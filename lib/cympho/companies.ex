@@ -15,6 +15,15 @@ defmodule Cympho.Companies do
 
   @runtime_mode_key "runtime_mode"
   @low_power_mode "low_power"
+
+  # CEO/CTO always hold these authorities via AgentActions' @governance_roles;
+  # the flags exist so the agent permissions UI reflects that instead of
+  # showing misleading "off" toggles.
+  @governance_role_permissions %{
+    "can_create_agents" => true,
+    "can_assign_tasks" => true,
+    "can_approve" => true
+  }
   @company_runtime_pause_key "company_runtime_pause"
   @company_runtime_pause_source "global_runtime_control"
 
@@ -1926,6 +1935,10 @@ defmodule Cympho.Companies do
       normalize_engineer_count(attrs[:engineer_count] || attrs["engineer_count"] || 2)
 
     adapter = normalize_adapter(attrs[:adapter] || attrs["adapter"] || :claude_code)
+
+    project_name =
+      normalize_project_name(attrs[:project_name] || attrs["project_name"], blueprint)
+
     owner_user_id = attrs[:owner_user_id] || attrs["owner_user_id"]
     engineer_names = normalize_engineer_names(attrs[:engineer_names] || attrs["engineer_names"])
     agent_runtime = normalize_agent_runtime(attrs[:agent_runtime] || attrs["agent_runtime"])
@@ -1984,7 +1997,7 @@ defmodule Cympho.Companies do
         %Project{}
         |> Project.changeset(%{
           company_id: company.id,
-          name: blueprint.project_name,
+          name: project_name,
           description: blueprint.project_description,
           prefix: issue_prefix,
           status: :active,
@@ -2018,6 +2031,9 @@ defmodule Cympho.Companies do
           adapter: adapter,
           runtime_config: agent_runtime,
           max_concurrent_jobs: 1,
+          # Governance roles always hold these authorities in AgentActions;
+          # setting the flags keeps the permissions UI truthful.
+          permissions: @governance_role_permissions,
           capabilities: %{
             "strategy" => true,
             "planning" => true,
@@ -2040,6 +2056,7 @@ defmodule Cympho.Companies do
           adapter: adapter,
           runtime_config: agent_runtime,
           max_concurrent_jobs: 2,
+          permissions: @governance_role_permissions,
           capabilities: %{
             "architecture" => true,
             "review" => true,
@@ -2229,6 +2246,7 @@ defmodule Cympho.Companies do
       description: blueprint.description,
       default_goal: blueprint.default_goal,
       default_prefix: blueprint.default_prefix,
+      project_name: blueprint.project_name,
       role_summary: blueprint.role_summary,
       seed_issue_count: length(blueprint.seed_issues),
       seed_issue_titles: Enum.map(blueprint.seed_issues, & &1.title),
@@ -2365,6 +2383,15 @@ defmodule Cympho.Companies do
   end
 
   defp normalize_engineer_names(_), do: []
+
+  # Blank/absent project names fall back to the blueprint's default so the
+  # launch stays backward compatible for callers that never pass one.
+  defp normalize_project_name(name, blueprint) do
+    case trim_or_nil(name) do
+      nil -> blueprint.project_name
+      trimmed -> String.slice(trimmed, 0, 255)
+    end
+  end
 
   defp engineer_name(names, index) do
     case Enum.at(names, index - 1) do

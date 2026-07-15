@@ -22,6 +22,11 @@
 :root {
   color-scheme: dark;
 
+  /* Desktop sidebar width — driven live by the resize/collapse controller in
+     root.html.heex (persisted to localStorage). The layout reads it via
+     w-[var(--sidebar-w)] / ml-[var(--sidebar-w)] / left-[var(--sidebar-w)]. */
+  --sidebar-w: 16rem;
+
   /* Canvas + surface ladder — warm "Claude" charcoal: canvas lifted to a
      paper-like warm tone; ladder steps up in warm lightness so elevation
      reads on the lighter canvas. (Legacy aliases below are var() refs and
@@ -1064,7 +1069,11 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
 }
 
 /* Page entrance — content wrapper fades up once per navigation. LiveView
-   patches don't remount the element, so this fires only on real loads. */
+   patches don't remount the element, so this fires only on real loads.
+   The `to` state clears the transform to `none` (not `translateY(0)`): with
+   `animation-fill-mode: both` a retained non-none transform makes .page-enter a
+   containing block, which would break `position: fixed` dropdown popovers
+   (they'd anchor to this wrapper instead of the viewport). */
 @keyframes page-enter {
   from {
     opacity: 0;
@@ -1072,11 +1081,86 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 .page-enter {
   animation: page-enter 600ms var(--ease-out-expo) both;
+}
+
+/* ── Resizable / collapsible desktop sidebar ──────────────────────────────
+   Width comes from --sidebar-w; the aside, main margin, and runtime top-bar
+   all read it. Collapsing sets the var to 0 and slides the rail off-canvas,
+   revealing the floating expand button. Transitions are suppressed mid-drag
+   (data-sidebar-dragging) so the handle tracks the pointer 1:1. */
+@media (min-width: 1024px) {
+  #sidebar,
+  #main-content,
+  #runtime-topbar {
+    transition-property: width, margin-left, left;
+    transition-duration: 200ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  html[data-sidebar-dragging="true"] #sidebar,
+  html[data-sidebar-dragging="true"] #main-content,
+  html[data-sidebar-dragging="true"] #runtime-topbar {
+    transition: none !important;
+  }
+
+  html[data-sidebar-collapsed="true"] {
+    --sidebar-w: 0px;
+  }
+
+  html[data-sidebar-collapsed="true"] #sidebar {
+    transform: translateX(-100%);
+  }
+
+  /* Drag handle sits on the rail's right edge. */
+  #sidebar-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 60;
+    touch-action: none;
+  }
+
+  #sidebar-resize-handle::after {
+    content: "";
+    position: absolute;
+    inset: 0 2px;
+    border-radius: 9999px;
+    background: transparent;
+    transition: background 150ms ease;
+  }
+
+  #sidebar-resize-handle:hover::after,
+  html[data-sidebar-dragging="true"] #sidebar-resize-handle::after {
+    background: var(--color-primary);
+  }
+
+  html[data-sidebar-collapsed="true"] #sidebar-resize-handle {
+    display: none;
+  }
+
+  /* Floating button to reopen a collapsed sidebar. */
+  #sidebar-expand-btn {
+    display: none;
+  }
+
+  html[data-sidebar-collapsed="true"] #sidebar-expand-btn {
+    display: inline-flex;
+  }
+}
+
+/* The expand button is desktop-only; the mobile drawer has its own button. */
+@media (max-width: 1023px) {
+  #sidebar-expand-btn {
+    display: none !important;
+  }
 }
 
 /* Staggered list entrance — apply `stagger-children` to a list container;

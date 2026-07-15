@@ -46,6 +46,54 @@ defmodule Cympho.CompaniesOnboardingTest do
     end
   end
 
+  describe "create_autonomous_company/1 project name" do
+    test "uses the supplied project_name over the blueprint default" do
+      {:ok, %{project: project}} =
+        Companies.create_autonomous_company(%{
+          name: "Named Project Co",
+          project_name: "Growth Engine"
+        })
+
+      assert project.name == "Growth Engine"
+    end
+
+    test "falls back to the blueprint default when project_name is blank" do
+      {:ok, %{project: project}} =
+        Companies.create_autonomous_company(%{name: "Default Project Co", project_name: "  "})
+
+      assert project.name == "Company OS"
+    end
+
+    test "falls back to the blueprint default when project_name is absent" do
+      {:ok, %{project: project}} =
+        Companies.create_autonomous_company(%{name: "No Project Key Co"})
+
+      assert project.name == "Company OS"
+    end
+  end
+
+  describe "create_autonomous_company/1 governance permissions" do
+    test "CEO and CTO carry the governance authority flags" do
+      {:ok, %{agents: agents}} =
+        Companies.create_autonomous_company(%{name: "Gov Co"})
+
+      for role <- [:ceo, :cto] do
+        agent = Enum.find(agents, &(&1.role == role))
+        assert agent.permissions["can_create_agents"]
+        assert agent.permissions["can_assign_tasks"]
+        assert agent.permissions["can_approve"]
+      end
+    end
+
+    test "engineers do not carry the governance authority flags" do
+      {:ok, %{agents: agents}} =
+        Companies.create_autonomous_company(%{name: "Eng Co", engineer_count: 1})
+
+      engineer = Enum.find(agents, &(&1.role == :engineer))
+      refute engineer.permissions["can_assign_tasks"]
+    end
+  end
+
   describe "create_autonomous_company/1 engineer names" do
     test "names engineer agents in order, padding with defaults" do
       {:ok, %{agents: agents}} =

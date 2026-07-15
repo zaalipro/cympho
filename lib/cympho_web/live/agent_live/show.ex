@@ -648,11 +648,26 @@ defmodule CymphoWeb.AgentLive.Show do
     config_revisions = Agents.list_config_revisions(agent.id, limit: 8)
     latest_prompt_tuning_revision = latest_prompt_tuning_revision(config_revisions)
 
+    latest_run = List.first(runs)
+
+    failure_reason =
+      cond do
+        latest_run && latest_run.status == "failed" && latest_run.error_reason ->
+          latest_run.error_reason
+
+        agent.status == :error ->
+          Cympho.Activities.latest_agent_failure_reason(agent.id)
+
+        true ->
+          nil
+      end
+
     socket
     |> assign(:agent, agent)
     |> assign(:wake_history, wake_history)
     |> assign(:recent_runs, runs)
-    |> assign(:latest_run, List.first(runs))
+    |> assign(:latest_run, latest_run)
+    |> assign(:latest_failure_reason, failure_reason)
     |> assign(:recent_issues, recent_issues)
     |> assign_new(:heartbeat_feedback, fn -> nil end)
     |> assign(:env_vars, env_vars)

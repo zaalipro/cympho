@@ -55,6 +55,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
         "blueprint" => "software",
         "name" => "Autonomous Software Company",
         "goal_title" => "Build and run the business autonomously",
+        "project_name" => "Company OS",
         "issue_prefix" => "LLM",
         "engineer_count" => "2",
         "engineer_names" => [],
@@ -131,6 +132,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
         "blueprint" => form["blueprint"],
         "name" => form["name"],
         "goal_title" => form["goal_title"],
+        "project_name" => form["project_name"],
         "issue_prefix" => form["issue_prefix"],
         "engineer_count" => engineer_count(form),
         "engineer_names" => form["engineer_names"] || [],
@@ -207,6 +209,9 @@ defmodule CymphoWeb.OnboardingLive.Index do
       String.trim(form["goal_title"] || "") == "" ->
         {:error, "Company goal is required."}
 
+      String.trim(form["project_name"] || "") == "" ->
+        {:error, "Project name is required."}
+
       not Regex.match?(~r/^[A-Z]{2,7}$/, form["issue_prefix"] || "") ->
         {:error, "Issue prefix must be 2-7 uppercase letters."}
 
@@ -227,6 +232,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
           params
           |> Map.put("blueprint", selected)
           |> Map.put("goal_title", blueprint.default_goal)
+          |> Map.put("project_name", blueprint.project_name)
           |> Map.put("issue_prefix", blueprint.default_prefix)
 
         {:error, :not_found} ->

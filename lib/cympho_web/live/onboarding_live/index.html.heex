@@ -218,6 +218,18 @@
               class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
             >{@company_form["goal_title"]}</textarea>
           </div>
+          <div>
+            <label class="block text-xs font-510 text-text-tertiary mb-1.5">Project name</label>
+            <input
+              name="company[project_name]"
+              value={@company_form["project_name"]}
+              maxlength="255"
+              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
+            />
+            <p class="mt-1 text-xs text-text-quaternary">
+              The first project your agents work in — you can rename it later in project settings.
+            </p>
+          </div>
           <div class="max-w-[200px]">
             <label class="block text-xs font-510 text-text-tertiary mb-1.5">Issue prefix</label>
             <input

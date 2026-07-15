@@ -8,6 +8,31 @@ defmodule Cympho.Activities do
   @default_company_timeline_limit 50
   @max_company_timeline_limit 200
 
+  @doc """
+  Returns the most recent heartbeat-failure reason logged for an agent, or nil.
+
+  The reason is stored in the activity metadata rather than a heartbeat_run row,
+  because the common failure (the orchestrator couldn't start the session, e.g.
+  the runtime command is missing) fails before any run row is created — so the
+  agent's Runs tab is empty and this is the only surviving diagnostic.
+  """
+  def latest_agent_failure_reason(agent_id) when is_binary(agent_id) do
+    Activity
+    |> where([a], a.action == "heartbeat_failed")
+    |> where([a], fragment("?->>'agent_id' = ?", a.metadata, ^agent_id))
+    |> order_by([a], desc: a.inserted_at)
+    |> limit(1)
+    |> select([a], a.metadata)
+    |> Repo.one()
+    |> case do
+      %{"reason" => reason} when is_binary(reason) and reason != "" -> reason
+      %{reason: reason} when is_binary(reason) and reason != "" -> reason
+      _ -> nil
+    end
+  end
+
+  def latest_agent_failure_reason(_), do: nil
+
   def list_activities(issue_id, opts \\ []) do
     limit = Keyword.get(opts, :limit, @default_list_limit)
 

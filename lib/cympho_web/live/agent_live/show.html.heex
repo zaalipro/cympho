@@ -21,11 +21,17 @@
         <div class="min-w-0">
           <p class="text-sm font-590 text-red-200">{@agent.name} is stuck in error</p>
           <p class="mt-1 text-sm leading-5 text-text-tertiary">
-            <%= if @latest_run && @latest_run.status == "failed" && @latest_run.error_reason do %>
-              Last run failed: {String.slice(@latest_run.error_reason, 0, 160)}
-            <% else %>
+            <%= if @latest_failure_reason do %>
               The last session did not finish cleanly. A fresh heartbeat usually recovers it.
+            <% else %>
+              The last session did not finish cleanly. A fresh heartbeat usually recovers it — or check the run readiness below.
             <% end %>
+          </p>
+          <p
+            :if={@latest_failure_reason}
+            class="mt-2 rounded-md border border-red-500/20 bg-red-500/[0.06] px-3 py-2 font-mono text-xs leading-5 text-red-200/90"
+          >
+            {String.slice(@latest_failure_reason, 0, 400)}
           </p>
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
@@ -37,12 +43,13 @@
             Retry with heartbeat
           </button>
           <button
+            :if={not Enum.empty?(@recent_runs)}
             type="button"
             phx-click="set_tab"
             phx-value-tab="runs"
             class="inline-flex items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
           >
-            See what failed
+            See run history
           </button>
         </div>
       </div>
@@ -182,7 +189,7 @@
         phx-value-tab={key}
         class={[
           "border-b-2 px-3 py-2 text-sm transition-colors duration-200 -mb-px",
-          key in ["instructions", "skills", "configuration"] && @current_tab != key &&
+          key in ["instructions", "skills"] && @current_tab != key &&
             "ui-advanced-only",
           if(@current_tab == key,
             do:

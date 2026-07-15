@@ -52,10 +52,11 @@
       
 <!-- Desktop sidebar / Mobile drawer -->
       <aside
-        class="w-64 shrink-0 bg-surface-1 border-r border-hairline flex flex-col fixed inset-y-0 left-0 z-50 -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+        class="w-64 lg:w-[var(--sidebar-w)] shrink-0 bg-surface-1 border-r border-hairline flex flex-col fixed inset-y-0 left-0 z-50 -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
         id="sidebar"
         data-mobile-drawer
       >
+        <div id="sidebar-resize-handle" aria-hidden="true"></div>
         <.company_rail company={assigns[:current_company]} />
         <.nav_rail
           current_path={@conn.request_path}
@@ -69,8 +70,28 @@
         <!-- Bottom user pill -->
         <div class="border-t border-border px-2 py-2">
           <.user_menu user={assigns[:current_user]} current_path={@conn.request_path} />
+          <button
+            type="button"
+            id="sidebar-collapse-btn"
+            data-sidebar-collapse
+            class="mt-1 hidden w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-510 text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-secondary lg:flex"
+            title="Collapse sidebar"
+          >
+            <.icon name="hero-chevron-double-left-mini" class="h-3.5 w-3.5" />
+            <span>Collapse</span>
+          </button>
         </div>
       </aside>
+      <!-- Floating expand button — shown only when the desktop sidebar is collapsed -->
+      <button
+        type="button"
+        id="sidebar-expand-btn"
+        data-sidebar-expand
+        class="fixed left-3 top-3 z-[55] items-center justify-center rounded-lg border border-hairline bg-surface-1/95 p-2 text-text-secondary shadow-card backdrop-blur transition-colors hover:text-text-primary"
+        title="Expand sidebar"
+      >
+        <.icon name="hero-chevron-double-right-mini" class="h-4 w-4" />
+      </button>
       <script>
         (() => {
           const sidebar = document.getElementById("sidebar");
@@ -80,6 +101,71 @@
           if (mobile && sidebar.classList.contains("-translate-x-full")) {
             sidebar.setAttribute("inert", "");
             sidebar.setAttribute("aria-hidden", "true");
+          }
+
+          // ── Resizable / collapsible desktop sidebar ──────────────────────
+          const root = document.documentElement;
+          const MIN = 200, MAX = 420, DEFAULT = 256;
+          const WIDTH_KEY = "cympho:sidebar-width";
+          const COLLAPSED_KEY = "cympho:sidebar-collapsed";
+
+          const clamp = (n) => Math.max(MIN, Math.min(MAX, n));
+
+          const savedWidth = parseInt(localStorage.getItem(WIDTH_KEY) || "", 10);
+          if (!Number.isNaN(savedWidth)) {
+            root.style.setProperty("--sidebar-w", clamp(savedWidth) + "px");
+          }
+          if (localStorage.getItem(COLLAPSED_KEY) === "true") {
+            root.setAttribute("data-sidebar-collapsed", "true");
+          }
+
+          const setCollapsed = (val) => {
+            if (val) {
+              root.setAttribute("data-sidebar-collapsed", "true");
+            } else {
+              root.removeAttribute("data-sidebar-collapsed");
+            }
+            localStorage.setItem(COLLAPSED_KEY, val ? "true" : "false");
+          };
+
+          document.addEventListener("click", (e) => {
+            if (e.target.closest("[data-sidebar-collapse]")) setCollapsed(true);
+            else if (e.target.closest("[data-sidebar-expand]")) setCollapsed(false);
+          });
+
+          // Drag-to-resize on the right edge of the rail.
+          const handle = document.getElementById("sidebar-resize-handle");
+          if (handle) {
+            const onMove = (e) => {
+              const x = e.touches ? e.touches[0].clientX : e.clientX;
+              root.style.setProperty("--sidebar-w", clamp(x) + "px");
+            };
+            const onUp = () => {
+              root.removeAttribute("data-sidebar-dragging");
+              const w = parseInt(getComputedStyle(root).getPropertyValue("--sidebar-w"), 10);
+              if (!Number.isNaN(w)) localStorage.setItem(WIDTH_KEY, String(clamp(w)));
+              window.removeEventListener("mousemove", onMove);
+              window.removeEventListener("mouseup", onUp);
+              window.removeEventListener("touchmove", onMove);
+              window.removeEventListener("touchend", onUp);
+              document.body.style.userSelect = "";
+            };
+            const onDown = (e) => {
+              e.preventDefault();
+              root.setAttribute("data-sidebar-dragging", "true");
+              document.body.style.userSelect = "none";
+              window.addEventListener("mousemove", onMove);
+              window.addEventListener("mouseup", onUp);
+              window.addEventListener("touchmove", onMove, {passive: false});
+              window.addEventListener("touchend", onUp);
+            };
+            handle.addEventListener("mousedown", onDown);
+            handle.addEventListener("touchstart", onDown, {passive: false});
+            // Double-click the handle to reset to the default width.
+            handle.addEventListener("dblclick", () => {
+              root.style.setProperty("--sidebar-w", DEFAULT + "px");
+              localStorage.setItem(WIDTH_KEY, String(DEFAULT));
+            });
           }
         })();
       </script>
@@ -237,8 +323,9 @@
 
       <header
         :if={runtime_topbar_allowed?}
+        id="runtime-topbar"
         data-testid="desktop-runtime-topbar"
-        class="fixed left-64 right-0 top-0 z-30 hidden h-14 items-center justify-between border-b border-hairline bg-surface-1/95 px-4 backdrop-blur lg:flex"
+        class="fixed left-0 lg:left-[var(--sidebar-w)] right-0 top-0 z-30 hidden h-14 items-center justify-between border-b border-hairline bg-surface-1/95 px-4 backdrop-blur lg:flex"
       >
         <div class="flex min-w-0 items-center gap-2.5">
           <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 text-white">
@@ -354,7 +441,7 @@
       <main
         id="main-content"
         class={[
-          "cympho-ambient h-screen flex-1 min-w-0 overflow-x-hidden overflow-y-auto lg:ml-64 pt-16 pb-16 lg:pb-0",
+          "cympho-ambient h-screen flex-1 min-w-0 overflow-x-hidden overflow-y-auto lg:ml-[var(--sidebar-w)] pt-16 pb-16 lg:pb-0",
           if(runtime_topbar_allowed?, do: "lg:pt-14", else: "lg:pt-0")
         ]}
       >
