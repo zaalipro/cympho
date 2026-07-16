@@ -88,10 +88,13 @@ defmodule Cympho.Issues do
 
   def human_action_count(_company_id, _user_id), do: 0
 
+  # Issues waiting on a human: assigned to this user directly, or blocked —
+  # blocked work always needs an owner decision (the dashboard says exactly
+  # that), so it must show up in the inbox action queue too.
   defp human_action_query(queryable, company_id, user_id) do
     queryable
     |> where([i], i.company_id == ^company_id)
-    |> where([i], i.assignee_user_id == ^user_id)
+    |> where([i], i.assignee_user_id == ^user_id or i.status == :blocked)
     |> where([i], i.status not in ^@terminal_issue_statuses)
   end
 
@@ -1776,8 +1779,19 @@ defmodule Cympho.Issues do
   function when moving work into review or closure so they cannot bypass the
   same evidence policy.
   """
-  def transition_issue_with_review_gates(%Issue{} = issue, new_status, agent_id \\ nil) do
+  def transition_issue_with_review_gates(
+        %Issue{} = issue,
+        new_status,
+        agent_id \\ nil,
+        opts \\ []
+      ) do
     issue = %{issue | execution_state: ExecutionState.normalize(issue.execution_state)}
+
+    # Whose active runs the runtime-verification gate ignores. Defaults to the
+    # transitioning agent; submit_review passes it separately because the
+    # submitting agent must not trip "1 run still active" on its OWN run,
+    # while agent_id stays nil to skip reviewer-role authorization.
+    gate_exclusion_id = Keyword.get(opts, :exclude_active_runs_for, agent_id)
 
     cond do
       new_status == :done and is_blocked?(issue) ->
@@ -1786,7 +1800,7 @@ defmodule Cympho.Issues do
       not StateMachine.valid_transition?(issue.status, new_status) ->
         {:error, :invalid_transition}
 
-      (blockers = review_status_blockers(issue, new_status, agent_id)) != [] ->
+      (blockers = review_status_blockers(issue, new_status, gate_exclusion_id)) != [] ->
         {:error,
          {:review_gates_blocked,
           %{

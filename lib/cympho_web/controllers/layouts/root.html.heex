@@ -574,9 +574,12 @@
         true -> List.first(quick_projects).id
       end %>
     
-<!-- Quick create issue modal (press C) -->
+<!-- Quick create issue modal (press C). data-ui-complex-page scopes the
+     simple/advanced CSS: .ui-advanced-only only hides inside such a container,
+     and the modal lives outside every page's own scope. -->
     <div
       id="quick-create-modal"
+      data-ui-complex-page
       class="hidden fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-6 sm:py-10"
     >
       <form

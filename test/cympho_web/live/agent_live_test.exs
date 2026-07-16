@@ -470,6 +470,25 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Runtime Profile"
     end
 
+    test "configuration form shows the runtime_config model that actually runs", %{conn: conn} do
+      # Onboarding's per-role AI writes the model to runtime_config (which
+      # wins the runtime merge); the form must show that, not the adapter
+      # default (o4-mini).
+      {:ok, agent} =
+        create_agent(%{
+          name: "Onboarded Codex Agent",
+          role: :cto,
+          status: :idle,
+          adapter: :codex,
+          runtime_config: %{"model" => "gpt-5.5", "autonomous" => true}
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ ~r/<option[^>]+value="gpt-5.5"[^>]+selected/
+      refute html =~ ~r/<option[^>]+value="o4-mini"[^>]+selected/
+    end
+
     test "runtime profile selector applies adapter and model before save", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{

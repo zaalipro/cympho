@@ -795,6 +795,41 @@ defmodule Cympho.AgentActionsTest do
       _ = ceo
     end
 
+    test "submit_review passes the runtime gate while the agent's own run is still active", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      {:ok, issue} = Issues.update_issue(issue, %{assignee_id: engineer.id, status: :in_progress})
+      insert_completed_run(engineer, issue)
+
+      # The submitting agent's own run is still "running" at action time —
+      # the orchestrator executes actions before the run record completes.
+      # The gate must not count it as a runtime-verification blocker.
+      Repo.insert!(%Run{
+        agent_id: engineer.id,
+        issue_id: issue.id,
+        status: "running",
+        adapter: "process"
+      })
+
+      actions = [
+        %{
+          "type" => "attach_work_product",
+          "kind" => "document",
+          "title" => "Delivery notes"
+        },
+        %{
+          "type" => "submit_review",
+          "role" => "cto",
+          "notes" =>
+            "[delivery] What happened: implementation is ready for CTO review. Files changed: implementation notes. Evidence produced: delivery notes work product and completed run. Verification: completed run passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the delivery notes and completed run before deciding."
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, engineer, actions)
+      assert Issues.get_issue!(issue.id).status == :in_review
+    end
+
     test "submit_review falls back to dispatcher routing when parent role doesn't match",
          %{issue: issue, engineer: engineer, company: company} do
       # Re-parent the engineer to another engineer (a peer, not a CTO). The

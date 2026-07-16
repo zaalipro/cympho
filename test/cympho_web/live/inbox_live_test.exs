@@ -298,6 +298,30 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ ~s(href="/issues/#{action_issue.id}")
       refute html =~ "Already resolved human task"
     end
+
+    test "blocked issues surface in the needs-action queue without a user assignment", %{
+      conn: conn
+    } do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      # Agents block work for an owner decision without setting
+      # assignee_user_id — the inbox must still surface it, or the dashboard
+      # says "N blocked issues need you" while the inbox says "Inbox zero".
+      {:ok, blocked_issue} =
+        Issues.create_issue(%{
+          title: "Blocked awaiting owner decision",
+          description: "Agent blocked this for the owner.",
+          status: :blocked,
+          priority: :high,
+          company_id: company.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, _view, html} = live(conn, "/inbox?status=action&density=detailed")
+
+      assert html =~ "Blocked awaiting owner decision"
+      assert html =~ ~s(href="/issues/#{blocked_issue.id}")
+    end
   end
 
   describe "bulk triage" do

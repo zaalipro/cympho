@@ -935,6 +935,10 @@ defmodule CymphoWeb.AgentLive.Show do
       |> Enum.reduce(%{}, fn %{key: k, value: v}, acc -> Map.put(acc, String.trim(k), v) end)
 
     (existing || %{})
+    # model/command now live in the adapter config the form just saved;
+    # leaving stale copies here would override that edit at runtime
+    # (Runtime.agent_config/1 merges runtime_config last).
+    |> Map.drop(["model", "command"])
     |> Map.merge(profile_runtime_config)
     |> Map.put("env", Map.merge(profile_env, env))
     |> Map.put("profile_id", RuntimeProfiles.normalize_id(profile_id))
@@ -1213,10 +1217,22 @@ defmodule CymphoWeb.AgentLive.Show do
     }
   end
 
-  defp runtime_form_from_agent(%Agent{config: config, adapter: adapter}) do
-    config = config || %{}
+  defp runtime_form_from_agent(%Agent{
+         config: config,
+         runtime_config: runtime_config,
+         adapter: adapter
+       }) do
+    # Mirror Cympho.Runtime.agent_config/1, where runtime_config overrides
+    # config at execution time (onboarding writes model/command there). The
+    # form must show the merged view or it displays a model the agent
+    # doesn't actually run.
+    config = Map.merge(config || %{}, adapter_overrides_from_runtime(runtime_config))
     adapter = adapter |> to_string() |> normalize_adapter()
     runtime_form_from_config(config, adapter)
+  end
+
+  defp adapter_overrides_from_runtime(runtime_config) do
+    Map.take(runtime_config || %{}, ["model", "command"])
   end
 
   defp runtime_form_from_config(config, adapter) do
