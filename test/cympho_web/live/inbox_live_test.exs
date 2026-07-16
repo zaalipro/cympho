@@ -20,13 +20,12 @@ defmodule CymphoWeb.InboxLiveTest do
 
       assert html =~ "Inbox"
       assert html =~ "Inbox command"
-      assert html =~ "Agent handoffs"
-      assert html =~ "Queue scope"
+      assert html =~ "Updates from your agents will land here as they work."
       assert html =~ "Action queue"
-      assert html =~ "Review decisions"
+      assert html =~ "Reviews"
       assert html =~ "Runtime / evidence"
-      assert html =~ "Unread handoffs"
-      assert html =~ "Deferred cleanup"
+      assert html =~ "Unread"
+      assert html =~ "Set aside"
     end
 
     test "shows agent selector", %{conn: conn} do
@@ -157,10 +156,10 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ "Open the Operations launch checklist"
       assert html =~ ~s(href="/operations#runtime-launch-checklist")
       assert html =~ "Action queue"
-      assert html =~ "Unread handoffs"
+      assert html =~ "Unread"
       assert html =~ "Read"
       assert html =~ "Runtime / evidence"
-      assert html =~ "No runtime launch or review-evidence repair request is waiting."
+      assert html =~ "Nothing is waiting on a launch or missing evidence."
       assert html =~ "Open issue"
       assert html =~ "Mark read"
 

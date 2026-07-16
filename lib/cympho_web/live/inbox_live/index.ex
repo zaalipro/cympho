@@ -390,8 +390,7 @@ defmodule CymphoWeb.InboxLive.Index do
       tone: :clear,
       badge: "Clear",
       heading: "Inbox is clear",
-      detail:
-        "No handoffs, review decisions, or unread agent signals need attention in this scope.",
+      detail: "Nothing is waiting on you here.",
       action_label: "Open issues",
       action_path: "/issues",
       focus_label: nil,
@@ -424,7 +423,7 @@ defmodule CymphoWeb.InboxLive.Index do
             badge: "Needs action",
             heading: "Handle your assigned blockers",
             detail:
-              "#{action_count} human #{pluralize(action_count, "task")} need your decision before agents can move cleanly.",
+              "#{action_count} #{pluralize(action_count, "task")} need#{if action_count == 1, do: "s"} your decision before agents can keep moving.",
             action_label: "Open my action queue",
             action_path:
               inbox_url(
@@ -441,9 +440,9 @@ defmodule CymphoWeb.InboxLive.Index do
           %{
             tone: :review,
             badge: "Review due",
-            heading: "Decide review queue",
+            heading: "Reviews waiting on you",
             detail:
-              "#{review_count} review #{pluralize(review_count, "decision")} need approve, changes, or evidence follow-up.",
+              "#{review_count} #{pluralize(review_count, "delivery")} waiting for your approve or request-changes call.",
             action_label: "Open review queue",
             action_path:
               inbox_url(
@@ -486,9 +485,9 @@ defmodule CymphoWeb.InboxLive.Index do
           %{
             tone: :unread,
             badge: "Unread",
-            heading: "Clear unread handoffs",
+            heading: "Catch up on unread",
             detail:
-              "#{unread_count} unread #{pluralize(unread_count, "item")} need triage in #{inbox_scope_label(socket.assigns.selected_agent_id, socket.assigns.selected_agent)}.",
+              "#{unread_count} unread #{pluralize(unread_count, "item")} in #{inbox_scope_label(socket.assigns.selected_agent_id, socket.assigns.selected_agent)}.",
             action_label: "Show unread",
             action_path:
               inbox_url(
@@ -507,10 +506,10 @@ defmodule CymphoWeb.InboxLive.Index do
         deferred_count > 0 ->
           %{
             tone: :deferred,
-            badge: "Deferred",
-            heading: "Review deferred inbox work",
+            badge: "Set aside",
+            heading: "Things you set aside",
             detail:
-              "#{deferred_count} dismissed or archived #{pluralize(deferred_count, "item")} may need cleanup before the next operating cycle.",
+              "#{deferred_count} dismissed or archived #{pluralize(deferred_count, "item")} — worth a quick look now and then.",
             action_label: "Show dismissed",
             action_path:
               inbox_url(
@@ -553,7 +552,7 @@ defmodule CymphoWeb.InboxLive.Index do
         :human_action,
         "Needs my action",
         action_count,
-        "Issues assigned directly to you, not mixed into agent notification noise.",
+        "Issues assigned directly to you.",
         "Open my queue",
         inbox_url(
           socket.assigns.selected_agent_id,
@@ -565,9 +564,9 @@ defmodule CymphoWeb.InboxLive.Index do
       ),
       inbox_queue_item(
         :review,
-        "Review decisions",
+        "Reviews",
         review_count,
-        "Approve, request changes, or inspect missing review evidence.",
+        "Deliveries waiting for your approve or request-changes call.",
         "Open reviews",
         inbox_url(
           socket.assigns.selected_agent_id,
@@ -588,9 +587,9 @@ defmodule CymphoWeb.InboxLive.Index do
       ),
       inbox_queue_item(
         :unread,
-        "Unread handoffs",
+        "Unread",
         unread_count,
-        "Read new agent handoffs before they age into stale work.",
+        "New updates from your agents.",
         "Show unread",
         inbox_url(
           socket.assigns.selected_agent_id,
@@ -602,9 +601,9 @@ defmodule CymphoWeb.InboxLive.Index do
       ),
       inbox_queue_item(
         :deferred,
-        "Deferred cleanup",
+        "Set aside",
         deferred_count,
-        "Review dismissed or archived signals before the next operating cycle.",
+        "Things you dismissed or archived.",
         "Show dismissed",
         inbox_url(
           socket.assigns.selected_agent_id,
@@ -641,7 +640,7 @@ defmodule CymphoWeb.InboxLive.Index do
   end
 
   defp nudge_queue_summary(_nudge_item) do
-    "No runtime launch or review-evidence repair request is waiting."
+    "Nothing is waiting on a launch or missing evidence."
   end
 
   defp nudge_queue_action_label(%{review_nudge: %{target_label: label}})
@@ -987,7 +986,7 @@ defmodule CymphoWeb.InboxLive.Index do
   defp empty_state_heading(_), do: "Inbox zero"
 
   defp empty_state_detail(nil) do
-    "Nothing needs you here right now. Agent handoffs, review requests, and issue updates will surface as the autonomous workflow runs."
+    "Nothing needs you here right now. Updates from your agents will land here as they work."
   end
 
   defp empty_state_detail("action"),
