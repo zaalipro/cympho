@@ -18,9 +18,11 @@
       <:actions>
         <.app_link
           navigate={~p"/kanban"}
-          class="inline-flex shrink-0 items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          title="Board view"
+          class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
         >
-          Board
+          <span class="hero-view-columns-mini h-4 w-4"></span>
+          <span class="sr-only">Board</span>
         </.app_link>
         <.density_switch
           density={@digest_density}

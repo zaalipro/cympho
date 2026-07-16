@@ -10,11 +10,8 @@ defmodule CymphoWeb.OnboardingLiveTest do
       conn: conn
     } do
       {:ok, view, html} = live(conn, "/onboarding")
-      assert html =~ "Start an autonomous company"
-      assert html =~ "Step 1 of 6"
-
-      # welcome -> blueprint
-      html = view |> element("button", "Continue") |> render_click()
+      assert html =~ "Choose a blueprint"
+      assert html =~ "Step 1 of 5"
       assert html =~ "Company blueprint"
 
       view
@@ -143,7 +140,6 @@ defmodule CymphoWeb.OnboardingLiveTest do
       {:ok, view, _html} = live(conn, "/onboarding")
 
       view |> element("button", "Continue") |> render_click()
-      view |> element("button", "Continue") |> render_click()
 
       view
       |> form("#company-step-form",
@@ -153,13 +149,12 @@ defmodule CymphoWeb.OnboardingLiveTest do
 
       html = view |> element("button", "Continue") |> render_click()
       assert html =~ "Issue prefix must be 2-7 uppercase letters."
-      assert html =~ "Step 3 of 6"
+      assert html =~ "Step 2 of 5"
     end
 
     test "blocks the company step when the goal is blank", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/onboarding")
 
-      view |> element("button", "Continue") |> render_click()
       view |> element("button", "Continue") |> render_click()
 
       view
@@ -170,7 +165,7 @@ defmodule CymphoWeb.OnboardingLiveTest do
 
       html = view |> element("button", "Continue") |> render_click()
       assert html =~ "Company goal is required."
-      assert html =~ "Step 3 of 6"
+      assert html =~ "Step 2 of 5"
     end
 
     test "shows the error banner when the launch transaction fails", %{conn: conn} do
@@ -213,8 +208,6 @@ defmodule CymphoWeb.OnboardingLiveTest do
     test "changing the blueprint refills goal and prefix", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/onboarding")
 
-      view |> element("button", "Continue") |> render_click()
-
       view
       |> form("#blueprint-form", company: %{"blueprint" => "go_to_market"})
       |> render_change()
@@ -251,12 +244,7 @@ defmodule CymphoWeb.OnboardingLiveTest do
     end
 
     test "filters the larger blueprint catalog", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/onboarding")
-
-      html =
-        view
-        |> element("button", "Continue")
-        |> render_click()
+      {:ok, view, html} = live(conn, "/onboarding")
 
       assert html =~ "17 of 17"
 

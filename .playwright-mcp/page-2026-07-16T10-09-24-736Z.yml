@@ -1,0 +1,105 @@
+- generic [active] [ref=f7e1]:
+  - link "Skip to main content" [ref=f7e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=f7e3]:
+    - complementary [ref=f7e4]:
+      - button "L LLMotions" [ref=f7e7] [cursor=pointer]:
+        - generic [ref=f7e10]:
+          - generic [ref=f7e11]: L
+          - generic [ref=f7e13]: LLMotions
+      - navigation [ref=f7e16]:
+        - button "New issue C" [ref=f7e17] [cursor=pointer]:
+          - generic [ref=f7e19]: New issue
+          - generic [ref=f7e20]: C
+        - button "Toggle simple and advanced view with U" [ref=f7e23] [cursor=pointer]:
+          - generic [ref=f7e26]: Simple
+        - link "Dashboard" [ref=f7e29] [cursor=pointer]:
+          - /url: /dashboard
+        - link "Board" [ref=f7e32] [cursor=pointer]:
+          - /url: /kanban
+        - link "Inbox" [ref=f7e35] [cursor=pointer]:
+          - /url: /inbox
+        - link "Approvals" [ref=f7e38] [cursor=pointer]:
+          - /url: /approvals?status=pending
+        - link "Reviews" [ref=f7e41] [cursor=pointer]:
+          - /url: /reviews
+        - link "Settings" [ref=f7e44] [cursor=pointer]:
+          - /url: /settings/profile
+        - generic [ref=f7e47]: Work
+        - link "Issues" [ref=f7e49] [cursor=pointer]:
+          - /url: /issues
+        - link "Goals" [ref=f7e52] [cursor=pointer]:
+          - /url: /goals
+        - generic [ref=f7e55]:
+          - generic [ref=f7e56]:
+            - button "Projects" [expanded] [ref=f7e57] [cursor=pointer]
+            - link "New project" [ref=f7e60] [cursor=pointer]:
+              - /url: /projects/new
+          - link "Company OS 5" [ref=f7e63] [cursor=pointer]:
+            - /url: /projects/e19ae41c-c6cd-4f7f-a382-25e2b6031134
+            - generic [ref=f7e65]: Company OS
+            - generic [ref=f7e66]: "5"
+        - generic [ref=f7e67]:
+          - generic [ref=f7e68]:
+            - button "Agents" [expanded] [ref=f7e69] [cursor=pointer]
+            - link "New agent" [ref=f7e72] [cursor=pointer]:
+              - /url: /agents/new
+          - generic [ref=f7e74]:
+            - link "CEO" [ref=f7e75] [cursor=pointer]:
+              - /url: /agents/96a7288f-c836-4b85-af11-79067178253b
+              - generic "Idle" [ref=f7e78]
+            - link "CTO" [ref=f7e79] [cursor=pointer]:
+              - /url: /agents/512954c7-3303-44e6-99b4-bb87977347cd
+              - generic "Idle" [ref=f7e82]
+            - link "Design Lead" [ref=f7e83] [cursor=pointer]:
+              - /url: /agents/3f9cc43e-c309-4a35-aa90-b4955b1e4789
+              - generic "Idle" [ref=f7e86]
+            - link "Engineer 1" [ref=f7e87] [cursor=pointer]:
+              - /url: /agents/2a9cf37f-7f68-464c-9a9d-5ba9f2586dbc
+              - generic "Idle" [ref=f7e90]
+            - link "Engineer 2" [ref=f7e91] [cursor=pointer]:
+              - /url: /agents/fcc58219-8af9-4535-97ea-10ed42b0c52e
+              - generic "Idle" [ref=f7e94]
+            - link "Product Lead" [ref=f7e95] [cursor=pointer]:
+              - /url: /agents/ce4df661-315d-4a57-9761-01337b6c0f49
+              - generic "Idle" [ref=f7e98]
+      - generic [ref=f7e100]:
+        - button "Z Zaali" [ref=f7e102] [cursor=pointer]:
+          - generic [ref=f7e103]: Z
+          - generic [ref=f7e104]: Zaali
+        - button "Collapse" [ref=f7e106] [cursor=pointer]
+    - banner [ref=f7e109]:
+      - generic [ref=f7e113]:
+        - generic [ref=f7e114]:
+          - generic [ref=f7e115]: Runtime
+          - generic [ref=f7e116]: Full power
+        - paragraph [ref=f7e117]: LLMotions
+      - generic [ref=f7e118]:
+        - button "Switch runtime to low power" [ref=f7e120] [cursor=pointer]: Low
+        - button "Pause runtime and preserve queued wakes" [ref=f7e123] [cursor=pointer]: Pause
+        - button "Stop runtime and cancel queued wakes" [ref=f7e126] [cursor=pointer]: Stop
+    - main [ref=f7e128]:
+      - generic [ref=f7e133]:
+        - generic [ref=f7e141]:
+          - generic [ref=f7e142]: Step 3 of 6
+          - heading "Name the company" [level=1] [ref=f7e323]
+          - paragraph [ref=f7e144]: Set the company name, goal, and issue prefix
+        - generic [ref=f7e324]:
+          - generic [ref=f7e325]:
+            - generic [ref=f7e326]: Company name
+            - textbox [ref=f7e327]: Autonomous Software Company
+          - generic [ref=f7e328]:
+            - generic [ref=f7e329]: Company goal
+            - textbox [ref=f7e330]: Build and run the business autonomously
+          - generic [ref=f7e331]:
+            - generic [ref=f7e332]: Project name
+            - textbox [ref=f7e333]: Company OS
+            - paragraph [ref=f7e334]: The first project your agents work in — you can rename it later in project settings.
+          - generic [ref=f7e335]:
+            - generic [ref=f7e336]: Issue prefix
+            - textbox [ref=f7e337]: LLM
+        - generic [ref=f7e338]:
+          - button "Back" [ref=f7e339] [cursor=pointer]
+          - generic [ref=f7e340]:
+            - generic [ref=f7e341]: 3 of 6
+            - button "Continue" [ref=f7e342] [cursor=pointer]

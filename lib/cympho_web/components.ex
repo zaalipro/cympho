@@ -73,11 +73,12 @@ defmodule CymphoWeb.Components do
         aria-pressed={to_string(@density == "compact")}
         title="Compact view (V)"
         class={[
-          "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-510 transition-colors",
+          "inline-flex items-center rounded-lg px-2.5 py-1.5 transition-colors",
           density_tab_class(@density, "compact")
         ]}
       >
-        <span class="hero-list-bullet-mini h-3.5 w-3.5"></span> Compact
+        <span class="hero-list-bullet-mini h-4 w-4"></span>
+        <span class="sr-only">Compact</span>
       </.link>
       <.link
         patch={@detailed_patch}
@@ -85,11 +86,12 @@ defmodule CymphoWeb.Components do
         aria-pressed={to_string(@density == "detailed")}
         title="Detailed view (V)"
         class={[
-          "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-510 transition-colors",
+          "inline-flex items-center rounded-lg px-2.5 py-1.5 transition-colors",
           density_tab_class(@density, "detailed")
         ]}
       >
-        <span class="hero-rectangle-stack-mini h-3.5 w-3.5"></span> Detailed
+        <span class="hero-rectangle-stack-mini h-4 w-4"></span>
+        <span class="sr-only">Detailed</span>
       </.link>
     </div>
     """

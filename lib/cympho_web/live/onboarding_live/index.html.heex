@@ -36,95 +36,8 @@
         {@step_error}
       </div>
       
-<!-- Welcome step -->
-      <div :if={@current_step == 0} class="ember-glass card-lift p-6 mb-6">
-        <div class="flex flex-col items-center gap-4 text-center">
-          <div class="w-16 h-16 rounded-full bg-gradient-to-br from-brand/25 to-brand/5 ring-1 ring-brand/40 shadow-[0_0_28px_rgb(var(--color-primary-rgb)/0.4)] flex items-center justify-center">
-            <svg class="w-8 h-8 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M13 10V3L4 14h7v7l9-11h-7z"
-              />
-            </svg>
-          </div>
-          <div>
-            <p class="text-sm text-text-secondary mb-2">
-              Give Cympho a goal and it builds you a team — a CEO, a CTO, and specialists — that breaks the work into issues and gets it done. You stay in charge.
-            </p>
-            <ul class="stagger-children text-sm text-text-tertiary space-y-1.5 text-left">
-              <li class="flex items-center gap-2">
-                <svg
-                  class="w-4 h-4 text-emerald shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-                Track issues with kanban boards
-              </li>
-              <li class="flex items-center gap-2">
-                <svg
-                  class="w-4 h-4 text-emerald shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-                Assign AI agents to automate work
-              </li>
-              <li class="flex items-center gap-2">
-                <svg
-                  class="w-4 h-4 text-emerald shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-                Set goals and track progress
-              </li>
-              <li class="flex items-center gap-2">
-                <svg
-                  class="w-4 h-4 text-emerald shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-                Keyboard-first for speed
-              </li>
-            </ul>
-          </div>
-        </div>
-      </div>
-      
 <!-- Blueprint step -->
-      <div :if={@current_step == 1} class="ember-glass p-6 mb-6">
+      <div :if={@current_step == 0} class="ember-glass p-6 mb-6">
         <form id="blueprint-search-form" phx-change="filter_blueprints" class="mb-3">
           <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div class="min-w-0 flex-1">
@@ -177,10 +90,21 @@
               >
                 {blueprint.role_summary}
               </span>
-              <span class="mt-3 flex flex-wrap gap-x-2 gap-y-1 text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
-                <span>{blueprint.default_agent_count} agents</span>
-                <span>{blueprint.capability_count} capabilities</span>
-                <span>{blueprint.seed_issue_count} issues</span>
+              <span class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-510 text-text-quaternary">
+                <span
+                  class="inline-flex items-center gap-1"
+                  title={"#{blueprint.default_agent_count} agents"}
+                >
+                  <span class="hero-user-group-mini h-3.5 w-3.5"></span>
+                  {blueprint.default_agent_count}
+                </span>
+                <span
+                  class="inline-flex items-center gap-1"
+                  title={"#{blueprint.seed_issue_count} starter issues"}
+                >
+                  <span class="hero-clipboard-document-list-mini h-3.5 w-3.5"></span>
+                  {blueprint.seed_issue_count}
+                </span>
               </span>
             </label>
           </div>
@@ -194,7 +118,7 @@
       </div>
       
 <!-- Company step -->
-      <div :if={@current_step == 2} class="ember-glass p-6 mb-6">
+      <div :if={@current_step == 1} class="ember-glass p-6 mb-6">
         <form id="company-step-form" phx-change="update_company_form" class="space-y-4">
           <div>
             <label class="block text-xs font-510 text-text-tertiary mb-1.5">Company name</label>
@@ -237,7 +161,7 @@
       </div>
       
 <!-- Team step -->
-      <div :if={@current_step == 3} class="ember-glass p-6 mb-6">
+      <div :if={@current_step == 2} class="ember-glass p-6 mb-6">
         <div class="mb-5 grid gap-2 sm:grid-cols-2">
           <div class="rounded-lg border border-brand/40 bg-brand/10 px-4 py-3">
             <p class="text-sm font-590 text-text-primary">CEO</p>
@@ -391,7 +315,7 @@
       </div>
       
 <!-- Launch step -->
-      <div :if={@current_step == 4} class="ember-glass card-lift p-6 mb-6">
+      <div :if={@current_step == 3} class="ember-glass card-lift p-6 mb-6">
         <div class="stagger-children space-y-2 text-sm">
           <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
             <span class="text-text-secondary">Company</span>
@@ -462,7 +386,7 @@
       </div>
       
 <!-- Ready step -->
-      <div :if={@current_step == 5} class="ember-glass card-lift p-6 mb-6">
+      <div :if={@current_step == 4} class="ember-glass card-lift p-6 mb-6">
         <div class="flex flex-col gap-4">
           <div class="flex flex-col items-center gap-3 text-center">
             <div class="w-14 h-14 rounded-full bg-emerald/10 ring-1 ring-emerald/40 shadow-[0_0_30px_rgb(var(--color-success-rgb)/0.5)] flex items-center justify-center">
@@ -492,36 +416,16 @@
                 <span class="text-text-primary font-590">{@bootstrap_result.company.name}</span>
               </div>
               <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-                <span class="text-text-secondary">Project</span>
-                <span class="text-text-primary font-590">{@bootstrap_result.project.name}</span>
-              </div>
-              <div class="flex items-center justify-between gap-3 py-1.5 px-3 rounded-lg bg-surface">
-                <span class="text-text-secondary">Blueprint</span>
-                <span class="text-text-primary font-590 text-right">
-                  {@bootstrap_result.blueprint.name}
-                </span>
-              </div>
-              <div class="flex items-center justify-between gap-3 py-1.5 px-3 rounded-lg bg-surface">
-                <span class="text-text-secondary">Manifest</span>
-                <span class="text-text-primary font-590 text-right">
-                  {@bootstrap_result.company.governance_config["company_blueprint_manifest"][
-                    "agent_count"
-                  ]} agents · {@bootstrap_result.company.governance_config[
-                    "company_blueprint_manifest"
-                  ]["capability_count"]} capabilities
-                </span>
-              </div>
-              <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-                <span class="text-text-secondary">Mission</span>
+                <span class="text-text-secondary">Goal</span>
                 <span
-                  class="text-text-primary truncate max-w-[200px]"
+                  class="text-text-primary truncate max-w-[280px]"
                   title={@bootstrap_result.goal.title}
                 >
                   {@bootstrap_result.goal.title}
                 </span>
               </div>
               <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-                <span class="text-text-secondary">Agents</span>
+                <span class="text-text-secondary">Your team</span>
                 <span class="text-text-primary font-590">
                   {length(@bootstrap_result.agents)} ({Enum.map_join(
                     @bootstrap_result.agents,
@@ -531,7 +435,7 @@
                 </span>
               </div>
               <div class="py-1.5 px-3">
-                <span class="text-text-secondary text-xs">Seed issues</span>
+                <span class="text-text-secondary text-xs">First issues</span>
                 <div class="mt-1.5 space-y-1">
                   <%= for issue <- @bootstrap_result.seed_issues do %>
                     <div class="flex items-center gap-2">
@@ -591,7 +495,7 @@
 <!-- Navigation buttons -->
       <div class="flex items-center justify-between">
         <button
-          :if={@current_step > 0 && @current_step < 5}
+          :if={@current_step > 0 && @current_step < 4}
           type="button"
           phx-click="prev_step"
           class="text-sm text-text-tertiary hover:text-text-secondary transition-colors px-3 py-2 min-h-[44px]"
@@ -611,7 +515,7 @@
             {@current_step + 1} of {length(@steps)}
           </span>
           <button
-            :if={@current_step < 4}
+            :if={@current_step < 3}
             type="button"
             phx-click="next_step"
             class="cta-glow bg-brand hover:bg-accent text-on-primary font-510 text-sm px-5 py-2.5 rounded-button transition-colors min-h-[44px]"

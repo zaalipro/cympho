@@ -6,11 +6,6 @@ defmodule CymphoWeb.OnboardingLive.Index do
 
   @steps [
     %{
-      id: :welcome,
-      title: "Start an autonomous company",
-      description: "Create a CEO, CTO, engineers, goal, project, and first issues"
-    },
-    %{
       id: :blueprint,
       title: "Choose a blueprint",
       description: "Pick the kind of company your agents will run"
@@ -23,7 +18,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
     %{
       id: :team,
       title: "Build the team",
-      description: "CEO and CTO lead by default — configure your engineers and runtime"
+      description: "Pick your engineers and which AI each role uses"
     },
     %{
       id: :launch,
@@ -164,14 +159,14 @@ defmodule CymphoWeb.OnboardingLive.Index do
            socket
            |> assign(:bootstrap_result, result)
            |> assign(:step_error, nil)
-           |> assign(:current_step, 5)}
+           |> assign(:current_step, 4)}
 
         {:error, reason} ->
           {:noreply, assign(socket, :step_error, "Could not create company: #{inspect(reason)}")}
       end
     else
       {:error, message} ->
-        {:noreply, socket |> assign(:current_step, 2) |> assign(:step_error, message)}
+        {:noreply, socket |> assign(:current_step, 1) |> assign(:step_error, message)}
     end
   end
 

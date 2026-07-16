@@ -27,7 +27,7 @@ defmodule CymphoWeb.RequireCompanyGateTest do
 
   test "onboarding stays reachable for company-less users" do
     assert {:ok, _view, html} = live(companyless_conn(), "/onboarding")
-    assert html =~ "Start an autonomous company"
+    assert html =~ "Choose a blueprint"
   end
 
   test "users with a company pass through" do
