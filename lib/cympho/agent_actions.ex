@@ -851,13 +851,14 @@ defmodule Cympho.AgentActions do
          :ok <- ensure_head_sha_changed_since_last_review(issue, action),
          {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_submit_review_note(note)),
          {:ok, issue_with_comment} <- Issues.get_issue(issue.id),
-         # Exclude THIS agent's own still-active run from the gate — otherwise
-         # submitting review mid-run always trips "1 run still active. Wait for
-         # completion." agent_id stays nil: any assigned role may submit, and
+         # Count THIS agent's own still-active run as completing — otherwise
+         # submitting review mid-run trips "1 run still active" (or, with the
+         # run dropped, an older failed attempt becomes the latest terminal
+         # evidence). agent_id stays nil: any assigned role may submit, and
          # the 3-arg transition would demand a CTO/CEO reviewer role.
          {:ok, transitioned} <-
            Issues.transition_issue_with_review_gates(issue_with_comment, :in_review, nil,
-             exclude_active_runs_for: agent.id
+             acting_agent_id: agent.id
            ),
          {:ok, updated} <-
            update_workflow_issue(transitioned, agent, %{

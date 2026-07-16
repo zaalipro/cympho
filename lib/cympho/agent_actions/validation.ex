@@ -767,7 +767,7 @@ defmodule Cympho.AgentActions.Validation do
     runs =
       issue.id
       |> HeartbeatEngine.list_runs_for_issue()
-      |> reject_current_agent_active_runs(current_agent_id)
+      |> complete_acting_agent_runs(current_agent_id)
 
     digest =
       IssueDigest.build(
@@ -783,13 +783,20 @@ defmodule Cympho.AgentActions.Validation do
     |> Enum.uniq_by(& &1.key)
   end
 
-  defp reject_current_agent_active_runs(runs, agent_id) when is_binary(agent_id) do
-    Enum.reject(runs, fn run ->
-      run.agent_id == agent_id and run.status in @active_run_statuses
+  # The acting agent's own in-flight run counts as completing (the
+  # orchestrator finalizes it right after this action batch) — dropping it
+  # would leave an OLD failed attempt as the latest terminal evidence.
+  defp complete_acting_agent_runs(runs, agent_id) when is_binary(agent_id) do
+    Enum.map(runs, fn run ->
+      if run.agent_id == agent_id and run.status in @active_run_statuses do
+        %{run | status: "completed"}
+      else
+        run
+      end
     end)
   end
 
-  defp reject_current_agent_active_runs(runs, _agent_id), do: runs
+  defp complete_acting_agent_runs(runs, _agent_id), do: runs
 
   defp explicit_note?(%{"notes" => notes}) when is_binary(notes), do: String.trim(notes) != ""
   defp explicit_note?(_action), do: false

@@ -1787,11 +1787,13 @@ defmodule Cympho.Issues do
       ) do
     issue = %{issue | execution_state: ExecutionState.normalize(issue.execution_state)}
 
-    # Whose active runs the runtime-verification gate ignores. Defaults to the
-    # transitioning agent; submit_review passes it separately because the
-    # submitting agent must not trip "1 run still active" on its OWN run,
-    # while agent_id stays nil to skip reviewer-role authorization.
-    gate_exclusion_id = Keyword.get(opts, :exclude_active_runs_for, agent_id)
+    # The agent performing this transition. Its own in-flight run is treated
+    # as completing (the orchestrator finalizes it right after these actions),
+    # so it neither trips "1 run still active" nor leaves an older failed run
+    # as the latest runtime evidence. submit_review passes it via opts because
+    # agent_id must stay nil there (the 3-arg transition path would demand a
+    # CTO/CEO reviewer role).
+    acting_agent_id = Keyword.get(opts, :acting_agent_id, agent_id)
 
     cond do
       new_status == :done and is_blocked?(issue) ->
@@ -1800,7 +1802,7 @@ defmodule Cympho.Issues do
       not StateMachine.valid_transition?(issue.status, new_status) ->
         {:error, :invalid_transition}
 
-      (blockers = review_status_blockers(issue, new_status, gate_exclusion_id)) != [] ->
+      (blockers = review_status_blockers(issue, new_status, acting_agent_id)) != [] ->
         {:error,
          {:review_gates_blocked,
           %{
@@ -1833,7 +1835,7 @@ defmodule Cympho.Issues do
     runs =
       issue.id
       |> HeartbeatEngine.list_runs_for_issue()
-      |> reject_current_agent_active_runs(current_agent_id)
+      |> complete_acting_agent_runs(current_agent_id)
 
     IssueDigest.review_status_blockers(
       issue,
@@ -1844,13 +1846,23 @@ defmodule Cympho.Issues do
     )
   end
 
-  defp reject_current_agent_active_runs(runs, agent_id) when is_binary(agent_id) do
-    Enum.reject(runs, fn run ->
-      run.agent_id == agent_id and run.status in @active_run_statuses
+  # The acting agent's own in-flight run is the runtime evidence for this very
+  # transition — the orchestrator finalizes it as completed right after the
+  # action batch succeeds. Count it as completing rather than dropping it:
+  # dropped, the latest terminal run is often an OLD failed attempt, which
+  # flips the gate from "run still active" to "failed runs need attention" —
+  # both unpassable from inside the run.
+  defp complete_acting_agent_runs(runs, agent_id) when is_binary(agent_id) do
+    Enum.map(runs, fn run ->
+      if run.agent_id == agent_id and run.status in @active_run_statuses do
+        %{run | status: "completed"}
+      else
+        run
+      end
     end)
   end
 
-  defp reject_current_agent_active_runs(runs, _agent_id), do: runs
+  defp complete_acting_agent_runs(runs, _agent_id), do: runs
 
   defp do_transition(%Issue{} = issue, new_status) do
     attrs = %{status: new_status}

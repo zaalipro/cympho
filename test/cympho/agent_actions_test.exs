@@ -802,6 +802,21 @@ defmodule Cympho.AgentActionsTest do
       {:ok, issue} = Issues.update_issue(issue, %{assignee_id: engineer.id, status: :in_progress})
       insert_completed_run(engineer, issue)
 
+      # A previous attempt failed (the exact prod retry scenario). The
+      # acting agent's live run must count as the LATEST terminal evidence —
+      # merely ignoring it would leave this failed run newest and flip the
+      # gate to "failed runs need attention".
+      an_hour_ago = DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:second)
+
+      Repo.insert!(%Run{
+        agent_id: engineer.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "process",
+        error_reason: "Agent action contract failed",
+        completed_at: an_hour_ago
+      })
+
       # The submitting agent's own run is still "running" at action time —
       # the orchestrator executes actions before the run record completes.
       # The gate must not count it as a runtime-verification blocker.
