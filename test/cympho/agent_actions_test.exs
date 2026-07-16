@@ -1067,8 +1067,14 @@ defmodule Cympho.AgentActionsTest do
     test "approve_issue is rejected for code work without a reviewable reference", %{
       issue: issue,
       ceo: ceo,
-      engineer: engineer
+      engineer: engineer,
+      project: project
     } do
+      # The PR requirement only applies when the project has a linked repo;
+      # without one, workspace delivery counts as the code reference.
+      {:ok, _project} =
+        Cympho.Projects.update_project(project, %{repo_url: "https://github.com/example/repo"})
+
       insert_completed_run(engineer, issue)
 
       {:ok, _work_product} =
@@ -1092,6 +1098,37 @@ defmodule Cympho.AgentActionsTest do
                  String.contains?(c.body, "approve_issue rejected") and
                  String.contains?(c.body, "code reference")
              end)
+    end
+
+    test "approve_issue passes the code-reference gate when no repo is linked", %{
+      issue: issue,
+      ceo: ceo,
+      engineer: engineer
+    } do
+      insert_completed_run(engineer, issue)
+
+      # URL-less code delivery: with no project repo configured, workspace
+      # delivery is the reference — the gate must not demand set_pr_url.
+      {:ok, _work_product} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          created_by_agent_id: engineer.id,
+          kind: "code_change",
+          title: "Implementation patch"
+        })
+
+      # The code-reference gate must no longer fire; any later gate (e.g. the
+      # approval-note shape) is out of scope for this test.
+      case AgentActions.execute(issue, ceo, [%{"type" => "approve_issue"}]) do
+        {:error, {:quality_gate_failed, "approve_issue", gaps}} ->
+          refute :code_reference in gaps
+
+        {:error, _other_gate} ->
+          :ok
+
+        {:ok, _} ->
+          :ok
+      end
     end
 
     test "approve_issue is rejected when runtime verification is missing", %{

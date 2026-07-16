@@ -2559,14 +2559,33 @@ defmodule Cympho.IssueDigest do
     }
   end
 
-  defp code_reference_quality_item(_issue, _metrics) do
-    %{
-      key: :code_reference,
-      label: "Code reference",
-      status: :missing,
-      prompt:
-        "Code-change work exists. Add `set_pr_url` or include a URL on the code-change work product."
-    }
+  # No repo is linked to the project and no PR URL exists, so a code URL is
+  # impossible — local workspace delivery (branch/SHA in the work product) is
+  # the intended mode. Demanding `set_pr_url` here would block forever.
+  defp code_reference_quality_item(issue, _metrics) do
+    if project_repo_configured?(issue) do
+      %{
+        key: :code_reference,
+        label: "Code reference",
+        status: :missing,
+        prompt:
+          "Code-change work exists. Add `set_pr_url` or include a URL on the code-change work product."
+      }
+    else
+      %{
+        key: :code_reference,
+        label: "Code reference",
+        status: :ok,
+        prompt: "No repo is linked to this project; workspace delivery counts as the reference."
+      }
+    end
+  end
+
+  defp project_repo_configured?(issue) do
+    case Map.get(issue, :project) do
+      %{repo_url: url} when is_binary(url) and url != "" -> true
+      _ -> false
+    end
   end
 
   defp code_product_reference?(%{kind: "code_change", url: url}), do: present?(url)
