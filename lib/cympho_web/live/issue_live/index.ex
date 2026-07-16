@@ -617,6 +617,21 @@ defmodule CymphoWeb.IssueLive.Index do
   defp status_badge_class(:cancelled), do: "bg-text-quaternary/15 text-text-tertiary"
   defp status_badge_class(_), do: "bg-subtle text-text-secondary"
 
+  # Compact rows: the status word collapses to a colored dot (tooltip carries
+  # the label). In-progress pulses to read "alive" at a glance.
+  defp status_dot_class(:backlog), do: "bg-text-quaternary/70"
+  defp status_dot_class(:todo), do: "bg-accent"
+  defp status_dot_class(:in_progress), do: "bg-brand animate-pulse"
+  defp status_dot_class(:in_review), do: "bg-sky-400"
+  defp status_dot_class(:done), do: "bg-success"
+  defp status_dot_class(:blocked), do: "bg-red-400"
+  defp status_dot_class(:cancelled), do: "bg-text-quaternary/50"
+  defp status_dot_class(_), do: "bg-text-quaternary"
+
+  # Compact rows: escalated priorities show as a single mini icon.
+  defp priority_icon_class(:critical), do: "hero-exclamation-triangle-mini text-red-400"
+  defp priority_icon_class(_), do: "hero-chevron-double-up-mini text-amber-400"
+
   # Only escalated priorities get an accent; medium/low stay quiet.
   defp priority_badge_class(:critical), do: "bg-red-500/15 text-red-300"
   defp priority_badge_class(:high), do: "bg-amber-500/15 text-amber-300"

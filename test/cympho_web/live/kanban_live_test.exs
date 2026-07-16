@@ -290,11 +290,13 @@ defmodule CymphoWeb.KanbanLiveTest do
       {:ok, _view, html} = live(conn(), "/kanban")
       doc = Floki.parse_document!(html)
 
-      high_card_text = doc |> Floki.find("[data-issue-id='#{high_issue.id}']") |> Floki.text()
-      medium_card_text = doc |> Floki.find("[data-issue-id='#{medium_issue.id}']") |> Floki.text()
+      # Elevated priority renders as a mini icon with a tooltip, not a word chip.
+      high_card = doc |> Floki.find("[data-issue-id='#{high_issue.id}']")
+      medium_card = doc |> Floki.find("[data-issue-id='#{medium_issue.id}']")
 
-      assert high_card_text =~ "High"
-      refute medium_card_text =~ "Medium"
+      assert high_card |> Floki.find("[title='High priority']") |> length() == 1
+      assert medium_card |> Floki.find("[title='Medium priority']") |> Enum.empty?()
+      refute medium_card |> Floki.text() =~ "Medium"
     end
 
     test "assigned cards show an initials avatar with role context" do

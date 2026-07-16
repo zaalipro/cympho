@@ -394,14 +394,26 @@
               {issue_identifier(issue)}
             </span>
             <span class="truncate text-sm font-510 text-text-primary">{issue.title}</span>
-            <span class={"hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-510 sm:inline-flex #{status_badge_class(issue.status)}"}>
+            <%!-- Compact rows read status as a colored dot; detailed keeps the word. --%>
+            <span
+              :if={@digest_density == "compact"}
+              class={"hidden h-2 w-2 shrink-0 rounded-full sm:inline-block #{status_dot_class(issue.status)}"}
+              title={status_label(issue.status)}
+              aria-label={status_label(issue.status)}
+            >
+            </span>
+            <span
+              :if={@digest_density == "detailed"}
+              class={"hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-510 sm:inline-flex #{status_badge_class(issue.status)}"}
+            >
               {status_label(issue.status)}
             </span>
             <span
               :if={@digest_density == "compact" and issue.priority in [:critical, :high]}
-              class={"hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-510 sm:inline-flex #{priority_badge_class(issue.priority)}"}
+              class={"hidden h-3.5 w-3.5 shrink-0 sm:inline-block #{priority_icon_class(issue.priority)}"}
+              title={"#{String.capitalize(to_string(issue.priority))} priority"}
+              aria-label={"#{String.capitalize(to_string(issue.priority))} priority"}
             >
-              {String.capitalize(to_string(issue.priority))}
             </span>
           </div>
           <p

@@ -112,9 +112,10 @@ defmodule CymphoWeb.KanbanLive.Components do
 
       <span
         :if={elevated_priority?(@issue.priority)}
-        class={"shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-510 " <> priority_class(@issue.priority)}
+        class={"h-3.5 w-3.5 shrink-0 " <> priority_icon_class(@issue.priority)}
+        title={"#{String.capitalize(to_string(@issue.priority))} priority"}
+        aria-label={"#{String.capitalize(to_string(@issue.priority))} priority"}
       >
-        {String.capitalize(to_string(@issue.priority))}
       </span>
 
       <span :if={@blocker_count > 0} class="shrink-0 font-510 text-brand">
@@ -353,6 +354,10 @@ defmodule CymphoWeb.KanbanLive.Components do
   def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
   def priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
   def priority_class(_), do: "bg-surface text-text-quaternary"
+
+  # Board cards show elevated priority as a single mini icon, not a word chip.
+  def priority_icon_class(:critical), do: "hero-exclamation-triangle-mini text-brand"
+  def priority_icon_class(_), do: "hero-chevron-double-up-mini text-amber-300"
 
   defp launch_readiness_chip_class(%{class: class}) do
     "mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-510 transition-colors hover:border-brand/40 hover:bg-brand/10 " <>
