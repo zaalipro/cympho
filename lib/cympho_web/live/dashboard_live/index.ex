@@ -350,9 +350,9 @@ defmodule CymphoWeb.DashboardLive.Index do
       paperclip_readiness_action(summary.autonomy_readiness),
       if(length(operations.recent_failures) > 0,
         do: %{
-          label: "Runtime failures need inspection",
+          label: "Some runs failed",
           detail:
-            "#{length(operations.recent_failures)} recent #{pluralize(length(operations.recent_failures), "run")} failed across the company.",
+            "#{length(operations.recent_failures)} recent #{pluralize(length(operations.recent_failures), "run")} failed — worth a look.",
           action: "Open failures",
           path: "/operations#runtime-failures",
           tone: :danger
@@ -361,8 +361,8 @@ defmodule CymphoWeb.DashboardLive.Index do
       if(!runtime_enabled?,
         do: %{
           label: "Review mode is on",
-          detail: "Agent execution is disabled, so it is safe to inspect and edit the company.",
-          action: "Enable runtime when ready",
+          detail: "Nothing runs or spends money — it is safe to inspect and edit the company.",
+          action: "Go live when ready",
           path: "/operations#runtime-launch-checklist",
           tone: :attention
         }
@@ -370,7 +370,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       if(company_status == :unconfigured,
         do: %{
           label: "Finish company setup",
-          detail: "Create the operating company, initial goal, and agent roster.",
+          detail: "Set a goal and build your team — setup takes a couple of minutes.",
           action: "Open setup",
           path: "/onboarding",
           tone: :attention
@@ -379,7 +379,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       if(agents == 0,
         do: %{
           label: "Hire your first agents",
-          detail: "A CEO, CTO, and engineer team make the board actionable.",
+          detail: "Start with a CEO, a CTO, and an engineer — they take it from there.",
           action: "Create agents",
           path: "/agents/new",
           tone: :attention
@@ -409,10 +409,9 @@ defmodule CymphoWeb.DashboardLive.Index do
       [] ->
         [
           %{
-            label: "System is steady",
-            detail:
-              "No urgent bottlenecks detected. Review priorities or inspect recent activity.",
-            action: "Scan board",
+            label: "All steady",
+            detail: "Nothing urgent. Agents are working — check the board if you're curious.",
+            action: "Open board",
             path: "/kanban",
             tone: :ok
           }
@@ -690,7 +689,7 @@ defmodule CymphoWeb.DashboardLive.Index do
 
   defp goal_alignment_action(%{floating: floating}) when is_integer(floating) and floating > 0 do
     %{
-      label: "Floating work needs strategy links",
+      label: "Some work has no goal",
       detail:
         "#{floating} open #{pluralize(floating, "issue")} #{if floating == 1, do: "has", else: "have"} no project or goal.",
       action: "Open goals",
@@ -713,8 +712,8 @@ defmodule CymphoWeb.DashboardLive.Index do
   defp goal_alignment_action(%{active_missions: 0, total_open: total})
        when is_integer(total) and total > 0 do
     %{
-      label: "No active mission anchors work",
-      detail: "Create a mission so new agent work can inherit strategic context.",
+      label: "No mission set",
+      detail: "Set a mission so new work has something to aim at.",
       action: "Open goals",
       path: "/goals",
       tone: :attention

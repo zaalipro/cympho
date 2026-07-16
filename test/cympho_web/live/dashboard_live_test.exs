@@ -223,7 +223,7 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ "Goal links"
       assert html =~ "50"
       assert html =~ "1 floating"
-      assert html =~ "Floating work needs strategy links"
+      assert html =~ "Some work has no goal"
       assert html =~ ~s(href="/goals")
     end
 
@@ -252,8 +252,8 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ "Needs you"
       assert html =~ "Needs setup"
       assert html =~ "Review mode is on"
-      assert html =~ "Agent execution is disabled, so it is safe to inspect and edit the company."
-      assert html =~ "Enable runtime when ready"
+      assert html =~ "Nothing runs or spends money — it is safe to inspect and edit the company."
+      assert html =~ "Go live when ready"
       assert html =~ ~s(href="/operations#runtime-launch-checklist")
       assert html =~ "Later"
       assert html =~ "blocked issue"
