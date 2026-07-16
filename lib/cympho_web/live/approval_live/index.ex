@@ -375,11 +375,11 @@ defmodule CymphoWeb.ApprovalLive.Index do
   end
 
   def approval_empty_detail(nil) do
-    "Every gate is clear and the company is running itself. When an agent needs a budget, deployment, hiring, or external-access call, the decision packet will land here."
+    "Nothing to approve. When an agent needs your call — a budget, a deploy, a hire — it lands here."
   end
 
   def approval_empty_detail(_status) do
-    "Clear the filter to inspect the full decision trail, or open Activity if you expected an approval event."
+    "Clear the filter to see everything, or check Activity if you expected something here."
   end
 
   def approval_empty_action_class(:primary) do

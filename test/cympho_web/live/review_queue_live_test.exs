@@ -75,7 +75,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
     assert html =~ ~s(data-testid="review-action-bar-#{in_review.id}")
     assert html =~ "Decide from the packet above"
     assert html =~ "Evidence gaps block closure"
-    assert html =~ "The close action will stay guarded until evidence is present."
+    assert html =~ "approving stays locked until the evidence is there."
     assert html =~ "Review decision packet"
     assert html =~ "Request changes first"
     assert html =~ "Evidence present"
@@ -146,7 +146,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
     assert html =~ "Evidence complete review"
     assert html =~ "Review decision packet"
     assert html =~ "Approve candidate"
-    assert html =~ "Review gates are clear"
+    assert html =~ "Checks are clear"
     assert html =~ "1 completed runtime run recorded."
     assert html =~ "1 work product attached."
     assert html =~ "No blocking review gate detected"

@@ -188,7 +188,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
       tone: :clear,
       eyebrow: "Review command",
       heading: "Review queue is clear",
-      detail: "No acceptance, rework, or CTO spec decision is waiting right now.",
+      detail: "Nothing is waiting on your review right now.",
       action_label: "Open issues",
       action_path: "/issues?triage=review",
       focus: nil,
@@ -327,7 +327,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
         ),
       summary:
         if(blocker_count == 0,
-          do: "Review gates are clear; perform final human inspection before closing.",
+          do: "Checks are clear — take one last look, then close it.",
           else:
             "#{blocker_count} review #{if blocker_count == 1, do: "gate", else: "gates"} still block approval."
         ),
@@ -380,7 +380,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
   end
 
   defp review_risk_lines([]) do
-    ["No blocking review gate detected. Confirm product quality manually before approval."]
+    ["No blocking review gate detected. Give it a quick once-over before approving."]
   end
 
   defp review_risk_lines(blockers) do
@@ -399,15 +399,15 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
   defp review_gate_heading(_card), do: "Evidence gaps block closure"
 
   defp review_gate_detail(%{blocker_count: 0}) do
-    "Approval gates are clear. Inspect the issue evidence, then approve or request changes."
+    "Checks are clear. Look over the work, then approve or request changes."
   end
 
   defp review_gate_detail(%{blocker_count: 1}) do
-    "Fix this gate before approving. The close action will stay guarded until evidence is present."
+    "Fix this first — approving stays locked until the evidence is there."
   end
 
   defp review_gate_detail(%{blocker_count: count}) do
-    "Fix these #{count} gates before approving. The close action will stay guarded until evidence is present."
+    "Fix these #{count} things first — approving stays locked until the evidence is there."
   end
 
   # Emerald and red are reserved for the approve / return actions themselves.

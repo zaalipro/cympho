@@ -84,7 +84,7 @@ defmodule CymphoWeb.ApprovalLiveTest do
 
       assert empty_filtered_html =~ "Filtered to Cancelled approvals."
       assert empty_filtered_html =~ "No cancelled approvals in this lane"
-      assert empty_filtered_html =~ "Clear the filter to inspect the full decision trail"
+      assert empty_filtered_html =~ "Clear the filter to see everything"
       assert empty_filtered_html =~ ~s(href="/approvals")
       assert empty_filtered_html =~ "Activity"
       refute empty_filtered_html =~ "No approvals yet."
