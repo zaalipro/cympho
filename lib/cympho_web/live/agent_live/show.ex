@@ -1807,7 +1807,7 @@ defmodule CymphoWeb.AgentLive.Show do
           %{
             tone: :steady,
             label: "Ready for work",
-            detail: "No active assigned issues in the recent window.",
+            detail: "Nothing assigned right now — give it something to do.",
             path: "/issues/new?assignee_id=#{agent.id}"
           }
       end
@@ -2047,19 +2047,19 @@ defmodule CymphoWeb.AgentLive.Show do
   defp readiness_label(_status, _count), do: "Needs attention"
 
   defp adapter_readiness_summary(adapter, :ready, _count) do
-    "#{adapter_label_human(adapter)} has the basic runtime fields it needs."
+    "#{adapter_label_human(adapter)} is set up and ready to run."
   end
 
   defp adapter_readiness_summary(adapter, :review_mode, _count) do
-    "#{adapter_label_human(adapter)} is configured, but autonomous dispatch is disabled for review mode."
+    "#{adapter_label_human(adapter)} is set up, but agents are in review mode and won't start on their own."
   end
 
   defp adapter_readiness_summary(adapter, :command_not_found, _count) do
-    "#{adapter_label_human(adapter)} points at a CLI command Cympho cannot find on this machine."
+    "#{adapter_label_human(adapter)} points at a command that isn't installed on this machine."
   end
 
   defp adapter_readiness_summary(adapter, _status, count) do
-    "#{adapter_label_human(adapter)} needs #{count} runtime check#{if count == 1, do: "", else: "s"} before autonomous runs."
+    "#{adapter_label_human(adapter)} needs #{count} thing#{if count == 1, do: "", else: "s"} fixed before it can run on its own."
   end
 
   defp selected_adapter_item(adapter) do
