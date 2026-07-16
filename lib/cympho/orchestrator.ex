@@ -1332,6 +1332,14 @@ defmodule Cympho.Orchestrator do
 
   ## Private — original helpers
 
+  # The claude CLI's `--output-format json` envelope carries the agent's text
+  # in "result"; the Messages-API shape carries a "content" block list. Falling
+  # through to inspect/1 would escape the quotes/newlines inside the agent's
+  # cympho-actions block, making it unparseable — so try both real shapes first.
+  defp extract_result_content(%{"result" => text}) when is_binary(text) and text != "" do
+    text
+  end
+
   defp extract_result_content(result) when is_map(result) do
     content = result["content"] || []
 

@@ -332,6 +332,55 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
+    test "parses cympho-actions from the claude CLI json envelope (result field)", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      session_id = "session-cli-envelope"
+      run_id = Ecto.UUID.generate()
+
+      # `claude -p --output-format json` returns the agent's text under
+      # "result" (not a Messages-API "content" list). Falling back to
+      # inspect/1 escaped the block's quotes and failed the contract.
+      result = %{
+        "type" => "result",
+        "is_error" => false,
+        "num_turns" => 3,
+        "result" => """
+        Delivered.
+
+        ```cympho-actions
+        {"actions":[{"type":"attach_work_product","title":"CLI envelope artifact","kind":"document","description":"From result-field envelope"}]}
+        ```
+        """
+      }
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           fail_run: fn _run, _reason -> {:ok, %{id: run_id}} end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        send(pid, {:turn_completed, session_id, result})
+        assert :ok = wait_until_stopped(pid)
+
+        [work_product] = WorkProducts.list_work_products(issue.id)
+        assert work_product.title == "CLI envelope artifact"
+      end
+    end
+
     test "adds a generated delivery comment when artifact action omits owner note", %{
       agent_id: agent_id,
       issue: issue
