@@ -47,3 +47,8 @@ erl_crash.dump
 # Environment variables
 .env
 .env.*
+
+# Browser test artifacts
+.playwright-mcp/
+*.png
+issues-snapshot.md
