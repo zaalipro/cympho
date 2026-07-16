@@ -158,10 +158,9 @@ defmodule CymphoWeb.RoutineLive.Index do
         metrics.total_routines == 0 ->
           %{
             tone: :empty,
-            badge: "Not configured",
+            badge: "None yet",
             heading: "Create the first routine",
-            detail:
-              "Start a recurring operational loop that creates work automatically instead of waiting for manual intake.",
+            detail: "Routines create work on a schedule, so you don't have to remember to.",
             action_label: "New routine",
             action_path: "/routines/new",
             focus_label: nil,
@@ -171,10 +170,10 @@ defmodule CymphoWeb.RoutineLive.Index do
         triggerless ->
           %{
             tone: :critical,
-            badge: "Trigger gap",
+            badge: "No trigger",
             heading: "Add trigger to routine",
             detail:
-              "#{triggerless.name} is active, but no enabled schedule or webhook trigger can fire it.",
+              "#{triggerless.name} is active, but nothing can set it off — add a schedule or webhook.",
             action_label: "Open routine",
             action_path: "/routines/#{triggerless.id}",
             focus_label: triggerless.name,
@@ -185,8 +184,8 @@ defmodule CymphoWeb.RoutineLive.Index do
           %{
             tone: :critical,
             badge: "Stuck run",
-            heading: "Clear stale routine execution",
-            detail: "#{stale.name} has a pending or running execution older than two hours.",
+            heading: "A routine run looks stuck",
+            detail: "#{stale.name} has a run that's been going for over two hours.",
             action_label: "Open run history",
             action_path: "/routines/#{stale.id}",
             focus_label: stale.name,
@@ -198,8 +197,7 @@ defmodule CymphoWeb.RoutineLive.Index do
             tone: :warning,
             badge: "Recent failure",
             heading: "Review failed routine",
-            detail:
-              "#{failed.name} failed recently. Inspect the generated issue or repair the routine before it repeats.",
+            detail: "#{failed.name} failed recently. Worth a look before it runs again.",
             action_label: "Open failed routine",
             action_path: "/routines/#{failed.id}",
             focus_label: failed.name,
@@ -209,23 +207,22 @@ defmodule CymphoWeb.RoutineLive.Index do
         paused ->
           %{
             tone: :paused,
-            badge: "Paused work",
-            heading: "Audit paused routine",
-            detail:
-              "#{paused.name} is paused and will not create work until an owner resumes or archives it.",
+            badge: "Paused",
+            heading: "A routine is paused",
+            detail: "#{paused.name} won't create work until you resume or archive it.",
             action_label: "Open paused routine",
             action_path: "/routines/#{paused.id}",
             focus_label: paused.name,
-            focus_detail: "Paused recurring work"
+            focus_detail: "Paused"
           }
 
         runnable ->
           %{
             tone: :healthy,
-            badge: "Ready",
-            heading: "Routine loop is operational",
+            badge: "Running",
+            heading: "Routines are running",
             detail:
-              "#{metrics.active_routines} active routine#{plural_suffix(metrics.active_routines)} can create recurring work. Review run history before adding more automation.",
+              "#{metrics.active_routines} active routine#{plural_suffix(metrics.active_routines)} creating work on schedule.",
             action_label: "Open routine",
             action_path: "/routines/#{runnable.id}",
             focus_label: runnable.name,
@@ -235,10 +232,9 @@ defmodule CymphoWeb.RoutineLive.Index do
         true ->
           %{
             tone: :empty,
-            badge: "No active loop",
-            heading: "Create or resume recurring work",
-            detail:
-              "Routine records exist, but no active routine can currently create autonomous work.",
+            badge: "None active",
+            heading: "No routines are running",
+            detail: "You have routines, but none are active. Resume one or create a new one.",
             action_label: "New routine",
             action_path: "/routines/new",
             focus_label: nil,

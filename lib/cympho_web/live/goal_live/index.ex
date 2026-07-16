@@ -124,11 +124,10 @@ defmodule CymphoWeb.GoalLive.Index do
   defp empty_goal_command do
     %{
       tone: :empty,
-      badge: "Ready for mission",
-      heading: "Create the first operating mission",
-      detail:
-        "Define the business outcome agents should optimize before adding more autonomous work.",
-      action_label: "Create mission",
+      badge: "No goals yet",
+      heading: "Set your first goal",
+      detail: "Tell your team what outcome you're after — everything else hangs off that.",
+      action_label: "Create goal",
       action_path: "/goals/new",
       focus_label: nil,
       focus_detail: nil,
@@ -153,9 +152,8 @@ defmodule CymphoWeb.GoalLive.Index do
           %{
             tone: :attention,
             badge: "No mission",
-            heading: "Create an operating mission",
-            detail:
-              "Agents need a mission anchor before they can optimize owner requests against a business outcome.",
+            heading: "Set a mission",
+            detail: "Your agents work best with a clear outcome to aim at. Give them one.",
             action_label: "Create mission",
             action_path: "/goals/new",
             focus_label: "Mission missing",
@@ -165,10 +163,9 @@ defmodule CymphoWeb.GoalLive.Index do
         risk_issue ->
           %{
             tone: :attention,
-            badge: "Unguided work",
+            badge: "Unlinked work",
             heading: "Link floating work to strategy",
-            detail:
-              "#{risk_issue.title} is active without a goal. Attach it to a mission or intentionally cancel it.",
+            detail: "#{risk_issue.title} is active without a goal. Link it to one, or cancel it.",
             action_label: "Open unlinked issue",
             action_path: "/issues/#{risk_issue.id}",
             focus_label: issue_focus_label(risk_issue),
@@ -182,7 +179,7 @@ defmodule CymphoWeb.GoalLive.Index do
           %{
             tone: :danger,
             badge: "Goal blocked",
-            heading: "Unblock strategic work",
+            heading: "A goal is stuck",
             detail:
               "#{goal.title} has #{health.blocked} blocked linked issue#{plural_suffix(health.blocked)} stopping progress.",
             action_label: "Open blocked goal",
@@ -225,9 +222,8 @@ defmodule CymphoWeb.GoalLive.Index do
           %{
             tone: :empty,
             badge: "No open work",
-            heading: "Create the next mission-backed issue",
-            detail:
-              "Goals are ready, but there is no active work for agents to execute right now.",
+            heading: "Nothing in flight",
+            detail: "Your goals are set, but no one is working toward them yet. Create an issue.",
             action_label: "Create issue",
             action_path: "/issues/new",
             focus_label: "No active work",
@@ -238,10 +234,9 @@ defmodule CymphoWeb.GoalLive.Index do
         true ->
           %{
             tone: :ok,
-            badge: "Strategy covered",
-            heading: "Keep execution tied to mission",
-            detail:
-              "#{summary.aligned_percent}% of open work is goal-linked. Review the active goals below before launching more work.",
+            badge: "On track",
+            heading: "Work is tied to your goals",
+            detail: "#{summary.aligned_percent}% of open work is linked to a goal.",
             action_label: "Create issue",
             action_path: "/issues/new",
             focus_label: "#{summary.mission_aligned}/#{summary.total_open} goal-linked",
@@ -327,21 +322,21 @@ defmodule CymphoWeb.GoalLive.Index do
   def alignment_status_label(_status), do: "Needs review"
 
   def alignment_status_detail(:aligned),
-    do: "Open work is connected to mission or project context."
+    do: "Open work is connected to a goal or project."
 
   def alignment_status_detail(:floating_work),
-    do: "Some open work has no project or goal link, so agents may optimize the wrong outcome."
+    do: "Some open work has no goal or project — it may drift from what you actually want."
 
   def alignment_status_detail(:missing_goal_links),
     do: "Open work exists, but none of it is tied to an active goal yet."
 
   def alignment_status_detail(:no_mission),
-    do: "Create an active mission so new work has a strategic anchor."
+    do: "Set a mission so new work has something to aim at."
 
   def alignment_status_detail(:empty),
-    do: "Create a mission and link issues as work starts."
+    do: "Set a mission and link issues as work starts."
 
-  def alignment_status_detail(_status), do: "Review goal links before launching more work."
+  def alignment_status_detail(_status), do: "Check the goal links before starting more work."
 
   def alignment_status_class(:aligned),
     do: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
