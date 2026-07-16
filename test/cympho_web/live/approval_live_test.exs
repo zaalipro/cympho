@@ -195,7 +195,7 @@ defmodule CymphoWeb.ApprovalLiveTest do
       {:ok, view, html} = live(conn, "/approvals/#{approval.id}")
 
       assert html =~ ~s(data-testid="approval-decision-packet")
-      assert html =~ "Decision packet"
+      assert html =~ "Your decision"
       assert html =~ "Awaiting owner decision"
       assert html =~ "1 linked issue need review."
       assert html =~ "Payload includes action, risk."
