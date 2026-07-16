@@ -3,7 +3,7 @@
     <.header>
       <div class="min-w-0">
         <span class="ember-eyebrow">
-          Owner triage · {@total} in view
+          {@total} in view
         </span>
         <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           {@page_title}
@@ -48,10 +48,10 @@
       <div class="mb-2 flex items-center justify-between px-1">
         <div>
           <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Decision lanes
+            Lanes
           </p>
           <p :if={@digest_density == "detailed"} class="mt-0.5 text-xs text-text-tertiary">
-            Jump straight to the queue that needs the next decision.
+            Jump straight to the queue that needs you next.
           </p>
         </div>
         <.link

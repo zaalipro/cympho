@@ -250,8 +250,8 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn(), "/issues?density=detailed")
 
-      assert html =~ "Owner triage"
-      assert html =~ "Jump straight to the queue that needs the next decision."
+      assert html =~ "in view"
+      assert html =~ "Jump straight to the queue that needs you next."
       assert html =~ "CEO lane"
       assert html =~ "Ready"
       assert html =~ "Blocked"
