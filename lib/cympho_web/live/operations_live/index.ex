@@ -1192,7 +1192,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       icon: "hero-wrench-screwdriver-mini",
       eyebrow: "Delegated",
       title: "#{count} setup #{plural_noun(count, "blocker")}",
-      detail: "Fix worker setup before the CEO parent can receive useful evidence.",
+      detail: "Something in the setup is blocking these from running.",
       count_label: "#{count} blocked",
       action_label: "Fix setup",
       action_event: nil,
@@ -1207,7 +1207,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       icon: "hero-list-bullet-mini",
       eyebrow: "Delegated",
       title: "#{count} delegated #{plural_noun(count, "item")} open",
-      detail: "Inspect the child queue for blockers, focused runs, and review handoffs.",
+      detail: "Work your agents handed to each other — check what's stuck or waiting.",
       count_label: "#{count} open",
       action_label: "Open queue",
       action_event: nil,
@@ -1219,11 +1219,11 @@ defmodule CymphoWeb.OperationsLive.Index do
 
   defp simple_delegated_runnable_detail(%{setup_blocked_count: setup_blocked})
        when setup_blocked > 0 do
-    "Focus runnable child work now; #{setup_blocked} setup #{plural_noun(setup_blocked, "blocker")} can be fixed from the queue."
+    "Ready to run now; #{setup_blocked} setup #{plural_noun(setup_blocked, "blocker")} can be fixed from the queue."
   end
 
   defp simple_delegated_runnable_detail(_delegated_work) do
-    "Focus child work so CTO/CEO review has evidence instead of another status note."
+    "Ready to run — start these so reviews have real work to look at."
   end
 
   defp simple_owner_signoff_row(%{count: count}) when count > 0 do
@@ -1233,7 +1233,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       icon: "hero-check-circle-mini",
       eyebrow: "Owner",
       title: "#{count} CEO #{plural_noun(count, "update")} waiting",
-      detail: "Accept closure or request a CEO revision from one place.",
+      detail: "Your CEO wants a decision — accept, or ask for another pass.",
       count_label: "#{count} waiting",
       action_label: "Review",
       action_event: nil,
@@ -1250,7 +1250,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       icon: "hero-sparkles-mini",
       eyebrow: "CEO",
       title: "#{count} receipt #{plural_noun(count, "gap")}",
-      detail: "Repair missing evidence, verification, risk, or next-decision fields.",
+      detail: "Some CEO updates are missing proof of what actually happened.",
       count_label: "#{count} gaps",
       action_label: "Inspect",
       action_event: nil,
@@ -1292,7 +1292,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       icon: "hero-check-circle-mini",
       eyebrow: "Steady",
       title: "No urgent operations",
-      detail: "Delegated work, owner signoff, CEO receipts, and runtime cleanup are quiet.",
+      detail: "Nothing needs you — everything is either running or done.",
       count_label: nil,
       action_label: "Details",
       action_event: nil,
