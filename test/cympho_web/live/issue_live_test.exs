@@ -386,7 +386,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Create a draft now, or add the missing signal first"
       assert html =~ "Create behavior"
       assert html =~ "Draft only until the brief is ready"
-      assert html =~ "Create Draft CEO Issue"
+      assert html =~ "Create Draft"
       assert html =~ ~s(data-testid="issue-create-mobile-summary")
       assert html =~ ~s(data-testid="issue-create-launch-rail")
       assert html =~ "Brief readiness"
@@ -462,7 +462,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Missing signals: none."
       assert html =~ "Queue focused CEO run after create"
       assert html =~ "Ready to create and queue"
-      assert html =~ "Create and Queue CEO Run"
+      assert html =~ "Create and Run First"
       queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
       assert Map.has_key?(queue_attrs, "checked")
       refute Map.has_key?(queue_attrs, "disabled")
@@ -535,7 +535,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Too thin for autonomy"
       assert html =~ "Focused CEO run needs a ready brief"
       assert html =~ "Draft only until the brief is ready"
-      assert html =~ "Create Draft CEO Issue"
+      assert html =~ "Create Draft"
       queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
       assert Map.has_key?(queue_attrs, "disabled")
       refute Map.has_key?(queue_attrs, "checked")
@@ -621,7 +621,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Evidence: Specify what proof should be inspected after the run."
       assert html =~ "Focused CEO run needs a ready brief"
       assert html =~ "Draft only until the brief is ready"
-      assert html =~ "Create Draft CEO Issue"
+      assert html =~ "Create Draft"
 
       result =
         view
@@ -690,7 +690,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Before you launch"
       refute html =~ "Queue focused CEO run after create"
       assert html =~ "CEO setup needed"
-      assert html =~ "Create CEO Issue"
+      assert html =~ "Create Issue"
 
       result =
         view
@@ -754,7 +754,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, view, html} = live(conn, "/issues/new")
 
       assert html =~ "Focused CEO run needs a ready brief"
-      assert html =~ "Create Draft CEO Issue"
+      assert html =~ "Create Draft"
 
       result =
         view
@@ -892,7 +892,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ "Ready to create swarm"
       assert html =~ "CEO run waits for the swarm to finish"
-      assert html =~ "Create Swarm Issue"
+      assert html =~ "Create Swarm"
       assert html =~ ~s(data-testid="issue-swarm-advanced-panel")
       assert html =~ "Swarm setup"
       assert html =~ "swarm-egress-a"

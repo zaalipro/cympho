@@ -38,62 +38,6 @@
           queue_focus_disabled?(@brief_readiness) or swarm_enabled?(@swarm_config) %>
         <% queue_focus_checked? = queue_focus_checked?(@brief_readiness, @queue_dispatch_focus?) %>
 
-        <div class="ui-simple-only grid grid-cols-3 gap-2">
-          <div class="ui-simple-card flex min-w-0 flex-col items-center gap-2 px-2 py-2 text-center sm:flex-row sm:gap-3 sm:px-3 sm:py-3 sm:text-left">
-            <span class="ui-simple-icon">
-              <span class="hero-pencil-square-mini h-4 w-4"></span>
-            </span>
-            <span class="min-w-0">
-              <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                Brief
-              </span>
-              <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-                {@brief_readiness.label}
-              </span>
-            </span>
-          </div>
-          <div class="ui-simple-card flex min-w-0 flex-col items-center gap-2 px-2 py-2 text-center sm:flex-row sm:gap-3 sm:px-3 sm:py-3 sm:text-left">
-            <span class="ui-simple-icon">
-              <span class="hero-sparkles-mini h-4 w-4"></span>
-            </span>
-            <span class="min-w-0">
-              <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                Route
-              </span>
-              <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-                CEO lane
-              </span>
-            </span>
-          </div>
-          <div class="ui-simple-card flex min-w-0 flex-col items-center gap-2 px-2 py-2 text-center sm:flex-row sm:gap-3 sm:px-3 sm:py-3 sm:text-left">
-            <span class="ui-simple-icon">
-              <span class="hero-bolt-mini h-4 w-4"></span>
-            </span>
-            <span class="min-w-0">
-              <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                Swarm
-              </span>
-              <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-                {if swarm_enabled?(@swarm_config),
-                  do: "#{swarm_count(@swarm_config)} workers",
-                  else: "Off"}
-              </span>
-            </span>
-          </div>
-        </div>
-
-        <div class="ui-simple-only flex items-center justify-end gap-2 rounded-lg border border-border bg-panel/85 px-3 py-3">
-          <.app_link
-            navigate={~p"/issues"}
-            class="rounded-lg px-3 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Cancel
-          </.app_link>
-          <.button type="submit" variant="primary" class="cta-glow">
-            {submit_label(@brief_readiness, @queue_dispatch_focus?, @intake_route, @swarm_config)}
-          </.button>
-        </div>
-
         <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
           <div class="space-y-5">
             <div
@@ -101,17 +45,17 @@
               data-testid="issue-intake-composer"
               class="rounded-lg border border-border bg-surface/70 px-4 py-4"
             >
-              <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div class="ui-advanced-only flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div class="min-w-0">
                   <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                     Owner brief
                   </p>
                   <h2 class="mt-1 text-base font-590 text-text-primary">Define the work first</h2>
-                  <p class="ui-advanced-only mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
+                  <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
                     Write the request the CEO should decide, decompose, or hand off.
                   </p>
                 </div>
-                <div class="ui-advanced-only shrink-0 rounded-md border border-border bg-panel px-3 py-2 text-right">
+                <div class="shrink-0 rounded-md border border-border bg-panel px-3 py-2 text-right">
                   <p class={[
                     "text-sm font-590",
                     case @brief_readiness.status do
@@ -228,20 +172,24 @@
                   required
                   options={project_options(@projects)}
                 />
-                <.input
-                  field={@form[:status]}
-                  type="select"
-                  label="Status"
-                  required
-                  options={status_options()}
-                />
-                <.input
-                  field={@form[:priority]}
-                  type="select"
-                  label="Priority"
-                  required
-                  options={priority_options()}
-                />
+                <div class="ui-advanced-only">
+                  <.input
+                    field={@form[:status]}
+                    type="select"
+                    label="Status"
+                    required
+                    options={status_options()}
+                  />
+                </div>
+                <div class="ui-advanced-only">
+                  <.input
+                    field={@form[:priority]}
+                    type="select"
+                    label="Priority"
+                    required
+                    options={priority_options()}
+                  />
+                </div>
                 <.input field={@form[:due_on]} type="date" label="Due date" />
               </div>
             </div>
@@ -250,7 +198,7 @@
               id="issue-create-mobile-summary"
               data-testid="issue-create-mobile-summary"
               class={[
-                "rounded-lg border px-4 py-3 md:hidden",
+                "ui-advanced-only rounded-lg border px-4 py-3 md:hidden",
                 launch_state_class(launch_state.tone)
               ]}
             >
@@ -379,7 +327,7 @@
               :if={!Enum.empty?(@goals)}
               id="issue-mission-context"
               data-testid="issue-mission-context"
-              class="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3"
+              class="ui-advanced-only rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3"
             >
               <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div class="min-w-0">

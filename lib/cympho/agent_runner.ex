@@ -51,9 +51,13 @@ defmodule Cympho.AgentRunner do
   defp build_claude_command(issue, agent_id, resume_decision, opts) do
     command = cli_command(opts)
 
+    # Headless runs have no human to approve tool prompts: without the
+    # permissions bypass every Bash/Edit call is denied and the agent burns
+    # its turns flailing, then fails the action contract.
     base = [
       "-p",
       "--bare",
+      "--dangerously-skip-permissions",
       "--output-format",
       "json"
     ]

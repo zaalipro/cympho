@@ -461,16 +461,16 @@ defmodule CymphoWeb.IssueLive.New do
   defp launch_state_class(:draft), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
   defp launch_state_class(_tone), do: "border-border bg-panel/70 text-text-secondary"
 
-  defp submit_label(_readiness, _queue_focus?, %{missing?: true}), do: "Create CEO Issue"
+  defp submit_label(_readiness, _queue_focus?, %{missing?: true}), do: "Create Issue"
 
-  defp submit_label(%{status: :ready}, true, _intake_route), do: "Create and Queue CEO Run"
+  defp submit_label(%{status: :ready}, true, _intake_route), do: "Create and Run First"
 
-  defp submit_label(%{status: :ready}, _queue_focus?, _intake_route), do: "Create CEO Issue"
+  defp submit_label(%{status: :ready}, _queue_focus?, _intake_route), do: "Create Issue"
 
-  defp submit_label(_readiness, _queue_focus?, _intake_route), do: "Create Draft CEO Issue"
+  defp submit_label(_readiness, _queue_focus?, _intake_route), do: "Create Draft"
 
   defp submit_label(_readiness, _queue_focus?, _intake_route, %{enabled: true}),
-    do: "Create Swarm Issue"
+    do: "Create Swarm"
 
   defp submit_label(readiness, queue_focus?, intake_route, _swarm_config),
     do: submit_label(readiness, queue_focus?, intake_route)
