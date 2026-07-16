@@ -37,7 +37,8 @@ defmodule CymphoWeb.OnboardingLiveTest do
       # company -> team
       html = view |> element("button", "Continue") |> render_click()
       assert html =~ "Owns the goal, sets direction"
-      assert html =~ "Adapter"
+      assert html =~ "AI provider"
+      assert html =~ "Choose a different AI per role"
 
       view
       |> form("#team-step-form",
@@ -82,6 +83,60 @@ defmodule CymphoWeb.OnboardingLiveTest do
       # A second launch click is ignored: a duplicate would get slug wizard-co-1.
       render_click(view, "start_autonomous_company")
       assert Companies.get_company_by_slug("wizard-co-1") == nil
+    end
+
+    test "per-role AI overrides land on the matching agents", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/onboarding")
+
+      render_change(view, "update_company_form", %{
+        "company" => %{
+          "name" => "Role Mix Co",
+          "goal_title" => "Prove per-role runtimes",
+          "issue_prefix" => "MIX",
+          "adapter" => "claude_code",
+          "runtime_model" => "claude-sonnet-5"
+        }
+      })
+
+      render_click(view, "toggle_role_overrides")
+
+      render_change(view, "update_company_form", %{
+        "company" => %{
+          "role_runtimes" => %{
+            "ceo" => %{"adapter" => "", "model" => "claude-opus-4-8", "command" => ""},
+            "cto" => %{"adapter" => "codex", "model" => "gpt-5.5", "command" => ""},
+            "engineer" => %{"adapter" => "", "model" => "", "command" => "cz"}
+          }
+        }
+      })
+
+      render_click(view, "start_autonomous_company")
+
+      company = Companies.get_company_by_slug("role-mix-co")
+      assert company
+
+      agents = Companies.list_company_agents(company.id)
+      ceo = Enum.find(agents, &(&1.role == :ceo))
+      cto = Enum.find(agents, &(&1.role == :cto))
+      engineer = Enum.find(agents, &(&1.role == :engineer))
+      product = Enum.find(agents, &(&1.role == :product_manager))
+
+      # CEO: shared provider, its own model via ANTHROPIC_MODEL
+      assert ceo.adapter == :claude_code
+      assert ceo.runtime_config["env"]["ANTHROPIC_MODEL"] == "claude-opus-4-8"
+
+      # CTO: different provider; model rides config["model"], not env
+      assert cto.adapter == :codex
+      assert cto.runtime_config["model"] == "gpt-5.5"
+      refute get_in(cto.runtime_config, ["env", "ANTHROPIC_MODEL"])
+
+      # Engineer: blank model falls back to command-only override
+      assert engineer.adapter == :claude_code
+      assert engineer.runtime_config["command"] == "cz"
+
+      # Non-overridden roles keep the shared runtime
+      assert product.adapter == :claude_code
+      assert product.runtime_config["env"]["ANTHROPIC_MODEL"] == "claude-sonnet-5"
     end
 
     test "blocks the company step on an invalid issue prefix", %{conn: conn} do

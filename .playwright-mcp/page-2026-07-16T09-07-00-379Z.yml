@@ -1,0 +1,154 @@
+- generic [active] [ref=f5e1]:
+  - link "Skip to main content" [ref=f5e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=f5e3]:
+    - complementary [ref=f5e4]:
+      - button "L LLMotions" [ref=f5e7] [cursor=pointer]:
+        - generic [ref=f5e10]:
+          - generic [ref=f5e11]: L
+          - generic [ref=f5e13]: LLMotions
+      - navigation [ref=f5e16]:
+        - button "New issue C" [ref=f5e17] [cursor=pointer]:
+          - generic [ref=f5e19]: New issue
+          - generic [ref=f5e20]: C
+        - button "Toggle simple and advanced view with U" [ref=f5e23] [cursor=pointer]:
+          - generic [ref=f5e26]: Simple
+        - link "Dashboard" [ref=f5e29] [cursor=pointer]:
+          - /url: /dashboard
+        - link "Board" [ref=f5e32] [cursor=pointer]:
+          - /url: /kanban
+        - link "Inbox" [ref=f5e35] [cursor=pointer]:
+          - /url: /inbox
+        - link "Approvals" [ref=f5e38] [cursor=pointer]:
+          - /url: /approvals?status=pending
+        - link "Reviews" [ref=f5e41] [cursor=pointer]:
+          - /url: /reviews
+        - link "Settings" [ref=f5e44] [cursor=pointer]:
+          - /url: /settings/profile
+        - generic [ref=f5e47]: Work
+        - link "Issues" [ref=f5e49] [cursor=pointer]:
+          - /url: /issues
+        - link "Goals" [ref=f5e52] [cursor=pointer]:
+          - /url: /goals
+        - generic [ref=f5e55]:
+          - generic [ref=f5e56]:
+            - button "Projects" [expanded] [ref=f5e57] [cursor=pointer]
+            - link "New project" [ref=f5e60] [cursor=pointer]:
+              - /url: /projects/new
+          - link "Company OS 5" [ref=f5e63] [cursor=pointer]:
+            - /url: /projects/e19ae41c-c6cd-4f7f-a382-25e2b6031134
+            - generic [ref=f5e65]: Company OS
+            - generic [ref=f5e66]: "5"
+        - generic [ref=f5e67]:
+          - generic [ref=f5e68]:
+            - button "Agents" [expanded] [ref=f5e69] [cursor=pointer]
+            - link "New agent" [ref=f5e72] [cursor=pointer]:
+              - /url: /agents/new
+          - generic [ref=f5e74]:
+            - link "CEO" [ref=f5e75] [cursor=pointer]:
+              - /url: /agents/96a7288f-c836-4b85-af11-79067178253b
+              - generic "Idle" [ref=f5e78]
+            - link "CTO" [ref=f5e79] [cursor=pointer]:
+              - /url: /agents/512954c7-3303-44e6-99b4-bb87977347cd
+              - generic "Idle" [ref=f5e82]
+            - link "Design Lead" [ref=f5e83] [cursor=pointer]:
+              - /url: /agents/3f9cc43e-c309-4a35-aa90-b4955b1e4789
+              - generic "Idle" [ref=f5e86]
+            - link "Engineer 1" [ref=f5e87] [cursor=pointer]:
+              - /url: /agents/2a9cf37f-7f68-464c-9a9d-5ba9f2586dbc
+              - generic "Idle" [ref=f5e90]
+            - link "Engineer 2" [ref=f5e91] [cursor=pointer]:
+              - /url: /agents/fcc58219-8af9-4535-97ea-10ed42b0c52e
+              - generic "Idle" [ref=f5e94]
+            - link "Product Lead" [ref=f5e95] [cursor=pointer]:
+              - /url: /agents/ce4df661-315d-4a57-9761-01337b6c0f49
+              - generic "Idle" [ref=f5e98]
+      - generic [ref=f5e100]:
+        - button "Z Zaali" [ref=f5e102] [cursor=pointer]:
+          - generic [ref=f5e103]: Z
+          - generic [ref=f5e104]: Zaali
+        - button "Collapse" [ref=f5e106] [cursor=pointer]
+    - banner [ref=f5e109]:
+      - generic [ref=f5e113]:
+        - generic [ref=f5e114]:
+          - generic [ref=f5e115]: Runtime
+          - generic [ref=f5e116]: Full power
+        - paragraph [ref=f5e117]: LLMotions
+      - generic [ref=f5e118]:
+        - button "Switch runtime to low power" [ref=f5e120] [cursor=pointer]: Low
+        - button "Pause runtime and preserve queued wakes" [ref=f5e123] [cursor=pointer]: Pause
+        - button "Stop runtime and cancel queued wakes" [ref=f5e126] [cursor=pointer]: Stop
+    - main [ref=f5e128]:
+      - generic [ref=f5e132]:
+        - generic [ref=f5e133]:
+          - generic [ref=f5e134]:
+            - link "Issues" [ref=f5e135] [cursor=pointer]:
+              - /url: /issues
+            - generic [ref=f5e138]: LLM-1
+          - generic [ref=f5e139]:
+            - generic [ref=f5e140]:
+              - heading "Create the first autonomous execution plan" [level=1] [ref=f5e141]
+              - button "Edit title" [ref=f5e142] [cursor=pointer]
+            - generic [ref=f5e144]:
+              - generic [ref=f5e145]: Blocked
+              - generic [ref=f5e147]: Critical
+              - 'generic "issue_commented: waiting on agent for 3m" [ref=f5e149]':
+                - generic [ref=f5e150]: ⏱
+                - generic [ref=f5e151]: Waiting on agent · 3m
+              - generic [ref=f5e152]:
+                - text: in
+                - link "Company OS" [ref=f5e153] [cursor=pointer]:
+                  - /url: /projects/e19ae41c-c6cd-4f7f-a382-25e2b6031134
+          - generic [ref=f5e155]:
+            - generic [ref=f5e158]:
+              - paragraph [ref=f5e159]: Agents need 3 things before this can move on.
+              - paragraph [ref=f5e160]: "Last: System note · 3m ago"
+            - button "Start verification" [ref=f5e162] [cursor=pointer]
+          - generic [ref=f5e165]:
+            - paragraph [ref=f5e167]: Break the company goal into CEO, CTO, product, design, and engineering work. Create follow-up issues for the first execution cycle.
+            - button "Edit description" [ref=f5e168] [cursor=pointer]
+          - generic [ref=f5e170]:
+            - generic [ref=f5e171]: Add Comment
+            - generic [ref=f5e172]:
+              - generic [ref=f5e173]:
+                - button "Owner update" [ref=f5e174] [cursor=pointer]
+                - button "Delivery" [ref=f5e175] [cursor=pointer]
+                - button "Review" [ref=f5e176] [cursor=pointer]
+                - button "Blocked" [ref=f5e177] [cursor=pointer]
+                - button "Handoff" [ref=f5e178] [cursor=pointer]
+              - generic [ref=f5e179]:
+                - textbox "Leave a note for the agents — or pick a template above…" [ref=f5e182]
+                - button "Send comment" [ref=f5e183] [cursor=pointer]:
+                  - generic [ref=f5e185]: Send
+        - complementary [ref=f5e186]:
+          - generic [ref=f5e187]:
+            - generic [ref=f5e188]:
+              - generic [ref=f5e189]:
+                - generic [ref=f5e190]: Status
+                - button "Blocked" [ref=f5e192] [cursor=pointer]
+              - generic [ref=f5e195]:
+                - generic [ref=f5e196]: Priority
+                - button "Critical" [ref=f5e198] [cursor=pointer]
+              - generic [ref=f5e201]:
+                - generic [ref=f5e202]: Assignee
+                - button "Unassigned" [ref=f5e204] [cursor=pointer]
+            - separator [ref=f5e207]
+            - generic [ref=f5e208]:
+              - generic [ref=f5e209]:
+                - generic [ref=f5e210]:
+                  - paragraph [ref=f5e211]: Goal
+                  - paragraph [ref=f5e212]: Ship a polished Cympho product people love
+                - generic [ref=f5e213]: Mission
+              - generic [ref=f5e214]:
+                - link "Open goal" [ref=f5e215] [cursor=pointer]:
+                  - /url: /goals/65fa4966-39d2-4128-9ab3-d941189fe078
+                - link "Open project" [ref=f5e216] [cursor=pointer]:
+                  - /url: /projects/e19ae41c-c6cd-4f7f-a382-25e2b6031134
+            - separator [ref=f5e217]
+            - generic [ref=f5e220]:
+              - generic [ref=f5e221]:
+                - paragraph [ref=f5e222]: Agents on this issue
+                - paragraph [ref=f5e223]: Pause just this issue if a run gets stuck.
+              - button "Pause" [ref=f5e224] [cursor=pointer]
+            - separator [ref=f5e226]
+            - generic [ref=f5e227]: Created Jul 16, 2026

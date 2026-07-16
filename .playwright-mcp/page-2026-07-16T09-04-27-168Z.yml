@@ -1,0 +1,236 @@
+- generic [active] [ref=f3e1]:
+  - link "Skip to main content" [ref=f3e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=f3e3]:
+    - complementary [ref=f3e4]:
+      - button "L LLMotions" [ref=f3e7] [cursor=pointer]:
+        - generic [ref=f3e10]:
+          - generic [ref=f3e11]: L
+          - generic [ref=f3e13]: LLMotions
+      - navigation [ref=f3e16]:
+        - button "New issue C" [ref=f3e17] [cursor=pointer]:
+          - generic [ref=f3e19]: New issue
+          - generic [ref=f3e20]: C
+        - button "Toggle simple and advanced view with U" [ref=f3e23] [cursor=pointer]:
+          - generic [ref=f3e26]: Simple
+        - link "Dashboard" [ref=f3e29] [cursor=pointer]:
+          - /url: /dashboard
+        - link "Board" [ref=f3e32] [cursor=pointer]:
+          - /url: /kanban
+        - link "Inbox" [ref=f3e35] [cursor=pointer]:
+          - /url: /inbox
+        - link "Approvals" [ref=f3e38] [cursor=pointer]:
+          - /url: /approvals?status=pending
+        - link "Reviews" [ref=f3e41] [cursor=pointer]:
+          - /url: /reviews
+        - link "Settings" [ref=f3e44] [cursor=pointer]:
+          - /url: /settings/profile
+        - generic [ref=f3e47]: Work
+        - link "Issues" [ref=f3e49] [cursor=pointer]:
+          - /url: /issues
+        - link "Goals" [ref=f3e52] [cursor=pointer]:
+          - /url: /goals
+        - generic [ref=f3e55]:
+          - generic [ref=f3e56]:
+            - button "Projects" [expanded] [ref=f3e57] [cursor=pointer]
+            - link "New project" [ref=f3e60] [cursor=pointer]:
+              - /url: /projects/new
+          - link "Company OS 5" [ref=f3e63] [cursor=pointer]:
+            - /url: /projects/e19ae41c-c6cd-4f7f-a382-25e2b6031134
+            - generic [ref=f3e65]: Company OS
+            - generic [ref=f3e66]: "5"
+        - generic [ref=f3e67]:
+          - generic [ref=f3e68]:
+            - button "Agents" [expanded] [ref=f3e69] [cursor=pointer]
+            - link "New agent" [ref=f3e72] [cursor=pointer]:
+              - /url: /agents/new
+          - generic [ref=f3e74]:
+            - link "CEO" [ref=f3e75] [cursor=pointer]:
+              - /url: /agents/96a7288f-c836-4b85-af11-79067178253b
+              - generic "Idle" [ref=f3e78]
+            - link "CTO" [ref=f3e79] [cursor=pointer]:
+              - /url: /agents/512954c7-3303-44e6-99b4-bb87977347cd
+              - generic "Idle" [ref=f3e82]
+            - link "Design Lead" [ref=f3e83] [cursor=pointer]:
+              - /url: /agents/3f9cc43e-c309-4a35-aa90-b4955b1e4789
+              - generic "Idle" [ref=f3e86]
+            - link "Engineer 1" [ref=f3e87] [cursor=pointer]:
+              - /url: /agents/2a9cf37f-7f68-464c-9a9d-5ba9f2586dbc
+              - generic "Idle" [ref=f3e90]
+            - link "Engineer 2" [ref=f3e91] [cursor=pointer]:
+              - /url: /agents/fcc58219-8af9-4535-97ea-10ed42b0c52e
+              - generic "Idle" [ref=f3e94]
+            - link "Product Lead" [ref=f3e95] [cursor=pointer]:
+              - /url: /agents/ce4df661-315d-4a57-9761-01337b6c0f49
+              - generic "Idle" [ref=f3e98]
+      - generic [ref=f3e100]:
+        - button "Z Zaali" [ref=f3e102] [cursor=pointer]:
+          - generic [ref=f3e103]: Z
+          - generic [ref=f3e104]: Zaali
+        - button "Collapse" [ref=f3e106] [cursor=pointer]
+    - banner [ref=f3e109]:
+      - generic [ref=f3e113]:
+        - generic [ref=f3e114]:
+          - generic [ref=f3e115]: Runtime
+          - generic [ref=f3e116]: Full power
+        - paragraph [ref=f3e117]: LLMotions
+      - generic [ref=f3e118]:
+        - button "Switch runtime to low power" [ref=f3e120] [cursor=pointer]: Low
+        - button "Pause runtime and preserve queued wakes" [ref=f3e123] [cursor=pointer]: Pause
+        - button "Stop runtime and cancel queued wakes" [ref=f3e126] [cursor=pointer]: Stop
+    - main [ref=f3e128]:
+      - generic [ref=f3e133]:
+        - generic [ref=f3e134]:
+          - generic [ref=f3e136]:
+            - generic [ref=f3e137]: 5 in view
+            - heading "All Issues" [level=1] [ref=f3e138]
+          - generic [ref=f3e139]:
+            - link "Board" [ref=f3e140] [cursor=pointer]:
+              - /url: /kanban
+            - generic "View density" [ref=f3e141]:
+              - link "Compact" [ref=f3e142] [cursor=pointer]:
+                - /url: /issues?page=1
+              - link "Detailed" [ref=f3e144] [cursor=pointer]:
+                - /url: /issues?page=1&density=detailed
+            - link "New Issue" [ref=f3e146] [cursor=pointer]:
+              - /url: /issues/new
+        - generic [ref=f3e149]:
+          - paragraph [ref=f3e152]: Lanes
+          - generic [ref=f3e153]:
+            - link "Open work 5" [ref=f3e154] [cursor=pointer]:
+              - /url: /issues?triage=open
+              - generic [ref=f3e155]:
+                - paragraph [ref=f3e159]: Open work
+                - generic [ref=f3e160]: "5"
+            - link "CEO lane 2" [ref=f3e161] [cursor=pointer]:
+              - /url: /issues?triage=ceo
+              - generic [ref=f3e162]:
+                - paragraph [ref=f3e166]: CEO lane
+                - generic [ref=f3e167]: "2"
+            - link "Ready 0" [ref=f3e168] [cursor=pointer]:
+              - /url: /issues?triage=ready
+              - generic [ref=f3e169]:
+                - paragraph [ref=f3e173]: Ready
+                - generic [ref=f3e174]: "0"
+            - link "Active 3" [ref=f3e175] [cursor=pointer]:
+              - /url: /issues?triage=active
+              - generic [ref=f3e176]:
+                - paragraph [ref=f3e180]: Active
+                - generic [ref=f3e181]: "3"
+            - link "Review 0" [ref=f3e182] [cursor=pointer]:
+              - /url: /issues?triage=review
+              - generic [ref=f3e183]:
+                - paragraph [ref=f3e187]: Review
+                - generic [ref=f3e188]: "0"
+            - link "Blocked 2" [ref=f3e189] [cursor=pointer]:
+              - /url: /issues?triage=blocked
+              - generic [ref=f3e190]:
+                - paragraph [ref=f3e194]: Blocked
+                - generic [ref=f3e195]: "2"
+            - link "Unassigned 0" [ref=f3e196] [cursor=pointer]:
+              - /url: /issues?triage=unassigned
+              - generic [ref=f3e197]:
+                - paragraph [ref=f3e201]: Unassigned
+                - generic [ref=f3e202]: "0"
+        - generic [ref=f3e203]:
+          - generic [ref=f3e204]:
+            - paragraph [ref=f3e206]: Attention queue
+            - generic [ref=f3e207]: 4 need you
+          - generic [ref=f3e208]:
+            - link "Create the first autonomous execution plan Unblock just now" [ref=f3e209] [cursor=pointer]:
+              - /url: /issues/48095bc8-ec91-48a8-89a5-9155a690b100
+              - generic [ref=f3e211]: Create the first autonomous execution plan
+              - generic [ref=f3e212]: Unblock
+              - generic [ref=f3e213]: just now
+            - link "Set up the engineering environment and CI pipeline Unblock just now" [ref=f3e214] [cursor=pointer]:
+              - /url: /issues/084e0c70-8869-48b8-bb5f-f9ee31f43f5c
+              - generic [ref=f3e216]: Set up the engineering environment and CI pipeline
+              - generic [ref=f3e217]: Unblock
+              - generic [ref=f3e218]: just now
+            - link "Define the technical architecture Observe 2m" [ref=f3e219] [cursor=pointer]:
+              - /url: /issues/3ea957f0-2e71-45db-93ac-bcc944667089
+              - generic [ref=f3e221]: Define the technical architecture
+              - generic [ref=f3e222]: Observe
+              - generic [ref=f3e223]: 2m
+            - link "Ship a working demo for stakeholder review Observe just now" [ref=f3e224] [cursor=pointer]:
+              - /url: /issues/2e05f483-f1dc-4010-a6e8-78aa6a206174
+              - generic [ref=f3e226]: Ship a working demo for stakeholder review
+              - generic [ref=f3e227]: Observe
+              - generic [ref=f3e228]: just now
+        - generic [ref=f3e230]:
+          - textbox "Search issues..." [ref=f3e233]
+          - generic [ref=f3e234]:
+            - 'button "Status: Any status" [ref=f3e236] [cursor=pointer]':
+              - generic [ref=f3e237]: "Status:"
+              - generic [ref=f3e238]: Any status
+            - 'button "Priority: Any priority" [ref=f3e241] [cursor=pointer]':
+              - generic [ref=f3e242]: "Priority:"
+              - generic [ref=f3e243]: Any priority
+            - 'button "Assignee: Anyone" [ref=f3e246] [cursor=pointer]':
+              - generic [ref=f3e247]: "Assignee:"
+              - generic [ref=f3e248]: Anyone
+            - 'button "Project: Any project" [ref=f3e251] [cursor=pointer]':
+              - generic [ref=f3e252]: "Project:"
+              - generic [ref=f3e253]: Any project
+            - 'button "Label: Any label" [ref=f3e256] [cursor=pointer]':
+              - generic [ref=f3e257]: "Label:"
+              - generic [ref=f3e258]: Any label
+        - generic [ref=f3e260]: 5 issues
+        - generic [ref=f3e262]:
+          - generic [ref=f3e263]:
+            - generic [ref=f3e264]: Issue
+            - generic [ref=f3e265]: Age
+          - generic [ref=f3e267]:
+            - link "LLM-5 Ship a working demo for stakeholder review In Progress" [ref=f3e268] [cursor=pointer]:
+              - /url: /issues/2e05f483-f1dc-4010-a6e8-78aa6a206174
+              - generic [ref=f3e269]:
+                - generic [ref=f3e270]: LLM-5
+                - generic [ref=f3e271]: Ship a working demo for stakeholder review
+                - generic [ref=f3e272]: In Progress
+            - generic "0 comments" [ref=f3e273]: just now
+            - group [ref=f3e276]:
+              - generic "Actions for Ship a working demo for stakeholder review" [ref=f3e277] [cursor=pointer]
+          - generic [ref=f3e280]:
+            - link "LLM-2 Set up the engineering environment and CI pipeline Blocked High" [ref=f3e281] [cursor=pointer]:
+              - /url: /issues/084e0c70-8869-48b8-bb5f-f9ee31f43f5c
+              - generic [ref=f3e282]:
+                - generic "Unread comments" [ref=f3e283]
+                - generic [ref=f3e284]: LLM-2
+                - generic [ref=f3e285]: Set up the engineering environment and CI pipeline
+                - generic [ref=f3e286]: Blocked
+                - generic [ref=f3e287]: High
+            - generic "2 comments" [ref=f3e288]: just now
+            - group [ref=f3e291]:
+              - generic "Actions for Set up the engineering environment and CI pipeline" [ref=f3e292] [cursor=pointer]
+          - generic [ref=f3e295]:
+            - link "LLM-4 Implement the first core feature In Progress" [ref=f3e296] [cursor=pointer]:
+              - /url: /issues/79fa2c1b-384c-4c85-a75f-16dbf0ff0d98
+              - generic [ref=f3e297]:
+                - generic [ref=f3e298]: LLM-4
+                - generic [ref=f3e299]: Implement the first core feature
+                - generic [ref=f3e300]: In Progress
+            - generic "0 comments" [ref=f3e301]: just now
+            - group [ref=f3e304]:
+              - generic "Actions for Implement the first core feature" [ref=f3e305] [cursor=pointer]
+          - generic [ref=f3e308]:
+            - link "LLM-1 Create the first autonomous execution plan Blocked Critical" [ref=f3e309] [cursor=pointer]:
+              - /url: /issues/48095bc8-ec91-48a8-89a5-9155a690b100
+              - generic [ref=f3e310]:
+                - generic [ref=f3e311]: LLM-1
+                - generic [ref=f3e312]: Create the first autonomous execution plan
+                - generic [ref=f3e313]: Blocked
+                - generic [ref=f3e314]: Critical
+            - generic "2 comments" [ref=f3e315]: just now
+            - group [ref=f3e318]:
+              - generic "Actions for Create the first autonomous execution plan" [ref=f3e319] [cursor=pointer]
+          - generic [ref=f3e322]:
+            - link "LLM-3 Define the technical architecture In Progress High" [ref=f3e323] [cursor=pointer]:
+              - /url: /issues/3ea957f0-2e71-45db-93ac-bcc944667089
+              - generic [ref=f3e324]:
+                - generic [ref=f3e325]: LLM-3
+                - generic [ref=f3e326]: Define the technical architecture
+                - generic [ref=f3e327]: In Progress
+                - generic [ref=f3e328]: High
+            - generic "0 comments" [ref=f3e329]: 2m
+            - group [ref=f3e332]:
+              - generic "Actions for Define the technical architecture" [ref=f3e333] [cursor=pointer]

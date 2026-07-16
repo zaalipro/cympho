@@ -61,7 +61,13 @@ defmodule CymphoWeb.OnboardingLive.Index do
         "engineer_names" => [],
         "adapter" => "claude_code",
         "runtime_command" => "",
-        "runtime_model" => ""
+        "runtime_model" => "",
+        "role_overrides" => false,
+        "role_runtimes" => %{
+          "ceo" => %{"adapter" => "", "model" => "", "command" => ""},
+          "cto" => %{"adapter" => "", "model" => "", "command" => ""},
+          "engineer" => %{"adapter" => "", "model" => "", "command" => ""}
+        }
       })
 
     {:ok, socket}
@@ -99,8 +105,15 @@ defmodule CymphoWeb.OnboardingLive.Index do
 
   def handle_event("update_company_form", %{"company" => params}, socket) do
     params = maybe_apply_blueprint_defaults(params, socket.assigns.company_form)
-    form = Map.merge(socket.assigns.company_form, params)
+    form = deep_merge_form(socket.assigns.company_form, params)
     {:noreply, socket |> assign(:company_form, form) |> assign(:step_error, nil)}
+  end
+
+  def handle_event("toggle_role_overrides", _params, socket) do
+    form =
+      Map.update(socket.assigns.company_form, "role_overrides", true, &(!&1))
+
+    {:noreply, assign(socket, :company_form, form)}
   end
 
   def handle_event("filter_blueprints", %{"blueprint_query" => query}, socket) do
@@ -141,6 +154,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
           "command" => form["runtime_command"],
           "model" => form["runtime_model"]
         },
+        "role_runtimes" => role_runtimes_attrs(form),
         "owner_user_id" => socket.assigns.current_user.id
       }
 
@@ -176,6 +190,36 @@ defmodule CymphoWeb.OnboardingLive.Index do
   # could smuggle any existing atom into the agent adapter enum.
   defp sanitize_adapter(adapter) when adapter in @allowed_adapters, do: adapter
   defp sanitize_adapter(_), do: "claude_code"
+
+  # Nested maps (role_runtimes) merge per key so editing one role's model
+  # doesn't drop the other roles' values from the change payload.
+  defp deep_merge_form(form, params) do
+    Map.merge(form, params, fn
+      _key, %{} = old, %{} = new -> Map.merge(old, new, &deep_merge_value/3)
+      _key, _old, new -> new
+    end)
+  end
+
+  defp deep_merge_value(_key, %{} = old, %{} = new), do: Map.merge(old, new)
+  defp deep_merge_value(_key, _old, new), do: new
+
+  # Only pass per-role runtimes to the launch engine when the user opened the
+  # override panel; otherwise every role uses the shared runtime.
+  defp role_runtimes_attrs(%{"role_overrides" => true} = form) do
+    Map.new(form["role_runtimes"] || %{}, fn {role, runtime} ->
+      {role,
+       %{
+         "adapter" => sanitize_role_adapter(runtime["adapter"], form["adapter"]),
+         "model" => runtime["model"],
+         "command" => runtime["command"]
+       }}
+    end)
+  end
+
+  defp role_runtimes_attrs(_form), do: %{}
+
+  defp sanitize_role_adapter(adapter, _shared) when adapter in @allowed_adapters, do: adapter
+  defp sanitize_role_adapter(_, shared), do: sanitize_adapter(shared)
 
   def engineer_count(form) do
     case Integer.parse(to_string(form["engineer_count"] || "2")) do
@@ -266,4 +310,60 @@ defmodule CymphoWeb.OnboardingLive.Index do
   end
 
   defp role_label(role), do: Agent.role_label(role)
+
+  # ── AI provider helpers (team step) ────────────────────────────────────
+
+  def adapter_options do
+    [
+      {"Claude Code", "claude_code"},
+      {"Codex (OpenAI)", "codex"},
+      {"Cursor", "cursor"},
+      {"HTTP", "http"}
+    ]
+  end
+
+  def model_placeholder("codex"), do: "gpt-5.5"
+  def model_placeholder("cursor"), do: "auto"
+  def model_placeholder(_adapter), do: "provider default"
+
+  def command_placeholder("codex"), do: "codex (default)"
+  def command_placeholder("cursor"), do: "agent (default)"
+  def command_placeholder(_adapter), do: "claude (default)"
+
+  def model_suggestion_lists do
+    [
+      {"claude_code", ["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"]},
+      {"codex", Enum.map(Cympho.Adapters.CodexAdapter.model_options(), &elem(&1, 1))},
+      {"cursor", Enum.map(Cympho.Adapters.RuntimeOptions.cursor_model_options(), &elem(&1, 1))},
+      {"http", []}
+    ]
+  end
+
+  def role_runtime_value(form, role, key) do
+    get_in(form, ["role_runtimes", role, key]) || ""
+  end
+
+  # The provider whose model suggestions apply to a role row: its own pick,
+  # or the shared provider when the role select is on "Same as above".
+  def role_runtime_adapter(form, role) do
+    case role_runtime_value(form, role, "adapter") do
+      "" -> form["adapter"] || "claude_code"
+      adapter -> adapter
+    end
+  end
+
+  def role_runtime_customized?(form, role) do
+    role_runtime_value(form, role, "adapter") != "" or
+      role_runtime_value(form, role, "model") != "" or
+      role_runtime_value(form, role, "command") != ""
+  end
+
+  def runtime_summary(adapter, model) do
+    label =
+      Enum.find_value(adapter_options(), adapter, fn {label, value} ->
+        if value == adapter, do: label
+      end)
+
+    if model in [nil, ""], do: "#{label} · default model", else: "#{label} · #{model}"
+  end
 end

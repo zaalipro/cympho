@@ -1941,7 +1941,20 @@ defmodule Cympho.Companies do
 
     owner_user_id = attrs[:owner_user_id] || attrs["owner_user_id"]
     engineer_names = normalize_engineer_names(attrs[:engineer_names] || attrs["engineer_names"])
-    agent_runtime = normalize_agent_runtime(attrs[:agent_runtime] || attrs["agent_runtime"])
+
+    agent_runtime =
+      normalize_agent_runtime(attrs[:agent_runtime] || attrs["agent_runtime"], adapter)
+
+    role_runtimes =
+      normalize_role_runtimes(
+        attrs[:role_runtimes] || attrs["role_runtimes"],
+        adapter,
+        agent_runtime
+      )
+
+    {ceo_adapter, ceo_runtime} = role_runtimes["ceo"]
+    {cto_adapter, cto_runtime} = role_runtimes["cto"]
+    {engineer_adapter, engineer_runtime} = role_runtimes["engineer"]
     seed_issue_count = length(blueprint.seed_issues)
     launch_manifest = blueprint_launch_manifest(blueprint, engineer_count)
 
@@ -2028,8 +2041,8 @@ defmodule Cympho.Companies do
           name: "CEO",
           title: "Chief Executive Officer",
           role: :ceo,
-          adapter: adapter,
-          runtime_config: agent_runtime,
+          adapter: ceo_adapter,
+          runtime_config: ceo_runtime,
           max_concurrent_jobs: 1,
           # Governance roles always hold these authorities in AgentActions;
           # setting the flags keeps the permissions UI truthful.
@@ -2053,8 +2066,8 @@ defmodule Cympho.Companies do
           name: "CTO",
           title: "Chief Technology Officer",
           role: :cto,
-          adapter: adapter,
-          runtime_config: agent_runtime,
+          adapter: cto_adapter,
+          runtime_config: cto_runtime,
           max_concurrent_jobs: 2,
           permissions: @governance_role_permissions,
           capabilities: %{
@@ -2078,8 +2091,8 @@ defmodule Cympho.Companies do
               name: engineer_name(engineer_names, index),
               title: "Software Engineer",
               role: :engineer,
-              adapter: adapter,
-              runtime_config: agent_runtime,
+              adapter: engineer_adapter,
+              runtime_config: engineer_runtime,
               max_concurrent_jobs: 1,
               capabilities: %{
                 "implementation" => true,
@@ -2403,18 +2416,54 @@ defmodule Cympho.Companies do
   # Builds the extra runtime_config merged into every launched agent.
   # command -> top-level "command" (read by adapters via the orchestrator's
   # config merge); model -> "env"."ANTHROPIC_MODEL" (injected by profile_env).
-  defp normalize_agent_runtime(%{} = runtime) do
+  defp normalize_agent_runtime(%{} = runtime, adapter) do
     command = trim_or_nil(runtime["command"] || runtime[:command])
     model = trim_or_nil(runtime["model"] || runtime[:model])
 
     %{}
     |> then(fn config -> if command, do: Map.put(config, "command", command), else: config end)
-    |> then(fn config ->
-      if model, do: Map.put(config, "env", %{"ANTHROPIC_MODEL" => model}), else: config
-    end)
+    |> put_runtime_model(model, adapter)
   end
 
-  defp normalize_agent_runtime(_), do: %{}
+  defp normalize_agent_runtime(_, _adapter), do: %{}
+
+  defp put_runtime_model(config, nil, _adapter), do: config
+
+  # Claude-compatible CLIs read the model from ANTHROPIC_MODEL; every other
+  # adapter reads config["model"] (Codex/Cursor pass it as a --model arg).
+  defp put_runtime_model(config, model, :claude_code) do
+    Map.put(config, "env", %{"ANTHROPIC_MODEL" => model})
+  end
+
+  defp put_runtime_model(config, model, _adapter), do: Map.put(config, "model", model)
+
+  # Per-role runtime overrides from onboarding: each role (ceo/cto/engineer)
+  # may pick its own adapter + model + command; blank fields fall back to the
+  # shared runtime, and a missing role entry falls back entirely.
+  defp normalize_role_runtimes(role_runtimes, default_adapter, default_runtime) do
+    role_runtimes = if is_map(role_runtimes), do: role_runtimes, else: %{}
+
+    Map.new(["ceo", "cto", "engineer"], fn role ->
+      case role_runtimes[role] do
+        %{} = runtime ->
+          adapter = normalize_adapter(runtime["adapter"] || runtime[:adapter] || default_adapter)
+
+          config =
+            case normalize_agent_runtime(runtime, adapter) do
+              empty when empty == %{} ->
+                if adapter == default_adapter, do: default_runtime, else: %{}
+
+              config ->
+                config
+            end
+
+          {role, {adapter, config}}
+
+        _ ->
+          {role, {default_adapter, default_runtime}}
+      end
+    end)
+  end
 
   defp trim_or_nil(value) when is_binary(value) do
     case String.trim(value) do
