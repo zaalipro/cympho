@@ -126,7 +126,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-eyebrow uppercase opacity-70">Mission context</p>
+              <p class="text-eyebrow uppercase opacity-70">Goal</p>
               <p class="mt-1 truncate text-sm font-510">
                 {mission_context_title(@issue)}
               </p>
@@ -178,7 +178,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-100/80">
-                  Blocker packet
+                  Blocked — needs you
                 </p>
                 <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-amber-100">
                   {blocker_packet_kind_label(@blocker_packet)}
@@ -190,7 +190,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               <p class="mt-1 text-[11px] leading-4 text-amber-100/75">
                 {blocker_packet_value(@blocker_packet, "next_decision") ||
                   blocker_packet_value(@blocker_packet, "restart_packet") ||
-                  "Resolve the named blocker, then relaunch or close with owner acceptance."}
+                  "Sort out the blocker, then relaunch — or close the issue if it's no longer needed."}
               </p>
             </div>
           </div>
@@ -216,7 +216,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             <div class="flex items-center justify-between gap-3">
               <div class="min-w-0">
                 <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-tertiary">
-                  Issue runtime
+                  Agents on this issue
                 </p>
                 <p class="mt-0.5 text-caption text-ink-muted">
                   {issue_runtime_control_detail(@issue)}
@@ -234,7 +234,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
                 :if={!Cympho.Issues.issue_runtime_paused?(@issue)}
                 type="button"
                 phx-click="pause_issue_runtime"
-                data-confirm="Pause this issue? Active harness work for this issue will stop and future dispatch is suppressed until resumed."
+                data-confirm="Pause this issue? Any running work on it stops, and nothing new starts until you resume."
                 class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-amber-400/30 bg-amber-400/10 px-2.5 text-xs font-590 text-amber-100 transition hover:bg-amber-400/15"
               >
                 <.icon name="hero-pause-mini" class="h-3.5 w-3.5 text-white" /> Pause
@@ -988,13 +988,13 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
   defp start_agent_disabled_reason(orchestrator_enabled?, issue, preflight) do
     cond do
       Cympho.Issues.issue_runtime_paused?(issue) ->
-        "This issue is paused. Resume it before starting agent runtime."
+        "This issue is paused. Resume it before starting an agent."
 
       company_runtime_paused_preflight?(preflight) ->
-        "Company runtime is paused. Resume runtime before starting agents or harnesses."
+        "Your agents are paused. Resume them before starting anything new."
 
       not orchestrator_enabled? ->
-        "Inline agent start is disabled in review mode. Use the focused command above or open Operations to launch runtime."
+        "Agents can't start from here in review mode. Use the focused command above, or launch from Operations."
 
       true ->
         nil
@@ -1480,9 +1480,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
   defp issue_runtime_control_detail(issue) do
     if Cympho.Issues.issue_runtime_paused?(issue) do
-      "Dispatch is frozen for this issue."
+      "Paused — nothing new starts until you resume."
     else
-      "Freeze only this issue if a run loops."
+      "Pause just this issue if a run gets stuck."
     end
   end
 
@@ -1863,7 +1863,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
   defp mission_context_detail(issue) do
     case issue_goal(issue) do
       nil ->
-        "This work is not tied to a mission. Link it from Goals so CEO decomposition, child issues, cost rollups, and owner review keep the business outcome."
+        "This work is not tied to a goal yet. Link one so your agents keep the bigger outcome in view."
 
       goal ->
         project = issue_project_name(issue)
@@ -1872,7 +1872,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         [
           "#{lineage} context is attached to this issue",
           project && "inside #{project}",
-          "and will carry into delegated work."
+          "and follows the work wherever it goes."
         ]
         |> Enum.reject(&is_nil/1)
         |> Enum.join(" ")

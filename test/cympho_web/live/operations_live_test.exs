@@ -715,7 +715,10 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ ~s(data-testid="operations-swarm-log")
       assert html =~ "Live swarm log"
       assert html =~ "Launch ready"
-      assert html =~ "Swarm is queued: workers feed CTO synthesis, then CEO handoff."
+
+      assert html =~
+               "Swarm is queued: workers run first, then the CTO reviews, then back to the CEO."
+
       assert Enum.any?(swarm_events, &(&1.event_type == "launch_ready"))
       assert html =~ "Filtered to"
       assert html =~ "Operations-visible swarm delivery"

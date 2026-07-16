@@ -373,10 +373,10 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "0/6"
       assert html =~ "Next prompt:"
       assert html =~ "Outcome: Name the owner-visible result"
-      assert html =~ "Launch scaffold"
-      assert html =~ "Use scaffold"
-      assert html =~ "Copy scaffold"
-      assert html =~ "Complete these lines to make the first CEO turn decision-grade."
+      assert html =~ "Brief template"
+      assert html =~ "Use template"
+      assert html =~ "Copy template"
+      assert html =~ "Fill these lines in so your CEO can act on the first turn."
       assert html =~ "CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`):"
 
       assert html =~
@@ -428,7 +428,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       html =
         view
-        |> element("#owner-brief-scaffold-copy button", "Use scaffold")
+        |> element("#owner-brief-scaffold-copy button", "Use template")
         |> render_click()
 
       assert textarea_value(html, "textarea[name='issue[description]']") =~
@@ -891,7 +891,7 @@ defmodule CymphoWeb.IssueLiveTest do
         |> render_change()
 
       assert html =~ "Ready to create swarm"
-      assert html =~ "CEO run waits for swarm synthesis"
+      assert html =~ "CEO run waits for the swarm to finish"
       assert html =~ "Create Swarm Issue"
       assert html =~ ~s(data-testid="issue-swarm-advanced-panel")
       assert html =~ "Swarm setup"
@@ -1017,7 +1017,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ ~s(data-testid="issue-swarm-panel")
       assert html =~ ~s(data-testid="issue-swarm-log")
-      assert html =~ "Swarm orchestration"
+      assert html =~ "Swarm"
       assert html =~ "Live swarm log"
       assert html =~ "Open queue"
       assert html =~ ~s(href="/operations?parent_issue_id=#{parent.id}#delegated-work-queue")
@@ -1029,15 +1029,15 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Independent first pass"
       assert html =~ "Evidence over consensus"
       assert html =~ "Preserve dissent"
-      assert html =~ "Worker packets"
-      assert html =~ "0/2 closed"
+      assert html =~ "Workers"
+      assert html =~ "0/2 finished"
       assert html_has_any?(html, worker_role_labels())
       assert html_has_any?(html, worker_lens_labels())
       assert html =~ "claude_code"
       assert html =~ "sonnet"
       assert html =~ "managed-egress-ui"
-      assert html =~ "CTO gate"
-      assert html =~ "CEO handoff"
+      assert html =~ "CTO review"
+      assert html =~ "Back to CEO"
       assert html =~ "Owner brief"
 
       children = Issues.list_child_issues(parent.id)
@@ -1053,8 +1053,8 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _view, worker_html} = live(conn(), "/issues/#{worker.id}")
 
       assert worker_html =~ ~s(data-testid="issue-swarm-panel")
-      assert worker_html =~ "Swarm worker packet"
-      assert worker_html =~ "This packet feeds CTO synthesis"
+      assert worker_html =~ "Swarm worker"
+      assert worker_html =~ "goes to your CTO for review"
 
       assert worker_html =~
                ~s(href="/operations?parent_issue_id=#{parent.id}#delegated-work-queue")
@@ -1065,11 +1065,11 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _view, cto_html} = live(conn(), "/issues/#{cto_issue.id}")
 
       assert cto_html =~ ~s(data-testid="issue-swarm-panel")
-      assert cto_html =~ "CTO swarm synthesis"
+      assert cto_html =~ "CTO review"
       assert cto_html =~ ~s(href="/operations?parent_issue_id=#{parent.id}#delegated-work-queue")
-      assert cto_html =~ "Waiting on packets"
-      assert cto_html =~ "CEO restart"
-      assert cto_html =~ "Worker packets"
+      assert cto_html =~ "Waiting on workers"
+      assert cto_html =~ "Back to CEO"
+      assert cto_html =~ "Workers"
     end
 
     test "refreshes the swarm panel when a worker event arrives" do
@@ -1115,7 +1115,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn(), "/issues/#{parent.id}")
 
-      assert html =~ "0/1 closed"
+      assert html =~ "0/1 finished"
 
       worker =
         parent.id
@@ -1137,10 +1137,10 @@ defmodule CymphoWeb.IssueLiveTest do
         })
 
       # Poll until the swarm event broadcast has reached the LiveView.
-      wait_until(fn -> assert render(view) =~ "1/1 closed" end)
+      wait_until(fn -> assert render(view) =~ "1/1 finished" end)
 
       html = render(view)
-      assert html =~ "1/1 closed"
+      assert html =~ "1/1 finished"
       assert html =~ "Worker completed"
       assert html =~ "Worker packet closed."
     end
@@ -1173,7 +1173,6 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
       assert html =~ ~s(data-testid="issue-mission-context")
-      assert html =~ "Mission context"
       assert html =~ "Sidebar Mission"
       assert html =~ "Mission context is attached to this issue inside Sidebar Mission Project"
       assert html =~ ~s(href="/goals/#{mission.id}")
@@ -1194,7 +1193,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ ~s(data-testid="issue-mission-context")
       assert html =~ "No goal linked"
       assert html =~ "Floating"
-      assert html =~ "This work is not tied to a mission"
+      assert html =~ "This work is not tied to a goal yet"
       assert html =~ ~s(href="/goals")
     end
 
@@ -1222,7 +1221,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
       assert html =~ ~s(data-testid="issue-blocker-packet")
-      assert html =~ "Blocker packet"
+      assert html =~ "Blocked — needs you"
       assert html =~ "Provider Auth"
       assert html =~ "Owner adds OPENAI_API_KEY"
       assert html =~ "Owner configures credentials"
@@ -1247,8 +1246,8 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ ~s(phx-hook="CopyToClipboard")
       assert html =~ "Copy command"
       assert html =~ ~s(data-testid="start-agent-disabled-reason")
-      assert html =~ "Inline agent start is disabled in review mode"
-      assert html =~ "Use the focused command above or open Operations to launch runtime."
+      assert html =~ "can&#39;t start from here in review mode"
+      assert html =~ "Use the focused command above, or launch from Operations."
     end
 
     test "prioritizes a dispatchable issue from the sidebar" do
@@ -2038,7 +2037,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Resume company runtime before agents start."
 
       assert html =~
-               "Company runtime is paused. Resume runtime before starting agents or harnesses."
+               "Your agents are paused. Resume them before starting anything new."
 
       assert has_element?(view, "button[disabled]", "Start agent")
     end
@@ -2101,16 +2100,16 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Acceptance criteria"
       assert html =~ "Edit issue brief"
       assert html =~ "/issues/#{issue.id}#issue-description"
-      assert html =~ "Delivery brief repair"
-      assert html =~ "Copy scaffold"
-      assert html =~ "Use scaffold"
+      assert html =~ "The brief needs more detail"
+      assert html =~ "Copy template"
+      assert html =~ "Use template"
 
       html =
         view
-        |> element("#issue-delivery-brief-repair button", "Use scaffold")
+        |> element("#issue-delivery-brief-repair button", "Use template")
         |> render_click()
 
-      assert html =~ "Delivery brief scaffold loaded into the description editor."
+      assert html =~ "Template loaded into the description editor."
       assert html =~ ~s(phx-submit="save_description")
       assert textarea_value(html, "textarea[name='description']") =~ "Delivery goal:"
       assert textarea_value(html, "textarea[name='description']") =~ "Acceptance criteria:"
@@ -2204,15 +2203,15 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Agent preflight"
       assert html =~ "Delivery brief"
       assert html =~ "Too thin for delivery"
-      assert html =~ "Delivery brief repair"
-      assert html =~ "Use scaffold"
+      assert html =~ "The brief needs more detail"
+      assert html =~ "Use template"
 
       html =
         view
-        |> element("#issue-delivery-brief-repair button", "Use scaffold")
+        |> element("#issue-delivery-brief-repair button", "Use template")
         |> render_click()
 
-      assert html =~ "Delivery brief scaffold loaded into the description editor."
+      assert html =~ "Template loaded into the description editor."
       assert textarea_value(html, "textarea[name='description']") =~ "Acceptance criteria:"
       assert textarea_value(html, "textarea[name='description']") =~ "Evidence required:"
       assert textarea_value(html, "textarea[name='description']") =~ "Definition of done:"
@@ -2243,15 +2242,15 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "routed by dispatcher"
       assert html =~ "Delivery brief"
       assert html =~ "Too thin for delivery"
-      assert html =~ "Delivery brief repair"
-      assert html =~ "Use scaffold"
+      assert html =~ "The brief needs more detail"
+      assert html =~ "Use template"
 
       html =
         view
-        |> element("#issue-delivery-brief-repair button", "Use scaffold")
+        |> element("#issue-delivery-brief-repair button", "Use template")
         |> render_click()
 
-      assert html =~ "Delivery brief scaffold loaded into the description editor."
+      assert html =~ "Template loaded into the description editor."
       assert textarea_value(html, "textarea[name='description']") =~ "Acceptance criteria:"
       assert textarea_value(html, "textarea[name='description']") =~ "Evidence required:"
       assert textarea_value(html, "textarea[name='description']") =~ "Verification required:"
@@ -2670,25 +2669,25 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "0/6 signals"
       assert html =~ "Outcome: Name the owner-visible result"
       assert html =~ "Complete the owner brief signals before launching CEO runtime."
-      assert html =~ "Owner brief repair"
-      assert html =~ "Copy repair scaffold"
-      assert html =~ "Use scaffold"
+      assert html =~ "The brief needs more detail"
+      assert html =~ "Copy template"
+      assert html =~ "Use template"
       assert html =~ "Brief repair scaffold:"
       assert html =~ "Constraints / risks:"
       assert html =~ "Focused command: hidden until the owner brief is decision-grade."
       assert has_element?(view, "#issue-ceo-launch-packet button", "Copy packet")
-      assert has_element?(view, "#issue-ceo-brief-repair button", "Use scaffold")
+      assert has_element?(view, "#issue-ceo-brief-repair button", "Use template")
       refute has_element?(view, "#issue-ceo-launch-packet button", "Copy command")
       refute has_element?(view, "#issue-ceo-launch-packet code")
       refute has_element?(view, "#issue-ceo-flow-checklist button", "Queue focused CEO run")
 
       html =
         view
-        |> element("#issue-ceo-brief-repair button", "Use scaffold")
+        |> element("#issue-ceo-brief-repair button", "Use template")
         |> render_click()
 
       assert html =~ ~s(phx-submit="save_description")
-      assert html =~ "Repair scaffold loaded into the description editor."
+      assert html =~ "Template loaded into the description editor."
       assert html =~ "Goal: &lt;the business outcome the owner wants&gt;"
 
       assert html =~
@@ -3527,8 +3526,8 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
 
-      assert html =~ "Issue runtime"
-      assert html =~ "Freeze only this issue if a run loops."
+      assert html =~ "Agents on this issue"
+      assert html =~ "Pause just this issue if a run gets stuck."
       assert html =~ "Pause"
 
       html =
@@ -3538,7 +3537,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ "Issue paused"
       assert html =~ "Paused"
-      assert html =~ "Dispatch is frozen for this issue."
+      assert html =~ "Paused — nothing new starts until you resume."
       assert Issues.issue_runtime_paused?(Issues.get_issue!(issue.id))
 
       {events, _total} =

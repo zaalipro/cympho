@@ -384,7 +384,8 @@ defmodule CymphoWeb.IssueLive.New do
 
   defp queue_focus_label(_readiness), do: "Focused CEO run needs a ready brief"
 
-  defp queue_focus_label(_readiness, %{enabled: true}), do: "CEO run waits for swarm synthesis"
+  defp queue_focus_label(_readiness, %{enabled: true}),
+    do: "CEO run waits for the swarm to finish"
 
   defp queue_focus_label(readiness, _swarm_config), do: queue_focus_label(readiness)
 
@@ -397,7 +398,7 @@ defmodule CymphoWeb.IssueLive.New do
   end
 
   defp queue_focus_detail(_readiness, %{enabled: true}) do
-    "Swarm mode blocks the CEO parent on temporary worker delivery and CTO synthesis before CEO runtime resumes."
+    "The CEO holds off until the workers finish and your CTO has reviewed their work."
   end
 
   defp queue_focus_detail(readiness, _swarm_config), do: queue_focus_detail(readiness)
@@ -408,7 +409,7 @@ defmodule CymphoWeb.IssueLive.New do
       label: "Ready to create swarm",
       badge: "Swarm",
       detail:
-        "Save will create the CEO parent, launch temporary non-engineering workers, and route synthesis through CTO before CEO review."
+        "Save creates the issue, spins up the temporary workers, and routes their output through your CTO before the CEO wraps up."
     }
   end
 

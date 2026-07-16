@@ -360,28 +360,28 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
                 <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div class="min-w-0">
                     <p class="text-[10px] font-510 uppercase tracking-[0.1em] text-amber-300">
-                      Owner brief repair
+                      The brief needs more detail
                     </p>
                     <p class="mt-1 text-sm leading-5 text-amber-100">
-                      Copy this scaffold into the description, fill the missing lines, then return here to launch.
+                      Fill in the missing lines below, then come back here to launch.
                     </p>
                   </div>
                   <div class="flex shrink-0 flex-wrap gap-2">
                     <button
                       type="button"
                       data-copy-text={@ceo_launch_packet.repair_scaffold}
-                      data-copy-label="Copy repair scaffold"
+                      data-copy-label="Copy template"
                       data-copy-success-label="Copied"
                       class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-panel px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/15"
                     >
-                      Copy repair scaffold
+                      Copy template
                     </button>
                     <button
                       type="button"
                       phx-click="draft_owner_brief_repair"
                       class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/15"
                     >
-                      Use scaffold
+                      Use template
                     </button>
                   </div>
                 </div>

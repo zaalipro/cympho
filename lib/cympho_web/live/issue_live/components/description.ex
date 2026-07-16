@@ -67,10 +67,10 @@ defmodule CymphoWeb.IssueLive.Show.Description do
         <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div class="min-w-0">
             <p class="text-[10px] font-510 uppercase tracking-[0.1em] text-amber-300">
-              Delivery brief repair
+              The brief needs more detail
             </p>
             <p class="mt-1 text-sm leading-5 text-amber-100">
-              Add the missing execution signals before dispatch: acceptance, evidence, verification, and done state.
+              Agents need a bit more to run with: what to do, what done looks like, and how to prove it.
             </p>
             <p class="mt-1 text-caption leading-4 text-amber-100/75">
               {@delivery_brief_readiness.next_prompt}
@@ -80,18 +80,18 @@ defmodule CymphoWeb.IssueLive.Show.Description do
             <button
               type="button"
               data-copy-text={@delivery_brief_readiness.repair_scaffold}
-              data-copy-label="Copy delivery scaffold"
+              data-copy-label="Copy template"
               data-copy-success-label="Copied"
               class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-panel px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/15"
             >
-              Copy scaffold
+              Copy template
             </button>
             <button
               type="button"
               phx-click="draft_delivery_brief_repair"
               class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/15"
             >
-              Use scaffold
+              Use template
             </button>
           </div>
         </div>
@@ -100,7 +100,7 @@ defmodule CymphoWeb.IssueLive.Show.Description do
             <.icon
               name="hero-chevron-down-mini"
               class="h-3.5 w-3.5 transition-transform group-open/scaffold:rotate-180"
-            /> Preview scaffold
+            /> Preview template
           </summary>
           <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-amber-500/15 bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-amber-100/90"><%= @delivery_brief_readiness.repair_scaffold %></pre>
         </details>

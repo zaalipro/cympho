@@ -185,7 +185,7 @@ defmodule Cympho.Issues.Swarm do
              SwarmEvents.record(parent, %{
                event_type: "temporary_agents_created",
                status: "success",
-               message: "Created #{length(temp_agents)} hidden one-time worker agents.",
+               message: "Created #{length(temp_agents)} temporary workers.",
                metadata: %{"agent_ids" => Enum.map(temp_agents, & &1.id)}
              }),
            {:ok, worker_issues} <- create_worker_issues(parent, temp_agents, specs),
@@ -193,7 +193,7 @@ defmodule Cympho.Issues.Swarm do
              SwarmEvents.record(parent, %{
                event_type: "worker_issues_created",
                status: "success",
-               message: "Created #{length(worker_issues)} independent worker packets.",
+               message: "Created #{length(worker_issues)} worker issues — one per worker.",
                metadata: %{"worker_issue_ids" => Enum.map(worker_issues, & &1.id)}
              }),
            {:ok, cto_issue} <- create_cto_issue(parent, worker_issues, config),
@@ -202,7 +202,7 @@ defmodule Cympho.Issues.Swarm do
                event_type: "cto_issue_created",
                status: "success",
                issue_id: cto_issue.id,
-               message: "Created CTO synthesis gate #{cto_issue.identifier || cto_issue.id}.",
+               message: "Created the CTO review issue #{cto_issue.identifier || cto_issue.id}.",
                metadata: %{"cto_issue_id" => cto_issue.id}
              }),
            :ok <- link_swarm_dependencies(parent, cto_issue, worker_issues),
@@ -211,7 +211,7 @@ defmodule Cympho.Issues.Swarm do
                event_type: "dependencies_linked",
                status: "success",
                issue_id: cto_issue.id,
-               message: "Linked worker packets to CTO synthesis and CTO synthesis to CEO parent.",
+               message: "Linked the workers to the CTO review, and the CTO review to this issue.",
                metadata: %{
                  "worker_issue_ids" => Enum.map(worker_issues, & &1.id),
                  "cto_issue_id" => cto_issue.id
@@ -224,7 +224,7 @@ defmodule Cympho.Issues.Swarm do
                event_type: "cto_blocked_on_workers",
                status: "info",
                issue_id: blocked_cto.id,
-               message: "CTO synthesis is blocked until all worker packets close.",
+               message: "The CTO review waits until every worker finishes.",
                metadata: %{"worker_issue_ids" => Enum.map(worker_issues, & &1.id)}
              }),
            {:ok, blocked_parent} <- block_for_swarm(parent, parent_blocker_note(cto_issue)),
@@ -232,7 +232,7 @@ defmodule Cympho.Issues.Swarm do
              SwarmEvents.record(parent, %{
                event_type: "parent_blocked_on_cto",
                status: "info",
-               message: "CEO parent is blocked on CTO synthesis.",
+               message: "This issue waits on the CTO review.",
                metadata: %{"cto_issue_id" => cto_issue.id}
              }),
            {:ok, updated_parent} <-
@@ -249,7 +249,7 @@ defmodule Cympho.Issues.Swarm do
             SwarmEvents.record(updated_parent, %{
               event_type: "worker_wakes_enqueued",
               status: "success",
-              message: "Queued #{length(wakes)} worker wakes for dispatch.",
+              message: "Queued #{length(wakes)} workers to start.",
               metadata: %{
                 "queued_count" => length(wakes),
                 "worker_issue_ids" => Enum.map(worker_issues, & &1.id),
@@ -260,7 +260,8 @@ defmodule Cympho.Issues.Swarm do
             SwarmEvents.record(updated_parent, %{
               event_type: "launch_ready",
               status: "success",
-              message: "Swarm is queued: workers feed CTO synthesis, then CEO handoff.",
+              message:
+                "Swarm is queued: workers run first, then the CTO reviews, then back to the CEO.",
               metadata: %{
                 "agent_count" => config.agent_count,
                 "cto_issue_id" => blocked_cto.id,
@@ -273,7 +274,7 @@ defmodule Cympho.Issues.Swarm do
               event_type: "worker_wakes_attention_required",
               status: "warning",
               message:
-                "Queued #{length(wakes)} of #{length(worker_issues)} worker wakes; retry failed packets from Operations.",
+                "Queued #{length(wakes)} of #{length(worker_issues)} workers; retry the failed ones from Operations.",
               metadata: %{
                 "queued_count" => length(wakes),
                 "failed_count" => length(errors),

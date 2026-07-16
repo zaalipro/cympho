@@ -75,7 +75,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
             <span aria-hidden="true" class="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-400">
             </span>
             <div class="min-w-0">
-              <p class="text-xs font-590 text-red-200">Swarm needs recovery</p>
+              <p class="text-xs font-590 text-red-200">Swarm hit a problem</p>
               <p class="mt-0.5 truncate text-[11px] leading-4 text-ink-tertiary">
                 {@panel.alert.type_label}: {@panel.alert.message}
               </p>
@@ -119,7 +119,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
                   Live swarm log
                 </h2>
                 <p class="text-[11px] text-ink-tertiary">
-                  Launch, worker, CTO, and CEO handoff events.
+                  Everything the swarm does, as it happens.
                 </p>
               </div>
             </div>
@@ -180,10 +180,10 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
           <div :if={@panel.workers != []} class="min-w-0">
             <div class="flex items-center justify-between gap-3">
               <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Worker packets
+                Workers
               </h2>
               <span class="font-serif text-caption text-ink-tertiary">
-                {@panel.worker_done}/{@panel.worker_total} closed
+                {@panel.worker_done}/{@panel.worker_total} finished
               </span>
             </div>
             <div class="mt-2 grid gap-2 md:grid-cols-2">
@@ -245,7 +245,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-ink-tertiary">
-                    CTO gate
+                    CTO review
                   </p>
                   <p class="mt-1 truncate text-sm font-590 text-ink group-hover:text-primary">
                     {@panel.cto.title}
@@ -270,7 +270,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
               <div class="flex items-start justify-between gap-3">
                 <div>
                   <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-ink-tertiary">
-                    CEO handoff
+                    Back to CEO
                   </p>
                   <p class="mt-1 text-sm font-590 text-ink">{@panel.handoff.title}</p>
                 </div>
@@ -451,12 +451,12 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
     proxy = proxy_label(swarm)
 
     %{
-      eyebrow: "Swarm orchestration",
+      eyebrow: "Swarm",
       phase_label: phase.label,
       phase_state: phase.state,
       summary: parent_summary(phase.key),
       metrics: [
-        %{label: "Workers", value: "#{worker_done}/#{worker_total} closed"},
+        %{label: "Workers", value: "#{worker_done}/#{worker_total} finished"},
         %{label: "CTO", value: issue_status_label(cto && cto.status)},
         %{label: "CEO", value: issue_status_label(issue.status)},
         %{label: "Proxy", value: proxy}
@@ -485,12 +485,12 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
     proxy = proxy_label(swarm)
 
     %{
-      eyebrow: "CTO swarm synthesis",
+      eyebrow: "CTO review",
       phase_label: phase.label,
       phase_state: phase.state,
       summary: cto_summary(phase.key),
       metrics: [
-        %{label: "Workers", value: "#{worker_done}/#{worker_total} closed"},
+        %{label: "Workers", value: "#{worker_done}/#{worker_total} finished"},
         %{label: "CTO issue", value: issue_status_label(issue.status)},
         %{label: "Role", value: "CTO"},
         %{label: "Proxy", value: proxy}
@@ -503,24 +503,24 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
       worker_total: worker_total,
       cto: nil,
       handoff: %{
-        title: "Prepare CEO restart packet",
+        title: "Hand back to the CEO",
         status: issue.status,
         status_label: issue_status_label(issue.status),
-        detail: "Close this synthesis with a tagged review so the CEO parent can resume cleanly."
+        detail: "Finish the review so the CEO can pick the work back up."
       }
     }
   end
 
   defp worker_panel(issue, swarm) do
     %{
-      eyebrow: "Swarm worker packet",
+      eyebrow: "Swarm worker",
       phase_label: issue_status_label(issue.status),
       phase_state: if(closed?(issue), do: :complete, else: :active),
-      summary: "This packet feeds CTO synthesis before the CEO issue resumes.",
+      summary: "What this worker produces goes to your CTO for review, then back to the CEO.",
       metrics: [
         %{label: "Role", value: role_label(issue.assigned_role)},
-        %{label: "Lens", value: lens_label(issue, swarm) || "Role-specific"},
-        %{label: "Harness", value: harness_label(swarm)},
+        %{label: "Focus", value: lens_label(issue, swarm) || "Role-specific"},
+        %{label: "Runtime", value: harness_label(swarm)},
         %{label: "Model", value: swarm_value(swarm, "model") || "runtime default"},
         %{label: "Reasoning", value: swarm_value(swarm, "reasoning_effort") || "auto"},
         %{label: "Proxy", value: swarm_value(swarm, "proxy_profile") || "None"}
@@ -528,16 +528,16 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
       protocol: protocol_chips(swarm),
       steps: [
         %{
-          title: "Worker packet",
-          detail: "Capture role-specific assumptions, risks, evidence, and next action.",
+          title: "Do the work",
+          detail: "Write up findings: assumptions, risks, evidence, and the next step.",
           state: if(closed?(issue), do: :complete, else: :active)
         },
         %{
-          title: "CTO synthesis",
-          detail: "CTO collects this packet before CEO handoff.",
+          title: "CTO review",
+          detail: "The CTO collects this work before handing back to the CEO.",
           state: if(closed?(issue), do: :active, else: :waiting)
         },
-        %{title: "CEO review", detail: "CEO waits for CTO synthesis.", state: :waiting}
+        %{title: "Back to CEO", detail: "The CEO waits for the CTO review.", state: :waiting}
       ],
       queue_path: swarm_queue_path(issue),
       workers: [],
@@ -564,17 +564,17 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
 
     [
       %{
-        title: "Temporary packets",
-        detail: "#{worker_done} of #{worker_total} worker packets are closed.",
+        title: "Workers",
+        detail: "#{worker_done} of #{worker_total} workers have finished.",
         state: if(workers_complete?, do: :complete, else: :active)
       },
       %{
-        title: "CTO synthesis",
+        title: "CTO review",
         detail: cto_step_detail(cto, workers_complete?),
         state: cto_step_state(cto, workers_complete?)
       },
       %{
-        title: "CEO handoff",
+        title: "Back to CEO",
         detail: ceo_step_detail(issue, cto_complete?),
         state: ceo_step_state(issue, cto_complete?)
       }
@@ -586,14 +586,17 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
 
     [
       %{
-        title: "Worker packets",
-        detail: "#{worker_done} of #{worker_total} blockers are closed.",
+        title: "Workers",
+        detail: "#{worker_done} of #{worker_total} workers have finished.",
         state: if(workers_complete?, do: :complete, else: :waiting)
       },
       %{
         title: "CTO review",
         detail:
-          if(closed?(issue), do: "Synthesis is closed.", else: "Publish the CEO-ready synthesis."),
+          if(closed?(issue),
+            do: "Review is done.",
+            else: "Write the combined review for the CEO."
+          ),
         state:
           cond do
             closed?(issue) -> :complete
@@ -602,8 +605,12 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
           end
       },
       %{
-        title: "CEO restart",
-        detail: if(closed?(issue), do: "CEO parent can resume.", else: "Waiting on CTO review."),
+        title: "Back to CEO",
+        detail:
+          if(closed?(issue),
+            do: "The CEO can pick the work back up.",
+            else: "Waiting on the CTO review."
+          ),
         state: if(closed?(issue), do: :complete, else: :waiting)
       }
     ]
@@ -618,10 +625,10 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
         %{key: :closed, label: "Closed", state: :complete}
 
       cto_complete? ->
-        %{key: :ceo_ready, label: "CEO handoff ready", state: :active}
+        %{key: :ceo_ready, label: "Ready for the CEO", state: :active}
 
       workers_complete? ->
-        %{key: :cto_ready, label: "CTO synthesis ready", state: :active}
+        %{key: :cto_ready, label: "Ready for CTO review", state: :active}
 
       true ->
         %{key: :workers_active, label: "Workers queued", state: :waiting}
@@ -632,38 +639,38 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
     workers_complete? = worker_total > 0 and worker_done >= worker_total
 
     cond do
-      closed?(issue) -> %{key: :closed, label: "Synthesis closed", state: :complete}
-      workers_complete? -> %{key: :cto_ready, label: "Ready to synthesize", state: :active}
-      true -> %{key: :waiting_workers, label: "Waiting on packets", state: :waiting}
+      closed?(issue) -> %{key: :closed, label: "Review done", state: :complete}
+      workers_complete? -> %{key: :cto_ready, label: "Ready to review", state: :active}
+      true -> %{key: :waiting_workers, label: "Waiting on workers", state: :waiting}
     end
   end
 
-  defp parent_summary(:closed), do: "Swarm delivery is closed."
+  defp parent_summary(:closed), do: "This swarm is done."
 
   defp parent_summary(:ceo_ready),
-    do: "CTO synthesis is closed; the CEO owns the final owner update."
+    do: "The CTO review is done; the CEO wraps up with the final owner update."
 
   defp parent_summary(:cto_ready),
-    do: "Temporary packets are closed; CTO synthesis is the next gate."
+    do: "All workers have finished; the CTO review is next."
 
   defp parent_summary(:workers_active),
-    do: "Temporary non-engineering workers are queued to prepare packets before CTO synthesis."
+    do: "Temporary workers are tackling this in parallel. Your CTO reviews what they produce."
 
-  defp cto_summary(:closed), do: "CTO synthesis is closed and ready for CEO review."
+  defp cto_summary(:closed), do: "The CTO review is done and back with the CEO."
 
   defp cto_summary(:cto_ready),
-    do: "Worker packets are closed; CTO can publish the CEO-ready synthesis."
+    do: "All workers have finished; the CTO can write the combined review."
 
   defp cto_summary(:waiting_workers),
-    do: "CTO synthesis is paused until all worker packets close."
+    do: "The CTO review starts once every worker has finished."
 
-  defp cto_step_detail(nil, _workers_complete?), do: "No CTO synthesis issue found yet."
+  defp cto_step_detail(nil, _workers_complete?), do: "No CTO review issue yet."
 
   defp cto_step_detail(cto, _workers_complete?) when cto.status in [:done, "done"],
-    do: "Synthesis is closed."
+    do: "Review is done."
 
   defp cto_step_detail(_cto, true), do: "Ready for CTO review."
-  defp cto_step_detail(_cto, false), do: "Waiting on worker packets."
+  defp cto_step_detail(_cto, false), do: "Waiting on workers."
 
   defp cto_step_state(nil, _workers_complete?), do: :waiting
   defp cto_step_state(cto, _workers_complete?) when cto.status in [:done, "done"], do: :complete
@@ -671,7 +678,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
   defp cto_step_state(_cto, false), do: :waiting
 
   defp ceo_step_detail(issue, true), do: "CEO owns #{issue_status_label(issue.status)}."
-  defp ceo_step_detail(_issue, false), do: "Waiting for CTO synthesis."
+  defp ceo_step_detail(_issue, false), do: "Waiting for the CTO review."
 
   defp ceo_step_state(issue, true), do: if(closed?(issue), do: :complete, else: :active)
   defp ceo_step_state(_issue, false), do: :waiting
@@ -685,8 +692,8 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
       status_label: issue_status_label(issue.status),
       detail:
         if(cto_done?,
-          do: "CTO synthesis is closed; continue with the CEO owner update.",
-          else: "CEO waits until the CTO gate closes."
+          do: "The CTO review is done; continue with the CEO owner update.",
+          else: "The CEO waits until the CTO review is done."
         )
     }
   end
@@ -700,7 +707,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
       identifier: cto.identifier || "CYM-?",
       status: cto.status,
       status_label: issue_status_label(cto.status),
-      detail: "#{worker_done}/#{worker_total} worker blockers are closed."
+      detail: "#{worker_done}/#{worker_total} workers have finished."
     }
   end
 

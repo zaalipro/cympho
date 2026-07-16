@@ -372,13 +372,13 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
       |> String.trim()
 
     case role do
-      "" -> "Temporary worker packet feeding CTO synthesis."
-      role -> "Temporary #{role} packet feeding CTO synthesis."
+      "" -> "Temporary worker — its output goes to the CTO for review."
+      role -> "Temporary #{role} worker — its output goes to the CTO for review."
     end
   end
 
   defp simple_description(%{origin_type: "swarm_cto_review"}, _description, _max) do
-    "CTO synthesis gate: merge worker packets, resolve dissent, then return CEO-ready delivery."
+    "CTO review: combine what the workers produced and hand the result back to the CEO."
   end
 
   defp simple_description(_issue, description, max), do: compact_description(description, max)

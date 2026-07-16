@@ -538,7 +538,7 @@ defmodule CymphoWeb.IssueLive.Show do
         {:noreply,
          socket
          |> assign(editing: "description", description_draft: scaffold)
-         |> put_flash(:info, "Delivery brief scaffold loaded into the description editor.")}
+         |> put_flash(:info, "Template loaded into the description editor.")}
 
       _readiness ->
         {:noreply, put_flash(socket, :info, "Delivery brief is already ready for dispatch.")}
@@ -1401,7 +1401,7 @@ defmodule CymphoWeb.IssueLive.Show do
         socket = assign(socket, editing: "description", description_draft: scaffold)
 
         if flash? do
-          put_flash(socket, :info, "Repair scaffold loaded into the description editor.")
+          put_flash(socket, :info, "Template loaded into the description editor.")
         else
           socket
         end
