@@ -73,7 +73,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
     assert html =~ ~s(data-testid="review-decision-card-#{in_review.id}")
     assert html =~ ~s(data-testid="review-gate-card-#{in_review.id}")
     assert html =~ ~s(data-testid="review-action-bar-#{in_review.id}")
-    assert html =~ "Decide from the packet above"
+    assert html =~ "Decide from what&#39;s above"
     assert html =~ "Evidence gaps block closure"
     assert html =~ "approving stays locked until the evidence is there."
     assert html =~ "Review decision packet"
