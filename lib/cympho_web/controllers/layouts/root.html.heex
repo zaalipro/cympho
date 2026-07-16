@@ -638,7 +638,7 @@
             />
           </div>
 
-          <div>
+          <div class="ui-advanced-only">
             <span class="mb-1 block text-[11px] font-590 uppercase tracking-[0.08em] text-ink-tertiary">
               Assignee
             </span>
@@ -650,7 +650,7 @@
             />
           </div>
 
-          <div>
+          <div class="ui-advanced-only">
             <span class="mb-1 block text-[11px] font-590 uppercase tracking-[0.08em] text-ink-tertiary">
               Status
             </span>
@@ -691,8 +691,8 @@
 
           <.swarm_configuration
             id="quick-create-swarm-config"
-            title="Swarm composition"
-            description="Choose harness, model, and effort combinations. CTO and CEO assign worker lenses."
+            title="Swarm setup"
+            description="Pick how many workers and which models. The rest is automatic."
             compact
             swarm_params={
               %{
