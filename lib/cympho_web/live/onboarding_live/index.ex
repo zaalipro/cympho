@@ -135,24 +135,25 @@ defmodule CymphoWeb.OnboardingLive.Index do
   defp launch_company(socket) do
     form = socket.assigns.company_form
 
-    with :ok <- validate_step(:company, form) do
-      attrs = %{
-        "blueprint" => form["blueprint"],
-        "name" => form["name"],
-        "goal_title" => form["goal_title"],
-        "project_name" => form["project_name"],
-        "issue_prefix" => form["issue_prefix"],
-        "engineer_count" => engineer_count(form),
-        "engineer_names" => form["engineer_names"] || [],
-        "adapter" => sanitize_adapter(form["adapter"]),
-        "agent_runtime" => %{
-          "command" => form["runtime_command"],
-          "model" => form["runtime_model"]
-        },
-        "role_runtimes" => role_runtimes_attrs(form),
-        "owner_user_id" => socket.assigns.current_user.id
-      }
+    attrs = %{
+      "blueprint" => form["blueprint"],
+      "name" => form["name"],
+      "goal_title" => form["goal_title"],
+      "project_name" => form["project_name"],
+      "issue_prefix" => form["issue_prefix"],
+      "engineer_count" => engineer_count(form),
+      "engineer_names" => form["engineer_names"] || [],
+      "adapter" => sanitize_adapter(form["adapter"]),
+      "agent_runtime" => %{
+        "command" => form["runtime_command"],
+        "model" => form["runtime_model"]
+      },
+      "role_runtimes" => role_runtimes_attrs(form),
+      "owner_user_id" => socket.assigns.current_user.id
+    }
 
+    with :ok <- validate_step(:company, form),
+         :ok <- validate_runtime_compat(attrs) do
       case create_company_safely(attrs) do
         {:ok, result} ->
           {:noreply,
@@ -165,9 +166,42 @@ defmodule CymphoWeb.OnboardingLive.Index do
           {:noreply, assign(socket, :step_error, "Could not create company: #{inspect(reason)}")}
       end
     else
+      # Send the owner back to the team step (where AI runtimes are picked) so
+      # they can fix a model/runtime mismatch instead of launching into a
+      # company whose agents can never dispatch.
+      {:error, :runtime_incompatible, message} ->
+        {:noreply, socket |> assign(:current_step, 2) |> assign(:step_error, message)}
+
       {:error, message} ->
         {:noreply, socket |> assign(:current_step, 1) |> assign(:step_error, message)}
     end
+  end
+
+  # Reject an adapter/model combination that could never dispatch — e.g. an
+  # OpenAI model under Claude Code's default `claude` command. Preflight already
+  # catches this, but only after the issue is created and silently stuck, so we
+  # surface it here at setup time. Checks the shared runtime and every per-role
+  # override.
+  defp validate_runtime_compat(attrs) do
+    shared_adapter = attrs["adapter"]
+
+    runtimes =
+      [
+        {shared_adapter, get_in(attrs, ["agent_runtime", "model"]),
+         get_in(attrs, ["agent_runtime", "command"])}
+      ] ++
+        Enum.map(attrs["role_runtimes"] || %{}, fn {_role, rt} ->
+          {rt["adapter"] || shared_adapter, rt["model"], rt["command"]}
+        end)
+
+    Enum.reduce_while(runtimes, :ok, fn {adapter, model, command}, _acc ->
+      config = %{"model" => model || "", "command" => command || ""}
+
+      case Cympho.Adapters.ModelCompatibility.validate(adapter, config) do
+        :ok -> {:cont, :ok}
+        {:error, message} -> {:halt, {:error, :runtime_incompatible, message}}
+      end
+    end)
   end
 
   # The engine uses Repo.insert! throughout, so changeset-invalid input raises

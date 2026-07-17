@@ -136,6 +136,28 @@ defmodule CymphoWeb.OnboardingLiveTest do
       assert product.runtime_config["env"]["ANTHROPIC_MODEL"] == "claude-sonnet-5"
     end
 
+    test "rejects an OpenAI model under Claude Code before launching", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/onboarding")
+
+      render_change(view, "update_company_form", %{
+        "company" => %{
+          "name" => "Mismatch Co",
+          "goal_title" => "Should not launch",
+          "issue_prefix" => "MIS",
+          "adapter" => "claude_code",
+          "runtime_model" => "gpt-5.5"
+        }
+      })
+
+      html = render_click(view, "start_autonomous_company")
+
+      # No company is created — the owner is told why instead of launching a
+      # company whose agents would silently never dispatch.
+      refute Companies.get_company_by_slug("mismatch-co")
+      assert html =~ "Claude Code"
+      assert html =~ "gpt-5.5"
+    end
+
     test "blocks the company step on an invalid issue prefix", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/onboarding")
 
