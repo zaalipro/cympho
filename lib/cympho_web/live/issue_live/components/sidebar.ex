@@ -1772,7 +1772,13 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
        when is_list(comments) do
     comments
     |> Enum.filter(&blocked_explanation_comment?/1)
-    |> Enum.max_by(& &1.inserted_at, DateTime, fn -> nil end)
+    # Prefer [blocked]-tagged notes: agents write those to be owner-readable,
+    # while system rejections carry raw error terms. Newest within each tier.
+    |> Enum.sort_by(
+      &{if(String.contains?(String.downcase(&1.body || ""), "[blocked]"), do: 0, else: 1),
+       DateTime.to_unix(&1.inserted_at) * -1}
+    )
+    |> List.first()
     |> case do
       nil -> nil
       comment -> %{"kind" => "other", "needs" => blocked_excerpt(comment.body)}
@@ -1790,8 +1796,13 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
   defp blocked_excerpt(body) do
     body
+    # Cut before any raw Elixir term dump (e.g. "{:review_gates_blocked, ...")
+    # — the human-written part always precedes it.
+    |> String.split("{:", parts: 2)
+    |> List.first()
     |> String.replace(~r/\s+/, " ")
     |> String.trim()
+    |> String.trim_trailing(":")
     |> String.slice(0, 240)
   end
 
