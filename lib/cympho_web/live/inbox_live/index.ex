@@ -76,23 +76,26 @@ defmodule CymphoWeb.InboxLive.Index do
     {:noreply, load_inbox(socket)}
   end
 
-  def handle_info({:run_status_changed, payload}, socket) do
+  def handle_info(%Phoenix.Socket.Broadcast{event: "run_status", payload: payload}, socket) do
     selected_agent_id = socket.assigns[:selected_agent_id]
+    for_selected? = selected_agent_id == "all" or payload[:agent_id] == selected_agent_id
+
+    toast =
+      case payload[:status] do
+        "completed" -> {"Agent completed a run", "success"}
+        "failed" -> {"Agent run failed", "error"}
+        "cancelled" -> {"Agent run cancelled", "warning"}
+        _ -> nil
+      end
 
     socket =
-      if selected_agent_id == "all" or payload[:agent_id] == selected_agent_id do
-        {message, type} =
-          case payload do
-            %{new_status: "completed"} -> {"Agent completed a run", "success"}
-            %{new_status: "failed"} -> {"Agent run failed", "error"}
-            %{new_status: "cancelled"} -> {"Agent run cancelled", "warning"}
-            _ -> {"Agent run status changed", "info"}
-          end
+      if for_selected? && toast do
+        {message, type} = toast
 
         push_event(socket, "toast", %{
           message: message,
           type: type,
-          key: "run_#{payload[:run_id]}"
+          key: "run_#{payload[:resource_id]}"
         })
       else
         socket

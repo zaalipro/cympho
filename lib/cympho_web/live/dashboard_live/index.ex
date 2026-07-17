@@ -57,17 +57,9 @@ defmodule CymphoWeb.DashboardLive.Index do
     {:noreply, socket |> assign(:current_company, company) |> assign_metrics()}
   end
 
-  def handle_info({:run_status, payload}, socket) do
-    type =
-      case payload[:event_type] do
-        :run_completed -> "success"
-        :run_failed -> "error"
-        :run_cancelled -> "warning"
-        _ -> "info"
-      end
-
-    msg = "Run #{payload[:event_type]} (#{payload[:status]})"
-    {:noreply, socket |> push_event("toast", %{message: msg, type: type}) |> assign_metrics()}
+  def handle_info(%Phoenix.Socket.Broadcast{event: "run_status"}, socket) do
+    # Keep the glanceable metrics fresh when runs change. No per-run toast.
+    {:noreply, assign_metrics(socket)}
   end
 
   def handle_info({:activity_created, activity}, socket) do
@@ -92,6 +84,13 @@ defmodule CymphoWeb.DashboardLive.Index do
     else
       {:noreply, socket}
     end
+  end
+
+  # Defensive catch-all: an unrecognized message must never crash the dashboard.
+  def handle_info(msg, socket) do
+    require Logger
+    Logger.warning("Unhandled message in DashboardLive.Index", message: inspect(msg))
+    {:noreply, socket}
   end
 
   # Mirrors Cympho.Dashboard.activity_to_map/1 — kept inline so the LiveView

@@ -1339,17 +1339,17 @@ defmodule CymphoWeb.IssueLive.Show do
     {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
   end
 
-  def handle_info({:run_status_changed, payload}, socket) do
+  def handle_info(%Phoenix.Socket.Broadcast{event: "run_status", payload: payload}, socket) do
     issue_id = socket.assigns.issue.id
 
     cond do
       payload[:issue_id] == issue_id ->
         {message, type} =
-          case payload do
-            %{new_status: "running"} -> {"Run started", "info"}
-            %{new_status: "completed"} -> {"Run completed successfully", "success"}
-            %{new_status: "failed"} -> {"Run failed", "error"}
-            %{new_status: "cancelled"} -> {"Run cancelled", "warning"}
+          case payload[:status] do
+            "running" -> {"Run started", "info"}
+            "completed" -> {"Run completed successfully", "success"}
+            "failed" -> {"Run failed", "error"}
+            "cancelled" -> {"Run cancelled", "warning"}
             _ -> {"Run status updated", "info"}
           end
 
@@ -1361,7 +1361,7 @@ defmodule CymphoWeb.IssueLive.Show do
           |> push_event("toast", %{
             message: message,
             type: type,
-            key: "run_#{issue_id}_#{payload[:new_status]}"
+            key: "run_#{issue_id}_#{payload[:status]}"
           })
 
         {:noreply, maybe_rebuild_timeline(socket)}
@@ -1391,6 +1391,14 @@ defmodule CymphoWeb.IssueLive.Show do
       documents = Documents.list_documents(socket.assigns.issue.id)
       {:noreply, assign(socket, documents: documents)}
     end
+  end
+
+  # Defensive catch-all: an unrecognized PubSub/Broadcast message must never
+  # crash the live issue view. Log it so shape mismatches stay visible.
+  def handle_info(msg, socket) do
+    require Logger
+    Logger.warning("Unhandled message in IssueLive.Show", message: inspect(msg))
+    {:noreply, socket}
   end
 
   defp draft_owner_brief_repair(socket, opts \\ []) do

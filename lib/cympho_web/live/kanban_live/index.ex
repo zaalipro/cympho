@@ -234,10 +234,10 @@ defmodule CymphoWeb.KanbanLive.Index do
      end)}
   end
 
-  def handle_info({:run_status_changed, payload}, socket) do
+  def handle_info(%Phoenix.Socket.Broadcast{event: "run_status", payload: payload}, socket) do
     socket =
       case payload do
-        %{new_status: "completed", agent_id: aid, issue_id: iid} ->
+        %{status: "completed", agent_id: aid, issue_id: iid} ->
           a = Enum.find(socket.assigns.agents, &(&1.id == aid))
 
           push_event(socket, "toast", %{
@@ -246,7 +246,7 @@ defmodule CymphoWeb.KanbanLive.Index do
             key: "run_#{iid}_completed"
           })
 
-        %{new_status: "failed", agent_id: aid, issue_id: iid} ->
+        %{status: "failed", agent_id: aid, issue_id: iid} ->
           a = Enum.find(socket.assigns.agents, &(&1.id == aid))
 
           push_event(socket, "toast", %{

@@ -78,17 +78,10 @@ defmodule CymphoWeb.IssueLive.Index do
   def handle_info({:issue_updated, _issue}, socket), do: {:noreply, reload(socket)}
   def handle_info({:issue_deleted, _id}, socket), do: {:noreply, reload(socket)}
 
-  def handle_info({:run_status, payload}, socket) do
-    type =
-      case payload[:event_type] do
-        :run_completed -> "success"
-        :run_failed -> "error"
-        :run_cancelled -> "warning"
-        _ -> "info"
-      end
-
-    msg = "Run #{payload[:event_type]} (#{payload[:status]})"
-    {:noreply, socket |> push_event("toast", %{message: msg, type: type}) |> reload()}
+  def handle_info(%Phoenix.Socket.Broadcast{event: "run_status"}, socket) do
+    # Refresh the list so status badges/counts stay current. No per-run toast —
+    # a list page shouldn't shout on every run event.
+    {:noreply, reload(socket)}
   end
 
   def handle_info({:issue_read_state_updated, issue_id}, socket) do

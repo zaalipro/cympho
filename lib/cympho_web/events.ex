@@ -170,13 +170,20 @@ defmodule CymphoWeb.Events do
   end
 
   defp build_run_payload(
-         %Run{id: run_id, status: status, adapter: adapter, issue_id: issue_id},
+         %Run{
+           id: run_id,
+           status: status,
+           adapter: adapter,
+           issue_id: issue_id,
+           agent_id: agent_id
+         },
          event_type
        ) do
     %{
       event_type: event_type,
       resource_id: run_id,
       issue_id: issue_id,
+      agent_id: agent_id,
       status: status,
       adapter: adapter,
       timestamp: DateTime.utc_now() |> DateTime.to_iso8601()

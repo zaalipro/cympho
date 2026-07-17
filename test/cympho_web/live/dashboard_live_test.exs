@@ -46,6 +46,27 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ "Active Agents"
     end
 
+    test "a run_status broadcast keeps the dashboard alive", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/dashboard")
+
+      # Regression: the dashboard subscribes to company runs but had no clause
+      # for the %Phoenix.Socket.Broadcast{event: "run_status"} struct and no
+      # catch-all, so any run start/fail crashed it.
+      payload = %{
+        event_type: :run_failed,
+        resource_id: Ecto.UUID.generate(),
+        issue_id: Ecto.UUID.generate(),
+        agent_id: Ecto.UUID.generate(),
+        status: "failed",
+        adapter: "claude_code",
+        timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+      }
+
+      CymphoWeb.Endpoint.broadcast("company:#{current_company_id()}:runs", "run_status", payload)
+
+      assert render(view) =~ "Active Agents"
+    end
+
     test "renders dashboard with metric cards", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/dashboard")
 

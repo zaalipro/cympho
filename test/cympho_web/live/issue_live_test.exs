@@ -969,6 +969,30 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "high"
     end
 
+    test "a run_status broadcast updates the view without crashing it", %{issue: issue} do
+      {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
+
+      # Regression: broadcast_run_status delivers a
+      # %Phoenix.Socket.Broadcast{event: "run_status"} struct. The view used to
+      # have only a {:run_status_changed, _} tuple clause and no catch-all, so
+      # every run start/fail terminated the LiveView on prod.
+      payload = %{
+        event_type: :run_completed,
+        resource_id: Ecto.UUID.generate(),
+        issue_id: issue.id,
+        agent_id: Ecto.UUID.generate(),
+        status: "completed",
+        adapter: "claude_code",
+        timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+      }
+
+      CymphoWeb.Endpoint.broadcast("company:#{current_company_id()}:runs", "run_status", payload)
+
+      assert_push_event(view, "toast", %{message: "Run completed successfully"})
+      # View is still alive and rendering.
+      assert render(view) =~ issue.title
+    end
+
     test "renders swarm issues as an orchestration surface" do
       {:ok, ceo} =
         create_agent(%{
