@@ -914,6 +914,10 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "block_issue"} = action) do
+    # Resolve synonym kinds (e.g. "missing_requirements" -> "owner_input_needed")
+    # before validating, so a naming near-miss blocks cleanly instead of failing.
+    action = Validation.canonicalize_blocker_kind(action)
+
     with :ok <- Validation.ensure_governance_quality(action, "block_issue"),
          reason = tagged_blocked_note(action["reason"] || "Agent blocked this issue."),
          blocker_kind = Map.get(action, "blocker_kind") || "other",

@@ -401,6 +401,55 @@ defmodule Cympho.AgentActions.Validation do
 
   @block_reason_kinds ~w(external_dep ci_failure env_unavailable owner_input_needed conflicting_change other)
 
+  # Models routinely invent near-miss blocker kinds ("missing_requirements",
+  # "needs_info", "thin_brief"). Map the common ones to the canonical set so a
+  # naming near-miss doesn't reject the whole action and strand the issue with
+  # a generic failure. Unknown kinds still fall through to a real error.
+  @blocker_kind_aliases %{
+    "missing_requirements" => "owner_input_needed",
+    "missing_info" => "owner_input_needed",
+    "missing_information" => "owner_input_needed",
+    "needs_info" => "owner_input_needed",
+    "needs_information" => "owner_input_needed",
+    "needs_input" => "owner_input_needed",
+    "owner_input" => "owner_input_needed",
+    "owner_decision" => "owner_input_needed",
+    "thin_brief" => "owner_input_needed",
+    "insufficient_brief" => "owner_input_needed",
+    "clarification_needed" => "owner_input_needed",
+    "dependency" => "external_dep",
+    "external_dependency" => "external_dep",
+    "blocked_dependency" => "external_dep",
+    "ci" => "ci_failure",
+    "ci_failed" => "ci_failure",
+    "build_failure" => "ci_failure",
+    "test_failure" => "ci_failure",
+    "environment" => "env_unavailable",
+    "env" => "env_unavailable",
+    "env_missing" => "env_unavailable",
+    "credentials" => "env_unavailable",
+    "provider_auth" => "env_unavailable",
+    "conflict" => "conflicting_change",
+    "merge_conflict" => "conflicting_change"
+  }
+
+  @doc """
+  Returns `action` with `blocker_kind` resolved to its canonical form when it
+  is a known synonym; leaves it untouched otherwise (so genuinely invalid
+  kinds still surface via `ensure_governance_quality/2`).
+  """
+  def canonicalize_blocker_kind(%{"blocker_kind" => kind} = action) when is_binary(kind) do
+    normalized =
+      kind |> String.trim() |> String.downcase() |> String.replace(~r/[\s-]+/, "_")
+
+    case Map.get(@blocker_kind_aliases, normalized) do
+      nil -> action
+      canonical -> Map.put(action, "blocker_kind", canonical)
+    end
+  end
+
+  def canonicalize_blocker_kind(action), do: action
+
   @block_issue_reason_checks [
     %{
       key: :cause,

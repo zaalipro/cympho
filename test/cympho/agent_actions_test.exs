@@ -1519,6 +1519,28 @@ defmodule Cympho.AgentActionsTest do
                AgentActions.execute(issue, ceo, actions)
     end
 
+    test "block_issue maps a synonym blocker_kind to the canonical kind", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      # A thin-brief block: the CEO emits "missing_requirements", which is a
+      # near-miss for owner_input_needed. It should block cleanly, not reject.
+      actions = [
+        %{
+          "type" => "block_issue",
+          "reason" => block_issue_reason(),
+          "blocker_kind" => "missing_requirements"
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, ceo, actions)
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :blocked
+      assert updated.monitor_state["block_reason_kind"] == "owner_input_needed"
+      assert updated.monitor_state["blocker_packet"]["kind"] == "owner_input_needed"
+    end
+
     test "block_issue records a Decision and stamps blocker_kind on monitor_state", %{
       issue: issue,
       ceo: ceo,
