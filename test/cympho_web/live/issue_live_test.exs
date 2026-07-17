@@ -1197,6 +1197,40 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ ~s(href="/goals")
     end
 
+    test "blocked issue without a packet falls back to the latest [blocked] note" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Blocking Marketer",
+          role: :marketer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Blocked without structured packet",
+          description: "Agent blocked this via comment only.",
+          status: :blocked,
+          priority: :high
+        })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          issue_id: issue.id,
+          author_type: "agent",
+          author_id: agent.id,
+          body:
+            "[blocked] Cause: marketer needs the owner-confirmed launch date before drafting the thread."
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ ~s(data-testid="issue-blocker-packet")
+      assert html =~ "Blocked — needs you"
+      assert html =~ "owner-confirmed launch date"
+    end
+
     test "shows owner-readable blocker packet in the sidebar" do
       {:ok, issue} =
         create_issue(%{

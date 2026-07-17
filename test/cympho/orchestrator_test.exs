@@ -338,14 +338,30 @@ defmodule Cympho.OrchestratorTest do
     } do
       session_id = "session-cli-envelope"
       run_id = Ecto.UUID.generate()
+      test_pid = self()
 
       # `claude -p --output-format json` returns the agent's text under
-      # "result" (not a Messages-API "content" list). Falling back to
-      # inspect/1 escaped the block's quotes and failed the contract.
+      # "result" (not a Messages-API "content" list), token usage under
+      # snake_case "usage" (with cache_* fields), and cost under
+      # "total_cost_usd" / camelCase modelUsage.costUSD.
       result = %{
         "type" => "result",
         "is_error" => false,
         "num_turns" => 3,
+        "total_cost_usd" => 2.25,
+        "usage" => %{
+          "input_tokens" => 19,
+          "cache_creation_input_tokens" => 193_082,
+          "cache_read_input_tokens" => 14_350,
+          "output_tokens" => 8_655
+        },
+        "modelUsage" => %{
+          "claude-opus-4-8" => %{
+            "inputTokens" => 19,
+            "outputTokens" => 8_655,
+            "costUSD" => 2.25
+          }
+        },
         "result" => """
         Delivered.
 
@@ -365,6 +381,10 @@ defmodule Cympho.OrchestratorTest do
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
            start_run: fn _ -> :ok end,
+           complete_run: fn _run, attrs ->
+             send(test_pid, {:run_completed_attrs, attrs})
+             {:ok, %{id: run_id}}
+           end,
            fail_run: fn _run, _reason -> {:ok, %{id: run_id}} end
          ]},
         {Cympho.AgentRunner, [],
@@ -378,6 +398,77 @@ defmodule Cympho.OrchestratorTest do
 
         [work_product] = WorkProducts.list_work_products(issue.id)
         assert work_product.title == "CLI envelope artifact"
+
+        # Real spend must reach the run record — $0 here means budgets are blind.
+        assert_receive {:run_completed_attrs, attrs}
+        assert Decimal.eq?(attrs.cost_usd, Decimal.from_float(2.25))
+        assert attrs.input_tokens == 19 + 193_082 + 14_350
+        assert attrs.output_tokens == 8_655
+      end
+    end
+
+    test "falls back to modelUsage cost when the envelope total is missing", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      session_id = "session-modelusage-cost"
+      run_id = Ecto.UUID.generate()
+      test_pid = self()
+
+      result = %{
+        "type" => "result",
+        "is_error" => false,
+        "modelUsage" => %{
+          "claude-opus-4-8" => %{
+            "inputTokens" => 100,
+            "cacheReadInputTokens" => 2_000,
+            "outputTokens" => 500,
+            "costUSD" => 0.42
+          },
+          "claude-haiku-4-5" => %{
+            "inputTokens" => 50,
+            "outputTokens" => 20,
+            "costUSD" => 0.01
+          }
+        },
+        "result" => """
+        Done.
+
+        ```cympho-actions
+        {"actions":[{"type":"comment","body":"Noted."}]}
+        ```
+        """
+      }
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           complete_run: fn _run, attrs ->
+             send(test_pid, {:run_completed_attrs, attrs})
+             {:ok, %{id: run_id}}
+           end,
+           fail_run: fn _run, _reason -> {:ok, %{id: run_id}} end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        send(pid, {:turn_completed, session_id, result})
+        assert :ok = wait_until_stopped(pid)
+
+        assert_receive {:run_completed_attrs, attrs}
+        assert Decimal.eq?(attrs.cost_usd, Decimal.from_float(0.43))
+        assert attrs.input_tokens == 100 + 2_000 + 50
+        assert attrs.output_tokens == 520
       end
     end
 

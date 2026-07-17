@@ -3419,10 +3419,16 @@ defmodule Cympho.RuntimeOperations do
   defp prompt_radar_rank(:ready), do: 4
   defp prompt_radar_rank(_), do: 5
 
+  # "Recent" means the last 24h, not the last 8 failures ever — without the
+  # window, long-fixed failures kept the dashboard's "Some runs failed" card
+  # red forever.
   defp recent_failures(company_id) do
+    cutoff = DateTime.add(DateTime.utc_now(), -24 * 60 * 60, :second)
+
     Run
     |> scoped(company_id)
     |> where([r], r.status in ^@failed_run_statuses)
+    |> where([r], coalesce(r.completed_at, r.inserted_at) > ^cutoff)
     |> order_by([r], desc: r.completed_at, desc: r.inserted_at)
     |> preload([:agent, :issue])
     |> limit(8)

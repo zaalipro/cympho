@@ -1288,20 +1288,59 @@ defmodule Cympho.Orchestrator do
     end
   end
 
+  # The claude CLI json envelope reports usage as snake_case `usage` (with
+  # cache_* token fields) plus per-model `modelUsage` (camelCase, carrying
+  # `costUSD`), and cost as `total_cost_usd`. Read all shapes — without this
+  # every run recorded $0 and budgets never saw real spend.
   defp extract_run_attrs(result) when is_map(result) do
     usage = result["usage"] || %{}
+    model_usage = (result["modelUsage"] || %{}) |> Map.values()
 
-    %{
-      input_tokens: usage["input_tokens"] || 0,
-      output_tokens: usage["output_tokens"] || 0,
-      cost_usd: parse_cost(result["cost_usd"] || usage["cost_usd"])
-    }
+    input_tokens =
+      case sum_fields(usage, ~w(input_tokens cache_creation_input_tokens cache_read_input_tokens)) do
+        0 -> sum_over(model_usage, ~w(inputTokens cacheCreationInputTokens cacheReadInputTokens))
+        n -> n
+      end
+
+    output_tokens =
+      case usage["output_tokens"] do
+        n when is_integer(n) and n > 0 -> n
+        _ -> sum_over(model_usage, ~w(outputTokens))
+      end
+
+    envelope_cost =
+      parse_cost(result["total_cost_usd"] || result["cost_usd"] || usage["cost_usd"])
+
+    cost =
+      if Decimal.eq?(envelope_cost, 0) do
+        Enum.reduce(model_usage, Decimal.new("0"), fn mu, acc ->
+          Decimal.add(acc, parse_cost(mu["costUSD"]))
+        end)
+      else
+        envelope_cost
+      end
+
+    %{input_tokens: input_tokens, output_tokens: output_tokens, cost_usd: cost}
   end
 
   defp extract_run_attrs(_), do: %{input_tokens: 0, output_tokens: 0, cost_usd: Decimal.new("0")}
 
+  defp sum_fields(map, fields) do
+    Enum.reduce(fields, 0, fn field, acc ->
+      case map[field] do
+        n when is_integer(n) -> acc + n
+        _ -> acc
+      end
+    end)
+  end
+
+  defp sum_over(maps, fields) do
+    Enum.reduce(maps, 0, fn map, acc -> acc + sum_fields(map, fields) end)
+  end
+
   defp parse_cost(nil), do: Decimal.new("0")
   defp parse_cost(val) when is_binary(val), do: Decimal.new(val)
+  defp parse_cost(val) when is_float(val), do: Decimal.from_float(val)
   defp parse_cost(val), do: Decimal.new("#{val}")
 
   defp session_adapter_name(%__MODULE__{run_id: run_id}) when not is_nil(run_id) do

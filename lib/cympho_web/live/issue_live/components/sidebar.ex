@@ -1749,15 +1749,51 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
   defp preflight_dot_class(_),
     do: "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-ink-tertiary"
 
-  defp issue_blocker_packet(%{monitor_state: monitor_state}) when is_map(monitor_state) do
+  defp issue_blocker_packet(%{monitor_state: monitor_state} = issue)
+       when is_map(monitor_state) do
     packet =
       Map.get(monitor_state, "blocker_packet") ||
         Map.get(monitor_state, :blocker_packet)
 
-    if valid_blocker_packet?(packet), do: packet
+    if valid_blocker_packet?(packet) do
+      packet
+    else
+      fallback_blocker_packet(issue)
+    end
   end
 
-  defp issue_blocker_packet(_issue), do: nil
+  defp issue_blocker_packet(issue), do: fallback_blocker_packet(issue)
+
+  # A blocked issue without a structured packet would render just "Blocked"
+  # with no explanation in simple mode (the timeline is advanced-only).
+  # Synthesize a minimal packet from the newest [blocked]/rejection comment
+  # so the sidebar card can always say WHY.
+  defp fallback_blocker_packet(%{status: :blocked, comments: comments})
+       when is_list(comments) do
+    comments
+    |> Enum.filter(&blocked_explanation_comment?/1)
+    |> Enum.max_by(& &1.inserted_at, DateTime, fn -> nil end)
+    |> case do
+      nil -> nil
+      comment -> %{"kind" => "other", "needs" => blocked_excerpt(comment.body)}
+    end
+  end
+
+  defp fallback_blocker_packet(_issue), do: nil
+
+  defp blocked_explanation_comment?(comment) do
+    body = String.downcase(comment.body || "")
+
+    String.contains?(body, "[blocked]") or String.contains?(body, "rejected") or
+      (comment.author_type == "system" and String.contains?(body, "block"))
+  end
+
+  defp blocked_excerpt(body) do
+    body
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+    |> String.slice(0, 240)
+  end
 
   defp valid_blocker_packet?(packet) when is_map(packet) do
     Enum.any?(["needs", "next_decision", "restart_packet", "cause"], fn key ->

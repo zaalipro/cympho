@@ -1852,6 +1852,47 @@ defmodule Cympho.RuntimeOperationsTest do
              )
     end
 
+    test "recent failures exclude runs older than 24 hours" do
+      {:ok, company} = Companies.create_company(%{name: "Stale Failure Co", slug: unique_slug()})
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Stale Failure Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Long-fixed failure",
+          status: :todo,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      two_days_ago =
+        DateTime.utc_now() |> DateTime.add(-2 * 24 * 60 * 60) |> DateTime.truncate(:second)
+
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "codex",
+        error_reason: "old failure",
+        completed_at: two_days_ago,
+        inserted_at: two_days_ago,
+        updated_at: two_days_ago
+      })
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert snapshot.recent_failures == []
+    end
+
     test "does not expose recent failures when company scope is missing" do
       {:ok, company} = Companies.create_company(%{name: "Nil Scope Co", slug: unique_slug()})
 
