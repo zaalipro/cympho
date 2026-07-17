@@ -1257,12 +1257,14 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp fail_engine_run(%__MODULE__{run_id: nil}, _reason), do: :ok
+  defp fail_engine_run(session, reason, usage_attrs \\ %{})
 
-  defp fail_engine_run(%__MODULE__{run_id: run_id}, reason) do
+  defp fail_engine_run(%__MODULE__{run_id: nil}, _reason, _usage_attrs), do: :ok
+
+  defp fail_engine_run(%__MODULE__{run_id: run_id}, reason, usage_attrs) do
     try do
       {:ok, run} = HeartbeatEngine.get_run(run_id)
-      HeartbeatEngine.fail_run(run, reason)
+      HeartbeatEngine.fail_run(run, reason, usage_attrs)
     rescue
       e ->
         Logger.warning("[Orchestrator] Failed to fail engine run: #{inspect(e)}")
@@ -1273,8 +1275,8 @@ defmodule Cympho.Orchestrator do
     complete_engine_run(session, result)
   end
 
-  defp finalize_engine_run_for_action_result(%__MODULE__{} = session, _result, {:error, reason}) do
-    fail_engine_run(session, {:agent_action_failed, reason})
+  defp finalize_engine_run_for_action_result(%__MODULE__{} = session, result, {:error, reason}) do
+    fail_engine_run(session, {:agent_action_failed, reason}, extract_run_attrs(result))
   end
 
   defp record_heartbeat(%__MODULE__{run_id: nil}), do: :ok

@@ -102,7 +102,17 @@ defmodule Cympho.HeartbeatEngine.Run do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     run
-    |> cast(attrs, [:error_reason, :log_excerpt, :session_state, :run_metadata])
+    # Tokens/cost were spent even when the turn failed a gate afterward —
+    # most real spend lands on failed runs, so budgets must still see it.
+    |> cast(attrs, [
+      :error_reason,
+      :log_excerpt,
+      :session_state,
+      :run_metadata,
+      :input_tokens,
+      :output_tokens,
+      :cost_usd
+    ])
     |> put_change(:status, "failed")
     |> put_change(:completed_at, now)
     |> put_change(:last_heartbeat_at, now)

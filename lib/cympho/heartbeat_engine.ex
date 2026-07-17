@@ -87,9 +87,15 @@ defmodule Cympho.HeartbeatEngine do
 
   @doc """
   Marks a run as failed with an error reason.
+
+  `usage_attrs` (`:input_tokens`, `:output_tokens`, `:cost_usd`) records the
+  spend the turn consumed before failing — a gate-rejected turn still burned
+  real tokens, and budgets must see it.
   """
-  @spec fail_run(Run.t(), term()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
-  def fail_run(%Run{status: "running"} = run, error_reason) do
+  @spec fail_run(Run.t(), term(), map()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
+  def fail_run(run, error_reason, usage_attrs \\ %{})
+
+  def fail_run(%Run{status: "running"} = run, error_reason, usage_attrs) do
     run
     |> finalize_run(["running"], fn current ->
       attrs =
@@ -98,17 +104,19 @@ defmodule Cympho.HeartbeatEngine do
           detail: current.log_excerpt
         )
         |> Map.take([:error_reason, :log_excerpt, :run_metadata])
+        |> Map.merge(Map.take(usage_attrs, [:input_tokens, :output_tokens, :cost_usd]))
 
       Run.fail_changeset(current, attrs)
     end)
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_failed")
+      record_cost_event(updated)
       CymphoWeb.Events.broadcast_run_status(updated, :run_failed)
     end)
   end
 
-  def fail_run(%Run{status: status}, _), do: {:error, {:invalid_status, status}}
+  def fail_run(%Run{status: status}, _, _), do: {:error, {:invalid_status, status}}
 
   @doc """
   Records a heartbeat tick on an active run for liveness tracking.

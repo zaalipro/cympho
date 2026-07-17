@@ -385,7 +385,7 @@ defmodule Cympho.OrchestratorTest do
              send(test_pid, {:run_completed_attrs, attrs})
              {:ok, %{id: run_id}}
            end,
-           fail_run: fn _run, _reason -> {:ok, %{id: run_id}} end
+           fail_run: fn _run, _reason, _usage -> {:ok, %{id: run_id}} end
          ]},
         {Cympho.AgentRunner, [],
          [
@@ -454,7 +454,7 @@ defmodule Cympho.OrchestratorTest do
              send(test_pid, {:run_completed_attrs, attrs})
              {:ok, %{id: run_id}}
            end,
-           fail_run: fn _run, _reason -> {:ok, %{id: run_id}} end
+           fail_run: fn _run, _reason, _usage -> {:ok, %{id: run_id}} end
          ]},
         {Cympho.AgentRunner, [],
          [
@@ -504,7 +504,7 @@ defmodule Cympho.OrchestratorTest do
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
            start_run: fn _ -> :ok end,
-           fail_run: fn _run, _reason -> {:ok, %{id: run_id}} end
+           fail_run: fn _run, _reason, _usage -> {:ok, %{id: run_id}} end
          ]},
         {Cympho.AgentRunner, [],
          [
@@ -917,7 +917,7 @@ defmodule Cympho.OrchestratorTest do
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
            start_run: fn _ -> :ok end,
-           fail_run: fn run, _reason -> {:ok, Map.put(run, :status, "failed")} end
+           fail_run: fn run, _reason, _usage -> {:ok, Map.put(run, :status, "failed")} end
          ]},
         {Cympho.AgentRunner, [],
          [
@@ -1211,7 +1211,7 @@ defmodule Cympho.OrchestratorTest do
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
-           fail_run: fn _run, _reason -> :ok end
+           fail_run: fn _run, _reason, _usage -> :ok end
          ]},
         {Cympho.Comments, [],
          [
@@ -1243,7 +1243,7 @@ defmodule Cympho.OrchestratorTest do
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
-           fail_run: fn _run, _reason -> :ok end
+           fail_run: fn _run, _reason, _usage -> :ok end
          ]},
         {Cympho.Comments, [],
          [
@@ -1296,7 +1296,7 @@ defmodule Cympho.OrchestratorTest do
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
-           fail_run: fn _run, _reason -> :ok end
+           fail_run: fn _run, _reason, _usage -> :ok end
          ]},
         {Cympho.Comments, [],
          [
@@ -1499,7 +1499,7 @@ defmodule Cympho.OrchestratorTest do
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
            start_run: fn _ -> :ok end,
-           fail_run: fn _run, reason ->
+           fail_run: fn _run, reason, _usage ->
              send(test_pid, {:run_failed, reason})
              {:ok, %{id: run_id}}
            end
@@ -1545,7 +1545,7 @@ defmodule Cympho.OrchestratorTest do
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
            start_run: fn _ -> :ok end,
-           fail_run: fn _run, _reason -> {:ok, %{id: run_id}} end
+           fail_run: fn _run, _reason, _usage -> {:ok, %{id: run_id}} end
          ]},
         {Cympho.Comments, [],
          [
@@ -1663,7 +1663,7 @@ defmodule Cympho.OrchestratorTest do
            get_run: fn ^run_id -> {:ok, %{id: run_id, status: "running"}} end,
            start_run: fn _ -> :ok end,
            record_heartbeat: fn _ -> {:ok, %{id: run_id}} end,
-           fail_run: fn _run, _reason -> {:ok, %{id: run_id, status: "failed"}} end
+           fail_run: fn _run, _reason, _usage -> {:ok, %{id: run_id, status: "failed"}} end
          ]},
         {Cympho.AgentRunner, [],
          [

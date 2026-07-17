@@ -121,6 +121,33 @@ defmodule Cympho.HeartbeatEngineTest do
       assert failed.completed_at
     end
 
+    test "records usage spent before the failure on the failed run" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(),
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+
+      # A gate-rejected turn still burned real tokens — budgets must see it.
+      assert {:ok, failed} =
+               HeartbeatEngine.fail_run(started, {:agent_action_failed, :missing_action_block}, %{
+                 input_tokens: 12_345,
+                 output_tokens: 678,
+                 cost_usd: Decimal.new("1.25")
+               })
+
+      assert failed.status == "failed"
+      assert failed.input_tokens == 12_345
+      assert failed.output_tokens == 678
+      assert Decimal.eq?(failed.cost_usd, Decimal.new("1.25"))
+    end
+
     test "clears a checked-out issue when a run fails" do
       agent_id = Ecto.UUID.generate()
       insert_agent(agent_id)
