@@ -64,6 +64,80 @@
       </.header>
     </div>
 
+    <%!-- Simple-mode home: a calm glance — work in flight, what needs you,
+         and the team — with one clear next action. The dense ops panels
+         below are advanced-mode only. --%>
+    <section aria-label="Home" class="ui-simple-only mb-6">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <.app_link
+          navigate={~p"/kanban"}
+          class="group flex items-center gap-3 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card transition hover:border-brand/40 hover:bg-surface/60"
+        >
+          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10">
+            <span class="hero-view-columns-mini h-5 w-5 text-brand"></span>
+          </span>
+          <span class="min-w-0">
+            <span class="block text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Your work
+            </span>
+            <span class="block text-lg font-590 text-text-primary">
+              <span class="tabular-nums">{@running_work + @queued_work}</span>
+              <span class="text-sm font-510 text-text-tertiary">active</span>
+            </span>
+          </span>
+        </.app_link>
+
+        <.app_link
+          navigate={~p"/inbox"}
+          class="group flex items-center gap-3 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card transition hover:border-brand/40 hover:bg-surface/60"
+        >
+          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10">
+            <span class="hero-inbox-mini h-5 w-5 text-brand"></span>
+          </span>
+          <span class="min-w-0">
+            <span class="block text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Needs you
+            </span>
+            <span class="block text-lg font-590 text-text-primary">
+              <span class="tabular-nums">{@needs_you_count}</span>
+              <span class="text-sm font-510 text-text-tertiary">
+                {if @needs_you_count == 1, do: "item", else: "items"}
+              </span>
+            </span>
+          </span>
+        </.app_link>
+
+        <.app_link
+          navigate={~p"/agents"}
+          class="group flex items-center gap-3 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card transition hover:border-brand/40 hover:bg-surface/60"
+        >
+          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10">
+            <span class="hero-users-mini h-5 w-5 text-brand"></span>
+          </span>
+          <span class="min-w-0">
+            <span class="block text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Your team
+            </span>
+            <span class="block text-lg font-590 text-text-primary">
+              <span class="tabular-nums">{@total_agents}</span>
+              <span class="text-sm font-510 text-text-tertiary">
+                {if @total_agents == 1, do: "agent", else: "agents"}
+              </span>
+            </span>
+          </span>
+        </.app_link>
+      </div>
+
+      <div class="mt-4">
+        <.app_link
+          navigate={~p"/issues/new"}
+          class="cta-glow inline-flex items-center gap-1.5 rounded-button bg-brand px-4 py-2 text-sm font-590 text-on-primary shadow-card transition hover:bg-accent-hover"
+        >
+          <span class="hero-plus-mini h-4 w-4"></span> New request
+        </.app_link>
+      </div>
+    </section>
+
     <%!-- ============================================================
          Needs you — the one row that answers "does anything need ME
          right now?". Each card is one decision with one CTA. When
@@ -139,7 +213,7 @@
          roll-up with a pulse dot, the four numbers that change
          decisions, and the runtime capacity gauge.
          ============================================================ --%>
-    <section aria-label="Company health" class="ember-glass mb-5 p-5">
+    <section aria-label="Company health" class="ui-advanced-only ember-glass mb-5 p-5">
       <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(220px,0.95fr)_minmax(0,1.35fr)_minmax(250px,0.95fr)] lg:items-center">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
@@ -739,7 +813,7 @@
          While you were away — the catch-up row. Activity ticker and
          inbox side by side; deeper telemetry stays in advanced mode.
          ============================================================ --%>
-    <section aria-label="While you were away" class="mt-5">
+    <section aria-label="While you were away" class="ui-advanced-only mt-5">
       <div class="mb-3 px-1">
         <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
           While you were away

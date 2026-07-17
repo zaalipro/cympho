@@ -67,6 +67,16 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert render(view) =~ "Active Agents"
     end
 
+    test "renders the simple-mode home glance", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/dashboard")
+
+      # The calm simple-mode block (shown via CSS when data-ui-mode=simple).
+      assert html =~ "Your work"
+      assert html =~ "Needs you"
+      assert html =~ "Your team"
+      assert html =~ "New request"
+    end
+
     test "renders dashboard with metric cards", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/dashboard")
 

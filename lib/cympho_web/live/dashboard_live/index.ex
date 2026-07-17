@@ -250,6 +250,7 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:owner_signoff_action, signoff_action)
     |> assign(:needs_you_actions, Enum.take(queue_actions, 3))
     |> assign(:later_actions, Enum.drop(queue_actions, 3))
+    |> assign(:needs_you_count, (if(signoff_action, do: 1, else: 0)) + length(queue_actions))
     |> assign(:all_clear?, is_nil(signoff_action) and all_clear?(queue_actions))
     |> assign(:agent_rollup, agent_rollup(summary.agent_status_counts))
     |> assign(:ceo_command_lane, ceo_command_lane(operations.ceo_flow))
