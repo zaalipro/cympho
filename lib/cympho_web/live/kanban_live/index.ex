@@ -238,19 +238,15 @@ defmodule CymphoWeb.KanbanLive.Index do
     socket =
       case payload do
         %{status: "completed", agent_id: aid, issue_id: iid} ->
-          a = Enum.find(socket.assigns.agents, &(&1.id == aid))
-
           push_event(socket, "toast", %{
-            message: "#{if a, do: a.name, else: "Agent"} completed work on #{iid}",
+            message: "#{agent_name(socket, aid)} finished a run on #{issue_label(socket, iid)}",
             type: "success",
             key: "run_#{iid}_completed"
           })
 
         %{status: "failed", agent_id: aid, issue_id: iid} ->
-          a = Enum.find(socket.assigns.agents, &(&1.id == aid))
-
           push_event(socket, "toast", %{
-            message: "#{if a, do: a.name, else: "Agent"} failed on #{iid}",
+            message: "#{agent_name(socket, aid)}'s run on #{issue_label(socket, iid)} failed",
             type: "error",
             key: "run_#{iid}_failed"
           })
@@ -263,6 +259,23 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  # Human labels for run toasts — show the issue's identifier (e.g. "CNT-8") and
+  # the agent's name, never a raw UUID.
+  defp agent_name(socket, agent_id) do
+    case Enum.find(socket.assigns.agents, &(&1.id == agent_id)) do
+      %{name: name} when is_binary(name) and name != "" -> name
+      _ -> "An agent"
+    end
+  end
+
+  defp issue_label(socket, issue_id) do
+    case Enum.find(socket.assigns.issues, &(&1.id == issue_id)) do
+      %{identifier: id} when is_binary(id) and id != "" -> id
+      %{title: title} when is_binary(title) and title != "" -> title
+      _ -> "an issue"
+    end
+  end
 
   @impl true
   def handle_event("transition_issue", %{"id" => id, "to_status" => to_status_string}, socket) do
