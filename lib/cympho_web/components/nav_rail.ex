@@ -88,12 +88,14 @@ defmodule CymphoWeb.Components.NavRail do
         icon="hero-shield-check-mini"
         current_path={@current_path}
         badge={@approval_count}
+        advanced_only
       />
       <.nav_link
         to={~p"/reviews"}
         label="Reviews"
         icon="hero-check-badge-mini"
         current_path={@current_path}
+        advanced_only
       />
       <.nav_link
         to={~p"/operations"}
@@ -110,12 +112,13 @@ defmodule CymphoWeb.Components.NavRail do
         current_path={@current_path}
       />
 
-      <.section_header label="Work" />
+      <.section_header label="Work" advanced_only />
       <.nav_link
         to={~p"/issues"}
         label="Issues"
         icon="hero-clipboard-document-list-mini"
         current_path={@current_path}
+        advanced_only
       />
       <.nav_link
         to={~p"/launch-items"}
@@ -124,7 +127,13 @@ defmodule CymphoWeb.Components.NavRail do
         current_path={@current_path}
         advanced_only
       />
-      <.nav_link to={~p"/goals"} label="Goals" icon="hero-flag-mini" current_path={@current_path} />
+      <.nav_link
+        to={~p"/goals"}
+        label="Goals"
+        icon="hero-flag-mini"
+        current_path={@current_path}
+        advanced_only
+      />
       <.nav_link
         to={~p"/routines"}
         label="Routines"
@@ -350,10 +359,14 @@ defmodule CymphoWeb.Components.NavRail do
   attr :label, :string, required: true
   attr :action_to, :string, default: nil
   attr :action_label, :string, default: nil
+  attr :advanced_only, :boolean, default: false
 
   defp section_header(assigns) do
     ~H"""
-    <div class="flex items-center justify-between px-3 pt-3 pb-1">
+    <div class={[
+      "flex items-center justify-between px-3 pt-3 pb-1",
+      @advanced_only && "ui-advanced-only"
+    ]}>
       <span class="text-[11px] font-510 tracking-[0.06em] text-text-quaternary">
         {@label}
       </span>

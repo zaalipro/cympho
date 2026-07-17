@@ -32,7 +32,9 @@ defmodule Cympho.PortKillerTest do
         :stderr_to_stdout
       ])
 
-    assert_receive {^port, {:data, "ready\n"}}, 1_000
+    # 5s (not 1s): under full-suite parallelism the OS spawn + first write can
+    # lag well past a second, which flaked this assertion in CI.
+    assert_receive {^port, {:data, "ready\n"}}, 5_000
     assert {:os_pid, os_pid} = Port.info(port, :os_pid)
     assert process_alive?(os_pid)
 
@@ -72,7 +74,7 @@ defmodule Cympho.PortKillerTest do
         :stderr_to_stdout
       ])
 
-    assert_receive {^port, {:data, data}}, 2_000
+    assert_receive {^port, {:data, data}}, 5_000
     grandchild_pid = data |> String.trim() |> String.to_integer()
     assert {:os_pid, parent_pid} = Port.info(port, :os_pid)
 

@@ -343,6 +343,7 @@ defmodule CymphoWeb.DashboardLive.Index do
 
     [
       owner_signoff_action(operations.owner_signoffs),
+      board_approval_action(company),
       ceo_outcome_attention_action(operations.ceo_outcomes),
       stale_review_nudge_action(operations.review_nudges),
       goal_alignment_action(alignment),
@@ -419,6 +420,26 @@ defmodule CymphoWeb.DashboardLive.Index do
 
       actions ->
         actions
+    end
+  end
+
+  # Pending board approvals surface here (and on the simple-mode home) so the
+  # owner never loses sight of them once the Approvals nav item is tucked into
+  # advanced mode.
+  defp board_approval_action(company) do
+    company_id = company && Map.get(company, :id)
+
+    with true <- is_binary(company_id),
+         count when count > 0 <- Cympho.BoardApprovals.count_pending_for_company(company_id) do
+      %{
+        label: "#{count} #{pluralize(count, "approval")} waiting",
+        detail: "Agent actions need your sign-off before they can run.",
+        action: "Review approvals",
+        path: "/approvals?status=pending",
+        tone: :attention
+      }
+    else
+      _ -> nil
     end
   end
 
