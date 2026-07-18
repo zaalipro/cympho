@@ -27,16 +27,26 @@ defmodule CymphoWeb.KanbanLive.Components do
     <div
       class="kanban-card-enter group min-h-[72px] cursor-grab rounded-xl border border-hairline bg-surface-2 p-3 shadow-card transition-all hover:border-border-hover hover:bg-surface-hover hover:shadow-raised active:cursor-grabbing"
       data-issue-id={@issue.id}
+      data-kanban-card
     >
       <.pending_wake_badge :if={@pending_wake} wake={@pending_wake} class="mb-2" />
 
-      <.link
-        navigate={"/issues/#{@issue.id}"}
-        class="line-clamp-2 block text-sm font-590 leading-5 text-text-primary transition-colors hover:text-white"
-        data-no-drag
-      >
-        {@issue.title}
-      </.link>
+      <div class="flex items-start gap-1.5">
+        <span
+          data-kanban-drag-handle
+          title="Drag issue"
+          class="mt-0.5 flex h-5 w-4 shrink-0 cursor-grab items-center justify-center rounded text-text-quaternary transition-colors group-hover:text-text-tertiary active:cursor-grabbing"
+        >
+          <span class="hero-ellipsis-vertical-mini h-4 w-4"></span>
+        </span>
+        <.link
+          navigate={"/issues/#{@issue.id}"}
+          draggable="false"
+          class="line-clamp-2 min-w-0 flex-1 text-sm font-590 leading-5 text-text-primary transition-colors hover:text-white"
+        >
+          {@issue.title}
+        </.link>
+      </div>
 
       <.card_meta issue={@issue} agent_heartbeat_states={@agent_heartbeat_states} class="mt-2" />
 

@@ -71,23 +71,45 @@
         />
         <!-- Bottom user pill -->
         <div class="border-t border-border px-2 py-2">
-          <button
-            type="button"
-            data-ui-mode-toggle
+          <div
+            data-ui-mode-switch
+            data-sidebar-ui-mode-switch
             data-sidebar-ui-mode-toggle
-            aria-label="Toggle simple and advanced view with U"
-            title="Toggle simple and advanced view with U"
-            aria-pressed="false"
-            class="mb-1 flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-[12px] text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            role="group"
+            aria-label="Interface mode"
+            class="mb-1 grid grid-cols-2 gap-1 rounded-xl border border-hairline bg-canvas/60 p-1"
           >
-            <span
-              data-ui-mode-icon
-              class="hero-squares-2x2-mini h-4 w-4 shrink-0 text-text-tertiary"
+            <button
+              type="button"
+              data-ui-mode-option="simple"
+              data-active="true"
+              aria-pressed="true"
+              title="Use Simple view"
+              class="ui-mode-option flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-510 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
             >
-            </span>
-            <span class="flex-1 text-left">Interface</span>
-            <span data-ui-mode-label class="text-xs text-text-quaternary">Simple</span>
-          </button>
+              <span
+                data-ui-mode-option-icon
+                class="hero-squares-2x2-mini h-3.5 w-3.5"
+              >
+              </span>
+              <span>Simple</span>
+            </button>
+            <button
+              type="button"
+              data-ui-mode-option="advanced"
+              data-active="false"
+              aria-pressed="false"
+              title="Use Advanced view"
+              class="ui-mode-option flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-510 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            >
+              <span
+                data-ui-mode-option-icon
+                class="hero-adjustments-horizontal-mini h-3.5 w-3.5"
+              >
+              </span>
+              <span>Advanced</span>
+            </button>
+          </div>
           <.user_menu user={assigns[:current_user]} current_path={@conn.request_path} />
           <button
             type="button"
@@ -248,11 +270,25 @@
             />
           </svg>
         </button>
-        <.runtime_control_menu
-          :if={assigns[:runtime_controls_allowed] && assigns[:current_company]}
-          company={assigns[:current_company]}
-          current_path={@conn.request_path}
-        />
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            data-ui-mode-toggle
+            data-mobile-ui-mode-toggle
+            aria-label="Toggle simple and advanced view with U"
+            title="Toggle simple and advanced view with U"
+            aria-pressed="false"
+            class="ui-mode-toggle flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+          >
+            <span data-ui-mode-icon class="hero-squares-2x2-mini h-4 w-4"></span>
+            <span class="sr-only" data-ui-mode-label>Simple</span>
+          </button>
+          <.runtime_control_menu
+            :if={assigns[:runtime_controls_allowed] && assigns[:current_company]}
+            company={assigns[:current_company]}
+            current_path={@conn.request_path}
+          />
+        </div>
       </header>
       
 <!-- Main content -->

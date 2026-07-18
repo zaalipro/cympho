@@ -77,14 +77,17 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ "Agents"
     end
 
-    test "app shell exposes one visible simple and advanced mode toggle", %{conn: conn} do
+    test "app shell exposes clear desktop and mobile mode controls", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/dashboard")
 
       document = Floki.parse_document!(html)
 
       assert length(Floki.find(document, "[data-ui-mode-toggle]")) == 1
-      assert Floki.find(document, "[data-sidebar-ui-mode-toggle]") != []
-      assert Floki.text(Floki.find(document, "[data-sidebar-ui-mode-toggle]")) =~ "Interface"
+      assert Floki.find(document, "[data-mobile-ui-mode-toggle]") != []
+      assert Floki.find(document, "[data-sidebar-ui-mode-switch]") != []
+      assert length(Floki.find(document, "[data-ui-mode-option]")) == 2
+      assert Floki.text(Floki.find(document, "[data-sidebar-ui-mode-switch]")) =~ "Simple"
+      assert Floki.text(Floki.find(document, "[data-sidebar-ui-mode-switch]")) =~ "Advanced"
       assert Floki.text(Floki.find(document, "[data-ui-mode-label]")) =~ "Simple"
     end
 

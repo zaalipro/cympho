@@ -43,6 +43,16 @@ function applyUIMode(mode, persist = false) {
       icon.classList.toggle("hero-adjustments-horizontal-mini", normalized === "advanced");
     });
   });
+
+  document.querySelectorAll("[data-ui-mode-switch]").forEach((switcher) => {
+    switcher.dataset.mode = normalized;
+  });
+
+  document.querySelectorAll("[data-ui-mode-option]").forEach((option) => {
+    const active = option.dataset.uiModeOption === normalized;
+    option.dataset.active = String(active);
+    option.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function toggleUIMode() {
@@ -78,6 +88,13 @@ function toggleDensityView() {
 }
 
 document.addEventListener("click", (e) => {
+  const option = e.target.closest("[data-ui-mode-option]");
+  if (option) {
+    e.preventDefault();
+    applyUIMode(option.dataset.uiModeOption, true);
+    return;
+  }
+
   const toggle = e.target.closest("[data-ui-mode-toggle]");
   if (!toggle) return;
   e.preventDefault();
@@ -269,10 +286,11 @@ const KanbanSortable = {
       try {
         const sortable = new window.Sortable(column, {
           group: "kanban",
+          draggable: "[data-kanban-card]",
           ghostClass: "opacity-30",
           dragClass: "rotate-2",
           animation: 150,
-          filter: "a, button, input, textarea, select, [data-no-drag]",
+          filter: "button, input, textarea, select, details, [data-no-drag]",
           preventOnFilter: false,
           onStart(evt) {
             evt.item.classList.add("kanban-card-dragging");

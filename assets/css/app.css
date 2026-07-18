@@ -337,6 +337,26 @@ html[data-ui-mode="simple"] [data-ui-complex-page]:not([data-density="detailed"]
   color: var(--color-ink);
 }
 
+.ui-mode-option {
+  color: var(--color-text-quaternary);
+}
+
+.ui-mode-option:hover {
+  color: var(--color-text-secondary);
+}
+
+.ui-mode-option[data-active="true"] {
+  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-2));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 35%, var(--color-border)),
+    0 1px 4px rgba(0, 0, 0, 0.18);
+  color: var(--color-ink);
+}
+
+.ui-mode-option[data-active="true"] [data-ui-mode-option-icon] {
+  color: var(--color-primary);
+}
+
 .ui-simple-icon {
   display: inline-flex;
   width: 32px;
