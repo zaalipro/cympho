@@ -322,6 +322,44 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ "Blocked awaiting owner decision"
       assert html =~ ~s(href="/issues/#{blocked_issue.id}")
     end
+
+    test "all feed renders and counts human-action issues once", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Blocked Work Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, blocked_issue} =
+        Issues.create_issue(%{
+          title: "Production access needs owner",
+          description: "The owner must unblock this work.",
+          status: :blocked,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: agent.id,
+          assignee_user_id: user.id
+        })
+
+      {:ok, _entry} = Inbox.ensure_inbox_entry(blocked_issue.id, agent.id)
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, _view, html} = live(conn, "/inbox")
+
+      document = Floki.parse_document!(html)
+
+      matching_rows =
+        document
+        |> Floki.find("#inbox-list > div[id^='inbox_items-']")
+        |> Enum.filter(fn row -> Floki.text(row) =~ "Production access needs owner" end)
+
+      assert length(matching_rows) == 1
+      assert html =~ ~r/<span>All<\/span>\s*<span[^>]*>\s*1\s*<\/span>/
+    end
   end
 
   describe "bulk triage" do

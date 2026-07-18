@@ -245,10 +245,11 @@ defmodule CymphoWeb.InboxLive.Index do
   # Update just the affected row instead of resetting the whole stream (which
   # discards scrolled-in pages and the scroll position). Recompute counts, then
   # keep the row (in place, or prepended for new items) when its status still
-  # matches the active filter, otherwise drop it. The bounded "review" feed is
-  # wake-driven, so fall back to a full reload there.
+  # matches the active filter, otherwise drop it. The unified "all" feed and
+  # bounded "review" feed include pseudo-items, so reload them to preserve
+  # ordering and issue-level deduplication.
   defp apply_inbox_change(socket, updated, opts \\ []) do
-    if socket.assigns[:current_status] == "review" do
+    if socket.assigns[:current_status] in [nil, "review"] do
       load_inbox(socket)
     else
       socket = assign_inbox_counts(socket)
@@ -321,17 +322,24 @@ defmodule CymphoWeb.InboxLive.Index do
   end
 
   defp load_inbox(socket) do
+    all_items = build_all_inbox_items(socket)
+
     socket
-    |> assign_inbox_counts()
-    |> reset_stream(:inbox_items, &fetch_inbox(socket, &1))
+    |> assign_inbox_counts(length(all_items))
+    |> reset_stream(:inbox_items, &fetch_inbox(socket, &1, all_items))
   end
 
-  defp fetch_inbox(socket, cursor) do
+  defp fetch_inbox(socket, cursor), do: fetch_inbox(socket, cursor, nil)
+
+  defp fetch_inbox(socket, cursor, all_items) do
     agent_id = socket.assigns[:selected_agent_id]
     status = socket.assigns[:current_status]
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
     cond do
+      is_nil(status) ->
+        capped_page(all_items || build_all_inbox_items(socket))
+
       status == "review" ->
         capped_page(build_review_queue_items(agent_id, company_id))
 
@@ -356,7 +364,7 @@ defmodule CymphoWeb.InboxLive.Index do
     %Cympho.Pagination.Page{entries: items, next_cursor: nil, has_more?: false}
   end
 
-  defp assign_inbox_counts(socket) do
+  defp assign_inbox_counts(socket, all_count \\ nil) do
     agent_id = socket.assigns[:selected_agent_id]
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
@@ -371,6 +379,7 @@ defmodule CymphoWeb.InboxLive.Index do
       counts
       |> Map.put("review", review_queue_count(agent_id, company_id))
       |> Map.put("action", human_action_count(socket))
+      |> Map.put("all", all_count || length(build_all_inbox_items(socket)))
 
     agent_counts = if company_id, do: Inbox.counts_by_agent_for_company(company_id), else: %{}
 
@@ -699,6 +708,34 @@ defmodule CymphoWeb.InboxLive.Index do
     |> List.first()
   end
 
+  defp build_all_inbox_items(socket) do
+    agent_id = socket.assigns[:selected_agent_id]
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+
+    persisted_items =
+      cond do
+        agent_id == "all" and company_id ->
+          Inbox.list_recent_for_company(company_id, limit: 100)
+
+        agent_id in [nil, "", "all"] ->
+          []
+
+        true ->
+          Inbox.list_inbox_for_agent(agent_id, limit: 100)
+      end
+
+    (build_human_action_items(socket) ++
+       build_review_queue_items(agent_id, company_id) ++ persisted_items)
+    |> Enum.uniq_by(& &1.issue_id)
+    |> Enum.sort_by(&inbox_item_timestamp/1, :desc)
+  end
+
+  defp inbox_item_timestamp(%{inserted_at: %DateTime{} = timestamp}) do
+    DateTime.to_unix(timestamp, :microsecond)
+  end
+
+  defp inbox_item_timestamp(_item), do: 0
+
   defp review_nudge_items(socket) do
     socket
     |> preview_items_for_command()
@@ -905,9 +942,15 @@ defmodule CymphoWeb.InboxLive.Index do
   defp count_for(counts, status), do: Map.get(counts, status, 0)
 
   defp total_count(counts) do
-    @statuses
-    |> Enum.map(&count_for(counts, &1))
-    |> Enum.sum()
+    case Map.fetch(counts, "all") do
+      {:ok, count} ->
+        count
+
+      :error ->
+        @statuses
+        |> Enum.map(&count_for(counts, &1))
+        |> Enum.sum()
+    end
   end
 
   defp agent_option_label(agent, agent_counts) do

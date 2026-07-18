@@ -1473,7 +1473,6 @@ defmodule Mix.Tasks.Cympho.Compare do
 
   def check_keyboard_first_view_modes do
     components_source = source_for(CymphoWeb.Components)
-    user_menu_source = source_for(CymphoWeb.Components.UserMenu)
 
     layout_source =
       File.read!(Path.join([File.cwd!(), "lib/cympho_web/controllers/layouts/root.html.heex"]))
@@ -1485,7 +1484,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(components_source, "data-density-option=\"compact\""),
       String.contains?(components_source, "data-density-option=\"detailed\""),
       String.contains?(components_source, "aria-pressed={to_string(@density == \"compact\")}"),
-      String.contains?(user_menu_source, "data-ui-mode-toggle"),
+      String.contains?(layout_source, "data-sidebar-ui-mode-toggle"),
       String.contains?(layout_source, "id=\"shortcuts-modal\""),
       String.contains?(layout_source, ">U</kbd>"),
       String.contains?(layout_source, ">V</kbd>"),

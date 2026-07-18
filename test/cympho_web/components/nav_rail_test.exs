@@ -39,6 +39,17 @@ defmodule CymphoWeb.Components.NavRailTest do
     refute html =~ "All agents"
   end
 
+  test "agent shortcuts stay visible in simple mode" do
+    html = render_rail(projects: [project(1)], agents: [agent(1)])
+    document = Floki.parse_document!(html)
+
+    [agent_section] = Floki.find(document, "[data-nav-section='agents']")
+    [project_section] = Floki.find(document, "[data-nav-section='projects']")
+
+    refute Floki.attribute(agent_section, "class") |> Enum.join(" ") =~ "ui-advanced-only"
+    assert Floki.attribute(project_section, "class") |> Enum.join(" ") =~ "ui-advanced-only"
+  end
+
   test "renders a stable inbox badge id when unread count is present" do
     html = render_rail(inbox_count: 7)
 

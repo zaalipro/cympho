@@ -166,23 +166,6 @@ defmodule CymphoWeb.Components.UserMenu do
             <span class="flex-1 text-left">Keyboard shortcuts</span>
             <kbd class="kbd">?</kbd>
           </button>
-          <button
-            type="button"
-            data-ui-mode-toggle
-            aria-label="Toggle simple and advanced view with U"
-            title="Toggle simple and advanced view with U"
-            aria-pressed="false"
-            class={menu_row_class(false)}
-            role="menuitem"
-          >
-            <span
-              data-ui-mode-icon
-              class="hero-squares-2x2-mini h-4 w-4 text-text-tertiary group-hover:text-text-primary"
-            >
-            </span>
-            <span class="flex-1 text-left">Interface</span>
-            <span data-ui-mode-label class="text-xs text-text-quaternary">Simple</span>
-          </button>
           <.menu_link
             to={~p"/settings/profile"}
             icon="hero-cog-6-tooth-mini"

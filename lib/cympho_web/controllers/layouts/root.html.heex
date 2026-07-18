@@ -71,6 +71,23 @@
         />
         <!-- Bottom user pill -->
         <div class="border-t border-border px-2 py-2">
+          <button
+            type="button"
+            data-ui-mode-toggle
+            data-sidebar-ui-mode-toggle
+            aria-label="Toggle simple and advanced view with U"
+            title="Toggle simple and advanced view with U"
+            aria-pressed="false"
+            class="mb-1 flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-[12px] text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+          >
+            <span
+              data-ui-mode-icon
+              class="hero-squares-2x2-mini h-4 w-4 shrink-0 text-text-tertiary"
+            >
+            </span>
+            <span class="flex-1 text-left">Interface</span>
+            <span data-ui-mode-label class="text-xs text-text-quaternary">Simple</span>
+          </button>
           <.user_menu user={assigns[:current_user]} current_path={@conn.request_path} />
           <button
             type="button"

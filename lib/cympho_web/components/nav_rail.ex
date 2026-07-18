@@ -7,7 +7,7 @@ defmodule CymphoWeb.Components.NavRail do
     2. Owner navigation — Home, Board, Inbox, Projects, Team, Settings
     3. Advanced work    — Issues, Reviews, Operations, Goals, Routines
     4. PROJECTS         — recent project rows, advanced only
-    5. AGENTS           — recent agent rows, advanced only
+    5. AGENTS           — recent agent rows, visible in both modes
 
     Settings (gear) pins to the top group. The "More" overflow (Org /
     Costs / Activity / Workspaces / Plugins / Skills / Tool
@@ -163,7 +163,6 @@ defmodule CymphoWeb.Components.NavRail do
         label="Agents"
         action_to={~p"/agents/new"}
         action_label="New agent"
-        advanced_only
       >
         <.agent_row
           :for={agent <- @visible_agents}
