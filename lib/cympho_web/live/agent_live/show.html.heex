@@ -603,6 +603,7 @@
             />
             <button
               type="submit"
+              aria-label="Add new file"
               title="Add new file"
               class="rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
             >
@@ -658,7 +659,8 @@
               phx-click="delete_file"
               phx-value-file={file}
               data-confirm={"Delete #{file}?"}
-              title="Delete"
+              aria-label={"Delete #{file}"}
+              title={"Delete #{file}"}
               class="hidden rounded p-1 text-text-quaternary hover:text-red-300 group-hover:block"
             >
               <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2168,7 +2170,8 @@
                 phx-click="remove_env_row"
                 phx-value-index={idx}
                 class="shrink-0 rounded-lg border border-border bg-surface p-2 text-text-quaternary hover:bg-red-500/10 hover:text-red-300"
-                title="Remove"
+                aria-label="Remove environment variable"
+                title="Remove environment variable"
               >
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path

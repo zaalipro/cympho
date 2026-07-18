@@ -59,6 +59,7 @@ defmodule CymphoWeb.IssueLive.Show.Header do
           phx-value-field="title"
           class="shrink-0 opacity-0 group-hover:opacity-100 text-ink-tertiary hover:text-ink-muted transition-all"
           aria-label="Edit title"
+          title="Edit title"
         >
           <.icon name="hero-pencil-mini" class="w-4 h-4" />
         </button>

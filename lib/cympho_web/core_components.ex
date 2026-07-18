@@ -25,6 +25,7 @@ defmodule CymphoWeb.CoreComponents do
           type="button"
           phx-click={@on_cancel}
           aria-label="Close"
+          title="Close"
           class="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-text-quaternary transition-colors duration-150 hover:bg-surface-hover hover:text-text-primary"
         >
           <.icon name="hero-x-mark-mini" class="h-4 w-4" />

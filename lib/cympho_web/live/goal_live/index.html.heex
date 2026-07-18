@@ -453,6 +453,7 @@
               <.app_link
                 navigate={~p"/goals/#{goal.id}/edit"}
                 aria-label={"Edit #{goal.title}"}
+                title={"Edit #{goal.title}"}
                 class="inline-flex items-center justify-center rounded-lg border border-transparent p-1.5 text-text-quaternary transition-colors hover:border-border hover:bg-surface hover:text-text-secondary"
               >
                 <.icon name="hero-pencil-square-mini" class="h-3.5 w-3.5" />
@@ -460,6 +461,7 @@
               <button
                 type="button"
                 aria-label={"Delete #{goal.title}"}
+                title={"Delete #{goal.title}"}
                 class="inline-flex items-center justify-center rounded-lg border border-transparent p-1.5 text-text-quaternary transition-colors hover:border-red-500/25 hover:bg-red-500/10 hover:text-red-300"
                 phx-click="delete_goal"
                 phx-value-id={goal.id}

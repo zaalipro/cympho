@@ -57,6 +57,7 @@ defmodule CymphoWeb.DocumentRevisionsLive do
         phx-click={@on_close}
         class="text-text-quaternary hover:text-text-secondary transition-colors"
         aria-label="Close"
+        title="Close"
       >
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path

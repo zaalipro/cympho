@@ -403,6 +403,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
             data-swarm-edit-row
             class="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
             aria-label="Edit swarm runtime choice"
+            title="Edit swarm runtime choice"
           >
             <.icon name="hero-pencil-square-mini" class="h-4 w-4" />
           </button>
@@ -411,6 +412,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
             data-swarm-remove-row
             class="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
             aria-label="Remove swarm runtime choice"
+            title="Remove swarm runtime choice"
           >
             <.icon name="hero-x-mark-mini" class="h-4 w-4" />
           </button>

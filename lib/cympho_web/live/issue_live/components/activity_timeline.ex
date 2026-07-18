@@ -198,6 +198,8 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
                   phx-click="delete_comment"
                   phx-value-id={entry.data.id}
                   data-confirm="Delete this comment?"
+                  aria-label="Delete comment"
+                  title="Delete comment"
                 >
                   <.icon name="hero-x-mark" class="h-3 w-3" />
                 </button>

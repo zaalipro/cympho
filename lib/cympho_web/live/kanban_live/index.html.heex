@@ -244,6 +244,8 @@
               type="button"
               phx-click="clear_filters"
               class="absolute right-2 top-1/2 -translate-y-1/2 text-text-quaternary hover:text-text-secondary p-1"
+              aria-label="Clear filters"
+              title="Clear filters"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -383,6 +385,7 @@
                         phx-click="toggle_column"
                         phx-value-status={status}
                         class="hidden lg:block text-text-quaternary hover:text-text-secondary transition-colors"
+                        aria-label="Collapse column"
                         title="Collapse column"
                       >
                         <svg

@@ -53,6 +53,7 @@ defmodule CymphoWeb.IssueLive.Show.Description do
             phx-value-field="description"
             class="shrink-0 opacity-0 group-hover:opacity-100 text-ink-tertiary hover:text-ink-muted transition-all"
             aria-label="Edit description"
+            title="Edit description"
           >
             <.icon name="hero-pencil-mini" class="w-4 h-4" />
           </button>

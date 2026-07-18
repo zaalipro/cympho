@@ -815,6 +815,8 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                     type="button"
                     class="p-1 hover:bg-surface-hover rounded"
                     phx-click="close_trace_details"
+                    aria-label="Close trace details"
+                    title="Close trace details"
                   >
                     <svg
                       class="w-5 h-5 text-text-secondary"
