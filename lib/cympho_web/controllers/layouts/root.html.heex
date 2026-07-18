@@ -57,15 +57,17 @@
         data-mobile-drawer
       >
         <div id="sidebar-resize-handle" aria-hidden="true"></div>
-        <.company_rail company={assigns[:current_company]} />
+        <.company_rail
+          company={assigns[:current_company]}
+          current_path={@conn.request_path}
+          runtime_controls_allowed={assigns[:runtime_controls_allowed] || false}
+        />
         <.nav_rail
           current_path={@conn.request_path}
           projects={assigns[:nav_projects] || []}
           agents={assigns[:nav_agents] || []}
           inbox_count={assigns[:nav_inbox_count] || 0}
           approval_count={assigns[:nav_approval_count] || 0}
-          current_company={assigns[:current_company]}
-          runtime_controls_allowed={assigns[:runtime_controls_allowed] || false}
         />
         <!-- Bottom user pill -->
         <div class="border-t border-border px-2 py-2">
@@ -74,11 +76,12 @@
             type="button"
             id="sidebar-collapse-btn"
             data-sidebar-collapse
-            class="mt-1 hidden w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-510 text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-secondary lg:flex"
+            aria-label="Collapse sidebar"
+            class="mt-1 hidden h-8 w-full items-center justify-center rounded-lg text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-secondary lg:flex"
             title="Collapse sidebar"
           >
             <.icon name="hero-chevron-double-left-mini" class="h-3.5 w-3.5" />
-            <span>Collapse</span>
+            <span class="sr-only">Collapse sidebar</span>
           </button>
         </div>
       </aside>
@@ -225,225 +228,17 @@
             />
           </svg>
         </button>
-        <div class="flex items-center gap-1">
-          <button
-            type="button"
-            data-ui-mode-toggle
-            title="Toggle simple and advanced view with U"
-            aria-label="Toggle simple and advanced view with U"
-            class="ui-mode-toggle flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface-2 text-white transition-colors hover:bg-surface-hover"
-          >
-            <span data-ui-mode-icon class="hero-squares-2x2-mini h-4 w-4"></span>
-            <span class="sr-only" data-ui-mode-label>Simple</span>
-          </button>
-          <form
-            :if={
-              assigns[:runtime_controls_allowed] && assigns[:current_company] &&
-                Map.get(assigns[:current_company] || %{}, :status) != "paused"
-            }
-            method="post"
-            action={~p"/runtime-control/pause"}
-          >
-            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-            <input type="hidden" name="return_to" value={@conn.request_path} />
-            <button
-              type="submit"
-              title="Pause runtime and preserve queued wakes"
-              aria-label="Pause runtime and preserve queued wakes"
-              data-confirm="Pause your agents? Queued work is saved for later."
-              class="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface-2 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
-            >
-              <span class="hero-pause-mini h-4 w-4"></span>
-            </button>
-          </form>
-          <form
-            :if={
-              assigns[:runtime_controls_allowed] && assigns[:current_company] &&
-                Map.get(assigns[:current_company] || %{}, :status) == "paused"
-            }
-            method="post"
-            action={~p"/runtime-control/resume"}
-          >
-            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-            <input type="hidden" name="return_to" value={@conn.request_path} />
-            <button
-              type="submit"
-              title="Resume runtime"
-              aria-label="Resume runtime"
-              class="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface-2 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
-            >
-              <span class="hero-play-mini h-4 w-4"></span>
-            </button>
-          </form>
-          <form
-            :if={assigns[:runtime_controls_allowed] && assigns[:current_company]}
-            method="post"
-            action={~p"/runtime-control/stop"}
-          >
-            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-            <input type="hidden" name="return_to" value={@conn.request_path} />
-            <button
-              type="submit"
-              title="Stop runtime and cancel queued wakes"
-              aria-label="Stop runtime and cancel queued wakes"
-              data-confirm="Stop your agents and clear the queue?"
-              class="flex h-9 w-9 items-center justify-center rounded-lg border border-red-500/25 bg-red-500/10 text-red-300 hover:bg-red-500/15 hover:text-red-200 transition-colors"
-            >
-              <span class="hero-stop-mini h-4 w-4"></span>
-            </button>
-          </form>
-        </div>
-      </header>
-
-      <% runtime_topbar_company = assigns[:current_company]
-
-      runtime_topbar_allowed? =
-        assigns[:runtime_controls_allowed] && runtime_topbar_company
-
-      runtime_topbar_paused? =
-        Map.get(runtime_topbar_company || %{}, :status) == "paused"
-
-      runtime_topbar_low_power? =
-        Map.get(Map.get(runtime_topbar_company || %{}, :governance_config) || %{}, "runtime_mode") ==
-          "low_power"
-
-      runtime_topbar_label =
-        cond do
-          runtime_topbar_paused? -> "Paused"
-          runtime_topbar_low_power? -> "Low power"
-          true -> "Full power"
-        end
-
-      runtime_topbar_status_class =
-        cond do
-          runtime_topbar_paused? -> "border-amber-500/30 bg-amber-500/10 text-amber-200"
-          runtime_topbar_low_power? -> "border-sky-500/30 bg-sky-500/10 text-sky-200"
-          true -> "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
-        end %>
-
-      <header
-        :if={runtime_topbar_allowed?}
-        id="runtime-topbar"
-        data-testid="desktop-runtime-topbar"
-        class="fixed left-0 lg:left-[var(--sidebar-w)] right-0 top-0 z-30 hidden h-14 items-center justify-between border-b border-hairline bg-surface-1/95 px-4 backdrop-blur lg:flex"
-      >
-        <div class="flex min-w-0 items-center gap-2.5">
-          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 text-white">
-            <span class="hero-bolt-mini h-4 w-4"></span>
-          </span>
-          <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-tertiary">
-                Runtime
-              </span>
-              <span
-                data-testid="desktop-runtime-status"
-                class={"rounded-full border px-2 py-0.5 text-[10px] font-590 #{runtime_topbar_status_class}"}
-              >
-                {runtime_topbar_label}
-              </span>
-            </div>
-            <p class="mt-0.5 truncate text-xs text-text-quaternary">
-              {runtime_topbar_company.name}
-            </p>
-          </div>
-        </div>
-
-        <div class="flex items-center gap-1.5">
-          <form
-            :if={!runtime_topbar_paused? && !runtime_topbar_low_power?}
-            method="post"
-            action={~p"/runtime-control/low-power"}
-          >
-            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-            <input type="hidden" name="return_to" value={@conn.request_path} />
-            <button
-              type="submit"
-              data-testid="desktop-runtime-low-power"
-              title="Switch runtime to low power"
-              aria-label="Switch runtime to low power"
-              data-confirm="Switch to low power? Only urgent work keeps running."
-              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-590 text-white transition-colors hover:bg-surface-hover"
-            >
-              <span class="hero-moon-mini h-4 w-4"></span> Low
-            </button>
-          </form>
-          <form
-            :if={!runtime_topbar_paused? && runtime_topbar_low_power?}
-            method="post"
-            action={~p"/runtime-control/resume"}
-          >
-            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-            <input type="hidden" name="return_to" value={@conn.request_path} />
-            <button
-              type="submit"
-              data-testid="desktop-runtime-full-power"
-              title="Resume full power runtime"
-              aria-label="Resume full power runtime"
-              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-590 text-white transition-colors hover:bg-surface-hover"
-            >
-              <span class="hero-bolt-mini h-4 w-4"></span> Full
-            </button>
-          </form>
-          <form
-            :if={!runtime_topbar_paused?}
-            method="post"
-            action={~p"/runtime-control/pause"}
-          >
-            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-            <input type="hidden" name="return_to" value={@conn.request_path} />
-            <button
-              type="submit"
-              data-testid="desktop-runtime-pause"
-              title="Pause runtime and preserve queued wakes"
-              aria-label="Pause runtime and preserve queued wakes"
-              data-confirm="Pause your agents? Queued work is saved for later."
-              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-590 text-white transition-colors hover:bg-surface-hover"
-            >
-              <span class="hero-pause-mini h-4 w-4"></span> Pause
-            </button>
-          </form>
-          <form
-            :if={runtime_topbar_paused?}
-            method="post"
-            action={~p"/runtime-control/resume"}
-          >
-            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-            <input type="hidden" name="return_to" value={@conn.request_path} />
-            <button
-              type="submit"
-              data-testid="desktop-runtime-resume"
-              title="Resume runtime"
-              aria-label="Resume runtime"
-              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-590 text-white transition-colors hover:bg-surface-hover"
-            >
-              <span class="hero-play-mini h-4 w-4"></span> Resume
-            </button>
-          </form>
-          <form method="post" action={~p"/runtime-control/stop"}>
-            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-            <input type="hidden" name="return_to" value={@conn.request_path} />
-            <button
-              type="submit"
-              data-testid="desktop-runtime-stop"
-              title="Stop runtime and cancel queued wakes"
-              aria-label="Stop runtime and cancel queued wakes"
-              data-confirm="Stop your agents and clear the queue?"
-              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-red-500/25 bg-red-500/10 px-2.5 text-xs font-590 text-red-200 transition-colors hover:bg-red-500/15"
-            >
-              <span class="hero-stop-mini h-4 w-4"></span> Stop
-            </button>
-          </form>
-        </div>
+        <.runtime_control_menu
+          :if={assigns[:runtime_controls_allowed] && assigns[:current_company]}
+          company={assigns[:current_company]}
+          current_path={@conn.request_path}
+        />
       </header>
       
 <!-- Main content -->
       <main
         id="main-content"
-        class={[
-          "cympho-ambient h-screen flex-1 min-w-0 overflow-x-hidden overflow-y-auto lg:ml-[var(--sidebar-w)] pt-16 pb-16 lg:pb-0",
-          if(runtime_topbar_allowed?, do: "lg:pt-14", else: "lg:pt-0")
-        ]}
+        class="cympho-ambient h-screen flex-1 min-w-0 overflow-x-hidden overflow-y-auto lg:ml-[var(--sidebar-w)] pt-16 pb-16 lg:pb-0 lg:pt-0"
       >
         <div class="page-enter relative z-[1]">
           {@inner_content}
@@ -473,21 +268,6 @@
           <span class="text-[10px] font-510">Home</span>
         </a>
         <a
-          href="/issues"
-          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
-          data-mobile-nav-path="/issues"
-        >
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-            />
-          </svg>
-          <span class="text-[10px] font-510">Issues</span>
-        </a>
-        <a
           href="/kanban"
           class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
           data-mobile-nav-path="/kanban"
@@ -502,21 +282,17 @@
           </svg>
           <span class="text-[10px] font-510">Board</span>
         </a>
-        <a
-          href="/agents"
-          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
-          data-mobile-nav-path="/agents"
+        <button
+          type="button"
+          data-quick-create-trigger
+          class="mobile-nav-item flex min-h-[44px] min-w-[48px] flex-col items-center justify-center gap-0.5 px-3 py-1.5 text-brand transition-colors"
+          aria-label="New issue"
         >
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.131A8 8 0 008 3.239c-4.828 4.596-5.212 11.611-.647 16.656A21.866 21.866 0 0012 21.942a21.866 21.866 0 003.99-.385M19.337 17.81a15.79 15.79 0 01-2.326 1.575"
-            />
-          </svg>
-          <span class="text-[10px] font-510">Agents</span>
-        </a>
+          <span class="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-on-primary shadow-card">
+            <span class="hero-plus-mini h-4 w-4"></span>
+          </span>
+          <span class="text-[10px] font-590">New</span>
+        </button>
         <a
           href="/inbox"
           class="mobile-nav-item relative flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
@@ -537,6 +313,21 @@
           >
             {min(assigns[:inbox_badge_count] || 0, 99)}
           </span>
+        </a>
+        <a
+          href="/agents"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
+          data-mobile-nav-path="/agents"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.131A8 8 0 008 3.239c-4.828 4.596-5.212 11.611-.647 16.656A21.866 21.866 0 0012 21.942a21.866 21.866 0 003.99-.385M19.337 17.81a15.79 15.79 0 01-2.326 1.575"
+            />
+          </svg>
+          <span class="text-[10px] font-510">Team</span>
         </a>
       </div>
     </nav>

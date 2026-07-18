@@ -70,11 +70,11 @@ defmodule CymphoWeb.DashboardLiveTest do
     test "renders the simple-mode home glance", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      # The calm simple-mode block (shown via CSS when data-ui-mode=simple).
-      assert html =~ "Your work"
-      assert html =~ "Needs you"
-      assert html =~ "Your team"
-      assert html =~ "New request"
+      assert html =~ "Today"
+      assert html =~ "What should the team do?"
+      assert html =~ "Active"
+      assert html =~ "Waiting"
+      assert html =~ "Agents"
     end
 
     test "renders dashboard with metric cards", %{conn: conn} do
@@ -111,15 +111,14 @@ defmodule CymphoWeb.DashboardLiveTest do
       {:ok, _view, html} = live(conn, "/dashboard")
 
       assert html =~ ~s(data-testid="runtime-controls")
-      assert html =~ ~s(data-testid="desktop-runtime-topbar")
-      assert html =~ ~s(data-testid="desktop-runtime-status")
+      assert html =~ ~s(data-testid="runtime-status-trigger")
       assert html =~ "Full power"
       assert html =~ "Pause"
       assert html =~ "Stop"
-      assert html =~ ~s(data-testid="desktop-runtime-pause")
-      assert html =~ ~s(data-testid="desktop-runtime-stop")
       assert html =~ ~s(action="/runtime-control/pause")
       assert html =~ ~s(action="/runtime-control/stop")
+      assert html =~ ~s(data-runtime-menu-close)
+      refute html =~ ~s(data-testid="desktop-runtime-topbar")
       assert html =~ ~s(id="sidebar")
       assert html =~ ~s(data-mobile-drawer)
       assert html =~ ~s(aria-controls="sidebar")
@@ -138,11 +137,10 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ ~s(data-testid="desktop-runtime-topbar")
-      assert html =~ "Paused"
-      assert html =~ ~s(data-testid="desktop-runtime-resume")
+      assert html =~ ~s(title="Runtime: Paused")
+      assert html =~ "Resume"
       assert html =~ ~s(action="/runtime-control/resume")
-      refute html =~ ~s(data-testid="desktop-runtime-pause")
+      refute html =~ ~s(action="/runtime-control/pause")
     end
 
     test "low power company shell topbar offers full power instead of low power" do
@@ -151,11 +149,10 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ ~s(data-testid="desktop-runtime-topbar")
-      assert html =~ "Low power"
-      assert html =~ ~s(data-testid="desktop-runtime-full-power")
+      assert html =~ ~s(title="Runtime: Low power")
+      assert html =~ "Full power"
       assert html =~ ~s(action="/runtime-control/resume")
-      refute html =~ ~s(data-testid="desktop-runtime-low-power")
+      refute html =~ ~s(action="/runtime-control/low-power")
     end
 
     test "renders spend posture and budget next action", %{

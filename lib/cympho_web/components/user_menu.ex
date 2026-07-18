@@ -79,7 +79,7 @@ defmodule CymphoWeb.Components.UserMenu do
           />
         </div>
 
-        <div class="py-1">
+        <div class="ui-advanced-only py-1">
           <p class="px-3 pt-1.5 pb-0.5 font-serif text-[12px] font-510 italic tracking-[0.02em] text-brand/80">
             More
           </p>
@@ -158,13 +158,30 @@ defmodule CymphoWeb.Components.UserMenu do
           <button
             type="button"
             data-action="open-shortcuts"
-            class={menu_row_class(false)}
+            class={[menu_row_class(false), "ui-advanced-only"]}
             role="menuitem"
           >
             <span class="hero-command-line-mini w-4 h-4 text-text-tertiary group-hover:text-text-primary">
             </span>
             <span class="flex-1 text-left">Keyboard shortcuts</span>
             <kbd class="kbd">?</kbd>
+          </button>
+          <button
+            type="button"
+            data-ui-mode-toggle
+            aria-label="Toggle simple and advanced view with U"
+            title="Toggle simple and advanced view with U"
+            aria-pressed="false"
+            class={menu_row_class(false)}
+            role="menuitem"
+          >
+            <span
+              data-ui-mode-icon
+              class="hero-squares-2x2-mini h-4 w-4 text-text-tertiary group-hover:text-text-primary"
+            >
+            </span>
+            <span class="flex-1 text-left">Interface</span>
+            <span data-ui-mode-label class="text-xs text-text-quaternary">Simple</span>
           </button>
           <.menu_link
             to={~p"/settings/profile"}

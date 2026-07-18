@@ -604,7 +604,7 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "Show all delegated work"
       assert html =~ ~s(data-testid="operations-simple-action-queue")
       assert html =~ ~s(data-testid="operations-simple-action-delegated")
-      assert html =~ "Action queue"
+      assert html =~ "Queue"
       assert html =~ "2 runnable delegated items"
       assert html =~ "Focus queue"
       assert html =~ "Run delegated CEO work"

@@ -979,38 +979,14 @@ defmodule CymphoWeb.InboxLive.Index do
   defp kind_chip_class(:unread), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
   defp kind_chip_class(_), do: "border-border bg-surface text-text-tertiary"
 
-  defp empty_state_heading(nil), do: "Inbox zero"
+  defp empty_state_heading(nil), do: "You're caught up"
   defp empty_state_heading("action"), do: "Nothing needs you"
-  defp empty_state_heading("unread"), do: "All caught up"
+  defp empty_state_heading("unread"), do: "You're caught up"
   defp empty_state_heading("review"), do: "Review queue is clear"
   defp empty_state_heading("read"), do: "Nothing read yet"
   defp empty_state_heading("dismissed"), do: "Nothing set aside"
   defp empty_state_heading("archived"), do: "Archive is empty"
-  defp empty_state_heading(_), do: "Inbox zero"
-
-  defp empty_state_detail(nil) do
-    "Nothing needs you here right now. Updates from your agents will land here as they work."
-  end
-
-  defp empty_state_detail("action"),
-    do: "No issues are waiting on your decision. Agents keep moving on their own from here."
-
-  defp empty_state_detail("unread"),
-    do: "Every handoff has been read. New agent handoffs land here first."
-
-  defp empty_state_detail("review"),
-    do: "No deliveries are waiting on your approve-or-request-changes call."
-
-  defp empty_state_detail("read"),
-    do: "Items you have read stay here until you dismiss or archive them."
-
-  defp empty_state_detail("dismissed"),
-    do: "Dismissed items wait here in case you want them back."
-
-  defp empty_state_detail("archived"),
-    do: "Archived items are kept here for reference."
-
-  defp empty_state_detail(_), do: empty_state_detail(nil)
+  defp empty_state_heading(_), do: "You're caught up"
 
   defp status_tab_class(current, status) do
     if current == status do

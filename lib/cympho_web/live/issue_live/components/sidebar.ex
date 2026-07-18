@@ -216,29 +216,27 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             <div class="flex items-center justify-between gap-3">
               <div class="min-w-0">
                 <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-tertiary">
-                  Agents on this issue
+                  Agents
                 </p>
-                <p class="mt-0.5 text-caption text-ink-muted">
+                <p class="ui-advanced-only mt-0.5 text-caption text-ink-muted">
                   {issue_runtime_control_detail(@issue)}
                 </p>
               </div>
-              <button
+              <.icon_action
                 :if={Cympho.Issues.issue_runtime_paused?(@issue)}
-                type="button"
                 phx-click="resume_issue_runtime"
-                class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-emerald-400/30 bg-emerald-400/10 px-2.5 text-xs font-590 text-emerald-100 transition hover:bg-emerald-400/15"
-              >
-                <.icon name="hero-play-mini" class="h-3.5 w-3.5 text-white" /> Resume
-              </button>
-              <button
+                icon="hero-play-mini"
+                label="Resume agents"
+                class="h-8 w-8 border-emerald-400/30 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/15"
+              />
+              <.icon_action
                 :if={!Cympho.Issues.issue_runtime_paused?(@issue)}
-                type="button"
                 phx-click="pause_issue_runtime"
                 data-confirm="Pause this issue? Any running work on it stops, and nothing new starts until you resume."
-                class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-amber-400/30 bg-amber-400/10 px-2.5 text-xs font-590 text-amber-100 transition hover:bg-amber-400/15"
-              >
-                <.icon name="hero-pause-mini" class="h-3.5 w-3.5 text-white" /> Pause
-              </button>
+                icon="hero-pause-mini"
+                label="Pause agents"
+                class="h-8 w-8 border-amber-400/30 bg-amber-400/10 text-amber-100 hover:bg-amber-400/15"
+              />
             </div>
           </div>
 

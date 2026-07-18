@@ -12,7 +12,7 @@ defmodule CymphoWeb.SettingsLive.Index do
 
         {:ok,
          socket
-         |> assign(:page_title, "Notification Settings")
+         |> assign(:page_title, "Notifications")
          |> assign(:user, user)
          |> assign(:prefs, prefs)
          |> assign(:user_id, user.id)
@@ -37,11 +37,11 @@ defmodule CymphoWeb.SettingsLive.Index do
   end
 
   defp apply_action(socket, :index, _params) do
-    assign(socket, :page_title, "Notification Settings")
+    assign(socket, :page_title, "Notifications")
   end
 
   defp apply_action(socket, nil, _params) do
-    assign(socket, :page_title, "Notification Settings")
+    assign(socket, :page_title, "Notifications")
   end
 
   @impl true
@@ -210,7 +210,7 @@ defmodule CymphoWeb.SettingsLive.Index do
     users = Users.list_users()
 
     socket
-    |> assign(:page_title, "Notification Settings")
+    |> assign(:page_title, "Notifications")
     |> assign(:user, nil)
     |> assign(:user_id, nil)
     |> assign(:users, users)

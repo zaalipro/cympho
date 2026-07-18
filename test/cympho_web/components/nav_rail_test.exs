@@ -22,23 +22,21 @@ defmodule CymphoWeb.Components.NavRailTest do
     assert html =~ "data-nav-body"
   end
 
-  test "9 agents (cap 8) renders 1 overflow row + a Show-1-more button, not a link" do
+  test "agent section is capped and links to the complete team" do
     html = render_rail(agents: Enum.map(1..9, &agent/1))
-    # all 9 rows present
-    assert html =~ "Engineer 9"
-    # exactly one overflow row (hidden until revealed)
-    assert length(String.split(html, "data-nav-overflow")) - 1 == 1
-    # inline reveal button (not a navigate link to /agents)
-    assert html =~ ~s(data-nav-show-more="agents")
-    assert html =~ "Show 1 more…"
-    assert html =~ "Show less"
-    refute html =~ ~s(navigate="/agents")
+
+    assert html =~ "Engineer 5"
+    refute html =~ "Engineer 6"
+    refute html =~ "Engineer 9"
+    assert html =~ "All agents"
+    assert html =~ ~s(href="/agents")
+    assert html =~ ">9<"
   end
 
-  test "no overflow → no Show-more button" do
+  test "no overflow omits the all-agents row" do
     html = render_rail(agents: Enum.map(1..3, &agent/1))
-    refute html =~ "data-nav-show-more"
-    refute html =~ "data-nav-overflow"
+
+    refute html =~ "All agents"
   end
 
   test "renders a stable inbox badge id when unread count is present" do
@@ -56,65 +54,24 @@ defmodule CymphoWeb.Components.NavRailTest do
     assert html =~ ~r/<span[^>]*data-testid="nav-badge-approvals"[^>]*>\s*3\s*<\/span>/s
   end
 
-  test "renders the simple and advanced mode switcher" do
+  test "keeps mode switching out of the navigation rail" do
     html = render_rail([])
 
-    assert html =~ ~s(data-ui-mode-toggle)
-    assert html =~ ~s(title="Toggle simple and advanced view with U")
-    assert html =~ ~s(aria-label="Toggle simple and advanced view with U")
-    assert html =~ "Simple"
-    assert html =~ "hero-squares-2x2-mini"
+    refute html =~ ~s(data-ui-mode-toggle)
+    assert html =~ "Home"
+    assert html =~ "Board"
+    assert html =~ "Team"
+    assert html =~ "ui-advanced-only"
   end
 
-  test "global runtime stop asks for confirmation" do
+  test "does not duplicate runtime controls in navigation" do
     html =
       render_rail(
         current_company: %{id: "company-1", status: "active"},
         runtime_controls_allowed: true
       )
 
-    assert html =~ ~s(action="/runtime-control/stop")
-
-    assert html =~
-             ~s(data-confirm="Stop your agents and clear the queue?")
-  end
-
-  test "global runtime pause explains that queued wakes are preserved" do
-    html =
-      render_rail(
-        current_company: %{id: "company-1", status: "active"},
-        runtime_controls_allowed: true
-      )
-
-    assert html =~ ~s(action="/runtime-control/pause")
-
-    assert html =~
-             ~s(data-confirm="Pause your agents? Queued work is saved for later.")
-  end
-
-  test "global runtime controls expose low-power and full-power modes" do
-    html =
-      render_rail(
-        current_company: %{id: "company-1", status: "active", governance_config: %{}},
-        runtime_controls_allowed: true
-      )
-
-    assert html =~ ~s(action="/runtime-control/low-power")
-    assert html =~ "Low"
-
-    low_power_html =
-      render_rail(
-        current_company: %{
-          id: "company-1",
-          status: "active",
-          governance_config: %{"runtime_mode" => "low_power"}
-        },
-        runtime_controls_allowed: true
-      )
-
-    assert low_power_html =~ "Low"
-    assert low_power_html =~ ~s(action="/runtime-control/resume")
-    assert low_power_html =~ "Full"
+    refute html =~ "/runtime-control/"
   end
 
   test "does not render the inbox badge when the unread count is zero" do

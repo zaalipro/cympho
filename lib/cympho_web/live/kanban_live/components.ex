@@ -44,11 +44,24 @@ defmodule CymphoWeb.KanbanLive.Components do
         issue={@issue}
         density={@digest_density}
         variant={if @digest_density == "compact", do: "inline", else: "card"}
-        class="mt-2"
+        class={["mt-2", @digest_density == "compact" && "ui-advanced-only"]}
       />
 
       <.link
-        :if={@launch_readiness}
+        :if={@launch_readiness && @digest_density == "compact"}
+        navigate={@launch_readiness.path}
+        data-no-drag
+        title={"#{@launch_readiness.label}: #{@launch_readiness.summary}"}
+        aria-label={"#{@launch_readiness.label}: #{@launch_readiness.target}"}
+        class={[
+          "mt-2 inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors hover:border-brand/40 hover:bg-brand/10",
+          @launch_readiness.class
+        ]}
+      >
+        <span class={[launch_readiness_icon(@launch_readiness.status), "h-3.5 w-3.5"]}></span>
+      </.link>
+      <.link
+        :if={@launch_readiness && @digest_density != "compact"}
         navigate={@launch_readiness.path}
         data-no-drag
         title={@launch_readiness.summary}
@@ -59,29 +72,34 @@ defmodule CymphoWeb.KanbanLive.Components do
       </.link>
       <% next_statuses = Index.valid_next_statuses(@issue.status) %>
       <%= if next_statuses != [] do %>
-        <div
-          class={[
-            "kanban-card-actions mt-3 items-center gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
-            if(@digest_density == "compact", do: "hidden sm:flex", else: "flex")
-          ]}
-          data-no-drag
-        >
-          <span class="text-[10px] font-510 text-text-quaternary">Move</span>
-          <%= for next_status <- next_statuses do %>
+        <details class="cympho-menu relative ml-auto mt-2 w-fit" data-no-drag>
+          <summary
+            class="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            aria-label="Move issue"
+            title="Move issue"
+          >
+            <span class="hero-ellipsis-horizontal-mini h-4 w-4"></span>
+          </summary>
+          <div class="cympho-menu-panel absolute right-0 z-30 mt-1 min-w-32 rounded-lg border border-border bg-panel p-1 shadow-dialog">
             <button
+              :for={next_status <- next_statuses}
               type="button"
               phx-click="transition_issue"
               phx-value-id={@issue.id}
               phx-value-to_status={next_status}
               data-kanban-action
-              class="rounded-md border border-border bg-panel px-1.5 py-0.5 text-[10px] font-510 text-text-tertiary hover:border-border-hover hover:bg-surface-hover hover:text-text-primary transition-colors"
-              style="min-height: 20px;"
+              class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
               title={"Move to #{Index.status_label(next_status)}"}
             >
-              {compact_status_label(next_status)}
+              <span class={[
+                "h-2 w-2 rounded-full",
+                column_dot_class(next_status)
+              ]}>
+              </span>
+              {Index.status_label(next_status)}
             </button>
-          <% end %>
-        </div>
+          </div>
+        </details>
       <% end %>
     </div>
     """
@@ -264,7 +282,6 @@ defmodule CymphoWeb.KanbanLive.Components do
         {empty_column_icon(@status)}
       </div>
       <p class="text-xs text-text-quaternary">{empty_column_message(@status)}</p>
-      <p class="mt-1 text-[10px] text-text-quaternary/70">Drag a card here</p>
     </div>
     """
   end
@@ -364,6 +381,12 @@ defmodule CymphoWeb.KanbanLive.Components do
       to_string(class)
   end
 
+  defp launch_readiness_icon(:ready), do: "hero-check-mini"
+  defp launch_readiness_icon(:review_mode), do: "hero-eye-mini"
+  defp launch_readiness_icon(:attention), do: "hero-wrench-screwdriver-mini"
+  defp launch_readiness_icon(:blocked), do: "hero-exclamation-triangle-mini"
+  defp launch_readiness_icon(_status), do: "hero-information-circle-mini"
+
   defp heartbeat_dot_color(:idle), do: "bg-emerald-400"
   defp heartbeat_dot_color(:running), do: "bg-yellow-400 animate-pulse"
   defp heartbeat_dot_color(:working), do: "bg-yellow-400 animate-pulse"
@@ -371,14 +394,6 @@ defmodule CymphoWeb.KanbanLive.Components do
   defp heartbeat_dot_color(:paused), do: "bg-text-tertiary"
   defp heartbeat_dot_color(:offline), do: "bg-text-quaternary"
   defp heartbeat_dot_color(_), do: "bg-text-quaternary"
-
-  defp compact_status_label(:backlog), do: "Backlog"
-  defp compact_status_label(:todo), do: "Todo"
-  defp compact_status_label(:in_progress), do: "Doing"
-  defp compact_status_label(:in_review), do: "Review"
-  defp compact_status_label(:blocked), do: "Blocked"
-  defp compact_status_label(:done), do: "Done"
-  defp compact_status_label(:cancelled), do: "Cancel"
 
   defp pluralize(1, word), do: word
   defp pluralize(_, word), do: word <> "s"

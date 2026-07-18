@@ -106,6 +106,74 @@ defmodule CymphoWeb.Components do
   end
 
   @doc """
+  Renders an accessible icon-only action. The visible icon is always paired
+  with a required accessible label and native tooltip.
+  """
+  attr :icon, :string, required: true
+  attr :label, :string, required: true
+  attr :navigate, :string, default: nil
+  attr :patch, :string, default: nil
+  attr :type, :string, default: "button"
+  attr :disabled, :boolean, default: false
+  attr :tone, :string, default: "neutral"
+  attr :class, :any, default: nil
+  attr :rest, :global
+
+  def icon_action(%{navigate: navigate} = assigns) when is_binary(navigate) do
+    ~H"""
+    <.link
+      navigate={@navigate}
+      aria-label={@label}
+      title={@label}
+      class={[icon_action_class(@tone), @class]}
+      {@rest}
+    >
+      <span class={[@icon, "h-4 w-4"]}></span>
+      <span class="sr-only">{@label}</span>
+    </.link>
+    """
+  end
+
+  def icon_action(%{patch: patch} = assigns) when is_binary(patch) do
+    ~H"""
+    <.link
+      patch={@patch}
+      aria-label={@label}
+      title={@label}
+      class={[icon_action_class(@tone), @class]}
+      {@rest}
+    >
+      <span class={[@icon, "h-4 w-4"]}></span>
+      <span class="sr-only">{@label}</span>
+    </.link>
+    """
+  end
+
+  def icon_action(assigns) do
+    ~H"""
+    <button
+      type={@type}
+      disabled={@disabled}
+      aria-label={@label}
+      title={@label}
+      class={[icon_action_class(@tone), @class]}
+      {@rest}
+    >
+      <span class={[@icon, "h-4 w-4"]}></span>
+      <span class="sr-only">{@label}</span>
+    </button>
+    """
+  end
+
+  defp icon_action_class("danger") do
+    "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-red-500/25 bg-red-500/10 text-red-300 transition-colors hover:bg-red-500/15 hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
+  end
+
+  defp icon_action_class(_tone) do
+    "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+  end
+
+  @doc """
   A small 4-point terracotta "spark" glyph — Cympho's nod to Claude's warm
   accent motif. Decorative only (`aria-hidden`); deliberately a plain
   sparkle, not Claude's multi-spoke sunburst, and never used as the product

@@ -130,7 +130,7 @@ defmodule CymphoWeb.KanbanLive.Index do
       |> assign(:selected_project_id, project_id)
       |> assign(:selected_project, selected_project)
       |> assign(:digest_density, digest_density)
-      |> assign(:page_title, "Kanban Board")
+      |> assign(:page_title, "Board")
       |> apply_project_filter(project_id)
 
     {:noreply, socket}
@@ -705,128 +705,6 @@ defmodule CymphoWeb.KanbanLive.Index do
       }
     ]
   end
-
-  def board_focus_items(issues, pending_wakes) do
-    issues
-    |> Enum.reject(&terminal_issue?/1)
-    |> Enum.map(&board_focus_item(&1, pending_wakes))
-    |> Enum.reject(&is_nil/1)
-    |> Enum.sort_by(fn item ->
-      {item.rank, priority_rank(item.issue.priority), DateTime.to_unix(item.issue.inserted_at)}
-    end)
-    |> Enum.take(3)
-  end
-
-  defp board_focus_item(%{status: :blocked} = issue, _pending_wakes) do
-    board_focus_item(
-      issue,
-      0,
-      "Unblock",
-      "Resolve the blocker before dragging this card forward."
-    )
-  end
-
-  defp board_focus_item(%{assigned_role: "ceo", assignee_id: nil} = issue, _pending_wakes) do
-    board_focus_item(
-      issue,
-      1,
-      "Add CEO",
-      "Create or assign the CEO before this owner request can launch."
-    )
-  end
-
-  defp board_focus_item(%{assignee_id: nil, assigned_role: role} = issue, _pending_wakes)
-       when role in [nil, ""] do
-    board_focus_item(
-      issue,
-      2,
-      "Assign owner",
-      "Pick the agent or role responsible for the next move."
-    )
-  end
-
-  defp board_focus_item(%{assigned_role: "ceo", status: :todo} = issue, _pending_wakes) do
-    board_focus_item(
-      issue,
-      3,
-      "Launch CEO",
-      "Start the first CEO turn and require owner update, handoff, or blocker."
-    )
-  end
-
-  defp board_focus_item(%{status: :in_review} = issue, _pending_wakes) do
-    board_focus_item(issue, 4, "Review", "Accept, request changes, or ask for missing evidence.")
-  end
-
-  defp board_focus_item(%{status: :in_progress} = issue, pending_wakes) do
-    detail =
-      if Map.has_key?(pending_wakes, issue.id) do
-        "A wake is queued. Watch for evidence before moving the card."
-      else
-        "Inspect runtime evidence and make sure the card is not stale."
-      end
-
-    board_focus_item(issue, 5, "Observe", detail)
-  end
-
-  defp board_focus_item(%{status: :todo} = issue, pending_wakes) do
-    detail =
-      if Map.has_key?(pending_wakes, issue.id) do
-        "Wake is queued; watch for the next agent signal."
-      else
-        "Prioritize this card for dispatch or assign an idle agent."
-      end
-
-    board_focus_item(issue, 6, "Dispatch", detail)
-  end
-
-  defp board_focus_item(%{status: :backlog} = issue, _pending_wakes) do
-    board_focus_item(issue, 7, "Scope", "Clarify the request, then promote it to To Do.")
-  end
-
-  defp board_focus_item(_issue, _pending_wakes), do: nil
-
-  defp board_focus_item(issue, rank, action, detail) do
-    %{
-      issue: issue,
-      rank: rank,
-      action: action,
-      detail: detail,
-      identifier: board_issue_identifier(issue),
-      path: "/issues/#{issue.id}"
-    }
-  end
-
-  defp terminal_issue?(%{status: status}), do: status in [:done, :cancelled]
-
-  defp priority_rank(:critical), do: 0
-  defp priority_rank(:high), do: 1
-  defp priority_rank(:medium), do: 2
-  defp priority_rank(:low), do: 3
-  defp priority_rank(_), do: 4
-
-  defp board_issue_identifier(%{identifier: identifier})
-       when is_binary(identifier) and identifier != "",
-       do: identifier
-
-  defp board_issue_identifier(%{issue_number: number}) when is_integer(number),
-    do: "CYM-#{number}"
-
-  defp board_issue_identifier(%{id: id}) when is_binary(id), do: "CYM-#{String.slice(id, 0, 4)}"
-  defp board_issue_identifier(_issue), do: "CYM"
-
-  def board_focus_action_class("Unblock"), do: "border-brand/25 bg-brand/10 text-brand"
-
-  def board_focus_action_class("Add CEO"),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  def board_focus_action_class("Assign owner"),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  def board_focus_action_class("Launch CEO"), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
-  def board_focus_action_class("Review"), do: "border-brand/25 bg-brand/10 text-brand"
-  def board_focus_action_class("Observe"), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-  def board_focus_action_class(_action), do: "border-border bg-panel text-text-secondary"
 
   def kanban_url(project_id, density) do
     query =

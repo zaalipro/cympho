@@ -1,5 +1,5 @@
 <.settings_layout active={:notifications}>
-  <.header title={@page_title} subtitle="Notification channels and event delivery preferences." />
+  <.header title={@page_title} />
 
   <div
     :if={@user == nil}
@@ -42,13 +42,7 @@
   <div :if={@user != nil} class="space-y-6">
     <section class="ember-glass p-5">
       <div class="mb-4">
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Delivery
-        </p>
-        <h2 class="mt-1 text-sm font-590 text-text-primary">Notification channels</h2>
-        <p class="mt-1 text-sm text-text-tertiary">
-          Turn a channel on to receive updates there. Fine-tune which events per channel below.
-        </p>
+        <h2 class="text-sm font-590 text-text-primary">Channels</h2>
         <hr class="ember-rule mt-4" />
       </div>
 
@@ -80,7 +74,7 @@
               </button>
             </div>
           </div>
-          <p class="mt-3 border-t border-border pt-3 text-xs leading-5 text-text-tertiary">
+          <p class="ui-advanced-only mt-3 border-t border-border pt-3 text-xs leading-5 text-text-tertiary">
             Account updates and issues assigned to you arrive in your inbox.
           </p>
         </div>
@@ -116,7 +110,7 @@
               </button>
             </div>
           </div>
-          <p class="mt-3 border-t border-border pt-3 text-xs leading-5 text-text-tertiary">
+          <p class="ui-advanced-only mt-3 border-t border-border pt-3 text-xs leading-5 text-text-tertiary">
             Instant chat pings for approvals and mentions.
           </p>
           <div

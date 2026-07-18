@@ -7,7 +7,6 @@ defmodule CymphoWeb.IssueLive.New do
   alias Cympho.Companies
   alias Cympho.Goals
   alias Cympho.IssueBriefReadiness
-  alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Proxies
   alias Cympho.Projects
   alias CymphoWeb.IssueLive.Components.SwarmConfig
@@ -31,12 +30,10 @@ defmodule CymphoWeb.IssueLive.New do
      |> assign(:projects, projects)
      |> assign(:goals, goals)
      |> assign(:description_placeholder, description_placeholder())
-     |> assign(:launch_packet_steps, launch_packet_steps())
      |> assign(:brief_readiness, IssueBriefReadiness.evaluate(%{}))
      |> assign(:issue_params, %{})
      |> assign(:issue_scope, scope)
      |> assign(:intake_route, intake_route(scope, socket.assigns[:current_company]))
-     |> assign(:runtime_enabled?, Dispatcher.enabled?())
      |> assign(:swarm_admin?, swarm_admin?(socket))
      |> assign(:proxy_profiles, proxy_profiles(socket))
      |> assign(:swarm_params, swarm_params)
@@ -154,47 +151,7 @@ defmodule CymphoWeb.IssueLive.New do
   end
 
   defp description_placeholder do
-    Enum.join(
-      [
-        "Goal:",
-        "Context:",
-        "Constraints / risks:",
-        "Definition of done:",
-        "CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`):",
-        "Evidence to inspect after the run:"
-      ],
-      "\n"
-    )
-  end
-
-  defp launch_packet_steps do
-    [
-      %{
-        label: "Outcome",
-        detail: "One concrete owner-visible result the CEO should optimize for."
-      },
-      %{
-        label: "Context",
-        detail: "The project, customer, repo, system, or market facts that change the answer."
-      },
-      %{
-        label: "Risk/constraint",
-        detail: "Deadlines, budgets, known risks, or boundaries the CEO must preserve."
-      },
-      %{
-        label: "Done signal",
-        detail: "The proof that lets the owner accept, delegate, or close the request."
-      },
-      %{
-        label: "First CEO signal",
-        detail:
-          "Whether the first useful reply should be `[owner_update]`, `[handoff]`, or `[blocked]`."
-      },
-      %{
-        label: "Evidence",
-        detail: "The artifacts, child issues, verification, or risks the owner should inspect."
-      }
-    ]
+    "What outcome do you want?"
   end
 
   def project_options(projects) do
@@ -300,11 +257,6 @@ defmodule CymphoWeb.IssueLive.New do
 
   defp normalize_project_id_for_goal(issue_params, _goal), do: issue_params
 
-  defp selected_goal_context(%Phoenix.HTML.Form{} = form, goals) do
-    goal_id = Phoenix.HTML.Form.input_value(form, :goal_id)
-    selected_goal(goal_id, goals)
-  end
-
   defp goal_option_label(%{goal_type: goal_type, title: title}) do
     "#{goal_type_label(goal_type)}: #{title}"
   end
@@ -372,105 +324,16 @@ defmodule CymphoWeb.IssueLive.New do
   defp queue_focus_disabled?(%{status: :ready}), do: false
   defp queue_focus_disabled?(_readiness), do: true
 
-  defp queue_focus_control_class(%{status: :ready}) do
-    "border-sky-500/25 bg-sky-500/[0.07] text-sky-100"
-  end
+  defp submit_label(_readiness, _queue_focus?, %{missing?: true}), do: "Create issue"
 
-  defp queue_focus_control_class(_readiness) do
-    "border-border bg-panel/70 text-text-tertiary"
-  end
+  defp submit_label(%{status: :ready}, true, _intake_route), do: "Create & queue"
 
-  defp queue_focus_label(%{status: :ready}), do: "Queue focused CEO run after create"
+  defp submit_label(%{status: :ready}, _queue_focus?, _intake_route), do: "Create issue"
 
-  defp queue_focus_label(_readiness), do: "Focused CEO run needs a ready brief"
-
-  defp queue_focus_label(_readiness, %{enabled: true}),
-    do: "CEO run waits for the swarm to finish"
-
-  defp queue_focus_label(readiness, _swarm_config), do: queue_focus_label(readiness)
-
-  defp queue_focus_detail(%{status: :ready}) do
-    "Pins this new issue for the next focused runtime pass. The issue page will show the exact command to start the first CEO turn on port 4329."
-  end
-
-  defp queue_focus_detail(%{next_prompt: next_prompt}) do
-    "Create a draft now, or add the missing signal first: #{next_prompt}"
-  end
-
-  defp queue_focus_detail(_readiness, %{enabled: true}) do
-    "The CEO holds off until the workers finish and your CTO has reviewed their work."
-  end
-
-  defp queue_focus_detail(readiness, _swarm_config), do: queue_focus_detail(readiness)
-
-  defp create_launch_state(_readiness, _queue_focus?, _intake_route, %{enabled: true}) do
-    %{
-      tone: :ready,
-      label: "Ready to create swarm",
-      badge: "Swarm",
-      detail:
-        "Save creates the issue, spins up the temporary workers, and routes their output through your CTO before the CEO wraps up."
-    }
-  end
-
-  defp create_launch_state(readiness, queue_focus?, intake_route, _swarm_config) do
-    create_launch_state(readiness, queue_focus?, intake_route)
-  end
-
-  defp create_launch_state(_readiness, _queue_focus?, %{missing?: true}) do
-    %{
-      tone: :attention,
-      label: "CEO setup needed",
-      badge: "Setup",
-      detail:
-        "Save will create a CEO-lane issue, but runtime cannot start until a CEO agent exists."
-    }
-  end
-
-  defp create_launch_state(%{status: :ready}, true, _intake_route) do
-    %{
-      tone: :ready,
-      label: "Ready to create and queue",
-      badge: "Queued",
-      detail: "Save will create the CEO issue and pin it for the next focused runtime pass."
-    }
-  end
-
-  defp create_launch_state(%{status: :ready}, _queue_focus?, _intake_route) do
-    %{
-      tone: :ready,
-      label: "Ready for manual launch",
-      badge: "Ready",
-      detail:
-        "Save will create the CEO issue. You can queue the first CEO run from the issue page."
-    }
-  end
-
-  defp create_launch_state(%{next_prompt: next_prompt}, _queue_focus?, _intake_route) do
-    %{
-      tone: :draft,
-      label: "Draft only until the brief is ready",
-      badge: "Draft",
-      detail:
-        "Save can create the CEO issue, but focused dispatch will not queue yet. #{next_prompt}"
-    }
-  end
-
-  defp launch_state_class(:ready), do: "border-success/25 bg-success/10 text-success"
-  defp launch_state_class(:attention), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-  defp launch_state_class(:draft), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-  defp launch_state_class(_tone), do: "border-border bg-panel/70 text-text-secondary"
-
-  defp submit_label(_readiness, _queue_focus?, %{missing?: true}), do: "Create Issue"
-
-  defp submit_label(%{status: :ready}, true, _intake_route), do: "Create and Run First"
-
-  defp submit_label(%{status: :ready}, _queue_focus?, _intake_route), do: "Create Issue"
-
-  defp submit_label(_readiness, _queue_focus?, _intake_route), do: "Create Draft"
+  defp submit_label(_readiness, _queue_focus?, _intake_route), do: "Create issue"
 
   defp submit_label(_readiness, _queue_focus?, _intake_route, %{enabled: true}),
-    do: "Create Swarm"
+    do: "Create swarm"
 
   defp submit_label(readiness, queue_focus?, intake_route, _swarm_config),
     do: submit_label(readiness, queue_focus?, intake_route)

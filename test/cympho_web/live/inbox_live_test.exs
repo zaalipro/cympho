@@ -20,7 +20,7 @@ defmodule CymphoWeb.InboxLiveTest do
 
       assert html =~ "Inbox"
       assert html =~ "Inbox command"
-      assert html =~ "Updates from your agents will land here as they work."
+      assert html =~ "caught up"
       assert html =~ "Action queue"
       assert html =~ "Reviews"
       assert html =~ "Runtime / evidence"
@@ -42,7 +42,7 @@ defmodule CymphoWeb.InboxLiveTest do
 
       # The default 'all' shows agent selector
       assert html =~ "select_agent"
-      assert html =~ "Inbox is clear"
+      assert html =~ "caught up"
     end
   end
 
@@ -373,7 +373,7 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*2\s*<\/span>/s
 
       view
-      |> element("button[phx-click='mark_unread_read']", "Mark unread as read")
+      |> element("button[phx-click='mark_unread_read']")
       |> render_click()
 
       html = render(view)
@@ -428,7 +428,7 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, view, _html} = live(conn, "/inbox?agent_id=#{selected_agent.id}")
 
       view
-      |> element("button[phx-click='mark_unread_read']", "Mark unread as read")
+      |> element("button[phx-click='mark_unread_read']")
       |> render_click()
 
       assert render(view) =~ "Other Inbox Agent (1 unread)"

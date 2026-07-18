@@ -929,7 +929,7 @@ defmodule CymphoWeb.Components.IssueDigest do
   attr :issue, :map, required: true
   attr :density, :string, default: "detailed"
   attr :variant, :string, default: "card"
-  attr :class, :string, default: ""
+  attr :class, :any, default: ""
 
   def issue_digest_card(assigns) do
     assigns =

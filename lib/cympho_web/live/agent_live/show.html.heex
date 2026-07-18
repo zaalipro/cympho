@@ -105,45 +105,39 @@
           navigate={~p"/issues/new?assignee_id=#{@agent.id}"}
           class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
         >
-          <span class="text-base leading-none">+</span> Assign Task
+          <.icon name="hero-plus-mini" class="h-4 w-4" /> Assign task
         </.app_link>
 
-        <button
-          type="button"
+        <.icon_action
           phx-click="run_heartbeat"
           disabled={is_paused?(@agent)}
-          title={
+          label={
             if is_paused?(@agent),
               do: "Resume this agent before running heartbeat",
-              else: "Queue an immediate heartbeat check"
+              else: "Run heartbeat"
           }
+          icon="hero-bolt-mini"
           class={[
-            "inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary",
             if(is_paused?(@agent),
               do: "cursor-not-allowed opacity-60",
-              else: "hover:bg-surface-hover hover:text-text-primary"
+              else: nil
             )
           ]}
-        >
-          ▶ Run Heartbeat
-        </button>
+        />
 
         <%= if is_paused?(@agent) do %>
-          <button
-            type="button"
+          <.icon_action
             phx-click="resume_agent"
-            class="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-510 text-emerald-300 hover:bg-emerald-500/15"
-          >
-            ▶ Resume
-          </button>
+            icon="hero-play-mini"
+            label="Resume agent"
+            class="border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15"
+          />
         <% else %>
-          <button
-            type="button"
+          <.icon_action
             phx-click="pause_agent"
-            class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-          >
-            ⏸ Pause
-          </button>
+            icon="hero-pause-mini"
+            label="Pause agent"
+          />
         <% end %>
 
         <span class={"inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-510 #{status_pill_class(@agent.status)}"}>
@@ -448,7 +442,7 @@
         </div>
       </section>
 
-      <.panel class="overflow-hidden">
+      <.panel class={["overflow-hidden", !@latest_run && "ui-advanced-only"]}>
         <div class="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Latest Run
@@ -508,7 +502,10 @@
         </div>
       </.panel>
 
-      <.panel class="overflow-hidden">
+      <.panel class={[
+        "overflow-hidden",
+        Enum.empty?(@recent_issues) && "ui-advanced-only"
+      ]}>
         <div class="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Recent Issues

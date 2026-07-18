@@ -22,28 +22,19 @@ defmodule CymphoWeb.Components.KanbanCardTest do
     )
   end
 
-  test "compact board cards hide secondary move controls on mobile" do
+  test "compact board cards use one accessible move menu" do
     html = render_card("compact")
-    class = action_row_class(html)
 
-    assert class =~ "kanban-card-actions"
-    assert class =~ "hidden sm:flex"
+    assert html =~ ~s(aria-label="Move issue")
+    assert html =~ "hero-ellipsis-horizontal-mini"
+    refute html =~ "kanban-card-actions"
   end
 
-  test "detailed board cards keep secondary move controls visible" do
+  test "detailed board cards also avoid repeated move buttons" do
     html = render_card("detailed")
-    class = action_row_class(html)
 
-    assert class =~ "kanban-card-actions"
-    assert class =~ "flex"
-    refute class =~ "hidden sm:flex"
-  end
-
-  defp action_row_class(html) do
-    html
-    |> Floki.parse_document!()
-    |> Floki.find(".kanban-card-actions")
-    |> Floki.attribute("class")
-    |> List.first()
+    assert html =~ ~s(aria-label="Move issue")
+    assert html =~ "hero-ellipsis-horizontal-mini"
+    refute html =~ "kanban-card-actions"
   end
 end

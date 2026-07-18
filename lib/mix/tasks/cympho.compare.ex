@@ -674,8 +674,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     dispatcher_source = source_for(Cympho.Orchestrator.Dispatcher)
     orchestrator_source = source_for(Cympho.Orchestrator)
     controller_source = source_for(CymphoWeb.RuntimeControlController)
-    nav_source = source_for(CymphoWeb.Components.NavRail)
-    layout_source = template_source_for(CymphoWeb.Layouts, "layouts/root.html.heex")
+    runtime_controls_source = source_for(CymphoWeb.Components.CompanyRail)
     audit_event_source = source_for(Cympho.AuditTrail.AuditEvent)
 
     checks = [
@@ -703,10 +702,10 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(controller_source, "company_runtime_paused"),
       String.contains?(controller_source, "company_runtime_stopped"),
       String.contains?(controller_source, "company_runtime_resumed"),
-      String.contains?(nav_source, "/runtime-control/pause"),
-      String.contains?(nav_source, "/runtime-control/stop"),
-      String.contains?(layout_source, "desktop-runtime-pause"),
-      String.contains?(layout_source, "desktop-runtime-stop"),
+      String.contains?(runtime_controls_source, "/runtime-control/pause"),
+      String.contains?(runtime_controls_source, "/runtime-control/stop"),
+      String.contains?(runtime_controls_source, ~s(data-testid="runtime-controls")),
+      String.contains?(runtime_controls_source, "runtime_control_menu"),
       String.contains?(audit_event_source, "company_runtime_paused"),
       String.contains?(audit_event_source, "company_runtime_stopped"),
       String.contains?(audit_event_source, "company_runtime_resumed")
@@ -766,7 +765,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     companies_source = source_for(Cympho.Companies)
     dispatcher_source = source_for(Cympho.Orchestrator.Dispatcher)
     controller_source = source_for(CymphoWeb.RuntimeControlController)
-    nav_source = source_for(CymphoWeb.Components.NavRail)
+    runtime_controls_source = source_for(CymphoWeb.Components.CompanyRail)
     dashboard_source = source_for(CymphoWeb.DashboardLive.Index)
     audit_event_source = source_for(Cympho.AuditTrail.AuditEvent)
 
@@ -782,8 +781,8 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(dispatcher_source, "runtime_mode_allows_issue?"),
       String.contains?(dispatcher_source, "Companies.low_power?(company)"),
       String.contains?(controller_source, "company_runtime_low_power"),
-      String.contains?(nav_source, "/runtime-control/low-power"),
-      String.contains?(nav_source, "company_low_power?"),
+      String.contains?(runtime_controls_source, "/runtime-control/low-power"),
+      String.contains?(runtime_controls_source, "company_low_power?"),
       String.contains?(dashboard_source, ":low_power"),
       String.contains?(audit_event_source, "company_runtime_low_power")
     ]
@@ -1474,7 +1473,7 @@ defmodule Mix.Tasks.Cympho.Compare do
 
   def check_keyboard_first_view_modes do
     components_source = source_for(CymphoWeb.Components)
-    nav_source = source_for(CymphoWeb.Components.NavRail)
+    user_menu_source = source_for(CymphoWeb.Components.UserMenu)
 
     layout_source =
       File.read!(Path.join([File.cwd!(), "lib/cympho_web/controllers/layouts/root.html.heex"]))
@@ -1486,7 +1485,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(components_source, "data-density-option=\"compact\""),
       String.contains?(components_source, "data-density-option=\"detailed\""),
       String.contains?(components_source, "aria-pressed={to_string(@density == \"compact\")}"),
-      String.contains?(nav_source, "data-ui-mode-toggle"),
+      String.contains?(user_menu_source, "data-ui-mode-toggle"),
       String.contains?(layout_source, "id=\"shortcuts-modal\""),
       String.contains?(layout_source, ">U</kbd>"),
       String.contains?(layout_source, ">V</kbd>"),

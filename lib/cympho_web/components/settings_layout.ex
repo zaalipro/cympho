@@ -46,6 +46,8 @@ defmodule CymphoWeb.Components.SettingsLayout do
      ]}
   ]
 
+  @simple_keys [:profile, :appearance, :notifications, :integrations]
+
   @doc """
   Renders the settings page shell. `active` is the atom key of the current tab
   (see `@groups`); `inner_block` is the tab's own content (typically starting
@@ -55,7 +57,17 @@ defmodule CymphoWeb.Components.SettingsLayout do
   slot :inner_block, required: true
 
   def settings_layout(assigns) do
-    assigns = assign(assigns, :groups, @groups)
+    items = Enum.flat_map(@groups, fn {_group, items} -> items end)
+
+    assigns =
+      assigns
+      |> assign(:groups, @groups)
+      |> assign(:simple_items, Enum.filter(items, fn {key, _, _, _} -> key in @simple_keys end))
+      |> assign(
+        :technical_items,
+        Enum.reject(items, fn {key, _, _, _} -> key in @simple_keys end)
+      )
+      |> assign(:technical_open?, assigns.active not in @simple_keys)
 
     ~H"""
     <.page size="wide" data-ui-complex-page class="ember-aurora">
@@ -65,7 +77,54 @@ defmodule CymphoWeb.Components.SettingsLayout do
             Settings
           </p>
           <div class="flex gap-2 overflow-x-auto pb-2 lg:block lg:space-y-5 lg:overflow-visible lg:pb-0">
-            <div :for={{group, items} <- @groups} class="contents lg:block lg:space-y-0.5">
+            <div class="ui-simple-only contents lg:block lg:space-y-0.5">
+              <.link
+                :for={{key, label, path, icon} <- @simple_items}
+                navigate={path}
+                aria-current={(@active == key && "page") || nil}
+                class={settings_nav_class(@active == key)}
+              >
+                <span class={[
+                  icon,
+                  "h-4 w-4 shrink-0",
+                  (@active == key && "text-brand") ||
+                    "text-text-tertiary group-hover:text-text-primary"
+                ]}>
+                </span>
+                <span class="flex-1 truncate text-left">{label}</span>
+              </.link>
+
+              <details class="group shrink-0 lg:mt-3" open={@technical_open?}>
+                <summary class="flex cursor-pointer list-none items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-2 text-[13px] font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary lg:border-transparent lg:bg-transparent lg:py-1.5">
+                  <span class="hero-cog-6-tooth-mini h-4 w-4 shrink-0 text-text-tertiary"></span>
+                  <span class="flex-1">Advanced</span>
+                  <span class="hero-chevron-down-mini h-3.5 w-3.5 text-text-quaternary transition-transform group-open:rotate-180">
+                  </span>
+                </summary>
+                <div class="mt-1 space-y-0.5 lg:pl-2">
+                  <.link
+                    :for={{key, label, path, icon} <- @technical_items}
+                    navigate={path}
+                    aria-current={(@active == key && "page") || nil}
+                    class={settings_nav_class(@active == key)}
+                  >
+                    <span class={[
+                      icon,
+                      "h-4 w-4 shrink-0",
+                      (@active == key && "text-brand") ||
+                        "text-text-tertiary group-hover:text-text-primary"
+                    ]}>
+                    </span>
+                    <span class="flex-1 truncate text-left">{label}</span>
+                  </.link>
+                </div>
+              </details>
+            </div>
+
+            <div
+              :for={{group, items} <- @groups}
+              class="ui-advanced-only contents lg:block lg:space-y-0.5"
+            >
               <p class="hidden px-3 pb-1 text-eyebrow uppercase text-text-quaternary lg:block">
                 {group}
               </p>

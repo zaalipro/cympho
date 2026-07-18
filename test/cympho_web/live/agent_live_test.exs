@@ -187,14 +187,14 @@ defmodule CymphoWeb.AgentLiveTest do
 
       {:ok, view, html} = live(conn, "/agents/#{agent.id}")
 
-      assert html =~ "Run Heartbeat"
+      assert html =~ ~s(aria-label="Run heartbeat")
       assert html =~ ~s(phx-click="run_heartbeat")
       refute html =~ "coming soon"
       refute html =~ "Heartbeat trigger"
 
       html =
         view
-        |> element("button[phx-click='run_heartbeat']", "Run Heartbeat")
+        |> element("button[phx-click='run_heartbeat']")
         |> render_click()
 
       assert html =~ "Heartbeat queued. The agent will pick up assigned To Do work if available."
@@ -212,7 +212,7 @@ defmodule CymphoWeb.AgentLiveTest do
 
       {:ok, view, html} = live(conn, "/agents/#{agent.id}")
 
-      assert html =~ "Run Heartbeat"
+      assert html =~ ~s(aria-label="Resume this agent before running heartbeat")
       assert html =~ "Resume this agent before running heartbeat"
       refute html =~ "coming soon"
       assert has_element?(view, "button[phx-click='run_heartbeat'][disabled]")

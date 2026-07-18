@@ -830,10 +830,13 @@ const UserMenu = {
     };
 
     this.handleAction = (e) => {
-      const btn = e.target.closest('[data-action]');
-      if (!btn) return;
-      const action = btn.dataset.action;
+      const item = e.target.closest('[role="menuitem"]');
+      if (!item || !this.popover.contains(item)) return;
+
       this._setOpen(false);
+      const action = item.dataset.action;
+      if (!action) return;
+
       if (action === 'open-shortcuts') {
         const m = document.getElementById('shortcuts-modal');
         if (m) m.classList.remove('hidden');
@@ -848,12 +851,12 @@ const UserMenu = {
     };
 
     this.trigger.addEventListener('click', this.toggle);
-    document.addEventListener('click', this.outside);
+    document.addEventListener('click', this.outside, true);
     document.addEventListener('keydown', this.escape);
     this.popover.addEventListener('click', this.handleAction);
   },
   destroyed() {
-    document.removeEventListener('click', this.outside);
+    document.removeEventListener('click', this.outside, true);
     document.removeEventListener('keydown', this.escape);
   },
   _setOpen(open) {

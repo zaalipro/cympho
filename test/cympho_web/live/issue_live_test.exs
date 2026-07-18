@@ -347,88 +347,30 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn, "/issues/new")
 
-      assert html =~ "Owner intake"
-      assert html =~ "First stop:"
-      assert html =~ "CEO"
-      assert html =~ "CEO first turn must return"
-      assert html =~ "[owner_update]"
-      assert html =~ "[handoff]"
-      assert html =~ "2-5 scoped issues"
-      assert html =~ "Owner request -&gt; CEO lane"
-      assert html =~ "Creates a To Do issue; no provider call."
-      assert html =~ "Opens the issue with CEO flow status."
-      assert html =~ "Before you launch"
-      assert html =~ "Make the CEO turn useful"
-      assert html =~ "Owner brief"
-      assert html =~ "Define the work first"
-      assert html =~ "Outcome"
-      assert html =~ "Risk/constraint"
-      assert html =~ "Done signal"
-      assert html =~ "First CEO signal"
-      assert html =~ "Routing lock"
-      assert html =~ "Open the CEO flow on the issue page."
-      assert html =~ "Watch for the first owner update, handoff, or blocker."
-      assert html =~ "Owner brief readiness"
+      assert html =~ "New issue"
+      assert html =~ "What should the team do?"
+      assert html =~ ~s(placeholder="What outcome do you want?")
+      assert html =~ "Options"
+      assert html =~ "Use a structured template"
       assert html =~ "Too thin for autonomy"
       assert html =~ "0/6"
-      assert html =~ "Next prompt:"
       assert html =~ "Outcome: Name the owner-visible result"
-      assert html =~ "Brief template"
-      assert html =~ "Use template"
-      assert html =~ "Copy template"
-      assert html =~ "Fill these lines in so your CEO can act on the first turn."
-      assert html =~ "CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`):"
-
-      assert html =~
-               "Missing signals: Outcome, Context, Risk/constraint, Done signal, First CEO signal, Evidence."
-
-      assert html =~ "Focused CEO run needs a ready brief"
-      assert html =~ "Create a draft now, or add the missing signal first"
-      assert html =~ "Create behavior"
-      assert html =~ "Draft only until the brief is ready"
-      assert html =~ "Create Draft"
-      assert html =~ ~s(data-testid="issue-create-mobile-summary")
-      assert html =~ ~s(data-testid="issue-create-launch-rail")
-      assert html =~ "Brief readiness"
-      assert html =~ "First run route"
+      assert html =~ "Add enough detail to make the brief ready."
+      assert html =~ "Create issue"
       queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
       assert Map.has_key?(queue_attrs, "disabled")
       refute Map.has_key?(queue_attrs, "checked")
-      assert html =~ "CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`):"
-      assert html =~ "Evidence to inspect after the run:"
-      assert html =~ "Constraints / risks:"
-      assert html =~ "Goal:\nContext:"
-      refute html =~ "Goal:\\nContext:"
       assert html =~ "Project"
       assert html =~ "Operating Project"
       assert html =~ "Launch Project"
-      assert html =~ "Launch Mission will be linked to this issue."
-      assert html =~ "keep the bigger outcome in view"
-
-      composer_index = :binary.match(html, ~s(id="issue-intake-composer")) |> elem(0)
-      mobile_summary_index = :binary.match(html, ~s(id="issue-create-mobile-summary")) |> elem(0)
-      owner_intake_index = :binary.match(html, ~s(id="issue-owner-intake")) |> elem(0)
-      mission_context_index = :binary.match(html, ~s(id="issue-mission-context")) |> elem(0)
-      launch_packet_index = :binary.match(html, ~s(id="issue-launch-packet")) |> elem(0)
-
-      launch_rail_index =
-        :binary.match(html, ~s(data-testid="issue-create-launch-rail")) |> elem(0)
-
-      title_index = :binary.match(html, ~s(name="issue[title]")) |> elem(0)
-      description_index = :binary.match(html, ~s(name="issue[description]")) |> elem(0)
-
-      assert composer_index < owner_intake_index
-      assert composer_index < mobile_summary_index
-      assert mobile_summary_index < owner_intake_index
-      assert composer_index < mission_context_index
-      assert composer_index < launch_packet_index
-      assert launch_packet_index < launch_rail_index
-      assert title_index < launch_packet_index
-      assert description_index < launch_packet_index
+      assert html =~ "Mission: Launch Mission"
+      refute html =~ "Owner intake"
+      refute html =~ "Routing lock"
+      refute html =~ "Before you launch"
 
       html =
         view
-        |> element("#owner-brief-scaffold-copy button", "Use template")
+        |> element("button[phx-click='use_launch_scaffold']")
         |> render_click()
 
       assert textarea_value(html, "textarea[name='issue[description]']") =~
@@ -457,12 +399,8 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ "Ready for CEO launch"
       assert html =~ "6/6"
-      assert html =~ "All launch signals are present."
-      assert html =~ "Goal: Owner asks for onboarding"
-      assert html =~ "Missing signals: none."
-      assert html =~ "Queue focused CEO run after create"
-      assert html =~ "Ready to create and queue"
-      assert html =~ "Create and Run First"
+      assert html =~ "Queue after creating"
+      assert html =~ "Create &amp; queue"
       queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
       assert Map.has_key?(queue_attrs, "checked")
       refute Map.has_key?(queue_attrs, "disabled")
@@ -533,9 +471,8 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, view, html} = live(conn, "/issues/new")
 
       assert html =~ "Too thin for autonomy"
-      assert html =~ "Focused CEO run needs a ready brief"
-      assert html =~ "Draft only until the brief is ready"
-      assert html =~ "Create Draft"
+      assert html =~ "Add enough detail to make the brief ready."
+      assert html =~ "Create issue"
       queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
       assert Map.has_key?(queue_attrs, "disabled")
       refute Map.has_key?(queue_attrs, "checked")
@@ -619,9 +556,8 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Needs one more pass"
       assert html =~ "5/6"
       assert html =~ "Evidence: Specify what proof should be inspected after the run."
-      assert html =~ "Focused CEO run needs a ready brief"
-      assert html =~ "Draft only until the brief is ready"
-      assert html =~ "Create Draft"
+      assert html =~ "Add enough detail to make the brief ready."
+      assert html =~ "Create issue"
 
       result =
         view
@@ -679,18 +615,11 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn, "/issues/new")
 
-      assert html =~ "Owner intake"
-      assert html =~ "CEO lane"
-      assert html =~ "CEO agent missing"
+      assert html =~ "Add a CEO agent before this issue can run."
       assert html =~ "Add CEO agent"
       assert html =~ ~s(href="/agents/new")
-      assert html =~ "Creates a CEO-role To Do issue; no provider call."
-      assert html =~ "Opens the issue with the CEO setup blocker visible."
-      assert html =~ "will stay in the CEO lane"
-      assert html =~ "Before you launch"
-      refute html =~ "Queue focused CEO run after create"
-      assert html =~ "CEO setup needed"
-      assert html =~ "Create Issue"
+      refute html =~ ~s(id="queue-dispatch-focus")
+      assert html =~ "Create issue"
 
       result =
         view
@@ -753,8 +682,8 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn, "/issues/new")
 
-      assert html =~ "Focused CEO run needs a ready brief"
-      assert html =~ "Create Draft"
+      assert html =~ "Add enough detail to make the brief ready."
+      assert html =~ "Create issue"
 
       result =
         view
@@ -839,8 +768,8 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn, "/issues/new")
 
-      assert html =~ "Swarm mode"
-      assert html =~ "Split this across temporary workers, then your CTO reviews"
+      assert html =~ "Use swarm"
+      assert html =~ "3 workers"
       refute html =~ ~s(data-testid="issue-swarm-advanced-panel")
 
       ready_description = """
@@ -881,7 +810,6 @@ defmodule CymphoWeb.IssueLiveTest do
       html =
         view
         |> form("form", %{
-          "queue_dispatch_focus" => "false",
           "swarm" => swarm_params,
           "issue" => %{
             "title" => "Owner asks for launch segment swarm",
@@ -890,9 +818,7 @@ defmodule CymphoWeb.IssueLiveTest do
         })
         |> render_change()
 
-      assert html =~ "Ready to create swarm"
-      assert html =~ "CEO run waits for the swarm to finish"
-      assert html =~ "Create Swarm"
+      assert html =~ "Create swarm"
       assert html =~ ~s(data-testid="issue-swarm-advanced-panel")
       assert html =~ "Swarm setup"
       assert html =~ "swarm-egress-a"
@@ -907,7 +833,6 @@ defmodule CymphoWeb.IssueLiveTest do
       result =
         view
         |> form("form", %{
-          "queue_dispatch_focus" => "false",
           "swarm" => swarm_params,
           "issue" => %{
             "title" => "Owner asks for launch segment swarm",
@@ -2021,9 +1946,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "CEO launch preview"
       assert html =~ "Next setup action"
       assert html =~ "Agrenting API key"
-      assert html =~ "AGRENTING_API_KEY"
-      assert html =~ "Add secret"
-      assert html =~ "/settings/secrets?key=AGRENTING_API_KEY"
+      assert html =~ "Fix before dispatch."
       refute html =~ "test-api-key"
     end
 
@@ -2318,7 +2241,8 @@ defmodule CymphoWeb.IssueLiveTest do
     test "renders comments section", %{issue: issue} do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
-      assert html =~ "Add Comment"
+      assert html =~ ~s(aria-label="Comment templates")
+      assert html =~ ~s(aria-label="Send comment")
       assert html =~ "Owner update"
       assert html =~ "Delivery"
       assert html =~ "Blocked"
@@ -3584,9 +3508,9 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
 
-      assert html =~ "Agents on this issue"
+      assert html =~ "Agents"
       assert html =~ "Pause just this issue if a run gets stuck."
-      assert html =~ "Pause"
+      assert html =~ ~s(aria-label="Pause agents")
 
       html =
         view
@@ -3596,6 +3520,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Issue paused"
       assert html =~ "Paused"
       assert html =~ "Paused — nothing new starts until you resume."
+      assert html =~ ~s(aria-label="Resume agents")
       assert Issues.issue_runtime_paused?(Issues.get_issue!(issue.id))
 
       {events, _total} =

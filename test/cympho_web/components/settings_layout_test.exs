@@ -20,6 +20,7 @@ defmodule CymphoWeb.Components.SettingsLayoutTest do
     html = render_settings(:appearance)
 
     for group <- ~w(Account Workspace Governance), do: assert(html =~ group)
+    assert html =~ "Advanced"
     assert html =~ "CONTENT-MARKER"
 
     for {label, path} <- [
@@ -37,12 +38,10 @@ defmodule CymphoWeb.Components.SettingsLayoutTest do
     end
   end
 
-  test "marks exactly the active tab with aria-current and the active style" do
+  test "marks the active tab in both mode-specific navigation variants" do
     html = render_settings(:appearance)
 
-    # Exactly one tab is current / styled active.
-    assert length(String.split(html, ~s(aria-current="page"))) - 1 == 1
-    assert length(String.split(html, "bg-brand/10")) - 1 == 1
+    assert length(String.split(html, ~s(aria-current="page"))) - 1 == 2
 
     # …and it is the Appearance tab (href precedes the rest attrs on the anchor).
     assert html =~ ~r|<a[^>]*href="/settings/appearance"[^>]*aria-current="page"|
@@ -51,7 +50,7 @@ defmodule CymphoWeb.Components.SettingsLayoutTest do
   test "active follows the passed key" do
     html = render_settings(:audit)
 
-    assert length(String.split(html, ~s(aria-current="page"))) - 1 == 1
+    assert length(String.split(html, ~s(aria-current="page"))) - 1 == 2
     assert html =~ ~r|<a[^>]*href="/settings/audit"[^>]*aria-current="page"|
     refute html =~ ~r|<a[^>]*href="/settings/appearance"[^>]*aria-current="page"|
   end

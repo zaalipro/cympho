@@ -4,10 +4,10 @@
          Hero — molten editorial greeting. Aurora field drifts behind;
          the status line rides in an ember eyebrow chip.
          ============================================================ --%>
-    <div class="mb-8 px-1 pt-2">
+    <div class="mb-5 px-1 pt-2">
       <.header>
         <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
+          <div class="ui-advanced-only flex flex-wrap items-center gap-2">
             <span class="ember-eyebrow">
               {status_label(@autonomy_status)} · {status_label(@operating_mode)}
             </span>
@@ -21,14 +21,11 @@
             </span>
           </div>
           <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-            What's up next?
+            Today
           </h1>
-          <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-            Decide what the company should do next, then watch agents execute it.
-          </p>
         </div>
         <:actions>
-          <.overflow_menu label="Company controls">
+          <.overflow_menu label="Company controls" class="ui-advanced-only">
             <.menu_item
               :if={@company && @autonomy_status == :active && @operating_mode != :low_power}
               phx-click="low_power_company"
@@ -54,12 +51,6 @@
             </.menu_item>
             <.menu_item navigate={~p"/onboarding"}>Start company setup</.menu_item>
           </.overflow_menu>
-          <.app_link
-            navigate={~p"/kanban"}
-            class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary shadow-card hover:bg-accent-hover"
-          >
-            Open board
-          </.app_link>
         </:actions>
       </.header>
     </div>
@@ -68,6 +59,18 @@
          and the team — with one clear next action. The dense ops panels
          below are advanced-mode only. --%>
     <section aria-label="Home" class="ui-simple-only mb-6">
+      <button
+        type="button"
+        data-quick-create-trigger
+        class="mb-4 flex w-full items-center gap-3 rounded-2xl border border-brand/25 bg-brand/[0.07] px-4 py-3.5 text-left shadow-card transition-colors hover:border-brand/45 hover:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+      >
+        <.spark class="h-5 w-5 shrink-0 text-brand" />
+        <span class="min-w-0 flex-1 truncate text-[15px] text-text-secondary">
+          What should the team do?
+        </span>
+        <span class="hero-arrow-right-mini h-4 w-4 shrink-0 text-brand"></span>
+      </button>
+
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <.app_link
           navigate={~p"/kanban"}
@@ -78,7 +81,7 @@
           </span>
           <span class="min-w-0">
             <span class="block text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Your work
+              Active
             </span>
             <span class="block text-lg font-590 text-text-primary">
               <span class="tabular-nums">{@running_work + @queued_work}</span>
@@ -96,7 +99,7 @@
           </span>
           <span class="min-w-0">
             <span class="block text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Needs you
+              Waiting
             </span>
             <span class="block text-lg font-590 text-text-primary">
               <span class="tabular-nums">{@needs_you_count}</span>
@@ -116,7 +119,7 @@
           </span>
           <span class="min-w-0">
             <span class="block text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Your team
+              Agents
             </span>
             <span class="block text-lg font-590 text-text-primary">
               <span class="tabular-nums">{@total_agents}</span>
@@ -125,15 +128,6 @@
               </span>
             </span>
           </span>
-        </.app_link>
-      </div>
-
-      <div class="mt-4">
-        <.app_link
-          navigate={~p"/issues/new"}
-          class="cta-glow inline-flex items-center gap-1.5 rounded-button bg-brand px-4 py-2 text-sm font-590 text-on-primary shadow-card transition hover:bg-accent-hover"
-        >
-          <span class="hero-plus-mini h-4 w-4"></span> New request
         </.app_link>
       </div>
     </section>
@@ -145,21 +139,10 @@
          Lower-priority items collapse behind a "Later" disclosure.
          ============================================================ --%>
     <section aria-label="Needs you" class="mb-5">
-      <div class="mb-3 flex flex-wrap items-end justify-between gap-3 px-1">
-        <div class="min-w-0">
-          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Needs you
-          </p>
-          <p class="mt-0.5 text-xs text-text-quaternary">
-            Decisions only you can make — everything else runs itself.
-          </p>
-        </div>
-        <a
-          href="/operations"
-          class="shrink-0 text-xs font-590 text-text-tertiary hover:text-text-primary"
-        >
-          Open Operations →
-        </a>
+      <div class="mb-3 px-1">
+        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          Needs you
+        </p>
       </div>
 
       <div class="stagger-children grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -1203,7 +1186,7 @@
          (inner search button, a sibling so the two delegated
          data-* handlers never collide). No new backend.
          ============================================================ --%>
-    <div class="mt-8">
+    <div class="ui-advanced-only mt-8">
       <div class="flex items-center gap-2 rounded-2xl border border-hairline bg-surface-1 px-4 py-3 shadow-card transition-colors focus-within:border-hairline-strong hover:border-hairline-strong">
         <div
           role="button"

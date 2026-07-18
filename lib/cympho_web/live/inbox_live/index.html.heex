@@ -1,30 +1,12 @@
 <.page size="wide" data-ui-complex-page data-density={@digest_density} class="ember-aurora">
   <div class="relative z-10">
-    <div class="mb-6 px-1 pt-2">
+    <div class="mb-5 px-1 pt-2">
       <%!-- Row 1: identity (left) + agent scope & density (right) --%>
       <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div class="min-w-0">
-          <span class="ember-eyebrow">
-            {total_count(@inbox_counts)} total · {status_filter_label(@current_status)}
-          </span>
-
-          <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+          <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
             Inbox
           </h1>
-
-          <p
-            :if={@digest_density == "detailed"}
-            class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary"
-          >
-            Everything your agents hand back, in one place.
-          </p>
-          <p class="mt-2 truncate text-sm text-text-secondary">
-            <span class="font-590 text-text-primary">
-              {inbox_scope_label(@selected_agent_id, @selected_agent)}
-            </span>
-            <span class="text-text-quaternary">·</span>
-            {status_filter_label(@current_status)} items
-          </p>
         </div>
 
         <div class="flex flex-wrap items-center gap-2 lg:shrink-0">
@@ -46,8 +28,10 @@
             type="button"
             phx-click="mark_unread_read"
             disabled={unread_count == 0}
+            aria-label="Mark unread as read"
+            title="Mark unread as read"
             class={[
-              "inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-510 transition-colors",
+              "relative inline-flex h-9 w-9 items-center justify-center rounded-lg border transition-colors",
               unread_count > 0 &&
                 "border-blue-500/25 bg-blue-500/10 text-blue-200 hover:bg-blue-500/15 hover:text-blue-100",
               unread_count == 0 &&
@@ -55,10 +39,9 @@
             ]}
           >
             <span class="hero-check-circle-mini h-4 w-4"></span>
-            <span>Mark unread as read</span>
             <span
               :if={unread_count > 0}
-              class="rounded-full bg-blue-400/15 px-1.5 py-0.5 font-mono text-[11px] tabular-nums"
+              class="absolute -right-1 -top-1 min-w-[16px] rounded-full bg-blue-400 px-1 font-mono text-[9px] font-590 leading-4 text-slate-950 tabular-nums"
             >
               {unread_count}
             </span>
@@ -80,7 +63,7 @@
         </div>
       </div>
 
-      <hr class="ember-rule mt-5" />
+      <hr class="ember-rule mt-4" />
 
       <%!-- Row 2: status filters. Triage lanes first; the archive-keeping
            filters sit after a divider so the eye stops at what needs work. --%>
@@ -117,34 +100,41 @@
           </span>
         </.link>
 
-        <span class="hidden h-4 w-px self-center bg-hairline sm:inline-block" aria-hidden="true">
-        </span>
-
-        <.link
-          :for={status <- ["read", "dismissed", "archived"]}
-          patch={
-            inbox_url(@selected_agent_id, @current_status, @digest_density, %{status: status})
-          }
-          class={[
-            "inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-510 transition-colors",
-            cleanup_tab_class(@current_status, status)
-          ]}
-        >
-          <span>{status_filter_label(status)}</span>
-          <span
-            :if={count_for(@inbox_counts, status) > 0}
-            class="font-mono text-[11px] tabular-nums opacity-70"
+        <details class="cympho-menu relative">
+          <summary
+            class="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full border border-border bg-surface text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            aria-label="More inbox filters"
+            title="More inbox filters"
           >
-            {count_for(@inbox_counts, status)}
-          </span>
-        </.link>
+            <span class="hero-funnel-mini h-3.5 w-3.5"></span>
+          </summary>
+          <div class="cympho-menu-panel absolute left-0 z-30 mt-2 min-w-40 rounded-xl border border-border bg-panel p-1 shadow-dialog">
+            <.link
+              :for={status <- ["read", "dismissed", "archived"]}
+              patch={
+                inbox_url(@selected_agent_id, @current_status, @digest_density, %{
+                  status: status
+                })
+              }
+              class={[
+                "flex items-center gap-2 rounded-md px-2.5 py-2 text-xs transition-colors hover:bg-surface-hover",
+                cleanup_tab_class(@current_status, status)
+              ]}
+            >
+              <span class="flex-1">{status_filter_label(status)}</span>
+              <span class="font-mono text-[10px] tabular-nums text-text-quaternary">
+                {count_for(@inbox_counts, status)}
+              </span>
+            </.link>
+          </div>
+        </details>
       </div>
     </div>
 
     <section
       data-testid="inbox-command"
       class={[
-        "ember-glass mb-5 overflow-hidden",
+        "ember-glass ui-advanced-only mb-5 overflow-hidden",
         @digest_density == "compact" && "hidden"
       ]}
     >
@@ -243,9 +233,6 @@
           </div>
           <p class="ember-ink mx-auto mt-5 font-serif text-[22px] font-510 tracking-[-0.01em]">
             {empty_state_heading(@current_status)}
-          </p>
-          <p class="mx-auto mt-2 max-w-md text-sm leading-6 text-text-tertiary">
-            {empty_state_detail(@current_status)}
           </p>
           <.link
             :if={@current_status}

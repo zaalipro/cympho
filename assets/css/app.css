@@ -1089,22 +1089,20 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
 }
 
 /* ── Resizable / collapsible desktop sidebar ──────────────────────────────
-   Width comes from --sidebar-w; the aside, main margin, and runtime top-bar
-   all read it. Collapsing sets the var to 0 and slides the rail off-canvas,
+   Width comes from --sidebar-w; the aside and main margin read it.
+   Collapsing sets the var to 0 and slides the rail off-canvas,
    revealing the floating expand button. Transitions are suppressed mid-drag
    (data-sidebar-dragging) so the handle tracks the pointer 1:1. */
 @media (min-width: 1024px) {
   #sidebar,
-  #main-content,
-  #runtime-topbar {
-    transition-property: width, margin-left, left;
+  #main-content {
+    transition-property: width, margin-left;
     transition-duration: 200ms;
     transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
   }
 
   html[data-sidebar-dragging="true"] #sidebar,
-  html[data-sidebar-dragging="true"] #main-content,
-  html[data-sidebar-dragging="true"] #runtime-topbar {
+  html[data-sidebar-dragging="true"] #main-content {
     transition: none !important;
   }
 

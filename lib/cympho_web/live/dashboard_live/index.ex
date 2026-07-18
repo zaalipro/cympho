@@ -250,7 +250,7 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:owner_signoff_action, signoff_action)
     |> assign(:needs_you_actions, Enum.take(queue_actions, 3))
     |> assign(:later_actions, Enum.drop(queue_actions, 3))
-    |> assign(:needs_you_count, (if(signoff_action, do: 1, else: 0)) + length(queue_actions))
+    |> assign(:needs_you_count, if(signoff_action, do: 1, else: 0) + length(queue_actions))
     |> assign(:all_clear?, is_nil(signoff_action) and all_clear?(queue_actions))
     |> assign(:agent_rollup, agent_rollup(summary.agent_status_counts))
     |> assign(:ceo_command_lane, ceo_command_lane(operations.ceo_flow))
@@ -655,24 +655,11 @@ defmodule CymphoWeb.DashboardLive.Index do
 
   defp all_clear_card(assigns) do
     ~H"""
-    <div class="flex min-w-0 items-center gap-4 rounded-xl border border-border bg-surface/40 p-5 sm:col-span-2 xl:col-span-3">
+    <div class="flex min-w-0 items-center gap-3 rounded-xl border border-border bg-surface/40 p-4 sm:col-span-2 xl:col-span-3">
       <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-teal-500/20 bg-teal-500/[0.06] text-teal-300">
         <span class="hero-check-circle-mini h-5 w-5"></span>
       </span>
-      <div class="min-w-0">
-        <p class="text-sm font-590 text-text-primary">
-          All clear — nothing needs you right now.
-        </p>
-        <p class="mt-0.5 text-xs leading-4 text-text-tertiary">
-          Agents keep working on their own. Check the board if you want to adjust priorities.
-        </p>
-      </div>
-      <a
-        href="/kanban"
-        class="ml-auto shrink-0 text-xs font-590 text-text-tertiary transition hover:text-text-primary"
-      >
-        Scan board →
-      </a>
+      <p class="text-sm font-590 text-text-primary">You're caught up.</p>
     </div>
     """
   end

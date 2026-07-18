@@ -4,10 +4,10 @@ defmodule CymphoWeb.Components.NavRail do
 
   Sections:
     1. Primary action  — New issue
-    2. Top-level pins  — Dashboard, Board, Inbox / Approvals (with badges)
-    3. WORK            — Issues, Goals, Routines
-    4. PROJECTS        — color dot · name · open-issue count, capped at 6
-    5. AGENTS          — role icon · name · live status dot, capped at 8
+    2. Owner navigation — Home, Board, Inbox, Projects, Team, Settings
+    3. Advanced work    — Issues, Reviews, Operations, Goals, Routines
+    4. PROJECTS         — recent project rows, advanced only
+    5. AGENTS           — recent agent rows, advanced only
 
     Settings (gear) pins to the top group. The "More" overflow (Org /
     Costs / Activity / Workspaces / Plugins / Skills / Tool
@@ -20,8 +20,8 @@ defmodule CymphoWeb.Components.NavRail do
     endpoint: CymphoWeb.Endpoint,
     router: CymphoWeb.Router
 
-  @projects_visible 6
-  @agents_visible 8
+  @projects_visible 3
+  @agents_visible 5
 
   attr :current_path, :string, required: true
   attr :projects, :list, default: []
@@ -33,16 +33,12 @@ defmodule CymphoWeb.Components.NavRail do
   attr :rest, :global
 
   def nav_rail(assigns) do
-    # Render every project/agent; rows past the initial cap are marked
-    # `data-nav-overflow` and hidden until the "Show N more" button reveals them
-    # (handled client-side in app.js — the nav lives in the conn-rendered root
-    # layout, so collapse/expand state is JS + localStorage, not LiveView).
     assigns =
       assigns
       |> assign(:projects_visible, @projects_visible)
       |> assign(:agents_visible, @agents_visible)
-      |> assign(:hidden_projects_count, max(0, length(assigns.projects) - @projects_visible))
-      |> assign(:hidden_agents_count, max(0, length(assigns.agents) - @agents_visible))
+      |> assign(:visible_projects, Enum.take(assigns.projects, @projects_visible))
+      |> assign(:visible_agents, Enum.take(assigns.agents, @agents_visible))
 
     ~H"""
     <nav class="flex-1 overflow-y-auto py-2.5 px-2 space-y-0.5" data-ui-complex-page {@rest}>
@@ -50,21 +46,9 @@ defmodule CymphoWeb.Components.NavRail do
 
       <div class="h-1.5"></div>
 
-      <.runtime_controls
-        :if={@current_company && @runtime_controls_allowed}
-        current_company={@current_company}
-        current_path={@current_path}
-      />
-
-      <div :if={@current_company && @runtime_controls_allowed} class="h-1.5"></div>
-
-      <.ui_mode_switcher />
-
-      <div class="h-1.5"></div>
-
       <.nav_link
         to={~p"/dashboard"}
-        label="Dashboard"
+        label="Home"
         icon="hero-squares-2x2-mini"
         current_path={@current_path}
       />
@@ -81,6 +65,27 @@ defmodule CymphoWeb.Components.NavRail do
         current_path={@current_path}
         badge={@inbox_count}
       />
+      <.nav_link
+        to={~p"/projects"}
+        label="Projects"
+        icon="hero-folder-mini"
+        current_path={@current_path}
+      />
+      <.nav_link
+        to={~p"/agents"}
+        label="Team"
+        icon="hero-users-mini"
+        current_path={@current_path}
+      />
+      <.nav_link
+        to={~p"/settings/profile"}
+        match="/settings"
+        label="Settings"
+        icon="hero-cog-6-tooth-mini"
+        current_path={@current_path}
+      />
+
+      <.section_header label="Advanced" advanced_only />
       <.nav_link
         to={~p"/approvals?status=pending"}
         match="/approvals"
@@ -104,15 +109,6 @@ defmodule CymphoWeb.Components.NavRail do
         current_path={@current_path}
         advanced_only
       />
-      <.nav_link
-        to={~p"/settings/profile"}
-        match="/settings"
-        label="Settings"
-        icon="hero-cog-6-tooth-mini"
-        current_path={@current_path}
-      />
-
-      <.section_header label="Work" advanced_only />
       <.nav_link
         to={~p"/issues"}
         label="Issues"
@@ -147,20 +143,19 @@ defmodule CymphoWeb.Components.NavRail do
         label="Projects"
         action_to={~p"/projects/new"}
         action_label="New project"
+        advanced_only
       >
-        <p
-          :if={@projects == []}
-          class="px-3 py-1.5 text-xs text-text-quaternary italic"
-        >
-          No projects yet.
-        </p>
         <.project_row
-          :for={{project, idx} <- Enum.with_index(@projects)}
+          :for={project <- @visible_projects}
           project={project}
-          overflow?={idx >= @projects_visible}
           current_path={@current_path}
         />
-        <.show_more :if={@hidden_projects_count > 0} key="projects" count={@hidden_projects_count} />
+        <.view_all
+          :if={length(@projects) > @projects_visible}
+          to={~p"/projects"}
+          label="All projects"
+          count={length(@projects)}
+        />
       </.nav_section>
 
       <.nav_section
@@ -168,168 +163,23 @@ defmodule CymphoWeb.Components.NavRail do
         label="Agents"
         action_to={~p"/agents/new"}
         action_label="New agent"
+        advanced_only
       >
-        <p
-          :if={@agents == []}
-          class="px-3 py-1.5 text-xs text-text-quaternary italic"
-        >
-          No agents yet.
-        </p>
         <.agent_row
-          :for={{agent, idx} <- Enum.with_index(@agents)}
+          :for={agent <- @visible_agents}
           agent={agent}
-          overflow?={idx >= @agents_visible}
           current_path={@current_path}
-          leadership?={leadership?(agent)}
         />
-        <.show_more :if={@hidden_agents_count > 0} key="agents" count={@hidden_agents_count} />
+        <.view_all
+          :if={length(@agents) > @agents_visible}
+          to={~p"/agents"}
+          label="All agents"
+          count={length(@agents)}
+        />
       </.nav_section>
 
       <div class="h-3"></div>
     </nav>
-    """
-  end
-
-  attr :current_company, :any, required: true
-  attr :current_path, :string, required: true
-
-  defp runtime_controls(assigns) do
-    ~H"""
-    <div
-      data-testid="runtime-controls"
-      class="ui-advanced-only rounded-xl border border-border bg-surface-2/70 p-2 shadow-card"
-    >
-      <div class="mb-2 flex items-center justify-between gap-2 px-0.5">
-        <span class="flex items-center gap-1.5 text-[11px] font-590 uppercase tracking-[0.08em] text-text-tertiary">
-          <span class="hero-bolt-mini h-3.5 w-3.5 text-brand"></span> Runtime
-        </span>
-        <span class={[
-          "rounded-full border px-2 py-0.5 text-[10px] font-590",
-          if(company_paused?(@current_company),
-            do: "border-amber-500/30 bg-amber-500/10 text-amber-300",
-            else:
-              if(company_low_power?(@current_company),
-                do: "border-sky-500/30 bg-sky-500/10 text-sky-300",
-                else: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-              )
-          )
-        ]}>
-          {runtime_status_label(@current_company)}
-        </span>
-      </div>
-      <div class={[
-        "grid gap-1.5",
-        if(company_paused?(@current_company), do: "grid-cols-2", else: "grid-cols-3")
-      ]}>
-        <.runtime_button
-          :if={!company_paused?(@current_company) && !company_low_power?(@current_company)}
-          action={~p"/runtime-control/low-power"}
-          icon="hero-moon-mini"
-          label="Low"
-          tone="neutral"
-          current_path={@current_path}
-          confirm="Switch to low power? Only urgent work keeps running."
-        />
-        <.runtime_button
-          :if={!company_paused?(@current_company) && company_low_power?(@current_company)}
-          action={~p"/runtime-control/resume"}
-          icon="hero-bolt-mini"
-          label="Full"
-          tone="neutral"
-          current_path={@current_path}
-        />
-        <.runtime_button
-          :if={!company_paused?(@current_company)}
-          action={~p"/runtime-control/pause"}
-          icon="hero-pause-mini"
-          label="Pause"
-          tone="neutral"
-          current_path={@current_path}
-          confirm="Pause your agents? Queued work is saved for later."
-        />
-        <.runtime_button
-          :if={company_paused?(@current_company)}
-          action={~p"/runtime-control/resume"}
-          icon="hero-play-mini"
-          label="Resume"
-          tone="neutral"
-          current_path={@current_path}
-        />
-        <.runtime_button
-          action={~p"/runtime-control/stop"}
-          icon="hero-stop-mini"
-          label="Stop"
-          tone="danger"
-          current_path={@current_path}
-          confirm="Stop your agents and clear the queue?"
-        />
-      </div>
-    </div>
-    """
-  end
-
-  attr :action, :string, required: true
-  attr :icon, :string, required: true
-  attr :label, :string, required: true
-  attr :tone, :string, default: "neutral"
-  attr :current_path, :string, required: true
-  attr :confirm, :string, default: nil
-
-  defp runtime_button(assigns) do
-    ~H"""
-    <form method="post" action={@action} class="min-w-0">
-      <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-      <input type="hidden" name="return_to" value={@current_path} />
-      <button
-        type="submit"
-        data-confirm={@confirm}
-        class={[
-          "inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border px-2 text-[12px] font-590 transition-colors",
-          @tone == "danger" &&
-            "border-red-500/25 bg-red-500/10 text-red-300 hover:bg-red-500/15 hover:text-red-200",
-          @tone != "danger" &&
-            "border-border bg-surface-1 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        ]}
-      >
-        <span class={[@icon, "h-3.5 w-3.5 shrink-0"]}></span>
-        <span class="truncate">{@label}</span>
-      </button>
-    </form>
-    """
-  end
-
-  defp company_paused?(%{status: "paused"}), do: true
-  defp company_paused?(_company), do: false
-
-  defp company_low_power?(%{governance_config: %{"runtime_mode" => "low_power"}}), do: true
-  defp company_low_power?(_company), do: false
-
-  defp runtime_status_label(company) do
-    cond do
-      company_paused?(company) -> "Paused"
-      company_low_power?(company) -> "Low"
-      true -> "Live"
-    end
-  end
-
-  defp ui_mode_switcher(assigns) do
-    ~H"""
-    <button
-      type="button"
-      data-ui-mode-toggle
-      title="Toggle simple and advanced view with U"
-      aria-label="Toggle simple and advanced view with U"
-      aria-pressed="false"
-      class="ui-mode-toggle flex w-full items-center gap-2.5 rounded-xl border border-border bg-surface-2/75 px-3 py-2 text-[13px] font-590 text-text-secondary shadow-card transition-colors hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
-    >
-      <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/10 text-white">
-        <span data-ui-mode-icon class="hero-squares-2x2-mini h-3.5 w-3.5"></span>
-      </span>
-      <span class="min-w-0 flex-1 text-left">
-        <span data-ui-mode-label>Simple</span>
-      </span>
-      <span class="hero-chevron-up-down-mini h-3.5 w-3.5 shrink-0 text-text-quaternary"></span>
-    </button>
     """
   end
 
@@ -389,11 +239,12 @@ defmodule CymphoWeb.Components.NavRail do
   attr :label, :string, required: true
   attr :action_to, :string, default: nil
   attr :action_label, :string, default: nil
+  attr :advanced_only, :boolean, default: false
   slot :inner_block, required: true
 
   defp nav_section(assigns) do
     ~H"""
-    <div data-nav-section={@key} class="pt-3">
+    <div data-nav-section={@key} class={["pt-3", @advanced_only && "ui-advanced-only"]}>
       <div class="flex items-center justify-between px-3 pb-1">
         <button
           type="button"
@@ -425,19 +276,20 @@ defmodule CymphoWeb.Components.NavRail do
     """
   end
 
-  attr :key, :string, required: true
+  attr :to, :string, required: true
+  attr :label, :string, required: true
   attr :count, :integer, required: true
 
-  defp show_more(assigns) do
+  defp view_all(assigns) do
     ~H"""
-    <button
-      type="button"
-      data-nav-show-more={@key}
-      class="block w-full px-3 py-1.5 text-left text-[12px] text-text-quaternary hover:text-text-secondary transition-colors"
+    <.link
+      navigate={@to}
+      class="flex items-center gap-2 px-3 py-1.5 text-[12px] text-text-quaternary transition-colors hover:text-text-secondary"
     >
-      <span data-nav-more>Show {@count} more…</span>
-      <span data-nav-less class="hidden">Show less</span>
-    </button>
+      <span class="hero-arrow-right-mini h-3.5 w-3.5"></span>
+      <span class="flex-1">{@label}</span>
+      <span class="tabular-nums">{@count}</span>
+    </.link>
     """
   end
 
@@ -496,7 +348,6 @@ defmodule CymphoWeb.Components.NavRail do
 
   attr :project, :map, required: true
   attr :current_path, :string, required: true
-  attr :overflow?, :boolean, default: false
 
   defp project_row(assigns) do
     href = ~p"/projects/#{assigns.project.id}"
@@ -508,11 +359,9 @@ defmodule CymphoWeb.Components.NavRail do
       navigate={@href}
       class={[
         "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors",
-        "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
-        @overflow? && "hidden"
+        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       ]}
       data-nav-path={@href}
-      data-nav-overflow={if @overflow?, do: "true"}
       data-active={if @active?, do: "true", else: "false"}
       aria-current={if @active?, do: "page", else: nil}
     >
@@ -537,8 +386,6 @@ defmodule CymphoWeb.Components.NavRail do
 
   attr :agent, :map, required: true
   attr :current_path, :string, required: true
-  attr :leadership?, :boolean, default: false
-  attr :overflow?, :boolean, default: false
 
   defp agent_row(assigns) do
     href = ~p"/agents/#{assigns.agent.id}"
@@ -550,11 +397,9 @@ defmodule CymphoWeb.Components.NavRail do
       navigate={@href}
       class={[
         "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors",
-        "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
-        @overflow? && "hidden"
+        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       ]}
       data-nav-path={@href}
-      data-nav-overflow={if @overflow?, do: "true"}
       data-active={if @active?, do: "true", else: "false"}
       aria-current={if @active?, do: "page", else: nil}
     >
@@ -571,9 +416,6 @@ defmodule CymphoWeb.Components.NavRail do
   end
 
   ## ── Helpers ────────────────────────────────────────────────────
-
-  defp leadership?(%{role: r}) when r in [:ceo, :cto], do: true
-  defp leadership?(_), do: false
 
   defp active?("/", current_path), do: current_path == "/"
 

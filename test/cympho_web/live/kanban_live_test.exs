@@ -164,17 +164,20 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ "Board implementation launch chip"
       assert html =~ ~s(href="/issues/#{issue.id}#issue-agent-panel")
 
-      launch_text =
+      launch_link =
         html
         |> Floki.parse_document!()
         |> Floki.find("a[href='/issues/#{issue.id}#issue-agent-panel']")
-        |> Floki.text()
+        |> List.first()
 
-      assert launch_text =~ "Board Launch Engineer"
-      assert launch_text =~ ~r/(Ready|Review mode|Needs setup|Blocked|No agent)/
+      {_tag, attrs, _children} = launch_link
+      attrs = Map.new(attrs)
+
+      assert attrs["aria-label"] =~ "Board Launch Engineer"
+      assert attrs["aria-label"] =~ ~r/(Ready|Review mode|Needs setup|Blocked|No agent)/
     end
 
-    test "renders board command flow metrics and focus queue" do
+    test "renders a compact board health summary and issue action menus" do
       {:ok, project} = create_project(%{name: "Command Board", prefix: "CB"})
 
       {:ok, ceo} =
@@ -225,22 +228,19 @@ defmodule CymphoWeb.KanbanLiveTest do
 
       {:ok, _view, html} = live(conn(), "/kanban?project_id=#{project.id}")
 
-      assert html =~ "Board command"
-      assert html =~ "Flow health"
-      assert html =~ "Focus queue"
-      assert html =~ "3 cards"
-      assert html =~ "Blocked"
-      assert html =~ "Awaiting acceptance"
-      assert html =~ "Queued for next dispatch"
+      assert html =~ "Board health"
+      assert html =~ "1 blocked"
+      assert html =~ "1 review"
+      refute html =~ "Board command"
+      refute html =~ "Focus queue"
       assert html =~ "Board blocked release"
-      assert html =~ "Unblock"
       assert html =~ ~s(href="/issues/#{blocked.id}")
       assert html =~ "Board CEO launch"
-      assert html =~ "Launch CEO"
       assert html =~ ~s(href="/issues/#{ceo_launch.id}")
       assert html =~ "Board review approval"
-      assert html =~ "Review"
       assert html =~ ~s(href="/issues/#{review.id}")
+      assert html =~ ~s(aria-label="Move issue")
+      assert html =~ "hero-ellipsis-horizontal-mini"
     end
 
     test "supports compact digest density" do
@@ -579,9 +579,9 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ "Nothing queued up"
     end
 
-    test "empty columns invite a drop" do
+    test "empty columns avoid repeated drop instructions" do
       {:ok, _view, html} = live(conn(), "/kanban")
-      assert html =~ "Drag a card here"
+      refute html =~ "Drag a card here"
     end
   end
 

@@ -80,9 +80,13 @@ defmodule CymphoWeb.IssueLive.Show.Header do
           Cancel
         </.button>
       </form>
-      <div class="mt-3 flex flex-wrap items-center gap-2">
-        <.badge variant="status" value={to_string(@issue.status)} />
-        <.badge variant="priority" value={to_string(@issue.priority)} />
+      <div
+        :if={
+          Cympho.Issues.issue_runtime_paused?(@issue) ||
+            (@pending_wake && !terminal_issue?(@issue))
+        }
+        class="mt-3 flex flex-wrap items-center gap-2"
+      >
         <span
           :if={Cympho.Issues.issue_runtime_paused?(@issue)}
           class="inline-flex items-center gap-1.5 rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[11px] font-590 uppercase tracking-[0.06em] text-amber-100"
@@ -90,24 +94,6 @@ defmodule CymphoWeb.IssueLive.Show.Header do
           <.icon name="hero-pause-mini" class="h-3.5 w-3.5 text-white" /> Paused
         </span>
         <.pending_wake_badge :if={@pending_wake && !terminal_issue?(@issue)} wake={@pending_wake} />
-        <span
-          :if={@issue.assignee}
-          class="inline-flex items-center gap-1.5 text-caption text-ink-muted"
-        >
-          <span class="w-4 h-4 rounded-full bg-brand/15 ring-1 ring-brand/30 flex items-center justify-center text-[10px] font-510 text-brand">
-            {String.first(@issue.assignee.name) || "?"}
-          </span>
-          {@issue.assignee.name}
-        </span>
-        <span :if={@issue.project} class="text-caption text-ink-tertiary">
-          <span class="font-serif italic">in</span>
-          <.app_link
-            navigate={~p"/projects/#{@issue.project.id}"}
-            class="text-ink-muted hover:text-brand hover:underline underline-offset-2 transition-colors"
-          >
-            {@issue.project.name}
-          </.app_link>
-        </span>
       </div>
     </div>
     """
@@ -135,7 +121,10 @@ defmodule CymphoWeb.IssueLive.Show.Header do
           <span class={digest_dot_class(@digest.tone)} aria-hidden="true"></span>
           <div class="min-w-0">
             <p class="text-sm font-510 leading-5 text-ink">{@digest.headline}</p>
-            <p :if={@last_event} class="mt-0.5 truncate text-caption text-ink-tertiary">
+            <p
+              :if={@last_event}
+              class="ui-advanced-only mt-0.5 truncate text-caption text-ink-tertiary"
+            >
               Last: {@last_event}
             </p>
           </div>
@@ -180,24 +169,24 @@ defmodule CymphoWeb.IssueLive.Show.Header do
 
     cond do
       terminal_issue?(issue) ->
-        %{tone: :quiet, headline: "Closed — nothing needs you here."}
+        %{tone: :quiet, headline: "Closed."}
 
       decision_pending? ->
-        %{tone: :urgent, headline: "A decision is waiting on you: accept or request revision."}
+        %{tone: :urgent, headline: "Review needed."}
 
       gate_resolution.active? and gate_resolution.mode == :pre_runtime ->
-        %{tone: :attention, headline: "Waiting on launch — no agent run has started yet."}
+        %{tone: :attention, headline: "Ready to run."}
 
       gate_resolution.active? ->
         count = length(gate_resolution.blockers)
 
         %{
           tone: :attention,
-          headline: "Agents need #{count} thing#{count_suffix(count)} before this can move on."
+          headline: "Blocked by #{count} item#{count_suffix(count)}."
         }
 
       true ->
-        %{tone: :quiet, headline: "Nothing needs you right now — agents have what they need."}
+        %{tone: :quiet, headline: "No action needed."}
     end
   end
 

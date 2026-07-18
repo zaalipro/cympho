@@ -1,7 +1,7 @@
 <.page size="full" data-ui-complex-page data-density={@digest_density}>
   <header class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
     <div class="min-w-0">
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="ui-advanced-only flex flex-wrap items-center gap-2">
         <span class="ember-eyebrow">
           Runtime mode ·
           <span class={mode_text_class(@runtime_mode.status)}>{@runtime_mode.label}</span>
@@ -24,18 +24,18 @@
     </div>
 
     <div class="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-end">
-      <.density_switch
-        density={@digest_density}
-        compact_patch={operations_url("compact", @delegated_parent_issue_id)}
-        detailed_patch={operations_url("detailed", @delegated_parent_issue_id)}
-      />
-      <button
-        type="button"
+      <div class="ui-advanced-only">
+        <.density_switch
+          density={@digest_density}
+          compact_patch={operations_url("compact", @delegated_parent_issue_id)}
+          detailed_patch={operations_url("detailed", @delegated_parent_issue_id)}
+        />
+      </div>
+      <.icon_action
         phx-click="refresh"
-        class="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
-      >
-        <span class="hero-arrow-path-mini h-4 w-4"></span> Refresh
-      </button>
+        icon="hero-arrow-path-mini"
+        label="Refresh operations"
+      />
     </div>
   </header>
 
@@ -52,99 +52,36 @@
     {@flash["error"]}
   </div>
 
-  <div class="ui-simple-only stagger-children mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-    <a
-      href="#operations-simple-next-fix"
-      class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
-    >
+  <section
+    id="operations-simple-state"
+    class="ui-simple-only mb-4 rounded-lg border border-border bg-panel px-4 py-4"
+  >
+    <div class="flex items-center gap-3">
       <span class="ui-simple-icon">
         <span class="hero-bolt-mini h-4 w-4"></span>
       </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Runtime
-        </span>
-        <span class={[
-          "mt-0.5 block truncate text-sm font-590",
-          mode_text_class(@runtime_mode.status)
-        ]}>
-          {@runtime_mode.label}
-        </span>
-      </span>
-    </a>
-    <a
-      href="#delegated-work-queue"
-      class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
-    >
-      <span class="ui-simple-icon">
-        <span class="hero-play-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Launch
-        </span>
-        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-          {@launch_plan.label}
-        </span>
-      </span>
-    </a>
-    <a
-      href="#operations-simple-live"
-      class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
-    >
-      <span class="ui-simple-icon">
-        <span class="hero-sparkles-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          CEO flow
-        </span>
-        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-          {@ceo_flow.label}
-        </span>
-      </span>
-    </a>
-    <a
-      href="#operations-simple-live"
-      class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
-    >
-      <span class="ui-simple-icon">
-        <span class="hero-check-circle-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Ready
-        </span>
-        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-          {@runtime_enablement.label}
-        </span>
-      </span>
-    </a>
-  </div>
-
-  <section
-    id="operations-simple-live"
-    class="ui-simple-only mb-4 rounded-lg border border-border bg-panel px-4 py-4"
-  >
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div class="min-w-0">
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Live work
+      <div class="min-w-0 flex-1">
+        <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          System state
         </p>
-        <h2 class="mt-1 text-base font-590 text-text-primary">
-          {@delegated_work.count} delegated · {@owner_signoffs.count} owner · {@ceo_outcomes.counts.attention} watch
-        </h2>
+        <div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h2 class={["text-base font-590", mode_text_class(@runtime_mode.status)]}>
+            {@runtime_mode.label}
+          </h2>
+          <span class="text-xs text-text-tertiary">
+            {@capacity.running_runs} running · {now_waiting_count(@wake_queue, @review_nudges)} waiting
+          </span>
+        </div>
       </div>
       <.app_link
         navigate="#delegated-work-queue"
-        class="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+        aria-label="Open work queue"
+        title="Open work queue"
       >
-        <span class="hero-list-bullet-mini h-3.5 w-3.5"></span> Open queue
+        <span class="hero-list-bullet-mini h-3.5 w-3.5"></span>
       </.app_link>
     </div>
-    <p class="mt-2 text-xs leading-5 text-text-tertiary">
-      What's running, what's waiting on you, and what's worth a look.
-    </p>
   </section>
 
   <section
@@ -195,21 +132,13 @@
         @runtime_enablement,
         @launch_plan
       ) %>
-    <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+    <div class="flex items-center justify-between gap-3">
       <div class="min-w-0">
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Action queue
-        </p>
-        <h2 class="mt-1 text-base font-590 text-text-primary">
+        <h2 class="text-base font-590 text-text-primary">
           {simple_action_queue_title(simple_rows)}
         </h2>
+        <p class="mt-0.5 text-xs text-text-quaternary">Queue</p>
       </div>
-      <a
-        href="#runtime-launch-checklist"
-        class="inline-flex shrink-0 items-center gap-1.5 text-xs font-510 text-text-tertiary transition hover:text-text-primary"
-      >
-        <span class="hero-adjustments-horizontal-mini h-3.5 w-3.5 text-white"></span> Details
-      </a>
     </div>
 
     <div class="stagger-children mt-3 grid gap-2 lg:grid-cols-2">
@@ -235,7 +164,6 @@
               </span>
             </div>
             <p class="mt-1 truncate text-sm font-590 text-text-primary">{row.title}</p>
-            <p class="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">{row.detail}</p>
           </div>
           <button
             :if={row.action_event}

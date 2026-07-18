@@ -30,7 +30,7 @@ defmodule CymphoWeb.SettingsLiveTest do
     test "first visit with user_id binds session to that user", %{user: user} do
       {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
 
-      assert html =~ "Notification Settings"
+      assert html =~ "Notifications"
       assert html =~ "Email"
     end
 
@@ -41,14 +41,14 @@ defmodule CymphoWeb.SettingsLiveTest do
       {:ok, _view, html} = live(conn, "/settings/notifications?user_id=fake-id")
 
       # Should still show the session-bound user, not the param
-      assert html =~ "Notification Settings"
+      assert html =~ "Notifications"
       assert html =~ user.email
     end
 
     test "select_user event stores user in session", %{user: user} do
       {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
 
-      assert html =~ "Notification Settings"
+      assert html =~ "Notifications"
       # The select_user event should persist the session binding
     end
 
@@ -60,7 +60,7 @@ defmodule CymphoWeb.SettingsLiveTest do
         assert html =~ "No users found"
       else
         # If there are users in DB from other tests, shows picker with list
-        assert html =~ "Notification Settings"
+        assert html =~ "Notifications"
       end
     end
   end
@@ -69,7 +69,7 @@ defmodule CymphoWeb.SettingsLiveTest do
     test "renders settings page with user", %{user: user} do
       {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
 
-      assert html =~ "Notification Settings"
+      assert html =~ "Notifications"
       assert html =~ "Email"
       assert html =~ "Telegram"
       assert html =~ "Webhook"
