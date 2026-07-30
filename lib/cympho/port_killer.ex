@@ -85,7 +85,8 @@ defmodule Cympho.PortKiller do
 
   defp child_pids(pid) do
     with executable when is_binary(executable) <- System.find_executable("pgrep"),
-         {out, 0} <- System.cmd(executable, ["-P", Integer.to_string(pid)], stderr_to_stdout: true) do
+         {out, 0} <-
+           System.cmd(executable, ["-P", Integer.to_string(pid)], stderr_to_stdout: true) do
       out
       |> String.split(~r/\s+/, trim: true)
       |> Enum.flat_map(&parse_pid/1)

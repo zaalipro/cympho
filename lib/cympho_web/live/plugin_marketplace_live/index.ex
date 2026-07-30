@@ -1,7 +1,9 @@
 defmodule CymphoWeb.PluginMarketplaceLive.Index do
   use CymphoWeb, :live_view
 
-  alias Cympho.Skills
+  alias Cympho.{Companies, Skills}
+
+  @mutation_forbidden_message "Only company owners, admins, and board members can change plugins."
 
   @available_plugins [
     %{
@@ -69,6 +71,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
      socket
      |> assign(:page_title, "Plugin Marketplace")
      |> assign(:company_id, company_id)
+     |> assign(:can_manage_plugins, can_manage_plugins?(socket))
      |> assign(:available_plugins, @available_plugins)
      |> assign(:search_query, "")}
   end
@@ -85,48 +88,52 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
 
   @impl true
   def handle_event("install", %{"identifier" => identifier}, socket) do
-    company_id = socket.assigns.company_id
+    authorize_plugin_mutation(socket, fn ->
+      company_id = socket.assigns.company_id
 
-    if is_nil(company_id) do
-      {:noreply, put_flash(socket, :error, "No company selected")}
-    else
-      case find_available_plugin(identifier) do
-        nil ->
-          {:noreply, put_flash(socket, :error, "Plugin not found")}
+      if is_nil(company_id) do
+        {:noreply, put_flash(socket, :error, "No company selected")}
+      else
+        case find_available_plugin(identifier) do
+          nil ->
+            {:noreply, put_flash(socket, :error, "Plugin not found")}
 
-        available_plugin ->
-          case install_plugin(available_plugin, company_id) do
-            {:ok, _plugin} ->
-              {:noreply,
-               socket
-               |> put_flash(:info, "#{available_plugin.name} installed successfully")
-               |> assign(:company_id, company_id)}
+          available_plugin ->
+            case install_plugin(available_plugin, company_id) do
+              {:ok, _plugin} ->
+                {:noreply,
+                 socket
+                 |> put_flash(:info, "#{available_plugin.name} installed successfully")
+                 |> assign(:company_id, company_id)}
 
-            {:error, changeset} ->
-              error_msg = extract_error_message(changeset)
-              {:noreply, put_flash(socket, :error, "Failed to install: #{error_msg}")}
-          end
+              {:error, changeset} ->
+                error_msg = extract_error_message(changeset)
+                {:noreply, put_flash(socket, :error, "Failed to install: #{error_msg}")}
+            end
+        end
       end
-    end
+    end)
   end
 
   @impl true
   def handle_event("uninstall", %{"id" => id}, socket) do
-    case fetch_company_plugin(socket, id) do
-      {:ok, plugin} ->
-        case Skills.delete_plugin(plugin) do
-          {:ok, _} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "Plugin uninstalled successfully")}
+    authorize_plugin_mutation(socket, fn ->
+      case fetch_company_plugin(socket, id) do
+        {:ok, plugin} ->
+          case Skills.delete_plugin(plugin) do
+            {:ok, _} ->
+              {:noreply,
+               socket
+               |> put_flash(:info, "Plugin uninstalled successfully")}
 
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Failed to uninstall plugin")}
-        end
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Failed to uninstall plugin")}
+          end
 
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Plugin not found")}
-    end
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "Plugin not found")}
+      end
+    end)
   end
 
   defp get_current_company_id(socket) do
@@ -191,4 +198,26 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
       _ -> {:error, :not_found}
     end
   end
+
+  defp authorize_plugin_mutation(socket, fun) do
+    if can_manage_plugins?(socket) do
+      fun.()
+    else
+      {:noreply,
+       socket
+       |> assign(:can_manage_plugins, false)
+       |> put_flash(:error, @mutation_forbidden_message)}
+    end
+  end
+
+  defp can_manage_plugins?(%{
+         assigns: %{
+           current_user: %{id: user_id},
+           current_company: %{id: company_id}
+         }
+       }) do
+    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+  end
+
+  defp can_manage_plugins?(_socket), do: false
 end

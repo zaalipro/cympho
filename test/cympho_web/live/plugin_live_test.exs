@@ -1,8 +1,19 @@
 defmodule CymphoWeb.PluginLiveTest do
   use CymphoWeb.LiveCase, async: true
 
+  alias Cympho.Companies
   alias Cympho.Repo
   alias Cympho.Skills.Plugin
+
+  setup %{conn: conn, current_company: company} = context do
+    unless context[:regular_member] do
+      user_id = Plug.Conn.get_session(conn, :user_id)
+      membership = Companies.get_membership(user_id, company.id)
+      assert {:ok, _membership} = Companies.update_membership(membership, %{role: "admin"})
+    end
+
+    :ok
+  end
 
   defp insert_plugin(company_id, overrides) do
     attrs =
@@ -45,6 +56,33 @@ defmodule CymphoWeb.PluginLiveTest do
 
       assert html =~ "Listed Plugin"
       assert html =~ plugin.identifier
+    end
+
+    test "hides mutation controls for a plugin outside the current company", %{conn: conn} do
+      user_id = Plug.Conn.get_session(conn, :user_id)
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Other Plugin Company",
+          slug: "other-plugin-company-#{System.unique_integer([:positive])}"
+        })
+
+      assert {:ok, _membership} =
+               Companies.create_membership(%{
+                 user_id: user_id,
+                 company_id: other_company.id,
+                 role: "admin"
+               })
+
+      plugin = insert_plugin(other_company.id, %{name: "Other Company Plugin"})
+
+      {:ok, view, html} = live(conn, "/plugins?company_id=#{other_company.id}")
+
+      assert html =~ plugin.name
+      refute has_element?(view, "button[phx-click='toggle_plugin'][phx-value-id='#{plugin.id}']")
+      refute has_element?(view, "a[href='/plugins/#{plugin.id}/edit']")
+      refute has_element?(view, "button[phx-click='delete'][phx-value-id='#{plugin.id}']")
+      assert has_element?(view, "a[href='/plugins/#{plugin.id}/settings']")
     end
 
     test "shows plugin health diagnostics", %{conn: conn, current_company: company} do
@@ -144,6 +182,82 @@ defmodule CymphoWeb.PluginLiveTest do
       unchanged = Repo.get!(Plugin, other_plugin.id)
       assert unchanged.enabled == true
       assert unchanged.status == "active"
+    end
+
+    @tag regular_member: true
+    test "regular members cannot see or invoke plugin mutations", %{
+      conn: conn,
+      current_company: company
+    } do
+      plugin = insert_plugin(company.id, %{enabled: true, status: "active"})
+
+      {:ok, view, html} = live(conn, "/plugins")
+
+      refute has_element?(view, ~s(a[href="/plugins/new"]))
+      refute has_element?(view, ~s(button[phx-click="toggle_plugin"]))
+      refute has_element?(view, ~s(a[href="/plugins/#{plugin.id}/edit"]))
+      refute has_element?(view, ~s(button[phx-click="delete"]))
+      refute html =~ "New Plugin"
+
+      render_click(view, "toggle_plugin", %{"id" => plugin.id})
+      render_click(view, "delete", %{"id" => plugin.id})
+
+      unchanged = Repo.get!(Plugin, plugin.id)
+      assert unchanged.enabled
+      assert unchanged.status == "active"
+
+      assert {:error, {:live_redirect, %{to: "/plugins"}}} = live(conn, "/plugins/new")
+
+      assert {:error, {:live_redirect, %{to: "/plugins"}}} =
+               live(conn, "/plugins/#{plugin.id}/edit")
+    end
+  end
+
+  describe "PluginLive.Show" do
+    test "keeps owner mutation controls in Advanced mode", %{
+      conn: conn,
+      current_company: company
+    } do
+      plugin = insert_plugin(company.id, %{name: "Advanced Controls"})
+
+      {:ok, view, _html} = live(conn, "/plugins/#{plugin.id}")
+
+      assert has_element?(view, "a.ui-advanced-only[href='/plugins/#{plugin.id}/edit']")
+      assert has_element?(view, "button.ui-advanced-only[phx-click='toggle_plugin']")
+      assert has_element?(view, "button[phx-click='toggle_plugin'][data-confirm]")
+    end
+
+    test "shows a plain-language Simple overview and scopes raw metadata to Advanced mode", %{
+      conn: conn,
+      current_company: company
+    } do
+      plugin =
+        insert_plugin(company.id, %{
+          name: "Scoped Capability Plugin",
+          enabled: true,
+          capabilities: ["read:issues"],
+          manifest: %{"host_services" => ["read:issues"]}
+        })
+
+      {:ok, view, _html} = live(conn, "/plugins/#{plugin.id}")
+
+      assert has_element?(view, "[data-testid='plugin-simple-overview'].ui-simple-only")
+      assert has_element?(view, "[data-testid='plugin-simple-overview']", "Enabled")
+      assert has_element?(view, "[data-testid='plugin-simple-overview']", company.name)
+
+      assert has_element?(
+               view,
+               "[data-testid='plugin-simple-overview']",
+               "This plugin can read issues."
+             )
+
+      refute has_element?(view, "[data-testid='plugin-simple-overview']", "read:issues")
+
+      assert has_element?(
+               view,
+               "[data-testid='plugin-advanced-detail'].ui-advanced-only pre",
+               "read:issues"
+             )
     end
   end
 

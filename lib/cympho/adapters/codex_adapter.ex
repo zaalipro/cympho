@@ -8,7 +8,7 @@ defmodule Cympho.Adapters.CodexAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
-  alias Cympho.Adapters.RuntimeTimeout
+  alias Cympho.Adapters.{ProviderFailure, ProviderProxy, RuntimeTimeout}
 
   @default_model "o4-mini"
   @model_options [
@@ -22,6 +22,23 @@ defmodule Cympho.Adapters.CodexAdapter do
   ]
   @default_timeout 300_000
   @max_timeout 3_600_000
+  @realpath_executables ["/usr/bin/realpath", "/bin/realpath"]
+  @git_executables ["/usr/bin/git", "/bin/git", "/usr/local/bin/git", "/opt/homebrew/bin/git"]
+  @bwrap_executables ["/usr/bin/bwrap", "/bin/bwrap"]
+  @sandbox_workspace "/workspace"
+  @sandbox_home "/home/codex"
+  @provider_capability_env "CYMPHO_PROVIDER_CAPABILITY"
+  @sandbox_ssh_socket "/run/cympho/ssh-agent.sock"
+  @sandbox_known_hosts "/run/cympho/known_hosts"
+  @safe_path "/usr/local/bin:/usr/bin:/bin"
+  @runtime_identity_keys ~w(
+    CYMPHO_RUN_ID
+    CYMPHO_ISSUE_ID
+    CYMPHO_AGENT_ID
+    CYMPHO_COMPANY_ID
+    CYMPHO_PROJECT_ID
+    CYMPHO_GOAL_ID
+  )
 
   def default_model, do: @default_model
 
@@ -65,17 +82,18 @@ defmodule Cympho.Adapters.CodexAdapter do
 
   defp do_run(session_id, issue, agent_id, recipient_pid, config, opts) do
     send(recipient_pid, {:session_started, session_id})
+    prompt_runtime_context = prompt_runtime_context(Keyword.get(opts, :runtime_context))
 
     prompt =
       Cympho.AgentPrompt.build(issue, agent_id,
         skills: Keyword.get(opts, :skills, []),
-        runtime_context: Keyword.get(opts, :runtime_context),
+        runtime_context: prompt_runtime_context,
         wake_context: Keyword.get(opts, :wake_context)
       )
 
     Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "codex"})
 
-    case run_codex(session_id, prompt, config, opts) do
+    case run_codex(session_id, issue, prompt, config, opts) do
       {:ok, output} ->
         send(recipient_pid, {:turn_completed, session_id, output})
 
@@ -84,53 +102,118 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
-  defp run_codex(session_id, prompt, config, opts) do
+  defp prompt_runtime_context(%Cympho.RuntimeContext{} = context) do
+    env =
+      context.env
+      |> Map.new()
+      |> Map.put("CYMPHO_WORKSPACE", @sandbox_workspace)
+      |> Map.put("AGENT_HOME", @sandbox_workspace)
+
+    %{context | cwd: @sandbox_workspace, env: env}
+  end
+
+  defp prompt_runtime_context(context), do: context
+
+  defp run_codex(session_id, issue, prompt, config, opts) do
     try do
       codex_bin = find_codex_binary()
+      bwrap_bin = find_bwrap_binary()
       model = config[:model] || config["model"] || @default_model
       timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
+      api_key = resolve_api_key(config, opts) || raise "OpenAI API key not configured"
+      upstream_base_url = provider_base_url(config, opts)
 
-      args = [
-        "--model",
-        to_string(model),
-        "--format",
-        "json",
-        "--quiet"
-      ]
+      cwd = configured_cwd(config, opts)
 
-      with_prompt_file(prompt, fn prompt_path ->
-        shell = System.find_executable("sh") || "/bin/sh"
+      isolated_issue_workspace? =
+        isolated_issue_workspace?(issue, cwd, Keyword.get(opts, :runtime_context))
 
-        shell_args = [
-          "-c",
-          "exec \"$0\" \"$@\" < \"$CYMPHO_PROMPT_FILE\"",
-          to_string(codex_bin) | args
-        ]
+      with_provider_proxy(upstream_base_url, api_key, timeout, fn proxy ->
+        args =
+          [
+            "exec",
+            "--ignore-user-config"
+          ] ++
+            provider_args(ProviderProxy.base_url(proxy)) ++
+            shell_environment_args(opts, cwd) ++
+            permission_args(isolated_issue_workspace?) ++
+            [
+              "--model",
+              to_string(model),
+              "--skip-git-repo-check",
+              "--color",
+              "never",
+              "--json",
+              "-"
+            ]
 
-        env =
-          [{"CYMPHO_PROMPT_FILE", prompt_path} | build_env(config, opts)]
-          |> port_env()
+        with_private_file("prompt", prompt <> "\n", fn prompt_path ->
+          shell = System.find_executable("sh") || "/bin/sh"
 
-        port_opts =
-          [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, shell_args}, {:env, env}] ++
-            cwd_opt(config, opts)
+          shell_args = [
+            "-c",
+            "exec \"$0\" \"$@\" < \"$CYMPHO_PROMPT_FILE\"",
+            to_string(bwrap_bin)
+            | bwrap_args(
+                codex_bin,
+                args,
+                cwd,
+                ProviderProxy.capability(proxy),
+                isolated_issue_workspace?,
+                opts
+              )
+          ]
 
-        with_port({:spawn_executable, String.to_charlist(shell)}, port_opts, fn port ->
-          case collect_output(port, "", timeout, session_id) do
-            {:ok, raw} ->
-              case Cympho.Adapters.ProviderFailure.detect(raw) do
-                :ok -> parse_codex_output(raw)
-                {:error, _} = err -> err
-              end
+          env = clean_port_env([{"CYMPHO_PROMPT_FILE", prompt_path}])
 
-            {:error, _} = err ->
-              err
-          end
+          port_opts =
+            [
+              :binary,
+              :exit_status,
+              :use_stdio,
+              :stderr_to_stdout,
+              {:args, shell_args},
+              {:env, env}
+            ] ++ cwd_opt(config, opts)
+
+          with_port({:spawn_executable, String.to_charlist(shell)}, port_opts, fn port ->
+            case collect_output(port, "", timeout, session_id) do
+              {:ok, raw} ->
+                case ProviderFailure.detect(raw) do
+                  :ok -> parse_codex_output(raw)
+                  {:error, _} = err -> err
+                end
+
+              {:error, _} = err ->
+                err
+            end
+          end)
         end)
       end)
     rescue
       e ->
         {:error, "Codex process failed: #{inspect(e)}"}
+    end
+  end
+
+  defp with_provider_proxy(upstream_base_url, api_key, timeout, fun) do
+    proxy_timeout = min(timeout, 600_000)
+
+    case ProviderProxy.start(
+           upstream_base_url: upstream_base_url,
+           api_key: api_key,
+           timeout_ms: proxy_timeout,
+           receive_timeout_ms: min(proxy_timeout, 60_000)
+         ) do
+      {:ok, proxy} ->
+        try do
+          fun.(proxy)
+        after
+          ProviderProxy.stop(proxy)
+        end
+
+      {:error, reason} ->
+        {:error, {:provider_proxy_unavailable, reason}}
     end
   end
 
@@ -176,20 +259,29 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
-  defp with_prompt_file(prompt, fun) do
-    path =
+  defp with_private_file(prefix, content, fun) do
+    private_dir =
       Path.join(
         System.tmp_dir!(),
-        "cympho-codex-prompt-#{System.unique_integer([:positive])}.txt"
+        "cympho-codex-#{prefix}-#{Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)}"
       )
 
-    File.write!(path, prompt <> "\n", [:binary])
-    File.chmod!(path, 0o600)
+    :ok = File.mkdir(private_dir)
+    :ok = File.chmod(private_dir, 0o700)
+    path = Path.join(private_dir, "value")
+    {:ok, io} = File.open(path, [:write, :binary, :exclusive])
 
     try do
+      try do
+        :ok = File.chmod(path, 0o600)
+        :ok = IO.binwrite(io, content)
+      after
+        File.close(io)
+      end
+
       fun.(path)
     after
-      File.rm(path)
+      File.rm_rf(private_dir)
     end
   end
 
@@ -203,13 +295,6 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
-  defp parse_codex_lines([line], raw) do
-    case Jason.decode(line) do
-      {:ok, json} -> {:ok, json}
-      {:error, _} -> {:error, {:parse_error, raw}}
-    end
-  end
-
   defp parse_codex_lines(lines, raw) do
     parsed =
       lines
@@ -220,37 +305,569 @@ defmodule Cympho.Adapters.CodexAdapter do
       end)
       |> Enum.map(fn {:ok, m} -> m end)
 
-    if Enum.empty?(parsed) do
-      {:error, {:parse_error, raw}}
-    else
-      {:ok, %{"turns" => parsed}}
+    case final_agent_message(parsed) do
+      {:ok, text} ->
+        result = %{"result" => text}
+
+        result =
+          case final_usage(parsed) do
+            nil -> result
+            usage -> Map.put(result, "usage", usage)
+          end
+
+        {:ok, result}
+
+      :error when length(parsed) == 1 ->
+        {:ok, hd(parsed)}
+
+      :error ->
+        {:error, {:parse_error, raw}}
     end
+  end
+
+  defp final_agent_message(events) do
+    events
+    |> Enum.reverse()
+    |> Enum.find_value(:error, fn
+      %{"type" => "item.completed", "item" => %{"type" => "agent_message", "text" => text}}
+      when is_binary(text) and text != "" ->
+        {:ok, text}
+
+      _event ->
+        false
+    end)
+  end
+
+  defp final_usage(events) do
+    events
+    |> Enum.reverse()
+    |> Enum.find_value(fn
+      %{"type" => "turn.completed", "usage" => usage} when is_map(usage) -> usage
+      _event -> nil
+    end)
   end
 
   defp find_codex_binary do
     System.find_executable("codex") || raise "codex binary not found in PATH"
   end
 
-  defp build_env(config, opts) do
+  defp resolve_api_key(config, opts) do
     runtime_env = Keyword.get(opts, :env, %{}) || runtime_context_env(opts[:runtime_context])
 
-    api_key =
-      config[:api_key] || config["api_key"] ||
-        runtime_env["OPENAI_API_KEY"] || runtime_env[:OPENAI_API_KEY] ||
-        Application.get_env(:cympho, :openai_api_key) ||
-        System.get_env("OPENAI_API_KEY")
+    first_present([
+      config[:api_key],
+      config["api_key"],
+      runtime_env["OPENAI_API_KEY"],
+      runtime_env[:OPENAI_API_KEY],
+      Application.get_env(:cympho, :openai_api_key),
+      System.get_env("OPENAI_API_KEY")
+    ])
+  end
 
-    base = [{"TERM", "dumb"} | normalize_env(runtime_env, ["OPENAI_API_KEY"])]
+  defp provider_base_url(config, opts) do
+    base_url =
+      first_present([
+        config[:base_url],
+        config["base_url"],
+        config[:endpoint],
+        config["endpoint"],
+        runtime_env_value(opts, "OPENAI_BASE_URL")
+      ])
 
-    if api_key do
-      [{"OPENAI_API_KEY", api_key} | base]
+    if is_binary(base_url) and String.trim(base_url) != "" do
+      String.trim(base_url)
     else
-      base
+      "https://api.openai.com/v1"
     end
   end
 
+  defp provider_args(proxy_base_url) do
+    provider =
+      ~s(model_providers.cympho_runtime={name="Cympho runtime",base_url=#{Jason.encode!(proxy_base_url)},wire_api="responses",auth={command="/usr/bin/printenv",args=[#{Jason.encode!(@provider_capability_env)}],timeout_ms=5000,refresh_interval_ms=0,cwd=#{Jason.encode!(@sandbox_workspace)}}})
+
+    ["-c", ~s(model_provider="cympho_runtime"), "-c", provider]
+  end
+
+  defp shell_environment_args(opts, cwd) do
+    {_mounts, env} = git_transport(opts, cwd)
+
+    set =
+      env
+      |> Enum.sort_by(fn {key, _value} -> key end)
+      |> Enum.map_join(",", fn {key, value} ->
+        "#{Jason.encode!(key)}=#{Jason.encode!(value)}"
+      end)
+
+    [
+      "-c",
+      ~s(shell_environment_policy={inherit="none",ignore_default_excludes=false,experimental_use_profile=false,set={#{set}}})
+    ]
+  end
+
+  defp permission_args(true) do
+    [
+      "-c",
+      ~s(approval_policy="never"),
+      "-c",
+      ~s(default_permissions="cympho_issue_workspace"),
+      "-c",
+      issue_workspace_permission_profile(),
+      "-c",
+      ~s(projects={#{Jason.encode!(@sandbox_workspace)}={trust_level="untrusted"}})
+    ]
+  end
+
+  defp permission_args(false) do
+    [
+      "-c",
+      ~s(approval_policy="never"),
+      "-c",
+      ~s(default_permissions="cympho_restricted_workspace"),
+      "-c",
+      restricted_workspace_permission_profile(),
+      "-c",
+      ~s(projects={#{Jason.encode!(@sandbox_workspace)}={trust_level="untrusted"}})
+    ]
+  end
+
+  defp issue_workspace_permission_profile do
+    filesystem =
+      [
+        ~s(":workspace_roots"={".git"="write"}),
+        ~s("/proc"="deny")
+      ]
+      |> Enum.join(",")
+
+    ~s(permissions.cympho_issue_workspace={extends=":workspace",filesystem={#{filesystem}},network={enabled=true}})
+  end
+
+  defp restricted_workspace_permission_profile do
+    filesystem =
+      [
+        ~s(":workspace_roots"={".git"="deny"}),
+        ~s("/proc"="deny")
+      ]
+      |> Enum.join(",")
+
+    ~s(permissions.cympho_restricted_workspace={extends=":workspace",filesystem={#{filesystem}},network={enabled=false}})
+  end
+
+  defp find_bwrap_binary do
+    case bwrap_binary() do
+      nil -> raise "bubblewrap binary not found; Codex runs require OS-level containment"
+      path -> path
+    end
+  end
+
+  defp bwrap_binary do
+    configured = Application.get_env(:cympho, :codex_bwrap_path)
+
+    ([configured] ++ @bwrap_executables ++ [System.find_executable("bwrap")])
+    |> Enum.find(fn
+      path when is_binary(path) and path != "" -> File.regular?(path)
+      _path -> false
+    end)
+  end
+
+  defp bwrap_args(codex_bin, codex_args, cwd, capability, _trusted_workspace?, opts) do
+    workspace = direct_real_directory!(cwd, "Codex workspace")
+    {git_mounts, sandbox_env} = git_transport(opts, workspace)
+    sandbox_env = Map.put(sandbox_env, @provider_capability_env, capability)
+
+    [
+      "--die-with-parent",
+      "--new-session",
+      "--unshare-user",
+      "--unshare-ipc",
+      "--unshare-pid",
+      "--unshare-uts",
+      "--unshare-cgroup-try",
+      "--share-net",
+      "--cap-drop",
+      "ALL",
+      "--clearenv"
+    ] ++
+      sandbox_setenv_args(sandbox_env) ++
+      [
+        "--ro-bind",
+        "/usr",
+        "/usr"
+      ] ++
+      usr_merged_symlink_args() ++
+      [
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--tmpfs",
+        "/home",
+        "--dir",
+        @sandbox_home,
+        "--dir",
+        Path.join(@sandbox_home, ".codex"),
+        "--tmpfs",
+        "/run",
+        "--dir",
+        "/run/cympho",
+        "--proc",
+        "/proc",
+        "--dir",
+        "/etc",
+        "--dir",
+        "/etc/ssl"
+      ] ++
+      system_ro_bind_args() ++
+      [
+        "--dir",
+        @sandbox_workspace,
+        "--bind",
+        workspace,
+        @sandbox_workspace
+      ] ++
+      git_mounts ++
+      [
+        "--chdir",
+        @sandbox_workspace,
+        "--",
+        to_string(codex_bin)
+        | codex_args
+      ]
+  end
+
+  defp sandbox_setenv_args(env) do
+    env
+    |> Enum.sort_by(fn {key, _value} -> key end)
+    |> Enum.flat_map(fn {key, value} -> ["--setenv", key, value] end)
+  end
+
+  defp sandbox_env(opts) do
+    runtime_env = Keyword.get(opts, :env, %{}) || runtime_context_env(opts[:runtime_context])
+
+    runtime_identity =
+      @runtime_identity_keys
+      |> Enum.flat_map(fn key ->
+        case Map.get(runtime_env, key) || Map.get(runtime_env, String.to_atom(key)) do
+          value when is_binary(value) and value != "" -> [{key, value}]
+          value when is_list(value) and value != [] -> [{key, List.to_string(value)}]
+          _value -> []
+        end
+      end)
+      |> Map.new()
+
+    Map.merge(
+      %{
+        "HOME" => @sandbox_home,
+        "CODEX_HOME" => Path.join(@sandbox_home, ".codex"),
+        "PATH" => @safe_path,
+        "TERM" => "dumb",
+        "LANG" => "C.UTF-8",
+        "LC_ALL" => "C.UTF-8",
+        "USER" => "cympho",
+        "LOGNAME" => "cympho",
+        "SHELL" => "/bin/sh",
+        "TMPDIR" => "/tmp",
+        "CYMPHO_WORKSPACE" => @sandbox_workspace,
+        "AGENT_HOME" => @sandbox_workspace,
+        "GIT_TERMINAL_PROMPT" => "0",
+        "GIT_CONFIG_NOSYSTEM" => "1",
+        "GIT_CONFIG_GLOBAL" => "/dev/null",
+        "GIT_ALLOW_PROTOCOL" => "https:ssh",
+        "GIT_PROTOCOL_FROM_USER" => "0",
+        "GIT_AUTHOR_NAME" => "Cympho Agent",
+        "GIT_AUTHOR_EMAIL" => "cympho@llmotions.com",
+        "GIT_COMMITTER_NAME" => "Cympho Agent",
+        "GIT_COMMITTER_EMAIL" => "cympho@llmotions.com"
+      },
+      runtime_identity
+    )
+  end
+
+  defp git_transport(opts, workspace) do
+    env = opts |> sandbox_env() |> Map.merge(git_config_env(workspace))
+    socket = System.get_env("CYMPHO_CODEX_SSH_AUTH_SOCK")
+    known_hosts = System.get_env("CYMPHO_CODEX_KNOWN_HOSTS")
+
+    with {:ok, real_socket} <- direct_real_socket(socket),
+         {:ok, real_known_hosts} <- direct_real_file(known_hosts) do
+      ssh_command =
+        "/usr/bin/ssh -F /dev/null -o IdentityAgent=#{@sandbox_ssh_socket} " <>
+          "-o UserKnownHostsFile=#{@sandbox_known_hosts} -o StrictHostKeyChecking=yes"
+
+      mounts = [
+        "--bind",
+        real_socket,
+        @sandbox_ssh_socket,
+        "--ro-bind",
+        real_known_hosts,
+        @sandbox_known_hosts
+      ]
+
+      git_env =
+        Map.merge(env, %{
+          "SSH_AUTH_SOCK" => @sandbox_ssh_socket,
+          "GIT_SSH_COMMAND" => ssh_command
+        })
+
+      {mounts, git_env}
+    else
+      _reason -> {[], env}
+    end
+  end
+
+  defp usr_merged_symlink_args do
+    [
+      {"usr/bin", "/bin"},
+      {"usr/sbin", "/sbin"},
+      {"usr/lib", "/lib"},
+      {"usr/lib64", "/lib64"}
+    ]
+    |> Enum.flat_map(fn {source, destination} ->
+      if File.dir?(Path.join("/", source)) do
+        ["--symlink", source, destination]
+      else
+        []
+      end
+    end)
+  end
+
+  defp system_ro_bind_args do
+    [
+      "/etc/resolv.conf",
+      "/etc/hosts",
+      "/etc/nsswitch.conf",
+      "/etc/passwd",
+      "/etc/group",
+      "/etc/ssl/certs",
+      "/etc/ssl/openssl.cnf",
+      "/etc/ld.so.cache",
+      "/etc/localtime"
+    ]
+    |> Enum.flat_map(fn path ->
+      if File.exists?(path), do: ["--ro-bind", path, path], else: []
+    end)
+  end
+
+  defp direct_real_directory!(path, label) when is_binary(path) do
+    with {:ok, %File.Stat{type: :directory}} <- File.lstat(path),
+         {:ok, real_path} <- realpath(path) do
+      real_path
+    else
+      _reason -> raise "#{label} must be a direct, existing directory"
+    end
+  end
+
+  defp direct_real_directory!(_path, label),
+    do: raise("#{label} must be a direct, existing directory")
+
+  defp direct_real_file(path) when is_binary(path) do
+    with {:ok, %File.Stat{type: :regular}} <- File.lstat(path),
+         {:ok, real_path} <- realpath(path) do
+      {:ok, real_path}
+    else
+      _reason -> :error
+    end
+  end
+
+  defp direct_real_file(_path), do: :error
+
+  defp direct_real_socket(path) when is_binary(path) do
+    with {:ok, %File.Stat{type: :other}} <- File.lstat(path),
+         {:ok, real_path} <- realpath(path) do
+      {:ok, real_path}
+    else
+      _reason -> :error
+    end
+  end
+
+  defp direct_real_socket(_path), do: :error
+
+  defp git_config_env(workspace) do
+    entries =
+      [
+        {"credential.helper", ""},
+        {"protocol.ext.allow", "never"}
+      ] ++ github_https_rewrite(workspace)
+
+    entries
+    |> Enum.with_index()
+    |> Enum.reduce(%{"GIT_CONFIG_COUNT" => to_string(length(entries))}, fn {{key, value}, index},
+                                                                           env ->
+      env
+      |> Map.put("GIT_CONFIG_KEY_#{index}", key)
+      |> Map.put("GIT_CONFIG_VALUE_#{index}", value)
+    end)
+  end
+
+  defp github_https_rewrite(workspace) do
+    with executable when is_binary(executable) <- git_executable(),
+         {origin, 0} <-
+           System.cmd(executable, ["-C", workspace, "remote", "get-url", "origin"],
+             stderr_to_stdout: true
+           ),
+         origin <- String.trim(origin),
+         %URI{
+           scheme: "https",
+           host: host,
+           path: path,
+           userinfo: nil,
+           query: nil,
+           fragment: nil
+         } <- URI.parse(origin),
+         true <- String.downcase(host || "") == "github.com",
+         repo_path when is_binary(repo_path) <- github_repo_path(path) do
+      ssh_url = "git@github.com:" <> repo_path
+      [{"url.#{ssh_url}.insteadOf", origin}]
+    else
+      _reason -> []
+    end
+  end
+
+  defp github_repo_path(path) do
+    segments = path |> to_string() |> String.trim("/") |> String.split("/", trim: true)
+
+    case segments do
+      [owner, repo] ->
+        if valid_github_segment?(owner) and valid_github_segment?(repo) do
+          Enum.join([owner, repo], "/")
+        end
+
+      _segments ->
+        nil
+    end
+  end
+
+  defp valid_github_segment?(segment) do
+    segment not in ["", ".", ".."] and String.match?(segment, ~r/\A[A-Za-z0-9_.-]+\z/)
+  end
+
+  defp isolated_issue_workspace?(issue, cwd, runtime_context) when is_binary(cwd) do
+    case trusted_repository_fingerprint(issue, cwd, runtime_context) do
+      {:ok, repository_fingerprint} ->
+        issue_id = issue_id(issue)
+        root = Cympho.Workspace.workspace_root() |> Path.expand()
+        workspace = issue_id |> Cympho.Workspace.workspace_path() |> Path.expand()
+        git_dir = Path.join(workspace, ".git")
+
+        with true <- Path.expand(cwd) == workspace,
+             true <- Path.dirname(workspace) == root,
+             {:ok, %File.Stat{type: :directory}} <- File.lstat(root),
+             {:ok, %File.Stat{type: :directory}} <- File.lstat(workspace),
+             {:ok, %File.Stat{type: :directory}} <- File.lstat(git_dir),
+             {:ok, real_root} <- realpath(root),
+             {:ok, real_workspace} <- realpath(workspace),
+             {:ok, real_git_dir} <- realpath(git_dir),
+             true <- real_workspace == Path.join(real_root, Path.basename(workspace)),
+             true <- real_git_dir == Path.join(real_workspace, ".git"),
+             true <- workspace_origin_matches?(real_workspace, repository_fingerprint) do
+          true
+        else
+          _reason -> false
+        end
+
+      :error ->
+        false
+    end
+  end
+
+  defp isolated_issue_workspace?(_issue, _cwd, _runtime_context), do: false
+
+  defp trusted_repository_fingerprint(
+         issue,
+         cwd,
+         %Cympho.RuntimeContext{
+           issue_id: context_issue_id,
+           project_id: context_project_id,
+           cwd: context_cwd,
+           metadata: metadata
+         }
+       )
+       when is_binary(context_issue_id) and is_binary(context_project_id) and
+              is_binary(context_cwd) and is_map(metadata) do
+    issue_repository_fingerprint = Map.get(metadata, "project_repository_fingerprint")
+
+    if context_issue_id == issue_id(issue) and
+         context_project_id == issue_project_id(issue) and
+         Path.expand(context_cwd) == Path.expand(cwd) and
+         valid_repository_fingerprint?(issue_repository_fingerprint) do
+      {:ok, issue_repository_fingerprint}
+    else
+      :error
+    end
+  end
+
+  defp trusted_repository_fingerprint(_issue, _cwd, _runtime_context), do: :error
+
+  defp valid_repository_fingerprint?(fingerprint) when is_binary(fingerprint) do
+    String.match?(fingerprint, ~r/\A[0-9a-f]{64}\z/)
+  end
+
+  defp valid_repository_fingerprint?(_fingerprint), do: false
+
+  defp workspace_origin_matches?(workspace, expected_fingerprint) do
+    with executable when is_binary(executable) <- git_executable(),
+         {origin, 0} <-
+           System.cmd(executable, ["-C", workspace, "remote", "get-url", "origin"],
+             stderr_to_stdout: true
+           ),
+         {:ok, actual_fingerprint} <- Cympho.Workspace.repository_fingerprint(origin) do
+      Plug.Crypto.secure_compare(actual_fingerprint, expected_fingerprint)
+    else
+      _reason -> false
+    end
+  end
+
+  defp git_executable do
+    Enum.find(@git_executables, &File.regular?/1)
+  end
+
+  defp realpath(path) do
+    case Enum.find(@realpath_executables, &File.regular?/1) do
+      nil ->
+        {:error, :realpath_unavailable}
+
+      executable ->
+        case System.cmd(executable, [path], stderr_to_stdout: true) do
+          {resolved, 0} ->
+            {:ok, resolved |> String.trim_trailing("\n") |> String.trim_trailing("\r")}
+
+          {_output, _status} ->
+            {:error, :realpath_failed}
+        end
+    end
+  end
+
+  defp issue_id(%{id: issue_id}) when not is_nil(issue_id), do: to_string(issue_id)
+  defp issue_id(%{"id" => issue_id}) when not is_nil(issue_id), do: to_string(issue_id)
+  defp issue_id(_issue), do: nil
+
+  defp issue_project_id(%{project_id: project_id}) when not is_nil(project_id),
+    do: to_string(project_id)
+
+  defp issue_project_id(%{"project_id" => project_id}) when not is_nil(project_id),
+    do: to_string(project_id)
+
+  defp issue_project_id(_issue), do: nil
+
+  defp configured_cwd(config, opts) do
+    opts[:cwd] || config[:cwd] || config["cwd"]
+  end
+
+  defp runtime_env_value(opts, key) do
+    env = Keyword.get(opts, :env, %{}) || runtime_context_env(opts[:runtime_context])
+    Map.get(env, key) || Map.get(env, String.to_atom(key))
+  end
+
+  defp first_present(values) do
+    Enum.find(values, fn
+      value when is_binary(value) -> String.trim(value) != ""
+      value when is_list(value) -> value != []
+      nil -> false
+      _value -> true
+    end)
+  end
+
   defp cwd_opt(config, opts) do
-    case opts[:cwd] || config[:cwd] || config["cwd"] do
+    case configured_cwd(config, opts) do
       nil -> []
       cwd -> [{:cd, cwd}]
     end
@@ -259,24 +876,19 @@ defmodule Cympho.Adapters.CodexAdapter do
   defp runtime_context_env(%Cympho.RuntimeContext{env: env}) when is_map(env), do: env
   defp runtime_context_env(_), do: %{}
 
-  defp normalize_env(env, skip_keys) when is_map(env) do
-    Enum.flat_map(env, fn {key, value} ->
-      key = env_string(key)
+  defp clean_port_env(env) do
+    replacements = MapSet.new(env, fn {key, _value} -> env_string(key) end)
 
-      if key in skip_keys do
-        []
-      else
-        [{key, value}]
-      end
-    end)
-  end
+    removals =
+      System.get_env()
+      |> Map.keys()
+      |> Enum.reject(&MapSet.member?(replacements, &1))
+      |> Enum.map(fn key -> {env_charlist(key), false} end)
 
-  defp normalize_env(_env, _skip_keys), do: []
-
-  defp port_env(env) do
-    Enum.map(env, fn {key, value} ->
-      {env_charlist(key), env_charlist(value)}
-    end)
+    removals ++
+      Enum.map(env, fn {key, value} ->
+        {env_charlist(key), env_charlist(value)}
+      end)
   end
 
   defp env_string(value) when is_binary(value), do: value
@@ -302,6 +914,13 @@ defmodule Cympho.Adapters.CodexAdapter do
         %{
           status: :degraded,
           message: "codex binary not found in PATH",
+          checked_at: DateTime.utc_now()
+        }
+
+      is_nil(bwrap_binary()) ->
+        %{
+          status: :degraded,
+          message: "bubblewrap not found; secure Codex containment is unavailable",
           checked_at: DateTime.utc_now()
         }
 
@@ -372,7 +991,8 @@ defmodule Cympho.Adapters.CodexAdapter do
     api_key = get_api_key(config)
     has_key = not is_nil(api_key) and api_key != ""
     has_binary = not is_nil(System.find_executable("codex"))
-    has_key and has_binary
+    has_sandbox = not is_nil(bwrap_binary())
+    has_key and has_binary and has_sandbox
   end
 
   @impl true
@@ -401,9 +1021,12 @@ defmodule Cympho.Adapters.CodexAdapter do
   defp config_value(_config, _key), do: nil
 
   defp get_api_key(config) do
-    config[:api_key] || config["api_key"] ||
-      Application.get_env(:cympho, :openai_api_key) ||
+    first_present([
+      config[:api_key],
+      config["api_key"],
+      Application.get_env(:cympho, :openai_api_key),
       System.get_env("OPENAI_API_KEY")
+    ])
   end
 
   defp validate_api_key(nil), do: {:error, "api_key is required"}

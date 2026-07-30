@@ -18,6 +18,7 @@
           Marketplace
         </.app_link>
         <.app_link
+          :if={@can_manage_plugins}
           navigate={~p"/plugins/new"}
           class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[40px] cta-glow rounded-button transition-colors inline-flex items-center gap-2"
         >
@@ -196,7 +197,11 @@
             >
               Browse marketplace
             </.app_link>
-            <.app_link navigate={~p"/plugins/new"} class={plugin_empty_action_class(:neutral)}>
+            <.app_link
+              :if={@can_manage_plugins}
+              navigate={~p"/plugins/new"}
+              class={plugin_empty_action_class(:neutral)}
+            >
               New plugin
             </.app_link>
           </div>
@@ -260,9 +265,11 @@
 
           <div class="flex shrink-0 items-center gap-1">
             <button
+              :if={can_manage_plugin?(@current_user, @current_company, plugin)}
               type="button"
               phx-click="toggle_plugin"
               phx-value-id={plugin.id}
+              data-confirm={"#{if plugin.enabled, do: "Disable", else: "Enable"} #{plugin.name}?"}
               class="rounded-lg border border-border bg-button px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
             >
               {if plugin.enabled, do: "Disable", else: "Enable"}
@@ -276,6 +283,7 @@
               <.icon name="hero-adjustments-horizontal-mini" class="h-4 w-4" />
             </.app_link>
             <.app_link
+              :if={can_manage_plugin?(@current_user, @current_company, plugin)}
               navigate={~p"/plugins/#{plugin.id}/edit"}
               aria-label="Edit plugin"
               title="Edit"
@@ -284,6 +292,7 @@
               <.icon name="hero-pencil-square-mini" class="h-4 w-4" />
             </.app_link>
             <button
+              :if={can_manage_plugin?(@current_user, @current_company, plugin)}
               type="button"
               phx-click="delete"
               phx-value-id={plugin.id}

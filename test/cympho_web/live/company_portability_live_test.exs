@@ -49,6 +49,19 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
     refute html =~ "hidden-portability-token"
   end
 
+  test "export rejects a company the current board member cannot access" do
+    conn = authenticated_conn(%{is_board_member: true})
+
+    {:ok, foreign_company} =
+      Companies.create_company(%{
+        name: "Foreign Export Company",
+        slug: "foreign-export-#{System.unique_integer([:positive])}"
+      })
+
+    assert {:error, {:redirect, %{to: "/companies"}}} =
+             live(conn, "/companies/#{foreign_company.id}/export")
+  end
+
   test "import page previews export contents and shows post-import secret restore actions" do
     conn = authenticated_conn(%{is_board_member: true})
     company = current_company()

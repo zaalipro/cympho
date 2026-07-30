@@ -14,6 +14,7 @@ defmodule CymphoWeb.IssueLive.New do
   import CymphoWeb.IssueLive.Components.SwarmConfig, only: [swarm_configuration: 1]
 
   @default_attrs %{"status" => "todo", "priority" => "medium"}
+  @allowed_issue_params ~w(title description status priority due_on goal_id project_id)
 
   @impl true
   def mount(params, _session, socket) do
@@ -241,8 +242,10 @@ defmodule CymphoWeb.IssueLive.New do
     goal = selected_goal(issue_params["goal_id"], socket.assigns.goals)
 
     issue_params
+    |> Map.take(@allowed_issue_params)
     |> normalize_goal_id(goal)
     |> normalize_project_id_for_goal(goal)
+    |> normalize_project_id(socket.assigns.projects)
   end
 
   defp normalize_goal_id(issue_params, %{id: goal_id}),
@@ -256,6 +259,20 @@ defmodule CymphoWeb.IssueLive.New do
   end
 
   defp normalize_project_id_for_goal(issue_params, _goal), do: issue_params
+
+  defp normalize_project_id(issue_params, projects) do
+    case issue_params["project_id"] do
+      project_id when is_binary(project_id) ->
+        if Enum.any?(projects, &(&1.id == project_id)) do
+          issue_params
+        else
+          Map.delete(issue_params, "project_id")
+        end
+
+      _project_id ->
+        Map.delete(issue_params, "project_id")
+    end
+  end
 
   defp goal_option_label(%{goal_type: goal_type, title: title}) do
     "#{goal_type_label(goal_type)}: #{title}"

@@ -50,15 +50,18 @@ defmodule CymphoWeb.CompanyLive.FormComponent do
   end
 
   defp save_company(socket, :new, company_params) do
-    case Companies.create_company(company_params) do
+    case Companies.create_company_for_owner(company_params, socket.assigns.current_user.id) do
       {:ok, company} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Company created successfully")
-         |> push_navigate(to: ~p"/companies/#{company}")}
+         |> put_flash(:info, "Company created. You are now its owner.")
+         |> redirect(to: ~p"/switch-company/#{company.id}?return_to=/companies/#{company.id}")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign_form(socket, changeset)}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "We couldn't create the company. Try again.")}
     end
   end
 

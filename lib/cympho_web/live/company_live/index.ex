@@ -6,15 +6,16 @@ defmodule CymphoWeb.CompanyLive.Index do
   @impl true
   def mount(_params, _session, socket) do
     blueprints = Companies.autonomous_company_blueprints()
+    user_id = socket.assigns.current_user.id
 
     {:ok,
      socket
      |> assign(:page_title, "Companies")
      |> assign(:infinite_scroll, %{})
      |> assign(:blueprints, blueprints)
-     |> assign(:launch_summary, launch_summary(blueprints))
+     |> assign(:launch_summary, launch_summary(blueprints, user_id))
      |> assign(:featured_blueprints, Enum.take(blueprints, 5))
-     |> init_stream(:companies, &fetch_companies/1)}
+     |> init_stream(:companies, &fetch_companies(user_id, &1))}
   end
 
   @impl true
@@ -48,30 +49,37 @@ defmodule CymphoWeb.CompanyLive.Index do
 
   @impl true
   def handle_event("delete_company", %{"id" => id}, socket) do
-    company = Companies.get_company!(id)
-    {:ok, _} = Companies.delete_company(company)
+    user_id = socket.assigns.current_user.id
 
-    {:noreply,
-     socket
-     |> refresh_launch_summary()
-     |> reset_stream(:companies, &fetch_companies/1)
-     |> put_flash(:info, "Company deleted successfully")}
+    if company_manager?(user_id, id) do
+      company = Companies.get_company!(id)
+      {:ok, _} = Companies.delete_company(company)
+
+      {:noreply,
+       socket
+       |> refresh_launch_summary()
+       |> reset_stream(:companies, &fetch_companies(user_id, &1))
+       |> put_flash(:info, "Company deleted successfully")}
+    else
+      {:noreply, put_flash(socket, :error, "Company not found or you cannot manage it.")}
+    end
   end
 
   def handle_event("next-page", _params, socket) do
-    {:reply, %{}, load_next(socket, :companies, &fetch_companies/1)}
+    user_id = socket.assigns.current_user.id
+    {:reply, %{}, load_next(socket, :companies, &fetch_companies(user_id, &1))}
   end
 
-  defp fetch_companies(cursor) do
-    Companies.list_companies_page(after: cursor)
+  defp fetch_companies(user_id, cursor) do
+    Companies.list_companies_for_user_page(user_id, after: cursor)
   end
 
   def format_inserted_at(company) do
     Calendar.strftime(company.inserted_at, "%Y-%m-%d %H:%M")
   end
 
-  defp launch_summary(blueprints) do
-    companies = Companies.list_companies()
+  defp launch_summary(blueprints, user_id) do
+    companies = Companies.list_companies_for_user(user_id)
     active_count = Enum.count(companies, &(&1.status == "active"))
     paused_count = Enum.count(companies, &(&1.status == "paused"))
 
@@ -92,8 +100,23 @@ defmodule CymphoWeb.CompanyLive.Index do
   end
 
   defp refresh_launch_summary(socket) do
-    assign(socket, :launch_summary, launch_summary(socket.assigns.blueprints))
+    assign(
+      socket,
+      :launch_summary,
+      launch_summary(socket.assigns.blueprints, socket.assigns.current_user.id)
+    )
   end
+
+  def can_manage_company?(user, company) do
+    company_manager?(user && user.id, company && company.id)
+  end
+
+  defp company_manager?(user_id, company_id)
+       when is_binary(user_id) and is_binary(company_id) do
+    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+  end
+
+  defp company_manager?(_user_id, _company_id), do: false
 
   defp launch_posture(0, _active_count, _paused_count) do
     %{

@@ -95,9 +95,9 @@ defmodule CymphoWeb.Components.SettingsLayout do
               </.link>
 
               <details class="group shrink-0 lg:mt-3" open={@technical_open?}>
-                <summary class="flex cursor-pointer list-none items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-2 text-[13px] font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary lg:border-transparent lg:bg-transparent lg:py-1.5">
+                <summary class="flex cursor-pointer list-none items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-2 text-[13px] font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 lg:border-transparent lg:bg-transparent lg:py-1.5">
                   <span class="hero-cog-6-tooth-mini h-4 w-4 shrink-0 text-text-tertiary"></span>
-                  <span class="flex-1">Advanced</span>
+                  <span class="flex-1">Technical settings</span>
                   <span class="hero-chevron-down-mini h-3.5 w-3.5 text-text-quaternary transition-transform group-open:rotate-180">
                   </span>
                 </summary>
@@ -157,7 +157,7 @@ defmodule CymphoWeb.Components.SettingsLayout do
 
   defp settings_nav_class(active?) do
     [
-      "group flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg border px-3 py-2 text-[13px] font-510 transition-colors lg:border-transparent lg:py-1.5",
+      "group flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg border px-3 py-2 text-[13px] font-510 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 lg:border-transparent lg:py-1.5",
       (active? &&
          "order-first border-brand/30 bg-brand/10 text-text-primary shadow-[0_10px_30px_-14px_rgb(var(--color-primary-rgb)/0.6)] lg:order-none lg:border-transparent") ||
         "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary lg:bg-transparent"

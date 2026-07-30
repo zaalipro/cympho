@@ -312,15 +312,17 @@ defmodule Cympho.Adapters.UnitTest do
       end
     end
 
-    test "available?/1 with api key depends on binary presence" do
+    test "available?/1 with api key depends on binary and sandbox presence" do
       has_codex = System.find_executable("codex") != nil
-      result = CodexAdapter.available?(%{api_key: "sk-test"})
 
-      if has_codex do
-        assert result == true
-      else
-        assert result == false
-      end
+      has_bwrap =
+        Enum.any?(["/usr/bin/bwrap", "/bin/bwrap", System.find_executable("bwrap")], fn
+          path when is_binary(path) -> File.regular?(path)
+          _path -> false
+        end)
+
+      result = CodexAdapter.available?(%{api_key: "sk-test"})
+      assert result == (has_codex and has_bwrap)
     end
 
     test "available?/0 delegates to available?/1" do

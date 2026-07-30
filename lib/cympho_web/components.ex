@@ -64,34 +64,37 @@ defmodule CymphoWeb.Components do
       ]}
       data-density-switch
       data-density={@density}
-      title="Toggle compact and detailed view with V"
-      aria-label="View density"
+      role="group"
+      title="Change row detail with V"
+      aria-label="Row detail"
     >
       <.link
         patch={@compact_patch}
         data-density-option="compact"
+        role="button"
         aria-pressed={to_string(@density == "compact")}
-        title="Compact view (V)"
+        title="Compact rows (V)"
         class={[
-          "inline-flex items-center rounded-lg px-2.5 py-1.5 transition-colors",
+          "inline-flex items-center rounded-lg px-2.5 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
           density_tab_class(@density, "compact")
         ]}
       >
         <span class="hero-list-bullet-mini h-4 w-4"></span>
-        <span class="sr-only">Compact</span>
+        <span class="sr-only">Compact rows</span>
       </.link>
       <.link
         patch={@detailed_patch}
         data-density-option="detailed"
+        role="button"
         aria-pressed={to_string(@density == "detailed")}
-        title="Detailed view (V)"
+        title="Detailed rows (V)"
         class={[
-          "inline-flex items-center rounded-lg px-2.5 py-1.5 transition-colors",
+          "inline-flex items-center rounded-lg px-2.5 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
           density_tab_class(@density, "detailed")
         ]}
       >
         <span class="hero-rectangle-stack-mini h-4 w-4"></span>
-        <span class="sr-only">Detailed</span>
+        <span class="sr-only">Detailed rows</span>
       </.link>
     </div>
     """

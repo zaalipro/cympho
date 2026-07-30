@@ -61,6 +61,20 @@ defmodule CymphoWeb.Components.CompanySwitcherStatic do
             </div>
             <div id="company-switcher-list"></div>
           </div>
+          <div class="flex items-center justify-between gap-3 border-t border-border px-3 py-2.5">
+            <a
+              href="/companies"
+              class="text-xs font-510 text-text-tertiary transition-colors hover:text-text-primary"
+            >
+              Manage companies
+            </a>
+            <a
+              href="/onboarding"
+              class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-590 text-on-primary transition-colors hover:bg-accent-hover"
+            >
+              <span class="hero-plus-mini h-3.5 w-3.5"></span> Create with guided setup
+            </a>
+          </div>
         </div>
       </div>
     </div>

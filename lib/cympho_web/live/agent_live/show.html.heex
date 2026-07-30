@@ -183,8 +183,7 @@
         phx-value-tab={key}
         class={[
           "border-b-2 px-3 py-2 text-sm transition-colors duration-200 -mb-px",
-          key in ["instructions", "skills"] && @current_tab != key &&
-            "ui-advanced-only",
+          key != "dashboard" && "ui-advanced-only",
           if(@current_tab == key,
             do:
               "border-brand text-text-primary font-510 shadow-[0_4px_12px_-4px_rgba(217,119,87,0.5)]",
@@ -194,6 +193,32 @@
       >
         {label}
       </button>
+    </div>
+
+    <div
+      :if={@current_tab != "dashboard"}
+      data-testid="agent-simple-tab-fallback"
+      class="ui-simple-only rounded-xl border border-brand/20 bg-brand/[0.06] px-5 py-6"
+    >
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div class="min-w-0">
+          <p class="text-sm font-590 text-text-primary">
+            This workspace is available in Advanced
+          </p>
+          <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
+            Simple keeps the agent's day-to-day status and actions together on Dashboard. Nothing has
+            been removed from the agent configuration.
+          </p>
+        </div>
+        <button
+          type="button"
+          phx-click="set_tab"
+          phx-value-tab="dashboard"
+          class="inline-flex min-h-[40px] shrink-0 items-center justify-center gap-2 rounded-lg border border-brand/25 bg-panel px-4 py-2 text-sm font-590 text-brand transition-colors hover:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+        >
+          <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to Dashboard
+        </button>
+      </div>
     </div>
 
     <%!-- ── Dashboard tab ─────────────────────────────────────────── --%>
@@ -587,7 +612,8 @@
     <%!-- ── Instructions tab ──────────────────────────────────────── --%>
     <div
       :if={@current_tab == "instructions"}
-      class="grid grid-cols-1 gap-5 lg:grid-cols-[260px_minmax(0,1fr)]"
+      data-testid="agent-instructions-panel"
+      class="ui-advanced-only grid grid-cols-1 gap-5 lg:grid-cols-[260px_minmax(0,1fr)]"
     >
       <.panel class="overflow-hidden">
         <div class="flex items-center justify-between border-b border-border px-4 py-3">
@@ -745,7 +771,11 @@
     </div>
 
     <%!-- ── Skills tab ────────────────────────────────────────────── --%>
-    <div :if={@current_tab == "skills"} class="space-y-5">
+    <div
+      :if={@current_tab == "skills"}
+      data-testid="agent-skills-panel"
+      class="ui-advanced-only space-y-5"
+    >
       <section data-testid="agent-skill-loadout" class="ember-glass p-4">
         <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div class="min-w-0">
@@ -927,7 +957,9 @@
     <div
       :if={@current_tab == "configuration"}
       id={"agent-config-fields-#{@agent.id}"}
+      data-testid="agent-configuration-panel"
       phx-hook="AdapterConfigFields"
+      class="ui-advanced-only"
     >
       <% selected_adapter = @selected_adapter || "claude_code" %>
       <.simple_form
@@ -1810,7 +1842,7 @@
                 class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
               >
                 <option
-                  :for={{label, value} <- codex_model_options()}
+                  :for={{label, value} <- codex_model_options(@runtime_model)}
                   value={value}
                   selected={value == @runtime_model}
                 >
@@ -2227,7 +2259,8 @@
     <%!-- ── Runs tab ──────────────────────────────────────────────── --%>
     <div
       :if={@current_tab == "runs"}
-      class="grid grid-cols-1 gap-5 lg:grid-cols-[320px_minmax(0,1fr)]"
+      data-testid="agent-runs-panel"
+      class="ui-advanced-only grid grid-cols-1 gap-5 lg:grid-cols-[320px_minmax(0,1fr)]"
     >
       <.panel class="overflow-hidden">
         <div class="border-b border-border px-4 py-3">

@@ -69,6 +69,7 @@ defmodule Cympho.RuntimeTest do
     assert context.adapter_config["cwd"] == context.cwd
     assert context.adapter_config["workspace_path"] == context.cwd
     assert context.metadata["workspace_source"] == "issue_workspace"
+    refute Map.has_key?(context.metadata, "project_repository_fingerprint")
 
     assert context.env["CYMPHO_RUN_ID"] == run_id
     assert context.env["CYMPHO_ISSUE_ID"] == issue.id
@@ -78,6 +79,73 @@ defmodule Cympho.RuntimeTest do
     assert context.env["AGENT_HOME"] == context.cwd
     assert context.adapter_config["env"]["CYMPHO_RUN_ID"] == run_id
     assert context.adapter_config["env"]["CYMPHO_WORKSPACE"] == context.cwd
+  end
+
+  test "preflight provisions a configured repo over an empty CLI scaffold", %{
+    company: company,
+    agent: agent,
+    issue: issue
+  } do
+    repo_dir = local_git_repo!()
+
+    {:ok, project} =
+      Projects.create_project(%{
+        company_id: company.id,
+        name: "Runtime Repo Project",
+        prefix: "RRP",
+        settings: %{"repo_url" => repo_dir}
+      })
+
+    {:ok, issue} = Issues.update_issue(issue, %{project_id: project.id})
+    path = Workspace.workspace_path(issue)
+
+    for dirname <- [".git", ".agents", ".codex"] do
+      File.mkdir_p!(Path.join(path, dirname))
+    end
+
+    on_exit(fn -> File.rm_rf!(repo_dir) end)
+
+    assert {:ok, context} = Runtime.preflight(issue, agent)
+    assert context.cwd == path
+    assert File.read!(Path.join(path, "README.md")) == "# Runtime repo\n"
+    assert {:ok, expected_fingerprint} = Workspace.repository_fingerprint(repo_dir)
+    assert context.metadata["project_repository_fingerprint"] == expected_fingerprint
+
+    assert {"true\n", 0} =
+             System.cmd("git", ["-C", path, "rev-parse", "--is-inside-work-tree"])
+  end
+
+  test "preflight does not trust an app-wide fallback as a project repository", %{
+    company: company,
+    agent: agent,
+    issue: issue
+  } do
+    repo_dir = local_git_repo!()
+    original_default_repo = Application.get_env(:cympho, :workspace_default_repo)
+    Application.put_env(:cympho, :workspace_default_repo, repo_dir)
+
+    {:ok, project} =
+      Projects.create_project(%{
+        company_id: company.id,
+        name: "Runtime Fallback Repo Project",
+        prefix: "RFR"
+      })
+
+    {:ok, issue} = Issues.update_issue(issue, %{project_id: project.id})
+
+    on_exit(fn ->
+      File.rm_rf!(repo_dir)
+
+      if original_default_repo do
+        Application.put_env(:cympho, :workspace_default_repo, original_default_repo)
+      else
+        Application.delete_env(:cympho, :workspace_default_repo)
+      end
+    end)
+
+    assert {:ok, context} = Runtime.preflight(issue, agent)
+    assert File.read!(Path.join(context.cwd, "README.md")) == "# Runtime repo\n"
+    refute Map.has_key?(context.metadata, "project_repository_fingerprint")
   end
 
   test "dispatch preflight blocks repo delivery on non-repo runtimes", %{
@@ -249,6 +317,73 @@ defmodule Cympho.RuntimeTest do
     assert context.adapter_config["endpoint"] == "https://cli.llmotions.com/v1"
     assert context.adapter_config["model"] == "gemma-4-31b"
     assert context.adapter_config["env"]["LLMOTIONS_API_KEY"] == "llmotions-test-key"
+  end
+
+  test "preflight injects an LLMotions secret into a Codex LLMotions config", %{
+    company: company
+  } do
+    original_bwrap = Application.get_env(:cympho, :codex_bwrap_path)
+    Application.put_env(:cympho, :codex_bwrap_path, "/usr/bin/true")
+
+    on_exit(fn ->
+      if original_bwrap do
+        Application.put_env(:cympho, :codex_bwrap_path, original_bwrap)
+      else
+        Application.delete_env(:cympho, :codex_bwrap_path)
+      end
+    end)
+
+    repo_dir = local_git_repo!()
+    on_exit(fn -> File.rm_rf!(repo_dir) end)
+
+    {:ok, project} =
+      Projects.create_project(%{
+        company_id: company.id,
+        name: "LLMotions Codex Project",
+        prefix: "LCP",
+        settings: %{"repo_url" => repo_dir}
+      })
+
+    {:ok, engineer} =
+      Agents.create_agent(%{
+        company_id: company.id,
+        project_id: project.id,
+        name: "LLMotions Codex Engineer",
+        role: :engineer,
+        status: :idle,
+        adapter: :codex,
+        config: %{
+          "base_url" => "https://cli.llmotions.com/v1",
+          "model" => "gpt-5.6-terra",
+          "repo_capable" => true
+        }
+      })
+
+    {:ok, _secret} =
+      Secrets.create_secret(%{
+        company_id: company.id,
+        scope: "company",
+        key: "LLMOTIONS_API_KEY",
+        value: "llmotions-codex-test-key"
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        company_id: company.id,
+        project_id: project.id,
+        title: "Codex LLMotions runtime smoke",
+        status: :todo,
+        assigned_role: "engineer",
+        assignee_id: engineer.id
+      })
+
+    on_exit(fn -> File.rm_rf!(Workspace.workspace_path(issue.id)) end)
+
+    assert {:ok, context} = Runtime.preflight(issue, engineer)
+    assert context.adapter == Cympho.Adapters.CodexAdapter
+    assert context.adapter_config["api_key"] == "llmotions-codex-test-key"
+    assert context.adapter_config["base_url"] == "https://cli.llmotions.com/v1"
+    assert context.adapter_config["model"] == "gpt-5.6-terra"
   end
 
   test "preflight blocks clear adapter and model mismatches", %{
@@ -453,5 +588,22 @@ defmodule Cympho.RuntimeTest do
 
       assert {:ok, _context} = Runtime.preflight(issue, agent)
     end
+  end
+
+  defp local_git_repo! do
+    repo_dir =
+      Path.join(System.tmp_dir!(), "cympho_runtime_repo_#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(repo_dir)
+    assert {_output, 0} = System.cmd("git", ["init", "--quiet"], cd: repo_dir)
+
+    assert {_output, 0} =
+             System.cmd("git", ["config", "user.email", "test@example.com"], cd: repo_dir)
+
+    assert {_output, 0} = System.cmd("git", ["config", "user.name", "Cympho Test"], cd: repo_dir)
+    File.write!(Path.join(repo_dir, "README.md"), "# Runtime repo\n")
+    assert {_output, 0} = System.cmd("git", ["add", "README.md"], cd: repo_dir)
+    assert {_output, 0} = System.cmd("git", ["commit", "--quiet", "-m", "initial"], cd: repo_dir)
+    repo_dir
   end
 end

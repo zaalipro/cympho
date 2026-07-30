@@ -1076,10 +1076,15 @@ defmodule CymphoWeb.AgentLive.Show do
     endpoint = runtime_or_config |> runtime_value(:endpoint) |> to_string() |> String.downcase()
     model = runtime_or_config |> runtime_value(:model) |> to_string() |> String.downcase()
 
-    if String.contains?(endpoint, "dashscope") or String.starts_with?(model, "qwen") do
-      ["DASHSCOPE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
-    else
-      ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"]
+    cond do
+      String.contains?(endpoint, "llmotions") ->
+        ["LLMOTIONS_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"]
+
+      String.contains?(endpoint, "dashscope") or String.starts_with?(model, "qwen") ->
+        ["DASHSCOPE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "LLMOTIONS_API_KEY"]
+
+      true ->
+        ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY", "LLMOTIONS_API_KEY"]
     end
   end
 
@@ -1254,6 +1259,10 @@ defmodule CymphoWeb.AgentLive.Show do
     }
   end
 
+  defp maybe_default_runtime_model(%{model: model} = runtime, "codex", _provider, _preset)
+       when is_binary(model) and model != "",
+       do: runtime
+
   defp maybe_default_runtime_model(runtime, adapter, provider, process_preset) do
     valid_models =
       adapter
@@ -1408,7 +1417,18 @@ defmodule CymphoWeb.AgentLive.Show do
 
   def runtime_profile_options, do: RuntimeProfiles.options()
 
-  def codex_model_options, do: Cympho.Adapters.CodexAdapter.model_options()
+  def codex_model_options(current_model \\ nil) do
+    options = Cympho.Adapters.CodexAdapter.model_options()
+    current_model = current_model |> to_string() |> String.trim()
+
+    if current_model != "" and
+         Enum.all?(options, fn {_label, value} -> value != current_model end) do
+      options ++ [{"#{current_model} (custom)", current_model}]
+    else
+      options
+    end
+  end
+
   def cursor_model_options, do: RuntimeOptions.cursor_model_options()
   def openclaw_provider_options, do: RuntimeOptions.openclaw_provider_options()
   def openclaw_provider_model_options, do: RuntimeOptions.openclaw_provider_model_options()

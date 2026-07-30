@@ -98,7 +98,11 @@
                 </div>
               </div>
 
-              <div :if={@swarm_admin?} class="border-t border-border pt-4">
+              <div
+                :if={@swarm_admin?}
+                data-testid="issue-swarm-controls"
+                class="ui-advanced-only border-t border-border pt-4"
+              >
                 <label for="issue-swarm-enabled" class="flex cursor-pointer items-center gap-3">
                   <input
                     id="issue-swarm-enabled"

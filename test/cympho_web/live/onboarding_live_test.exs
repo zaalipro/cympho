@@ -13,6 +13,24 @@ defmodule CymphoWeb.OnboardingLiveTest do
       assert html =~ "Choose a blueprint"
       assert html =~ "Step 1 of 5"
       assert html =~ "Company blueprint"
+      assert html =~ "data-ui-complex-page"
+      assert html =~ "onboarding-blueprint-card"
+      assert html =~ "onboarding-blueprint-input sr-only"
+
+      document = Floki.parse_document!(html)
+      [blueprint_grid] = Floki.find(document, "#blueprint-form > div.grid")
+      [blueprint_card | _] = Floki.find(document, ".onboarding-blueprint-card")
+      grid_classes = blueprint_grid |> Floki.attribute("class") |> Enum.join(" ")
+      card_classes = blueprint_card |> Floki.attribute("class") |> Enum.join(" ")
+
+      assert grid_classes =~ "min-w-0"
+      assert grid_classes =~ "grid-cols-1"
+      assert card_classes =~ "w-full"
+      assert card_classes =~ "min-w-0"
+      assert card_classes =~ "max-w-full"
+
+      css = File.read!(Path.join([File.cwd!(), "assets/css/app.css"]))
+      assert css =~ ".onboarding-blueprint-card:focus-within"
 
       view
       |> form("#blueprint-form", company: %{"blueprint" => "software"})
@@ -36,6 +54,13 @@ defmodule CymphoWeb.OnboardingLiveTest do
       assert html =~ "Owns the goal, sets direction"
       assert html =~ "AI provider"
       assert html =~ "Choose a different AI per role"
+
+      document = Floki.parse_document!(html)
+      [advanced_fields] = Floki.find(document, "[data-testid='onboarding-ai-advanced-fields']")
+
+      assert advanced_fields
+             |> Floki.attribute("class")
+             |> Enum.join(" ") =~ "ui-advanced-only"
 
       view
       |> form("#team-step-form",
@@ -204,7 +229,10 @@ defmodule CymphoWeb.OnboardingLiveTest do
       })
 
       html = render_click(view, "start_autonomous_company")
-      assert html =~ "Could not create company:"
+
+      assert html =~
+               "We couldn&#39;t launch the company. Review the company and AI settings, then try again."
+
       assert Companies.get_company_by_slug("banner-co") == nil
     end
 

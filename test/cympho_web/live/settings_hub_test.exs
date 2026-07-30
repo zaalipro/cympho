@@ -12,6 +12,16 @@ defmodule CymphoWeb.SettingsHubTest do
   alias Cympho.Secrets.Secret
 
   describe "hub tabs mount inside the shared shell" do
+    setup %{conn: conn, current_company: company} = context do
+      unless context[:regular_member] do
+        user_id = Plug.Conn.get_session(conn, :user_id)
+        membership = Companies.get_membership(user_id, company.id)
+        assert {:ok, _membership} = Companies.update_membership(membership, %{role: "admin"})
+      end
+
+      :ok
+    end
+
     test "profile", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/profile")
       assert html =~ "Profile"
@@ -83,6 +93,111 @@ defmodule CymphoWeb.SettingsHubTest do
       refute html =~ "stored-provider-secret"
     end
 
+    @tag regular_member: true
+    test "regular members can view secret metadata but cannot invoke any mutation", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "READ_ONLY_RUNTIME_KEY",
+          value: "member-must-not-see-or-change",
+          description: "Original read-only description"
+        })
+
+      path = "/settings/secrets?" <> URI.encode_query(%{"key" => "MEMBER_CREATED_KEY"})
+      {:ok, view, html} = live(conn, path)
+
+      assert html =~ "READ_ONLY_RUNTIME_KEY"
+      assert html =~ "Original read-only description"
+      assert html =~ ~s(data-testid="secrets-read-only")
+      refute html =~ "member-must-not-see-or-change"
+      refute has_element?(view, ~s(button[phx-click="show_create_form"]))
+      refute has_element?(view, ~s(button[phx-click="show_edit_form"]))
+      refute has_element?(view, ~s(button[phx-click="rotate"]))
+      refute has_element?(view, ~s(button[phx-click="delete"]))
+      refute has_element?(view, "#secret-form")
+
+      html = render_click(view, "show_versions", %{"id" => secret.id})
+      assert html =~ ~s(id="versions-modal")
+
+      for {event, params} <- [
+            {"show_create_form", %{}},
+            {"show_edit_form", %{"id" => secret.id}},
+            {"rotate", %{"id" => secret.id}},
+            {"delete", %{"id" => secret.id}}
+          ] do
+        assert render_click(view, event, params) =~
+                 "Only company owners, admins, and board members can change secrets."
+      end
+
+      assert render_submit(view, "save", %{
+               "secret" => %{
+                 "key" => "MEMBER_CREATED_KEY",
+                 "scope" => "company",
+                 "value" => "unauthorized-value",
+                 "description" => "Unauthorized mutation"
+               }
+             }) =~ "Only company owners, admins, and board members can change secrets."
+
+      assert {:ok, reloaded} = Secrets.get_secret(secret.id)
+      assert reloaded.description == "Original read-only description"
+      assert reloaded.version == 1
+      assert {:ok, "member-must-not-see-or-change"} = Secrets.get_secret_value(reloaded.id)
+
+      assert {:error, :not_found} =
+               Secrets.get_secret_by_key(company.id, "MEMBER_CREATED_KEY", scope: "company")
+    end
+
+    test "an open secret form rechecks authorization before saving", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "REVOKED_EDITOR_KEY",
+          value: "original-value",
+          description: "Original description"
+        })
+
+      {:ok, view, _html} = live(conn, "/settings/secrets")
+
+      view
+      |> element(~s(button[phx-click="show_edit_form"][phx-value-id="#{secret.id}"]))
+      |> render_click()
+
+      user_id = Plug.Conn.get_session(conn, :user_id)
+      membership = Companies.get_membership(user_id, company.id)
+
+      assert {:ok, _membership} =
+               Companies.update_membership(membership, %{
+                 role: "member",
+                 is_board_member: false
+               })
+
+      html =
+        view
+        |> form("#secret-form", %{
+          "secret" => %{
+            "scope" => "company",
+            "value" => "unauthorized-replacement",
+            "description" => "Unauthorized description"
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "Only company owners, admins, and board members can change secrets."
+
+      assert {:ok, reloaded} = Secrets.get_secret(secret.id)
+      assert reloaded.description == "Original description"
+      assert reloaded.version == 1
+      assert {:ok, "original-value"} = Secrets.get_secret_value(reloaded.id)
+    end
+
     test "secrets shows rotation posture and opens rotate form", %{
       conn: conn,
       current_company: company
@@ -151,6 +266,7 @@ defmodule CymphoWeb.SettingsHubTest do
       assert html =~ "OpenAI Chat Qwen DashScope"
       assert html =~ "OpenAI Chat Qwen DashScope Flash / Plus / Intl"
       assert html =~ "qwen3.7-plus"
+      assert has_element?(view, "[data-testid='secret-scope-field'].ui-advanced-only")
 
       refute html =~ "test-runtime-key"
 
@@ -169,6 +285,28 @@ defmodule CymphoWeb.SettingsHubTest do
                Secrets.get_secret_by_key(company.id, "ANTHROPIC_API_KEY", scope: "company")
 
       assert {:ok, "test-runtime-key"} = Secrets.get_secret_value(secret.id)
+    end
+
+    test "generic secret scope controls are Advanced-only", %{conn: conn} do
+      path =
+        "/settings/secrets?" <>
+          URI.encode_query([
+            {"key", "PROJECT_API_KEY"},
+            {"scope", "project"},
+            {"scope_id", "project-scope"}
+          ])
+
+      {:ok, view, _html} = live(conn, path)
+
+      assert has_element?(
+               view,
+               "[data-testid='secret-scope-field'].ui-advanced-only select[name='secret[scope]']"
+             )
+
+      assert has_element?(
+               view,
+               "[data-testid='secret-scope-id-field'].ui-advanced-only input[name='secret[scope_id]']"
+             )
     end
 
     test "secrets shows DashScope-specific runtime guidance for Qwen prefill links", %{
@@ -323,6 +461,44 @@ defmodule CymphoWeb.SettingsHubTest do
 
       assert {:ok, _foreign_secret} = Secrets.get_secret(foreign_secret.id)
       assert {:ok, _local_secret} = Secrets.get_secret(local_secret.id)
+    end
+
+    test "secrets ignores an unauthorized company_id query parameter", %{
+      conn: conn,
+      current_company: company
+    } do
+      other_company = create_company("foreign-query-secret")
+
+      {:ok, foreign_secret} =
+        Secrets.create_secret(%{
+          company_id: other_company.id,
+          scope: "company",
+          key: "FOREIGN_QUERY_RUNTIME_KEY",
+          value: "foreign-query-secret-value",
+          description: "Foreign query-only description"
+        })
+
+      {:ok, local_secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "LOCAL_QUERY_RUNTIME_KEY",
+          value: "local-query-secret-value",
+          description: "Local query description"
+        })
+
+      {:ok, view, html} = live(conn, "/settings/secrets?company_id=#{other_company.id}")
+
+      assert html =~ "LOCAL_QUERY_RUNTIME_KEY"
+      assert html =~ "Local query description"
+      assert html =~ ~s(data-testid="secret-row-#{local_secret.id}")
+      refute html =~ "FOREIGN_QUERY_RUNTIME_KEY"
+      refute html =~ "Foreign query-only description"
+      refute html =~ "foreign-query-secret-value"
+
+      html = render_click(view, "show_versions", %{"id" => foreign_secret.id})
+      assert html =~ "Secret not found"
+      refute html =~ ~s(id="versions-modal")
     end
 
     test "execution policies", %{conn: conn} do

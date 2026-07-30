@@ -317,18 +317,29 @@
   color: var(--color-brand);
 }
 
-/* Simple / Advanced product mode. Advanced keeps the existing dense
-   operational surfaces; Simple keeps the action path visible and folds
-   explanatory/audit copy away. */
+/* Simple / Advanced product mode. Mode and row density are independent:
+   choosing detailed rows must not expose expert-only controls in Simple. */
 html:not([data-ui-mode="simple"]) .ui-simple-only {
   display: none !important;
 }
 
-html[data-ui-mode="simple"] [data-ui-complex-page]:not([data-density="detailed"]) .ui-advanced-only,
-html[data-ui-mode="simple"] [data-ui-complex-page]:not([data-density="detailed"]) [data-ui-advanced-only],
-html[data-ui-mode="simple"] [data-ui-complex-page]:not([data-density="detailed"]) [data-ui-simple-hide],
-[data-density="detailed"] .ui-simple-only {
+html[data-ui-mode="simple"] [data-ui-complex-page] .ui-advanced-only,
+html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-advanced-only],
+html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-hide] {
   display: none !important;
+}
+
+html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-single-column] {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
+  grid-column: 1 / -1 !important;
+}
+
+.onboarding-blueprint-card:focus-within {
+  border-color: color-mix(in srgb, var(--color-primary) 70%, var(--color-border));
+  box-shadow: 0 0 0 2px rgb(var(--color-primary-rgb) / 0.35);
 }
 
 .ui-mode-toggle[data-mode="advanced"] {

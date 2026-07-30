@@ -2044,7 +2044,8 @@ defmodule Cympho.Issues do
 
   @doc """
   Picks the agent to assign as the next reviewer for `issue`, given the role
-  the submitter wants to review (e.g. `"cto"`).
+  the submitter wants to review (e.g. `"cto"`). When the requested role is
+  blank, the role is inferred from the same routing evidence.
 
   Resolution order — first match wins:
   1. `issue.last_reviewer_id` if that agent is alive, in the same company, and
@@ -2058,13 +2059,27 @@ defmodule Cympho.Issues do
   `submit_review`; if you add a new path that needs a reviewer, route it
   through here so continuity is preserved.
   """
-  def resolve_reviewer(_issue, _agent, nil), do: nil
-  def resolve_reviewer(_issue, _agent, ""), do: nil
-
+  @spec resolve_reviewer(Issue.t(), Agent.t(), String.t() | nil) :: binary() | nil
   def resolve_reviewer(%Issue{} = issue, %Agent{} = agent, requested_role)
-      when is_binary(requested_role) do
+      when is_binary(requested_role) or is_nil(requested_role) do
+    requested_role =
+      if is_binary(requested_role) and String.trim(requested_role) == "",
+        do: nil,
+        else: requested_role
+
     last_reviewer_match(issue, agent, requested_role) ||
       parent_match(agent, requested_role)
+  end
+
+  @doc "Infers the next reviewer's role from issue-local routing evidence."
+  @spec resolve_reviewer_role(Issue.t(), Agent.t()) :: String.t() | nil
+  def resolve_reviewer_role(%Issue{} = issue, %Agent{} = agent) do
+    with reviewer_id when is_binary(reviewer_id) <- resolve_reviewer(issue, agent, nil),
+         {:ok, %Agent{role: role}} when is_atom(role) <- Agents.get_agent(reviewer_id) do
+      Atom.to_string(role)
+    else
+      _ -> nil
+    end
   end
 
   defp last_reviewer_match(%Issue{last_reviewer_id: nil}, _agent, _requested_role), do: nil
@@ -2100,6 +2115,8 @@ defmodule Cympho.Issues do
         nil
     end
   end
+
+  defp role_matches?(_role, nil), do: true
 
   defp role_matches?(role, requested) when is_atom(role) do
     to_string(role) == to_string(requested)

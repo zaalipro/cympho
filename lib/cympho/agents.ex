@@ -220,6 +220,44 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Atomically replaces the config map for a set of agents.
+
+  This is intended for trusted bulk configuration flows where every update
+  must commit together. Agent update broadcasts are emitted only after the
+  transaction succeeds.
+  """
+  @spec update_adapter_configs([{Agent.t(), map()}]) ::
+          {:ok, [Agent.t()]} | {:error, binary(), term()}
+  def update_adapter_configs(updates) when is_list(updates) do
+    multi =
+      Enum.reduce(updates, Ecto.Multi.new(), fn {%Agent{} = agent, config}, multi ->
+        changeset = Agent.update_changeset(agent, %{config: config})
+        Ecto.Multi.update(multi, {:agent_config, agent.id}, changeset, stale_error_field: :id)
+      end)
+
+    case Repo.transaction(multi) do
+      {:ok, changes} ->
+        updated_agents =
+          Enum.map(updates, fn {agent, _config} ->
+            Map.fetch!(changes, {:agent_config, agent.id})
+          end)
+
+        Enum.each(updated_agents, fn updated ->
+          Phoenix.PubSub.broadcast(
+            Cympho.PubSub,
+            "company:#{updated.company_id}:agents",
+            {:agent_updated, updated}
+          )
+        end)
+
+        {:ok, updated_agents}
+
+      {:error, {:agent_config, agent_id}, reason, _changes} ->
+        {:error, agent_id, reason}
+    end
+  end
+
+  @doc """
   Updates an agent's admin-managed permission map.
   """
   def update_agent_permissions(%Agent{} = agent, permissions) when is_map(permissions) do

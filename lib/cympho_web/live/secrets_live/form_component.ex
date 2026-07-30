@@ -1,8 +1,11 @@
 defmodule CymphoWeb.SecretsLive.FormComponent do
   use CymphoWeb, :live_component
+  alias Cympho.Companies
   alias Cympho.Secrets
   alias Cympho.Secrets.Secret
   alias CymphoWeb.UserAuth
+
+  @mutation_forbidden_message "Only company owners, admins, and board members can change secrets."
 
   @impl true
   def update(%{secret: secret, form_mode: form_mode, company_id: company_id} = assigns, socket) do
@@ -24,9 +27,11 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
       |> assign(:secret, secret)
       |> assign(:form_mode, form_mode)
       |> assign(:company_id, company_id)
+      |> assign(:current_user_id, Map.get(assigns, :current_user_id))
       |> assign(:on_cancel, Map.get(assigns, :on_cancel))
       |> assign(:return_to, return_to)
       |> assign(:runtime_hint, runtime_hint(prefill))
+      |> assign(:mutation_error, socket.assigns[:mutation_error])
       |> assign(:form, form)
 
     {:ok, socket}
@@ -44,6 +49,14 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
   end
 
   def handle_event("save", %{"secret" => secret_params}, socket) do
+    if can_manage_secrets?(socket) do
+      save_secret(secret_params, socket)
+    else
+      {:noreply, assign(socket, :mutation_error, @mutation_forbidden_message)}
+    end
+  end
+
+  defp save_secret(secret_params, socket) do
     company_id = socket.assigns.company_id
     secret_params = Map.put(secret_params, "company_id", company_id)
 
@@ -86,6 +99,15 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
     end
   end
 
+  defp can_manage_secrets?(%{
+         assigns: %{current_user_id: user_id, company_id: company_id}
+       })
+       when is_binary(user_id) and is_binary(company_id) do
+    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+  end
+
+  defp can_manage_secrets?(_socket), do: false
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -93,6 +115,13 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
       id="secret-form-panel"
       class="mb-6 overflow-hidden rounded-lg border border-border bg-panel"
     >
+      <div
+        :if={@mutation_error}
+        data-testid="secret-form-authorization-error"
+        class="border-b border-red-500/25 bg-red-500/10 px-5 py-3 text-sm text-red-200"
+      >
+        {@mutation_error}
+      </div>
       <div
         :if={@runtime_hint}
         id="runtime-secret-setup-guide"
@@ -190,20 +219,26 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
               required
             />
 
-            <.select
-              name={@form[:scope].name}
-              label="Scope"
-              options={[
-                {"Company", "company"},
-                {"Instance", "instance"},
-                {"Agent", "agent"},
-                {"Project", "project"}
-              ]}
-              value={@form[:scope].value}
-              required
-            />
+            <div class="ui-advanced-only" data-testid="secret-scope-field">
+              <.select
+                name={@form[:scope].name}
+                label="Scope"
+                options={[
+                  {"Company", "company"},
+                  {"Instance", "instance"},
+                  {"Agent", "agent"},
+                  {"Project", "project"}
+                ]}
+                value={@form[:scope].value}
+                required
+              />
+            </div>
 
-            <div :if={@form[:scope].value in ["agent", "project"]}>
+            <div
+              :if={@form[:scope].value in ["agent", "project"]}
+              data-testid="secret-scope-id-field"
+              class="ui-advanced-only"
+            >
               <.input
                 field={@form[:scope_id]}
                 label="Scope ID"

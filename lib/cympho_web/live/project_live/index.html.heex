@@ -20,6 +20,20 @@
       </:actions>
     </.header>
 
+    <div
+      :if={@flash["info"]}
+      class="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
+    >
+      {@flash["info"]}
+    </div>
+
+    <div
+      :if={@flash["error"]}
+      class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
+    >
+      {@flash["error"]}
+    </div>
+
     <div class="ui-simple-only mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
       <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
         <span class="ui-simple-icon">

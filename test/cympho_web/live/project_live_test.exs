@@ -61,6 +61,51 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert html =~ "25% complete"
       assert html =~ ~s(href="/issues?project_id=#{project.id}")
     end
+
+    test "does not archive a project from another company", %{conn: conn} do
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Other Project Company",
+          slug: "other-project-company-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, other_project} =
+        Projects.create_project(%{
+          name: "Foreign Project",
+          prefix: "FRGN",
+          company_id: other_company.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/projects")
+
+      html = render_click(view, "delete_project", %{"id" => other_project.id})
+
+      assert html =~ "Project not found for this company."
+      assert Projects.get_project!(other_project.id).status == :active
+    end
+
+    test "archives a current-company project and updates the visible state", %{conn: conn} do
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Archive Me",
+          prefix: "ARCV",
+          company_id: company.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/projects")
+
+      html = render_click(view, "delete_project", %{"id" => project.id})
+
+      assert html =~ "Project archived."
+      assert html =~ "Archived"
+      assert Projects.get_project!(project.id).status == :archived
+    end
   end
 
   describe "New project" do
@@ -74,29 +119,89 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert html =~ "New project"
       assert html =~ "Project launch plan"
       assert html =~ "Operating boundary"
-      assert html =~ "Repository and identifier"
+      assert html =~ "Issue identifier"
       assert html =~ "Workspace posture"
       assert html =~ "Setup checklist"
       assert html =~ "Create behavior"
+      assert has_element?(view, "[data-ui-complex-page]")
+      assert has_element?(view, "form[data-ui-simple-single-column]")
 
-      view
-      |> form("form", %{
-        "project" => %{
-          "name" => "Customer Portal",
-          "description" => "Second project for multi-project intake.",
-          "prefix" => "CP",
-          "status" => "active",
-          "repo_url" => "https://github.com/example/customer-portal",
-          "color" => "#d97757"
-        }
-      })
-      |> render_submit()
+      assert has_element?(
+               view,
+               "[data-testid='project-identifier-fields'][data-ui-simple-single-column]"
+             )
+
+      assert has_element?(
+               view,
+               "[data-testid='project-create-actions'][data-ui-simple-full-span]"
+             )
+
+      assert has_element?(view, "input[name='project[name]']")
+      assert has_element?(view, "input[name='project[prefix]']")
+
+      refute has_element?(view, ".ui-advanced-only input[name='project[name]']")
+      refute has_element?(view, ".ui-advanced-only input[name='project[prefix]']")
+      refute has_element?(view, ".ui-advanced-only button[type='submit']")
+
+      assert has_element?(
+               view,
+               "[data-testid='project-repository-field'].ui-advanced-only input[name='project[repo_url]']"
+             )
+
+      assert has_element?(
+               view,
+               "[data-testid='project-workspace-posture'].ui-advanced-only select[name='project[status]']"
+             )
+
+      assert has_element?(view, "[data-testid='project-setup-rail'].ui-advanced-only")
+
+      result =
+        view
+        |> form("form", %{
+          "project" => %{
+            "name" => "Customer Portal",
+            "description" => "Second project for multi-project intake.",
+            "prefix" => "CP",
+            "status" => "active",
+            "repo_url" => "https://github.com/example/customer-portal",
+            "color" => "#d97757"
+          }
+        })
+        |> render_submit()
 
       [project] = Projects.list_projects_by_company(company.id)
       assert project.name == "Customer Portal"
       assert project.company_id == company.id
       assert project.repo_url == "https://github.com/example/customer-portal"
       assert project.color == "#d97757"
+
+      expected_path = "/projects/#{project.id}"
+      assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
+    end
+
+    test "ignores a forged company id", %{conn: conn} do
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign New Project Company",
+          slug: "foreign-new-project-#{System.unique_integer([:positive])}"
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/projects/new")
+
+      render_submit(view, "save", %{
+        "project" => %{
+          "name" => "Scoped Project",
+          "prefix" => "SCOP",
+          "company_id" => other_company.id
+        }
+      })
+
+      [project] = Projects.list_projects_by_company(company.id)
+      assert project.name == "Scoped Project"
+      assert Projects.list_projects_by_company(other_company.id) == []
     end
   end
 
@@ -165,6 +270,17 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert html =~ "Environment variables"
       assert html =~ "Work queue"
       assert html =~ "Save changes"
+      assert has_element?(view, "[data-testid='project-status-field'].ui-advanced-only")
+
+      assert has_element?(
+               view,
+               "[data-testid='project-settings-repository-field'].ui-advanced-only"
+             )
+
+      assert has_element?(view, "[data-testid='project-color-field'].ui-advanced-only")
+      assert has_element?(view, "[data-testid='project-environment-variables'].ui-advanced-only")
+      assert has_element?(view, "#project-settings[data-ui-simple-single-column]")
+      assert has_element?(view, "#project-settings [data-ui-simple-single-column]")
       refute html =~ "/projects/#{project.id}/edit"
 
       {:ok, _edit_view, edit_html} = live(conn, "/projects/#{project.id}/edit")

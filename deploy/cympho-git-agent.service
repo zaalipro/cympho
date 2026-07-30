@@ -1,0 +1,25 @@
+[Unit]
+Description=Cympho repository-scoped SSH agent
+Before=cympho.service
+ConditionPathExists=/etc/cympho-git-agent.env
+
+[Service]
+Type=simple
+User=cympho
+Group=cympho
+RuntimeDirectory=cympho-git-agent
+RuntimeDirectoryMode=0700
+Environment=SSH_AUTH_SOCK=/run/cympho-git-agent/agent.sock
+EnvironmentFile=/etc/cympho-git-agent.env
+ExecStart=/usr/bin/ssh-agent -D -a /run/cympho-git-agent/agent.sock
+ExecStartPost=/usr/bin/ssh-add ${CYMPHO_GIT_SSH_KEY}
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+StandardOutput=journal
+StandardError=journal

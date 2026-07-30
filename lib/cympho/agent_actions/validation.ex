@@ -414,6 +414,7 @@ defmodule Cympho.AgentActions.Validation do
     "needs_input" => "owner_input_needed",
     "owner_input" => "owner_input_needed",
     "owner_decision" => "owner_input_needed",
+    "owner_verification" => "owner_input_needed",
     "thin_brief" => "owner_input_needed",
     "insufficient_brief" => "owner_input_needed",
     "clarification_needed" => "owner_input_needed",

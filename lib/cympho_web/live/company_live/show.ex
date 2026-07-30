@@ -4,17 +4,27 @@ defmodule CymphoWeb.CompanyLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    company = Companies.get_company!(id)
-    memberships = Companies.list_memberships(company.id)
+    user = socket.assigns.current_user
 
-    {:ok,
-     socket
-     |> assign(:page_title, company.name)
-     |> assign(:company, company)
-     |> assign(:memberships, memberships)
-     |> assign(:show_pause_modal, false)
-     |> assign(:show_resume_modal, false)
-     |> assign(:pause_reason, "")}
+    if Companies.has_access?(user.id, id) do
+      company = Companies.get_company!(id)
+      memberships = Companies.list_memberships(company.id)
+
+      {:ok,
+       socket
+       |> assign(:page_title, company.name)
+       |> assign(:company, company)
+       |> assign(:memberships, memberships)
+       |> assign(:can_manage?, company_manager?(user.id, company.id))
+       |> assign(:show_pause_modal, false)
+       |> assign(:show_resume_modal, false)
+       |> assign(:pause_reason, "")}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "Company not found or you do not have access.")
+       |> redirect(to: ~p"/companies")}
+    end
   end
 
   @impl true
@@ -32,7 +42,10 @@ defmodule CymphoWeb.CompanyLive.Show do
 
   @impl true
   def handle_event("delete_membership", %{"id" => membership_id}, socket) do
-    membership = Enum.find(socket.assigns.memberships, fn m -> m.id == membership_id end)
+    membership =
+      if socket.assigns.can_manage? do
+        Enum.find(socket.assigns.memberships, fn m -> m.id == membership_id end)
+      end
 
     if membership do
       {:ok, _} = Companies.delete_membership(membership)
@@ -47,7 +60,7 @@ defmodule CymphoWeb.CompanyLive.Show do
   end
 
   def handle_event("show_pause_modal", _, socket),
-    do: {:noreply, assign(socket, show_pause_modal: true, pause_reason: "")}
+    do: maybe_show_runtime_modal(socket, :pause)
 
   def handle_event("hide_pause_modal", _, socket),
     do: {:noreply, assign(socket, show_pause_modal: false)}
@@ -59,7 +72,7 @@ defmodule CymphoWeb.CompanyLive.Show do
     reason =
       if socket.assigns.pause_reason == "", do: "Manual pause", else: socket.assigns.pause_reason
 
-    case Companies.pause_company(socket.assigns.company, reason) do
+    case socket.assigns.can_manage? && Companies.pause_company(socket.assigns.company, reason) do
       {:ok, u} ->
         {:noreply,
          socket
@@ -70,17 +83,23 @@ defmodule CymphoWeb.CompanyLive.Show do
       {:error, _} ->
         {:noreply,
          socket |> assign(:show_pause_modal, false) |> put_flash(:error, "Failed to pause.")}
+
+      false ->
+        {:noreply,
+         socket
+         |> assign(:show_pause_modal, false)
+         |> put_flash(:error, "You cannot control this company's runtime.")}
     end
   end
 
   def handle_event("show_resume_modal", _, socket),
-    do: {:noreply, assign(socket, show_resume_modal: true)}
+    do: maybe_show_runtime_modal(socket, :resume)
 
   def handle_event("hide_resume_modal", _, socket),
     do: {:noreply, assign(socket, show_resume_modal: false)}
 
   def handle_event("resume_company", _, socket) do
-    case Companies.resume_company(socket.assigns.company) do
+    case socket.assigns.can_manage? && Companies.resume_company(socket.assigns.company) do
       {:ok, u} ->
         {:noreply,
          socket
@@ -91,7 +110,29 @@ defmodule CymphoWeb.CompanyLive.Show do
       {:error, _} ->
         {:noreply,
          socket |> assign(:show_resume_modal, false) |> put_flash(:error, "Failed to resume.")}
+
+      false ->
+        {:noreply,
+         socket
+         |> assign(:show_resume_modal, false)
+         |> put_flash(:error, "You cannot control this company's runtime.")}
     end
+  end
+
+  defp maybe_show_runtime_modal(%{assigns: %{can_manage?: true}} = socket, :pause) do
+    {:noreply, assign(socket, show_pause_modal: true, pause_reason: "")}
+  end
+
+  defp maybe_show_runtime_modal(%{assigns: %{can_manage?: true}} = socket, :resume) do
+    {:noreply, assign(socket, show_resume_modal: true)}
+  end
+
+  defp maybe_show_runtime_modal(socket, _mode) do
+    {:noreply, put_flash(socket, :error, "You cannot control this company's runtime.")}
+  end
+
+  defp company_manager?(user_id, company_id) do
+    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
   end
 
   def format_inserted_at(company), do: Calendar.strftime(company.inserted_at, "%Y-%m-%d %H:%M")

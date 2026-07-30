@@ -1,4 +1,4 @@
-<div class="ember-aurora px-4 py-6 sm:px-6 lg:px-8">
+<div class="ember-aurora px-4 py-6 sm:px-6 lg:px-8" data-ui-complex-page>
   <div class="relative z-[1] mx-auto max-w-7xl space-y-6">
     <.header>
       <div class="min-w-0">
@@ -13,31 +13,37 @@
       <:actions>
         <.app_link
           navigate={~p"/companies/import"}
-          class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
+          class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
         >
           <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Import
         </.app_link>
         <.app_link
           navigate={~p"/companies/new"}
-          class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+          class="ui-advanced-only inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
         >
           <.icon name="hero-plus-mini" class="h-4 w-4" /> New company
+        </.app_link>
+        <.app_link
+          navigate={~p"/onboarding"}
+          class="ui-simple-only inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+        >
+          <.icon name="hero-sparkles-mini" class="h-4 w-4" /> Guided setup
         </.app_link>
       </:actions>
     </.header>
 
     <div
-      :if={@flash && @flash[:info]}
+      :if={@flash["info"]}
       class="rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
     >
-      {@flash[:info]}
+      {@flash["info"]}
     </div>
 
     <div
-      :if={@flash && @flash[:error]}
+      :if={@flash["error"]}
       class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
     >
-      {@flash[:error]}
+      {@flash["error"]}
     </div>
 
     <section
@@ -66,7 +72,7 @@
             </.app_link>
             <.app_link
               navigate={~p"/companies/import"}
-              class="inline-flex items-center gap-2 rounded-button border border-border bg-subtle px-5 py-3 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
+              class="ui-advanced-only inline-flex items-center gap-2 rounded-button border border-border bg-subtle px-5 py-3 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
             >
               <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Import company
             </.app_link>
@@ -248,18 +254,21 @@
 
             <div class="flex shrink-0 flex-wrap gap-2 sm:justify-end">
               <.app_link
+                :if={can_manage_company?(@current_user, company)}
                 navigate={~p"/companies/#{company}/export"}
                 class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
               >
                 <.icon name="hero-arrow-down-tray-mini" class="h-4 w-4" /> Export
               </.app_link>
               <.app_link
+                :if={can_manage_company?(@current_user, company)}
                 navigate={~p"/companies/#{company}/edit"}
                 class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
               >
                 <.icon name="hero-pencil-square-mini" class="h-4 w-4" /> Edit
               </.app_link>
               <button
+                :if={can_manage_company?(@current_user, company)}
                 phx-click="delete_company"
                 phx-value-id={company.id}
                 class="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-300 hover:bg-red-500/15"
@@ -285,6 +294,7 @@
       title={@page_title}
       action={@live_action}
       company={@company}
+      current_user={@current_user}
       patch={@live_action == :edit}
     />
   </div>

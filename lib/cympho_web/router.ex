@@ -136,7 +136,7 @@ defmodule CymphoWeb.Router do
       live "/plugins", PluginLive.Index
       live "/plugins/new", PluginLive.New
       live "/plugins/marketplace", PluginMarketplaceLive.Index
-      live "/plugins/:id", PluginLive.Show
+      live "/plugins/:id", PluginLive.Show, :show
       live "/plugins/:id/edit", PluginLive.Edit
       live "/plugins/:id/settings", PluginLive.Show, :settings
       live "/search", SearchLive.Index

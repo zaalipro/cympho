@@ -150,6 +150,7 @@
               </span>
             <% else %>
               <button
+                :if={@can_manage_plugins}
                 type="button"
                 phx-click="install"
                 phx-value-identifier={plugin.identifier}
@@ -157,6 +158,13 @@
               >
                 <.icon name="hero-arrow-down-tray-mini" class="w-4 h-4" /> Install
               </button>
+              <span
+                :if={!@can_manage_plugins}
+                data-testid="plugin-marketplace-read-only"
+                class="flex-1 text-center text-xs text-text-tertiary"
+              >
+                Read-only
+              </span>
             <% end %>
           </div>
         </div>

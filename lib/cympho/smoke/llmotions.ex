@@ -4,7 +4,7 @@ defmodule Cympho.Smoke.LLMotions do
 
   The setup is intentionally deterministic and side-effect-light: it creates a
   new company, configures CEO/CTO as OpenAI-compatible LLMotions chat agents,
-  configures engineer/QA as repo-capable process agents, stores the optional
+  configures engineer/QA as repo-capable Codex agents, stores the optional
   API key as an encrypted company secret, and creates one owner issue that the
   CEO must decompose in the live runtime.
   """
@@ -176,8 +176,9 @@ defmodule Cympho.Smoke.LLMotions do
 
     with {:ok, ceo} <- configure_llmotions_agent(ceo, model, ceo_instructions()),
          {:ok, cto} <- configure_llmotions_agent(cto, model, cto_instructions()),
-         {:ok, engineer} <- configure_repo_agent(engineer, "Repo-capable Engineer"),
-         {:ok, qa} <- ensure_qa_agent(company.id, project.id, cto.id) do
+         {:ok, engineer} <-
+           configure_repo_agent(engineer, "Repo-capable Codex Engineer", model),
+         {:ok, qa} <- ensure_qa_agent(company.id, project.id, cto.id, model) do
       {:ok, %{ceo: ceo, cto: cto, engineer: engineer, qa: qa}}
     end
   rescue
@@ -205,26 +206,30 @@ defmodule Cympho.Smoke.LLMotions do
     })
   end
 
-  defp configure_repo_agent(%Agent{} = agent, name) do
+  defp configure_repo_agent(%Agent{} = agent, name, model) do
     Agents.update_agent(agent, %{
       name: name,
-      adapter: :process,
-      config:
-        RuntimeProfiles.config("process-codex")
-        |> Map.put("repo_capable", true),
-      runtime_config:
-        RuntimeProfiles.runtime_config("process-codex")
-        |> Map.put("profile_id", "process-codex")
-        |> Map.put("repo_capable", true),
+      adapter: :codex,
+      config: %{
+        "base_url" => @endpoint,
+        "model" => model,
+        "repo_capable" => true,
+        "timeout_sec" => 1_200
+      },
+      runtime_config: %{
+        "profile_id" => RuntimeProfiles.custom_id(),
+        "repo_capable" => true,
+        "env" => %{"OPENAI_BASE_URL" => @endpoint}
+      },
       max_concurrent_jobs: 1,
       instructions: append_instructions(agent.instructions, repo_instructions())
     })
   end
 
-  defp ensure_qa_agent(company_id, project_id, cto_id) do
+  defp ensure_qa_agent(company_id, project_id, cto_id, model) do
     case Agents.list_agents_by_role(:qa_engineer, company_id) do
       [qa | _] ->
-        configure_repo_agent(qa, qa.name || "QA Smoke Engineer")
+        configure_repo_agent(qa, qa.name || "QA Codex Engineer", model)
 
       [] ->
         Agents.create_agent(%{
@@ -235,14 +240,18 @@ defmodule Cympho.Smoke.LLMotions do
           title: "QA Smoke Engineer",
           role: :qa_engineer,
           status: :idle,
-          adapter: :process,
-          config:
-            RuntimeProfiles.config("process-codex")
-            |> Map.put("repo_capable", true),
-          runtime_config:
-            RuntimeProfiles.runtime_config("process-codex")
-            |> Map.put("profile_id", "process-codex")
-            |> Map.put("repo_capable", true),
+          adapter: :codex,
+          config: %{
+            "base_url" => @endpoint,
+            "model" => model,
+            "repo_capable" => true,
+            "timeout_sec" => 1_200
+          },
+          runtime_config: %{
+            "profile_id" => RuntimeProfiles.custom_id(),
+            "repo_capable" => true,
+            "env" => %{"OPENAI_BASE_URL" => @endpoint}
+          },
           max_concurrent_jobs: 1,
           instructions: repo_instructions()
         })
@@ -339,11 +348,13 @@ defmodule Cympho.Smoke.LLMotions do
     "LLMotions Smoke #{timestamp}"
   end
 
+  defp profile_id_for_model("gemma-4-31b"), do: "openai-chat-llmotions-gemma"
+
   defp profile_id_for_model("gemini-3.5-flash-low"),
     do: "openai-chat-llmotions-gemini-flash-low"
 
   defp profile_id_for_model("gemini-3.5-flash"), do: "openai-chat-llmotions-gemini-flash"
-  defp profile_id_for_model(_), do: "openai-chat-llmotions-gemma"
+  defp profile_id_for_model(_), do: RuntimeProfiles.custom_id()
 
   defp append_instructions(nil, extra), do: extra
   defp append_instructions("", extra), do: extra

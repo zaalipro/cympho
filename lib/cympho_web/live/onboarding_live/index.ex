@@ -28,7 +28,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
     %{
       id: :ready,
       title: "You're all set",
-      description: "Your autonomous company is live"
+      description: "Your company structure and starting work are ready"
     }
   ]
 
@@ -162,8 +162,13 @@ defmodule CymphoWeb.OnboardingLive.Index do
            |> assign(:step_error, nil)
            |> assign(:current_step, 4)}
 
-        {:error, reason} ->
-          {:noreply, assign(socket, :step_error, "Could not create company: #{inspect(reason)}")}
+        {:error, _reason} ->
+          {:noreply,
+           assign(
+             socket,
+             :step_error,
+             "We couldn't launch the company. Review the company and AI settings, then try again."
+           )}
       end
     else
       # Send the owner back to the team step (where AI runtimes are picked) so

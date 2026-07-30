@@ -294,6 +294,30 @@ defmodule Cympho.AgentsTest do
     end
   end
 
+  describe "update_adapter_configs/1" do
+    test "rolls back every config when one agent update is invalid", %{agent: first} do
+      {:ok, second} =
+        Agents.create_agent(%{
+          name: "Second Config Agent",
+          role: :engineer,
+          status: :idle,
+          config: %{"model" => "before-two"}
+        })
+
+      invalid_second = %{second | name: nil}
+
+      assert {:error, failed_id, %Ecto.Changeset{}} =
+               Agents.update_adapter_configs([
+                 {first, %{"model" => "after-one"}},
+                 {invalid_second, %{"model" => "after-two"}}
+               ])
+
+      assert failed_id == second.id
+      assert Agents.get_agent!(first.id).config == first.config
+      assert Agents.get_agent!(second.id).config == %{"model" => "before-two"}
+    end
+  end
+
   describe "delete_agent/1" do
     test "deletes the agent", %{agent: agent} do
       assert {:ok, _} = Agents.delete_agent(agent)

@@ -20,7 +20,10 @@
         <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           New Agent
         </h1>
-        <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+        <p class="ui-simple-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+          Choose the agent's role and reporting line. Cympho will apply the working defaults.
+        </p>
+        <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
           Create an autonomous teammate with a role, operating instructions, and runtime adapter.
         </p>
       </div>
@@ -79,6 +82,7 @@
         id="new-agent-form"
         phx-change="validate"
         phx-submit="save"
+        data-ui-simple-single-column
         class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
       >
         <% role_value = @form[:role].value || "engineer" %>
@@ -89,10 +93,16 @@
             <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Agent launch plan
             </p>
-            <h2 class="mt-1 text-lg font-590 text-text-primary">
+            <h2 class="ui-simple-only mt-1 text-lg font-590 text-text-primary">
+              Set identity and reporting
+            </h2>
+            <h2 class="ui-advanced-only mt-1 text-lg font-590 text-text-primary">
               Configure the operator before work enters the queue
             </h2>
-            <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+            <p class="ui-simple-only mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+              Name the teammate, choose the role, and decide who receives its handoffs.
+            </p>
+            <p class="ui-advanced-only mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
               Choose the role, reporting line, runtime profile, and operating guide that decide how this
               agent picks up work and hands it off.
             </p>
@@ -145,7 +155,29 @@
               </div>
             </section>
 
-            <section data-testid="new-agent-runtime-section" class="space-y-4">
+            <section
+              data-testid="new-agent-defaults-summary"
+              class="ui-simple-only rounded-xl border border-brand/20 bg-brand/[0.06] px-4 py-4 sm:px-5"
+            >
+              <div class="flex items-start gap-3">
+                <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-brand/25 bg-panel text-brand">
+                  <.icon name="hero-check-circle-mini" class="h-4 w-4" />
+                </span>
+                <div class="min-w-0">
+                  <p class="text-sm font-590 text-text-primary">Friendly defaults are ready</p>
+                  <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
+                    This agent starts with the {role_name} playbook, the company runtime defaults, and
+                    safe handoff behavior. Switch to Advanced only when you need to tune the runtime,
+                    adapter, instructions, or environment.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section
+              data-testid="new-agent-runtime-section"
+              class="ui-advanced-only space-y-4"
+            >
               <div>
                 <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                   2 · Runtime profile
@@ -276,7 +308,7 @@
                     class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                   >
                     <option
-                      :for={{label, value} <- codex_model_options()}
+                      :for={{label, value} <- codex_model_options(@runtime_model)}
                       value={value}
                       selected={value == @runtime_model}
                     >
@@ -571,7 +603,7 @@
 
             <section
               data-testid="new-agent-guide-section"
-              class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5"
+              class="ui-advanced-only space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5"
             >
               <div>
                 <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
@@ -639,7 +671,7 @@
           </div>
         </.panel>
 
-        <aside class="space-y-4 lg:sticky lg:top-6">
+        <aside class="ui-advanced-only space-y-4 lg:sticky lg:top-6">
           <section data-testid="new-agent-setup-checklist" class="ember-glass p-4">
             <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Hire checklist

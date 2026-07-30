@@ -263,25 +263,27 @@ defmodule Cympho.RuntimePreflightTest do
   end
 
   test "links missing provider credentials to company secrets" do
-    agent = %{
-      id: Ecto.UUID.generate(),
-      adapter: :agrenting,
-      config: %{},
-      runtime_config: %{}
-    }
+    without_agrenting_env(fn ->
+      agent = %{
+        id: Ecto.UUID.generate(),
+        adapter: :agrenting,
+        config: %{},
+        runtime_config: %{}
+      }
 
-    preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
+      preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
 
-    item = Enum.find(preflight.items, &(&1.label == "Agrenting API key"))
-    uri = URI.parse(item.target_path)
-    query = URI.decode_query(uri.query)
+      item = Enum.find(preflight.items, &(&1.label == "Agrenting API key"))
+      uri = URI.parse(item.target_path)
+      query = URI.decode_query(uri.query)
 
-    assert item.status == :attention
-    assert item.target_label == "Add secret"
-    assert uri.path == "/settings/secrets"
-    assert query["key"] == "AGRENTING_API_KEY"
-    assert query["scope"] == "company"
-    assert query["description"] == "Agrenting API key for agent runtime"
+      assert item.status == :attention
+      assert item.target_label == "Add secret"
+      assert uri.path == "/settings/secrets"
+      assert query["key"] == "AGRENTING_API_KEY"
+      assert query["scope"] == "company"
+      assert query["description"] == "Agrenting API key for agent runtime"
+    end)
   end
 
   test "for_issue links missing assigned-agent command to agent config" do
@@ -733,51 +735,53 @@ defmodule Cympho.RuntimePreflightTest do
   end
 
   test "for_issue ignores unrelated scoped secrets for provider credentials" do
-    {:ok, company} =
-      Companies.create_company(%{name: "Preflight Wrong Secret Co", slug: unique_slug()})
+    without_agrenting_env(fn ->
+      {:ok, company} =
+        Companies.create_company(%{name: "Preflight Wrong Secret Co", slug: unique_slug()})
 
-    {:ok, agent} =
-      Agents.create_agent(%{
-        name: "Remote Engineer Wrong Secret",
-        role: :engineer,
-        status: :idle,
-        adapter: :agrenting,
-        config: %{
-          "agent_did" => "did:example:remote-engineer",
-          "capability" => "implementation",
-          "max_price" => "1.00"
-        },
-        company_id: company.id
-      })
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Remote Engineer Wrong Secret",
+          role: :engineer,
+          status: :idle,
+          adapter: :agrenting,
+          config: %{
+            "agent_did" => "did:example:remote-engineer",
+            "capability" => "implementation",
+            "max_price" => "1.00"
+          },
+          company_id: company.id
+        })
 
-    {:ok, _secret} =
-      Secrets.create_secret(%{
-        company_id: company.id,
-        scope: "company",
-        key: "OPENAI_API_KEY",
-        value: "wrong-provider-key",
-        description: "Wrong provider key"
-      })
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "OPENAI_API_KEY",
+          value: "wrong-provider-key",
+          description: "Wrong provider key"
+        })
 
-    {:ok, issue} =
-      Issues.create_issue(%{
-        title: "Wrong secret issue",
-        status: :todo,
-        priority: :high,
-        assigned_role: "engineer",
-        assignee_id: agent.id,
-        company_id: company.id
-      })
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Wrong secret issue",
+          status: :todo,
+          priority: :high,
+          assigned_role: "engineer",
+          assignee_id: agent.id,
+          company_id: company.id
+        })
 
-    preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
-    item = Enum.find(preflight.items, &(&1.label == "Agrenting API key"))
-    uri = URI.parse(item.target_path)
-    query = URI.decode_query(uri.query)
+      preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
+      item = Enum.find(preflight.items, &(&1.label == "Agrenting API key"))
+      uri = URI.parse(item.target_path)
+      query = URI.decode_query(uri.query)
 
-    assert preflight.status == :attention
-    assert item.status == :attention
-    assert query["return_to"] == "/issues/#{issue.id}"
-    refute inspect(preflight) =~ "wrong-provider-key"
+      assert preflight.status == :attention
+      assert item.status == :attention
+      assert query["return_to"] == "/issues/#{issue.id}"
+      refute inspect(preflight) =~ "wrong-provider-key"
+    end)
   end
 
   test "for_issue blocks when the assigned agent is not dispatch-eligible" do
@@ -837,8 +841,14 @@ defmodule Cympho.RuntimePreflightTest do
 
   defp unique_slug, do: "preflight-#{System.unique_integer([:positive])}"
 
+  defp without_agrenting_env(fun), do: without_env(~w(AGRENTING_API_KEY), fun)
+
   defp without_chat_provider_env(fun) do
     keys = ~w(DASHSCOPE_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY LLMOTIONS_API_KEY)
+    without_env(keys, fun)
+  end
+
+  defp without_env(keys, fun) do
     original = Map.new(keys, &{&1, System.get_env(&1)})
 
     Enum.each(keys, &System.delete_env/1)

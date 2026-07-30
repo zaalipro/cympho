@@ -42,6 +42,36 @@ defmodule Cympho.HeartbeatEngineTest do
       assert started.started_at
     end
 
+    test "provisions a configured issue repository before the run starts" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      {issue_id, repo_dir} = insert_repo_issue()
+      path = Cympho.Workspace.workspace_path(issue_id)
+
+      for dirname <- [".git", ".agents", ".codex"] do
+        File.mkdir_p!(Path.join(path, dirname))
+      end
+
+      on_exit(fn ->
+        File.rm_rf!(repo_dir)
+        File.rm_rf!(path)
+      end)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: issue_id,
+          adapter: "claude_local"
+        })
+
+      assert {:ok, started} = HeartbeatEngine.start_run(run)
+      assert started.workspace_path == path
+      assert File.read!(Path.join(path, "README.md")) == "# Heartbeat repo\n"
+
+      assert {"true\n", 0} =
+               System.cmd("git", ["-C", path, "rev-parse", "--is-inside-work-tree"])
+    end
+
     test "rejects non-pending run" do
       run = %Run{status: "running", id: Ecto.UUID.generate()}
       assert {:error, {:invalid_status, "running"}} = HeartbeatEngine.start_run(run)
@@ -669,6 +699,45 @@ defmodule Cympho.HeartbeatEngineTest do
       })
 
     issue.id
+  end
+
+  defp insert_repo_issue do
+    unique = System.unique_integer([:positive])
+    repo_dir = Path.join(System.tmp_dir!(), "cympho_hb_repo_#{unique}")
+    File.mkdir_p!(repo_dir)
+    assert {_output, 0} = System.cmd("git", ["init", "--quiet"], cd: repo_dir)
+
+    assert {_output, 0} =
+             System.cmd("git", ["config", "user.email", "test@example.com"], cd: repo_dir)
+
+    assert {_output, 0} = System.cmd("git", ["config", "user.name", "Cympho Test"], cd: repo_dir)
+    File.write!(Path.join(repo_dir, "README.md"), "# Heartbeat repo\n")
+    assert {_output, 0} = System.cmd("git", ["add", "README.md"], cd: repo_dir)
+    assert {_output, 0} = System.cmd("git", ["commit", "--quiet", "-m", "initial"], cd: repo_dir)
+
+    company =
+      Cympho.Repo.insert!(%Cympho.Companies.Company{
+        name: "HB Repo Co #{unique}",
+        slug: "hb-repo-co-#{unique}"
+      })
+
+    {:ok, project} =
+      Cympho.Projects.create_project(%{
+        company_id: company.id,
+        name: "HB Repo Project #{unique}",
+        prefix: "HBR",
+        settings: %{"repo_url" => repo_dir}
+      })
+
+    issue =
+      Cympho.Repo.insert!(%Cympho.Issues.Issue{
+        title: "heartbeat repo issue #{unique}",
+        identifier: "HBR-#{unique}",
+        company_id: company.id,
+        project_id: project.id
+      })
+
+    {issue.id, repo_dir}
   end
 
   defp insert_checked_out_issue(agent_id) do

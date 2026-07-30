@@ -1,8 +1,11 @@
 defmodule CymphoWeb.SecretsLive.Index do
   use CymphoWeb, :live_view
+  alias Cympho.Companies
   alias Cympho.Secrets
   alias Cympho.Secrets.Secret
   alias CymphoWeb.UserAuth
+
+  @mutation_forbidden_message "Only company owners, admins, and board members can change secrets."
 
   @runtime_credential_profiles [
     %{
@@ -68,11 +71,21 @@ defmodule CymphoWeb.SecretsLive.Index do
   ]
 
   @impl true
-  def mount(%{"company_id" => company_id}, _session, socket) do
+  def mount(params, _session, socket) do
+    company_id = resolve_company_id(params, socket)
+
+    mount_company(company_id, socket)
+  end
+
+  defp mount_company(company_id, socket) when is_binary(company_id) do
     socket =
       socket
       |> assign(:page_title, "Secrets Management")
       |> assign(:company_id, company_id)
+      |> assign(
+        :can_manage_secrets,
+        can_manage_secrets?(socket.assigns[:current_user], company_id)
+      )
       |> assign(:infinite_scroll, %{})
       |> assign(:selected_secret, nil)
       |> assign(:show_form, false)
@@ -88,29 +101,23 @@ defmodule CymphoWeb.SecretsLive.Index do
     {:ok, socket}
   end
 
-  def mount(_, session, socket) do
-    # Try to get company_id from current company
-    company_id = get_current_company_id(socket)
-
-    if company_id do
-      mount(%{"company_id" => company_id}, session, socket)
-    else
-      {:ok,
-       socket
-       |> assign(:page_title, "Secrets Management")
-       |> assign(:company_id, nil)
-       |> assign(:infinite_scroll, %{})
-       |> assign(:selected_secret, nil)
-       |> assign(:show_form, false)
-       |> assign(:form_mode, :create)
-       |> assign(:secret_prefill, %{})
-       |> assign(:secret_action_error, nil)
-       |> assign(:versions, [])
-       |> assign(:show_versions, false)
-       |> assign(:rotation_summary, empty_rotation_summary())
-       |> assign(:runtime_credential_guide, runtime_credential_guide(nil))
-       |> init_stream(:secrets, &fetch_secrets(socket, &1))}
-    end
+  defp mount_company(_company_id, socket) do
+    {:ok,
+     socket
+     |> assign(:page_title, "Secrets Management")
+     |> assign(:company_id, nil)
+     |> assign(:can_manage_secrets, false)
+     |> assign(:infinite_scroll, %{})
+     |> assign(:selected_secret, nil)
+     |> assign(:show_form, false)
+     |> assign(:form_mode, :create)
+     |> assign(:secret_prefill, %{})
+     |> assign(:secret_action_error, nil)
+     |> assign(:versions, [])
+     |> assign(:show_versions, false)
+     |> assign(:rotation_summary, empty_rotation_summary())
+     |> assign(:runtime_credential_guide, runtime_credential_guide(nil))
+     |> init_stream(:secrets, &fetch_secrets(socket, &1))}
   end
 
   @impl true
@@ -120,32 +127,36 @@ defmodule CymphoWeb.SecretsLive.Index do
         {:noreply, socket}
 
       prefill ->
-        {:noreply,
-         socket
-         |> assign(:show_form, true)
-         |> assign(:form_mode, :create)
-         |> assign(:selected_secret, nil)
-         |> assign(:secret_prefill, prefill)
-         |> assign(:secret_action_error, nil)}
+        authorize_secret_mutation(socket, fn ->
+          {:noreply,
+           socket
+           |> assign(:show_form, true)
+           |> assign(:form_mode, :create)
+           |> assign(:selected_secret, nil)
+           |> assign(:secret_prefill, prefill)
+           |> assign(:secret_action_error, nil)}
+        end)
     end
   end
 
   @impl true
   def handle_info({CymphoWeb.SecretsLive.FormComponent, {:saved, _result}}, socket) do
-    return_to = safe_prefill_return_to(socket.assigns.secret_prefill)
+    authorize_secret_mutation(socket, fn ->
+      return_to = safe_prefill_return_to(socket.assigns.secret_prefill)
 
-    socket =
-      socket
-      |> put_flash(:info, "Secret saved successfully")
-      |> assign(:show_form, false)
-      |> assign(:secret_prefill, %{})
-      |> assign(:secret_action_error, nil)
+      socket =
+        socket
+        |> put_flash(:info, "Secret saved successfully")
+        |> assign(:show_form, false)
+        |> assign(:secret_prefill, %{})
+        |> assign(:secret_action_error, nil)
 
-    if return_to do
-      {:noreply, push_navigate(socket, to: return_to)}
-    else
-      {:noreply, load_secrets(socket)}
-    end
+      if return_to do
+        {:noreply, push_navigate(socket, to: return_to)}
+      else
+        {:noreply, load_secrets(socket)}
+      end
+    end)
   end
 
   @impl true
@@ -154,39 +165,43 @@ defmodule CymphoWeb.SecretsLive.Index do
   end
 
   def handle_event("show_create_form", _, socket) do
-    changeset = Secret.changeset(%Secret{}, %{})
+    authorize_secret_mutation(socket, fn ->
+      changeset = Secret.changeset(%Secret{}, %{})
 
-    socket =
-      socket
-      |> assign(:show_form, true)
-      |> assign(:form_mode, :create)
-      |> assign(:changeset, changeset)
-      |> assign(:selected_secret, nil)
-      |> assign(:secret_prefill, %{})
-      |> assign(:secret_action_error, nil)
+      socket =
+        socket
+        |> assign(:show_form, true)
+        |> assign(:form_mode, :create)
+        |> assign(:changeset, changeset)
+        |> assign(:selected_secret, nil)
+        |> assign(:secret_prefill, %{})
+        |> assign(:secret_action_error, nil)
 
-    {:noreply, socket}
+      {:noreply, socket}
+    end)
   end
 
   def handle_event("show_edit_form", %{"id" => id}, socket) do
-    case get_current_company_secret(socket, id) do
-      {:ok, secret} ->
-        changeset = Secret.changeset(secret, %{})
+    authorize_secret_mutation(socket, fn ->
+      case get_current_company_secret(socket, id) do
+        {:ok, secret} ->
+          changeset = Secret.changeset(secret, %{})
 
-        socket =
-          socket
-          |> assign(:show_form, true)
-          |> assign(:form_mode, :edit)
-          |> assign(:changeset, changeset)
-          |> assign(:selected_secret, secret)
-          |> assign(:secret_prefill, %{})
-          |> assign(:secret_action_error, nil)
+          socket =
+            socket
+            |> assign(:show_form, true)
+            |> assign(:form_mode, :edit)
+            |> assign(:changeset, changeset)
+            |> assign(:selected_secret, secret)
+            |> assign(:secret_prefill, %{})
+            |> assign(:secret_action_error, nil)
 
-        {:noreply, socket}
+          {:noreply, socket}
 
-      {:error, :not_found} ->
-        {:noreply, secret_action_error(socket)}
-    end
+        {:error, :not_found} ->
+          {:noreply, secret_action_error(socket)}
+      end
+    end)
   end
 
   def handle_event("show_versions", %{"id" => id}, socket) do
@@ -230,81 +245,87 @@ defmodule CymphoWeb.SecretsLive.Index do
   end
 
   def handle_event("save", %{"secret" => secret_params}, socket) do
-    company_id = socket.assigns.company_id
+    authorize_secret_mutation(socket, fn ->
+      company_id = socket.assigns.company_id
 
-    secret_params = Map.put(secret_params, "company_id", company_id)
+      secret_params = Map.put(secret_params, "company_id", company_id)
 
-    result =
-      case socket.assigns.form_mode do
-        :create -> Secrets.create_secret(secret_params)
-        :edit -> Secrets.update_secret(socket.assigns.selected_secret, secret_params)
+      result =
+        case socket.assigns.form_mode do
+          :create -> Secrets.create_secret(secret_params)
+          :edit -> Secrets.update_secret(socket.assigns.selected_secret, secret_params)
+        end
+
+      case result do
+        {:ok, _secret} ->
+          socket =
+            socket
+            |> put_flash(:info, "Secret saved successfully")
+            |> assign(:show_form, false)
+            |> assign(:secret_prefill, %{})
+            |> assign(:secret_action_error, nil)
+            |> load_secrets()
+
+          {:noreply, socket}
+
+        {:error, changeset} ->
+          socket =
+            socket
+            |> put_flash(:error, "Failed to save secret")
+            |> assign(:changeset, changeset)
+
+          {:noreply, socket}
       end
-
-    case result do
-      {:ok, _secret} ->
-        socket =
-          socket
-          |> put_flash(:info, "Secret saved successfully")
-          |> assign(:show_form, false)
-          |> assign(:secret_prefill, %{})
-          |> assign(:secret_action_error, nil)
-          |> load_secrets()
-
-        {:noreply, socket}
-
-      {:error, changeset} ->
-        socket =
-          socket
-          |> put_flash(:error, "Failed to save secret")
-          |> assign(:changeset, changeset)
-
-        {:noreply, socket}
-    end
+    end)
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
-    case get_current_company_secret(socket, id) do
-      {:ok, secret} ->
-        case Secrets.delete_secret(secret) do
-          {:ok, _} ->
-            socket =
-              socket
-              |> put_flash(:info, "Secret deleted successfully")
-              |> assign(:secret_action_error, nil)
-              |> load_secrets()
+    authorize_secret_mutation(socket, fn ->
+      case get_current_company_secret(socket, id) do
+        {:ok, secret} ->
+          case Secrets.delete_secret(secret) do
+            {:ok, _} ->
+              socket =
+                socket
+                |> put_flash(:info, "Secret deleted successfully")
+                |> assign(:secret_action_error, nil)
+                |> load_secrets()
 
-            {:noreply, socket}
+              {:noreply, socket}
 
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Failed to delete secret")}
-        end
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Failed to delete secret")}
+          end
 
-      {:error, _} ->
-        {:noreply, secret_action_error(socket)}
-    end
+        {:error, _} ->
+          {:noreply, secret_action_error(socket)}
+      end
+    end)
   end
 
   def handle_event("rotate", %{"id" => id}, socket) do
-    case get_current_company_secret(socket, id) do
-      {:ok, secret} ->
-        # For rotation, we'd typically show a modal to enter new value
-        # For now, we'll open the edit form
-        changeset = Secret.changeset(secret, %{})
+    authorize_secret_mutation(socket, fn ->
+      case get_current_company_secret(socket, id) do
+        {:ok, secret} ->
+          # For rotation, we'd typically show a modal to enter new value
+          # For now, we'll open the edit form
+          changeset = Secret.changeset(secret, %{})
 
-        socket =
-          socket
-          |> assign(:show_form, true)
-          |> assign(:form_mode, :rotate)
-          |> assign(:changeset, changeset)
-          |> assign(:selected_secret, secret)
-          |> assign(:secret_prefill, %{})
-          |> assign(:secret_action_error, nil)
+          socket =
+            socket
+            |> assign(:show_form, true)
+            |> assign(:form_mode, :rotate)
+            |> assign(:changeset, changeset)
+            |> assign(:selected_secret, secret)
+            |> assign(:secret_prefill, %{})
+            |> assign(:secret_action_error, nil)
 
-        {:noreply, socket}
+          {:noreply, socket}
 
-      {:error, _} ->
-        {:noreply, secret_action_error(socket)}
-    end
+        {:error, _} ->
+          {:noreply, secret_action_error(socket)}
+      end
+    end)
   end
 
   defp load_secrets(socket) do
@@ -346,6 +367,29 @@ defmodule CymphoWeb.SecretsLive.Index do
     end
   end
 
+  defp resolve_company_id(%{"company_id" => requested_company_id}, socket)
+       when is_binary(requested_company_id) do
+    current_company_id = get_current_company_id(socket)
+    user = socket.assigns[:current_user]
+
+    cond do
+      requested_company_id == current_company_id -> current_company_id
+      company_accessible?(user, requested_company_id) -> requested_company_id
+      true -> current_company_id
+    end
+  end
+
+  defp resolve_company_id(_params, socket), do: get_current_company_id(socket)
+
+  defp company_accessible?(%{id: user_id}, company_id) do
+    case Ecto.UUID.cast(company_id) do
+      {:ok, _uuid} -> Companies.has_access?(user_id, company_id)
+      :error -> false
+    end
+  end
+
+  defp company_accessible?(_user, _company_id), do: false
+
   defp get_current_company_secret(socket, id) do
     case socket.assigns[:company_id] do
       company_id when is_binary(company_id) -> Secrets.get_company_secret(company_id, id)
@@ -358,6 +402,26 @@ defmodule CymphoWeb.SecretsLive.Index do
     |> put_flash(:error, "Secret not found")
     |> assign(:secret_action_error, "Secret not found")
   end
+
+  defp authorize_secret_mutation(socket, fun) do
+    if can_manage_secrets?(socket.assigns[:current_user], socket.assigns[:company_id]) do
+      fun.()
+    else
+      {:noreply,
+       socket
+       |> assign(:can_manage_secrets, false)
+       |> assign(:show_form, false)
+       |> assign(:secret_prefill, %{})
+       |> assign(:secret_action_error, @mutation_forbidden_message)
+       |> put_flash(:error, @mutation_forbidden_message)}
+    end
+  end
+
+  defp can_manage_secrets?(%{id: user_id}, company_id) when is_binary(company_id) do
+    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+  end
+
+  defp can_manage_secrets?(_user, _company_id), do: false
 
   defp secret_prefill(%{"key" => key} = params, company_id)
        when is_binary(company_id) and is_binary(key) do

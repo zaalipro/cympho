@@ -1,8 +1,9 @@
 defmodule CymphoWeb.PluginLive.Show do
   use CymphoWeb, :live_view
 
-  alias Cympho.Repo
-  alias Cympho.Skills
+  alias Cympho.{Companies, Repo, Skills}
+
+  @mutation_forbidden_message "Only company owners, admins, and board members can change plugins."
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -13,7 +14,8 @@ defmodule CymphoWeb.PluginLive.Show do
         {:ok,
          socket
          |> assign(:page_title, plugin.name)
-         |> assign(:plugin, plugin)}
+         |> assign(:plugin, plugin)
+         |> assign(:can_manage_plugins, can_manage_plugins?(socket))}
 
       {:error, :not_found} ->
         {:ok,
@@ -52,34 +54,60 @@ defmodule CymphoWeb.PluginLive.Show do
 
   @impl true
   def handle_event("toggle_plugin", _params, socket) do
-    case Skills.toggle_plugin(socket.assigns.plugin) do
-      {:ok, updated_plugin} ->
-        updated_plugin = Repo.preload(updated_plugin, [:company, :project])
+    authorize_plugin_mutation(socket, fn ->
+      case Skills.toggle_plugin(socket.assigns.plugin) do
+        {:ok, updated_plugin} ->
+          updated_plugin = Repo.preload(updated_plugin, [:company, :project])
 
-        {:noreply,
-         socket
-         |> assign(:plugin, updated_plugin)
-         |> put_flash(
-           :info,
-           "Plugin #{if updated_plugin.enabled, do: "enabled", else: "disabled"}"
-         )}
+          {:noreply,
+           socket
+           |> assign(:plugin, updated_plugin)
+           |> put_flash(
+             :info,
+             "Plugin #{if updated_plugin.enabled, do: "enabled", else: "disabled"}"
+           )}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to toggle plugin")}
-    end
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to toggle plugin")}
+      end
+    end)
   end
 
   @impl true
   def handle_event("delete", _params, socket) do
-    case Skills.delete_plugin(socket.assigns.plugin) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Plugin deleted successfully")
-         |> push_navigate(to: ~p"/plugins")}
+    authorize_plugin_mutation(socket, fn ->
+      case Skills.delete_plugin(socket.assigns.plugin) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Plugin deleted successfully")
+           |> push_navigate(to: ~p"/plugins")}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to delete plugin")}
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to delete plugin")}
+      end
+    end)
+  end
+
+  defp authorize_plugin_mutation(socket, fun) do
+    if can_manage_plugins?(socket) do
+      fun.()
+    else
+      {:noreply,
+       socket
+       |> assign(:can_manage_plugins, false)
+       |> put_flash(:error, @mutation_forbidden_message)}
     end
   end
+
+  defp can_manage_plugins?(%{
+         assigns: %{
+           current_user: %{id: user_id},
+           current_company: %{id: company_id}
+         }
+       }) do
+    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+  end
+
+  defp can_manage_plugins?(_socket), do: false
 end

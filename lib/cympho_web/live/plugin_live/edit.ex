@@ -1,29 +1,39 @@
 defmodule CymphoWeb.PluginLive.Edit do
   use CymphoWeb, :live_view
 
-  alias Cympho.Repo
-  alias Cympho.Skills
+  alias Cympho.{Companies, Repo, Skills}
   alias CymphoWeb.PluginLive.FormHelpers
+
+  @mutation_forbidden_message "Only company owners, admins, and board members can change plugins."
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case fetch_company_plugin(socket, id) do
-      {:ok, plugin} ->
-        plugin = Repo.preload(plugin, [:company, :project])
-        changeset = Skills.change_plugin(plugin)
+    socket = assign(socket, :can_manage_plugins, can_manage_plugins?(socket))
 
-        {:ok,
-         socket
-         |> assign(:page_title, "Edit #{plugin.name}")
-         |> assign(:plugin, plugin)
-         |> FormHelpers.assign_context_options()
-         |> assign_form(changeset)}
+    if socket.assigns.can_manage_plugins do
+      case fetch_company_plugin(socket, id) do
+        {:ok, plugin} ->
+          plugin = Repo.preload(plugin, [:company, :project])
+          changeset = Skills.change_plugin(plugin)
 
-      {:error, :not_found} ->
-        {:ok,
-         socket
-         |> put_flash(:error, "Plugin not found")
-         |> push_navigate(to: ~p"/plugins")}
+          {:ok,
+           socket
+           |> assign(:page_title, "Edit #{plugin.name}")
+           |> assign(:plugin, plugin)
+           |> FormHelpers.assign_context_options()
+           |> assign_form(changeset)}
+
+        {:error, :not_found} ->
+          {:ok,
+           socket
+           |> put_flash(:error, "Plugin not found")
+           |> push_navigate(to: ~p"/plugins")}
+      end
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, @mutation_forbidden_message)
+       |> push_navigate(to: ~p"/plugins")}
     end
   end
 
@@ -36,24 +46,26 @@ defmodule CymphoWeb.PluginLive.Edit do
 
   @impl true
   def handle_event("save", %{"plugin" => plugin_params}, socket) do
-    with {:ok, plugin_params} <-
-           FormHelpers.normalize_plugin_params(socket, plugin_params,
-             plugin: socket.assigns.plugin
-           ) do
-      case Skills.update_plugin(socket.assigns.plugin, plugin_params) do
-        {:ok, plugin} ->
-          {:noreply,
-           socket
-           |> put_flash(:info, "Plugin updated successfully")
-           |> push_navigate(to: ~p"/plugins/#{plugin.id}")}
+    authorize_plugin_mutation(socket, fn ->
+      with {:ok, plugin_params} <-
+             FormHelpers.normalize_plugin_params(socket, plugin_params,
+               plugin: socket.assigns.plugin
+             ) do
+        case Skills.update_plugin(socket.assigns.plugin, plugin_params) do
+          {:ok, plugin} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Plugin updated successfully")
+             |> push_navigate(to: ~p"/plugins/#{plugin.id}")}
 
-        {:error, %Ecto.Changeset{} = changeset} ->
-          {:noreply, assign_form(socket, changeset)}
+          {:error, %Ecto.Changeset{} = changeset} ->
+            {:noreply, assign_form(socket, changeset)}
+        end
+      else
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "Choose a project from this company.")}
       end
-    else
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Choose a project from this company.")}
-    end
+    end)
   end
 
   def handle_event("validate", %{"plugin" => plugin_params}, socket) do
@@ -74,4 +86,26 @@ defmodule CymphoWeb.PluginLive.Edit do
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
     assign(socket, :form, to_form(changeset))
   end
+
+  defp authorize_plugin_mutation(socket, fun) do
+    if can_manage_plugins?(socket) do
+      fun.()
+    else
+      {:noreply,
+       socket
+       |> assign(:can_manage_plugins, false)
+       |> put_flash(:error, @mutation_forbidden_message)}
+    end
+  end
+
+  defp can_manage_plugins?(%{
+         assigns: %{
+           current_user: %{id: user_id},
+           current_company: %{id: company_id}
+         }
+       }) do
+    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+  end
+
+  defp can_manage_plugins?(_socket), do: false
 end

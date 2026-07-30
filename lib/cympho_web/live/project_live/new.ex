@@ -16,11 +16,16 @@ defmodule CymphoWeb.ProjectLive.New do
 
   @impl true
   def handle_event("save", %{"project" => project_params}, socket) do
-    params = Map.merge(socket.assigns.project_scope, project_params)
+    # The browser form never needs to choose its tenant. Keep the selected
+    # company authoritative even when a client forges an extra company_id.
+    params = Map.merge(project_params, socket.assigns.project_scope)
 
     case Projects.create_project(params) do
-      {:ok, _project} ->
-        {:noreply, push_navigate(socket, to: ~p"/projects")}
+      {:ok, project} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Project created. Add its first issue when you are ready.")
+         |> push_navigate(to: ~p"/projects/#{project.id}")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}

@@ -29,17 +29,6 @@ defmodule CymphoWeb.OperationsLiveTest do
     end
   end
 
-  defp link_href(html, label) do
-    html
-    |> Floki.parse_document!()
-    |> Floki.find("a")
-    |> Enum.find_value(fn {_tag, attrs, children} ->
-      if children |> Floki.text() |> String.trim() == label do
-        attrs |> Map.new() |> Map.get("href")
-      end
-    end)
-  end
-
   describe "Operations page" do
     test "renders runtime services and capacity for a signed-in owner", %{conn: conn} do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
@@ -184,19 +173,28 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       assert html =~ ~s(data-ui-complex-page)
       assert html =~ ~s(data-density="compact")
-      assert link_href(html, "Compact") == "/operations?parent_issue_id=#{parent_issue.id}"
+      assert element_attrs(html, "[data-density-switch]")["aria-label"] == "Row detail"
 
-      detailed_href = link_href(html, "Detailed")
+      assert element_attrs(html, "[data-density-option='compact']")["href"] ==
+               "/operations?parent_issue_id=#{parent_issue.id}"
+
+      detailed_href = element_attrs(html, "[data-density-option='detailed']")["href"]
       assert detailed_href =~ "/operations?"
       assert detailed_href =~ "density=detailed"
       assert detailed_href =~ "parent_issue_id=#{parent_issue.id}"
+      assert html =~ "Compact rows"
+      assert html =~ "Detailed rows"
 
       {:ok, _view, html} =
         live(conn, "/operations?density=detailed&parent_issue_id=#{parent_issue.id}")
 
       assert html =~ ~s(data-density="detailed")
-      assert link_href(html, "Compact") == "/operations?parent_issue_id=#{parent_issue.id}"
-      assert link_href(html, "Detailed") =~ "density=detailed"
+
+      assert element_attrs(html, "[data-density-option='compact']")["href"] ==
+               "/operations?parent_issue_id=#{parent_issue.id}"
+
+      assert element_attrs(html, "[data-density-option='detailed']")["href"] =~
+               "density=detailed"
     end
 
     test "explains launch-ready adapter health warnings", %{conn: conn} do
@@ -1085,6 +1083,8 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "OPENAI_API_KEY not set"
       assert html =~ "Recent Runtime Failures"
       assert html =~ ~s(id="runtime-failures")
+      refute element_attrs(html, "#operations-side-rail")["class"] =~ "ui-advanced-only"
+      refute element_attrs(html, "#runtime-failures")["class"] =~ "ui-advanced-only"
       assert html =~ "Focused relaunch"
       assert html =~ "Fix and relaunch"
       assert html =~ "Focused relaunch command"
@@ -1093,6 +1093,10 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{failed_issue.id}"
       assert html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{thin_receipt_issue.id}"
       assert html =~ ~s(id="recent-failure-focused-command-)
+
+      assert element_attrs(html, "[id^='recent-failure-focused-command-']")["class"] =~
+               "ui-advanced-only"
+
       assert html =~ ~s(id="ceo-outcome-focused-command-)
       assert html =~ "2 attempts"
       assert html =~ "grouped CEO outcomes"

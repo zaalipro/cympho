@@ -74,8 +74,15 @@ defmodule Cympho.Smoke.LLMotionsTest do
              "`block_issue.reason` must be a multiline JSON string"
 
     assert report.agents.cto.instructions =~ "Use `\\n` between"
-    assert report.agents.engineer.adapter == :process
-    assert report.agents.qa.adapter == :process
+    assert report.agents.engineer.adapter == :codex
+    assert report.agents.qa.adapter == :codex
+
+    for agent <- [report.agents.engineer, report.agents.qa] do
+      assert agent.config["base_url"] == "https://cli.llmotions.com/v1"
+      assert agent.config["model"] == "gemini-3.5-flash-low"
+      assert agent.runtime_config["profile_id"] == Cympho.RuntimeProfiles.custom_id()
+    end
+
     assert AgentRuntimeCapabilities.repo_delivery_capable?(report.agents.engineer)
     assert AgentRuntimeCapabilities.repo_delivery_capable?(report.agents.qa)
 
@@ -115,7 +122,39 @@ defmodule Cympho.Smoke.LLMotionsTest do
       assert report.preflight.status == :attention
       assert report.preflight.first_action.label == "Chat completion key"
       assert report.preflight.first_action.target_path =~ "key=LLMOTIONS_API_KEY"
+
+      assert report.agents.ceo.runtime_config["profile_id"] ==
+               "openai-chat-llmotions-gemma"
     end)
+  end
+
+  test "custom models keep a custom profile label instead of claiming Gemma" do
+    unique = System.unique_integer([:positive])
+
+    assert {:ok, report} =
+             LLMotions.setup(
+               company_name: "LLMotions Terra Smoke #{unique}",
+               issue_prefix: "LTR",
+               model: "gpt-5.6-terra",
+               api_key: nil,
+               store_secret?: false,
+               create_workspace?: false
+             )
+
+    for agent <- [report.agents.ceo, report.agents.cto] do
+      assert agent.config["model"] == "gpt-5.6-terra"
+      assert agent.runtime_config["profile_id"] == Cympho.RuntimeProfiles.custom_id()
+    end
+
+    for agent <- [report.agents.engineer, report.agents.qa] do
+      assert agent.adapter == :codex
+      assert agent.config["base_url"] == "https://cli.llmotions.com/v1"
+      assert agent.config["model"] == "gpt-5.6-terra"
+      assert agent.runtime_config["profile_id"] == Cympho.RuntimeProfiles.custom_id()
+    end
+
+    assert report.text =~ "gpt-5.6-terra"
+    refute report.text =~ "openai-chat-llmotions-gemma"
   end
 
   defp without_chat_provider_env(fun) do

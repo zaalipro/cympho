@@ -11,8 +11,10 @@ defmodule Cympho.AgentActions do
   alias Cympho.{
     Activities,
     Agents,
+    AuditTrail,
     Comments,
     Decisions,
+    IssueDigest,
     Issues,
     PrincipalPermissions,
     PullRequestContract,
@@ -25,8 +27,9 @@ defmodule Cympho.AgentActions do
   alias Cympho.AgentActions.Validation
 
   alias Cympho.Agents.Agent
-  alias Cympho.Issues.Issue
-  alias Cympho.Issues.SwarmEvents
+  alias Cympho.Comments.Comment
+  alias Cympho.Issues.{ExecutionState, Issue, SwarmEvents}
+  alias Cympho.WorkProducts.IssueWorkProduct
   alias Cympho.AuditTrail.Instrumenter
 
   require Logger
@@ -86,7 +89,7 @@ defmodule Cympho.AgentActions do
   @spec execute(Issue.t(), Agent.t() | binary(), [action()]) ::
           {:ok, %{issue: Issue.t(), results: [map()]}} | {:error, term()}
   def execute(%Issue{} = issue, %Agent{} = agent, actions) when is_list(actions) do
-    actions = backfill_approval_notes(actions)
+    actions = prepare_paired_comment_actions(actions)
 
     cond do
       cross_company?(issue, agent) ->
@@ -118,11 +121,16 @@ defmodule Cympho.AgentActions do
 
   def execute(_issue, _agent, _actions), do: {:error, :invalid_execution_context}
 
-  defp backfill_approval_notes(actions) do
+  defp prepare_paired_comment_actions(actions) do
     {actions, _last_comment} =
       Enum.reduce(actions, {[], nil}, fn action, {acc, last_comment} ->
         comment_body = paired_comment_body(action) || last_comment
-        action = maybe_backfill_approval_note(action, comment_body)
+
+        action =
+          action
+          |> maybe_backfill_approval_note(comment_body)
+          |> maybe_mark_paired_submit_review(comment_body)
+
         {[action | acc], comment_body}
       end)
 
@@ -151,6 +159,20 @@ defmodule Cympho.AgentActions do
 
   defp maybe_backfill_approval_note(action, _comment_body), do: action
 
+  defp maybe_mark_paired_submit_review(%{"type" => "submit_review"} = action, comment_body)
+       when is_binary(comment_body) do
+    comment = %{body: comment_body}
+    receipt = IssueDigest.audit_last_action_receipt(comment)
+
+    if IssueDigest.meaningful_comment?(comment) and receipt.status == :ok do
+      Map.put(action, :paired_comment?, true)
+    else
+      action
+    end
+  end
+
+  defp maybe_mark_paired_submit_review(action, _comment_body), do: action
+
   defp do_execute(%Issue{} = issue, %Agent{} = agent, actions) do
     result =
       Repo.transaction(fn ->
@@ -165,6 +187,8 @@ defmodule Cympho.AgentActions do
           actions
           |> Enum.with_index()
           |> Enum.reduce({initial_issue, []}, fn {action, index}, {current_issue, acc} ->
+            action = resolve_action_context(action, current_issue, agent)
+
             with :ok <- authorize_action(action, current_issue, agent),
                  {:ok, action_result} <- execute_action(current_issue, agent, action) do
               log_action(current_issue, agent, action, action_result)
@@ -261,6 +285,25 @@ defmodule Cympho.AgentActions do
       issue,
       "Action rejected: only CEO/CTO agents may emit approve_issue, request_changes, or block_issue. " <>
         "Use submit_review to escalate, or comment to explain."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(%Issue{} = issue, {:invalid_role, roles}) do
+    system_comment(
+      issue,
+      "request_changes rejected: `role` must name the delivery/rework owner receiving the issue. " <>
+        "Use one of: #{Enum.join(roles, ", ")}. Do not route changes back to the reviewer role."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:submit_review_role_unresolved, roles}
+       ) do
+    system_comment(
+      issue,
+      "submit_review rejected: `role` was omitted and no previous reviewer or supervisor " <>
+        "could be inferred. Provide one of: #{Enum.join(roles, ", ")}."
     )
   end
 
@@ -844,12 +887,12 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "submit_review"} = action) do
-    assignee_id = Issues.resolve_reviewer(issue, agent, action["role"])
-    note = action["notes"] || "Submitted for #{human_role(action["role"])} review."
-
-    with :ok <- Validation.ensure_submit_review_quality(issue, agent, action),
+    with :ok <- ensure_submit_review_role(action),
+         assignee_id = Issues.resolve_reviewer(issue, agent, action["role"]),
+         note = action["notes"] || "Submitted for #{human_role(action["role"])} review.",
+         :ok <- Validation.ensure_submit_review_quality(issue, agent, action),
          :ok <- ensure_head_sha_changed_since_last_review(issue, action),
-         {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_submit_review_note(note)),
+         {:ok, _comment} <- maybe_submit_review_comment(issue, agent, action, note),
          {:ok, issue_with_comment} <- Issues.get_issue(issue.id),
          # Count THIS agent's own still-active run as completing — otherwise
          # submitting review mid-run trips "1 run still active" (or, with the
@@ -867,7 +910,10 @@ defmodule Cympho.AgentActions do
              checked_out_at: nil,
              assigned_role: action["role"],
              last_reviewer_id: assignee_id || transitioned.last_reviewer_id,
-             monitor_state: stamp_last_review_sha(transitioned, action)
+             monitor_state:
+               transitioned
+               |> stamp_last_review_sha(action)
+               |> stamp_last_review_submitter(agent)
            }) do
       {:ok, %{type: "submit_review", issue_id: updated.id}}
     end
@@ -884,7 +930,8 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "request_changes"} = action) do
-    with :ok <- Validation.ensure_governance_quality(action, "request_changes"),
+    with :ok <- ensure_request_changes_role(action),
+         :ok <- Validation.ensure_governance_quality(action, "request_changes"),
          :ok <- Validation.ensure_request_changes_feedback_ready(action),
          reason = tagged_review_note(action["reason"] || "Changes requested."),
          {:ok, updated} <-
@@ -2751,6 +2798,221 @@ defmodule Cympho.AgentActions do
     end
   end
 
+  defp stamp_last_review_submitter(monitor_state, %Agent{id: id, role: role}) do
+    monitor_state
+    |> Map.put("last_review_submitter_id", id)
+    |> Map.put("last_review_submitter_role", Atom.to_string(role))
+  end
+
+  # Missing submit-review roles follow the same issue-local reviewer routing
+  # used by the executor. Explicit non-blank roles are never overridden.
+  defp resolve_action_context(%{"type" => "submit_review"} = action, issue, agent) do
+    if blank?(action["role"]) do
+      case Issues.resolve_reviewer_role(issue, agent) do
+        role when role in @roles -> Map.put(action, "role", role)
+        _ -> action
+      end
+    else
+      action
+    end
+  end
+
+  # A review rejection normally returns work to the role that submitted the
+  # current review. Explicit non-blank roles are never overridden. The legacy
+  # fallback uses issue-local delivery evidence instead of a global role.
+  defp resolve_action_context(
+         %{"type" => "request_changes", "role" => role} = action,
+         _issue,
+         _agent
+       )
+       when is_binary(role) and role != "",
+       do: action
+
+  defp resolve_action_context(%{"type" => "request_changes"} = action, issue, _agent) do
+    case review_return_role(issue) do
+      role when role in @roles -> Map.put(action, "role", role)
+      _ -> action
+    end
+  end
+
+  defp resolve_action_context(action, _issue, _agent), do: action
+
+  defp ensure_submit_review_role(%{"role" => role}) when role in @roles, do: :ok
+
+  defp ensure_submit_review_role(_action),
+    do: {:error, {:submit_review_role_unresolved, @roles}}
+
+  defp ensure_request_changes_role(%{"role" => role}) when role in @roles, do: :ok
+  defp ensure_request_changes_role(_action), do: {:error, {:invalid_role, @roles}}
+
+  defp review_return_role(%Issue{} = issue) do
+    execution_policy_executor_role(issue) ||
+      persisted_review_submitter_role(issue) ||
+      audit_review_return_role(issue) ||
+      latest_delivery_comment_role(issue) ||
+      latest_code_change_role(issue) ||
+      delivery_role_for_company(issue.created_by_agent_id, issue.company_id) ||
+      delivery_role_for_company(issue.assignee_id, issue.company_id)
+  end
+
+  defp execution_policy_executor_role(
+         %Issue{
+           status: :in_review,
+           execution_state: execution_state
+         } = issue
+       )
+       when is_map(execution_state) and map_size(execution_state) > 0 do
+    state = ExecutionState.normalize(execution_state)
+
+    if Map.get(state, :current_stage_type) == :reviewer and
+         is_binary(Map.get(state, :current_participant)) do
+      executor_id =
+        case Map.get(state, :history, []) do
+          [first | _] -> Map.get(first, :participant) || Map.get(first, "participant")
+          _ -> nil
+        end || Map.get(state, :return_assignee)
+
+      role_for_company_agent(executor_id, issue.company_id)
+    end
+  end
+
+  defp execution_policy_executor_role(_issue), do: nil
+
+  defp persisted_review_submitter_role(%Issue{
+         company_id: company_id,
+         monitor_state: monitor_state
+       })
+       when is_map(monitor_state) do
+    submitter_id = Map.get(monitor_state, "last_review_submitter_id")
+    submitter_role = Map.get(monitor_state, "last_review_submitter_role")
+
+    with true <- is_binary(submitter_id),
+         true <- submitter_role in @roles,
+         {:ok, %Agent{company_id: ^company_id, role: role}} <- Agents.get_agent(submitter_id),
+         ^submitter_role <- Atom.to_string(role) do
+      submitter_role
+    else
+      _ -> nil
+    end
+  end
+
+  defp persisted_review_submitter_role(_issue), do: nil
+
+  defp audit_review_return_role(%Issue{} = issue) do
+    events = issue_audit_events(issue)
+
+    Enum.find_value(events, fn event ->
+      if audit_action_type(event) == "submit_review" do
+        role_for_company_agent(audit_agent_id(event), issue.company_id)
+      end
+    end) ||
+      latest_explicit_routing_role(events, issue.company_id)
+  end
+
+  defp issue_audit_events(%Issue{} = issue) do
+    issue.id
+    |> AuditTrail.list_resource_history("issue", limit: 100)
+    |> Enum.sort_by(fn event -> {event.inserted_at, event.id} end, :desc)
+  end
+
+  defp latest_explicit_routing_role(events, company_id) do
+    Enum.find_value(events, fn event ->
+      params = audit_action_params(event)
+
+      case audit_action_type(event) do
+        "delegate" ->
+          params
+          |> action_map_value("to_agent_id")
+          |> role_for_company_agent(company_id)
+
+        "handoff" ->
+          case action_map_value(params, "role") do
+            role when role in @roles -> role
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+    end)
+  end
+
+  defp audit_action_type(%{
+         event_type: "agent_action_executed",
+         actor_type: "agent",
+         payload: payload
+       })
+       when is_map(payload) do
+    Map.get(payload, "action_type") || Map.get(payload, :action_type)
+  end
+
+  defp audit_action_type(_event), do: nil
+
+  defp audit_action_params(%{payload: payload}) when is_map(payload) do
+    payload
+    |> action_map_value("params")
+    |> normalize_map()
+  end
+
+  defp audit_action_params(_event), do: %{}
+
+  defp audit_agent_id(%{actor_type: "agent", actor_id: actor_id}), do: actor_id
+  defp audit_agent_id(_event), do: nil
+
+  defp action_map_value(map, key) when is_map(map) do
+    Map.get(map, key) || Map.get(map, String.to_existing_atom(key))
+  end
+
+  defp latest_delivery_comment_role(%Issue{} = issue) do
+    from(comment in Comment,
+      where: comment.issue_id == ^issue.id,
+      where: comment.author_type == "agent",
+      where: ilike(comment.body, "[delivery]%"),
+      order_by: [desc: comment.inserted_at, desc: comment.id],
+      limit: 50,
+      select: comment.author_id
+    )
+    |> Repo.all()
+    |> Enum.find_value(&delivery_role_for_company(&1, issue.company_id))
+  end
+
+  defp latest_code_change_role(%Issue{} = issue) do
+    from(work_product in IssueWorkProduct,
+      where: work_product.issue_id == ^issue.id,
+      where: work_product.kind == "code_change",
+      order_by: [desc: work_product.inserted_at, desc: work_product.id],
+      limit: 50,
+      select: work_product.created_by_agent_id
+    )
+    |> Repo.all()
+    |> Enum.find_value(&delivery_role_for_company(&1, issue.company_id))
+  end
+
+  defp role_for_company_agent(agent_id, company_id) when is_binary(agent_id) do
+    case Agents.get_agent(agent_id) do
+      {:ok, %Agent{company_id: ^company_id, role: role}}
+      when role in @delivery_roles or role in @governance_roles ->
+        Atom.to_string(role)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp role_for_company_agent(_agent_id, _company_id), do: nil
+
+  defp delivery_role_for_company(agent_id, company_id) when is_binary(agent_id) do
+    case Agents.get_agent(agent_id) do
+      {:ok, %Agent{company_id: ^company_id, role: role}} when role in @delivery_roles ->
+        Atom.to_string(role)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp delivery_role_for_company(_agent_id, _company_id), do: nil
+
   defp blank?(nil), do: true
   defp blank?(""), do: true
   defp blank?(value) when is_binary(value), do: String.trim(value) == ""
@@ -3186,6 +3448,17 @@ defmodule Cympho.AgentActions do
     do_agent_comment(issue, agent, to_string(body))
   end
 
+  # A preceding comment action is the owner-facing receipt for this batch.
+  # Adding a second terse `[delivery]` note here would make that synthetic note
+  # the latest receipt and hide the complete evidence the agent just wrote.
+  defp maybe_submit_review_comment(_issue, _agent, %{paired_comment?: true}, _note) do
+    {:ok, %{id: nil}}
+  end
+
+  defp maybe_submit_review_comment(issue, agent, _action, note) do
+    maybe_agent_comment(issue, agent, tagged_submit_review_note(note))
+  end
+
   defp ensure_swarm_worker_completion_context(%Issue{} = issue, %Agent{} = agent) do
     issue_swarm = issue.monitor_state |> normalize_map() |> Map.get("swarm") |> normalize_map()
     agent_swarm = agent.runtime_config |> normalize_map() |> Map.get("swarm") |> normalize_map()
@@ -3320,7 +3593,7 @@ defmodule Cympho.AgentActions do
       Instrumenter.record_agent_action(
         %{
           action_type: action["type"],
-          params: Map.drop(action, ["type"])
+          params: Map.drop(action, ["type", :paired_comment?])
         },
         issue,
         agent.id

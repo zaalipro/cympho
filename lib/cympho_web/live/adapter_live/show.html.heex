@@ -25,6 +25,8 @@
 
   <div
     :if={@flash && @flash[:info]}
+    role="status"
+    aria-live="polite"
     class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:info]}
@@ -32,6 +34,7 @@
 
   <div
     :if={@flash && @flash[:error]}
+    role="alert"
     class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:error]}
@@ -46,21 +49,23 @@
           <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Health Status
           </h2>
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              phx-click="test_health"
-              class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
-            >
-              Refresh
-            </button>
-            <button
-              type="button"
-              phx-click="send_test_heartbeat"
-              class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
-            >
-              Test Heartbeat
-            </button>
+          <div class="ui-advanced-only flex items-center gap-2">
+            <%= if @can_manage_adapter_settings do %>
+              <button
+                type="button"
+                phx-click="test_health"
+                class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                phx-click="send_test_heartbeat"
+                class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Validate config
+              </button>
+            <% end %>
           </div>
         </div>
 
@@ -87,11 +92,14 @@
           >
             {@health.message}
           </div>
+          <p class="text-[11px] leading-4 text-text-quaternary">
+            This checks required settings only. Run an assigned issue to verify the provider connection end to end.
+          </p>
         </div>
       </div>
       
 <!-- Adapter Details -->
-      <div class="card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
+      <div class="ui-advanced-only card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
         <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
           Details
         </h2>
@@ -117,52 +125,86 @@
 <!-- Center + Right columns: Config & Agents -->
     <div class="lg:col-span-2 space-y-6">
       <!-- Configuration -->
-      <div class="card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
+      <div class="ui-advanced-only card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
         <div class="flex items-center justify-between">
           <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Configuration
           </h2>
-          <span class="text-xs text-text-tertiary">{length(@config_schema)} fields</span>
+          <span class="text-xs text-text-tertiary">
+            {length(visible_config_schema(@config_schema))} fields
+          </span>
         </div>
+
+        <p class="text-xs leading-5 text-text-quaternary">
+          Saved values are copied to every assigned agent. API keys entered here are stored in
+          <.app_link navigate={~p"/settings/secrets"} class="text-brand hover:underline">
+            encrypted company Secrets
+          </.app_link>
+          and are not copied into agent configs.
+        </p>
 
         <div
           :if={@validation_error}
+          role="alert"
+          aria-live="polite"
           class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2 rounded-lg"
         >
           {@validation_error}
         </div>
 
-        <form phx-change="validate_config" phx-submit="save_config" class="space-y-4">
-          <div :for={field <- @config_schema} class="space-y-1">
-            <label class="block text-xs font-510 text-text-secondary">
-              {field.description || Atom.to_string(field.key)}
-              <%= if field.required do %>
-                <span class="text-red-400">*</span>
-              <% end %>
-            </label>
-            <div class="flex items-center gap-2">
-              <input
-                type={input_type(field.type)}
-                name={"config[#{field.key}]"}
-                value={input_value(Map.get(@config, field.key))}
-                placeholder={if field.default, do: inspect(field.default), else: ""}
-                class="flex-1 bg-surface-hover border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-quaternary focus:outline-none focus:border-brand transition-colors"
-              />
-              <span class="text-[10px] text-text-quaternary">
-                {schema_type_label(field.type)}
-              </span>
+        <%= if @can_manage_adapter_settings do %>
+          <form phx-change="validate_config" phx-submit="save_config" class="space-y-4">
+            <div :for={field <- visible_config_schema(@config_schema)} class="space-y-1">
+              <label
+                for={"adapter-config-#{field.key}"}
+                class="block text-xs font-510 text-text-secondary"
+              >
+                {field.description || Atom.to_string(field.key)}
+                <%= if field.required do %>
+                  <span class="text-red-400">*</span>
+                <% end %>
+              </label>
+              <div class="flex items-center gap-2">
+                <input
+                  :if={field.type == :boolean}
+                  type="hidden"
+                  name={"config[#{field.key}]"}
+                  value="false"
+                />
+                <input
+                  id={"adapter-config-#{field.key}"}
+                  type={input_type(field)}
+                  name={"config[#{field.key}]"}
+                  value={field_input_value(field, @config)}
+                  checked={field_checked?(field, @config)}
+                  required={field_required?(field, @config)}
+                  aria-required={field_required?(field, @config)}
+                  placeholder={input_placeholder(field, @config)}
+                  autocomplete={input_autocomplete(field)}
+                  step={input_step(field)}
+                  class="flex-1 bg-surface-hover border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-quaternary focus:outline-none focus:border-brand transition-colors"
+                />
+                <span class="text-[10px] text-text-quaternary">
+                  {schema_type_label(field.type)}
+                </span>
+              </div>
             </div>
-          </div>
 
-          <div class="pt-2 border-t border-border">
-            <button
-              type="submit"
-              class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-button transition-colors"
-            >
-              Save Configuration
-            </button>
-          </div>
-        </form>
+            <div class="pt-2 border-t border-border">
+              <button
+                type="submit"
+                class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-button transition-colors"
+              >
+                Save Configuration
+              </button>
+            </div>
+          </form>
+        <% else %>
+          <p data-testid="adapter-config-read-only" class="text-sm leading-5 text-text-tertiary">
+            Adapter settings are read-only. Only company owners, admins, and board members can
+            change configuration or run validation checks.
+          </p>
+        <% end %>
       </div>
       
 <!-- Assigned Agents -->

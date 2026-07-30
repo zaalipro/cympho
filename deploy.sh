@@ -201,8 +201,19 @@ step "Installing systemd unit"
 run_remote_script <<EOF
 unit_src=${SOURCE_DIR}/deploy/cympho.service
 unit_dst=/etc/systemd/system/${SERVICE_NAME}.service
+git_agent_src=${SOURCE_DIR}/deploy/cympho-git-agent.service
+git_agent_dst=/etc/systemd/system/cympho-git-agent.service
+units_changed=0
+_sudo systemd-analyze verify "\$unit_src" "\$git_agent_src"
 if ! _sudo cmp -s "\$unit_src" "\$unit_dst" 2>/dev/null; then
   _sudo install -m 0644 "\$unit_src" "\$unit_dst"
+  units_changed=1
+fi
+if ! _sudo cmp -s "\$git_agent_src" "\$git_agent_dst" 2>/dev/null; then
+  _sudo install -m 0644 "\$git_agent_src" "\$git_agent_dst"
+  units_changed=1
+fi
+if [ "\$units_changed" = "1" ]; then
   _sudo systemctl daemon-reload
 fi
 _sudo systemctl enable ${SERVICE_NAME} >/dev/null 2>&1 || true
@@ -287,8 +298,15 @@ fi
 EOF
 
 step "Health check (${LOCAL_HEALTH_URL})"
-sleep 4
-if ! run_ssh "curl -fsS --max-time 10 '${LOCAL_HEALTH_URL}' >/dev/null"; then
+local_ok=0
+for _ in $(seq 1 15); do
+  if run_ssh "curl -fsS --max-time 10 '${LOCAL_HEALTH_URL}' >/dev/null"; then
+    local_ok=1
+    break
+  fi
+  sleep 2
+done
+if [[ "${local_ok}" != "1" ]]; then
   run_ssh "sudo journalctl -u ${SERVICE_NAME} -n 60 --no-pager" || true
   rollback_release "Service failed local health check"
 fi

@@ -258,6 +258,34 @@ defmodule CymphoWeb.QuickIssueControllerTest do
       refute Repo.exists?(from i in Issue, where: i.title == ^title)
     end
 
+    test "rejects a stale quick-create form after the session company changes", %{conn: conn} do
+      {conn, _user, current_company} = register_and_log_in_user(conn)
+      unique = System.unique_integer([:positive])
+
+      {:ok, stale_company} =
+        Cympho.Companies.create_company(%{
+          name: "Stale Quick Co #{unique}",
+          slug: "stale-quick-co-#{unique}"
+        })
+
+      title = "Stale tab issue #{unique}"
+
+      conn =
+        post(conn, "/issues/quick-create", %{
+          "title" => title,
+          "company_id" => stale_company.id,
+          "status" => "todo"
+        })
+
+      assert redirected_to(conn) == "/issues"
+      assert current_company.id != stale_company.id
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "The company changed in another tab. Review the current company and try again."
+
+      refute Repo.exists?(from i in Issue, where: i.title == ^title)
+    end
+
     test "rejects cross-company quick-create goals", %{conn: conn} do
       {conn, _user, _company} = register_and_log_in_user(conn)
       unique = System.unique_integer([:positive])

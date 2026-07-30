@@ -74,6 +74,7 @@ defmodule CymphoWeb.QuickIssueController do
     assignee_id = if swarm_config.enabled, do: nil, else: Map.get(params, "assignee_id")
 
     with {:ok, status} <- validate_status(Map.get(params, "status", "todo")),
+         :ok <- validate_page_company(company_id, Map.get(params, "company_id")),
          {:ok, priority} <- validate_priority(Map.get(params, "priority", "medium")),
          {:ok, project_id} <- validate_project(company_id, Map.get(params, "project_id")),
          {:ok, goal} <- validate_goal(company_id, Map.get(params, "goal_id")),
@@ -105,6 +106,13 @@ defmodule CymphoWeb.QuickIssueController do
   end
 
   defp validate_status(_status), do: {:error, "Choose a valid status."}
+
+  defp validate_page_company(_company_id, nil), do: :ok
+  defp validate_page_company(company_id, company_id), do: :ok
+
+  defp validate_page_company(_company_id, _page_company_id) do
+    {:error, "The company changed in another tab. Review the current company and try again."}
+  end
 
   defp validate_priority(priority) when is_binary(priority) do
     if priority in Enum.map(Issue.priority_options(), &to_string/1) do

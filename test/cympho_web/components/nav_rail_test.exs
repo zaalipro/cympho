@@ -59,10 +59,21 @@ defmodule CymphoWeb.Components.NavRailTest do
 
   test "renders a visible approvals badge when decisions are pending" do
     html = render_rail(approval_count: 3)
+    document = Floki.parse_document!(html)
+    [approval_link] = Floki.find(document, "a[href='/approvals?status=pending']")
 
     assert html =~ ~s(href="/approvals?status=pending")
     assert html =~ ~s(data-testid="nav-badge-approvals")
     assert html =~ ~r/<span[^>]*data-testid="nav-badge-approvals"[^>]*>\s*3\s*<\/span>/s
+    refute Floki.attribute(approval_link, "class") |> Enum.join(" ") =~ "ui-advanced-only"
+  end
+
+  test "keeps an empty approvals shortcut in Advanced mode" do
+    html = render_rail(approval_count: 0)
+    document = Floki.parse_document!(html)
+    [approval_link] = Floki.find(document, "a[href='/approvals?status=pending']")
+
+    assert Floki.attribute(approval_link, "class") |> Enum.join(" ") =~ "ui-advanced-only"
   end
 
   test "keeps mode switching out of the navigation rail" do
@@ -73,6 +84,7 @@ defmodule CymphoWeb.Components.NavRailTest do
     assert html =~ "Board"
     assert html =~ "Team"
     assert html =~ "ui-advanced-only"
+    assert html =~ "focus-visible:ring-2"
   end
 
   test "does not duplicate runtime controls in navigation" do

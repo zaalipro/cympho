@@ -43,6 +43,57 @@ defmodule Cympho.WorkspaceTest do
       assert result == {:error, :path_outside_workspace}
     end
   end
+
+  describe "repository_fingerprint/1" do
+    test "normalizes equivalent HTTPS and SSH repository URLs" do
+      assert {:ok, https_fingerprint} =
+               Workspace.repository_fingerprint("https://github.com/Example/project.git/")
+
+      assert {:ok, scp_fingerprint} =
+               Workspace.repository_fingerprint("git@github.com:Example/project.git")
+
+      assert {:ok, ssh_fingerprint} =
+               Workspace.repository_fingerprint("ssh://git@github.com/Example/project.git")
+
+      assert https_fingerprint == scp_fingerprint
+      assert https_fingerprint == ssh_fingerprint
+    end
+
+    test "preserves non-git SSH usernames in repository identity" do
+      assert {:ok, alice_fingerprint} =
+               Workspace.repository_fingerprint("alice@git.example.com:team/project.git")
+
+      assert {:ok, alice_uri_fingerprint} =
+               Workspace.repository_fingerprint("ssh://alice@git.example.com/team/project.git")
+
+      assert {:ok, bob_fingerprint} =
+               Workspace.repository_fingerprint("bob@git.example.com:team/project.git")
+
+      assert {:ok, conventional_git_fingerprint} =
+               Workspace.repository_fingerprint("git@git.example.com:team/project.git")
+
+      assert {:ok, https_fingerprint} =
+               Workspace.repository_fingerprint("https://git.example.com/team/project.git")
+
+      assert alice_fingerprint == alice_uri_fingerprint
+      refute alice_fingerprint == bob_fingerprint
+      refute alice_fingerprint == https_fingerprint
+      assert conventional_git_fingerprint == https_fingerprint
+    end
+
+    test "rejects secret-bearing or ambiguous remote URLs" do
+      assert {:error, :invalid_repo_url} =
+               Workspace.repository_fingerprint("https://token@github.com/example/project.git")
+
+      assert {:error, :invalid_repo_url} =
+               Workspace.repository_fingerprint(
+                 "https://github.com/example/project.git?token=secret"
+               )
+
+      assert {:error, :invalid_repo_url} =
+               Workspace.repository_fingerprint("https://github.com/example/project.git#branch")
+    end
+  end
 end
 
 defmodule Cympho.Workspace.RepoUrlTest do
@@ -64,6 +115,31 @@ defmodule Cympho.Workspace.RepoUrlTest do
   end
 
   describe "get_repo_url/1" do
+    test "returns the project's canonical repo_url" do
+      {:ok, project} =
+        create_project_with_company(%{
+          name: "Canonical Repo Project",
+          prefix: "CR",
+          repo_url: "https://github.com/example/canonical.git"
+        })
+
+      assert {:ok, "https://github.com/example/canonical.git"} =
+               Workspace.get_repo_url(project.id)
+    end
+
+    test "prefers the canonical repo_url over the legacy settings value" do
+      {:ok, project} =
+        create_project_with_company(%{
+          name: "Canonical Repo Project",
+          prefix: "CP",
+          repo_url: "https://github.com/example/canonical.git",
+          settings: %{"repo_url" => "https://github.com/example/legacy.git"}
+        })
+
+      assert {:ok, "https://github.com/example/canonical.git"} =
+               Workspace.get_repo_url(project.id)
+    end
+
     test "returns repo_url from project settings" do
       {:ok, project} =
         create_project_with_company(%{
@@ -211,6 +287,103 @@ defmodule Cympho.Workspace.RepoUrlTest do
       assert {"CYM-88/improve-pr-docs\n", 0} =
                System.cmd("git", ["branch", "--show-current"], cd: path)
     end
+  end
+
+  describe "ensure_for_issue/1" do
+    test "clones a configured repository when the issue path is absent" do
+      repo_dir = local_git_repo!()
+      issue = repo_issue!(repo_dir, "CYM-91", "Provision missing workspace", "PM")
+      path = Workspace.workspace_path(issue)
+
+      on_exit(fn ->
+        File.rm_rf!(repo_dir)
+        File.rm_rf!(path)
+      end)
+
+      refute File.exists?(path)
+      assert {:ok, ^path} = Workspace.ensure_for_issue(issue)
+      assert File.read!(Path.join(path, "README.md")) == "# Test\n"
+      assert_git_workspace(path)
+    end
+
+    test "replaces the known empty CLI control-directory scaffold with a clone" do
+      repo_dir = local_git_repo!()
+      issue = repo_issue!(repo_dir, "CYM-92", "Recover CLI scaffold", "RS")
+      path = Workspace.workspace_path(issue)
+
+      for dirname <- [".git", ".agents", ".codex"] do
+        File.mkdir_p!(Path.join(path, dirname))
+      end
+
+      on_exit(fn ->
+        File.rm_rf!(repo_dir)
+        File.rm_rf!(path)
+      end)
+
+      assert {:ok, ^path} = Workspace.ensure_for_issue(issue)
+      assert File.read!(Path.join(path, "README.md")) == "# Test\n"
+      refute File.exists?(Path.join(path, ".agents"))
+      refute File.exists?(Path.join(path, ".codex"))
+      assert_git_workspace(path)
+    end
+
+    test "preserves an arbitrary non-empty non-Git workspace" do
+      repo_dir = local_git_repo!()
+      issue = repo_issue!(repo_dir, "CYM-93", "Preserve local files", "PL")
+      path = Workspace.workspace_path(issue)
+      important_path = Path.join(path, "important.txt")
+
+      File.mkdir_p!(path)
+      File.write!(important_path, "do not overwrite")
+
+      on_exit(fn ->
+        File.rm_rf!(repo_dir)
+        File.rm_rf!(path)
+      end)
+
+      assert {:error, {:workspace_not_git_repo, ^path}} = Workspace.ensure_for_issue(issue)
+      assert File.read!(important_path) == "do not overwrite"
+      refute File.exists?(Path.join(path, "README.md"))
+    end
+
+    test "reuses an existing Git workspace without resetting its files" do
+      repo_dir = local_git_repo!()
+      issue = repo_issue!(repo_dir, "CYM-94", "Reuse checkout", "RC")
+      path = Workspace.workspace_path(issue)
+      marker_path = Path.join(path, "local-change.txt")
+
+      on_exit(fn ->
+        File.rm_rf!(repo_dir)
+        File.rm_rf!(path)
+      end)
+
+      assert {:ok, ^path} = Workspace.ensure_for_issue(issue)
+      File.write!(marker_path, "keep me")
+
+      assert {:ok, ^path} = Workspace.ensure_for_issue(issue)
+      assert File.read!(marker_path) == "keep me"
+    end
+  end
+
+  defp repo_issue!(repo_dir, identifier, title, prefix) do
+    {:ok, project} =
+      create_project_with_company(%{
+        name: "Repo Project #{identifier}",
+        prefix: prefix,
+        settings: %{"repo_url" => repo_dir}
+      })
+
+    %{
+      id: Ecto.UUID.generate(),
+      identifier: identifier,
+      title: title,
+      project_id: project.id
+    }
+  end
+
+  defp assert_git_workspace(path) do
+    assert {"true\n", 0} =
+             System.cmd("git", ["-C", path, "rev-parse", "--is-inside-work-tree"])
   end
 
   defp local_git_repo! do

@@ -1,7 +1,7 @@
 defmodule Cympho.CompaniesTest do
   use Cympho.DataCase
 
-  alias Cympho.{AgentInstructionStudio, Companies}
+  alias Cympho.{AgentInstructionStudio, Agents, Companies}
   alias Cympho.Companies.{Company, CompanyInvite, JoinRequest}
   alias Cympho.Goals.Goal
   alias Cympho.Projects
@@ -187,6 +187,150 @@ defmodule Cympho.CompaniesTest do
       [project] = data.projects
       assert project.github_webhook_secret == "***REDACTED***"
       refute inspect(data) =~ "github-webhook-secret"
+    end
+
+    test "export_company/1 recursively scrubs legacy nested agent credentials" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Nested Secret Corp", slug: "nested-secret"})
+
+      {:ok, _agent} =
+        Agents.create_agent(%{
+          name: "Legacy Credential Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          company_id: company.id,
+          config: %{
+            "api_key" => "legacy-plain-api-key",
+            "provider" => %{
+              "access_token" => "legacy-access-token",
+              "client_secret" => "legacy-client-secret",
+              "label" => "safe-provider-label"
+            },
+            "credentials" => [
+              %{"refresh_token" => "legacy-refresh-token"},
+              %{"label" => "safe-list-label"}
+            ]
+          }
+        })
+
+      data = Companies.export_company(company.id)
+      [agent] = data.agents
+
+      assert agent.config["api_key"] == "***REDACTED***"
+      assert agent.config["provider"]["access_token"] == "***REDACTED***"
+      assert agent.config["provider"]["client_secret"] == "***REDACTED***"
+      assert agent.config["provider"]["label"] == "safe-provider-label"
+      assert agent.config["credentials"] == "***REDACTED***"
+
+      exported = inspect(data)
+      refute exported =~ "legacy-plain-api-key"
+      refute exported =~ "legacy-access-token"
+      refute exported =~ "legacy-client-secret"
+      refute exported =~ "legacy-refresh-token"
+
+      json_data = data |> Jason.encode!() |> Jason.decode!()
+
+      assert {:ok, result} = Companies.import_company(json_data)
+      [imported_agent] = Agents.list_agents_by_company(result.company.id)
+
+      refute Map.has_key?(imported_agent.config, "api_key")
+      refute Map.has_key?(imported_agent.config["provider"], "access_token")
+      refute Map.has_key?(imported_agent.config["provider"], "client_secret")
+      assert imported_agent.config["provider"]["label"] == "safe-provider-label"
+      refute Map.has_key?(imported_agent.config, "credentials")
+    end
+
+    test "export/import redacts arbitrary HTTP authorization and process environments" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Adapter Config Secret Corp", slug: "adapter-secrets"})
+
+      {:ok, _http_agent} =
+        Agents.create_agent(%{
+          name: "Sensitive HTTP Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :http,
+          company_id: company.id,
+          config: %{
+            "url" => "https://example.test/hook",
+            "headers" => %{
+              "Authorization" => "Bearer leaked-http-token",
+              "Cookie" => "session=leaked-cookie",
+              "X-API-Key" => "leaked-header-key",
+              "Accept" => "application/json"
+            },
+            "Authorization" => "Bearer leaked-top-level-token",
+            "x-api-key" => "leaked-top-level-key",
+            "DATABASE-URL" => "postgres://leaked-database-url",
+            "client-credential" => "leaked-client-credential",
+            "label" => "safe-http-label",
+            "masked_note" => "***REDACTED***",
+            "fallbacks" => ["safe-fallback", "***REDACTED***"]
+          }
+        })
+
+      {:ok, _process_agent} =
+        Agents.create_agent(%{
+          name: "Sensitive Process Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          company_id: company.id,
+          config: %{
+            "command" => "safe-command",
+            "env" => %{
+              "DATABASE_URL" => "postgres://leaked-process-database",
+              "SAFE_MODE" => "true"
+            },
+            "label" => "safe-process-label"
+          }
+        })
+
+      data = Companies.export_company(company.id)
+      http_export = Enum.find(data.agents, &(&1.name == "Sensitive HTTP Agent"))
+      process_export = Enum.find(data.agents, &(&1.name == "Sensitive Process Agent"))
+
+      assert http_export.config["headers"] == "***REDACTED***"
+      assert http_export.config["Authorization"] == "***REDACTED***"
+      assert http_export.config["x-api-key"] == "***REDACTED***"
+      assert http_export.config["DATABASE-URL"] == "***REDACTED***"
+      assert http_export.config["client-credential"] == "***REDACTED***"
+      assert http_export.config["label"] == "safe-http-label"
+      assert process_export.config["env"] == "***REDACTED***"
+      assert process_export.config["command"] == "safe-command"
+      assert process_export.config["label"] == "safe-process-label"
+
+      exported = inspect(data)
+      refute exported =~ "leaked-http-token"
+      refute exported =~ "leaked-cookie"
+      refute exported =~ "leaked-header-key"
+      refute exported =~ "leaked-top-level-token"
+      refute exported =~ "leaked-top-level-key"
+      refute exported =~ "leaked-database-url"
+      refute exported =~ "leaked-client-credential"
+      refute exported =~ "leaked-process-database"
+
+      json_data = data |> Jason.encode!() |> Jason.decode!()
+      assert {:ok, result} = Companies.import_company(json_data)
+
+      imported_agents = Agents.list_agents_by_company(result.company.id)
+      imported_http = Enum.find(imported_agents, &(&1.name == "Sensitive HTTP Agent"))
+      imported_process = Enum.find(imported_agents, &(&1.name == "Sensitive Process Agent"))
+
+      refute Map.has_key?(imported_http.config, "headers")
+      refute Map.has_key?(imported_http.config, "Authorization")
+      refute Map.has_key?(imported_http.config, "x-api-key")
+      refute Map.has_key?(imported_http.config, "DATABASE-URL")
+      refute Map.has_key?(imported_http.config, "client-credential")
+      refute Map.has_key?(imported_http.config, "masked_note")
+      assert imported_http.config["url"] == "https://example.test/hook"
+      assert imported_http.config["label"] == "safe-http-label"
+      assert imported_http.config["fallbacks"] == ["safe-fallback"]
+
+      refute Map.has_key?(imported_process.config, "env")
+      assert imported_process.config["command"] == "safe-command"
+      assert imported_process.config["label"] == "safe-process-label"
     end
 
     test "export_company/1 includes a non-sensitive secret restore manifest" do

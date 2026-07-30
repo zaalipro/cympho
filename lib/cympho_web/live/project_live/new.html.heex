@@ -1,11 +1,14 @@
-<.page size="wide" class="ember-aurora">
+<.page size="wide" class="ember-aurora" data-ui-complex-page>
   <div class="relative z-[1]">
     <.header>
       <span class="ember-eyebrow">New workstream</span>
       <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
         New project
       </h1>
-      <p class="mt-2 max-w-2xl text-body-sm text-text-tertiary">
+      <p class="ui-simple-only mt-2 max-w-2xl text-body-sm text-text-tertiary">
+        Name the project and tell the team what it owns.
+      </p>
+      <p class="ui-advanced-only mt-2 max-w-2xl text-body-sm text-text-tertiary">
         Group related issues, link to a repo, and configure environment variables for agents.
       </p>
       <:actions>
@@ -21,6 +24,7 @@
     <.form
       for={@form}
       phx-submit="save"
+      data-ui-simple-single-column
       class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
     >
       <section class="ember-glass overflow-hidden">
@@ -61,24 +65,36 @@
           <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
             <div>
               <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Repository and identifier
+                Issue identifier
               </p>
               <p class="mt-1 text-sm text-text-tertiary">
-                Prefixes become issue IDs. Repo URLs give runtime workspaces a concrete code target.
+                Prefixes become issue IDs.
+                <span class="ui-advanced-only">
+                  Repo URLs give runtime workspaces a concrete code target.
+                </span>
               </p>
             </div>
 
-            <div class="grid gap-4 md:grid-cols-[minmax(0,160px)_minmax(0,1fr)]">
+            <div
+              data-testid="project-identifier-fields"
+              data-ui-simple-single-column
+              class="grid gap-4 md:grid-cols-[minmax(0,160px)_minmax(0,1fr)]"
+            >
               <.input field={@form[:prefix]} label="Prefix" required placeholder="ACME" />
-              <.input
-                field={@form[:repo_url]}
-                label="Repository URL"
-                placeholder="https://github.com/owner/repo"
-              />
+              <div class="ui-advanced-only" data-testid="project-repository-field">
+                <.input
+                  field={@form[:repo_url]}
+                  label="Repository URL"
+                  placeholder="https://github.com/owner/repo"
+                />
+              </div>
             </div>
           </section>
 
-          <section class="space-y-4">
+          <section
+            class="ui-advanced-only space-y-4"
+            data-testid="project-workspace-posture"
+          >
             <div>
               <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                 Workspace posture
@@ -102,7 +118,7 @@
         </div>
       </section>
 
-      <aside class="space-y-4">
+      <aside class="ui-advanced-only space-y-4" data-testid="project-setup-rail">
         <section
           data-testid="project-setup-checklist"
           class="rounded-xl border border-border bg-panel p-4 shadow-card"
@@ -159,7 +175,11 @@
         </section>
       </aside>
 
-      <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2">
+      <div
+        data-testid="project-create-actions"
+        data-ui-simple-full-span
+        class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2"
+      >
         <.app_link
           navigate={~p"/projects"}
           class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"

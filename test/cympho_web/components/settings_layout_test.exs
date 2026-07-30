@@ -20,7 +20,7 @@ defmodule CymphoWeb.Components.SettingsLayoutTest do
     html = render_settings(:appearance)
 
     for group <- ~w(Account Workspace Governance), do: assert(html =~ group)
-    assert html =~ "Advanced"
+    assert html =~ "Technical settings"
     assert html =~ "CONTENT-MARKER"
 
     for {label, path} <- [
@@ -53,5 +53,12 @@ defmodule CymphoWeb.Components.SettingsLayoutTest do
     assert length(String.split(html, ~s(aria-current="page"))) - 1 == 2
     assert html =~ ~r|<a[^>]*href="/settings/audit"[^>]*aria-current="page"|
     refute html =~ ~r|<a[^>]*href="/settings/appearance"[^>]*aria-current="page"|
+  end
+
+  test "mode-specific settings navigation keeps a visible keyboard focus state" do
+    html = render_settings(:profile)
+
+    assert html =~ "focus-visible:ring-2"
+    assert html =~ "focus-visible:ring-brand/40"
   end
 end

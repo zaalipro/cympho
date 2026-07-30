@@ -14,14 +14,14 @@
       </div>
       <:actions>
         <button
-          :if={@company.status == "active"}
+          :if={@can_manage? && @company.status == "active"}
           phx-click="show_pause_modal"
           class="inline-flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-2 text-sm font-510 text-amber-200 transition-colors hover:bg-amber-500/15"
         >
           <.icon name="hero-pause-mini" class="h-4 w-4" /> Pause Company
         </button>
         <button
-          :if={@company.status == "paused"}
+          :if={@can_manage? && @company.status == "paused"}
           phx-click="show_resume_modal"
           class="inline-flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-4 py-2 text-sm font-510 text-emerald-300 transition-colors hover:bg-emerald-500/15"
         >
@@ -29,6 +29,7 @@
         </button>
 
         <.app_link
+          :if={@can_manage?}
           navigate={~p"/companies/#{@company}/export"}
           class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
         >
@@ -36,6 +37,7 @@
         </.app_link>
 
         <.app_link
+          :if={@can_manage?}
           navigate={~p"/companies/import"}
           class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
         >
@@ -43,6 +45,7 @@
         </.app_link>
 
         <.app_link
+          :if={@can_manage?}
           navigate={~p"/companies/#{@company}/edit"}
           class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
         >
@@ -59,17 +62,17 @@
     </.header>
 
     <div
-      :if={@flash && @flash[:info]}
+      :if={@flash["info"]}
       class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
     >
-      {@flash[:info]}
+      {@flash["info"]}
     </div>
 
     <div
-      :if={@flash && @flash[:error]}
+      :if={@flash["error"]}
       class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
     >
-      {@flash[:error]}
+      {@flash["error"]}
     </div>
 
     <div class="stagger-children grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8 mt-2">
@@ -156,6 +159,7 @@
                 </td>
                 <td class="px-6 py-4 text-right">
                   <button
+                    :if={@can_manage?}
                     phx-click="delete_membership"
                     phx-value-id={membership.id}
                     class="text-red-400 hover:text-red-300 text-sm"
@@ -228,12 +232,13 @@
       </div>
     </div>
     <.live_component
-      :if={@live_action in [:edit]}
+      :if={@can_manage? && @live_action in [:edit]}
       module={CymphoWeb.CompanyLive.FormComponent}
       id={@company.id}
       title={@page_title}
       action={@live_action}
       company={@company}
+      current_user={@current_user}
       patch={true}
     />
   </div>

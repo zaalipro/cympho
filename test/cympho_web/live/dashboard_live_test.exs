@@ -88,7 +88,25 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert length(Floki.find(document, "[data-ui-mode-option]")) == 2
       assert Floki.text(Floki.find(document, "[data-sidebar-ui-mode-switch]")) =~ "Simple"
       assert Floki.text(Floki.find(document, "[data-sidebar-ui-mode-switch]")) =~ "Advanced"
-      assert Floki.text(Floki.find(document, "[data-ui-mode-label]")) =~ "Simple"
+
+      assert Floki.text(Floki.find(document, "[data-ui-mode-label]")) =~
+               "Switch to Advanced view"
+
+      assert html =~ ~s(aria-describedby="interface-mode-help")
+      assert html =~ "Simple shows guided essentials"
+      assert html =~ "Advanced shows full controls and diagnostics"
+      [mode_status] = Floki.find(document, "[data-ui-mode-status]")
+      assert Floki.attribute(mode_status, "aria-live") == ["polite"]
+      assert Floki.attribute(mode_status, "aria-atomic") == ["true"]
+      assert Floki.find(document, "#sidebar #interface-mode-help") == []
+      assert Floki.find(document, "header [data-ui-mode-status]") == []
+    end
+
+    test "client mode control announces the action and resulting mode" do
+      source = File.read!(Path.join([File.cwd!(), "assets/js/app.js"]))
+
+      assert source =~ ~s|toggle.setAttribute("aria-label", `Switch to ${nextLabel} view`)|
+      assert source =~ ~s|status.textContent = `${activeLabel} view enabled`|
     end
 
     test "renders dashboard with metric cards", %{conn: conn} do
@@ -126,7 +144,7 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       assert html =~ ~s(data-testid="runtime-controls")
       assert html =~ ~s(data-testid="runtime-status-trigger")
-      assert html =~ "Full power"
+      assert html =~ ~s(title="Runtime: Review mode")
       assert html =~ "Pause"
       assert html =~ "Stop"
       assert html =~ ~s(action="/runtime-control/pause")
@@ -151,7 +169,7 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ ~s(title="Runtime: Paused")
+      assert html =~ ~s(title="Runtime: Review mode · paused")
       assert html =~ "Resume"
       assert html =~ ~s(action="/runtime-control/resume")
       refute html =~ ~s(action="/runtime-control/pause")
@@ -163,7 +181,7 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ ~s(title="Runtime: Low power")
+      assert html =~ ~s(title="Runtime: Review mode · low power")
       assert html =~ "Full power"
       assert html =~ ~s(action="/runtime-control/resume")
       refute html =~ ~s(action="/runtime-control/low-power")

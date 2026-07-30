@@ -1,4 +1,4 @@
-<div class="p-6 lg:p-8 max-w-5xl mx-auto w-full min-w-0">
+<div class="p-6 lg:p-8 max-w-5xl mx-auto w-full min-w-0" data-ui-complex-page>
   <.header
     title={@page_title}
     subtitle={@plugin.description || "Plugin details and configuration."}
@@ -11,22 +11,74 @@
         Back
       </.app_link>
       <.app_link
+        :if={@can_manage_plugins}
         navigate={~p"/plugins/#{@plugin.id}/edit"}
-        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+        class="ui-advanced-only rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
       >
         Edit
       </.app_link>
       <button
+        :if={@can_manage_plugins}
         type="button"
         phx-click="toggle_plugin"
-        class="cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+        data-confirm={"#{if @plugin.enabled, do: "Disable", else: "Enable"} #{@plugin.name}?"}
+        class="ui-advanced-only cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
       >
         {if @plugin.enabled, do: "Disable", else: "Enable"}
       </button>
     </:actions>
   </.header>
 
-  <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+  <section
+    data-testid="plugin-simple-overview"
+    class="ui-simple-only rounded-xl border border-border bg-surface p-5"
+  >
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div class="min-w-0">
+        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          Plugin overview
+        </p>
+        <h2 class="mt-1 break-words text-base font-590 text-text-primary">{@plugin.name}</h2>
+      </div>
+      <span class={[
+        "inline-flex w-fit shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-510",
+        if(@plugin.enabled,
+          do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300",
+          else: "border-border bg-panel text-text-tertiary"
+        )
+      ]}>
+        {if @plugin.enabled, do: "Enabled", else: "Disabled"}
+      </span>
+    </div>
+
+    <dl class="mt-4 grid min-w-0 gap-4 border-t border-border pt-4 sm:grid-cols-2">
+      <div class="min-w-0">
+        <dt class="text-xs text-text-quaternary">Scope</dt>
+        <dd class="mt-1 break-words text-sm text-text-secondary">
+          {(@plugin.company && @plugin.company.name) || "Global"} / {(@plugin.project &&
+                                                                        @plugin.project.name) ||
+            "All projects"}
+        </dd>
+      </div>
+      <div class="min-w-0">
+        <dt class="text-xs text-text-quaternary">Permissions</dt>
+        <dd class="mt-1 text-sm leading-5 text-text-secondary">
+          <%= if Enum.empty?(@plugin.capabilities || []) do %>
+            No host access is declared.
+          <% else %>
+            This plugin can {CymphoWeb.PluginLive.Index.humanized_capabilities(
+              @plugin.capabilities
+            )}.
+          <% end %>
+        </dd>
+      </div>
+    </dl>
+  </section>
+
+  <div
+    data-testid="plugin-advanced-detail"
+    class="ui-advanced-only grid grid-cols-1 gap-4 lg:grid-cols-3"
+  >
     <section class="rounded-xl border border-border bg-surface p-5 lg:col-span-2">
       <h2 class="mb-4 text-sm font-590 text-text-primary">
         {if @live_action == :settings, do: "Settings", else: "Manifest"}

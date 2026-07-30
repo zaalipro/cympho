@@ -4,6 +4,7 @@ defmodule Cympho.AgentActionsTest do
   alias Cympho.{
     AgentActions,
     Agents,
+    AuditTrail,
     Comments,
     Companies,
     Issues,
@@ -68,6 +69,55 @@ defmodule Cympho.AgentActionsTest do
       """
 
       assert {:error, {:unsupported_action, "ship_money"}} = AgentActions.parse(body)
+    end
+
+    test "submit_review accepts omitted or blank roles but still validates explicit roles" do
+      action_block = fn action ->
+        """
+        ```cympho-actions
+        #{Jason.encode!(%{"actions" => [action]})}
+        ```
+        """
+      end
+
+      assert {:ok, [%{"type" => "submit_review"} = action]} =
+               AgentActions.parse(action_block.(%{"type" => "submit_review"}))
+
+      refute Map.has_key?(action, "role")
+
+      for blank_role <- ["", "   "] do
+        assert {:ok, [%{"role" => ^blank_role}]} =
+                 AgentActions.parse(
+                   action_block.(%{"type" => "submit_review", "role" => blank_role})
+                 )
+      end
+
+      assert {:ok, [%{"role" => "cto"}]} =
+               AgentActions.parse(action_block.(%{"type" => "submit_review", "role" => "cto"}))
+
+      assert {:error, {:invalid_role, _roles}} =
+               AgentActions.parse(action_block.(%{"type" => "submit_review", "role" => "wizard"}))
+    end
+
+    test "accepts request_changes without an explicit return role" do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"request_changes","reason":"Evidence inspected: the review artifact. Required changes: correct the stated behavior. Verification required: run the focused test. Next action: resubmit for review."}]}
+      ```
+      """
+
+      assert {:ok, [%{"type" => "request_changes"} = action]} = AgentActions.parse(body)
+      refute Map.has_key?(action, "role")
+
+      blank_role_body =
+        String.replace(body, "\"request_changes\"", "\"request_changes\",\"role\":\"\"")
+
+      assert {:ok, [%{"role" => ""}]} = AgentActions.parse(blank_role_body)
+
+      invalid_body =
+        String.replace(body, "\"request_changes\"", "\"request_changes\",\"role\":\"wizard\"")
+
+      assert {:error, {:invalid_role, _roles}} = AgentActions.parse(invalid_body)
     end
 
     test "normalizes attach_work_product name and content aliases" do
@@ -667,7 +717,7 @@ defmodule Cympho.AgentActionsTest do
       issue: issue,
       ceo: ceo
     } do
-      actions = [%{"type" => "submit_review", "role" => "cto", "notes" => "Ready"}]
+      actions = [%{"type" => "submit_review", "notes" => "Ready"}]
 
       assert {:error, :no_supervisor_to_review} = AgentActions.execute(issue, ceo, actions)
 
@@ -793,6 +843,150 @@ defmodule Cympho.AgentActionsTest do
              end)
 
       _ = ceo
+    end
+
+    test "submit_review infers the CEO parent role when a CTO omits role", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto
+    } do
+      {:ok, issue} = Issues.update_issue(issue, %{assignee_id: cto.id, status: :in_progress})
+      insert_completed_run(cto, issue)
+
+      actions = [
+        %{
+          "type" => "attach_work_product",
+          "kind" => "document",
+          "title" => "CTO delivery notes"
+        },
+        %{
+          "type" => "submit_review",
+          "notes" =>
+            "[delivery] What happened: the technical plan is ready for CEO review. Files changed: CTO delivery notes. Evidence produced: delivery notes work product and completed run. Verification: completed run passed. Risks: none known. Current state: ready for review. Next decision: CEO review. Restart packet: CEO should inspect the technical plan and completed run before deciding."
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, cto, actions)
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :in_review
+      assert updated.assignee_id == ceo.id
+      assert updated.assigned_role == "ceo"
+      assert updated.last_reviewer_id == ceo.id
+    end
+
+    test "submit_review infers the CTO parent role when an engineer provides a blank role", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer
+    } do
+      {:ok, issue} = Issues.update_issue(issue, %{assignee_id: engineer.id, status: :in_progress})
+      insert_completed_run(engineer, issue)
+
+      actions = [
+        %{
+          "type" => "attach_work_product",
+          "kind" => "document",
+          "title" => "Blank-role delivery notes"
+        },
+        %{
+          "type" => "submit_review",
+          "role" => "   ",
+          "notes" =>
+            "[delivery] What happened: implementation is ready for CTO review. Files changed: blank-role delivery notes. Evidence produced: delivery notes work product and completed run. Verification: completed run passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the implementation notes and completed run before deciding."
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, engineer, actions)
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :in_review
+      assert updated.assignee_id == cto.id
+      assert updated.assigned_role == "cto"
+      assert updated.last_reviewer_id == cto.id
+    end
+
+    test "submit_review accepts delivery evidence created earlier in the same action batch", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer
+    } do
+      {:ok, issue} = Issues.update_issue(issue, %{assignee_id: engineer.id, status: :in_progress})
+      insert_completed_run(engineer, issue)
+
+      delivery_note =
+        "[delivery] What happened: acceptance documentation is ready for review. " <>
+          "Files changed: acceptance criteria document. " <>
+          "Evidence produced: acceptance criteria work product. " <>
+          "Verification: reviewed every criterion against the issue brief. " <>
+          "Risks: none known. Current state: ready for review. " <>
+          "Next decision: CTO approval. " <>
+          "Restart packet: inspect the attached acceptance criteria and approve or request changes."
+
+      actions = [
+        %{"type" => "comment", "body" => delivery_note},
+        %{
+          "type" => "attach_work_product",
+          "kind" => "document",
+          "title" => "Acceptance criteria"
+        },
+        %{
+          "type" => "submit_review",
+          "role" => "cto",
+          "notes" => "Acceptance criteria are ready for CTO review."
+        }
+      ]
+
+      assert {:ok,
+              %{
+                results: [
+                  %{type: "comment"},
+                  %{type: "attach_work_product"},
+                  %{type: "submit_review"}
+                ]
+              }} = AgentActions.execute(issue, engineer, actions)
+
+      updated = Issues.get_issue!(issue.id)
+      comments = Comments.list_comments(issue.id)
+
+      assert updated.status == :in_review
+      assert updated.assignee_id == cto.id
+      assert length(WorkProducts.list_work_products(issue.id)) == 1
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "agent" and comment.body == delivery_note
+             end)
+
+      assert Enum.count(comments, &(&1.author_type == "agent")) == 1
+    end
+
+    test "submit_review keeps its complete note when an earlier batch comment is not a receipt",
+         %{
+           issue: issue,
+           engineer: engineer
+         } do
+      {:ok, issue} = Issues.update_issue(issue, %{assignee_id: engineer.id, status: :in_progress})
+      insert_completed_run(engineer, issue)
+
+      submit_note =
+        "[delivery] What happened: implementation is ready for review. " <>
+          "Files changed: lib/example.ex. Evidence produced: delivery work product. " <>
+          "Verification: completed tests passed. Risks: none known. " <>
+          "Current state: ready for review. Next decision: CTO review. " <>
+          "Restart packet: inspect the delivery work product and test evidence."
+
+      actions = [
+        %{"type" => "comment", "body" => "I am preparing the final handoff."},
+        %{"type" => "attach_work_product", "kind" => "document", "title" => "Delivery notes"},
+        %{"type" => "submit_review", "role" => "cto", "notes" => submit_note}
+      ]
+
+      assert {:ok, _result} = AgentActions.execute(issue, engineer, actions)
+      assert Issues.get_issue!(issue.id).status == :in_review
+
+      comments = Comments.list_comments(issue.id)
+      assert Enum.any?(comments, &(&1.author_type == "agent" and &1.body == submit_note))
+      assert Enum.count(comments, &(&1.author_type == "agent")) == 2
     end
 
     test "submit_review passes the runtime gate while the agent's own run is still active", %{
@@ -924,19 +1118,32 @@ defmodule Cympho.AgentActionsTest do
       after_round_one = Issues.get_issue!(issue.id)
       assert after_round_one.assignee_id == cto.id
       assert after_round_one.last_reviewer_id == cto.id
+      assert after_round_one.monitor_state["last_review_submitter_id"] == engineer.id
+      assert after_round_one.monitor_state["last_review_submitter_role"] == "engineer"
 
       # CTO asks for changes.
+      request_changes_reason = request_changes_reason()
+
+      response = """
+      Reviewed the submitted work and found a focused gap.
+
+      ```cympho-actions
+      #{Jason.encode!(%{"actions" => [%{"type" => "comment", "body" => "[review] #{request_changes_reason}"}, %{"type" => "request_changes", "reason" => request_changes_reason}]})}
+      ```
+      """
+
+      assert {:ok, [review_comment, %{"type" => "request_changes"} = request_changes]} =
+               AgentActions.parse(response)
+
+      assert String.starts_with?(review_comment["body"], "[review]")
+      refute Map.has_key?(request_changes, "role")
+
       assert {:ok, _} =
-               AgentActions.execute(after_round_one, cto, [
-                 %{
-                   "type" => "request_changes",
-                   "role" => "engineer",
-                   "reason" => request_changes_reason()
-                 }
-               ])
+               AgentActions.execute(after_round_one, cto, [review_comment, request_changes])
 
       mid_loop = Issues.get_issue!(issue.id)
       assert mid_loop.status == :todo
+      assert mid_loop.assigned_role == "engineer"
       assert mid_loop.last_reviewer_id == cto.id
 
       # Re-parent the engineer to cto_two so parent-walk WOULD prefer cto_two.
@@ -951,7 +1158,6 @@ defmodule Cympho.AgentActionsTest do
         %{"type" => "attach_work_product", "kind" => "document", "title" => "round two"},
         %{
           "type" => "submit_review",
-          "role" => "cto",
           "head_sha" => "sha-round-two",
           "notes" =>
             "[delivery] What happened: round two addresses the gap. Action taken: resubmitted CTO review after adding coverage. Files changed: lib/foo.ex. Evidence produced: round two work product and sha-round-two. Evidence/artifact: round two work product and sha-round-two. Verification: tests pass including new coverage. Remaining risk: none. Current state: ready. Next decision: CTO re-review. Restart packet: CTO should inspect lib/foo.ex, sha-round-two, and new coverage before deciding."
@@ -1360,6 +1566,89 @@ defmodule Cympho.AgentActionsTest do
              )
     end
 
+    test "request_changes without role recovers the legacy delivery owner from delegate audit", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer
+    } do
+      assert {:ok, _event} =
+               AuditTrail.record_event(%{
+                 company_id: issue.company_id,
+                 event_type: "agent_action_executed",
+                 actor_type: "agent",
+                 actor_id: engineer.id,
+                 resource_type: "issue",
+                 resource_id: issue.id,
+                 payload: %{
+                   "action_type" => "delegate",
+                   "params" => %{"to_agent_id" => engineer.id}
+                 }
+               })
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :in_review,
+          assignee_id: cto.id,
+          assigned_role: "cto",
+          monitor_state: %{}
+        })
+
+      reason = request_changes_reason()
+
+      actions = [
+        %{"type" => "comment", "body" => "[review] #{reason}"},
+        %{"type" => "request_changes", "reason" => reason}
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, cto, actions)
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :todo
+      assert updated.assigned_role == "engineer"
+      refute updated.assigned_role == "cto"
+    end
+
+    test "request_changes without role rejects unrelated delivery-agent audit events", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer
+    } do
+      assert {:ok, _event} =
+               AuditTrail.record_event(%{
+                 company_id: issue.company_id,
+                 event_type: "agent_action_executed",
+                 actor_type: "agent",
+                 actor_id: engineer.id,
+                 resource_type: "issue",
+                 resource_id: issue.id,
+                 payload: %{"action_type" => "escalate", "params" => %{}}
+               })
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :in_review,
+          assignee_id: cto.id,
+          assigned_role: "cto",
+          monitor_state: %{}
+        })
+
+      assert {:error, {:invalid_role, _roles}} =
+               AgentActions.execute(issue, cto, [
+                 %{"type" => "request_changes", "reason" => request_changes_reason()}
+               ])
+
+      unchanged = Issues.get_issue!(issue.id)
+      assert unchanged.status == :in_review
+      assert unchanged.assigned_role == "cto"
+
+      assert Enum.any?(Comments.list_comments(issue.id), fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "request_changes rejected") and
+                 String.contains?(comment.body, "delivery/rework owner") and
+                 String.contains?(comment.body, "Do not route changes back to the reviewer")
+             end)
+    end
+
     test "request_changes to repo delivery role rejects thin feedback", %{issue: issue, cto: cto} do
       reason = "Needs tests covering the null-guard in lib/foo.ex"
 
@@ -1523,6 +1812,11 @@ defmodule Cympho.AgentActionsTest do
       issue: issue,
       ceo: ceo
     } do
+      assert %{"blocker_kind" => "owner_input_needed"} =
+               Cympho.AgentActions.Validation.canonicalize_blocker_kind(%{
+                 "blocker_kind" => "owner_verification"
+               })
+
       # A thin-brief block: the CEO emits "missing_requirements", which is a
       # near-miss for owner_input_needed. It should block cleanly, not reject.
       actions = [

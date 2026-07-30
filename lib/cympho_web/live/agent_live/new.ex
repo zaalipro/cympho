@@ -136,7 +136,18 @@ defmodule CymphoWeb.AgentLive.New do
     |> Enum.map(fn adapter -> {adapter_label(adapter), to_string(adapter)} end)
   end
 
-  def codex_model_options, do: Cympho.Adapters.CodexAdapter.model_options()
+  def codex_model_options(current_model \\ nil) do
+    options = Cympho.Adapters.CodexAdapter.model_options()
+    current_model = current_model |> to_string() |> String.trim()
+
+    if current_model != "" and
+         Enum.all?(options, fn {_label, value} -> value != current_model end) do
+      options ++ [{"#{current_model} (custom)", current_model}]
+    else
+      options
+    end
+  end
+
   def cursor_model_options, do: RuntimeOptions.cursor_model_options()
   def openclaw_provider_options, do: RuntimeOptions.openclaw_provider_options()
   def openclaw_provider_model_options, do: RuntimeOptions.openclaw_provider_model_options()
@@ -602,6 +613,10 @@ defmodule CymphoWeb.AgentLive.New do
       openclaw_harness_id: ""
     }
   end
+
+  defp maybe_default_runtime_model(%{model: model} = runtime, "codex", _provider, _preset)
+       when is_binary(model) and model != "",
+       do: runtime
 
   defp maybe_default_runtime_model(runtime, adapter, provider, process_preset) do
     valid_models =

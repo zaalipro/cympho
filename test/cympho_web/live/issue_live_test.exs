@@ -497,6 +497,58 @@ defmodule CymphoWeb.IssueLiveTest do
       assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
     end
 
+    test "ignores forged tenant and assignment fields" do
+      company_id = current_company_id()
+
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Scoped Intake CEO",
+          role: :ceo,
+          status: :idle,
+          company_id: company_id
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Foreign Issue Company",
+          slug: "foreign-issue-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, foreign_agent} =
+        Agents.create_agent(%{
+          name: "Foreign Engineer",
+          role: :engineer,
+          status: :idle,
+          company_id: other_company.id
+        })
+
+      {:ok, view, _html} = live(conn(), "/issues/new")
+
+      render_submit(view, "save", %{
+        "issue" => %{
+          "title" => "Tenant-scoped owner request",
+          "description" => "Keep this request in the selected company and CEO lane.",
+          "company_id" => other_company.id,
+          "assignee_id" => foreign_agent.id,
+          "assigned_role" => "engineer"
+        }
+      })
+
+      created =
+        Issues.list_issues(%{company_id: company_id})
+        |> Enum.find(&(&1.title == "Tenant-scoped owner request"))
+
+      assert created
+      assert created.company_id == company_id
+      assert created.assignee_id == ceo.id
+      assert created.assigned_role == "ceo"
+
+      refute Enum.any?(
+               Issues.list_issues(%{company_id: other_company.id}),
+               &(&1.title == "Tenant-scoped owner request")
+             )
+    end
+
     test "does not queue focused dispatch for almost-ready owner briefs" do
       {:ok, company} =
         Companies.create_company(%{
@@ -770,6 +822,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ "Use swarm"
       assert html =~ "3 workers"
+      assert has_element?(view, "[data-testid='issue-swarm-controls'].ui-advanced-only")
       refute html =~ ~s(data-testid="issue-swarm-advanced-panel")
 
       ready_description = """

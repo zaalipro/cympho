@@ -175,6 +175,31 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Test Agent"
     end
 
+    test "marks expert tabs and panels Advanced-only with a Simple dashboard fallback", %{
+      conn: conn
+    } do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Mode Aware Agent",
+          role: :engineer,
+          status: :idle,
+          instructions: "Keep the daily dashboard calm."
+        })
+
+      for tab <- ~w(instructions skills configuration runs) do
+        {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=#{tab}")
+
+        assert has_element?(view, "button.ui-advanced-only[phx-value-tab='#{tab}']")
+        assert has_element?(view, "[data-testid='agent-#{tab}-panel'].ui-advanced-only")
+        assert has_element?(view, "[data-testid='agent-simple-tab-fallback'].ui-simple-only")
+
+        assert has_element?(
+                 view,
+                 "[data-testid='agent-simple-tab-fallback'] button[phx-value-tab='dashboard']"
+               )
+      end
+    end
+
     test "dashboard queues an immediate heartbeat for an idle agent", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{
@@ -487,6 +512,57 @@ defmodule CymphoWeb.AgentLiveTest do
 
       assert html =~ ~r/<option[^>]+value="gpt-5.5"[^>]+selected/
       refute html =~ ~r/<option[^>]+value="o4-mini"[^>]+selected/
+    end
+
+    test "configuration form preserves a saved custom Codex model", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Custom Codex Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          config: %{"model" => "gpt-5.6-terra"}
+        })
+
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ ~r/<option[^>]+value="gpt-5.6-terra"[^>]+selected/
+      assert html =~ "gpt-5.6-terra (custom)"
+
+      html =
+        view
+        |> form("form[phx-change='config_validate']", %{
+          "agent" => %{
+            "name" => agent.name,
+            "title" => "",
+            "role" => "engineer",
+            "parent_id" => "",
+            "adapter" => "codex",
+            "model" => "gpt-5.6-terra",
+            "max_concurrent_jobs" => "3"
+          }
+        })
+        |> render_change()
+
+      assert html =~ "codex --model gpt-5.6-terra"
+      assert html =~ ~r/<option[^>]+value="gpt-5.6-terra"[^>]+selected/
+
+      view
+      |> form("form[phx-submit='config_save']", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "engineer",
+          "parent_id" => "",
+          "adapter" => "codex",
+          "model" => "gpt-5.6-terra",
+          "max_concurrent_jobs" => "3"
+        }
+      })
+      |> render_submit()
+
+      {:ok, updated} = Agents.get_agent(agent.id)
+      assert updated.config["model"] == "gpt-5.6-terra"
     end
 
     test "runtime profile selector applies adapter and model before save", %{conn: conn} do
@@ -1678,7 +1754,7 @@ defmodule CymphoWeb.AgentLiveTest do
 
   describe "Adapter Selection" do
     test "shows adapter dropdown on new agent form", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/agents/new")
+      {:ok, view, html} = live(conn, "/agents/new")
 
       assert html =~ "Adapter"
       assert html =~ "Agent launch plan"
@@ -1692,6 +1768,14 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Selected role"
       assert html =~ ~s(data-testid="new-agent-runtime-profile")
       assert html =~ "Runtime profile"
+      assert html =~ "Choose the agent"
+      assert html =~ "role and reporting line"
+      assert html =~ "Create an autonomous teammate with a role"
+      assert has_element?(view, "form[data-ui-simple-single-column]")
+      assert has_element?(view, "[data-testid='new-agent-defaults-summary'].ui-simple-only")
+      assert has_element?(view, "[data-testid='new-agent-runtime-section'].ui-advanced-only")
+      assert has_element?(view, "[data-testid='new-agent-adapter-section'].ui-advanced-only")
+      assert has_element?(view, "[data-testid='new-agent-guide-section'].ui-advanced-only")
     end
 
     test "new agent form previews and saves DashScope runtime profile", %{

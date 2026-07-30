@@ -616,6 +616,19 @@ defmodule Cympho.AgentPromptTest do
       assert prompt =~ "submit_review"
     end
 
+    test "CTO review guidance requires the rework role and canonical repository verification", %{
+      issue: issue,
+      cto: cto
+    } do
+      prompt = AgentPrompt.build(issue, cto.id)
+
+      assert prompt =~ "`request_changes` requires `role` and `reason`"
+      assert prompt =~ "delivery/rework owner receiving the issue, never the reviewer"
+      assert prompt =~ "inspect the repository's lockfile and package manager"
+      assert prompt =~ "run the repository's canonical check or CI-equivalent command"
+      assert prompt =~ "name the exact command and failure"
+    end
+
     test "action contract requires owner-facing comment updates", %{
       issue: issue,
       engineer: engineer
@@ -1213,6 +1226,30 @@ defmodule Cympho.AgentPromptTest do
       assert prompt =~ "Delegate with a full agent UUID"
       assert prompt =~ "[ok] Runtime verification"
       refute prompt =~ "still active"
+    end
+
+    test "Codex runtime guidance rejects host-side workspace paths", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      prompt =
+        AgentPrompt.build(issue, engineer.id,
+          runtime_context: %Cympho.RuntimeContext{
+            issue_id: issue.id,
+            agent_id: engineer.id,
+            adapter: Cympho.Adapters.CodexAdapter,
+            adapter_config: %{},
+            cwd: "/workspace",
+            env: %{
+              "CYMPHO_WORKSPACE" => "/workspace",
+              "AGENT_HOME" => "/workspace"
+            }
+          }
+        )
+
+      assert prompt =~ "`/workspace` is the only usable working-tree path"
+      assert prompt =~ "Host-side paths such as `/tmp/...`"
+      assert prompt =~ "current cwd or `$CYMPHO_WORKSPACE`"
     end
 
     test "prompt includes recent comments and sub-issues", %{

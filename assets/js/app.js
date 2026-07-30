@@ -10,6 +10,9 @@ window.toggleTheme = function() {};
 const UI_MODE_KEY = "cympho-ui-mode";
 
 function currentUIMode() {
+  const domMode = document.documentElement.dataset.uiMode;
+  if (domMode === "advanced" || domMode === "simple") return domMode;
+
   try {
     return localStorage.getItem(UI_MODE_KEY) === "advanced" ? "advanced" : "simple";
   } catch (_e) {
@@ -25,17 +28,49 @@ function writeUIMode(mode) {
   }
 }
 
+function visibleModeControl(mode) {
+  const controls = [
+    ...document.querySelectorAll(`[data-ui-mode-option="${mode}"]`),
+    ...document.querySelectorAll("[data-ui-mode-toggle]")
+  ];
+
+  return controls.find((control) => {
+    if (!(control instanceof HTMLElement) || control.closest("[inert]")) return false;
+    const style = window.getComputedStyle(control);
+    const rect = control.getBoundingClientRect();
+    return style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.bottom > 0 &&
+      rect.right > 0 &&
+      rect.top < window.innerHeight &&
+      rect.left < window.innerWidth;
+  });
+}
+
+function focusedElementIsVisible(element) {
+  if (!(element instanceof HTMLElement) || element === document.body) return true;
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
+}
+
 function applyUIMode(mode, persist = false) {
   const normalized = mode === "advanced" ? "advanced" : "simple";
+  const activeLabel = normalized === "advanced" ? "Advanced" : "Simple";
+  const nextLabel = normalized === "advanced" ? "Simple" : "Advanced";
+  const focusedBeforeChange = document.activeElement;
   document.documentElement.dataset.uiMode = normalized;
   if (persist) writeUIMode(normalized);
 
   document.querySelectorAll("[data-ui-mode-toggle]").forEach((toggle) => {
     toggle.dataset.mode = normalized;
     toggle.setAttribute("aria-pressed", String(normalized === "advanced"));
+    toggle.setAttribute("aria-label", `Switch to ${nextLabel} view`);
+    toggle.setAttribute("title", `${activeLabel} view active. Switch to ${nextLabel} view (U)`);
 
     toggle.querySelectorAll("[data-ui-mode-label]").forEach((label) => {
-      label.textContent = normalized === "advanced" ? "Advanced" : "Simple";
+      label.textContent = `Switch to ${nextLabel} view`;
     });
 
     toggle.querySelectorAll("[data-ui-mode-icon]").forEach((icon) => {
@@ -53,6 +88,16 @@ function applyUIMode(mode, persist = false) {
     option.dataset.active = String(active);
     option.setAttribute("aria-pressed", String(active));
   });
+
+  if (persist) {
+    document.querySelectorAll("[data-ui-mode-status]").forEach((status) => {
+      status.textContent = `${activeLabel} view enabled`;
+    });
+  }
+
+  if (!focusedElementIsVisible(focusedBeforeChange)) {
+    visibleModeControl(normalized)?.focus({preventScroll: true});
+  }
 }
 
 function toggleUIMode() {
@@ -366,6 +411,21 @@ function initCommandPalette() {
   }
 }
 
+function resetCommandPalette(input) {
+  if (!input) return;
+  input.value = '';
+  input.dispatchEvent(new Event('input'));
+  requestAnimationFrame(() => input.focus());
+}
+
+function openCommandPalette() {
+  const palette = document.getElementById('command-palette');
+  if (!palette) return;
+
+  palette.classList.remove('hidden');
+  resetCommandPalette(document.getElementById('command-input'));
+}
+
 // Keyboard shortcuts
 const GOTO_KEYS = {
   'i': '/issues',
@@ -376,6 +436,8 @@ const GOTO_KEYS = {
   'd': '/dashboard',
   's': '/settings/profile',
 };
+
+const ADVANCED_ONLY_GOTO_KEYS = new Set(['i', 'g']);
 
 let gotoBuffer = '';
 let gotoTimer = null;
@@ -404,25 +466,18 @@ function handleKeydown(e) {
     return;
   }
 
-  // Don't trigger shortcuts when typing in inputs
-  if (isInput) return;
-
   // Cmd/Ctrl+K opens command palette
   if ((e.metaKey || e.ctrlKey) && e.key === 'k' && !e.shiftKey) {
     e.preventDefault();
     const palette = document.getElementById('command-palette');
     if (palette) {
-      palette.classList.toggle('hidden');
-      const input = document.getElementById('command-input');
-      if (input && !palette.classList.contains('hidden')) {
-        input.value = '';
-        input.focus();
-      }
+      if (palette.classList.contains('hidden')) openCommandPalette();
+      else palette.classList.add('hidden');
     }
     return;
   }
 
-  // Cmd/Ctrl+K opens company switcher
+  // Cmd/Ctrl+Shift+K opens company switcher
   if ((e.metaKey || e.ctrlKey) && e.key === 'K') {
     e.preventDefault();
     if (window.openCompanySwitcher) {
@@ -430,6 +485,10 @@ function handleKeydown(e) {
     }
     return;
   }
+
+  // Plain-key shortcuts must not fire while the user is typing. Modified
+  // command shortcuts above remain globally available from form fields.
+  if (isInput) return;
 
   // ? opens shortcuts cheatsheet
   if (e.key === '?' || (e.shiftKey && e.key === '/')) {
@@ -447,22 +506,26 @@ function handleKeydown(e) {
     return;
   }
 
-  // G prefix for navigation (G then another key)
-  if (e.key === 'g' && !e.metaKey && !e.ctrlKey) {
-    gotoBuffer = 'g';
-    clearTimeout(gotoTimer);
-    gotoTimer = setTimeout(() => { gotoBuffer = ''; }, 1000);
-    return;
-  }
-
   if (gotoBuffer === 'g') {
-    const url = GOTO_KEYS[e.key];
-    if (url) {
+    const key = e.key.toLowerCase();
+    const url = GOTO_KEYS[key];
+    const availableInCurrentMode =
+      currentUIMode() === 'advanced' || !ADVANCED_ONLY_GOTO_KEYS.has(key);
+
+    if (url && availableInCurrentMode) {
       e.preventDefault();
       window.location.href = url;
     }
     gotoBuffer = '';
     clearTimeout(gotoTimer);
+    return;
+  }
+
+  // G prefix for navigation (G then another key)
+  if (e.key.toLowerCase() === 'g' && !e.metaKey && !e.ctrlKey) {
+    gotoBuffer = 'g';
+    clearTimeout(gotoTimer);
+    gotoTimer = setTimeout(() => { gotoBuffer = ''; }, 1000);
     return;
   }
 
@@ -859,12 +922,7 @@ const UserMenu = {
         const m = document.getElementById('shortcuts-modal');
         if (m) m.classList.remove('hidden');
       } else if (action === 'open-command-palette') {
-        const p = document.getElementById('command-palette');
-        if (p) {
-          p.classList.remove('hidden');
-          const input = document.getElementById('command-input');
-          if (input) requestAnimationFrame(() => input.focus());
-        }
+        openCommandPalette();
       }
     };
 
@@ -1123,6 +1181,16 @@ document.addEventListener('click', (e) => {
     e.preventDefault();
     window.openQuickCreate();
   }
+});
+
+// The dashboard prompt bar has a standalone command-palette button outside
+// the user-menu hook, so it needs the same delegated behavior here.
+document.addEventListener('click', (e) => {
+  const trig = e.target.closest('[data-action="open-command-palette"]');
+  if (!trig || trig.getAttribute('role') === 'menuitem') return;
+
+  e.preventDefault();
+  openCommandPalette();
 });
 
 window.addEventListener('phx:issue:replace_url', (e) => {

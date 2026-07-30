@@ -43,6 +43,27 @@ defmodule Cympho.Companies do
     )
   end
 
+  def list_companies_for_user(user_id) do
+    Company
+    |> join(:inner, [c], membership in CompanyMembership,
+      on: membership.company_id == c.id and membership.user_id == ^user_id
+    )
+    |> order_by([c], asc: c.inserted_at, asc: c.name, asc: c.id)
+    |> Repo.all()
+  end
+
+  def list_companies_for_user_page(user_id, opts \\ []) do
+    Company
+    |> join(:inner, [c], membership in CompanyMembership,
+      on: membership.company_id == c.id and membership.user_id == ^user_id
+    )
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:inserted_at, :asc}, {:name, :asc}, {:id, :asc}]
+    )
+  end
+
   def get_company!(id), do: Repo.get!(Company, id)
 
   def get_company_by_slug(slug) do
@@ -53,6 +74,39 @@ defmodule Cympho.Companies do
     %Company{}
     |> Company.changeset(attrs)
     |> Repo.insert()
+  end
+
+  @doc """
+  Creates a company and makes the given user its owner in one transaction.
+
+  The owner also becomes a board member and uses the new company as their
+  default workspace. This is the creation path for signed-in users; the plain
+  `create_company/1` function remains available for imports, seeds, and tests
+  that deliberately manage membership separately.
+  """
+  def create_company_for_owner(attrs, owner_user_id) do
+    Repo.transaction(fn ->
+      with {:ok, owner} <- Cympho.Users.get_user(owner_user_id),
+           {:ok, company} <-
+             %Company{}
+             |> Company.changeset(attrs)
+             |> Repo.insert(),
+           {:ok, _membership} <-
+             %CompanyMembership{}
+             |> CompanyMembership.changeset(%{
+               user_id: owner.id,
+               company_id: company.id,
+               role: "owner",
+               is_board_member: true
+             })
+             |> Repo.insert(),
+           {:ok, _owner} <-
+             owner |> Ecto.Changeset.change(company_id: company.id) |> Repo.update() do
+        company
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
 
   def update_company(%Company{} = company, attrs) do
@@ -2830,7 +2884,41 @@ defmodule Cympho.Companies do
 
   # ── Export ──
 
-  @secret_fields ~w(password_hash key_hash encrypted_value webhook_secret github_webhook_secret)
+  @secret_fields ~w(
+    password_hash
+    key_hash
+    encrypted_value
+    webhook_secret
+    github_webhook_secret
+    api_key
+    password
+    secret
+    token
+    authorization
+    cookie
+    database_url
+    key
+    credential
+    credentials
+    headers
+    env
+    auth
+    authentication
+    secrets
+  )
+  @secret_field_suffixes ~w(
+    _api_key
+    _password
+    _secret
+    _token
+    _authorization
+    _cookie
+    _database_url
+    _key
+    _credential
+    _credentials
+  )
+  @redacted_secret_marker "***REDACTED***"
 
   def export_company(company_id) do
     company = get_company!(company_id)
@@ -2952,15 +3040,31 @@ defmodule Cympho.Companies do
   defp scrub_map(map) do
     Map.new(map, fn
       {k, v} ->
-        if secret_field?(k), do: {k, "***REDACTED***"}, else: scrub_map_entry(k, v)
+        if secret_field?(k), do: {k, @redacted_secret_marker}, else: scrub_map_entry(k, v)
     end)
   end
 
-  defp secret_field?(key) when is_atom(key), do: Atom.to_string(key) in @secret_fields
-  defp secret_field?(key), do: key in @secret_fields
+  defp secret_field?(key) do
+    key = normalize_secret_field(key)
 
-  defp scrub_map_entry(k, v) when is_map(v) and is_struct(v), do: {k, scrub(v)}
-  defp scrub_map_entry(k, v), do: {k, v}
+    key in @secret_fields or
+      Enum.any?(@secret_field_suffixes, &String.ends_with?(key, &1))
+  end
+
+  defp normalize_secret_field(key) do
+    key
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, "_")
+    |> String.trim("_")
+  end
+
+  defp scrub_map_entry(k, v), do: {k, scrub_nested(v)}
+
+  defp scrub_nested(value) when is_map(value), do: scrub(value)
+  defp scrub_nested(value) when is_list(value), do: Enum.map(value, &scrub_nested/1)
+  defp scrub_nested(value), do: value
 
   # ── Import ──
 
@@ -3290,7 +3394,10 @@ defmodule Cympho.Companies do
       name: get_export_field(agent_data, :name),
       url_key: url_key,
       role: get_export_field(agent_data, :role, :engineer),
-      config: get_export_field(agent_data, :config, %{}),
+      config:
+        agent_data
+        |> get_export_field(:config, %{})
+        |> drop_redacted_secret_placeholders(),
       instructions: get_export_field(agent_data, :instructions),
       company_id: company_id
     }
@@ -3312,6 +3419,24 @@ defmodule Cympho.Companies do
         error
     end
   end
+
+  defp drop_redacted_secret_placeholders(value) when is_map(value) do
+    Enum.reduce(value, %{}, fn {key, nested_value}, acc ->
+      if nested_value == @redacted_secret_marker do
+        acc
+      else
+        Map.put(acc, key, drop_redacted_secret_placeholders(nested_value))
+      end
+    end)
+  end
+
+  defp drop_redacted_secret_placeholders(value) when is_list(value) do
+    value
+    |> Enum.reject(&(&1 == @redacted_secret_marker))
+    |> Enum.map(&drop_redacted_secret_placeholders/1)
+  end
+
+  defp drop_redacted_secret_placeholders(value), do: value
 
   defp import_issues(issues, company_id, project_id_map, agent_id_map, label_id_map) do
     result =

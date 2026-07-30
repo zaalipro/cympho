@@ -466,16 +466,19 @@ defmodule Cympho.AgentActions.Parser do
         end
 
       "submit_review" ->
-        with :ok <- validate_role(action["role"]) do
+        if blank?(action["role"]) do
           {:ok, action}
+        else
+          with :ok <- validate_role(action["role"]), do: {:ok, action}
         end
 
       "approve_issue" ->
         {:ok, action}
 
       "request_changes" ->
-        with :ok <- validate_role(action["role"]) do
-          {:ok, action}
+        case Map.get(action, "role") do
+          role when role in [nil, ""] -> {:ok, action}
+          role -> with :ok <- validate_role(role), do: {:ok, action}
         end
 
       "block_issue" ->

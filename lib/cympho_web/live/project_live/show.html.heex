@@ -30,6 +30,20 @@
       </:actions>
     </.header>
 
+    <div
+      :if={@flash["info"]}
+      class="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
+    >
+      {@flash["info"]}
+    </div>
+
+    <div
+      :if={@flash["error"]}
+      class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
+    >
+      {@flash["error"]}
+    </div>
+
     <section data-testid="project-command" class="ember-glass mb-5 overflow-hidden">
       <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div class="min-w-0">
@@ -307,6 +321,7 @@
 
     <div
       id="project-settings"
+      data-ui-simple-single-column
       class="mt-5 grid scroll-mt-24 grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)]"
     >
       <section class="overflow-hidden rounded-lg border border-border bg-panel">
@@ -326,21 +341,27 @@
             type="textarea"
             rows={3}
           />
-          <div class="grid gap-5 sm:grid-cols-2">
+          <div data-ui-simple-single-column class="grid gap-5 sm:grid-cols-2">
             <.input field={@form[:prefix]} label="Prefix" required placeholder="PROJ" />
-            <.select
-              name="project[status]"
-              label="Status"
-              options={[Active: "active", Archived: "archived"]}
+            <div class="ui-advanced-only" data-testid="project-status-field">
+              <.select
+                name="project[status]"
+                label="Status"
+                options={[Active: "active", Archived: "archived"]}
+              />
+            </div>
+          </div>
+          <div class="ui-advanced-only" data-testid="project-settings-repository-field">
+            <.input
+              field={@form[:repo_url]}
+              label="Repository URL"
+              placeholder="https://github.com/owner/repo"
             />
           </div>
-          <.input
-            field={@form[:repo_url]}
-            label="Repository URL"
-            placeholder="https://github.com/owner/repo"
-          />
 
-          <.color_swatch_picker field={@form[:color]} label="Sidebar color" />
+          <div class="ui-advanced-only" data-testid="project-color-field">
+            <.color_swatch_picker field={@form[:color]} label="Sidebar color" />
+          </div>
 
           <:actions>
             <div class="flex items-center justify-end border-t border-border pt-5">
@@ -350,7 +371,10 @@
         </.simple_form>
       </section>
 
-      <section class="ui-advanced-only overflow-hidden rounded-lg border border-border bg-panel">
+      <section
+        data-testid="project-environment-variables"
+        class="ui-advanced-only overflow-hidden rounded-lg border border-border bg-panel"
+      >
         <div class="px-4 py-3">
           <p class="text-sm font-590 text-text-primary">Environment variables</p>
           <p class="mt-1 text-xs leading-5 text-text-tertiary">

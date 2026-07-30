@@ -1,7 +1,7 @@
 [Unit]
 Description=Cympho (Phoenix release)
-After=network-online.target docker.service
-Wants=network-online.target
+After=network-online.target docker.service cympho-git-agent.service
+Wants=network-online.target cympho-git-agent.service
 # Postgres runs as a docker container; wait for docker but don't hard-require it.
 After=docker.service
 
@@ -20,7 +20,13 @@ Environment=RELEASE_TMP=/tmp
 # provider base URL + auth token come from /etc/cympho.env (ANTHROPIC_*).
 Environment=HOME=/opt/cympho/claude-home
 Environment=CYMPHO_CLAUDE_COMMAND=/opt/cympho/bin/claude
+Environment=CYMPHO_CODEX_SSH_AUTH_SOCK=/run/cympho-git-agent/agent.sock
+Environment=CYMPHO_CODEX_KNOWN_HOSTS=/opt/cympho/claude-home/.ssh/known_hosts
 EnvironmentFile=/etc/cympho.env
+# Optional deployment-specific Git transport. Keep repo-scoped deploy keys and
+# their absolute Git/SSH settings out of the release and the agent's isolated
+# HOME. Missing files are intentionally ignored.
+EnvironmentFile=-/etc/cympho-git.env
 ExecStart=/opt/cympho/current/bin/cympho start
 ExecStop=/opt/cympho/current/bin/cympho stop
 Restart=on-failure

@@ -73,7 +73,8 @@ mise exec -- mix cympho.llmotions_smoke --yes
 
 The task creates a timestamped company, stores `LLMOTIONS_API_KEY` as an
 encrypted company-scoped secret, configures CEO/CTO as LLMotions chat agents,
-configures engineer/QA as repo-capable process agents, creates a primary project
+configures engineer/QA as repo-capable Codex agents using the same selected
+LLMotions model, creates a primary project
 workspace pointing at the current repo, creates the Team Pulse CEO mission issue,
 pins it for focused dispatch, and prints the exact runtime command to run next.
 
@@ -120,12 +121,23 @@ Max concurrent jobs: 1
 ```
 
 6. Confirm at least one implementation engineer with a repo-capable runtime.
-Use `Process Codex CLI` for a local low-cost coding lane, or another runtime
-that can actually change files and run tests.
+The smoke helper selects the hardened `Codex` adapter directly and keeps the
+chosen model, including custom values such as `gpt-5.6-terra`.
 
-Process Codex runs Codex headlessly with `codex exec`, `--sandbox
-workspace-write`, and stdin prompt delivery. Plain `codex` opens the interactive
-TUI and will fail under the process adapter because stdin/stderr are not a TTY.
+Codex runs headlessly inside an outer Bubblewrap boundary containing only the
+exact issue checkout, system binaries, and minimal TLS/DNS files. Host homes,
+service configuration, key files, and `/proc` are absent. Plain or untrusted
+workspaces use a no-network profile with `.git` denied; only a checkout whose
+origin matches trusted project metadata receives network and `.git` write
+permissions. A per-run loopback proxy injects the real provider credential, so
+Codex receives only a short-lived capability and model-run commands receive
+neither value.
+
+For Git pushes, use the dedicated repository-scoped SSH agent configured by
+`cympho-git-agent.service`; never mount a private key into the agent workspace.
+The autonomous profile permits public command egress for Git and package tools,
+so installations that need destination-level egress controls must add a host or
+service network policy without breaking the repository transport.
 
 7. Open `Operations` and check that:
 
@@ -274,12 +286,11 @@ Engineer runtime layer:
 - Seed isolated worktrees with dependencies/build artifacts before expecting
   fast verification. A brand-new worktree may fail before app code compiles if
   dependencies need generated assets that already exist only in the main build.
-- Confirm the process command is non-interactive (`codex exec`, not plain
-  `codex`).
-- Keep the focused runtime alive until the process agent returns a final
+- Confirm the Codex adapter is healthy and Bubblewrap is available.
+- Keep the focused runtime alive until the Codex agent returns a final
   `cympho-actions` block. Stopping the runtime early can leave useful code
   changes in the worktree but no issue comment, work product, or review action.
-- After a process run, compare DB evidence with filesystem evidence:
+- After a Codex run, compare DB evidence with filesystem evidence:
 
 ```bash
 git -C <execution_workspace_cwd> status --short

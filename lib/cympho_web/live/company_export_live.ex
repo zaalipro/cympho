@@ -6,16 +6,25 @@ defmodule CymphoWeb.CompanyExportLive do
   @impl true
   def mount(params, _session, socket) do
     company_id = Map.get(params, "company_id") || Map.fetch!(params, "id")
-    company = Companies.get_company!(company_id)
+    user_id = socket.assigns.current_user.id
 
-    {:ok,
-     socket
-     |> assign(:page_title, "Export #{company.name}")
-     |> assign(:company, company)
-     |> assign(:secret_manifest, Companies.export_secret_manifest(company_id))
-     |> assign(:export_data, nil)
-     |> assign(:loading, false)
-     |> assign(:download_ready, false)}
+    if Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id) do
+      company = Companies.get_company!(company_id)
+
+      {:ok,
+       socket
+       |> assign(:page_title, "Export #{company.name}")
+       |> assign(:company, company)
+       |> assign(:secret_manifest, Companies.export_secret_manifest(company_id))
+       |> assign(:export_data, nil)
+       |> assign(:loading, false)
+       |> assign(:download_ready, false)}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "Company not found or you cannot export it.")
+       |> redirect(to: ~p"/companies")}
+    end
   end
 
   @impl true

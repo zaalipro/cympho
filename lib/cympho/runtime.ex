@@ -14,6 +14,7 @@ defmodule Cympho.Runtime do
     Agents,
     Companies,
     Finances,
+    Projects,
     Repo,
     RuntimeContext,
     Secrets,
@@ -79,11 +80,7 @@ defmodule Cympho.Runtime do
          env: runtime_env,
          skills: Keyword.get(opts, :skills, []),
          budget: budget,
-         metadata: %{
-           "runtime_profile_id" => Keyword.get(opts, :runtime_profile_id),
-           "workspace_source" => workspace.source,
-           "preflight_at" => DateTime.utc_now() |> DateTime.to_iso8601()
-         }
+         metadata: runtime_metadata(issue, workspace, opts)
        }}
     end
   end
@@ -278,7 +275,11 @@ defmodule Cympho.Runtime do
   end
 
   defp with_secret_backed_api_key(config, :codex, env) do
-    put_config_new(config, "api_key", env["OPENAI_API_KEY"])
+    api_key =
+      env["OPENAI_API_KEY"] ||
+        if(llmotions_codex?(config), do: env["LLMOTIONS_API_KEY"])
+
+    put_config_new(config, "api_key", api_key)
   end
 
   defp with_secret_backed_api_key(config, :claude_code, env) do
@@ -373,6 +374,11 @@ defmodule Cympho.Runtime do
   defp llmotions_chat?(endpoint, model) do
     text = "#{endpoint} #{model}" |> String.downcase()
     String.contains?(text, "llmotions")
+  end
+
+  defp llmotions_codex?(config) do
+    endpoint = config_value(config, "base_url") || config_value(config, "endpoint")
+    is_binary(endpoint) and String.contains?(String.downcase(endpoint), "llmotions")
   end
 
   defp dashscope_chat?(endpoint, model) do
@@ -535,10 +541,8 @@ defmodule Cympho.Runtime do
   end
 
   defp fallback_workspace(%Issue{} = issue) do
-    cwd = Workspace.workspace_path(issue.id)
-
-    case File.mkdir_p(cwd) do
-      :ok ->
+    case Workspace.ensure_for_issue(issue) do
+      {:ok, cwd} ->
         {:ok,
          %{
            cwd: cwd,
@@ -566,6 +570,42 @@ defmodule Cympho.Runtime do
     |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
     |> Map.new(fn {key, value} -> {key, to_string(value)} end)
   end
+
+  defp runtime_metadata(%Issue{} = issue, workspace, opts) do
+    metadata = %{
+      "runtime_profile_id" => Keyword.get(opts, :runtime_profile_id),
+      "workspace_source" => workspace.source,
+      "preflight_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    case configured_project_repository_fingerprint(issue) do
+      {:ok, fingerprint} -> Map.put(metadata, "project_repository_fingerprint", fingerprint)
+      :error -> metadata
+    end
+  end
+
+  defp configured_project_repository_fingerprint(%Issue{project_id: project_id})
+       when is_binary(project_id) do
+    with {:ok, project} <- Projects.get_project(project_id),
+         repo_url when is_binary(repo_url) and repo_url != "" <- project_repository_url(project),
+         {:ok, fingerprint} <- Workspace.repository_fingerprint(repo_url) do
+      {:ok, fingerprint}
+    else
+      _reason -> :error
+    end
+  end
+
+  defp configured_project_repository_fingerprint(_issue), do: :error
+
+  defp project_repository_url(%{repo_url: repo_url})
+       when is_binary(repo_url) and repo_url != "",
+       do: repo_url
+
+  defp project_repository_url(%{settings: %{"repo_url" => repo_url}})
+       when is_binary(repo_url) and repo_url != "",
+       do: repo_url
+
+  defp project_repository_url(_project), do: nil
 
   defp put_runtime_config(config, cwd, env) do
     config

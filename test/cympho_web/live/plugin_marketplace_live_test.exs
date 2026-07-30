@@ -1,9 +1,20 @@
 defmodule CymphoWeb.PluginMarketplaceLiveTest do
   use CymphoWeb.LiveCase, async: true
 
+  alias Cympho.Companies
   alias Cympho.Repo
   alias Cympho.Skills
   alias Cympho.Skills.Plugin
+
+  setup %{conn: conn, current_company: company} = context do
+    unless context[:regular_member] do
+      user_id = Plug.Conn.get_session(conn, :user_id)
+      membership = Companies.get_membership(user_id, company.id)
+      assert {:ok, _membership} = Companies.update_membership(membership, %{role: "admin"})
+    end
+
+    :ok
+  end
 
   describe "mount" do
     test "renders the available plugins catalog", %{conn: conn} do
@@ -39,6 +50,22 @@ defmodule CymphoWeb.PluginMarketplaceLiveTest do
       _html = render_click(view, "install", %{"identifier" => "does-not-exist"})
 
       assert Repo.all(Plugin) == []
+    end
+
+    @tag regular_member: true
+    test "regular members cannot install marketplace plugins", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, view, html} = live(conn, "/plugins/marketplace")
+
+      assert html =~ ~s(data-testid="plugin-marketplace-read-only")
+      refute has_element?(view, "button[phx-click='install']")
+
+      render_click(view, "install", %{"identifier" => "github-integration"})
+
+      assert {:error, :not_found} =
+               Skills.get_plugin_by_identifier("github-integration", company.id)
     end
   end
 

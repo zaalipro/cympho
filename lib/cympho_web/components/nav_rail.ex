@@ -93,7 +93,7 @@ defmodule CymphoWeb.Components.NavRail do
         icon="hero-shield-check-mini"
         current_path={@current_path}
         badge={@approval_count}
-        advanced_only
+        advanced_only={@approval_count == 0}
       />
       <.nav_link
         to={~p"/reviews"}
@@ -314,7 +314,7 @@ defmodule CymphoWeb.Components.NavRail do
     <.link
       navigate={@to}
       class={[
-        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors",
+        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
         "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
         @advanced_only && "ui-advanced-only"
       ]}

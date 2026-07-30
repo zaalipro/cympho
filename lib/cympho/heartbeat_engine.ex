@@ -354,13 +354,8 @@ defmodule Cympho.HeartbeatEngine do
   # ---------------------------------------------------------------------------
 
   defp resolve_workspace(%Run{issue_id: issue_id}) do
-    case Workspace.workspace_path(issue_id) do
-      path when is_binary(path) ->
-        File.mkdir_p(path)
-        {:ok, path}
-
-      error ->
-        {:error, error}
+    with {:ok, %Issue{} = issue} <- Issues.get_issue(issue_id) do
+      Workspace.ensure_for_issue(issue)
     end
   end
 

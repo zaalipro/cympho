@@ -14,6 +14,35 @@ defmodule Cympho.CompaniesOnboardingTest do
     user
   end
 
+  describe "create_company_for_owner/2" do
+    test "atomically creates the owner membership and selects the company" do
+      user = create_user!()
+
+      assert {:ok, company} =
+               Companies.create_company_for_owner(
+                 %{name: "Manual Owned Co", slug: "manual-owned-co"},
+                 user.id
+               )
+
+      membership = Companies.get_membership(user.id, company.id)
+      assert membership.role == "owner"
+      assert membership.is_board_member
+
+      assert {:ok, reloaded} = Cympho.Users.get_user(user.id)
+      assert reloaded.company_id == company.id
+    end
+
+    test "does not create a company when the owner does not exist" do
+      assert {:error, :not_found} =
+               Companies.create_company_for_owner(
+                 %{name: "Orphan Co", slug: "orphan-co"},
+                 Ecto.UUID.generate()
+               )
+
+      assert Companies.get_company_by_slug("orphan-co") == nil
+    end
+  end
+
   describe "create_autonomous_company/1 owner linkage" do
     test "creates an owner board membership and sets the user's default company" do
       user = create_user!()

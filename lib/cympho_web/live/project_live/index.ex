@@ -64,9 +64,17 @@ defmodule CymphoWeb.ProjectLive.Index do
 
   @impl true
   def handle_event("delete_project", %{"id" => id}, socket) do
-    project = Projects.get_project!(id)
-    {:ok, _} = Projects.archive_project(project)
-    {:noreply, assign_project_operating_snapshot(socket)}
+    with %{id: company_id} <- socket.assigns[:current_company],
+         {:ok, project} <- Projects.get_company_project(company_id, id),
+         {:ok, archived_project} <- Projects.archive_project(project) do
+      {:noreply,
+       socket
+       |> assign_project_operating_snapshot()
+       |> stream_insert(:projects, archived_project)
+       |> put_flash(:info, "Project archived.")}
+    else
+      _ -> {:noreply, put_flash(socket, :error, "Project not found for this company.")}
+    end
   end
 
   def handle_event("next-page", _params, socket) do

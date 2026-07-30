@@ -29,6 +29,8 @@ defmodule CymphoWeb.CompanyController do
               :reject_join_request
             ]
 
+  plug :require_export_authorization when action in [:export]
+
   def index(conn, _params) do
     user = conn.assigns.current_user
 
@@ -230,6 +232,21 @@ defmodule CymphoWeb.CompanyController do
   end
 
   # ── Helpers ──
+
+  defp require_export_authorization(conn, _opts) do
+    user = conn.assigns.current_user
+    company_id = conn.params["company_id"]
+
+    if Companies.admin?(user.id, company_id) or
+         Companies.is_board_member?(user.id, company_id) do
+      conn
+    else
+      conn
+      |> put_status(:forbidden)
+      |> json(%{errors: [%{detail: "Forbidden"}]})
+      |> halt()
+    end
+  end
 
   defp handle_join_request(conn, company_id, request_id, fun, opts) do
     request = Cympho.Repo.get(Cympho.Companies.JoinRequest, request_id)

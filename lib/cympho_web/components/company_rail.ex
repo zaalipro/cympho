@@ -1,6 +1,8 @@
 defmodule CymphoWeb.Components.CompanyRail do
   use Phoenix.Component
 
+  alias Cympho.Orchestrator.Dispatcher
+
   use Phoenix.VerifiedRoutes,
     endpoint: CymphoWeb.Endpoint,
     router: CymphoWeb.Router
@@ -206,6 +208,9 @@ defmodule CymphoWeb.Components.CompanyRail do
 
   defp runtime_status_label(company) do
     cond do
+      not Dispatcher.enabled?() and company_paused?(company) -> "Review mode · paused"
+      not Dispatcher.enabled?() and company_low_power?(company) -> "Review mode · low power"
+      not Dispatcher.enabled?() -> "Review mode"
       company_paused?(company) -> "Paused"
       company_low_power?(company) -> "Low power"
       true -> "Full power"
@@ -216,6 +221,7 @@ defmodule CymphoWeb.Components.CompanyRail do
     cond do
       company_paused?(company) -> "bg-amber-400"
       company_low_power?(company) -> "bg-sky-400"
+      not Dispatcher.enabled?() -> "bg-gray-400"
       true -> "bg-emerald-400"
     end
   end
