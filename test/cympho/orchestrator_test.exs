@@ -58,6 +58,32 @@ defmodule Cympho.OrchestratorTest do
   end
 
   describe "adapter resolution success path" do
+    test "does not dispatch an adapter when another run owns the checkout", %{
+      agent: agent,
+      issue: issue
+    } do
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+      assert {:ok, owner_run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: checked_out.company_id,
+                 agent_id: agent.id,
+                 issue_id: checked_out.id,
+                 adapter: "claude_code",
+                 bind_checkout: true
+               })
+
+      assert {:error, {:checkout_run_bind_failed, :checkout_run_conflict}} =
+               Orchestrator.start_and_run(checked_out, agent.id)
+
+      reloaded = Issues.get_issue!(checked_out.id)
+      assert reloaded.checkout_run_id == owner_run.id
+
+      runs = Cympho.HeartbeatEngine.list_runs_for_issue(checked_out.id)
+      assert Enum.count(runs, &(&1.status == "pending")) == 1
+      assert Enum.count(runs, &(&1.status == "cancelled")) == 1
+    end
+
     test "company runtime stop cancels the live adapter session", %{
       company: company,
       agent: agent,
@@ -303,6 +329,187 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
+    test "does not call the adapter when the initial engine run was cancelled", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      run_id = Ecto.UUID.generate()
+      test_pid = self()
+
+      with_mocks([
+        {Cympho.Adapters, [], [resolve: fn _ -> {:ok, MockAdapter, %{}} end]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id ->
+             {:ok,
+              %{
+                id: run_id,
+                status: "cancelled",
+                adapter: "claude_code",
+                agent_id: agent_id,
+                issue_id: issue.id
+              }}
+           end,
+           start_run: fn _run -> {:error, {:invalid_status, "cancelled"}} end
+         ]},
+        {MockAdapter, [:passthrough],
+         [
+           run: fn _issue, _agent_id, _recipient_pid, _opts ->
+             send(test_pid, :adapter_called)
+             "unexpected-session"
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert :ok = wait_until_stopped(pid)
+        refute_received :adapter_called
+      end
+    end
+
+    test "does not call the adapter again when a no-output retry run cannot start", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      initial_run_id = Ecto.UUID.generate()
+      retry_run_id = Ecto.UUID.generate()
+      session_id = "initial-no-output-session"
+      test_pid = self()
+
+      run_ids =
+        start_supervised!({Elixir.Agent, fn -> [initial_run_id, retry_run_id] end})
+
+      with_mocks([
+        {Cympho.Adapters, [], [resolve: fn _ -> {:ok, MockAdapter, %{}} end]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _attrs ->
+             id = Elixir.Agent.get_and_update(run_ids, fn [next | rest] -> {next, rest} end)
+             {:ok, %{id: id}}
+           end,
+           get_run: fn
+             ^initial_run_id ->
+               {:ok,
+                %{
+                  id: initial_run_id,
+                  status: "running",
+                  adapter: "claude_code",
+                  agent_id: agent_id,
+                  issue_id: issue.id
+                }}
+
+             ^retry_run_id ->
+               {:ok,
+                %{
+                  id: retry_run_id,
+                  status: "cancelled",
+                  adapter: "claude_code",
+                  agent_id: agent_id,
+                  issue_id: issue.id
+                }}
+           end,
+           start_run: fn
+             %{id: ^initial_run_id} = run -> {:ok, run}
+             %{id: ^retry_run_id} -> {:error, {:invalid_status, "cancelled"}}
+           end,
+           fail_run: fn run, _reason, _usage -> {:ok, Map.put(run, :status, "failed")} end
+         ]},
+        {MockAdapter, [:passthrough],
+         [
+           run: fn _issue, _agent_id, _recipient_pid, _opts ->
+             send(test_pid, :adapter_called)
+             session_id
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert_receive :adapter_called, 1_000
+
+        monitor_ref = Process.monitor(pid)
+        send(pid, {:turn_ended_with_error, session_id, :no_output})
+        assert_receive {:DOWN, ^monitor_ref, :process, ^pid, :normal}, 1_000
+
+        refute_receive :adapter_called, 100
+        assert Elixir.Agent.get(run_ids, & &1) == []
+      end
+    end
+
+    test "does not call the adapter again when a provider fallback run cannot start", %{
+      agent: agent,
+      agent_id: agent_id,
+      issue: issue
+    } do
+      {:ok, _agent} =
+        Agents.update_agent(agent, %{
+          runtime_config: %{
+            "profile_id" => "codex-gpt-5.5",
+            "fallback_profile_ids" => ["codex-mini"]
+          }
+        })
+
+      initial_run_id = Ecto.UUID.generate()
+      fallback_run_id = Ecto.UUID.generate()
+      session_id = "initial-provider-outage-session"
+      test_pid = self()
+
+      run_ids =
+        start_supervised!({Elixir.Agent, fn -> [initial_run_id, fallback_run_id] end})
+
+      with_mocks([
+        {Cympho.Adapters, [], [resolve: fn _ -> {:ok, MockAdapter, %{}} end]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _attrs ->
+             id = Elixir.Agent.get_and_update(run_ids, fn [next | rest] -> {next, rest} end)
+             {:ok, %{id: id}}
+           end,
+           get_run: fn
+             ^initial_run_id ->
+               {:ok,
+                %{
+                  id: initial_run_id,
+                  status: "running",
+                  adapter: "claude_code",
+                  agent_id: agent_id,
+                  issue_id: issue.id
+                }}
+
+             ^fallback_run_id ->
+               {:ok,
+                %{
+                  id: fallback_run_id,
+                  status: "recovered",
+                  adapter: "codex",
+                  agent_id: agent_id,
+                  issue_id: issue.id
+                }}
+           end,
+           start_run: fn
+             %{id: ^initial_run_id} = run -> {:ok, run}
+             %{id: ^fallback_run_id} -> {:error, {:invalid_status, "recovered"}}
+           end,
+           fail_run: fn run, _reason, _usage -> {:ok, Map.put(run, :status, "failed")} end
+         ]},
+        {MockAdapter, [:passthrough],
+         [
+           run: fn _issue, _agent_id, _recipient_pid, _opts ->
+             send(test_pid, :adapter_called)
+             session_id
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert_receive :adapter_called, 1_000
+
+        monitor_ref = Process.monitor(pid)
+        send(pid, {:turn_ended_with_error, session_id, {:http_error, 503, "unavailable"}})
+        assert_receive {:DOWN, ^monitor_ref, :process, ^pid, :normal}, 1_000
+
+        refute_receive :adapter_called, 100
+        assert Elixir.Agent.get(run_ids, & &1) == []
+      end
+    end
+
     test "creates heartbeat run on success", %{
       issue_id: issue_id,
       agent_id: agent_id,
@@ -472,6 +679,66 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
+    test "accounts for OpenAI-compatible usage preserved by the chat adapter", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      session_id = "session-openai-chat-usage"
+      run_id = Ecto.UUID.generate()
+      test_pid = self()
+
+      body =
+        Jason.encode!(%{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => """
+                Delivered through LLMotions.
+
+                ```cympho-actions
+                {"actions":[{"type":"attach_work_product","title":"LLMotions artifact","kind":"document","description":"Usage propagation evidence"}]}
+                ```
+                """
+              }
+            }
+          ],
+          "usage" => %{
+            "prompt_tokens" => 1_200,
+            "completion_tokens" => 300,
+            "total_tokens" => 1_500
+          },
+          "cost_usd" => "1.25"
+        })
+
+      assert {:ok, result} = Cympho.Adapters.OpenAIChatAdapter.parse_chat_response(body)
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           complete_run: fn _run, attrs ->
+             send(test_pid, {:run_completed_attrs, attrs})
+             {:ok, %{id: run_id}}
+           end,
+           fail_run: fn _run, _reason, _usage -> {:ok, %{id: run_id}} end
+         ]},
+        {Cympho.AgentRunner, [], [run: fn _issue, _agent_id, _pid, _opts -> session_id end]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        send(pid, {:turn_completed, session_id, result})
+        assert :ok = wait_until_stopped(pid)
+
+        assert_receive {:run_completed_attrs, attrs}
+        assert attrs.input_tokens == 1_200
+        assert attrs.output_tokens == 300
+        assert Decimal.eq?(attrs.cost_usd, Decimal.new("1.25"))
+      end
+    end
+
     test "adds a generated delivery comment when artifact action omits owner note", %{
       agent_id: agent_id,
       issue: issue
@@ -635,6 +902,8 @@ defmodule Cympho.OrchestratorTest do
         %{result: fallback_result}
       ])
 
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
       with_mocks([
         {Cympho.Adapters, [],
          [
@@ -644,7 +913,7 @@ defmodule Cympho.OrchestratorTest do
            end
          ]}
       ]) do
-        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
         wait_until_stopped(pid)
 
         assert_received {:resolved_runtime, :claude_code, _primary_config}
@@ -697,6 +966,8 @@ defmodule Cympho.OrchestratorTest do
         %{result: fallback_result}
       ])
 
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
       with_mocks([
         {Cympho.Adapters, [],
          [
@@ -706,7 +977,7 @@ defmodule Cympho.OrchestratorTest do
            end
          ]}
       ]) do
-        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
         wait_until_stopped(pid)
 
         assert_received {:resolved_runtime, :claude_code, _primary_config}
@@ -746,6 +1017,8 @@ defmodule Cympho.OrchestratorTest do
         %{error: {:provider_failure, :quota_exceeded, "insufficient_quota"}}
       ])
 
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
       {:ok, queued_issue} =
         Issues.create_issue(%{
           title: "Queued provider work",
@@ -775,7 +1048,7 @@ defmodule Cympho.OrchestratorTest do
            end
          ]}
       ]) do
-        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
         wait_until_stopped(pid)
 
         assert_received {:resolved_runtime, :claude_code, _primary_config}
@@ -817,7 +1090,7 @@ defmodule Cympho.OrchestratorTest do
             Retry completed.
 
             ```cympho-actions
-            {"actions":[{"type":"comment","body":"Retry run produced useful work."}]}
+            {"actions":[{"type":"handoff","role":"cto","reason":"Retry produced useful work that now needs CTO review."}]}
             ```
             """
           }
@@ -829,6 +1102,8 @@ defmodule Cympho.OrchestratorTest do
         %{result: retry_result}
       ])
 
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
       with_mocks([
         {Cympho.Adapters, [],
          [
@@ -838,7 +1113,7 @@ defmodule Cympho.OrchestratorTest do
            end
          ]}
       ]) do
-        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
         assert :ok = wait_until_stopped(pid)
 
         assert_received {:resolved_runtime, :claude_code, _primary_config}
@@ -871,6 +1146,8 @@ defmodule Cympho.OrchestratorTest do
         %{error: {:parse_error, "missing text content"}}
       ])
 
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
       with_mocks([
         {Cympho.Adapters, [],
          [
@@ -880,7 +1157,7 @@ defmodule Cympho.OrchestratorTest do
            end
          ]}
       ]) do
-        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
         assert :ok = wait_until_stopped(pid)
 
         assert_received {:resolved_runtime, :claude_code, _primary_config}
@@ -1451,7 +1728,7 @@ defmodule Cympho.OrchestratorTest do
             Retry completed.
 
             ```cympho-actions
-            {"actions":[{"type":"comment","body":"Retry run produced useful work."}]}
+            {"actions":[{"type":"handoff","role":"cto","reason":"Retry produced useful work that now needs CTO review."}]}
             ```
             """
           }
@@ -1466,13 +1743,15 @@ defmodule Cympho.OrchestratorTest do
         %{result: retry_result}
       ])
 
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
       with_mocks([
         {Cympho.Adapters, [],
          [
            resolve: fn %{config: config} -> {:ok, MockAdapter, config} end
          ]}
       ]) do
-        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
         assert :ok = wait_until_stopped(pid)
 
         runs = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
@@ -1745,19 +2024,27 @@ defmodule Cympho.OrchestratorTest do
   end
 
   describe "engine run start" do
-    test "logs and keeps the session running when start_run loses a CAS race", %{
+    test "logs and stops before adapter dispatch when start_run loses a CAS race", %{
       issue: issue,
       agent_id: agent_id,
       issue_id: issue_id
     } do
-      run = %{id: Ecto.UUID.generate(), agent_id: agent_id, issue_id: issue_id}
+      run = %{
+        id: Ecto.UUID.generate(),
+        status: "running",
+        adapter: "claude_code",
+        agent_id: agent_id,
+        issue_id: issue_id
+      }
+
+      test_pid = self()
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           with_mocks([
             {Cympho.Adapters, [],
              [
-               resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+               resolve: fn _ -> {:ok, MockAdapter, %{}} end
              ]},
             {Cympho.HeartbeatEngine, [],
              [
@@ -1765,20 +2052,22 @@ defmodule Cympho.OrchestratorTest do
                get_run: fn _ -> {:ok, run} end,
                start_run: fn _ -> {:error, {:invalid_status, "running"}} end
              ]},
-            {Cympho.AgentRunner, [],
+            {MockAdapter, [:passthrough],
              [
-               run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+               run: fn _issue, _agent_id, _pid, _opts ->
+                 send(test_pid, :adapter_called_after_start_race)
+                 make_ref()
+               end
              ]}
           ]) do
             {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
-            # Force the {:continue, :start_session} to run so start_run is called.
-            assert Orchestrator.get_session_state(issue_id)
-            assert Process.alive?(pid)
-            Orchestrator.stop(issue_id)
+            assert :ok = wait_until_stopped(pid)
+            refute_received :adapter_called_after_start_race
           end
         end)
 
-      assert log =~ "engine run already transitioned"
+      assert log =~ "adapter dispatch aborted"
+      assert log =~ "run startup failed"
     end
   end
 

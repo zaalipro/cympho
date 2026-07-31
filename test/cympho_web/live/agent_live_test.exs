@@ -175,9 +175,7 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Test Agent"
     end
 
-    test "marks expert tabs and panels Advanced-only with a Simple dashboard fallback", %{
-      conn: conn
-    } do
+    test "keeps prompt-authoring tabs Advanced-only with a Simple fallback", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{
           name: "Mode Aware Agent",
@@ -186,7 +184,7 @@ defmodule CymphoWeb.AgentLiveTest do
           instructions: "Keep the daily dashboard calm."
         })
 
-      for tab <- ~w(instructions skills configuration runs) do
+      for tab <- ~w(instructions skills) do
         {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=#{tab}")
 
         assert has_element?(view, "button.ui-advanced-only[phx-value-tab='#{tab}']")
@@ -198,6 +196,40 @@ defmodule CymphoWeb.AgentLiveTest do
                  "[data-testid='agent-simple-tab-fallback'] button[phx-value-tab='dashboard']"
                )
       end
+    end
+
+    test "offers Setup and History in Simple with the dense panels gated", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Simple Reachable Agent",
+          role: :engineer,
+          status: :idle
+        })
+
+      for tab <- ~w(configuration runs) do
+        {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=#{tab}")
+
+        # The tab itself must be reachable in Simple...
+        refute has_element?(view, "button.ui-advanced-only[phx-value-tab='#{tab}']")
+        # ...and must not fall back to the "switch to Advanced" card.
+        refute has_element?(view, "[data-testid='agent-simple-tab-fallback']")
+      end
+
+      # Setup: identity and runtime profile survive; the dense panels are gated.
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert has_element?(view, "[data-testid='agent-configuration-panel']")
+      refute has_element?(view, "[data-testid='agent-configuration-panel'].ui-advanced-only")
+      assert html =~ "Basics"
+      assert html =~ "How it runs"
+      assert has_element?(view, "#agent-instruction-studio.ui-advanced-only")
+      assert has_element?(view, "#agent-env-vars.ui-advanced-only")
+
+      # History: a plain list in Simple, the master/detail view in Advanced.
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=runs")
+
+      assert has_element?(view, "[data-testid='agent-simple-runs-panel'].ui-simple-only")
+      assert has_element?(view, "[data-testid='agent-runs-panel'].ui-advanced-only")
     end
 
     test "dashboard queues an immediate heartbeat for an idle agent", %{conn: conn} do

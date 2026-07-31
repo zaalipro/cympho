@@ -36,7 +36,7 @@
       </section>
     <% else %>
       <.header>
-        <span class="ember-eyebrow">Spend guardrails</span>
+        <span class="ui-advanced-only ember-eyebrow">Spend guardrails</span>
         <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           {@page_title}
         </h1>
@@ -135,7 +135,8 @@
       </div>
 
       <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90 mb-3">
-        Guardrails
+        <span class="ui-advanced-only">Guardrails</span>
+        <span class="ui-simple-only">Limits</span>
       </p>
 
       <div
@@ -148,16 +149,21 @@
           class="only:block hidden col-span-full rounded-card border border-dashed border-border bg-panel/50 px-6 py-12 text-center"
         >
           <p class="text-sm font-590 text-text-primary">
-            No spend guardrails yet
+            <span class="ui-advanced-only">No spend guardrails yet</span>
+            <span class="ui-simple-only">No spending limit yet</span>
           </p>
           <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
-            Create a company budget before broad autonomous runs so provider spend has a hard stop.
+            <span class="ui-advanced-only">
+              Create a company budget before broad autonomous runs so provider spend has a hard stop.
+            </span>
+            <span class="ui-simple-only">Set one so the team can't overspend.</span>
           </p>
           <.app_link
             navigate={~p"/budgets/new"}
             class="mt-5 inline-flex h-9 items-center justify-center rounded-button bg-brand px-4 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
           >
-            Create budget
+            <span class="ui-advanced-only">Create budget</span>
+            <span class="ui-simple-only">Set a limit</span>
           </.app_link>
         </div>
 

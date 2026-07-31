@@ -41,6 +41,8 @@ defmodule Cympho.AgentActions.Parser do
     resolve_conflict
     cancel_issue
     swarm_worker_complete
+    ask_user_questions
+    request_confirmation
   )
   @roles Agent.role_strings()
   @priorities ~w(low medium high critical)
@@ -580,8 +582,44 @@ defmodule Cympho.AgentActions.Parser do
         with :ok <- require_string(action, "summary") do
           {:ok, action}
         end
+
+      "ask_user_questions" ->
+        with {:ok, questions} <- validate_user_questions(action["questions"]),
+             :ok <- validate_optional_bounded_string(action, "message", 1_000) do
+          {:ok, Map.put(action, "questions", questions)}
+        end
+
+      "request_confirmation" ->
+        with :ok <- require_bounded_string(action, "message", 2_000),
+             :ok <- validate_optional_bounded_string(action, "details", 10_000),
+             :ok <- validate_optional_uuid(action, "target_document_id") do
+          {:ok, action}
+        end
     end
   end
+
+  defp validate_user_questions(questions)
+       when is_list(questions) and length(questions) in 1..5 do
+    questions
+    |> Enum.reduce_while({:ok, []}, fn
+      question, {:ok, acc} when is_map(question) ->
+        question = normalize_string_keys(question)
+
+        case require_bounded_string(question, "question", 500) do
+          :ok -> {:cont, {:ok, [Map.take(question, ["question"]) | acc]}}
+          error -> {:halt, error}
+        end
+
+      _question, _acc ->
+        {:halt, {:error, :invalid_user_question}}
+    end)
+    |> case do
+      {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
+      error -> error
+    end
+  end
+
+  defp validate_user_questions(_questions), do: {:error, :invalid_user_questions}
 
   # Inline review comments are an optional list of `%{path, line, body}`
   # objects. We allow an empty/missing list — the action body alone may be
@@ -723,6 +761,31 @@ defmodule Cympho.AgentActions.Parser do
 
       _ ->
         {:error, {:required, field}}
+    end
+  end
+
+  defp require_bounded_string(action, field, max_length) do
+    with :ok <- require_string(action, field) do
+      if String.length(action[field]) <= max_length,
+        do: :ok,
+        else: {:error, {:string_too_long, field, max_length}}
+    end
+  end
+
+  defp validate_optional_bounded_string(action, field, max_length) do
+    case Map.get(action, field) do
+      nil -> :ok
+      value when is_binary(value) and byte_size(value) == 0 -> :ok
+      value when is_binary(value) -> require_bounded_string(action, field, max_length)
+      _ -> {:error, {:invalid_string, field}}
+    end
+  end
+
+  defp validate_optional_uuid(action, field) do
+    case Map.get(action, field) do
+      nil -> :ok
+      "" -> :ok
+      value -> validate_uuid_string(value, field)
     end
   end
 

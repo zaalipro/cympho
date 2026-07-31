@@ -113,9 +113,24 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
 
     assert has_element?(view, "[data-testid='company-import-preview']")
     assert html =~ "Preview #{company.name} before import"
+    assert has_element?(view, "[data-testid='company-import-target-plan']")
+    assert html =~ "Version 1"
+    assert html =~ "#{company.slug}-copy"
     assert html =~ "Secret restore manifest"
     assert html =~ "PROJECT_TOKEN"
     refute html =~ "never-import-this-value"
+
+    html =
+      view
+      |> element("input[phx-value-strategy='fail']")
+      |> render_click()
+
+    assert html =~ "fail strategy blocks import"
+    assert has_element?(view, "button[phx-click='start_import'][disabled]")
+
+    view
+    |> element("input[phx-value-strategy='suffix']")
+    |> render_click()
 
     view
     |> element("button", "Start Import")
@@ -128,5 +143,40 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
     assert html =~ "PROJECT_TOKEN"
     assert html =~ "Add value"
     refute html =~ "never-import-this-value"
+  end
+
+  test "import page rejects unsupported package versions without creating a company" do
+    conn = authenticated_conn(%{is_board_member: true})
+    company = current_company()
+
+    export_json =
+      company.id
+      |> Companies.export_company()
+      |> Map.put(:version, 2)
+      |> Jason.encode!()
+
+    company_count = Cympho.Repo.aggregate(Cympho.Companies.Company, :count, :id)
+    {:ok, view, _html} = live(conn, "/companies/import")
+
+    upload =
+      file_input(view, "#company-import-upload", :import_file, [
+        %{
+          name: "future-company.json",
+          content: export_json,
+          type: "application/json",
+          last_modified: 1_700_000_000
+        }
+      ])
+
+    render_upload(upload, "future-company.json")
+
+    html =
+      view
+      |> form("#company-import-upload")
+      |> render_submit()
+
+    assert html =~ "Export version 2 is not supported"
+    refute has_element?(view, "[data-testid='company-import-preview']")
+    assert Cympho.Repo.aggregate(Cympho.Companies.Company, :count, :id) == company_count
   end
 end

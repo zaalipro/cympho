@@ -8,6 +8,7 @@ defmodule CymphoWeb.IssueJSON do
       description: issue.description,
       status: issue.status,
       priority: issue.priority,
+      work_mode: issue.work_mode,
       parent_id: issue.parent_id,
       project_id: issue.project_id,
       assignee_id: issue.assignee_id,

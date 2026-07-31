@@ -128,6 +128,8 @@ defmodule Cympho.Adapters.CodexAdapter do
       isolated_issue_workspace? =
         isolated_issue_workspace?(issue, cwd, Keyword.get(opts, :runtime_context))
 
+      read_only_work_mode? = read_only_work_mode?(issue)
+
       with_provider_proxy(upstream_base_url, api_key, timeout, fn proxy ->
         args =
           [
@@ -136,7 +138,7 @@ defmodule Cympho.Adapters.CodexAdapter do
           ] ++
             provider_args(ProviderProxy.base_url(proxy)) ++
             shell_environment_args(opts, cwd) ++
-            permission_args(isolated_issue_workspace?) ++
+            permission_args(isolated_issue_workspace?, read_only_work_mode?) ++
             [
               "--model",
               to_string(model),
@@ -159,7 +161,7 @@ defmodule Cympho.Adapters.CodexAdapter do
                 args,
                 cwd,
                 ProviderProxy.capability(proxy),
-                isolated_issue_workspace?,
+                read_only_work_mode?,
                 opts
               )
           ]
@@ -404,7 +406,20 @@ defmodule Cympho.Adapters.CodexAdapter do
     ]
   end
 
-  defp permission_args(true) do
+  defp permission_args(isolated_issue_workspace?, true) do
+    [
+      "-c",
+      ~s(approval_policy="never"),
+      "-c",
+      ~s(default_permissions="cympho_read_only_workspace"),
+      "-c",
+      read_only_workspace_permission_profile(isolated_issue_workspace?),
+      "-c",
+      ~s(projects={#{Jason.encode!(@sandbox_workspace)}={trust_level="untrusted"}})
+    ]
+  end
+
+  defp permission_args(true, false) do
     [
       "-c",
       ~s(approval_policy="never"),
@@ -417,7 +432,7 @@ defmodule Cympho.Adapters.CodexAdapter do
     ]
   end
 
-  defp permission_args(false) do
+  defp permission_args(false, false) do
     [
       "-c",
       ~s(approval_policy="never"),
@@ -439,6 +454,17 @@ defmodule Cympho.Adapters.CodexAdapter do
       |> Enum.join(",")
 
     ~s(permissions.cympho_issue_workspace={extends=":workspace",filesystem={#{filesystem}},network={enabled=true}})
+  end
+
+  defp read_only_workspace_permission_profile(network_enabled?) do
+    filesystem =
+      [
+        ~s(":workspace_roots"={".git"="deny"}),
+        ~s("/proc"="deny")
+      ]
+      |> Enum.join(",")
+
+    ~s(permissions.cympho_read_only_workspace={extends=":read-only",filesystem={#{filesystem}},network={enabled=#{network_enabled?}}})
   end
 
   defp restricted_workspace_permission_profile do
@@ -469,7 +495,7 @@ defmodule Cympho.Adapters.CodexAdapter do
     end)
   end
 
-  defp bwrap_args(codex_bin, codex_args, cwd, capability, _trusted_workspace?, opts) do
+  defp bwrap_args(codex_bin, codex_args, cwd, capability, read_only_work_mode?, opts) do
     workspace = direct_real_directory!(cwd, "Codex workspace")
     {git_mounts, sandbox_env} = git_transport(opts, workspace)
     sandbox_env = Map.put(sandbox_env, @provider_capability_env, capability)
@@ -519,11 +545,9 @@ defmodule Cympho.Adapters.CodexAdapter do
       system_ro_bind_args() ++
       [
         "--dir",
-        @sandbox_workspace,
-        "--bind",
-        workspace,
         @sandbox_workspace
       ] ++
+      workspace_mount_args(workspace, read_only_work_mode?) ++
       git_mounts ++
       [
         "--chdir",
@@ -533,6 +557,22 @@ defmodule Cympho.Adapters.CodexAdapter do
         | codex_args
       ]
   end
+
+  defp workspace_mount_args(workspace, true),
+    do: ["--ro-bind", workspace, @sandbox_workspace]
+
+  defp workspace_mount_args(workspace, false),
+    do: ["--bind", workspace, @sandbox_workspace]
+
+  defp read_only_work_mode?(%{work_mode: mode})
+       when mode in [:planning, :ask, "planning", "ask"],
+       do: true
+
+  defp read_only_work_mode?(%{"work_mode" => mode})
+       when mode in [:planning, :ask, "planning", "ask"],
+       do: true
+
+  defp read_only_work_mode?(_issue), do: false
 
   defp sandbox_setenv_args(env) do
     env

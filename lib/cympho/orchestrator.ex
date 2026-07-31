@@ -172,15 +172,21 @@ defmodule Cympho.Orchestrator do
   @impl true
   def init({issue, agent_id, opts}) do
     session = %__MODULE__{issue: issue, agent_id: agent_id, opts: opts}
-    session = create_pending_run(session, issue, agent_id)
-    {:ok, session, {:continue, :start_session}}
+
+    case create_pending_run(session, issue, agent_id) do
+      {:ok, session} -> {:ok, session, {:continue, :start_session}}
+      {:error, reason} -> {:stop, reason}
+    end
   end
 
   @impl true
   def handle_continue(:start_session, %__MODULE__{} = session) do
     case prepare_runtime(session) do
       {:ok, module, config, runtime_context} ->
-        {:noreply, start_runtime_session(session, module, config, runtime_context)}
+        case start_runtime_session(session, module, config, runtime_context) do
+          {:ok, started_session} -> {:noreply, started_session}
+          {:error, reason} -> stop_before_adapter_dispatch(session, reason)
+        end
 
       {:error, error} ->
         handle_preflight_or_resolution_error(session, error)
@@ -344,10 +350,16 @@ defmodule Cympho.Orchestrator do
       {:ok, fallback_session} ->
         {:noreply, fallback_session}
 
+      {:error, start_error} ->
+        stop_before_adapter_dispatch(session, start_error)
+
       :none ->
         case maybe_start_no_work_retry(session, reason) do
           {:ok, retry_session} ->
             {:noreply, retry_session}
+
+          {:error, start_error} ->
+            stop_before_adapter_dispatch(session, start_error)
 
           :none ->
             finish_failed_session(session, reason)
@@ -581,37 +593,70 @@ defmodule Cympho.Orchestrator do
 
   ## Private — HeartbeatEngine integration
 
-  defp create_pending_run(session, issue, agent_id, adapter_override \\ nil) do
+  defp create_pending_run(
+         session,
+         issue,
+         agent_id,
+         adapter_override \\ nil,
+         runtime_config_override \\ nil
+       ) do
     try do
-      adapter =
-        adapter_override ||
-          case safe_get_agent(agent_id) do
-            {:ok, agent} -> agent |> agent_adapter() |> adapter_name()
-            {:error, _} -> "claude_code"
-          end
+      {configured_adapter, configured_runtime} =
+        case safe_get_agent(agent_id) do
+          {:ok, agent} -> {agent |> agent_adapter() |> adapter_name(), agent_config(agent)}
+          {:error, _} -> {"claude_code", %{}}
+        end
+
+      adapter = adapter_override || configured_adapter
+      runtime_config = runtime_config_override || configured_runtime
 
       run_attrs = %{
         company_id: Map.get(issue, :company_id),
         agent_id: agent_id,
         issue_id: issue.id,
         adapter: adapter,
-        invocation_source: Keyword.get(session.opts || [], :invocation_source, "heartbeat")
+        invocation_source: Keyword.get(session.opts || [], :invocation_source, "heartbeat"),
+        run_metadata: runtime_identity_metadata(adapter, runtime_config),
+        bind_checkout: true
       }
 
       case HeartbeatEngine.create_run(run_attrs) do
         {:ok, run} ->
-          %{session | run_id: run.id}
+          {:ok, %{session | run_id: run.id}}
 
         {:error, reason} ->
           Logger.warning("[Orchestrator] Failed to create engine run: #{inspect(reason)}")
-          session
+          {:error, reason}
       end
     rescue
       e ->
         Logger.warning("[Orchestrator] Failed to create engine run: #{inspect(e)}")
-        session
+        {:error, {:run_creation_failed, Exception.message(e)}}
     end
   end
+
+  defp runtime_identity_metadata(adapter, config) when is_map(config) do
+    runtime =
+      %{
+        "provider" => config_value(config, "provider") || adapter_name(adapter),
+        "model" => config_value(config, "model")
+      }
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+      |> Map.new()
+
+    %{"runtime" => runtime}
+  end
+
+  defp runtime_identity_metadata(adapter, _config),
+    do: %{"runtime" => %{"provider" => adapter_name(adapter)}}
+
+  defp config_value(config, "provider"),
+    do: Map.get(config, "provider") || Map.get(config, :provider)
+
+  defp config_value(config, "model"),
+    do: Map.get(config, "model") || Map.get(config, :model)
+
+  defp config_value(_config, _key), do: nil
 
   defp safe_get_agent(agent_id) do
     Agents.get_agent(agent_id)
@@ -721,33 +766,40 @@ defmodule Cympho.Orchestrator do
   end
 
   defp start_runtime_session(session, module, config, runtime_context) do
-    start_engine_run(session)
-    wake_context = runtime_wake_context(session)
+    case start_engine_run(session) do
+      :ok ->
+        wake_context = runtime_wake_context(session)
 
-    if initial_runtime_attempt?(session) do
-      consume_pending_wakes(session.agent_id, session.issue.id)
+        if initial_runtime_attempt?(session) do
+          consume_pending_wakes(session.agent_id, session.issue.id)
+        end
+
+        schedule_heartbeat_tick()
+
+        opts =
+          session
+          |> run_opts(config, runtime_context)
+          |> Keyword.put(:wake_context, wake_context)
+
+        session_id = module.run(session.issue, session.agent_id, self(), opts)
+
+        # Reset adapter-session liveness tracking for the new attempt — the new
+        # adapter may not register with AdapterSessions at all (e.g. remote
+        # marketplace adapters), and inheriting `seen?` from a previous adapter
+        # would false-positive the dead-worker detector.
+        {:ok,
+         %{
+           session
+           | session_id: session_id,
+             runtime_context: runtime_context,
+             adapter_session_seen?: false,
+             adapter_session_misses: 0
+         }}
+
+      {:error, reason} ->
+        cancel_pending_engine_run(session)
+        {:error, {:engine_run_start_failed, reason}}
     end
-
-    schedule_heartbeat_tick()
-
-    opts =
-      session
-      |> run_opts(config, runtime_context)
-      |> Keyword.put(:wake_context, wake_context)
-
-    session_id = module.run(session.issue, session.agent_id, self(), opts)
-
-    # Reset adapter-session liveness tracking for the new attempt — the new
-    # adapter may not register with AdapterSessions at all (e.g. remote
-    # marketplace adapters), and inheriting `seen?` from a previous adapter
-    # would false-positive the dead-worker detector.
-    %{
-      session
-      | session_id: session_id,
-        runtime_context: runtime_context,
-        adapter_session_seen?: false,
-        adapter_session_misses: 0
-    }
   end
 
   defp runtime_wake_context(%__MODULE__{no_work_retry_count: count}) when count > 0 do
@@ -806,7 +858,7 @@ defmodule Cympho.Orchestrator do
         |> start_next_provider_fallback(reason)
 
       profile ->
-        attempt_session =
+        attempt_base =
           session
           |> Map.put(:fallback_profile_ids, rest)
           |> Map.put(:fallback_errors, session.fallback_errors ++ [{profile_id, reason}])
@@ -814,26 +866,43 @@ defmodule Cympho.Orchestrator do
           |> Map.put(:session_id, nil)
           |> Map.put(:tool_traces, %{})
           |> Map.put(:runtime_context, nil)
-          |> create_pending_run(session.issue, session.agent_id, profile.adapter)
 
-        case prepare_runtime(attempt_session, profile) do
-          {:ok, module, config, runtime_context} ->
-            create_agent_comment(
-              session.issue,
-              session.agent_id,
-              "#{provider_fallback_label(reason)} on #{runtime_label(session)}; retrying with runtime profile #{profile.name} (`#{profile.id}`)."
-            )
+        case create_pending_run(
+               attempt_base,
+               session.issue,
+               session.agent_id,
+               profile.adapter,
+               profile.config || %{}
+             ) do
+          {:ok, attempt_session} ->
+            case prepare_runtime(attempt_session, profile) do
+              {:ok, module, config, runtime_context} ->
+                case start_runtime_session(attempt_session, module, config, runtime_context) do
+                  {:ok, fallback_session} ->
+                    create_agent_comment(
+                      session.issue,
+                      session.agent_id,
+                      "#{provider_fallback_label(reason)} on #{runtime_label(session)}; retrying with runtime profile #{profile.name} (`#{profile.id}`)."
+                    )
 
-            {:ok, start_runtime_session(attempt_session, module, config, runtime_context)}
+                    {:ok, fallback_session}
 
-          {:error, fallback_error} ->
-            fail_engine_run(
-              attempt_session,
-              {:fallback_preflight_failed, profile.id, fallback_error}
-            )
+                  {:error, start_error} ->
+                    {:error, start_error}
+                end
 
-            %{attempt_session | fallback_profile_ids: rest}
-            |> start_next_provider_fallback(reason)
+              {:error, fallback_error} ->
+                fail_engine_run(
+                  attempt_session,
+                  {:fallback_preflight_failed, profile.id, fallback_error}
+                )
+
+                %{attempt_session | fallback_profile_ids: rest}
+                |> start_next_provider_fallback(reason)
+            end
+
+          {:error, ownership_error} ->
+            {:error, ownership_error}
         end
     end
   end
@@ -902,31 +971,57 @@ defmodule Cympho.Orchestrator do
 
   defp maybe_start_no_work_retry(%__MODULE__{} = session, reason) do
     if no_work_failure?(reason) and session.no_work_retry_count < @max_no_work_retries do
-      attempt_session =
+      attempt_base =
         session
         |> Map.put(:no_work_retry_count, session.no_work_retry_count + 1)
         |> Map.put(:session_id, nil)
         |> Map.put(:tool_traces, %{})
         |> Map.put(:runtime_context, nil)
-        |> create_pending_run(session.issue, session.agent_id, session_adapter_name(session))
 
-      case prepare_retry_runtime(attempt_session, session) do
-        {:ok, module, config, runtime_context} ->
-          create_agent_comment(
-            session.issue,
-            session.agent_id,
-            "No usable adapter output from #{runtime_label(session)}; retrying once with the same runtime before blocking. Reason: #{format_no_work_reason(reason)}."
-          )
+      case create_pending_run(
+             attempt_base,
+             session.issue,
+             session.agent_id,
+             session_adapter_name(session)
+           ) do
+        {:ok, attempt_session} ->
+          case prepare_retry_runtime(attempt_session, session) do
+            {:ok, module, config, runtime_context} ->
+              case start_runtime_session(attempt_session, module, config, runtime_context) do
+                {:ok, retry_session} ->
+                  create_agent_comment(
+                    session.issue,
+                    session.agent_id,
+                    "No usable adapter output from #{runtime_label(session)}; retrying once with the same runtime before blocking. Reason: #{format_no_work_reason(reason)}."
+                  )
 
-          {:ok, start_runtime_session(attempt_session, module, config, runtime_context)}
+                  {:ok, retry_session}
 
-        {:error, retry_error} ->
-          fail_engine_run(attempt_session, {:runtime_retry_preflight_failed, retry_error})
-          :none
+                {:error, start_error} ->
+                  {:error, start_error}
+              end
+
+            {:error, retry_error} ->
+              fail_engine_run(attempt_session, {:runtime_retry_preflight_failed, retry_error})
+              :none
+          end
+
+        {:error, ownership_error} ->
+          {:error, ownership_error}
       end
     else
       :none
     end
+  end
+
+  defp stop_before_adapter_dispatch(%__MODULE__{} = session, reason) do
+    Logger.warning("[Orchestrator] Stopping before adapter dispatch because run startup failed",
+      issue_id: session.issue.id,
+      agent_id: session.agent_id,
+      error: inspect(reason)
+    )
+
+    {:stop, :normal, session}
   end
 
   defp no_work_failure?(:no_output), do: true
@@ -1218,30 +1313,69 @@ defmodule Cympho.Orchestrator do
   defp start_engine_run(%__MODULE__{run_id: nil}), do: :ok
 
   defp start_engine_run(%__MODULE__{run_id: run_id}) do
-    try do
-      {:ok, run} = HeartbeatEngine.get_run(run_id)
-
+    with {:ok, run} <- HeartbeatEngine.get_run(run_id) do
       case HeartbeatEngine.start_run(run) do
-        {:error, {:invalid_status, status}} ->
-          # Lost CAS race: the run left "pending" before we could start it
-          # (e.g. the watchdog recovered it, or a duplicate dispatch won). The
-          # run did not start here; keep the session running so the adapter
-          # attempt is not aborted on a benign race.
-          Logger.warning("[Orchestrator] engine run already transitioned; not started here",
+        :ok ->
+          :ok
+
+        {:ok, _started_run} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("[Orchestrator] engine run did not start; adapter dispatch aborted",
             component: "orchestrator",
             agent_id: Map.get(run, :agent_id),
             issue_id: Map.get(run, :issue_id),
             run_id: Map.get(run, :id),
-            status: status
+            error: inspect(reason)
           )
 
-        _ok_or_other ->
-          :ok
+          {:error, reason}
+
+        other ->
+          Logger.warning("[Orchestrator] engine run returned an unexpected start result",
+            component: "orchestrator",
+            run_id: Map.get(run, :id),
+            result: inspect(other)
+          )
+
+          {:error, {:unexpected_start_result, other}}
       end
-    rescue
-      e ->
-        Logger.warning("[Orchestrator] Failed to start engine run: #{inspect(e)}")
+    else
+      {:error, reason} -> {:error, reason}
     end
+  rescue
+    e ->
+      Logger.warning("[Orchestrator] Failed to start engine run: #{inspect(e)}")
+      {:error, {:run_start_crashed, Exception.message(e)}}
+  end
+
+  defp cancel_pending_engine_run(%__MODULE__{run_id: nil}), do: :ok
+
+  defp cancel_pending_engine_run(%__MODULE__{run_id: run_id}) do
+    with {:ok, %{status: "pending"} = run} <- HeartbeatEngine.get_run(run_id) do
+      case HeartbeatEngine.cancel_run(run) do
+        {:ok, _cancelled_run} ->
+          :ok
+
+        {:error, {:invalid_status, _status}} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("[Orchestrator] failed to cancel an unstarted engine run",
+            run_id: run_id,
+            error: inspect(reason)
+          )
+      end
+    else
+      _ -> :ok
+    end
+  rescue
+    error ->
+      Logger.warning("[Orchestrator] failed to inspect an unstarted engine run",
+        run_id: run_id,
+        error: Exception.message(error)
+      )
   end
 
   defp complete_engine_run(%__MODULE__{run_id: nil}, _result), do: :ok
@@ -1300,14 +1434,29 @@ defmodule Cympho.Orchestrator do
 
     input_tokens =
       case sum_fields(usage, ~w(input_tokens cache_creation_input_tokens cache_read_input_tokens)) do
-        0 -> sum_over(model_usage, ~w(inputTokens cacheCreationInputTokens cacheReadInputTokens))
-        n -> n
+        0 ->
+          case usage["prompt_tokens"] do
+            n when is_integer(n) and n >= 0 ->
+              n
+
+            _ ->
+              sum_over(model_usage, ~w(inputTokens cacheCreationInputTokens cacheReadInputTokens))
+          end
+
+        n ->
+          n
       end
 
     output_tokens =
       case usage["output_tokens"] do
-        n when is_integer(n) and n > 0 -> n
-        _ -> sum_over(model_usage, ~w(outputTokens))
+        n when is_integer(n) and n >= 0 ->
+          n
+
+        _ ->
+          case usage["completion_tokens"] do
+            n when is_integer(n) and n >= 0 -> n
+            _ -> sum_over(model_usage, ~w(outputTokens))
+          end
       end
 
     envelope_cost =
@@ -1824,6 +1973,7 @@ defmodule Cympho.Orchestrator do
               %{count: 1},
               %{
                 tool_name: trace.tool_name,
+                company_id: trace.company_id,
                 agent_id: trace.agent_id,
                 issue_id: trace.issue_id,
                 trace_id: trace_id,
@@ -1894,6 +2044,7 @@ defmodule Cympho.Orchestrator do
             %{count: 1},
             %{
               tool_name: tool_call["name"],
+              company_id: issue.company_id,
               agent_id: agent_id,
               issue_id: issue.id,
               trace_id: trace.id

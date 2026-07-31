@@ -59,26 +59,17 @@
         <span class="hero-bolt-mini h-4 w-4"></span>
       </span>
       <div class="min-w-0 flex-1">
-        <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          System state
-        </p>
-        <div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <%!-- No "System state" eyebrow and no jump-link to the delegated-work
+             console: simple mode shows the same work as plain rows below. --%>
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
           <h2 class={["text-base font-590", mode_text_class(@runtime_mode.status)]}>
-            {@runtime_mode.label}
+            {simple_runtime_mode_label(@runtime_mode)}
           </h2>
           <span class="text-xs text-text-tertiary">
-            {@capacity.running_runs} running · {now_waiting_count(@wake_queue, @review_nudges)} waiting
+            {@capacity.running_runs} working · {now_waiting_count(@wake_queue, @review_nudges)} waiting
           </span>
         </div>
       </div>
-      <.app_link
-        navigate="#delegated-work-queue"
-        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
-        aria-label="Open work queue"
-        title="Open work queue"
-      >
-        <span class="hero-list-bullet-mini h-3.5 w-3.5"></span>
-      </.app_link>
     </div>
   </section>
 
@@ -94,9 +85,13 @@
           <span class={"rounded-full border px-2 py-0.5 text-[10px] font-590 uppercase #{action_badge_class(action.tone)}"}>
             Next
           </span>
-          <h2 class="text-sm font-590 text-text-primary">{action.title}</h2>
+          <h2 class="text-sm font-590 text-text-primary">
+            {simple_operations_title(action.title)}
+          </h2>
         </div>
-        <p class="mt-1 text-xs leading-5 text-text-tertiary">{action.body}</p>
+        <p class="mt-1 text-xs leading-5 text-text-tertiary">
+          {simple_operations_body(action.title, action.body)}
+        </p>
       </div>
       <a
         :if={Map.get(action, :target_path) && anchor_path?(action.target_path)}
@@ -104,7 +99,7 @@
         class="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
       >
         <span class="hero-arrow-down-mini h-3.5 w-3.5"></span>
-        {action.target_label}
+        {simple_operations_target_label(action.target_label)}
       </a>
       <.app_link
         :if={Map.get(action, :target_path) && not anchor_path?(action.target_path)}
@@ -112,7 +107,7 @@
         class="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
       >
         <span class="hero-wrench-screwdriver-mini h-3.5 w-3.5"></span>
-        {action.target_label}
+        {simple_operations_target_label(action.target_label)}
       </.app_link>
     </div>
   </section>
@@ -135,7 +130,6 @@
         <h2 class="text-base font-590 text-text-primary">
           {simple_action_queue_title(simple_rows)}
         </h2>
-        <p class="mt-0.5 text-xs text-text-quaternary">Queue</p>
       </div>
     </div>
 
@@ -150,10 +144,10 @@
             <span class={[row.icon, "h-4 w-4 text-white"]}></span>
           </span>
           <div class="min-w-0 flex-1">
+            <%!-- The row icon already carries the category the eyebrow spelled
+                 out in caps; only the count survives next to the title. --%>
             <div class="flex min-w-0 flex-wrap items-center gap-2">
-              <span class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                {row.eyebrow}
-              </span>
+              <p class="min-w-0 truncate text-sm font-590 text-text-primary">{row.title}</p>
               <span
                 :if={row.count_label}
                 class="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-text-secondary"
@@ -161,7 +155,6 @@
                 {row.count_label}
               </span>
             </div>
-            <p class="mt-1 truncate text-sm font-590 text-text-primary">{row.title}</p>
           </div>
           <button
             :if={row.action_event}
@@ -984,9 +977,11 @@
         </p>
       </section>
 
+      <%!-- Both consoles below are advanced-only: simple mode already shows the
+           same work as plain rows in #operations-simple-action-queue. --%>
       <section
         id="delegated-work-queue"
-        class="ember-glass scroll-mt-20 md:scroll-mt-6"
+        class="ui-advanced-only ember-glass scroll-mt-20 md:scroll-mt-6"
       >
         <div class="border-b border-border px-5 py-4">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -3160,18 +3155,24 @@
         </div>
       </section>
 
+      <%!-- Stays visible in simple mode: the "Something went wrong" card on Home
+           links straight here, so hiding it would dead-end that flow. --%>
       <section
         id="runtime-failures"
         class="rounded-lg border border-border bg-panel scroll-mt-6"
       >
         <div class="border-b border-border px-4 py-3">
-          <h2 class="text-sm font-590 text-text-primary">Recent Runtime Failures</h2>
+          <h2 class="text-sm font-590 text-text-primary">
+            <span class="ui-advanced-only">Recent Runtime Failures</span>
+            <span class="ui-simple-only">What went wrong</span>
+          </h2>
         </div>
         <div
           :if={@recent_failures == []}
           class="px-4 py-8 text-center text-sm text-text-tertiary"
         >
-          No failed runs found.
+          <span class="ui-advanced-only">No failed runs found.</span>
+          <span class="ui-simple-only">Nothing has failed.</span>
         </div>
         <div :if={@recent_failures != []} class="divide-y divide-border">
           <div :for={failure <- @recent_failures} class="px-4 py-3">

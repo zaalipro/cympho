@@ -29,6 +29,11 @@ done
 DOMAIN=""
 if [ "$IS_PROD" -eq 1 ]; then
     read -p "Enter your Domain or Subdomain (e.g., cympho.example.com): " DOMAIN
+
+    if [[ ! "$DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+        echo "Error: Enter a bare hostname such as cympho.example.com (no scheme or path)."
+        exit 1
+    fi
 fi
 
 echo ""
@@ -42,6 +47,12 @@ read -p "Company Issue Prefix (e.g., CYM): " ISSUE_PREFIX
 
 if [ -z "$ISSUE_PREFIX" ]; then
   ISSUE_PREFIX="CYM"
+fi
+
+ISSUE_PREFIX=$(printf '%s' "$ISSUE_PREFIX" | tr '[:lower:]' '[:upper:]')
+if [[ ! "$ISSUE_PREFIX" =~ ^[A-Z][A-Z0-9]{1,9}$ ]]; then
+    echo "Error: Issue prefix must be 2-10 uppercase letters or numbers and start with a letter."
+    exit 1
 fi
 
 # 2. Detect OS and Machine architecture
@@ -175,20 +186,24 @@ if [ "$IS_PROD" -eq 1 ]; then
         CYMPHO_ENCRYPTION_KEY=$(mix phx.gen.secret 32)
         CYMPHO_USER_JWT_SECRET=$(mix phx.gen.secret)
         CYMPHO_AGENT_JWT_SECRET=$(mix phx.gen.secret)
+        LIVE_VIEW_SALT=$(mix phx.gen.secret 16)
         
         cat <<EOF > "$ENV_FILE"
-export MIX_ENV=prod
-export PORT=4000
-export PHX_HOST="$DOMAIN"
-export APP_HOST="https://$DOMAIN"
-export SECRET_KEY_BASE="$SECRET_KEY_BASE"
-export CYMPHO_ENCRYPTION_KEY="$CYMPHO_ENCRYPTION_KEY"
-export CYMPHO_USER_JWT_SECRET="$CYMPHO_USER_JWT_SECRET"
-export CYMPHO_AGENT_JWT_SECRET="$CYMPHO_AGENT_JWT_SECRET"
-export DATABASE_URL="ecto://cympho_user:$DB_PASS@localhost/cympho_prod"
+MIX_ENV=prod
+PORT=4000
+APP_HOST=$DOMAIN
+SECRET_KEY_BASE=$SECRET_KEY_BASE
+LIVE_VIEW_SALT=$LIVE_VIEW_SALT
+CYMPHO_ENCRYPTION_KEY=$CYMPHO_ENCRYPTION_KEY
+CYMPHO_USER_JWT_SECRET=$CYMPHO_USER_JWT_SECRET
+CYMPHO_AGENT_JWT_SECRET=$CYMPHO_AGENT_JWT_SECRET
+DATABASE_URL=ecto://cympho_user:$DB_PASS@localhost/cympho_prod
 EOF
     fi
+    chmod 600 "$ENV_FILE"
+    set -a
     source "$ENV_FILE"
+    set +a
 else
     mix local.hex --force
     mix local.rebar --force
@@ -201,18 +216,30 @@ mix setup
 
 # 8. Seed the Admin User and Company
 echo "Seeding the admin user and company..."
-cat <<EOF > seed_admin.exs
+export CYMPHO_INSTALL_ADMIN_EMAIL="$ADMIN_EMAIL"
+export CYMPHO_INSTALL_ADMIN_NAME="$ADMIN_NAME"
+export CYMPHO_INSTALL_ADMIN_PASSWORD="$ADMIN_PASSWORD"
+export CYMPHO_INSTALL_COMPANY_NAME="$COMPANY_NAME"
+export CYMPHO_INSTALL_ISSUE_PREFIX="$ISSUE_PREFIX"
+
+cat <<'EOF' > seed_admin.exs
 alias Cympho.Repo
 alias Cympho.Companies
 alias Cympho.Users.User
 
+admin_email = System.fetch_env!("CYMPHO_INSTALL_ADMIN_EMAIL")
+admin_name = System.fetch_env!("CYMPHO_INSTALL_ADMIN_NAME")
+admin_password = System.fetch_env!("CYMPHO_INSTALL_ADMIN_PASSWORD")
+company_name = System.fetch_env!("CYMPHO_INSTALL_COMPANY_NAME")
+issue_prefix = System.fetch_env!("CYMPHO_INSTALL_ISSUE_PREFIX")
+
 # Check if the company already exists or create a new autonomous one
-company = case Repo.get_by(Companies.Company, name: "$COMPANY_NAME") do
+company = case Repo.get_by(Companies.Company, name: company_name) do
   nil ->
     {:ok, %{company: company}} = Companies.create_autonomous_company(%{
-      name: "$COMPANY_NAME",
+      name: company_name,
       goal_title: "Initial Company Goal",
-      issue_prefix: "$ISSUE_PREFIX",
+      issue_prefix: issue_prefix,
       engineer_count: 1,
       adapter: :claude_code
     })
@@ -221,14 +248,14 @@ company = case Repo.get_by(Companies.Company, name: "$COMPANY_NAME") do
 end
 
 user_attrs = %{
-  email: "$ADMIN_EMAIL",
-  name: "$ADMIN_NAME",
-  password: "$ADMIN_PASSWORD",
+  email: admin_email,
+  name: admin_name,
+  password: admin_password,
   company_id: company.id
 }
 
 # Create or Update the admin user
-case Repo.get_by(User, email: "$ADMIN_EMAIL") do
+case Repo.get_by(User, email: admin_email) do
   nil ->
     %User{}
     |> User.registration_changeset(user_attrs)
@@ -247,6 +274,8 @@ EOF
 
 mix run seed_admin.exs
 rm seed_admin.exs
+unset CYMPHO_INSTALL_ADMIN_EMAIL CYMPHO_INSTALL_ADMIN_NAME CYMPHO_INSTALL_ADMIN_PASSWORD
+unset CYMPHO_INSTALL_COMPANY_NAME CYMPHO_INSTALL_ISSUE_PREFIX
 
 # If production, optionally build assets and release
 if [ "$IS_PROD" -eq 1 ]; then
@@ -281,9 +310,8 @@ After=network.target postgresql.service caddy.service
 Type=simple
 User=$USER
 WorkingDirectory=$APP_DIR
-EnvironmentFile=$APP_DIR/.env
 Environment="PATH=$ASDF_DIR/shims:$ASDF_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=/bin/bash -c "source $ASDF_DIR/asdf.sh && mix phx.server"
+ExecStart=/bin/bash -lc 'set -a; source "$APP_DIR/.env"; source "$ASDF_DIR/asdf.sh"; set +a; exec mix phx.server'
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536

@@ -1303,8 +1303,36 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp simple_action_queue_title([%{key: "steady"}]), do: "All quiet"
 
   defp simple_action_queue_title(rows) do
-    "#{length(rows)} next #{plural_noun(length(rows), "move")}"
+    "#{length(rows)} #{plural_noun(length(rows), "thing")} to do"
   end
+
+  # ── Simple-mode copy ────────────────────────────────────────────
+  # Runtime actions are named for the machine ("Enable autonomous dispatch").
+  # These map the handful that reach simple mode onto what the owner is
+  # actually deciding. Anything unmapped passes through unchanged.
+
+  defp simple_runtime_mode_label(%{status: :review}), do: "Nothing is running"
+  defp simple_runtime_mode_label(%{status: :degraded}), do: "Working, but not fully set up"
+  defp simple_runtime_mode_label(%{status: :autonomous}), do: "The team is working"
+  defp simple_runtime_mode_label(%{label: label}), do: label
+
+  defp simple_operations_title("Enable autonomous dispatch"), do: "Turn the team on"
+  defp simple_operations_title("Restart with runtime enabled"), do: "Turn the team on"
+  defp simple_operations_title("Resume company runtime"), do: "Unpause the team"
+  defp simple_operations_title("Add an agent"), do: "Add someone to the team"
+  defp simple_operations_title(title), do: title
+
+  defp simple_operations_body("Enable autonomous dispatch", _body),
+    do: "Needs a restart with the launch settings."
+
+  defp simple_operations_body("Restart with runtime enabled", _body),
+    do: "Needs a restart with the launch settings."
+
+  defp simple_operations_body(_title, body), do: body
+
+  defp simple_operations_target_label("Review service gates"), do: "See what's missing"
+  defp simple_operations_target_label("Open launch checklist"), do: "See the steps"
+  defp simple_operations_target_label(label), do: label
 
   defp simple_action_row_class(:danger), do: "border-brand/25 bg-brand/[0.07]"
   defp simple_action_row_class(:attention), do: "border-amber-500/25 bg-amber-500/[0.06]"

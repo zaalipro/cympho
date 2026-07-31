@@ -12,7 +12,7 @@
         <div class="flex flex-wrap items-center gap-2 lg:shrink-0">
           <% unread_count = count_for(@inbox_counts, "unread") %>
 
-          <form phx-change="select_agent">
+          <form phx-change="select_agent" class="ui-advanced-only">
             <.select_menu
               name="agent_id"
               value={@selected_agent_id}
@@ -47,19 +47,21 @@
             </span>
           </button>
 
-          <.density_switch
-            density={@digest_density}
-            compact_patch={
-              inbox_url(@selected_agent_id, @current_status, @digest_density, %{
-                density: "compact"
-              })
-            }
-            detailed_patch={
-              inbox_url(@selected_agent_id, @current_status, @digest_density, %{
-                density: "detailed"
-              })
-            }
-          />
+          <div class="ui-advanced-only">
+            <.density_switch
+              density={@digest_density}
+              compact_patch={
+                inbox_url(@selected_agent_id, @current_status, @digest_density, %{
+                  density: "compact"
+                })
+              }
+              detailed_patch={
+                inbox_url(@selected_agent_id, @current_status, @digest_density, %{
+                  density: "detailed"
+                })
+              }
+            />
+          </div>
         </div>
       </div>
 
@@ -80,6 +82,8 @@
             {total_count(@inbox_counts)}
           </span>
         </.link>
+        <%!-- Simple mode keeps only "All" and the one lane that answers "is this
+             mine?". Unread/Awaiting review are ways of slicing the same list. --%>
         <.link
           :for={status <- ["action", "unread", "review"]}
           patch={
@@ -87,11 +91,13 @@
           }
           class={[
             "inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-510 transition-colors",
+            status != "action" && "ui-advanced-only",
             status_tab_class(@current_status, status)
           ]}
         >
           <span class={["h-1.5 w-1.5 shrink-0 rounded-full", status_dot(status)]}></span>
-          <span>{status_filter_label(status)}</span>
+          <span class="ui-advanced-only">{status_filter_label(status)}</span>
+          <span :if={status == "action"} class="ui-simple-only">Needs you</span>
           <span
             :if={count_for(@inbox_counts, status) > 0}
             class="font-mono text-[11px] tabular-nums opacity-70"
@@ -100,7 +106,7 @@
           </span>
         </.link>
 
-        <details class="cympho-menu relative">
+        <details class="ui-advanced-only cympho-menu relative">
           <summary
             class="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full border border-border bg-surface text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-primary"
             aria-label="More inbox filters"
@@ -251,7 +257,9 @@
         class={[
           "group border border-hairline bg-surface-1 transition-all hover:border-border-hover hover:bg-surface-hover/40 hover:shadow-raised",
           if(@digest_density == "compact", do: "rounded-lg", else: "rounded-2xl"),
-          if(item.status == "unread" or Map.get(item, :kind) in [:review_queue, :human_action],
+          if(
+            item.status == "unread" or
+              item_kind(item) in [:review, :human_action, :decision, :failure, :spend],
             do: "border-l-2 border-l-brand shadow-raised",
             else: "shadow-card"
           ),
@@ -317,73 +325,92 @@
               </span>
             </div>
 
-            <%= if item.issue do %>
-              <.app_link
-                navigate={issue_link(item.issue)}
-                class={"block min-w-0 text-base leading-6 hover:text-brand #{if item.status == "unread", do: "font-590 text-text-primary", else: "font-510 text-text-secondary"}"}
-              >
-                <span class="font-mono text-xs text-text-quaternary">
-                  {item.issue.identifier || "Issue"}
-                </span>
-                <span class="mx-2 text-text-quaternary">·</span>
-                <span>{item.issue.title}</span>
-              </.app_link>
-
-              <p
-                :if={@digest_density == "detailed" and issue_description(item.issue)}
-                class="mt-2 line-clamp-2 max-w-3xl text-sm text-text-tertiary"
-              >
-                {issue_description(item.issue)}
-              </p>
-
-              <div
-                :if={@digest_density == "detailed" and item.review_nudge}
-                class="mt-2 flex flex-wrap items-center gap-1.5"
-              >
-                <span
-                  class="line-clamp-1 text-xs text-amber-200/80"
-                  title={item.review_nudge.summary}
+            <%= cond do %>
+              <% owner_decision_item?(item) -> %>
+                <.app_link
+                  navigate={item.target_path}
+                  class="block min-w-0 text-base font-590 leading-6 text-text-primary hover:text-brand"
                 >
-                  {item.review_nudge.summary}
-                </span>
-                <span
-                  :for={label <- item.review_nudge.blocker_labels || []}
-                  class="rounded-full border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-510 text-amber-200"
-                >
-                  {label}
-                </span>
-              </div>
+                  {item.title}
+                </.app_link>
 
-              <.issue_digest_card
-                issue={item.issue}
-                density={@digest_density}
-                variant={if @digest_density == "compact", do: "inline", else: "card"}
-                class="mt-2"
-              />
-
-              <div class={[
-                "flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-text-quaternary",
-                if(@digest_density == "compact", do: "mt-1", else: "mt-2")
-              ]}>
-                <span>{issue_status_label(item.issue.status)}</span>
-                <span
-                  :if={item.issue.priority in [:critical, :high, "critical", "high"]}
-                  class={[
-                    "rounded-full border px-2 py-0.5 font-510",
-                    priority_badge_class(item.issue.priority)
-                  ]}
+                <p
+                  :if={item.summary not in [nil, ""]}
+                  class="mt-1.5 max-w-3xl text-sm leading-6 text-text-tertiary"
                 >
-                  {priority_label(item.issue.priority)}
-                </span>
-                <span :if={item.issue.assigned_role}>
-                  Role: {item.issue.assigned_role}
-                </span>
-              </div>
-            <% else %>
-              <p class="text-base font-590 text-text-tertiary">Issue removed</p>
-              <p class="mt-2 text-sm text-text-quaternary">
-                This inbox entry points to an issue that is no longer available.
-              </p>
+                  {item.summary}
+                </p>
+
+                <p
+                  :if={@digest_density == "detailed" and item.diagnostic not in [nil, ""]}
+                  class="ui-advanced-only mt-2 font-mono text-xs leading-5 text-text-quaternary"
+                  data-testid="owner-attention-diagnostic"
+                >
+                  Technical details · {item.diagnostic}
+                </p>
+              <% item.issue -> %>
+                <.app_link
+                  navigate={issue_link(item.issue)}
+                  class={"block min-w-0 text-base leading-6 hover:text-brand #{if item.status == "unread", do: "font-590 text-text-primary", else: "font-510 text-text-secondary"}"}
+                >
+                  <span class="font-mono text-xs text-text-quaternary">
+                    {item.issue.identifier || "Issue"}
+                  </span>
+                  <span class="mx-2 text-text-quaternary">·</span>
+                  <span>{item.issue.title}</span>
+                </.app_link>
+
+                <p
+                  :if={@digest_density == "detailed" and issue_description(item.issue)}
+                  class="mt-2 line-clamp-2 max-w-3xl text-sm text-text-tertiary"
+                >
+                  {issue_description(item.issue)}
+                </p>
+
+                <div
+                  :if={@digest_density == "detailed" and item.review_nudge}
+                  class="mt-2 flex flex-wrap items-center gap-1.5"
+                >
+                  <span
+                    class="line-clamp-1 text-xs text-amber-200/80"
+                    title={item.review_nudge.summary}
+                  >
+                    {item.review_nudge.summary}
+                  </span>
+                  <span
+                    :for={label <- item.review_nudge.blocker_labels || []}
+                    class="rounded-full border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-510 text-amber-200"
+                  >
+                    {label}
+                  </span>
+                </div>
+
+                <.issue_digest_card
+                  issue={item.issue}
+                  density={@digest_density}
+                  variant={if @digest_density == "compact", do: "inline", else: "card"}
+                  class="mt-2"
+                />
+
+                <div class={[
+                  "flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-text-quaternary",
+                  if(@digest_density == "compact", do: "mt-1", else: "mt-2")
+                ]}>
+                  <span>{issue_status_label(item.issue.status)}</span>
+                  <.priority_mark
+                    :if={item.issue.priority in [:critical, :high, "critical", "high"]}
+                    priority={item.issue.priority}
+                    pill_class={"border #{priority_badge_class(item.issue.priority)}"}
+                  />
+                  <span :if={item.issue.assigned_role}>
+                    Role: {item.issue.assigned_role}
+                  </span>
+                </div>
+              <% true -> %>
+                <p class="text-base font-590 text-text-tertiary">Issue removed</p>
+                <p class="mt-2 text-sm text-text-quaternary">
+                  This inbox entry points to an issue that is no longer available.
+                </p>
             <% end %>
           </div>
 
@@ -439,11 +466,44 @@
               <span class="sr-only">Mark read</span>
             </button>
             <.app_link
-              :if={item.issue}
+              :if={not is_nil(item.issue) and not owner_decision_item?(item)}
               navigate={issue_link(item.issue)}
               class={"rounded-lg border text-xs font-510 transition-colors #{if @digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2"} #{if item.status == "unread" or item_kind(item) == :human_action, do: "border-brand/30 bg-brand/10 font-590 text-brand hover:bg-brand/20", else: "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"}"}
             >
               Open issue
+            </.app_link>
+            <button
+              :if={Map.get(item, :kind) == :approval}
+              type="button"
+              phx-click="deny_approval"
+              phx-value-approval_id={item.source_id}
+              data-confirm="Deny this approval request?"
+              class={[
+                "rounded-lg border border-rose-500/30 bg-rose-500/10 text-xs font-510 text-rose-200 transition-colors hover:bg-rose-500/15",
+                if(@digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2")
+              ]}
+            >
+              Deny
+            </button>
+            <button
+              :if={Map.get(item, :kind) == :approval}
+              type="button"
+              phx-click="approve_approval"
+              phx-value-approval_id={item.source_id}
+              data-confirm="Approve this request and let the agent continue?"
+              class={[
+                "rounded-lg border border-emerald-500/30 bg-emerald-500/15 text-xs font-590 text-emerald-200 transition-colors hover:bg-emerald-500/25",
+                if(@digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2")
+              ]}
+            >
+              Approve
+            </button>
+            <.app_link
+              :if={owner_decision_item?(item) and item.target_path}
+              navigate={item.target_path}
+              class={"rounded-lg border border-border bg-surface text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary #{if @digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2"}"}
+            >
+              {item.target_label || "Open details"}
             </.app_link>
             <.app_link
               :if={item.review_nudge && item.review_nudge.target_path}

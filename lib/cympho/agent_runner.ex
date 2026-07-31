@@ -51,16 +51,10 @@ defmodule Cympho.AgentRunner do
   defp build_claude_command(issue, agent_id, resume_decision, opts) do
     command = cli_command(opts)
 
-    # Headless runs have no human to approve tool prompts: without the
-    # permissions bypass every Bash/Edit call is denied and the agent burns
-    # its turns flailing, then fails the action contract.
-    base = [
-      "-p",
-      "--bare",
-      "--dangerously-skip-permissions",
-      "--output-format",
-      "json"
-    ]
+    base =
+      ["-p", "--bare"] ++
+        permission_args(issue) ++
+        ["--output-format", "json"]
 
     prompt = build_prompt(issue, agent_id, opts)
 
@@ -80,6 +74,27 @@ defmodule Cympho.AgentRunner do
     # Build the full bash command with piped input
     bash_command(command, args, prompt)
   end
+
+  # Plan and Ask runs may inspect the checkout but must not change it. Claude's
+  # plan permission mode enforces that at tool execution time; standard runs
+  # remain unattended and writable under the existing bypass behavior.
+  defp permission_args(issue) do
+    if read_only_work_mode?(issue) do
+      ["--permission-mode", "plan"]
+    else
+      ["--dangerously-skip-permissions"]
+    end
+  end
+
+  defp read_only_work_mode?(%{work_mode: mode})
+       when mode in [:planning, :ask, "planning", "ask"],
+       do: true
+
+  defp read_only_work_mode?(%{"work_mode" => mode})
+       when mode in [:planning, :ask, "planning", "ask"],
+       do: true
+
+  defp read_only_work_mode?(_issue), do: false
 
   defp cli_command(opts) do
     config = option_value(opts, :config) || %{}

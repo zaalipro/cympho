@@ -7,6 +7,7 @@ defmodule Cympho.Finances.TokenUsage do
   alias Cympho.Projects.Project
   alias Cympho.Goals.Goal
   alias Cympho.Issues.Issue
+  alias Cympho.HeartbeatEngine.Run
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -17,6 +18,7 @@ defmodule Cympho.Finances.TokenUsage do
     belongs_to :project, Project
     belongs_to :goal, Goal
     belongs_to :issue, Issue
+    belongs_to :heartbeat_run, Run
 
     field :provider, :string
     field :model, :string
@@ -40,6 +42,7 @@ defmodule Cympho.Finances.TokenUsage do
       :project_id,
       :goal_id,
       :issue_id,
+      :heartbeat_run_id,
       :provider,
       :model,
       :input_tokens,
@@ -59,6 +62,8 @@ defmodule Cympho.Finances.TokenUsage do
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:goal_id)
     |> foreign_key_constraint(:issue_id)
+    |> foreign_key_constraint(:heartbeat_run_id)
+    |> unique_constraint(:heartbeat_run_id)
   end
 
   defp compute_total_tokens(changeset) do

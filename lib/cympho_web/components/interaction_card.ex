@@ -130,6 +130,15 @@ defmodule CymphoWeb.Components.InteractionCard do
       >
         {Map.get(@interaction.payload, "details")}
       </div>
+      <p
+        :if={Map.has_key?(@interaction.payload, "target_revision_number")}
+        class="text-xs text-text-quaternary"
+      >
+        Pinned to {Map.get(@interaction.payload, "target_document_title", "plan")} revision {Map.get(
+          @interaction.payload,
+          "target_revision_number"
+        )}.
+      </p>
     </div>
     """
   end

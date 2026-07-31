@@ -575,7 +575,7 @@ defmodule Cympho.Wakes do
         ) ::
           {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
   def do_wake_agent(agent_id, issue_id, reason, triggered_by_type, triggered_by_id, metadata) do
-    with :ok <- wake_runtime_allowed?(issue_id) do
+    with :ok <- wake_runtime_allowed?(agent_id, issue_id) do
       attrs = %{
         agent_id: agent_id,
         issue_id: issue_id,
@@ -596,16 +596,19 @@ defmodule Cympho.Wakes do
     end
   end
 
-  defp wake_runtime_allowed?(nil), do: :ok
-  defp wake_runtime_allowed?(""), do: :ok
+  defp wake_runtime_allowed?(_agent_id, nil), do: :ok
+  defp wake_runtime_allowed?(_agent_id, ""), do: :ok
 
-  defp wake_runtime_allowed?(issue_id) when is_binary(issue_id) do
+  defp wake_runtime_allowed?(agent_id, issue_id) when is_binary(issue_id) do
     case Repo.get(Issue, issue_id) do
       nil ->
         {:error, :issue_not_found}
 
       %Issue{} = issue ->
         cond do
+          not agent_matches_issue_company?(agent_id, issue.company_id) ->
+            {:error, :company_mismatch}
+
           Issues.issue_runtime_paused?(issue) ->
             {:error, :issue_runtime_paused}
 
@@ -618,7 +621,20 @@ defmodule Cympho.Wakes do
     end
   end
 
-  defp wake_runtime_allowed?(_issue_id), do: {:error, :invalid_issue}
+  defp wake_runtime_allowed?(_agent_id, _issue_id), do: {:error, :invalid_issue}
+
+  defp agent_matches_issue_company?(agent_id, issue_company_id)
+       when is_binary(agent_id) and is_binary(issue_company_id) do
+    case Repo.get(Agent, agent_id) do
+      %Agent{company_id: agent_company_id} when is_binary(agent_company_id) ->
+        agent_company_id == issue_company_id
+
+      _ ->
+        true
+    end
+  end
+
+  defp agent_matches_issue_company?(_agent_id, _issue_company_id), do: true
 
   defp company_paused?(nil), do: false
 
@@ -700,10 +716,13 @@ defmodule Cympho.Wakes do
 
   def list_review_queue({:agent, agent_id}, opts) when is_binary(agent_id) do
     limit = Keyword.get(opts, :limit, 50)
+    company_id = Keyword.get(opts, :company_id)
 
     AgentWake
-    |> where([w], w.agent_id == ^agent_id and w.status in ["pending", "running"])
-    |> where([w], w.reason in ^@review_queue_reasons)
+    |> join(:inner, [w], i in assoc(w, :issue))
+    |> where([w, _i], w.agent_id == ^agent_id and w.status in ["pending", "running"])
+    |> where([w, _i], w.reason in ^@review_queue_reasons)
+    |> scope_review_queue_company(company_id)
     |> order_by([w], desc: w.inserted_at)
     |> limit(^limit)
     |> preload([:issue, :agent])
@@ -728,6 +747,12 @@ defmodule Cympho.Wakes do
   end
 
   def list_review_queue(_, _), do: []
+
+  defp scope_review_queue_company(query, company_id) when is_binary(company_id) do
+    where(query, [_w, i], i.company_id == ^company_id)
+  end
+
+  defp scope_review_queue_company(query, _company_id), do: query
 
   @doc """
   Returns active review-nudge wakes for the given issues.

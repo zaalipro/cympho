@@ -1214,6 +1214,7 @@ defmodule Cympho.Issues do
         )
 
         CymphoWeb.Events.broadcast_issue_update(issue, :issue_created)
+        Cympho.Telemetry.issue_created(issue)
         issue = maybe_classify_role(issue, attrs)
         issue = maybe_launch_swarm(issue, attrs)
         maybe_auto_ignite(issue, attrs)
@@ -1591,6 +1592,22 @@ defmodule Cympho.Issues do
       {:ok, updated}
     end
   end
+
+  @doc "Updates an issue's agent work contract using the supported mode whitelist."
+  def set_work_mode(%Issue{} = issue, mode) when mode in [:standard, :planning, :ask] do
+    update_issue(issue, %{work_mode: mode})
+  end
+
+  def set_work_mode(%Issue{} = issue, mode) when is_binary(mode) do
+    case mode do
+      "standard" -> set_work_mode(issue, :standard)
+      "planning" -> set_work_mode(issue, :planning)
+      "ask" -> set_work_mode(issue, :ask)
+      _ -> {:error, :invalid_work_mode}
+    end
+  end
+
+  def set_work_mode(_issue, _mode), do: {:error, :invalid_work_mode}
 
   # Re-run the LLM classifier when title/description changed AND the prior
   # role was LLM-derived (`monitor_state["routing"]["source"] == "llm"`).
@@ -2300,6 +2317,60 @@ defmodule Cympho.Issues do
   end
 
   @doc """
+  Releases only the exact unbound checkout represented by `issue`.
+
+  Dispatcher startup failures use this compare-and-set before a run owns the
+  checkout. If another run has bound the checkout, or a successor has otherwise
+  updated the issue, cleanup loses safely instead of clearing the new owner.
+  """
+  @spec release_unbound_checkout(Issue.t(), atom()) ::
+          {:ok, Issue.t()} | {:error, :checkout_conflict}
+  def release_unbound_checkout(%Issue{} = issue, target_status \\ :todo) do
+    atomic_release(issue, target_status,
+      require_owner?: true,
+      require_unbound_snapshot?: true
+    )
+  end
+
+  @doc """
+  Atomically binds an agent's checked-out issue to the run that owns it.
+
+  A same-agent retry may bind after the prior terminal run released the issue
+  back to `:todo`; binding promotes it to `:in_progress` in the same compare-
+  and-set. A different run already stored in `checkout_run_id` always wins.
+  """
+  @spec bind_checkout_run(binary(), binary(), binary()) ::
+          {:ok, Issue.t()} | {:error, :not_found | :checkout_run_conflict}
+  def bind_checkout_run(issue_id, agent_id, run_id)
+      when is_binary(issue_id) and is_binary(agent_id) and is_binary(run_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      from(i in Issue,
+        where:
+          i.id == ^issue_id and i.assignee_id == ^agent_id and
+            i.status in ^[:todo, :in_progress] and
+            (is_nil(i.checkout_run_id) or i.checkout_run_id == ^run_id)
+      )
+      |> Repo.update_all(
+        set: [
+          checkout_run_id: run_id,
+          checked_out_at: now,
+          status: :in_progress,
+          updated_at: now
+        ],
+        inc: [lock_version: 1]
+      )
+
+    case count do
+      1 -> get_issue(issue_id)
+      _ -> bind_checkout_run_error(issue_id)
+    end
+  end
+
+  def bind_checkout_run(_issue_id, _agent_id, _run_id), do: {:error, :checkout_run_conflict}
+
+  @doc """
   Clears a stale checkout lock without changing the intended assignee.
 
   Runtime recovery uses this when an issue is stranded by a dead run or stale
@@ -2311,6 +2382,45 @@ defmodule Cympho.Issues do
     atomic_clear_checkout_lock(issue, target_status)
   end
 
+  @doc """
+  Clears checkout metadata only when `run_id` still owns it.
+
+  An unbound checkout is intentionally not treated as owned by a legacy run:
+  it may belong to a newer same-agent dispatch that has not bound its run yet.
+  """
+  @spec clear_checkout_lock_for_run(binary(), binary(), binary(), atom()) ::
+          {:ok, Issue.t()} | {:error, :not_found | :checkout_not_owned}
+  def clear_checkout_lock_for_run(issue_id, agent_id, run_id, target_status \\ :todo)
+
+  def clear_checkout_lock_for_run(issue_id, agent_id, run_id, target_status)
+      when is_binary(issue_id) and is_binary(agent_id) and is_binary(run_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      from(i in Issue,
+        where:
+          i.id == ^issue_id and i.assignee_id == ^agent_id and
+            i.checkout_run_id == ^run_id
+      )
+      |> Repo.update_all(
+        set: [
+          checkout_run_id: nil,
+          checked_out_at: nil,
+          status: target_status,
+          updated_at: now
+        ],
+        inc: [lock_version: 1]
+      )
+
+    case count do
+      1 -> get_issue(issue_id)
+      _ -> checkout_run_clear_error(issue_id)
+    end
+  end
+
+  def clear_checkout_lock_for_run(_issue_id, _agent_id, _run_id, _target_status),
+    do: {:error, :checkout_not_owned}
+
   defp same_company?(%Issue{company_id: nil}, _agent), do: true
   defp same_company?(_issue, %Agent{company_id: nil}), do: true
 
@@ -2318,6 +2428,20 @@ defmodule Cympho.Issues do
     do: issue_company_id == agent_company_id
 
   defp same_company?(_issue, _agent), do: false
+
+  defp bind_checkout_run_error(issue_id) do
+    case Repo.get(Issue, issue_id) do
+      nil -> {:error, :not_found}
+      _issue -> {:error, :checkout_run_conflict}
+    end
+  end
+
+  defp checkout_run_clear_error(issue_id) do
+    case Repo.get(Issue, issue_id) do
+      nil -> {:error, :not_found}
+      _issue -> {:error, :checkout_not_owned}
+    end
+  end
 
   defp company_runtime_paused?(%Issue{company_id: nil}), do: false
 
@@ -2456,6 +2580,7 @@ defmodule Cympho.Issues do
   defp atomic_release(%Issue{} = issue, target_status, opts) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     require_owner? = Keyword.get(opts, :require_owner?, true)
+    require_unbound_snapshot? = Keyword.get(opts, :require_unbound_snapshot?, false)
 
     query =
       from(i in Issue,
@@ -2465,6 +2590,18 @@ defmodule Cympho.Issues do
     query =
       if require_owner? and issue.assignee_id do
         where(query, [i], i.assignee_id == ^issue.assignee_id)
+      else
+        query
+      end
+
+    query =
+      if require_unbound_snapshot? do
+        from(i in query,
+          where:
+            i.status == ^:in_progress and is_nil(i.checkout_run_id) and
+              i.checked_out_at == ^issue.checked_out_at and
+              i.lock_version == ^issue.lock_version
+        )
       else
         query
       end

@@ -57,7 +57,7 @@ defmodule CymphoWeb.Components.NavRailTest do
     assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*7\s*<\/span>/s
   end
 
-  test "renders a visible approvals badge when decisions are pending" do
+  test "keeps approvals in Advanced mode when decisions are pending" do
     html = render_rail(approval_count: 3)
     document = Floki.parse_document!(html)
     [approval_link] = Floki.find(document, "a[href='/approvals?status=pending']")
@@ -65,7 +65,7 @@ defmodule CymphoWeb.Components.NavRailTest do
     assert html =~ ~s(href="/approvals?status=pending")
     assert html =~ ~s(data-testid="nav-badge-approvals")
     assert html =~ ~r/<span[^>]*data-testid="nav-badge-approvals"[^>]*>\s*3\s*<\/span>/s
-    refute Floki.attribute(approval_link, "class") |> Enum.join(" ") =~ "ui-advanced-only"
+    assert Floki.attribute(approval_link, "class") |> Enum.join(" ") =~ "ui-advanced-only"
   end
 
   test "keeps an empty approvals shortcut in Advanced mode" do

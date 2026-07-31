@@ -870,6 +870,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
             # terminate/2 and therefore never sends :session_ended) still
             # frees the concurrency slot and releases the issue.
             ref = Process.monitor(pid)
+            Cympho.Telemetry.dispatch_started(checked_out, agent.id, required_role)
 
             %{
               state
@@ -883,10 +884,11 @@ defmodule Cympho.Orchestrator.Dispatcher do
               "[Dispatcher] Failed to start orchestrator for issue #{issue.id}: #{inspect(reason)}"
             )
 
-            # Undo the checkout: it moved the issue to :in_progress, which
-            # the candidate query never selects, so without this release the
-            # scheduled retry could never re-dispatch the issue.
-            _ = Issues.force_release_issue(checked_out, :todo)
+            # Undo only the checkout snapshot we started from. Orchestrator
+            # creation can lose a checkout_run_id bind race after another run
+            # has become the legitimate owner; unconditional release here
+            # would clear that successor's lock and double-dispatch the issue.
+            _ = Issues.release_unbound_checkout(checked_out, :todo)
 
             record_dispatch_failure(issue, state, :orchestrator_start_failed)
         end
@@ -977,6 +979,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
     next_attempts = min(attempts + 1, @max_retries)
     backoff_ms = backoff_ms_for_attempt(attempts)
     next_retry_at = :os.system_time(:millisecond) + backoff_ms
+
+    Cympho.Telemetry.dispatch_retry_scheduled(issue, next_attempts, backoff_ms)
 
     new_retry_entry = %{attempts: next_attempts, next_retry_at: next_retry_at}
     new_retries = Map.put(state.retry_attempts, issue.id, new_retry_entry)

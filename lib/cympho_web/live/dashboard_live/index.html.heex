@@ -179,10 +179,22 @@
               </span>
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-sm font-510 text-text-primary">
-                  {action.label}
+                  <span class="ui-advanced-only">{action.label}</span>
+                  <span class="ui-simple-only">
+                    {simple_field(action, :label, action.label)}
+                  </span>
                 </span>
                 <span class="block truncate text-[11px] text-text-quaternary">
-                  {Map.get(action, :action)} · {Map.get(action, :detail)}
+                  <span class="ui-advanced-only">
+                    {Map.get(action, :action)} · {Map.get(action, :detail)}
+                  </span>
+                  <span class="ui-simple-only">
+                    {simple_field(action, :action, Map.get(action, :action))} · {simple_field(
+                      action,
+                      :detail,
+                      Map.get(action, :detail)
+                    )}
+                  </span>
                 </span>
               </span>
             </a>

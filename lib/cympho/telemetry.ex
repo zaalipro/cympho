@@ -15,6 +15,10 @@ defmodule Cympho.Telemetry do
       [:cympho, :onboarding, :completed],
       [:cympho, :web, :request, :stop],
       [:cympho, :tool, :call],
+      [:cympho, :tool, :complete],
+      [:cympho, :routing, :classified],
+      [:cympho, :run, :lifecycle],
+      [:cympho, :dispatcher, :dispatch],
       [:cympho, :dispatcher, :stalled_wakeup]
     ]
 
@@ -25,7 +29,13 @@ defmodule Cympho.Telemetry do
     :telemetry.execute(
       [:cympho, :issue, :created],
       %{count: 1},
-      %{status: issue.status, priority: issue.priority, project_id: issue.project_id}
+      %{
+        issue_id: issue.id,
+        company_id: issue.company_id,
+        project_id: issue.project_id,
+        status: issue.status,
+        priority: issue.priority
+      }
     )
   end
 
@@ -68,6 +78,58 @@ defmodule Cympho.Telemetry do
   def onboarding_completed do
     :telemetry.execute([:cympho, :onboarding, :completed], %{count: 1}, %{})
   end
+
+  def run_lifecycle(run, action) when is_map(run) do
+    :telemetry.execute(
+      [:cympho, :run, :lifecycle],
+      %{count: 1, duration_ms: run_duration_ms(run)},
+      %{
+        action: action,
+        run_id: Map.get(run, :id),
+        company_id: Map.get(run, :company_id),
+        agent_id: Map.get(run, :agent_id),
+        issue_id: Map.get(run, :issue_id),
+        status: Map.get(run, :status),
+        adapter: Map.get(run, :adapter)
+      }
+    )
+  end
+
+  def dispatch_started(issue, agent_id, role) do
+    :telemetry.execute(
+      [:cympho, :dispatcher, :dispatch],
+      %{count: 1},
+      %{
+        status: :started,
+        company_id: Map.get(issue, :company_id),
+        issue_id: Map.get(issue, :id),
+        agent_id: agent_id,
+        role: role
+      }
+    )
+  end
+
+  def dispatch_retry_scheduled(issue, attempt, backoff_ms) do
+    :telemetry.execute(
+      [:cympho, :dispatcher, :dispatch],
+      %{count: 1, attempt: attempt, backoff_ms: backoff_ms},
+      %{
+        status: :retry_scheduled,
+        company_id: Map.get(issue, :company_id),
+        issue_id: Map.get(issue, :id),
+        role: Map.get(issue, :assigned_role)
+      }
+    )
+  end
+
+  defp run_duration_ms(%{
+         started_at: %DateTime{} = started_at,
+         completed_at: %DateTime{} = completed_at
+       }) do
+    max(DateTime.diff(completed_at, started_at, :millisecond), 0)
+  end
+
+  defp run_duration_ms(_), do: 0
 
   defp handle_event(_event_name, measurements, metadata, _config) do
     :telemetry.execute(

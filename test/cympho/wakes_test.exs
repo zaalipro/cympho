@@ -768,6 +768,49 @@ defmodule Cympho.WakesTest do
 
       assert [] = Wakes.list_issue_wakes(paused.id)
     end
+
+    test "rejects an issue wake when the agent belongs to another company" do
+      unique = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Wake Tenant Company #{unique}",
+          slug: "wake-tenant-#{unique}"
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Other Wake Tenant Company #{unique}",
+          slug: "other-wake-tenant-#{unique}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Wake Tenant Agent #{unique}",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Foreign wake issue #{unique}",
+          status: :in_progress,
+          company_id: other_company.id
+        })
+
+      assert {:error, :company_mismatch} =
+               Wakes.do_wake_agent(
+                 agent.id,
+                 issue.id,
+                 "issue_commented",
+                 "system",
+                 nil,
+                 %{}
+               )
+
+      assert [] = Wakes.list_issue_wakes(issue.id)
+    end
   end
 
   describe "list_agent_wakes/1" do

@@ -14,7 +14,9 @@ defmodule Cympho.AgentActions do
     AuditTrail,
     Comments,
     Decisions,
+    Documents,
     IssueDigest,
+    IssueThreadInteractions,
     Issues,
     PrincipalPermissions,
     PullRequestContract,
@@ -51,6 +53,7 @@ defmodule Cympho.AgentActions do
   @delivery_roles Agent.delivery_roles()
   @repo_delivery_roles Agent.pr_delivery_roles()
   @text_only_delivery_adapters [:openai_chat]
+  @planning_document_key "work-mode-plan"
 
   # Actions that change governance state require the agent's role to be in this
   # set. Lower-privileged agents that emit them are rejected with
@@ -102,10 +105,10 @@ defmodule Cympho.AgentActions do
         {:error, :rate_limited}
 
       true ->
-        case Validation.ensure_no_contradictory_success(actions) do
-          :ok ->
-            do_execute(issue, agent, actions)
-
+        with :ok <- Validation.ensure_no_contradictory_success(actions),
+             :ok <- Validation.ensure_work_mode_actions(issue, actions) do
+          do_execute(issue, agent, actions)
+        else
           {:error, reason} ->
             maybe_emit_rejection_comment(issue, reason)
             {:error, reason}
@@ -182,6 +185,11 @@ defmodule Cympho.AgentActions do
         # single `current_issue` snapshot causes silent corruption when actions
         # are chained.
         initial_issue = Issues.get_issue!(issue.id)
+
+        case Validation.ensure_work_mode_actions(initial_issue, actions) do
+          :ok -> :ok
+          {:error, reason} -> Repo.rollback(reason)
+        end
 
         {final_issue, results} =
           actions
@@ -285,6 +293,49 @@ defmodule Cympho.AgentActions do
       issue,
       "Action rejected: only CEO/CTO agents may emit approve_issue, request_changes, or block_issue. " <>
         "Use submit_review to escalate, or comment to explain."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:work_mode_action_forbidden, :planning, action_type}
+       ) do
+    system_comment(
+      issue,
+      "#{action_type} rejected: this issue is in Plan first mode. Attach a planning document and use request_confirmation; implementation, delegation, and operational side effects stay locked until the owner accepts."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:work_mode_action_forbidden, :ask, action_type}
+       ) do
+    system_comment(
+      issue,
+      "#{action_type} rejected: this issue is in Ask me first mode. Use one ask_user_questions action with 1–5 structured questions and wait for the owner response."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(%Issue{} = issue, {:work_mode_interaction_required, mode}) do
+    expected = if mode == :ask, do: "ask_user_questions", else: "request_confirmation"
+
+    system_comment(
+      issue,
+      "Action batch rejected: #{mode} mode must end with exactly one #{expected} interaction so the issue pauses for the owner."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(%Issue{} = issue, {:work_mode_interaction_count, mode, 1}) do
+    system_comment(
+      issue,
+      "Action batch rejected: #{mode} mode accepts exactly one structured owner interaction per turn."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(%Issue{} = issue, :planning_document_required) do
+    system_comment(
+      issue,
+      "request_confirmation rejected: Plan first mode needs a reviewable planning document before approval. Attach a document work product with the plan in `description` or `payload.text`, then request confirmation; Cympho will pin the confirmation to that revision."
     )
   end
 
@@ -629,7 +680,7 @@ defmodule Cympho.AgentActions do
     block_issue handoff set_pr_url
     seed_mission_issues delegate escalate intervene
     merge_pr force_fix_pr resolve_conflict cancel_issue
-    swarm_worker_complete
+    swarm_worker_complete ask_user_questions request_confirmation
   )
   defp mutates_issue?(%{"type" => type}) when type in @mutating_action_types, do: true
   defp mutates_issue?(_), do: false
@@ -1012,6 +1063,22 @@ defmodule Cympho.AgentActions do
     end
   end
 
+  defp execute_action(issue, agent, %{"type" => "ask_user_questions"} = action) do
+    create_owner_interaction(issue, agent, :ask_user_questions, %{
+      "message" => action["message"] || "The agent needs your answers before continuing.",
+      "questions" => action["questions"]
+    })
+  end
+
+  defp execute_action(issue, agent, %{"type" => "request_confirmation"} = action) do
+    create_owner_interaction(
+      issue,
+      agent,
+      :request_confirmation,
+      Map.take(action, ["message", "details", "target_document_id"])
+    )
+  end
+
   # Parse-time marker for an unknown action type in an otherwise-valid batch.
   # Surface it as a system comment so the agent self-corrects next turn, but
   # never fail the batch over it.
@@ -1071,7 +1138,17 @@ defmodule Cympho.AgentActions do
     case recent_duplicate_work_product(issue, agent, action["title"], kind) do
       %{id: work_product_id} ->
         # Retried run re-attaching the same artifact — keep the original.
-        {:ok, %{type: "attach_work_product", work_product_id: work_product_id, duplicate: true}}
+        with {:ok, work_product} <- WorkProducts.get_work_product(work_product_id),
+             {:ok, planning_document} <-
+               maybe_sync_planning_document(issue, agent, work_product) do
+          result = %{
+            type: "attach_work_product",
+            work_product_id: work_product_id,
+            duplicate: true
+          }
+
+          {:ok, maybe_put_planning_document_id(result, planning_document)}
+        end
 
       nil ->
         attrs = %{
@@ -1087,7 +1164,11 @@ defmodule Cympho.AgentActions do
 
         case WorkProducts.create_work_product(attrs) do
           {:ok, work_product} ->
-            {:ok, %{type: "attach_work_product", work_product_id: work_product.id}}
+            with {:ok, planning_document} <-
+                   maybe_sync_planning_document(issue, agent, work_product) do
+              result = %{type: "attach_work_product", work_product_id: work_product.id}
+              {:ok, maybe_put_planning_document_id(result, planning_document)}
+            end
 
           error ->
             error
@@ -1209,6 +1290,197 @@ defmodule Cympho.AgentActions do
          assignee_id: updated.assignee_id
        }}
     end
+  end
+
+  defp create_owner_interaction(issue, agent, kind, payload) do
+    issue = Issues.get_issue!(issue.id)
+
+    payload =
+      payload
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+      |> Map.new()
+
+    with {:ok, payload} <- ensure_planning_confirmation_document(issue, agent, kind, payload) do
+      create_or_reuse_owner_interaction(issue, agent, kind, payload)
+    end
+  end
+
+  defp create_or_reuse_owner_interaction(issue, agent, kind, payload) do
+    existing =
+      issue.id
+      |> IssueThreadInteractions.pending_interactions()
+      |> Enum.find(&reusable_owner_interaction?(&1, issue, agent, kind))
+
+    if existing do
+      {:ok,
+       %{
+         type: to_string(kind),
+         interaction_id: existing.id,
+         issue_id: issue.id,
+         duplicate: true
+       }}
+    else
+      with {:ok, interaction} <-
+             IssueThreadInteractions.create_interaction(%{
+               issue_id: issue.id,
+               kind: kind,
+               payload: payload,
+               created_by_agent_id: agent.id
+             }),
+           {:ok, updated} <-
+             update_workflow_issue(issue, agent, %{
+               status: :blocked,
+               assignee_id: agent.id,
+               checkout_run_id: nil,
+               checked_out_at: nil,
+               monitor_state:
+                 (issue.monitor_state || %{})
+                 |> Map.delete("blocker_packet")
+                 |> Map.put("work_mode_wait", work_mode_wait(interaction))
+             }) do
+        {:ok,
+         %{
+           type: to_string(kind),
+           interaction_id: interaction.id,
+           issue_id: updated.id
+         }}
+      end
+    end
+  end
+
+  defp reusable_owner_interaction?(interaction, issue, agent, kind) do
+    wait = Map.get(issue.monitor_state || %{}, "work_mode_wait", %{})
+
+    interaction.kind == kind and
+      interaction.created_by_agent_id == agent.id and
+      issue.status == :blocked and
+      issue.assignee_id == agent.id and
+      Map.get(wait, "interaction_id") == interaction.id and
+      Map.get(wait, "kind") == to_string(kind) and
+      wait_pin_matches_interaction?(wait, interaction.payload) and
+      IssueThreadInteractions.target_revision_current?(interaction)
+  end
+
+  defp wait_pin_matches_interaction?(wait, payload) do
+    Enum.all?(
+      ["target_document_id", "target_revision_number", "target_revision_sha256"],
+      fn key ->
+        case Map.get(wait, key) do
+          nil -> true
+          value -> value == Map.get(payload || %{}, key)
+        end
+      end
+    )
+  end
+
+  defp work_mode_wait(interaction) do
+    %{
+      "interaction_id" => interaction.id,
+      "kind" => to_string(interaction.kind)
+    }
+    |> maybe_put_wait_pin("target_document_id", interaction.payload)
+    |> maybe_put_wait_pin("target_revision_number", interaction.payload)
+    |> maybe_put_wait_pin("target_revision_sha256", interaction.payload)
+  end
+
+  defp maybe_put_wait_pin(wait, key, payload) do
+    case Map.get(payload || %{}, key) do
+      nil -> wait
+      value -> Map.put(wait, key, value)
+    end
+  end
+
+  defp ensure_planning_confirmation_document(
+         %Issue{work_mode: mode} = issue,
+         agent,
+         :request_confirmation,
+         payload
+       )
+       when mode in [:planning, "planning"] do
+    with {:ok, document} <- planning_confirmation_document(issue, agent),
+         :ok <- validate_requested_planning_document(payload, document) do
+      {:ok, Map.put(payload, "target_document_id", document.id)}
+    end
+  end
+
+  defp ensure_planning_confirmation_document(_issue, _agent, _kind, payload),
+    do: {:ok, payload}
+
+  defp planning_confirmation_document(issue, agent) do
+    case Documents.get_document_by_key(issue.id, @planning_document_key) do
+      {:ok, document} ->
+        if is_binary(document.body) and String.trim(document.body) != "" do
+          {:ok, document}
+        else
+          {:error, :planning_document_required}
+        end
+
+      {:error, :not_found} ->
+        issue.id
+        |> WorkProducts.list_work_products()
+        |> Enum.find(&(&1.kind == "document" and &1.created_by_agent_id == agent.id))
+        |> case do
+          nil -> {:error, :planning_document_required}
+          work_product -> maybe_sync_planning_document(issue, agent, work_product)
+        end
+    end
+  end
+
+  defp validate_requested_planning_document(payload, document) do
+    case Map.get(payload, "target_document_id") do
+      nil -> :ok
+      "" -> :ok
+      requested_id when requested_id == document.id -> :ok
+      _requested_id -> {:error, :invalid_planning_document}
+    end
+  end
+
+  defp maybe_sync_planning_document(
+         %Issue{work_mode: mode} = issue,
+         agent,
+         %{kind: "document"} = work_product
+       )
+       when mode in [:planning, "planning"] do
+    body = planning_document_body(work_product)
+
+    if String.trim(body) == "" do
+      {:error, :planning_document_required}
+    else
+      attrs = %{title: work_product.title, format: "markdown", body: body}
+
+      case Documents.get_document_by_key(issue.id, @planning_document_key) do
+        {:ok, document} ->
+          if document.title == work_product.title and document.body == body do
+            {:ok, document}
+          else
+            Documents.update_document(document, attrs, agent.id, "agent")
+          end
+
+        {:error, :not_found} ->
+          Documents.create_document(
+            Map.merge(attrs, %{issue_id: issue.id, key: @planning_document_key})
+          )
+      end
+    end
+  end
+
+  defp maybe_sync_planning_document(_issue, _agent, _work_product), do: {:ok, nil}
+
+  defp planning_document_body(work_product) do
+    description = work_product.description || ""
+    payload_text = Map.get(work_product.payload || %{}, "text", "")
+
+    cond do
+      String.trim(description) != "" -> description
+      is_binary(payload_text) -> payload_text
+      true -> ""
+    end
+  end
+
+  defp maybe_put_planning_document_id(result, nil), do: result
+
+  defp maybe_put_planning_document_id(result, document) do
+    Map.put(result, :planning_document_id, document.id)
   end
 
   defp assign_handoff_owner_for_dispatch(%Issue{} = issue, role) do

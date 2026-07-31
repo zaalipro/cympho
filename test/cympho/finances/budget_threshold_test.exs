@@ -87,7 +87,7 @@ defmodule Cympho.Finances.BudgetThresholdTest do
       assert successful_count <= 1
     end
 
-    test "action_on_exceed='block' prevents token usage recording" do
+    test "action_on_exceed='block' keeps crossing usage auditable" do
       company_id = create_company_id()
 
       {:ok, _policy} =
@@ -122,9 +122,13 @@ defmodule Cympho.Finances.BudgetThresholdTest do
                  cost_usd: Decimal.new("0.01")
                })
 
-      # Verify token usage was not recorded (should still be 5)
+      # The provider already spent the tokens, so the crossing callback is
+      # committed even though the caller receives the hard-stop outcome.
       token_usages = Finances.list_token_usages(company_id)
-      assert length(token_usages) == 5
+      assert length(token_usages) == 6
+
+      incidents = Finances.list_budget_incidents(company_id)
+      assert Enum.any?(incidents, &(&1.event_type == "budget_exceeded"))
     end
 
     test "action_on_exceed='warn' allows token usage recording" do

@@ -76,6 +76,7 @@ defmodule CymphoWeb.QuickIssueController do
     with {:ok, status} <- validate_status(Map.get(params, "status", "todo")),
          :ok <- validate_page_company(company_id, Map.get(params, "company_id")),
          {:ok, priority} <- validate_priority(Map.get(params, "priority", "medium")),
+         {:ok, work_mode} <- validate_work_mode(Map.get(params, "work_mode", "standard")),
          {:ok, project_id} <- validate_project(company_id, Map.get(params, "project_id")),
          {:ok, goal} <- validate_goal(company_id, Map.get(params, "goal_id")),
          :ok <- validate_goal_project(goal, project_id),
@@ -85,6 +86,7 @@ defmodule CymphoWeb.QuickIssueController do
           "title" => String.trim(title),
           "status" => status,
           "priority" => priority,
+          "work_mode" => work_mode,
           "company_id" => company_id
         }
         |> put_optional("project_id", project_id)
@@ -123,6 +125,16 @@ defmodule CymphoWeb.QuickIssueController do
   end
 
   defp validate_priority(_priority), do: {:error, "Choose a valid priority."}
+
+  defp validate_work_mode(work_mode) when is_binary(work_mode) do
+    if work_mode in Enum.map(Issue.work_mode_options(), &to_string/1) do
+      {:ok, work_mode}
+    else
+      {:error, "Choose how the team should begin."}
+    end
+  end
+
+  defp validate_work_mode(_work_mode), do: {:error, "Choose how the team should begin."}
 
   defp validate_project(_company_id, project_id) when project_id in [nil, ""], do: {:ok, nil}
 

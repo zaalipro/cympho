@@ -75,7 +75,14 @@ defmodule CymphoWeb.Events do
       company_id ->
         topic = "company:#{company_id}:runs"
         payload = build_run_payload(run, event_type)
-        Cympho.RateLimiting.dedup_broadcast(topic, "run_status", payload)
+
+        result = Cympho.RateLimiting.dedup_broadcast(topic, "run_status", payload)
+
+        if event_type in [:run_started, :run_completed, :run_failed, :run_cancelled] do
+          Cympho.OwnerAttention.notify_changed(company_id)
+        end
+
+        result
     end
   end
 

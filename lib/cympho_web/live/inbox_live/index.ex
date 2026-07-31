@@ -1,8 +1,9 @@
 defmodule CymphoWeb.InboxLive.Index do
   use CymphoWeb, :live_view
+  alias Cympho.Approvals
   alias Cympho.Inbox
   alias Cympho.Agents
-  alias Cympho.Issues
+  alias Cympho.OwnerAttention
 
   @statuses ~w(action unread read dismissed archived review)
 
@@ -27,6 +28,7 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:agent_counts, %{})
       |> assign(:inbox_command, empty_inbox_command())
       |> assign(:inbox_action_queue, [])
+      |> assign(:owner_attention_items, [])
 
     if connected?(socket) do
       if socket.assigns.selected_agent_id do
@@ -76,6 +78,26 @@ defmodule CymphoWeb.InboxLive.Index do
     {:noreply, load_inbox(socket)}
   end
 
+  def handle_info({:owner_attention_changed, company_id}, socket) do
+    if socket.assigns[:current_company] && socket.assigns.current_company.id == company_id,
+      do: {:noreply, load_inbox(socket)},
+      else: {:noreply, socket}
+  end
+
+  def handle_info({event, _payload}, socket)
+      when event in [
+             :approval_created,
+             :approval_resolved,
+             :approval_cancelled,
+             :approvals_cancelled_for_issue,
+             :board_approval_created,
+             :board_approval_resolved,
+             :board_approval_cancelled,
+             :board_vote_cast
+           ] do
+    {:noreply, load_inbox(socket)}
+  end
+
   def handle_info(%Phoenix.Socket.Broadcast{event: "run_status", payload: payload}, socket) do
     selected_agent_id = socket.assigns[:selected_agent_id]
     for_selected? = selected_agent_id == "all" or payload[:agent_id] == selected_agent_id
@@ -100,6 +122,8 @@ defmodule CymphoWeb.InboxLive.Index do
       else
         socket
       end
+
+    socket = load_inbox(socket)
 
     {:noreply, socket}
   end
@@ -149,6 +173,14 @@ defmodule CymphoWeb.InboxLive.Index do
 
   def handle_event("restore", params, socket) do
     inbox_action(socket, params, &Inbox.restore/2)
+  end
+
+  def handle_event("approve_approval", %{"approval_id" => approval_id}, socket) do
+    resolve_approval(socket, approval_id, :approved, "Approved from Inbox")
+  end
+
+  def handle_event("deny_approval", %{"approval_id" => approval_id}, socket) do
+    resolve_approval(socket, approval_id, :denied, "Denied from Inbox")
   end
 
   def handle_event("filter_status", %{"status" => status}, socket) do
@@ -272,8 +304,9 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp handle_review_action(socket, issue_id, wake_id, target_status, ok_message) do
     with {:ok, issue} <- scoped_get_issue(socket, issue_id),
+         {:ok, wake} <- scoped_wake_if_present(wake_id, issue),
          {:ok, _} <- transition_for_review(issue, target_status),
-         :ok <- consume_wake_if_present(wake_id) do
+         :ok <- consume_wake_if_present(wake) do
       {:noreply,
        socket
        |> put_flash(:info, ok_message)
@@ -289,6 +322,30 @@ defmodule CymphoWeb.InboxLive.Index do
     end
   end
 
+  defp resolve_approval(socket, approval_id, decision, reason) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         %{id: user_id} <- socket.assigns[:current_user],
+         {:ok, _approval} <- Approvals.get_company_approval(company_id, approval_id),
+         {:ok, _resolved} <-
+           Approvals.resolve_approval(approval_id, decision, %{
+             resolved_by_user_id: user_id,
+             resolution_reason: reason
+           }) do
+      message = if decision == :approved, do: "Approval accepted.", else: "Approval denied."
+
+      {:noreply,
+       socket
+       |> put_flash(:info, message)
+       |> load_inbox()}
+    else
+      _ ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Could not resolve this approval.")
+         |> load_inbox()}
+    end
+  end
+
   # `transition_issue_with_review_gates/3` runs the same quality gates an
   # agent's approve_issue action hits, so a human approving from the inbox
   # gets the same enforcement.
@@ -300,17 +357,25 @@ defmodule CymphoWeb.InboxLive.Index do
     Cympho.Issues.transition_issue(issue, :todo)
   end
 
-  defp consume_wake_if_present(nil), do: :ok
-  defp consume_wake_if_present(""), do: :ok
+  defp scoped_wake_if_present(nil, _issue), do: {:ok, nil}
+  defp scoped_wake_if_present("", _issue), do: {:ok, nil}
 
-  defp consume_wake_if_present(wake_id) do
+  defp scoped_wake_if_present(wake_id, issue) do
     case Cympho.Wakes.get_agent_wake(wake_id) do
-      {:ok, wake} ->
-        _ = Cympho.Wakes.consume_wake(wake)
-        :ok
+      {:ok, %{issue_id: issue_id} = wake} when issue_id == issue.id ->
+        {:ok, wake}
 
       _ ->
-        :ok
+        {:error, :wake_not_found}
+    end
+  end
+
+  defp consume_wake_if_present(nil), do: :ok
+
+  defp consume_wake_if_present(wake) do
+    case Cympho.Wakes.consume_wake(wake) do
+      {:ok, _wake} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -322,7 +387,9 @@ defmodule CymphoWeb.InboxLive.Index do
   end
 
   defp load_inbox(socket) do
-    all_items = build_all_inbox_items(socket)
+    attention_items = owner_attention_items(socket)
+    socket = assign(socket, :owner_attention_items, attention_items)
+    all_items = build_all_inbox_items(socket, attention_items)
 
     socket
     |> assign_inbox_counts(length(all_items))
@@ -335,16 +402,17 @@ defmodule CymphoWeb.InboxLive.Index do
     agent_id = socket.assigns[:selected_agent_id]
     status = socket.assigns[:current_status]
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+    attention_items = socket.assigns[:owner_attention_items] || []
 
     cond do
       is_nil(status) ->
-        capped_page(all_items || build_all_inbox_items(socket))
+        capped_page(all_items || build_all_inbox_items(socket, attention_items))
 
       status == "review" ->
-        capped_page(build_review_queue_items(agent_id, company_id))
+        capped_page(Enum.filter(attention_items, &(&1.kind == :review_queue)))
 
       status == "action" ->
-        capped_page(build_human_action_items(socket))
+        capped_page(Enum.reject(attention_items, &(&1.kind == :review_queue)))
 
       agent_id == "all" and company_id ->
         opts = [limit: 100] ++ if(status, do: [status: status], else: [])
@@ -367,6 +435,7 @@ defmodule CymphoWeb.InboxLive.Index do
   defp assign_inbox_counts(socket, all_count \\ nil) do
     agent_id = socket.assigns[:selected_agent_id]
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+    attention_items = socket.assigns[:owner_attention_items] || []
 
     counts =
       cond do
@@ -377,9 +446,9 @@ defmodule CymphoWeb.InboxLive.Index do
 
     counts =
       counts
-      |> Map.put("review", review_queue_count(agent_id, company_id))
-      |> Map.put("action", human_action_count(socket))
-      |> Map.put("all", all_count || length(build_all_inbox_items(socket)))
+      |> Map.put("review", Enum.count(attention_items, &(&1.kind == :review_queue)))
+      |> Map.put("action", Enum.count(attention_items, &(&1.kind != :review_queue)))
+      |> Map.put("all", all_count || length(build_all_inbox_items(socket, attention_items)))
 
     agent_counts = if company_id, do: Inbox.counts_by_agent_for_company(company_id), else: %{}
 
@@ -423,7 +492,7 @@ defmodule CymphoWeb.InboxLive.Index do
     review_count = count_for(counts, "review")
     deferred_count = count_for(counts, "dismissed") + count_for(counts, "archived")
     total = total_count(counts)
-    action_item = first_human_action_item(socket)
+    action_item = first_action_item(socket)
     nudge_item = List.first(nudge_items)
     review_item = first_review_queue_item(socket)
 
@@ -433,9 +502,9 @@ defmodule CymphoWeb.InboxLive.Index do
           %{
             tone: :urgent,
             badge: "Needs action",
-            heading: "Handle your assigned blockers",
+            heading: "Handle your assigned blockers and decisions",
             detail:
-              "#{action_count} #{pluralize(action_count, "task")} need#{if action_count == 1, do: "s"} your decision before agents can keep moving.",
+              "#{action_count} #{pluralize(action_count, "item")} need#{if action_count == 1, do: "s"} your decision before work can keep moving.",
             action_label: "Open my action queue",
             action_path:
               inbox_url(
@@ -564,7 +633,7 @@ defmodule CymphoWeb.InboxLive.Index do
         :human_action,
         "Needs my action",
         action_count,
-        "Issues assigned directly to you.",
+        "Decisions, approvals, and failed work waiting for you.",
         "Open my queue",
         inbox_url(
           socket.assigns.selected_agent_id,
@@ -679,36 +748,18 @@ defmodule CymphoWeb.InboxLive.Index do
   defp nudge_queue_action_path(_socket, _nudge_item), do: "/issues"
 
   defp first_review_queue_item(socket) do
-    socket.assigns.selected_agent_id
-    |> review_scope(socket.assigns[:current_company] && socket.assigns.current_company.id)
-    |> Cympho.Wakes.list_review_queue(limit: 1)
-    |> case do
-      [%{wake: wake, issue: issue} | _] ->
-        %{
-          id: wake.id,
-          kind: :review_queue,
-          wake_id: wake.id,
-          issue: issue,
-          issue_id: issue.id,
-          agent: wake.agent,
-          agent_id: wake.agent_id,
-          status: "review",
-          review_nudge: nil,
-          inserted_at: wake.inserted_at
-        }
-
-      [] ->
-        nil
-    end
+    socket.assigns[:owner_attention_items]
+    |> List.wrap()
+    |> Enum.find(&(&1.kind == :review_queue))
   end
 
-  defp first_human_action_item(socket) do
-    socket
-    |> build_human_action_items()
-    |> List.first()
+  defp first_action_item(socket) do
+    socket.assigns[:owner_attention_items]
+    |> List.wrap()
+    |> Enum.find(&(&1.kind != :review_queue))
   end
 
-  defp build_all_inbox_items(socket) do
+  defp build_all_inbox_items(socket, attention_items) do
     agent_id = socket.assigns[:selected_agent_id]
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
@@ -724,10 +775,24 @@ defmodule CymphoWeb.InboxLive.Index do
           Inbox.list_inbox_for_agent(agent_id, limit: 100)
       end
 
-    (build_human_action_items(socket) ++
-       build_review_queue_items(agent_id, company_id) ++ persisted_items)
-    |> Enum.uniq_by(& &1.issue_id)
-    |> Enum.sort_by(&inbox_item_timestamp/1, :desc)
+    attention_issue_ids =
+      attention_items
+      |> Enum.map(& &1.issue_id)
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    persisted_items =
+      Enum.reject(persisted_items, &MapSet.member?(attention_issue_ids, &1.issue_id))
+
+    (attention_items ++ persisted_items)
+    |> Enum.sort_by(&unified_inbox_sort_key/1)
+  end
+
+  defp unified_inbox_sort_key(item) do
+    severity_rank = %{critical: 0, high: 1, medium: 2, low: 3}
+    rank = Map.get(severity_rank, Map.get(item, :severity), 4)
+
+    {rank, -inbox_item_timestamp(item), to_string(Map.get(item, :id, ""))}
   end
 
   defp inbox_item_timestamp(%{inserted_at: %DateTime{} = timestamp}) do
@@ -742,44 +807,18 @@ defmodule CymphoWeb.InboxLive.Index do
     |> Enum.filter(& &1.review_nudge)
   end
 
-  defp build_human_action_items(socket) do
+  defp owner_attention_items(socket) do
     current_user = socket.assigns[:current_user]
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+    agent_id = socket.assigns[:selected_agent_id]
 
-    case current_user do
-      %{id: user_id} when is_binary(company_id) and is_binary(user_id) ->
-        company_id
-        |> Issues.list_human_action_issues(user_id, limit: 100)
-        |> Enum.map(fn issue ->
-          %{
-            id: "human-action-#{issue.id}",
-            kind: :human_action,
-            issue: issue,
-            issue_id: issue.id,
-            agent: nil,
-            agent_id: nil,
-            target_user: current_user,
-            status: "action",
-            review_nudge: nil,
-            inserted_at: issue.updated_at || issue.inserted_at
-          }
-        end)
+    if is_binary(company_id) and current_user do
+      opts =
+        if is_binary(agent_id) and agent_id != "all", do: [agent_id: agent_id], else: []
 
-      _ ->
-        []
-    end
-  end
-
-  defp human_action_count(socket) do
-    current_user = socket.assigns[:current_user]
-    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
-
-    case current_user do
-      %{id: user_id} when is_binary(company_id) and is_binary(user_id) ->
-        Issues.human_action_count(company_id, user_id)
-
-      _ ->
-        0
+      OwnerAttention.list_items(company_id, current_user, opts)
+    else
+      []
     end
   end
 
@@ -799,6 +838,11 @@ defmodule CymphoWeb.InboxLive.Index do
     end
   end
 
+  defp inbox_item_label(%{kind: kind, title: title})
+       when kind in [:approval, :board_approval, :interaction, :failed_run, :budget_incident] and
+              is_binary(title),
+       do: title
+
   defp inbox_item_label(%{issue: %{identifier: identifier, title: title}}) do
     [identifier, title]
     |> Enum.reject(&(&1 in [nil, ""]))
@@ -807,44 +851,6 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp inbox_item_label(%{issue: %{title: title}}), do: title
   defp inbox_item_label(_item), do: "Inbox item"
-
-  # Returns the "Awaiting my review" pseudo-items: wake-driven entries that
-  # share the inbox row shape so the existing template can render them.
-  # `kind: :review_queue` tags each so we can swap action buttons.
-  defp build_review_queue_items(agent_id, company_id) do
-    scope = review_scope(agent_id, company_id)
-
-    scope
-    |> Cympho.Wakes.list_review_queue(limit: 100)
-    |> Enum.map(fn %{wake: wake, issue: issue} ->
-      %{
-        id: wake.id,
-        kind: :review_queue,
-        wake: wake,
-        wake_id: wake.id,
-        issue: issue,
-        issue_id: issue.id,
-        agent: wake.agent,
-        agent_id: wake.agent_id,
-        status: "review",
-        review_nudge: nil,
-        inserted_at: wake.inserted_at
-      }
-    end)
-  end
-
-  defp review_queue_count(agent_id, company_id) do
-    scope = review_scope(agent_id, company_id)
-    scope |> Cympho.Wakes.list_review_queue(limit: 200) |> length()
-  end
-
-  defp review_scope(agent_id, company_id) do
-    cond do
-      agent_id in [nil, "", "all"] and is_binary(company_id) -> {:company, company_id}
-      is_binary(agent_id) -> {:agent, agent_id}
-      true -> {:agent, nil}
-    end
-  end
 
   defp build_url(socket, overrides) do
     status = Map.get(overrides, "status", socket.assigns.current_status)
@@ -992,6 +998,9 @@ defmodule CymphoWeb.InboxLive.Index do
     cond do
       Map.get(item, :kind) == :human_action -> :human_action
       Map.get(item, :kind) == :review_queue -> :review
+      Map.get(item, :kind) in [:approval, :board_approval, :interaction] -> :decision
+      Map.get(item, :kind) == :failed_run -> :failure
+      Map.get(item, :kind) == :budget_incident -> :spend
       Map.get(item, :review_nudge) -> :evidence
       item.status == "unread" -> :unread
       item.status in ["dismissed", "archived"] -> :deferred
@@ -1001,6 +1010,9 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp kind_icon(:human_action), do: "hero-flag-mini"
   defp kind_icon(:review), do: "hero-check-badge-mini"
+  defp kind_icon(:decision), do: "hero-shield-check-mini"
+  defp kind_icon(:failure), do: "hero-exclamation-triangle-mini"
+  defp kind_icon(:spend), do: "hero-currency-dollar-mini"
   defp kind_icon(:evidence), do: "hero-bolt-mini"
   defp kind_icon(:unread), do: "hero-inbox-arrow-down-mini"
   defp kind_icon(:deferred), do: "hero-archive-box-mini"
@@ -1008,17 +1020,29 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp kind_tile_class(:human_action), do: "border-brand/30 bg-brand/15 text-brand"
   defp kind_tile_class(:review), do: "border-brand/25 bg-brand/10 text-brand"
+  defp kind_tile_class(:decision), do: "border-violet-500/25 bg-violet-500/10 text-violet-200"
+  defp kind_tile_class(:failure), do: "border-rose-500/30 bg-rose-500/10 text-rose-200"
+  defp kind_tile_class(:spend), do: "border-amber-500/30 bg-amber-500/10 text-amber-200"
   defp kind_tile_class(:evidence), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   defp kind_tile_class(:unread), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
   defp kind_tile_class(_), do: "border-border bg-surface text-text-quaternary"
 
   defp kind_chip_label(:human_action), do: "Needs you"
   defp kind_chip_label(:review), do: "Your review"
+  defp kind_chip_label(:decision), do: "Your decision"
+  defp kind_chip_label(:failure), do: "Run needs attention"
+  defp kind_chip_label(:spend), do: "Spend needs attention"
   defp kind_chip_label(:unread), do: "Unread"
   defp kind_chip_label(_), do: nil
 
   defp kind_chip_class(:human_action), do: "border-brand/30 bg-brand/10 text-brand"
   defp kind_chip_class(:review), do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp kind_chip_class(:decision),
+    do: "border-violet-500/25 bg-violet-500/10 text-violet-200"
+
+  defp kind_chip_class(:failure), do: "border-rose-500/30 bg-rose-500/10 text-rose-200"
+  defp kind_chip_class(:spend), do: "border-amber-500/30 bg-amber-500/10 text-amber-200"
   defp kind_chip_class(:unread), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
   defp kind_chip_class(_), do: "border-border bg-surface text-text-tertiary"
 
@@ -1065,12 +1089,6 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp issue_status_label(_), do: "Unknown"
 
-  defp priority_label(priority) when is_atom(priority),
-    do: priority |> to_string() |> String.capitalize()
-
-  defp priority_label(priority) when is_binary(priority), do: String.capitalize(priority)
-  defp priority_label(_), do: "No priority"
-
   defp issue_description(%{description: description}) when is_binary(description) do
     description
     |> String.replace(~r/\s+/, " ")
@@ -1085,11 +1103,25 @@ defmodule CymphoWeb.InboxLive.Index do
   defp target_agent_name(%{target_user: %{name: name}}, _selected_agent) when is_binary(name),
     do: name
 
+  defp target_agent_name(%{target_label_text: label}, _selected_agent)
+       when is_binary(label) and label != "",
+       do: label
+
   defp target_agent_name(_item, %{name: name}) when is_binary(name), do: name
   defp target_agent_name(_item, _selected_agent), do: "Unknown agent"
 
   defp issue_link(issue) when is_nil(issue), do: "#"
   defp issue_link(issue), do: ~p"/issues/#{issue.id}"
+
+  defp owner_decision_item?(item) do
+    Map.get(item, :kind) in [
+      :approval,
+      :board_approval,
+      :interaction,
+      :failed_run,
+      :budget_incident
+    ]
+  end
 
   defp pluralize(1, word), do: word
   defp pluralize(_, word), do: word <> "s"

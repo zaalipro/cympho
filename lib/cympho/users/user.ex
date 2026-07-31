@@ -14,6 +14,7 @@ defmodule Cympho.Users.User do
     field :webhook_enabled, :boolean, default: false
     field :webhook_url, :string
     field :theme, :string, default: "claude"
+    field :onboarding_draft, :map, default: %{}
 
     belongs_to :company, Cympho.Companies.Company
     has_many :memberships, Cympho.Companies.CompanyMembership

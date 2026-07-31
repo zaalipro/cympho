@@ -461,6 +461,13 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_event("combobox_priority", _, socket), do: {:noreply, socket}
 
+  def handle_event("combobox_work_mode", %{"selected" => work_mode}, socket)
+      when is_binary(work_mode) do
+    handle_event("update_work_mode", %{"work_mode" => work_mode}, socket)
+  end
+
+  def handle_event("combobox_work_mode", _, socket), do: {:noreply, socket}
+
   def handle_event("combobox_assignee", %{"selected" => nil}, socket) do
     handle_event("unassign_issue", %{}, socket)
   end
@@ -507,6 +514,23 @@ defmodule CymphoWeb.IssueLive.Show do
           {:error, _changeset} ->
             {:noreply, put_flash(socket, :error, "Failed to update priority")}
         end
+    end
+  end
+
+  @impl true
+  def handle_event("update_work_mode", %{"work_mode" => work_mode}, socket) do
+    case Issues.set_work_mode(socket.assigns.issue, work_mode) do
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(issue: issue)
+         |> put_flash(:info, "Work mode updated")}
+
+      {:error, :invalid_work_mode} ->
+        {:noreply, put_flash(socket, :error, "Choose a valid work mode")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to update work mode")}
     end
   end
 
@@ -897,6 +921,14 @@ defmodule CymphoWeb.IssueLive.Show do
 
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
+      {:error, :stale_target_revision} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "This plan changed after the confirmation was requested. Review the latest revision before confirming it."
+         )}
+
       {:error, :invalid_transition} ->
         {:noreply, put_flash(socket, :error, "Invalid state transition")}
 

@@ -68,6 +68,33 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
                OpenAIChatAdapter.parse_chat_response(body)
     end
 
+    test "preserves allowlisted chat usage and adds canonical accounting fields" do
+      body =
+        Jason.encode!(%{
+          "choices" => [%{"message" => %{"content" => "Done"}}],
+          "usage" => %{
+            "prompt_tokens" => 1_234,
+            "completion_tokens" => 56,
+            "total_tokens" => 1_290,
+            "api_key" => "must-not-propagate"
+          },
+          "cost_usd" => "0.0125"
+        })
+
+      assert {:ok, result} = OpenAIChatAdapter.parse_chat_response(body)
+
+      assert result["usage"] == %{
+               "prompt_tokens" => 1_234,
+               "completion_tokens" => 56,
+               "total_tokens" => 1_290,
+               "input_tokens" => 1_234,
+               "output_tokens" => 56
+             }
+
+      assert result["cost_usd"] == "0.0125"
+      refute Map.has_key?(result["usage"], "api_key")
+    end
+
     test "rejects responses without text content" do
       body = Jason.encode!(%{"choices" => [%{"message" => %{"content" => ""}}]})
       assert {:error, :no_output} = OpenAIChatAdapter.parse_chat_response(body)
@@ -221,6 +248,43 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
 
         assert_receive {:session_started, ^session_id}, 500
         assert_receive {:turn_ended_with_error, ^session_id, {:request_error, "timeout"}}, 1_000
+      end
+    end
+
+    test "redacts credentials and never returns raw provider error bodies" do
+      secret = "sk-provider-secret"
+
+      with_mock Finch,
+        build: fn _, _, _, _ -> :request end,
+        stream: fn :request, Cympho.Finch, init, fun, receive_timeout: _timeout ->
+          body =
+            Jason.encode!(%{
+              "error" => %{"message" => "Credential #{secret} was rejected"},
+              "debug_body" => "raw-provider-body"
+            })
+
+          acc = fun.({:status, 401}, init)
+          acc = fun.({:data, body}, acc)
+          {:ok, acc}
+        end do
+        session_id =
+          OpenAIChatAdapter.run(
+            %{id: "issue-1", title: "Test issue", description: "Test description"},
+            "agent-1",
+            self(),
+            config: %{
+              "endpoint" => "https://cli.llmotions.com/v1",
+              "api_key" => secret,
+              "model" => "gpt-5.6-terra",
+              "timeout" => 10
+            }
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:http_error, 401, "Credential [REDACTED] was rejected"}},
+                       1_000
       end
     end
 

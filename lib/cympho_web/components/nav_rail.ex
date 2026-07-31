@@ -93,7 +93,7 @@ defmodule CymphoWeb.Components.NavRail do
         icon="hero-shield-check-mini"
         current_path={@current_path}
         badge={@approval_count}
-        advanced_only={@approval_count == 0}
+        advanced_only
       />
       <.nav_link
         to={~p"/reviews"}

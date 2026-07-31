@@ -356,7 +356,14 @@ defmodule CymphoWeb.DashboardLive.Index do
             "#{length(operations.recent_failures)} recent #{pluralize(length(operations.recent_failures), "run")} failed — worth a look.",
           action: "Open failures",
           path: "/operations#runtime-failures",
-          tone: :danger
+          tone: :danger,
+          simple: %{
+            icon: "hero-exclamation-triangle-mini",
+            label: "Something went wrong",
+            detail:
+              "#{length(operations.recent_failures)} #{pluralize(length(operations.recent_failures), "attempt")} failed.",
+            action: "See what happened"
+          }
         }
       ),
       if(!runtime_enabled?,
@@ -365,7 +372,13 @@ defmodule CymphoWeb.DashboardLive.Index do
           detail: "Nothing runs or spends money — it is safe to inspect and edit the company.",
           action: "Go live when ready",
           path: "/operations#runtime-launch-checklist",
-          tone: :attention
+          tone: :attention,
+          simple: %{
+            icon: "hero-pause-circle-mini",
+            label: "Nothing is running",
+            detail: "Safe to look around. Nothing costs money yet.",
+            action: "Turn on"
+          }
         }
       ),
       if(company_status == :unconfigured,
@@ -374,7 +387,13 @@ defmodule CymphoWeb.DashboardLive.Index do
           detail: "Set a goal and build your team — setup takes a couple of minutes.",
           action: "Open setup",
           path: "/onboarding",
-          tone: :attention
+          tone: :attention,
+          simple: %{
+            icon: "hero-sparkles-mini",
+            label: "Finish setting up",
+            detail: "Pick a goal and a team. Takes two minutes.",
+            action: "Finish setup"
+          }
         }
       ),
       if(agents == 0,
@@ -383,7 +402,13 @@ defmodule CymphoWeb.DashboardLive.Index do
           detail: "Start with a CEO, a CTO, and an engineer — they take it from there.",
           action: "Create agents",
           path: "/agents/new",
-          tone: :attention
+          tone: :attention,
+          simple: %{
+            icon: "hero-user-plus-mini",
+            label: "Build your team",
+            detail: "Start with a CEO, a CTO, and an engineer.",
+            action: "Add people"
+          }
         }
       ),
       if(blocked > 0,
@@ -392,7 +417,13 @@ defmodule CymphoWeb.DashboardLive.Index do
           detail: "Blocked work needs an owner decision before agents can continue.",
           action: "Review blockers",
           path: "/kanban",
-          tone: :danger
+          tone: :danger,
+          simple: %{
+            icon: "hero-hand-raised-mini",
+            label: "The team is stuck",
+            detail: "#{blocked} #{pluralize(blocked, "task")} can't move without you.",
+            action: "Unblock #{if blocked == 1, do: "it", else: "them"}"
+          }
         }
       ),
       if(runtime_enabled? and queued > 0 and running == 0,
@@ -401,7 +432,13 @@ defmodule CymphoWeb.DashboardLive.Index do
           detail: "#{queued} #{pluralize(queued, "issue")} can be picked up by available agents.",
           action: "Open board",
           path: "/kanban",
-          tone: :brand
+          tone: :brand,
+          simple: %{
+            icon: "hero-clock-mini",
+            label: "Work is waiting",
+            detail: "#{queued} #{pluralize(queued, "task")} ready to be picked up.",
+            action: "See the board"
+          }
         }
       )
     ]
@@ -414,7 +451,13 @@ defmodule CymphoWeb.DashboardLive.Index do
             detail: "Nothing urgent. Agents are working — check the board if you're curious.",
             action: "Open board",
             path: "/kanban",
-            tone: :ok
+            tone: :ok,
+            simple: %{
+              icon: "hero-check-circle-mini",
+              label: "All good",
+              detail: "Nothing needs you. The team is working.",
+              action: "See the board"
+            }
           }
         ]
 
@@ -436,7 +479,13 @@ defmodule CymphoWeb.DashboardLive.Index do
         detail: "Agent actions need your sign-off before they can run.",
         action: "Review approvals",
         path: "/approvals?status=pending",
-        tone: :attention
+        tone: :attention,
+        simple: %{
+          icon: "hero-hand-thumb-up-mini",
+          label: "#{count} #{pluralize(count, "thing")} to approve",
+          detail: "The team is waiting on your OK.",
+          action: "Approve"
+        }
       }
     else
       _ -> nil
@@ -556,6 +605,50 @@ defmodule CymphoWeb.DashboardLive.Index do
   def mode_description(:paused), do: "Agents are paused. Your work is safe and still here."
   def mode_description(_), do: "Finish setup to give your agents a goal and a team."
 
+  # ── Simple-mode copy ────────────────────────────────────────────
+  # Each attention item carries an optional `:simple` map with plain
+  # wording and an icon. Both variants render; CSS shows one. Missing
+  # keys fall back to the advanced copy so a new action is never blank.
+
+  defp simple_field(action, key, fallback) do
+    action
+    |> Map.get(:simple)
+    |> case do
+      %{} = simple -> Map.get(simple, key)
+      _ -> nil
+    end
+    |> Kernel.||(fallback)
+  end
+
+  defp simple_paperclip_label(:critical), do: "Can't run yet"
+  defp simple_paperclip_label(:setup), do: "Needs setup first"
+  defp simple_paperclip_label(_), do: "Not ready to run yet"
+
+  defp simple_paperclip_detail(paperclip) do
+    count =
+      paperclip
+      |> Map.get(:primitives, [])
+      |> Enum.count(&(Map.get(&1, :level) != :healthy))
+
+    case count do
+      0 -> "One thing to check first."
+      n -> "#{n} #{pluralize(n, "thing")} to check first."
+    end
+  end
+
+  # Money in plain words: "$3 of $100 used this month", no percentages
+  # or threshold vocabulary.
+  defp simple_budget_detail(cost, fallback) do
+    spend = Map.get(cost, :budget_spend) || Map.get(cost, :period_cost)
+    limit = Map.get(cost, :budget_limit)
+
+    if spend && limit do
+      "#{format_cost(spend)} of #{format_cost(limit)} used so far."
+    else
+      fallback
+    end
+  end
+
   defp primary_action_badge(%{path: "/operations#owner-signoff-queue"}), do: "Owner decision"
   defp primary_action_badge(%{tone: :danger}), do: "Fix first"
   defp primary_action_badge(%{tone: :attention}), do: "Needs setup"
@@ -576,19 +669,40 @@ defmodule CymphoWeb.DashboardLive.Index do
       class={"card-lift group flex min-w-0 flex-col rounded-xl border p-4 transition hover:bg-surface-hover/40 #{next_action_card_class(Map.get(@action, :tone, :ok))}"}
     >
       <span class={[
-        "self-start rounded-full border px-2 py-0.5 text-[10px] font-590 uppercase tracking-[0.1em]",
+        "ui-advanced-only self-start rounded-full border px-2 py-0.5 text-[10px] font-590 uppercase tracking-[0.1em]",
         next_action_pill_class(Map.get(@action, :tone, :ok))
       ]}>
         {primary_action_badge(@action)}
       </span>
+      <%!-- Simple mode replaces the uppercase pill with a single tone icon:
+           three identical "NEEDS SETUP" chips said nothing worth reading. --%>
+      <span class={[
+        "ui-simple-only self-start rounded-full border p-1.5",
+        next_action_pill_class(Map.get(@action, :tone, :ok))
+      ]}>
+        <span class={[
+          simple_field(@action, :icon, "hero-information-circle-mini"),
+          "block h-4 w-4"
+        ]}>
+        </span>
+      </span>
       <p class="mt-2.5 text-sm font-590 leading-5 text-text-primary">
-        {Map.get(@action, :label)}
+        <span class="ui-advanced-only">{Map.get(@action, :label)}</span>
+        <span class="ui-simple-only">
+          {simple_field(@action, :label, Map.get(@action, :label))}
+        </span>
       </p>
       <p class="mt-1 line-clamp-2 text-xs leading-4 text-text-tertiary">
-        {Map.get(@action, :detail)}
+        <span class="ui-advanced-only">{Map.get(@action, :detail)}</span>
+        <span class="ui-simple-only">
+          {simple_field(@action, :detail, Map.get(@action, :detail))}
+        </span>
       </p>
       <span class="mt-auto flex items-center gap-1.5 pt-3 text-xs font-590 text-brand transition group-hover:text-accent-hover">
-        {Map.get(@action, :action, "Open")}
+        <span class="ui-advanced-only">{Map.get(@action, :action, "Open")}</span>
+        <span class="ui-simple-only">
+          {simple_field(@action, :action, Map.get(@action, :action, "Open"))}
+        </span>
         <span class="hero-arrow-up-right-mini h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-x-0.5">
         </span>
       </span>
@@ -672,7 +786,14 @@ defmodule CymphoWeb.DashboardLive.Index do
         "#{attention} CEO #{pluralize(attention, "outcome")} #{if attention == 1, do: "needs", else: "need"} owner follow-up after failed or silent turns.",
       action: "Open CEO monitor",
       path: "/operations#ceo-outcome-monitor",
-      tone: :danger
+      tone: :danger,
+      simple: %{
+        icon: "hero-exclamation-triangle-mini",
+        label: "The CEO needs you",
+        detail:
+          "#{attention} #{pluralize(attention, "task")} stalled and #{if attention == 1, do: "needs", else: "need"} a look.",
+        action: "Take a look"
+      }
     }
   end
 
@@ -689,7 +810,14 @@ defmodule CymphoWeb.DashboardLive.Index do
         "#{count} CEO owner #{pluralize(count, "update")} #{if count == 1, do: "is", else: "are"} ready for acceptance or revision.",
       action: "Review signoff",
       path: "/operations#owner-signoff-queue",
-      tone: :success
+      tone: :success,
+      simple: %{
+        icon: "hero-hand-thumb-up-mini",
+        label: "Work is ready for you",
+        detail:
+          "#{count} #{pluralize(count, "update")} waiting on your yes or no.",
+        action: "Read #{if count == 1, do: "it", else: "them"}"
+      }
     }
   end
 
@@ -702,7 +830,13 @@ defmodule CymphoWeb.DashboardLive.Index do
         "#{floating} open #{pluralize(floating, "issue")} #{if floating == 1, do: "has", else: "have"} no project or goal.",
       action: "Open goals",
       path: "/goals",
-      tone: :attention
+      tone: :attention,
+      simple: %{
+        icon: "hero-flag-mini",
+        label: "Some work has no aim",
+        detail: "#{floating} #{pluralize(floating, "task")} not tied to anything.",
+        action: "Tie #{if floating == 1, do: "it", else: "them"} up"
+      }
     }
   end
 
@@ -713,7 +847,13 @@ defmodule CymphoWeb.DashboardLive.Index do
       detail: "#{total} open #{pluralize(total, "issue")} should be tied to an active goal.",
       action: "Open goals",
       path: "/goals",
-      tone: :attention
+      tone: :attention,
+      simple: %{
+        icon: "hero-flag-mini",
+        label: "Work has no aim",
+        detail: "#{total} open #{pluralize(total, "task")} with no goal.",
+        action: "Set a goal"
+      }
     }
   end
 
@@ -724,7 +864,13 @@ defmodule CymphoWeb.DashboardLive.Index do
       detail: "Set a mission so new work has something to aim at.",
       action: "Open goals",
       path: "/goals",
-      tone: :attention
+      tone: :attention,
+      simple: %{
+        icon: "hero-flag-mini",
+        label: "No goal yet",
+        detail: "Tell the team what you want.",
+        action: "Set a goal"
+      }
     }
   end
 
@@ -736,7 +882,13 @@ defmodule CymphoWeb.DashboardLive.Index do
       detail: cost_budget_detail(cost, "Spend has crossed the active budget limit."),
       action: "Open budgets",
       path: "/budgets",
-      tone: :danger
+      tone: :danger,
+      simple: %{
+        icon: "hero-banknotes-mini",
+        label: "Over your limit",
+        detail: simple_budget_detail(cost, "Spending went past the limit you set."),
+        action: "Open budget"
+      }
     }
   end
 
@@ -750,7 +902,13 @@ defmodule CymphoWeb.DashboardLive.Index do
         "#{format_tokens(tokens)} unpriced tokens across #{pluralize(requests, "request")}. Add pricing before scaling autonomous runs.",
       action: "Open costs",
       path: "/costs",
-      tone: :attention
+      tone: :attention,
+      simple: %{
+        icon: "hero-banknotes-mini",
+        label: "Costs aren't tracked",
+        detail: "Some work ran without a price attached.",
+        action: "Add prices"
+      }
     }
   end
 
@@ -760,7 +918,13 @@ defmodule CymphoWeb.DashboardLive.Index do
       detail: cost_budget_detail(cost, "Spend is near the configured warning threshold."),
       action: "Review budget",
       path: "/budgets",
-      tone: :attention
+      tone: :attention,
+      simple: %{
+        icon: "hero-banknotes-mini",
+        label: "Check spending",
+        detail: simple_budget_detail(cost, "Spending is getting close to your limit."),
+        action: "Open budget"
+      }
     }
   end
 
@@ -772,7 +936,14 @@ defmodule CymphoWeb.DashboardLive.Index do
           "#{cost_period_label(cost)} is #{format_cost(Map.get(cost, :period_cost))}. Add a company or agent budget before autonomy scales.",
         action: "Create budget",
         path: "/budgets/new",
-        tone: :attention
+        tone: :attention,
+        simple: %{
+          icon: "hero-banknotes-mini",
+          label: "No spending limit",
+          detail:
+            "You've spent #{format_cost(Map.get(cost, :period_cost))} with nothing to stop it.",
+          action: "Set a limit"
+        }
       }
     end
   end
@@ -793,7 +964,13 @@ defmodule CymphoWeb.DashboardLive.Index do
         detail: "#{primitive.label}: #{primitive.summary}",
         action: "Fix #{primitive.label}",
         path: primitive.path,
-        tone: paperclip_action_tone(Map.get(paperclip, :level))
+        tone: paperclip_action_tone(Map.get(paperclip, :level)),
+        simple: %{
+          icon: "hero-exclamation-triangle-mini",
+          label: simple_paperclip_label(Map.get(paperclip, :level)),
+          detail: simple_paperclip_detail(paperclip),
+          action: "Check them"
+        }
       }
     end
   end
@@ -928,7 +1105,14 @@ defmodule CymphoWeb.DashboardLive.Index do
           "#{pre_runtime_stale_count} pre-runtime #{pluralize(pre_runtime_stale_count, "issue")} need focused dispatch before evidence can land.",
         action: "Open launch checklist",
         path: "/operations#runtime-launch-checklist",
-        tone: :attention
+        tone: :attention,
+        simple: %{
+          icon: "hero-play-circle-mini",
+          label: "Ready when you are",
+          detail:
+            "#{pre_runtime_stale_count} #{pluralize(pre_runtime_stale_count, "task")} waiting for the go-ahead.",
+          action: "Start #{if pre_runtime_stale_count == 1, do: "it", else: "them"}"
+        }
       }
     else
       %{
@@ -937,7 +1121,14 @@ defmodule CymphoWeb.DashboardLive.Index do
           "#{stale_count} evidence #{pluralize(stale_count, "request")} need owner follow-up.",
         action: "Open Operations",
         path: "/operations#review-nudges",
-        tone: :attention
+        tone: :attention,
+        simple: %{
+          icon: "hero-clock-mini",
+          label: "Waiting on you",
+          detail:
+            "#{stale_count} #{pluralize(stale_count, "question")} #{if stale_count == 1, do: "has", else: "have"} gone unanswered.",
+          action: "Answer #{if stale_count == 1, do: "it", else: "them"}"
+        }
       }
     end
   end

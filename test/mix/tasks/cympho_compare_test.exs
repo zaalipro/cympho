@@ -28,12 +28,30 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert output |> String.trim_leading() |> String.starts_with?("[")
 
     rows = Jason.decode!(output)
-    assert Enum.any?(rows, &(&1["slug"] == "bring_your_own_agent"))
 
-    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+    assert %{"verdict" => "parity", "evidence" => adapter_evidence} =
+             Enum.find(rows, &(&1["slug"] == "bring_your_own_agent"))
+
+    assert adapter_evidence =~ "broader adapter package catalog"
+
+    assert Enum.all?(rows, fn row ->
+             row["paperclip_revision"] == "c62fa8d6a03377370c3a08ac49320cbba1c44227" and
+               row["paperclip_inspected_on"] == "2026-07-30"
+           end)
+
+    assert %{"verdict" => "parity", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "cost_control"))
 
-    assert evidence =~ "owner-visible spend posture"
+    assert evidence =~ "runtime enforcement is scored separately"
+
+    assert %{"verdict" => "parity", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "runtime_budget_enforcement"))
+
+    assert evidence =~ "OpenAI-compatible usage"
+    assert evidence =~ "tenant-validated, idempotent ledger"
+    assert evidence =~ "company/agent/issue/project/goal"
+    assert evidence =~ "active"
+    assert evidence =~ "process crash"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "adapter_circuit_breaker"))
@@ -66,6 +84,16 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert evidence =~ "current human user"
     assert evidence =~ "notification-only noise"
 
+    assert %{"verdict" => "parity", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "owner_decisions_queue"))
+
+    assert evidence =~ "company-scoped Inbox queue"
+    assert evidence =~ "reviews"
+    assert evidence =~ "approvals"
+    assert evidence =~ "failed runs"
+    assert evidence =~ "budget incidents"
+    assert evidence =~ "pending questions/confirmations/task proposals"
+
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "scoped_agent_task_assignment"))
 
@@ -97,17 +125,32 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert evidence =~ "health diagnostics"
     assert evidence =~ "stale runs"
 
-    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+    assert %{"verdict" => "parity", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "workspaces"))
 
     assert evidence =~ "execution health"
     assert evidence =~ "preview gaps"
+    assert evidence =~ "remote sandbox execution is scored separately"
 
-    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+    assert %{"verdict" => "parity", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "plugins"))
 
-    assert evidence =~ "plugin health"
+    assert evidence =~ "owner-visible health"
     assert evidence =~ "capability gaps"
+    assert evidence =~ "dynamic extension registration is scored separately"
+
+    assert %{"verdict" => "parity", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "local_plugin_catalog_integrity"))
+
+    assert evidence =~ "source-backed"
+    assert evidence =~ "start_link/1"
+    assert evidence =~ "fabricated ratings/download counts are absent"
+
+    assert %{"verdict" => "parity", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "external_otlp_tracing"))
+
+    assert evidence =~ "fail-open OTLP export"
+    assert evidence =~ "allowlisted correlation spans"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "goal_alignment"))
@@ -124,6 +167,14 @@ defmodule Mix.Tasks.CymphoCompareTest do
              Enum.find(rows, &(&1["slug"] == "stale_lock_recovery"))
 
     assert evidence =~ "preserves assignee ownership"
+
+    assert %{"verdict" => "parity", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "run_checkout_ownership"))
+
+    assert evidence =~ "bind checkout_run_id before dispatch"
+    assert evidence =~ "aborts provider invocation"
+    assert evidence =~ "without releasing a successor"
+    assert evidence =~ "compare-clears by run id"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "stale_patrol_exclusion"))
@@ -281,11 +332,20 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert evidence =~ "valid multilingual CLI output"
     assert evidence =~ "malformed subprocess bytes"
 
-    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+    assert %{"verdict" => "parity", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "company_portability"))
 
     assert evidence =~ "non-secret secret manifest"
-    assert evidence =~ "post-import restore checklist"
+    assert evidence =~ "restore checklist"
+    assert evidence =~ "tracked separately"
+
+    assert %{"verdict" => "parity", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "company_import_preview"))
+
+    assert evidence =~ "read-only"
+    assert evidence =~ "planned writes"
+    assert evidence =~ "strict reference validation"
+    assert evidence =~ "non-secret restore requirements"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "company_blueprints"))
@@ -296,6 +356,76 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert evidence =~ "default agents"
     assert evidence =~ "unique capability tags"
     assert evidence =~ "created companies store the manifest"
+
+    assert %{"verdict" => "parity", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "mcp_server"))
+
+    assert evidence =~ "external AI clients"
+
+    assert %{"verdict" => "parity", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "revision_pinned_plan_approval"))
+
+    assert evidence =~ "reject acceptance"
+    assert evidence =~ "target revision is stale"
+
+    assert %{"verdict" => "parity", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "task_work_modes"))
+
+    assert evidence =~ "standard/planning/ask intent"
+    assert evidence =~ "Claude and Codex"
+    assert evidence =~ "read-only"
+    assert evidence =~ "External HTTP/process adapters"
+
+    assert %{"verdict" => "parity", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "resumable_onboarding"))
+
+    assert evidence =~ "allowlisted non-secret user draft"
+    assert evidence =~ "atomically clears"
+    assert evidence =~ "stale replay"
+    assert evidence =~ "duplicate work"
+
+    assert %{"verdict" => "parity", "evidence" => review_nudge_evidence} =
+             Enum.find(rows, &(&1["slug"] == "review_nudges"))
+
+    assert review_nudge_evidence =~ "does not infer superiority"
+
+    assert %{"verdict" => "parity", "evidence" => rate_limit_evidence} =
+             Enum.find(rows, &(&1["slug"] == "rate_limiting"))
+
+    assert rate_limit_evidence =~ "different extension-call boundary"
+
+    expected_open_gaps = [
+      "remote_sandbox_execution",
+      "governed_dynamic_mcp",
+      "durable_eval_feedback",
+      "selective_standard_portability"
+    ]
+
+    for slug <- expected_open_gaps do
+      assert %{"verdict" => "gap", "evidence" => evidence} =
+               Enum.find(rows, &(&1["slug"] == slug))
+
+      assert is_binary(evidence) and evidence != ""
+    end
+
+    assert Enum.find(rows, &(&1["slug"] == "remote_sandbox_execution"))["evidence"] =~
+             "real remote provider"
+
+    assert Enum.find(rows, &(&1["slug"] == "governed_dynamic_mcp"))["evidence"] =~
+             "local plugin lifecycle"
+
+    assert Enum.find(rows, &(&1["slug"] == "durable_eval_feedback"))["evidence"] =~
+             "saved evaluation runs"
+
+    assert %{"verdict" => "parity", "evidence" => mobile_evidence} =
+             Enum.find(rows, &(&1["slug"] == "mobile_safe_area_evidence"))
+
+    assert mobile_evidence =~ "safe-area and dynamic-viewport"
+    assert mobile_evidence =~ "keyboard-open"
+    assert mobile_evidence =~ "landscape evidence"
+
+    assert Enum.find(rows, &(&1["slug"] == "selective_standard_portability"))["evidence"] =~
+             "local/GitHub/ref"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "secrets"))

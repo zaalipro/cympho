@@ -20,7 +20,7 @@ defmodule Cympho.Plugins.ExamplePlugin do
     # Example: Read issues if we have the capability
     if "read:issues" in state.plugin.capabilities do
       case HostServices.list_issues(state.company_id, %{}, state.plugin.capabilities) do
-        {:ok, issues} ->
+        issues when is_list(issues) ->
           HostServices.log(
             state.plugin.id,
             state.company_id,
@@ -41,7 +41,7 @@ defmodule Cympho.Plugins.ExamplePlugin do
     # Example: Get a setting
     api_key = HostServices.get_setting(state.plugin, "api_key", "default-key")
 
-    {:ok, %{state | status: :running, api_key: api_key}}
+    {:ok, state |> Map.put(:status, :running) |> Map.put(:api_key, api_key)}
   end
 
   def handle_message({:process_issue, issue_id}, state) do

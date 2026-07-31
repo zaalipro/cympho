@@ -1630,6 +1630,73 @@ defmodule CymphoWeb.AgentLive.Show do
 
   defp adapter_error_for_run(run), do: AdapterError.from_run(run)
 
+  # ── Simple-mode run history ─────────────────────────────────────
+  # Advanced shows a run as a record (id, adapter, tokens, timings).
+  # Simple shows it as something that happened: did it work, what was
+  # it, when. Everything else stays on the advanced master/detail.
+
+  def simple_run_icon(status) when status in ["succeeded", "completed"],
+    do: "hero-check-circle-mini"
+
+  def simple_run_icon("failed"), do: "hero-exclamation-triangle-mini"
+  def simple_run_icon("cancelled"), do: "hero-no-symbol-mini"
+  def simple_run_icon("running"), do: "hero-play-circle-mini"
+  def simple_run_icon(status) when status in ["pending", "queued"], do: "hero-clock-mini"
+  def simple_run_icon(_), do: "hero-information-circle-mini"
+
+  def simple_run_tone_class(status) when status in ["succeeded", "completed"],
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  def simple_run_tone_class("failed"), do: "border-brand/30 bg-brand/10 text-brand"
+  def simple_run_tone_class("running"), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+
+  def simple_run_tone_class(status) when status in ["pending", "queued"],
+    do: "border-amber-400/25 bg-amber-400/10 text-amber-300"
+
+  def simple_run_tone_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  def simple_run_headline(run) do
+    case run.status do
+      s when s in ["succeeded", "completed"] -> "Finished a task"
+      "failed" -> "Tried and failed"
+      "cancelled" -> "Stopped early"
+      "running" -> "Working on something now"
+      s when s in ["pending", "queued"] -> "Waiting to start"
+      _ -> "Did something"
+    end
+  end
+
+  # Prefer the agent's own summary of the turn; fall back to a plain reason
+  # when the run failed, so a failure row is never just a red icon.
+  def simple_run_detail(run, adapter_error) do
+    summary = run.continuation_summary
+
+    cond do
+      is_binary(summary) and String.trim(summary) != "" ->
+        String.slice(String.trim(summary), 0, 160)
+
+      adapter_error ->
+        simple_adapter_error_reason(adapter_error.category)
+
+      true ->
+        nil
+    end
+  end
+
+  defp simple_adapter_error_reason(:missing_binary), do: "The tool it needs isn't installed."
+  defp simple_adapter_error_reason(:missing_credentials), do: "It has no key to sign in with."
+  defp simple_adapter_error_reason(:auth_failed), do: "Its sign-in was rejected."
+  defp simple_adapter_error_reason(:quota_exceeded), do: "The AI account is out of credit."
+  defp simple_adapter_error_reason(:rate_limited), do: "The AI provider asked us to slow down."
+  defp simple_adapter_error_reason(:provider_unavailable), do: "The AI provider was unreachable."
+  defp simple_adapter_error_reason(:timeout), do: "It took too long and gave up."
+  defp simple_adapter_error_reason(:runtime_blocked), do: "Something is blocking it from running."
+  defp simple_adapter_error_reason(:malformed_output), do: "Its answer came back garbled."
+  defp simple_adapter_error_reason(:action_contract_failed), do: "It asked for something invalid."
+  defp simple_adapter_error_reason(:no_output), do: "It finished without saying anything."
+  defp simple_adapter_error_reason(:nonzero_exit), do: "The tool it runs stopped with an error."
+  defp simple_adapter_error_reason(_), do: "Something went wrong on the way to the AI provider."
+
   defp adapter_health_check(adapter, config) do
     adapter = normalize_adapter(adapter)
 

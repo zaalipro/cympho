@@ -45,7 +45,7 @@ defmodule Cympho.Issues.IssueThreadInteraction do
 
   def resolve_changeset(interaction, attrs) do
     interaction
-    |> cast(attrs, [:status, :resolved_by_user_id, :resolved_at, :payload])
+    |> cast(attrs, [:status, :resolved_by_user_id, :resolved_at])
     |> validate_required([:status, :resolved_by_user_id, :resolved_at])
     |> validate_inclusion(:status, [:accepted, :rejected, :responded])
   end

@@ -121,7 +121,10 @@ defmodule CymphoWeb.IssueLive.Show.Header do
         <div class="flex min-w-0 items-center gap-2.5">
           <span class={digest_dot_class(@digest.tone)} aria-hidden="true"></span>
           <div class="min-w-0">
-            <p class="text-sm font-510 leading-5 text-ink">{@digest.headline}</p>
+            <p class="text-sm font-510 leading-5 text-ink">
+              <span class="ui-advanced-only">{@digest.headline}</span>
+              <span class="ui-simple-only">{simple_headline(@digest)}</span>
+            </p>
             <p
               :if={@last_event}
               class="ui-advanced-only mt-0.5 truncate text-caption text-ink-tertiary"
@@ -136,7 +139,8 @@ defmodule CymphoWeb.IssueLive.Show.Header do
             href={@primary_action.href}
             class={digest_action_class(@digest.tone)}
           >
-            {@primary_action.label}
+            <span class="ui-advanced-only">{@primary_action.label}</span>
+            <span class="ui-simple-only">{simple_action_label(@primary_action.label)}</span>
           </a>
           <button
             :if={@primary_action.type == :event}
@@ -145,7 +149,8 @@ defmodule CymphoWeb.IssueLive.Show.Header do
             phx-value-action={@primary_action.action}
             class={digest_action_class(@digest.tone)}
           >
-            {@primary_action.label}
+            <span class="ui-advanced-only">{@primary_action.label}</span>
+            <span class="ui-simple-only">{simple_action_label(@primary_action.label)}</span>
           </button>
           <button
             :if={@primary_action.type == :live_event}
@@ -154,7 +159,8 @@ defmodule CymphoWeb.IssueLive.Show.Header do
             data-confirm={Map.get(@primary_action, :confirm)}
             class={digest_action_class(@digest.tone)}
           >
-            {@primary_action.label}
+            <span class="ui-advanced-only">{@primary_action.label}</span>
+            <span class="ui-simple-only">{simple_action_label(@primary_action.label)}</span>
           </button>
         </div>
       </div>
@@ -190,6 +196,27 @@ defmodule CymphoWeb.IssueLive.Show.Header do
         %{tone: :quiet, headline: "No action needed."}
     end
   end
+
+  # Simple mode drops the trailing period and the runtime vocabulary: the
+  # headline is read as a state label, not a sentence.
+  defp simple_headline(%{headline: "Ready to run."}), do: "Ready"
+  defp simple_headline(%{headline: "Review needed."}), do: "Needs your review"
+  defp simple_headline(%{headline: "No action needed."}), do: "Nothing to do"
+  defp simple_headline(%{headline: "Closed."}), do: "Done"
+
+  defp simple_headline(%{headline: "Blocked by " <> rest}) do
+    "Stuck on " <> String.trim_trailing(rest, ".")
+  end
+
+  defp simple_headline(%{headline: headline}), do: headline
+
+  # Gate actions are named for the runtime ("queue focused dispatch"). Simple
+  # mode names the outcome instead ("start now"). Unmapped labels pass through.
+  defp simple_action_label("Queue focused dispatch"), do: "Start now"
+  defp simple_action_label("Focus queued"), do: "Starting next"
+  defp simple_action_label("Review evidence"), do: "See the work"
+  defp simple_action_label("Accept owner verification"), do: "Looks good"
+  defp simple_action_label(label), do: label
 
   defp last_event_line([]), do: nil
 

@@ -42,6 +42,11 @@ defmodule Cympho.Issues.Issue do
       default: :backlog
 
     field :priority, Ecto.Enum, values: [:low, :medium, :high, :critical], default: :medium
+
+    field :work_mode, Ecto.Enum,
+      values: [:standard, :planning, :ask],
+      default: :standard
+
     field :lock_version, :integer, default: 0
     field :github_pr_url, :string
     field :github_pr_number, :integer
@@ -103,6 +108,7 @@ defmodule Cympho.Issues.Issue do
       :identifier,
       :status,
       :priority,
+      :work_mode,
       :assignee_id,
       :assignee_user_id,
       :checkout_run_id,
@@ -138,12 +144,14 @@ defmodule Cympho.Issues.Issue do
     |> validate_length(:title, min: 1, max: 255)
     |> validate_number(:issue_number, greater_than: 0)
     |> validate_number(:request_depth, greater_than_or_equal_to: 0)
+    |> validate_inclusion(:work_mode, work_mode_options())
     |> unique_constraint(:identifier, name: :issues_project_id_identifier_index)
     |> unique_constraint(:issue_number, name: :issues_company_id_issue_number_index)
   end
 
   def status_options, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked, :cancelled]
   def priority_options, do: [:low, :medium, :high, :critical]
+  def work_mode_options, do: [:standard, :planning, :ask]
 
   @doc """
   Builds the canonical GitHub PR URL for an issue. Prefers the new

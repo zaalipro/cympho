@@ -1999,7 +1999,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "CEO launch preview"
       assert html =~ "Next setup action"
       assert html =~ "Agrenting API key"
-      assert html =~ "Fix before dispatch."
+      assert html =~ "Pick how this agent runs."
       refute html =~ "test-api-key"
     end
 
@@ -2068,7 +2068,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Runtime paused"
       assert html =~ "operator hold"
       assert html =~ "Open runtime controls"
-      assert html =~ "Resume company runtime before agents start."
+      assert html =~ "Turn the team back on to start."
 
       assert html =~
                "Your agents are paused. Resume them before starting anything new."
@@ -2205,9 +2205,9 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
       assert html =~ ~s(id="issue-simple-preflight-action")
-      assert html =~ "Setup needed"
+      assert html =~ "No safe place to work"
       assert html =~ "Workspace isolation"
-      assert html =~ "Attach a worktree before agents edit files."
+      assert html =~ "Give it its own copy of the code."
       assert html =~ "Shared UI checkout"
       assert html =~ "/workspaces/#{project_workspace.id}"
       assert html =~ "Open workspace"

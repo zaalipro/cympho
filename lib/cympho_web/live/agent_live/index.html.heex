@@ -2,7 +2,7 @@
   <div class="relative z-[1]">
     <.header>
       <div class="min-w-0">
-        <span class="ember-eyebrow">
+        <span class="ui-advanced-only ember-eyebrow">
           Roster · {@status_counts[:running] || 0} running now
         </span>
         <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
@@ -72,69 +72,41 @@
       {@flash[:error]}
     </div>
 
-    <div class="ui-simple-only stagger-children mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+    <%!-- Two facts, not four. "Idle" is just the roster minus "working now", and
+         "Coverage" linked into the operations console — the opposite of a simple
+         flow. The uppercase eyebrow above each number is dropped too: the icon
+         and the sentence already say it. --%>
+    <div class="ui-simple-only stagger-children mb-4 grid gap-2 sm:grid-cols-2">
       <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
         <span class="ui-simple-icon">
           <span class="hero-play-mini h-4 w-4"></span>
         </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Running
-          </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-            {@status_counts[:running] || 0} working now
-          </span>
+        <span class="min-w-0 truncate text-sm font-590 text-text-primary">
+          {@status_counts[:running] || 0} working now
         </span>
       </div>
       <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
         <span class="ui-simple-icon">
-          <span class="hero-moon-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Idle
-          </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-            {@status_counts[:idle] || 0} ready for work
-          </span>
-        </span>
-      </div>
-      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-        <span class="ui-simple-icon">
-          <span class="hero-exclamation-triangle-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Needs attention
-          </span>
           <span class={[
-            "mt-0.5 block truncate text-sm font-590",
-            if((@status_counts[:error] || 0) > 0, do: "text-red-300", else: "text-text-primary")
+            "h-4 w-4",
+            if((@status_counts[:error] || 0) > 0,
+              do: "hero-exclamation-triangle-mini",
+              else: "hero-check-circle-mini"
+            )
           ]}>
-            <%= if (@status_counts[:error] || 0) > 0 do %>
-              {@status_counts[:error]} in error
-            <% else %>
-              All clear
-            <% end %>
           </span>
+        </span>
+        <span class={[
+          "min-w-0 truncate text-sm font-590",
+          if((@status_counts[:error] || 0) > 0, do: "text-red-300", else: "text-text-primary")
+        ]}>
+          <%= if (@status_counts[:error] || 0) > 0 do %>
+            {@status_counts[:error]} need help
+          <% else %>
+            Everyone is fine
+          <% end %>
         </span>
       </div>
-      <a
-        href={~p"/operations#runtime-staffing-gaps"}
-        class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
-      >
-        <span class="ui-simple-icon">
-          <span class="hero-user-group-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Coverage
-          </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary group-hover:text-brand">
-            {(@org_health && @org_health.label) || "No queued work"}
-          </span>
-        </span>
-      </a>
     </div>
 
     <div class="ui-advanced-only stagger-children mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -343,7 +315,7 @@
             <span class="text-xs tabular-nums text-text-quaternary">{length(agents)}</span>
           </div>
           <p class={[
-            "truncate text-xs",
+            "ui-advanced-only truncate text-xs",
             if(group_needs_attention?(agents), do: "text-red-200", else: "text-text-quaternary")
           ]}>
             {group_pulse(agents)}
@@ -401,7 +373,9 @@
             </p>
           </div>
 
-          <div class="lg:w-[64px] lg:shrink-0">
+          <%!-- "0/1" is a capacity ratio, not something a simple-mode owner acts
+               on; the status pill next to it already says idle or working. --%>
+          <div class="ui-advanced-only lg:w-[64px] lg:shrink-0">
             <span
               class={"inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-510 tabular-nums #{workload_tone(workload_for(@workload, agent.id), agent.max_concurrent_jobs)}"}
               title={"#{workload_for(@workload, agent.id)} in progress of #{agent.max_concurrent_jobs} max"}

@@ -7,6 +7,14 @@ defmodule Cympho.Plugins.Worker do
     quote do
       use GenServer
 
+      def start_link(args) do
+        plugin = Keyword.fetch!(args, :plugin)
+
+        GenServer.start_link(__MODULE__, args,
+          name: {:via, Registry, {Cympho.Plugins.ProcessRegistry, plugin.id}}
+        )
+      end
+
       @impl GenServer
       def init(args) do
         plugin = Keyword.fetch!(args, :plugin)
@@ -18,9 +26,7 @@ defmodule Cympho.Plugins.Worker do
           status: :initialized
         }
 
-        case handle_init(state) do
-          {:ok, state} -> {:ok, state}
-        end
+        Cympho.Plugins.Worker.normalize_init_result(handle_init(state))
       end
 
       @impl true
@@ -62,4 +68,8 @@ defmodule Cympho.Plugins.Worker do
   @callback handle_request(term(), term(), map()) :: {:reply, term(), map()} | {:noreply, map()}
   @callback handle_cast_request(term(), map()) :: {:noreply, map()}
   @callback handle_terminate(term(), map()) :: term()
+
+  @doc false
+  def normalize_init_result({:ok, state}), do: {:ok, state}
+  def normalize_init_result({:error, reason}), do: {:stop, reason}
 end

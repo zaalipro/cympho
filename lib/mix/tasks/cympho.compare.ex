@@ -1,26 +1,34 @@
 defmodule Mix.Tasks.Cympho.Compare do
-  @shortdoc "Print a Paperclip comparison with Cympho-side runtime evidence"
+  @shortdoc "Print a two-sided Paperclip comparison with local runtime evidence"
 
   @moduledoc """
   Prints a feature comparison of Cympho vs Paperclip (github.com/paperclipai/paperclip).
 
   Each Cympho row is grounded in the codebase via a runtime check — a
   module/function exists, an Ecto schema is loaded, an OTP child is supervised.
-  The task fails with a non-zero exit code if Cympho is missing local coverage
-  for a feature class Paperclip's public README lists as a differentiator.
-  It is not an independent benchmark of Paperclip.
+  Known gaps are part of the report instead of being omitted from the selected
+  feature list. Use `--strict` when a non-zero exit is useful in an audit; the
+  default report remains usable while planned gaps are open.
 
-      mix cympho.compare           # text table
-      mix cympho.compare --json    # machine-readable
+  Paperclip descriptions are source-review snapshots, not runtime checks. This
+  task is not an independent production benchmark of either application.
+  The Paperclip side is pinned to public revision
+  `c62fa8d6a03377370c3a08ac49320cbba1c44227`, inspected 2026-07-30.
+
+      mix cympho.compare             # text table
+      mix cympho.compare --json      # machine-readable
+      mix cympho.compare --strict    # exit non-zero when any gap is open
 
   Use this in CI to assert Cympho's claimed comparison surface stays intact.
   """
 
   use Mix.Task
 
-  @switches [json: :boolean]
+  @switches [json: :boolean, strict: :boolean]
   @json_log_level :emergency
   @table_log_level :warning
+  @paperclip_revision "c62fa8d6a03377370c3a08ac49320cbba1c44227"
+  @paperclip_inspected_on "2026-07-30"
 
   # Each feature row:
   #   :slug, :paperclip — the claim from their README
@@ -58,6 +66,14 @@ defmodule Mix.Tasks.Cympho.Compare do
       paperclip: "Cancelled/dead runs can leave stale execution locks and checkout conflicts",
       cympho: "Operations recovery clears stale checkout locks without dropping assignees",
       check: &__MODULE__.check_stale_lock_recovery/0
+    },
+    %{
+      slug: "run_checkout_ownership",
+      paperclip:
+        "A run owns checkout through a durable run id and terminal cleanup compare-clears only that run",
+      cympho:
+        "Pending runs atomically bind checkout_run_id before adapter dispatch and clear only their own lock",
+      check: &__MODULE__.check_run_checkout_ownership/0
     },
     %{
       slug: "stale_patrol_exclusion",
@@ -253,6 +269,14 @@ defmodule Mix.Tasks.Cympho.Compare do
       check: &__MODULE__.check_human_action_inbox/0
     },
     %{
+      slug: "owner_decisions_queue",
+      paperclip:
+        "A unified attention service aggregates approvals, reviews, failed runs, blockers, and human actions",
+      cympho:
+        "OwnerAttention normalizes company-scoped human work, approvals, review wakes, unresolved run failures, and budget incidents in Inbox",
+      check: &__MODULE__.check_owner_decisions_queue/0
+    },
+    %{
       slug: "scoped_agent_task_assignment",
       paperclip:
         "Public issues request granular task-assignment grants so non-CEO agents can assign decomposed work without a CEO bottleneck",
@@ -299,6 +323,14 @@ defmodule Mix.Tasks.Cympho.Compare do
       check: &__MODULE__.check_plugins/0
     },
     %{
+      slug: "local_plugin_catalog_integrity",
+      paperclip:
+        "Catalog entries are installable extensions with explicit source and capability metadata",
+      cympho:
+        "The local catalog validates source modules and only offers Install for a proven worker entrypoint",
+      check: &__MODULE__.check_local_plugin_catalog_integrity/0
+    },
+    %{
       slug: "workspaces",
       paperclip: "Isolated execution workspaces, dev servers, preview URLs",
       cympho: "Workspaces context with execution health, services, probes, leases, previews",
@@ -329,13 +361,96 @@ defmodule Mix.Tasks.Cympho.Compare do
       check: &__MODULE__.check_portability/0
     },
     %{
+      slug: "company_import_preview",
+      paperclip: "Dry-run import reports exact actions and collision outcomes before writes",
+      cympho:
+        "A version-aware server preview reports target slug, planned writes, warnings, and secret restore requirements",
+      check: &__MODULE__.check_portability_preview/0
+    },
+    %{
       slug: "company_blueprints",
       paperclip: "16 pre-built companies with specialized agents and skills",
       cympho:
         "Executable onboarding/CLI company blueprints that create agents, goals, projects, and seed issues",
       check: &__MODULE__.check_company_blueprints/0
     },
-    # ---- Cympho-exclusive differentiators (Paperclip README does not mention) ----
+    # ---- Current Paperclip capabilities that must remain visible as open gaps ----
+    %{
+      slug: "runtime_budget_enforcement",
+      paperclip:
+        "Runtime cost events feed scoped policies, incidents, hard stops, and active-work cancellation",
+      cympho:
+        "Run-linked usage feeds one finance path with incidents, preflight blocking, and scoped active-work cancellation",
+      check: &__MODULE__.check_runtime_budget_enforcement/0
+    },
+    %{
+      slug: "task_work_modes",
+      paperclip: "Per-task Agent, Plan, and Ask modes with planning and question-first contracts",
+      cympho:
+        "Issues persist Agent/Plan/Ask intent with prompt/action contracts and read-only Claude/Codex workspace paths",
+      check: &__MODULE__.check_task_work_modes/0
+    },
+    %{
+      slug: "revision_pinned_plan_approval",
+      paperclip: "Plan approval targets the latest reviewed revision",
+      cympho:
+        "Canonical plan confirmations pin an immutable document revision and reject stale acceptance",
+      check: &__MODULE__.check_revision_pinned_plan_approval/0
+    },
+    %{
+      slug: "remote_sandbox_execution",
+      paperclip:
+        "Environment-driver plugins provision and operate remote sandboxes across multiple providers",
+      cympho:
+        "Workspace provider records exist, but no remote environment driver executes their lifecycle",
+      check: &__MODULE__.check_remote_sandbox_execution/0
+    },
+    %{
+      slug: "governed_dynamic_mcp",
+      paperclip:
+        "Governed MCP tool access covers allow, deny, approval, revocation, and rate-limit paths",
+      cympho: "The MCP server exposes a static built-in tool list",
+      check: &__MODULE__.check_governed_dynamic_mcp/0
+    },
+    %{
+      slug: "durable_eval_feedback",
+      paperclip:
+        "Saved skill test runs and persisted feedback exports connect outcomes to agent context",
+      cympho:
+        "Deterministic prompt fixtures and revisioned tuning guardrails exist, but evaluation outcomes and feedback are not durable product records",
+      check: &__MODULE__.check_durable_eval_feedback/0
+    },
+    %{
+      slug: "resumable_onboarding",
+      paperclip:
+        "Onboarding state can survive an interrupted setup and established companies have a guided improvement path",
+      cympho:
+        "Allowlisted non-secret drafts resume setup; Start or Improve can add scoped work without duplicating a company",
+      check: &__MODULE__.check_resumable_onboarding/0
+    },
+    %{
+      slug: "mobile_safe_area_evidence",
+      paperclip:
+        "The public product story includes managing autonomous companies from mobile devices",
+      cympho:
+        "The shell has tested dynamic-viewport/safe-area primitives plus recorded Ego Lite portrait, keyboard-open, and landscape evidence",
+      check: &__MODULE__.check_mobile_safe_area_evidence/0
+    },
+    %{
+      slug: "selective_standard_portability",
+      paperclip:
+        "Portable company packages support selective content and standard local or repository-backed sources",
+      cympho:
+        "V1 whole-company JSON import has a dry-run plan but not a selective standard package workflow",
+      check: &__MODULE__.check_selective_standard_portability/0
+    },
+    %{
+      slug: "external_otlp_tracing",
+      paperclip: "Optional OpenTelemetry trace export is documented and fail-open",
+      cympho: "Optional fail-open OTLP export with allowlisted spans and durable correlation IDs",
+      check: &__MODULE__.check_external_otlp_tracing/0
+    },
+    # ---- Cympho differentiators ----
     %{
       slug: "decision_reversal",
       paperclip:
@@ -345,7 +460,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     },
     %{
       slug: "mcp_server",
-      paperclip: "(not mentioned)",
+      paperclip: "MCP Tool Gateway and Apps expose governed tools to agents",
       cympho:
         "Built-in MCP server (Cympho.Mcp.Server) so external AI models can drive Cympho as tools",
       check: &__MODULE__.check_mcp/0
@@ -390,6 +505,7 @@ defmodule Mix.Tasks.Cympho.Compare do
   def run(argv) do
     {opts, _, _} = OptionParser.parse(argv, strict: @switches)
     json? = Keyword.get(opts, :json, false)
+    strict? = Keyword.get(opts, :strict, false)
 
     gaps =
       with_compare_log_level(json?, fn ->
@@ -406,7 +522,12 @@ defmodule Mix.Tasks.Cympho.Compare do
                 e -> {:gap, "check raised: #{Exception.message(e)}"}
               end
 
-            Map.merge(feature, %{verdict: verdict, evidence: evidence})
+            Map.merge(feature, %{
+              verdict: verdict,
+              evidence: evidence,
+              paperclip_revision: @paperclip_revision,
+              paperclip_inspected_on: @paperclip_inspected_on
+            })
           end)
 
         if json? do
@@ -421,7 +542,7 @@ defmodule Mix.Tasks.Cympho.Compare do
         Enum.count(results, &(&1.verdict == :gap))
       end)
 
-    if gaps > 0, do: System.at_exit(fn _ -> exit({:shutdown, 1}) end)
+    if strict? and gaps > 0, do: System.at_exit(fn _ -> exit({:shutdown, 1}) end)
   end
 
   defp with_compare_log_level(json?, fun) do
@@ -456,6 +577,7 @@ defmodule Mix.Tasks.Cympho.Compare do
 
     IO.puts("")
     IO.puts(IO.ANSI.bright() <> "Cympho vs Paperclip — feature comparison" <> IO.ANSI.reset())
+    IO.puts("Paperclip #{@paperclip_revision} (inspected #{@paperclip_inspected_on})")
     IO.puts(String.duplicate("─", 78))
 
     Enum.each(results, fn row ->
@@ -512,8 +634,8 @@ defmodule Mix.Tasks.Cympho.Compare do
 
     cond do
       length(present) == length(expected) ->
-        {:exceeds,
-         "#{length(registered)} registered adapter types (#{Enum.join(registered, ", ")}) — Cympho covers the common local/CLI/HTTP adapter classes and adds openai_chat plus agrenting"}
+        {:parity,
+         "#{length(registered)} registered Cympho adapter types (#{Enum.join(registered, ", ")}); Paperclip's pinned source exposes a broader adapter package catalog, while Cympho covers the common local/CLI/HTTP paths and adds explicit OpenAI-compatible chat plus Agrenting support"}
 
       length(present) > 0 ->
         {:gap, "only #{length(present)}/#{length(expected)} adapters registered"}
@@ -603,6 +725,29 @@ defmodule Mix.Tasks.Cympho.Compare do
        "Operations recovery detects stale checked-out issues, clears checkout_run_id/checked_out_at, and preserves assignee ownership for the next dispatch"}
     else
       {:gap, "stale checkout lock recovery primitives are incomplete"}
+    end
+  end
+
+  def check_run_checkout_ownership do
+    heartbeat_source = source_for(Cympho.HeartbeatEngine)
+    orchestrator_source = source_for(Cympho.Orchestrator)
+    dispatcher_source = source_for(Cympho.Orchestrator.Dispatcher)
+
+    checks = [
+      module_with_fun?(Cympho.Issues, :bind_checkout_run, 3),
+      module_with_fun?(Cympho.Issues, :clear_checkout_lock_for_run, 4),
+      module_with_fun?(Cympho.Issues, :release_unbound_checkout, 2),
+      String.contains?(heartbeat_source, "maybe_bind_checkout"),
+      String.contains?(orchestrator_source, "bind_checkout: true"),
+      String.contains?(orchestrator_source, "adapter dispatch aborted"),
+      String.contains?(dispatcher_source, "release_unbound_checkout")
+    ]
+
+    if Enum.all?(checks) do
+      {:parity,
+       "New runs bind checkout_run_id before dispatch, start failure aborts provider invocation, ownership conflicts cancel the duplicate without releasing a successor, and terminal cleanup compare-clears by run id"}
+    else
+      {:gap, "checkout_run_id is not yet bound and compare-cleared through the runtime path"}
     end
   end
 
@@ -814,8 +959,8 @@ defmodule Mix.Tasks.Cympho.Compare do
 
     cond do
       has_budgets and has_finances and has_posture and has_period and has_unpriced_guard ->
-        {:exceeds,
-         "Budgets + Finances hard stops plus owner-visible spend posture, remaining budget, incident-aware warnings, and unpriced token-usage alerts so zero-cost model gaps are not rendered as clean $0.00 spend"}
+        {:parity,
+         "Budgets + Finances expose spend posture, remaining budget, incident warnings, and unpriced-usage alerts; runtime enforcement is scored separately"}
 
       has_budgets and has_finances ->
         {:parity, "Budgets + Finances contexts present"}
@@ -998,28 +1143,47 @@ defmodule Mix.Tasks.Cympho.Compare do
   end
 
   def check_human_action_inbox do
-    issues_source = source_for(Cympho.Issues)
     inbox_live_source = source_for(CymphoWeb.InboxLive.Index)
     inbox_template_source = template_source_for(CymphoWeb.InboxLive.Index, "index.html.heex")
 
     checks = [
-      module_with_fun?(Cympho.Issues, :list_human_action_issues, 3),
-      module_with_fun?(Cympho.Issues, :human_action_count, 2),
-      String.contains?(issues_source, "assignee_user_id"),
-      String.contains?(issues_source, "@terminal_issue_statuses"),
-      String.contains?(inbox_live_source, "Map.put(\"action\", human_action_count(socket))"),
-      String.contains?(inbox_live_source, "build_human_action_items"),
-      String.contains?(inbox_live_source, "human_action_count"),
+      module_with_fun?(Cympho.OwnerAttention, :list_items, 3),
+      module_with_fun?(Cympho.OwnerAttention, :unresolved_count, 2),
+      String.contains?(inbox_live_source, "OwnerAttention.list_items"),
+      String.contains?(inbox_live_source, "owner_attention_items"),
+      String.contains?(inbox_live_source, "build_inbox_action_queue"),
       String.contains?(inbox_live_source, ":human_action"),
       String.contains?(inbox_template_source, "inbox-action-queue")
     ]
 
     if Enum.all?(checks) do
       {:exceeds,
-       "Inbox exposes a Needs my action lane for non-terminal issues assigned to the current human user, with a dedicated count, filter tab, action-queue card, and issue-backed rows instead of notification-only noise"}
+       "Inbox exposes a Needs my action lane for the current human user from the company-scoped OwnerAttention source of truth, with one unresolved count, filter state, and action queue instead of notification-only noise"}
     else
       {:gap,
        "human action inbox lane is missing issue query, count, filter, or template evidence"}
+    end
+  end
+
+  def check_owner_decisions_queue do
+    inbox_source = source_for(CymphoWeb.InboxLive.Index)
+    auth_source = source_for(CymphoWeb.UserAuth)
+
+    checks = [
+      module_with_fun?(Cympho.OwnerAttention, :list_items, 3),
+      module_with_fun?(Cympho.OwnerAttention, :unresolved_count, 2),
+      String.contains?(inbox_source, "OwnerAttention.list_items"),
+      String.contains?(inbox_source, "approve_approval"),
+      String.contains?(source_for(Cympho.OwnerAttention), "budget_incident_items"),
+      String.contains?(source_for(Cympho.OwnerAttention), "interaction_items"),
+      String.contains?(auth_source, "OwnerAttention.list_items")
+    ]
+
+    if Enum.all?(checks) do
+      {:parity,
+       "OwnerAttention provides one company-scoped Inbox queue and badge for human issues, pending questions/confirmations/task proposals, reviews, approvals, unresolved failed runs, and budget incidents"}
+    else
+      {:gap, "owner actions remain split across separate queues or badge sources"}
     end
   end
 
@@ -1178,8 +1342,8 @@ defmodule Mix.Tasks.Cympho.Compare do
 
     cond do
       has_ctx and has_sup and has_health ->
-        {:exceeds,
-         "Plugins context + supervisor plus owner-visible plugin health for capability gaps, manifest errors, recent error logs, failing webhooks, and supervisor availability"}
+        {:parity,
+         "Plugins context + supervisor plus owner-visible health for capability gaps, manifest errors, recent error logs, failing webhooks, and supervisor availability; dynamic extension registration is scored separately"}
 
       has_ctx and has_sup and running? ->
         {:parity, "Plugins context + supervisor running"}
@@ -1192,6 +1356,28 @@ defmodule Mix.Tasks.Cympho.Compare do
     end
   end
 
+  def check_local_plugin_catalog_integrity do
+    marketplace_source = source_for(CymphoWeb.PluginMarketplaceLive.Index)
+    entries = Cympho.Plugins.Catalog.entries()
+
+    installable_sources_valid? =
+      entries
+      |> Enum.filter(& &1.installable?)
+      |> Enum.all?(&function_exported?(&1.source_module, :start_link, 1))
+
+    synthetic_metrics_absent? =
+      Enum.all?(["rating", "downloads", "documentation_url"], fn field ->
+        not String.contains?(marketplace_source, field)
+      end)
+
+    if entries != [] and installable_sources_valid? and synthetic_metrics_absent? do
+      {:parity,
+       "Local catalog entries are validated and source-backed, installable entries export start_link/1, and fabricated ratings/download counts are absent"}
+    else
+      {:gap, "plugin catalog contains synthetic metadata or unstartable install targets"}
+    end
+  end
+
   def check_workspaces do
     has_context = module_with_fun?(Cympho.Workspaces, :__info__, 1)
     has_health = module_with_fun?(Cympho.Workspaces, :health_summary, 1)
@@ -1199,8 +1385,8 @@ defmodule Mix.Tasks.Cympho.Compare do
 
     cond do
       has_context and has_health and has_preview ->
-        {:exceeds,
-         "Workspaces context plus owner-visible execution health for stale workspaces, runtime services, preview gaps, expiring leases, and failed probes"}
+        {:parity,
+         "Workspaces provide execution health for stale workspaces, runtime services, preview gaps, expiring leases, and failed probes; remote sandbox execution is scored separately"}
 
       has_context ->
         {:parity, "Workspaces context present"}
@@ -1275,14 +1461,26 @@ defmodule Mix.Tasks.Cympho.Compare do
 
     cond do
       has_export and has_import and has_manifest ->
-        {:exceeds,
-         "Companies export/import plus a non-secret secret manifest and remapped post-import restore checklist for omitted credentials"}
+        {:parity,
+         "Companies export/import include a non-secret secret manifest and remapped restore checklist; dry-run and selective portability are tracked separately"}
 
       has_export and has_import ->
         {:parity, "Companies.export_company/1 + import_company/2"}
 
       true ->
         {:gap, "Company portability missing"}
+    end
+  end
+
+  def check_portability_preview do
+    has_preview = module_with_fun?(Cympho.Companies, :preview_import, 2)
+    has_plan_module = module_with_fun?(Cympho.Companies.Portability, :preview_import, 2)
+
+    if has_preview and has_plan_module do
+      {:parity,
+       "Company import uses a read-only, version-aware server plan with deterministic slug collisions, planned writes, strict reference validation, warnings, and non-secret restore requirements; selective packaging is scored separately"}
+    else
+      {:gap, "company import has no side-effect-free domain preview plan"}
     end
   end
 
@@ -1363,6 +1561,259 @@ defmodule Mix.Tasks.Cympho.Compare do
     end
   end
 
+  def check_runtime_budget_enforcement do
+    runtime_source = source_for(Cympho.HeartbeatEngine) <> source_for(Cympho.Orchestrator)
+    finances_source = source_for(Cympho.Finances)
+    openai_source = source_for(Cympho.Adapters.OpenAIChatAdapter)
+
+    checks = [
+      String.contains?(runtime_source, "Finances.record_token_usage"),
+      String.contains?(openai_source, "maybe_put_usage"),
+      String.contains?(openai_source, "prompt_tokens"),
+      String.contains?(openai_source, "completion_tokens"),
+      String.contains?(finances_source, "validate_heartbeat_run_scope"),
+      String.contains?(finances_source, "existing_heartbeat_run_usage"),
+      String.contains?(finances_source, "BudgetIncident"),
+      String.contains?(finances_source, "check_runtime_budget"),
+      String.contains?(finances_source, ~s(scope: "company")),
+      String.contains?(finances_source, ~s(scope: "agent")),
+      String.contains?(finances_source, ~s(scope: "issue")),
+      String.contains?(finances_source, ~s(scope in ["project", "goal"])),
+      String.contains?(finances_source, "cancel_active_runs_for_issue"),
+      String.contains?(finances_source, "cancel_active_runs_for_agent")
+    ]
+
+    if Enum.all?(checks) do
+      {:parity,
+       "OpenAI-compatible usage is normalized into a run-linked, tenant-validated, idempotent ledger; usage plus incidents commit before hard-stop cleanup; future dispatch is blocked; active company/agent/issue/project/goal work is cancelled. A process crash between the committed ledger and external cleanup remains a bounded recovery risk"}
+    else
+      {:gap,
+       "runtime execution does not yet prove persisted usage -> policy incident -> dispatch stop/cancellation as one path"}
+    end
+  end
+
+  def check_task_work_modes do
+    issue_fields = Cympho.Issues.Issue.__schema__(:fields)
+    prompt_source = source_for(Cympho.AgentPrompt)
+    runner_source = source_for(Cympho.AgentRunner)
+    codex_source = source_for(Cympho.Adapters.CodexAdapter)
+
+    if :work_mode in issue_fields and
+         String.contains?(prompt_source, "planning") and
+         String.contains?(prompt_source, "ask") and
+         String.contains?(runner_source, ~s(["--permission-mode", "plan"])) and
+         String.contains?(codex_source, "cympho_read_only_workspace") and
+         String.contains?(codex_source, ~s(["--ro-bind", workspace)) do
+      {:parity,
+       "Issues persist standard/planning/ask intent; prompts and server actions enforce it; Claude and Codex use read-only permission/workspace paths for Plan/Ask. External HTTP/process adapters still depend on their own isolation contract"}
+    else
+      {:gap,
+       "standard/planning/ask intent is missing schema, prompt/action enforcement, or read-only workspace enforcement for repo-capable built-in adapters"}
+    end
+  end
+
+  def check_revision_pinned_plan_approval do
+    interaction_source = source_for(Cympho.IssueThreadInteractions)
+    action_source = source_for(Cympho.AgentActions)
+
+    if String.contains?(interaction_source, "stale_target_revision") and
+         String.contains?(action_source, "ensure_planning_confirmation_document") do
+      {:parity,
+       "Planning confirmations are server-pinned to a revisioned document and reject acceptance when their target revision is stale"}
+    else
+      {:gap, "confirmation acceptance is not pinned to the reviewed document revision"}
+    end
+  end
+
+  def check_remote_sandbox_execution do
+    driver = Cympho.Workspaces.EnvironmentDriver
+    registry = Cympho.Workspaces.EnvironmentDrivers
+
+    provider_drivers = [
+      Cympho.Workspaces.Drivers.E2B,
+      Cympho.Workspaces.Drivers.Daytona,
+      Cympho.Workspaces.Drivers.Cloudflare,
+      Cympho.Workspaces.Drivers.Modal,
+      Cympho.Workspaces.Drivers.Kubernetes
+    ]
+
+    has_driver_contract = module_with_fun?(driver, :behaviour_info, 1)
+    has_registry = module_with_fun?(registry, :resolve, 1)
+
+    has_real_provider =
+      Enum.any?(provider_drivers, fn provider ->
+        module_with_fun?(provider, :acquire, 2) and
+          module_with_fun?(provider, :execute, 3) and
+          module_with_fun?(provider, :release, 2)
+      end)
+
+    if has_driver_contract and has_registry and has_real_provider do
+      {:parity,
+       "A registered remote provider implements acquire/execute/release through the environment-driver lifecycle"}
+    else
+      {:gap,
+       "local workspace records, leases, probes, and previews do not provision or execute a real remote provider; a behavior alone would not close this gap"}
+    end
+  end
+
+  def check_governed_dynamic_mcp do
+    has_registry = module_with_fun?(Cympho.Mcp.ToolRegistry, :__info__, 1)
+    has_grants = module_with_fun?(Cympho.Mcp.ToolGrants, :__info__, 1)
+    has_registration = module_with_fun?(Cympho.Mcp.ToolRegistry, :register, 2)
+    has_unregistration = module_with_fun?(Cympho.Mcp.ToolRegistry, :unregister, 1)
+    has_authorization = module_with_fun?(Cympho.Mcp.ToolGrants, :authorize_call, 3)
+    has_revocation = module_with_fun?(Cympho.Mcp.ToolGrants, :revoke, 2)
+
+    if Enum.all?([
+         has_registry,
+         has_grants,
+         has_registration,
+         has_unregistration,
+         has_authorization,
+         has_revocation
+       ]) do
+      {:parity,
+       "Dynamic MCP tools register and unregister through explicit call authorization and revocation"}
+    else
+      {:gap,
+       "the source-backed local plugin lifecycle does not yet provide dynamic MCP registration, per-agent authorization, approval, revocation, and rate limiting"}
+    end
+  end
+
+  def check_durable_eval_feedback do
+    has_evaluations = module_with_fun?(Cympho.Evaluations, :__info__, 1)
+    has_feedback = module_with_fun?(Cympho.Evaluations, :record_feedback, 2)
+    has_reruns = module_with_fun?(Cympho.Evaluations, :rerun_suite, 2)
+    has_comparison = module_with_fun?(Cympho.Evaluations, :compare_runs, 2)
+
+    if has_evaluations and has_feedback and has_reruns and has_comparison do
+      {:parity,
+       "Saved evaluation runs, provenance, deterministic reruns, comparisons, and owner feedback are durable company-scoped records"}
+    else
+      {:gap,
+       "deterministic fixtures, exact tuning previews, durable config revisions, rollback, and a latest-run canary exist, but saved evaluation runs, immutable outcome provenance, comparisons, and owner feedback do not"}
+    end
+  end
+
+  def check_resumable_onboarding do
+    onboarding_source = source_for(Cympho.Onboarding)
+    live_source = source_for(CymphoWeb.OnboardingLive.Index)
+
+    template_source =
+      template_source_for(CymphoWeb.OnboardingLive.Index, "index.html.heex")
+
+    checks = [
+      :onboarding_draft in Cympho.Users.User.__schema__(:fields),
+      module_with_fun?(Cympho.Onboarding, :get_draft, 1),
+      module_with_fun?(Cympho.Onboarding, :save_draft, 2),
+      module_with_fun?(Cympho.Onboarding, :clear_draft, 1),
+      module_with_fun?(Cympho.Onboarding, :create_improvement, 3),
+      String.contains?(onboarding_source, "@safe_form_fields"),
+      String.contains?(onboarding_source, "@secret_patterns"),
+      String.contains?(onboarding_source, "improvement_authorized?"),
+      String.contains?(onboarding_source, "onboarding_improvement"),
+      String.contains?(onboarding_source, "clear_matching_draft"),
+      String.contains?(onboarding_source, ~s(lock: "FOR UPDATE")),
+      String.contains?(live_source, "improvement_submission_id"),
+      String.contains?(live_source, "Onboarding.clear_draft"),
+      String.contains?(template_source, "Improve this company")
+    ]
+
+    if Enum.all?(checks) do
+      {:parity,
+       "Onboarding persists an allowlisted non-secret user draft with restore/reset cleanup; Start vs Improve rechecks membership, and an improvement submission atomically clears its matching draft and reuses the same goal/CEO issue after a stale replay instead of creating another company or duplicate work"}
+    else
+      {:gap,
+       "the onboarding wizard starts from defaults after a reconnect and only launches a new company; there is no durable non-secret draft or improve-existing workflow"}
+    end
+  end
+
+  def check_mobile_safe_area_evidence do
+    app_css = File.read!("assets/css/app.css")
+    root_layout = File.read!("lib/cympho_web/controllers/layouts/root.html.heex")
+
+    evidence =
+      if File.exists?("docs/MOBILE_QA.md"), do: File.read!("docs/MOBILE_QA.md"), else: ""
+
+    has_safe_area =
+      String.contains?(app_css, "safe-area-inset-bottom") and
+        String.contains?(root_layout, "safe-area-bottom")
+
+    has_dynamic_shell_viewport =
+      (String.contains?(app_css, "100dvh") or String.contains?(root_layout, "100dvh")) and
+        (String.contains?(app_css, "100svh") or String.contains?(root_layout, "100svh")) and
+        File.exists?("test/cympho_web/components/mobile_shell_test.exs")
+
+    has_repeatable_evidence =
+      Enum.all?(
+        ["Ego Lite", "390x844", "keyboard", "landscape"],
+        &String.contains?(evidence, &1)
+      )
+
+    cond do
+      has_safe_area and has_dynamic_shell_viewport and has_repeatable_evidence ->
+        {:parity,
+         "The application shell uses safe-area and dynamic-viewport primitives with repeatable Ego Lite portrait, keyboard-open, and landscape evidence"}
+
+      has_safe_area and has_dynamic_shell_viewport ->
+        {:gap,
+         "the shell has tested 100dvh/100svh and safe-area primitives, but repeatable Ego Lite 390x844, keyboard-open, and landscape evidence is still missing"}
+
+      true ->
+        {:gap,
+         "the application shell lacks complete dynamic-viewport/safe-area implementation and repeatable Ego Lite mobile evidence"}
+    end
+  end
+
+  def check_selective_standard_portability do
+    package = Cympho.Companies.PortablePackage
+
+    checks = [
+      module_with_fun?(package, :export, 2),
+      module_with_fun?(package, :preview, 2),
+      module_with_fun?(package, :import, 2),
+      module_with_fun?(package, :load_source, 2),
+      module_with_fun?(package, :collision_modes, 0)
+    ]
+
+    if Enum.all?(checks) do
+      {:parity,
+       "Selective packages support dry-run merge, explicit collision modes, and pinned local/repository sources"}
+    else
+      {:gap,
+       "the read-only V1 import preview is whole-company JSON only; selective includes, merge/skip/replace, a documented directory format, and local/GitHub/ref sources remain open"}
+    end
+  end
+
+  def check_external_otlp_tracing do
+    runtime_config = File.read!("config/runtime.exs")
+    readme = File.read!("README.md")
+
+    observability_doc =
+      if File.exists?("docs/OBSERVABILITY.md"),
+        do: File.read!("docs/OBSERVABILITY.md"),
+        else: ""
+
+    has_otel_setup = module_with_fun?(Cympho.OpenTelemetry, :setup, 0)
+
+    has_allowlisted_instrumentation =
+      module_with_fun?(Cympho.OpenTelemetry.Instrumentation, :span_spec, 3)
+
+    configured? = String.contains?(runtime_config, "OTEL_EXPORTER_OTLP_ENDPOINT")
+
+    documented? =
+      String.contains?(readme, "docs/OBSERVABILITY.md") and
+        String.contains?(observability_doc, "mix test test/cympho/open_telemetry_test.exs") and
+        String.contains?(observability_doc, "Redaction contract")
+
+    if has_otel_setup and has_allowlisted_instrumentation and configured? and documented? do
+      {:parity,
+       "Optional fail-open OTLP export is runtime-configured with allowlisted correlation spans and an executable redaction/operator guide"}
+    else
+      {:gap, "no optional OTLP exporter and trace-correlation runtime configuration are present"}
+    end
+  end
+
   def check_decisions do
     if module_with_fun?(Cympho.Decisions, :__info__, 1) and
          module_with_fun?(Cympho.Decisions, :reverse_decision, 3),
@@ -1374,7 +1825,7 @@ defmodule Mix.Tasks.Cympho.Compare do
 
   def check_mcp do
     if module_with_fun?(Cympho.Mcp.Server, :__info__, 1),
-      do: {:exceeds, "Cympho.Mcp.Server exposes Cympho as MCP tools to external AI clients"},
+      do: {:parity, "Cympho.Mcp.Server exposes Cympho as tools to external AI clients"},
       else: {:gap, "MCP server missing"}
   end
 
@@ -1416,8 +1867,8 @@ defmodule Mix.Tasks.Cympho.Compare do
   def check_review_nudges do
     if module_with_fun?(Cympho.ReviewNudges, :__info__, 1),
       do:
-        {:exceeds,
-         "Cympho.ReviewNudges — proactive evidence-request tracker; no specific equivalent is called out in Paperclip's public README"},
+        {:parity,
+         "Cympho.ReviewNudges provides proactive evidence-request tracking; this comparison does not infer superiority merely because Paperclip's public README does not name an equivalent module"},
       else: {:gap, "ReviewNudges missing"}
   end
 
@@ -1426,7 +1877,9 @@ defmodule Mix.Tasks.Cympho.Compare do
     has_ip = Process.whereis(Cympho.RateLimiting.IpRateLimiter) != nil
 
     if has_dedup and has_ip,
-      do: {:exceeds, "BroadcastDedup + IpRateLimiter running (per-socket token bucket too)"},
+      do:
+        {:parity,
+         "Cympho BroadcastDedup, IpRateLimiter, and per-socket token buckets protect UI transports; Paperclip's governed MCP rate limits cover a different extension-call boundary and are scored separately"},
       else: {:gap, "rate-limiting GenServers not running: dedup=#{has_dedup} ip=#{has_ip}"}
   end
 

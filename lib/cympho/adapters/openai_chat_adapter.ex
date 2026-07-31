@@ -11,11 +11,13 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
   @behaviour Cympho.Adapters.Adapter
 
   alias Cympho.Adapters.RuntimeTimeout
+  alias Cympho.Secrets.Redaction
 
   @default_timeout 120_000
   @max_timeout 3_600_000
   @default_model "qwen3.7-plus"
   @max_response_bytes 2 * 1024 * 1024
+  @usage_fields ~w(prompt_tokens completion_tokens total_tokens input_tokens output_tokens cost_usd)
   @default_system_prompt """
   You are a Cympho runtime agent. Work only from the supplied issue context and \
   the allowed Cympho action contract. Keep owner-visible progress concise, do \
@@ -110,10 +112,10 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
     ]
 
     Finch.build(:post, url, headers, Jason.encode!(payload))
-    |> stream_to_acc(timeout)
+    |> stream_to_acc(timeout, Enum.filter([api_key], &(is_binary(&1) and &1 != "")))
   end
 
-  defp stream_to_acc(req, timeout) do
+  defp stream_to_acc(req, timeout, secrets) do
     init = %{status: nil, body: [], size: 0, overflow: false}
 
     fun = fn
@@ -145,7 +147,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
 
       {:ok, %{status: status, body: chunks}} ->
         body = chunks |> Enum.reverse() |> IO.iodata_to_binary()
-        {:error, {:http_error, status, error_message(body)}}
+        {:error, {:http_error, status, error_message(body, secrets)}}
 
       {:error, %Finch.Error{} = error, _acc} ->
         {:error, {:finch_error, Exception.message(error)}}
@@ -173,7 +175,12 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
   def parse_chat_response(body) when is_binary(body) do
     with {:ok, decoded} <- Jason.decode(body),
          {:ok, content} <- extract_content(decoded) do
-      {:ok, %{"content" => [%{"type" => "text", "text" => String.trim(content)}]}}
+      result =
+        %{"content" => [%{"type" => "text", "text" => String.trim(content)}]}
+        |> maybe_put_usage(decoded)
+        |> maybe_put_response_cost(decoded)
+
+      {:ok, result}
     else
       {:error, %Jason.DecodeError{} = error} -> {:error, {:parse_error, Exception.message(error)}}
       {:error, reason} -> {:error, reason}
@@ -215,14 +222,75 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
 
   defp normalize_content(_), do: {:error, {:parse_error, "message content is not text"}}
 
-  defp error_message(body) do
+  defp error_message(body, secrets) do
     case Jason.decode(body) do
-      {:ok, %{"error" => %{"message" => message}}} when is_binary(message) -> message
-      {:ok, %{"message" => message}} when is_binary(message) -> message
-      {:ok, decoded} -> inspect(decoded)
-      {:error, _} -> String.slice(body, 0, 2_000)
+      {:ok, %{"error" => %{"message" => message}}} when is_binary(message) ->
+        message |> Redaction.redact(secrets) |> String.slice(0, 1_000)
+
+      {:ok, %{"message" => message}} when is_binary(message) ->
+        message |> Redaction.redact(secrets) |> String.slice(0, 1_000)
+
+      {:ok, _decoded} ->
+        "Provider returned an error response"
+
+      {:error, _} ->
+        "Provider returned a non-JSON error response"
     end
   end
+
+  defp maybe_put_usage(result, %{"usage" => usage}) when is_map(usage) do
+    normalized =
+      usage
+      |> Map.take(@usage_fields)
+      |> Enum.reduce(%{}, fn {key, value}, acc ->
+        case normalize_usage_value(key, value) do
+          nil -> acc
+          normalized_value -> Map.put(acc, key, normalized_value)
+        end
+      end)
+      |> maybe_put("input_tokens", token_count(usage["input_tokens"] || usage["prompt_tokens"]))
+      |> maybe_put(
+        "output_tokens",
+        token_count(usage["output_tokens"] || usage["completion_tokens"])
+      )
+
+    if map_size(normalized) == 0, do: result, else: Map.put(result, "usage", normalized)
+  end
+
+  defp maybe_put_usage(result, _decoded), do: result
+
+  defp maybe_put_response_cost(result, decoded) do
+    case normalize_cost(decoded["total_cost_usd"] || decoded["cost_usd"]) do
+      nil -> result
+      cost -> Map.put(result, "cost_usd", cost)
+    end
+  end
+
+  defp normalize_usage_value("cost_usd", value), do: normalize_cost(value)
+  defp normalize_usage_value(_key, value), do: token_count(value)
+
+  defp token_count(value) when is_integer(value) and value >= 0, do: value
+
+  defp token_count(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {count, ""} when count >= 0 -> count
+      _ -> nil
+    end
+  end
+
+  defp token_count(_value), do: nil
+
+  defp normalize_cost(value) when is_integer(value) and value >= 0, do: value
+  defp normalize_cost(value) when is_float(value) and value >= 0, do: value
+
+  defp normalize_cost(value) when is_binary(value) do
+    case Decimal.parse(String.trim(value)) do
+      {decimal, ""} -> if Decimal.negative?(decimal), do: nil, else: Decimal.to_string(decimal)
+      _ -> nil
+    end
+  end
+
+  defp normalize_cost(_value), do: nil
 
   @impl true
   def health_check(config) do

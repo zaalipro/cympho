@@ -20,6 +20,18 @@ bind_ip =
 
 config :cympho, env: config_env()
 
+# Optional OTLP tracing. Dependencies are marked `runtime: false` and are
+# started explicitly by Cympho only when the base endpoint is present. Keeping
+# raw values here lets the setup module validate them before the SDK can start.
+config :cympho, :open_telemetry,
+  endpoint: System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT"),
+  traces_endpoint: System.get_env("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+  protocol:
+    System.get_env("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL") ||
+      System.get_env("OTEL_EXPORTER_OTLP_PROTOCOL") || "http_protobuf",
+  service_name: System.get_env("OTEL_SERVICE_NAME") || "cympho",
+  deployment_environment: System.get_env("RELEASE_ENV") || to_string(config_env())
+
 endpoint_config = [url: [host: host, port: port]]
 
 endpoint_config =

@@ -77,6 +77,7 @@ defmodule CymphoWeb.UserAuth do
         |> assign_sidebar_data()
         |> subscribe_inbox_badge_updates()
         |> subscribe_approval_badge_updates()
+        |> subscribe_owner_attention_updates()
 
       {:cont, socket}
     end
@@ -139,7 +140,7 @@ defmodule CymphoWeb.UserAuth do
   defp assign_sidebar_data(socket) do
     case socket.assigns[:current_company] do
       %{id: company_id} ->
-        inbox_count = Cympho.Inbox.unread_count_for_company(company_id)
+        inbox_count = owner_inbox_badge_count(company_id, socket.assigns[:current_user])
         approval_count = pending_approval_badge_count(company_id)
 
         socket
@@ -171,8 +172,10 @@ defmodule CymphoWeb.UserAuth do
         end
 
         Phoenix.LiveView.attach_hook(socket, :inbox_badge_count, :handle_info, fn
-          {:company_inbox_count_changed, changed_company_id, count}, socket
+          {:company_inbox_count_changed, changed_company_id, _unread_count}, socket
           when changed_company_id == company_id ->
+            count = owner_inbox_badge_count(company_id, socket.assigns[:current_user])
+
             {:halt,
              socket
              |> assign(:nav_inbox_count, count)
@@ -198,14 +201,47 @@ defmodule CymphoWeb.UserAuth do
                                                                                      socket ->
           if approval_badge_event?(message) do
             count = pending_approval_badge_count(company_id)
+            inbox_count = owner_inbox_badge_count(company_id, socket.assigns[:current_user])
 
             {:cont,
              socket
              |> assign(:nav_approval_count, count)
-             |> assign(:approval_badge_count, count)}
+             |> assign(:approval_badge_count, count)
+             |> assign(:nav_inbox_count, inbox_count)
+             |> assign(:inbox_badge_count, inbox_count)}
           else
             {:cont, socket}
           end
+        end)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp subscribe_owner_attention_updates(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} when is_binary(company_id) ->
+        if Phoenix.LiveView.connected?(socket) do
+          Cympho.OwnerAttention.subscribe(company_id)
+        end
+
+        Phoenix.LiveView.attach_hook(socket, :owner_attention_badge_count, :handle_info, fn
+          {:owner_attention_changed, changed_company_id}, socket
+          when changed_company_id == company_id ->
+            count = owner_inbox_badge_count(company_id, socket.assigns[:current_user])
+
+            socket =
+              socket
+              |> assign(:nav_inbox_count, count)
+              |> assign(:inbox_badge_count, count)
+
+            if socket.view == CymphoWeb.InboxLive.Index,
+              do: {:cont, socket},
+              else: {:halt, socket}
+
+          _message, socket ->
+            {:cont, socket}
         end)
 
       _ ->
@@ -227,7 +263,7 @@ defmodule CymphoWeb.UserAuth do
   end
 
   defp assign_browser_sidebar_data(conn, %{id: company_id}) do
-    inbox_count = Cympho.Inbox.unread_count_for_company(company_id)
+    inbox_count = owner_inbox_badge_count(company_id, conn.assigns[:current_user])
     approval_count = pending_approval_badge_count(company_id)
 
     conn
@@ -254,6 +290,30 @@ defmodule CymphoWeb.UserAuth do
   defp pending_approval_badge_count(company_id) do
     Cympho.Approvals.count_pending_for_company(company_id) +
       Cympho.BoardApprovals.count_pending_for_company(company_id)
+  end
+
+  defp owner_inbox_badge_count(company_id, user) do
+    cap = 99
+    attention_items = Cympho.OwnerAttention.list_items(company_id, user, limit: cap)
+    attention_count = length(attention_items)
+
+    if attention_count >= cap do
+      cap
+    else
+      attention_issue_ids =
+        attention_items
+        |> Enum.map(& &1.issue_id)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+
+      unread_count =
+        Cympho.Inbox.unread_count_for_company_excluding_issues(
+          company_id,
+          attention_issue_ids
+        )
+
+      min(cap, attention_count + unread_count)
+    end
   end
 
   defp approval_badge_event?({event, _payload})

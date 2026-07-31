@@ -11,6 +11,7 @@ defmodule CymphoWeb.CompanyImportLive do
      |> assign(:step, :upload)
      |> assign(:upload_data, nil)
      |> assign(:import_data, nil)
+     |> assign(:preview_plan, nil)
      |> assign(:validation_errors, [])
      |> assign(:slug_strategy, :suffix)
      |> assign(:importing, false)
@@ -53,13 +54,25 @@ defmodule CymphoWeb.CompanyImportLive do
       end)
       |> case do
         [%{} = import_data] ->
-          validation_errors = validate_import_data(import_data)
+          case Companies.preview_import(import_data,
+                 slug_strategy: socket.assigns.slug_strategy
+               ) do
+            {:ok, preview_plan} ->
+              {:noreply,
+               socket
+               |> assign(:import_data, import_data)
+               |> assign(:preview_plan, preview_plan)
+               |> assign(:validation_errors, [])
+               |> assign(:step, :preview)}
 
-          {:noreply,
-           socket
-           |> assign(:import_data, import_data)
-           |> assign(:validation_errors, validation_errors)
-           |> assign(:step, if(validation_errors == [], do: :preview, else: :upload))}
+            {:error, preview_error} ->
+              {:noreply,
+               socket
+               |> assign(:import_data, import_data)
+               |> assign(:preview_plan, nil)
+               |> assign(:validation_errors, preview_error_messages(preview_error))
+               |> assign(:step, :upload)}
+          end
 
         _error ->
           {:noreply, put_flash(socket, :error, "Failed to process uploaded file")}
@@ -68,19 +81,40 @@ defmodule CymphoWeb.CompanyImportLive do
   end
 
   @impl true
-  def handle_event("set_slug_strategy", %{"strategy" => strategy}, socket) do
-    {:noreply, assign(socket, :slug_strategy, String.to_existing_atom(strategy))}
+  def handle_event("set_slug_strategy", %{"strategy" => strategy}, socket)
+      when strategy in ["suffix", "fail"] do
+    slug_strategy = if strategy == "fail", do: :fail, else: :suffix
+
+    case Companies.preview_import(socket.assigns.import_data, slug_strategy: slug_strategy) do
+      {:ok, preview_plan} ->
+        {:noreply,
+         socket
+         |> assign(:slug_strategy, slug_strategy)
+         |> assign(:preview_plan, preview_plan)
+         |> assign(:validation_errors, [])}
+
+      {:error, preview_error} ->
+        {:noreply,
+         socket
+         |> assign(:slug_strategy, slug_strategy)
+         |> assign(:preview_plan, nil)
+         |> assign(:validation_errors, preview_error_messages(preview_error))}
+    end
   end
 
   @impl true
   def handle_event("start_import", _params, socket) do
-    send(self(), :do_import)
+    if preview_ready?(socket.assigns.preview_plan) do
+      send(self(), :do_import)
 
-    {:noreply,
-     socket
-     |> assign(:importing, true)
-     |> assign(:step, :importing)
-     |> assign(:progress, "Starting import...")}
+      {:noreply,
+       socket
+       |> assign(:importing, true)
+       |> assign(:step, :importing)
+       |> assign(:progress, "Starting import...")}
+    else
+      {:noreply, put_flash(socket, :error, "Resolve the import preview blockers first.")}
+    end
   end
 
   @impl true
@@ -89,6 +123,7 @@ defmodule CymphoWeb.CompanyImportLive do
      socket
      |> assign(:step, :upload)
      |> assign(:import_data, nil)
+     |> assign(:preview_plan, nil)
      |> assign(:validation_errors, [])
      |> assign(:import_result, nil)
      |> assign(:progress, nil)
@@ -115,8 +150,8 @@ defmodule CymphoWeb.CompanyImportLive do
 
             {:ok, import_result}
 
-          {:error, _reason} = error ->
-            error
+          {:error, reason} ->
+            {:error, import_error_text(reason)}
         end
       rescue
         e -> {:error, Exception.message(e)}
@@ -128,42 +163,6 @@ defmodule CymphoWeb.CompanyImportLive do
      |> assign(:import_result, result)
      |> assign(:step, :complete)
      |> assign(:progress, nil)}
-  end
-
-  defp validate_import_data(data) do
-    errors = []
-
-    errors =
-      if Map.has_key?(data, "company") do
-        errors
-      else
-        ["Missing company data" | errors]
-      end
-
-    company_data = Map.get(data, "company", %{})
-
-    errors =
-      if Map.has_key?(company_data, "name") && Map.get(company_data, "name") != "" do
-        errors
-      else
-        ["Company name is required" | errors]
-      end
-
-    errors =
-      if Map.has_key?(company_data, "slug") && Map.get(company_data, "slug") != "" do
-        errors
-      else
-        ["Company slug is required" | errors]
-      end
-
-    errors =
-      if Map.has_key?(data, "version") do
-        errors
-      else
-        ["Missing export version" | errors]
-      end
-
-    Enum.reverse(errors)
   end
 
   @impl true
@@ -204,14 +203,27 @@ defmodule CymphoWeb.CompanyImportLive do
                 {import_command_title(@step, @import_data, @import_result)}
               </h2>
               <p class="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-                {import_command_summary(@step, @import_data, @import_result)}
+                {import_command_summary(
+                  @step,
+                  @import_data,
+                  @import_result,
+                  @preview_plan
+                )}
               </p>
             </div>
 
             <div class="border-t border-border bg-subtle/60 p-6 lg:border-l lg:border-t-0 lg:p-8">
               <div class="grid grid-cols-2 gap-3">
                 <div
-                  :for={metric <- import_command_metrics(@step, @import_data, @import_result)}
+                  :for={
+                    metric <-
+                      import_command_metrics(
+                        @step,
+                        @import_data,
+                        @import_result,
+                        @preview_plan
+                      )
+                  }
                   class="rounded-lg border border-border bg-surface p-4"
                 >
                   <div class="text-lg font-510 text-text-primary">{metric.value}</div>
@@ -316,7 +328,7 @@ defmodule CymphoWeb.CompanyImportLive do
     """
   end
 
-  defp render_step(%{step: :preview, import_data: _import_data} = assigns) do
+  defp render_step(%{step: :preview, preview_plan: %{} = _preview_plan} = assigns) do
     ~H"""
     <div class="space-y-6">
       <div data-testid="company-import-preview" class="bg-surface border border-border rounded-xl p-6">
@@ -335,39 +347,73 @@ defmodule CymphoWeb.CompanyImportLive do
               </svg>
             </div>
             <div>
-              <h4 class="text-xl font-510 text-text-primary">{@import_data["company"]["name"]}</h4>
+              <h4 class="text-xl font-510 text-text-primary">{@preview_plan.company.name}</h4>
               <div class="text-text-secondary text-sm">
-                <code class="bg-black/20 px-2 py-1 rounded">{@import_data["company"]["slug"]}</code>
+                <code class="bg-black/20 px-2 py-1 rounded">{@preview_plan.company.source_slug}</code>
+                <span class="ml-2">Version {@preview_plan.version}</span>
               </div>
             </div>
           </div>
 
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div class="text-center">
               <div class="text-2xl font-510 text-brand">
-                {Enum.count(@import_data["projects"] || [])}
+                {@preview_plan.inventory.projects}
               </div>
               <div class="text-xs text-text-secondary mt-1">Projects</div>
             </div>
             <div class="text-center">
               <div class="text-2xl font-510 text-brand">
-                {Enum.count(@import_data["agents"] || [])}
+                {@preview_plan.inventory.agents}
               </div>
               <div class="text-xs text-text-secondary mt-1">Agents</div>
             </div>
             <div class="text-center">
               <div class="text-2xl font-510 text-brand">
-                {Enum.count(@import_data["issues"] || [])}
+                {@preview_plan.inventory.issues}
               </div>
               <div class="text-xs text-text-secondary mt-1">Issues</div>
             </div>
             <div class="text-center">
               <div class="text-2xl font-510 text-brand">
-                {Enum.count(@import_data["goals"] || [])}
+                {@preview_plan.inventory.goals}
               </div>
               <div class="text-xs text-text-secondary mt-1">Goals</div>
             </div>
+            <div class="text-center">
+              <div class="text-2xl font-510 text-brand">{@preview_plan.inventory.users}</div>
+              <div class="text-xs text-text-secondary mt-1">Users</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-510 text-brand">
+                {@preview_plan.inventory.memberships}
+              </div>
+              <div class="text-xs text-text-secondary mt-1">Memberships</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-510 text-brand">{@preview_plan.inventory.comments}</div>
+              <div class="text-xs text-text-secondary mt-1">Comments</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-510 text-brand">{@preview_plan.inventory.labels}</div>
+              <div class="text-xs text-text-secondary mt-1">Labels</div>
+            </div>
           </div>
+        </div>
+
+        <div
+          data-testid="company-import-target-plan"
+          class="mb-6 rounded-lg border border-border bg-subtle p-4"
+        >
+          <h4 class="text-sm font-510 text-text-primary">Target company plan</h4>
+          <p class="mt-2 text-sm text-text-secondary">
+            Requested <code>{@preview_plan.target.requested_slug}</code>
+            <span class="mx-1">→</span>
+            <code class="font-510 text-text-primary">{@preview_plan.target.slug}</code>
+          </p>
+          <p class="mt-2 text-xs text-text-tertiary">
+            {@preview_plan.inventory.package_records} package records · {@preview_plan.inventory.planned_writes} planned writes
+          </p>
         </div>
 
         <div class="mb-6 rounded-lg border border-border bg-subtle p-4">
@@ -379,17 +425,23 @@ defmodule CymphoWeb.CompanyImportLive do
               </p>
             </div>
             <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-xs font-510 text-amber-200">
-              {Enum.count(secret_manifest(@import_data))} keys
+              {Enum.count(@preview_plan.secret_restore_requirements)} keys
             </span>
           </div>
 
-          <div :if={secret_manifest(@import_data) == []} class="text-sm text-text-tertiary">
+          <div
+            :if={@preview_plan.secret_restore_requirements == []}
+            class="text-sm text-text-tertiary"
+          >
             No active secrets are listed in this export.
           </div>
 
-          <div :if={secret_manifest(@import_data) != []} class="divide-y divide-border">
+          <div
+            :if={@preview_plan.secret_restore_requirements != []}
+            class="divide-y divide-border"
+          >
             <div
-              :for={secret <- secret_manifest(@import_data)}
+              :for={secret <- @preview_plan.secret_restore_requirements}
               class="flex flex-col gap-1 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
             >
               <div class="text-sm font-510 text-text-primary">{export_field(secret, :key)}</div>
@@ -398,6 +450,17 @@ defmodule CymphoWeb.CompanyImportLive do
               </div>
             </div>
           </div>
+        </div>
+
+        <div
+          :if={@preview_plan.warnings != []}
+          data-testid="company-import-warnings"
+          class="mb-6 rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-amber-200"
+        >
+          <h4 class="text-sm font-510">Preview warnings</h4>
+          <ul class="mt-2 list-disc space-y-1 pl-5 text-sm">
+            <li :for={warning <- @preview_plan.warnings}>{warning.message}</li>
+          </ul>
         </div>
 
         <div class="mb-6">
@@ -433,7 +496,12 @@ defmodule CymphoWeb.CompanyImportLive do
         <div class="flex gap-3">
           <button
             phx-click="start_import"
-            class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-6 py-3 rounded-button transition-colors inline-flex items-center gap-2"
+            disabled={!@preview_plan.ready?}
+            class={[
+              "font-510 text-sm px-6 py-3 rounded-button transition-colors inline-flex items-center gap-2",
+              @preview_plan.ready? && "bg-brand hover:bg-accent text-on-primary",
+              !@preview_plan.ready? && "cursor-not-allowed bg-subtle text-text-tertiary"
+            ]}
           >
             <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Start Import
           </button>
@@ -585,6 +653,15 @@ defmodule CymphoWeb.CompanyImportLive do
   defp import_success?({:ok, _}), do: true
   defp import_success?(_), do: false
 
+  defp preview_ready?(%{ready?: true}), do: true
+  defp preview_ready?(_preview_plan), do: false
+
+  defp preview_error_messages(%{errors: errors}) when is_list(errors) do
+    Enum.map(errors, &export_field(&1, :message, "Invalid import package"))
+  end
+
+  defp preview_error_messages(_preview_error), do: ["Invalid import package"]
+
   defp import_error?({:error, _}), do: true
   defp import_error?(_), do: false
 
@@ -630,6 +707,16 @@ defmodule CymphoWeb.CompanyImportLive do
   defp import_error_message({:error, msg}), do: msg
   defp import_error_message(_), do: nil
 
+  defp import_error_text(reason) when is_binary(reason), do: reason
+
+  defp import_error_text(%{errors: _errors} = reason) do
+    reason
+    |> preview_error_messages()
+    |> Enum.join(" ")
+  end
+
+  defp import_error_text(reason), do: inspect(reason)
+
   defp import_command_title(:upload, _import_data, _result),
     do: "Import a portable company export"
 
@@ -648,34 +735,35 @@ defmodule CymphoWeb.CompanyImportLive do
 
   defp import_command_title(_step, _import_data, _result), do: "Company import"
 
-  defp import_command_summary(:upload, _import_data, _result) do
+  defp import_command_summary(:upload, _import_data, _result, _preview_plan) do
     "Upload a Cympho export JSON. The import creates a new company and keeps secret values empty until an owner restores them."
   end
 
-  defp import_command_summary(:preview, import_data, _result) do
-    "#{total_import_records(import_data)} portable records are ready to import. Review the slug strategy and secret restore manifest before continuing."
+  defp import_command_summary(:preview, _import_data, _result, preview_plan) do
+    "#{total_import_records(nil, preview_plan)} portable records are ready to import. Review the exact target slug, warnings, and secret restore manifest before continuing."
   end
 
-  defp import_command_summary(:importing, _import_data, _result) do
+  defp import_command_summary(:importing, _import_data, _result, _preview_plan) do
     "Creating the company, remapping scoped records, and preparing the secret restore queue."
   end
 
-  defp import_command_summary(:complete, _import_data, {:ok, _result}) do
+  defp import_command_summary(:complete, _import_data, {:ok, _result}, _preview_plan) do
     "The imported company is available. Restore queued secret values before dispatching runtime work."
   end
 
-  defp import_command_summary(:complete, _import_data, {:error, _result}) do
+  defp import_command_summary(:complete, _import_data, {:error, _result}, _preview_plan) do
     "The import did not finish. Review the error below, adjust the export or slug strategy, and try again."
   end
 
-  defp import_command_summary(_step, _import_data, _result), do: "Prepare a company import."
+  defp import_command_summary(_step, _import_data, _result, _preview_plan),
+    do: "Prepare a company import."
 
-  defp import_command_metrics(step, import_data, result) do
+  defp import_command_metrics(step, import_data, result, preview_plan) do
     [
       %{label: "Stage", value: step_label(step)},
-      %{label: "Records", value: total_import_records(import_data)},
-      %{label: "Secrets", value: import_secret_count(import_data, result)},
-      %{label: "Slug", value: slug_preview(import_data, result)}
+      %{label: "Records", value: total_import_records(import_data, preview_plan)},
+      %{label: "Secrets", value: import_secret_count(import_data, result, preview_plan)},
+      %{label: "Slug", value: slug_preview(import_data, result, preview_plan)}
     ]
   end
 
@@ -693,23 +781,35 @@ defmodule CymphoWeb.CompanyImportLive do
     |> export_field(:name, "the company")
   end
 
-  defp total_import_records(nil), do: 0
+  defp total_import_records(_import_data, %{inventory: %{package_records: count}}), do: count
+  defp total_import_records(nil, _preview_plan), do: 0
 
-  defp total_import_records(import_data) do
+  defp total_import_records(import_data, _preview_plan) do
     [:projects, :agents, :issues, :goals, :labels, :memberships]
     |> Enum.map(fn key -> import_data |> export_field(key, []) |> Enum.count() end)
     |> Enum.sum()
   end
 
-  defp import_secret_count(_import_data, {:ok, %{secrets_to_restore: secrets}})
+  defp import_secret_count(_import_data, {:ok, %{secrets_to_restore: secrets}}, _preview_plan)
        when is_list(secrets),
        do: Enum.count(secrets)
 
-  defp import_secret_count(import_data, _result), do: Enum.count(secret_manifest(import_data))
+  defp import_secret_count(_import_data, _result, %{
+         secret_restore_requirements: requirements
+       }),
+       do: Enum.count(requirements)
 
-  defp slug_preview(_import_data, {:ok, %{company: %{slug: slug}}}) when is_binary(slug), do: slug
+  defp import_secret_count(import_data, _result, _preview_plan),
+    do: Enum.count(secret_manifest(import_data))
 
-  defp slug_preview(import_data, _result) do
+  defp slug_preview(_import_data, {:ok, %{company: %{slug: slug}}}, _preview_plan)
+       when is_binary(slug),
+       do: slug
+
+  defp slug_preview(_import_data, _result, %{target: %{slug: slug}}) when is_binary(slug),
+    do: slug
+
+  defp slug_preview(import_data, _result, _preview_plan) do
     import_data
     |> export_field(:company, %{})
     |> export_field(:slug, "Not loaded")

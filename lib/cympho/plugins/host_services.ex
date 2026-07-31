@@ -32,13 +32,23 @@ defmodule Cympho.Plugins.HostServices do
   Creates an issue.
   Requires "write:issues" capability.
   """
-  def create_issue(_company_id, attrs, capabilities) when is_list(capabilities) do
+  def create_issue(company_id, attrs, capabilities)
+      when is_binary(company_id) and is_map(attrs) and is_list(capabilities) do
     if "write:issues" in capabilities do
       alias Cympho.Issues
-      Issues.create_issue(attrs)
+
+      with {:ok, scoped_attrs} <- scope_issue_attrs(attrs, company_id) do
+        Issues.create_issue(scoped_attrs)
+      end
     else
       {:error, :unauthorized}
     end
+  end
+
+  def create_issue(_company_id, _attrs, capabilities) when is_list(capabilities) do
+    if "write:issues" in capabilities,
+      do: {:error, :invalid_company_scope},
+      else: {:error, :unauthorized}
   end
 
   @doc """
@@ -174,5 +184,16 @@ defmodule Cympho.Plugins.HostServices do
     alias Cympho.Skills
     settings = Map.put(plugin.settings || %{}, key, value)
     Skills.update_plugin(plugin, %{settings: settings})
+  end
+
+  defp scope_issue_attrs(attrs, company_id) do
+    attrs = Map.drop(attrs, [:company_id, "company_id"])
+    keys = Map.keys(attrs)
+
+    cond do
+      Enum.all?(keys, &is_atom/1) -> {:ok, Map.put(attrs, :company_id, company_id)}
+      Enum.all?(keys, &is_binary/1) -> {:ok, Map.put(attrs, "company_id", company_id)}
+      true -> {:error, :invalid_attributes}
+    end
   end
 end

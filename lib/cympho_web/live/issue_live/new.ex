@@ -13,8 +13,8 @@ defmodule CymphoWeb.IssueLive.New do
 
   import CymphoWeb.IssueLive.Components.SwarmConfig, only: [swarm_configuration: 1]
 
-  @default_attrs %{"status" => "todo", "priority" => "medium"}
-  @allowed_issue_params ~w(title description status priority due_on goal_id project_id)
+  @default_attrs %{"status" => "todo", "priority" => "medium", "work_mode" => "standard"}
+  @allowed_issue_params ~w(title description status priority work_mode due_on goal_id project_id)
 
   @impl true
   def mount(params, _session, socket) do
@@ -149,6 +149,17 @@ defmodule CymphoWeb.IssueLive.New do
   def priority_options do
     Issue.priority_options()
     |> Enum.map(fn priority -> {priority_label(priority), to_string(priority)} end)
+  end
+
+  def work_mode_options do
+    [
+      {"Start work", "standard", "Begin the task now.",
+       "The agent may use its normal role actions and delivery workflow."},
+      {"Plan first", "planning", "Show me a plan before making changes.",
+       "The agent may attach a planning document and request confirmation, but cannot implement or delegate until you accept."},
+      {"Ask me first", "ask", "Ask the questions needed to get this right.",
+       "The agent must create a structured question request and cannot take other side effects until you respond."}
+    ]
   end
 
   defp description_placeholder do

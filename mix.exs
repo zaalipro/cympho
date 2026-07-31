@@ -46,6 +46,11 @@ defmodule Cympho.MixProject do
       # {:telegex, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
+      # Optional OTLP tracing is started explicitly only when configured.
+      # Keep these out of the default application startup path so an absent or
+      # broken collector can never prevent Cympho from booting.
+      {:opentelemetry, "~> 1.7", runtime: false},
+      {:opentelemetry_exporter, "~> 1.10", runtime: false},
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.4"},
       {:yaml_elixir, "~> 2.9"},
@@ -84,6 +89,13 @@ defmodule Cympho.MixProject do
       setup: ["deps.get", "ecto.setup"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
+      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      "assets.build": ["compile", "tailwind cympho", "esbuild cympho"],
+      "assets.deploy": [
+        "tailwind cympho --minify",
+        "esbuild cympho --minify",
+        "phx.digest"
+      ],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
     ]
   end

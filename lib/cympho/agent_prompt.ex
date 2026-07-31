@@ -71,6 +71,7 @@ defmodule Cympho.AgentPrompt do
 
     [
       current_task_block(issue, agent),
+      work_mode_block(issue),
       wake_context_block(wake_context, agent),
       triggering_comment_block(issue, wake_context),
       attachments_block(issue),
@@ -722,6 +723,38 @@ defmodule Cympho.AgentPrompt do
   end
 
   defp current_task_assignee(_agent), do: "Running agent: unknown"
+
+  defp work_mode_block(issue) do
+    case field(issue, :work_mode) || :standard do
+      mode when mode in [:planning, "planning"] ->
+        """
+        ## HIGH PRIORITY WORK MODE — PLAN FIRST
+        This issue is planning-only until the owner accepts your confirmation request. This contract overrides role playbooks, wake guidance, and ordinary completion rules.
+
+        You MAY inspect context, reason, write an owner-readable plan, emit `comment`, attach a plan with `attach_work_product` using `kind: "document"`, and emit exactly one `request_confirmation` describing what approval unlocks. Put the actual plan in the document's `description` or `payload.text`; Cympho records it as a revisioned issue plan and automatically pins the confirmation to that revision. A confirmation without a reviewable plan is rejected.
+        You MUST NOT implement, edit product code, delegate, create child issues, hand off, submit/approve work, set a PR, spawn agents, or trigger any other operational side effect before acceptance. The server rejects the entire action batch if it contains a mode-incompatible action.
+        End this turn with a structured `request_confirmation`; do not claim implementation is complete. You do not need to invent a document id: when none is supplied, the server saves your attached document (or confirmation details) as a revisioned plan and pins the confirmation to it.
+        """
+        |> String.trim()
+
+      mode when mode in [:ask, "ask"] ->
+        """
+        ## HIGH PRIORITY WORK MODE — ASK ME FIRST
+        This issue is clarification-only until the owner responds. This contract overrides role playbooks, wake guidance, and ordinary completion rules.
+
+        Do not implement, edit files, delegate, create child issues, or take operational side effects. Emit exactly one `ask_user_questions` action with 1–5 specific question objects shaped as `{"question":"..."}`. You may pair it with one concise owner-facing `comment` explaining why the answers matter. The server rejects any incompatible action batch.
+        Stop after asking. The issue resumes in Standard mode and wakes you after the owner responds.
+        """
+        |> String.trim()
+
+      _ ->
+        """
+        ## HIGH PRIORITY WORK MODE — START WORK
+        This issue is in Standard mode. Follow the current task and your normal role/action contract. Structured `ask_user_questions` and `request_confirmation` remain available when a genuine owner decision is required.
+        """
+        |> String.trim()
+    end
+  end
 
   defp triggering_comment_block(issue, wake_context) do
     with {reason, metadata} <- normalize_wake_context(wake_context),
@@ -1703,6 +1736,8 @@ defmodule Cympho.AgentPrompt do
     Treat your final response summary as run memory. Include objective, actions taken, files changed or artifacts, validation, risks/gaps, current state, next decision, and restart packet. Avoid vague endings like "done", "fixed", or "tests passed" without the decision context; Cympho folds your summary and tagged comment into the issue memory panel.
 
     `attach_work_product` has a strict schema: use `title` for the artifact name, optional `description` for artifact contents/summary, optional `kind`, `payload`, `metadata`, and `url`. Valid `kind` values are `code_change`, `document`, `url`, `artifact`, or `other`; for strategy plans/specs, use `document`. If you include `payload`, it must be a JSON object; put long artifact text in `description` or in `payload.text`. Do not use `name` or `content` keys for work products.
+
+    Structured owner interactions are server-rendered and pause the issue. `ask_user_questions` requires `questions` with 1–5 objects shaped as `{"question":"..."}` and accepts an optional `message`. `request_confirmation` requires a concrete `message` and accepts optional `details` and `target_document_id`. In Plan first mode, attach a non-empty document plan in the same or an earlier turn; Cympho auto-targets its revision when `target_document_id` is omitted. Do not imitate these with a prose comment: use the action so the owner can respond and the creating agent can be resumed.
 
     A run is incomplete if the current issue remains `in_progress` and assigned to you. After delegation or decomposition, also emit a state-changing action such as `handoff`, `block_issue`, `approve_issue`, or `request_changes`. For CEO decomposition where child issues must finish first, use `block_issue` with a clear `[blocked]` comment such as "Waiting for delegated sub-issues."
 

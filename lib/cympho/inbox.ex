@@ -72,6 +72,29 @@ defmodule Cympho.Inbox do
     |> Kernel.||(0)
   end
 
+  @doc "Counts company unread rows except issues already represented by owner attention."
+  def unread_count_for_company_excluding_issues(company_id, issue_ids)
+      when is_binary(company_id) and is_list(issue_ids) do
+    query =
+      from(s in InboxState,
+        join: a in Cympho.Agents.Agent,
+        on: a.id == s.agent_id,
+        where: a.company_id == ^company_id and s.status == "unread"
+      )
+
+    query =
+      case Enum.filter(issue_ids, &is_binary/1) do
+        [] -> query
+        ids -> where(query, [s, _a], s.issue_id not in ^ids)
+      end
+
+    query
+    |> Repo.aggregate(:count)
+    |> Kernel.||(0)
+  end
+
+  def unread_count_for_company_excluding_issues(_company_id, _issue_ids), do: 0
+
   @doc """
   Recent inbox items across all agents in the given company. Used by the
   dashboard preview — kept small (10 by default) and preloaded with `:issue`.

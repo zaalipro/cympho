@@ -2,6 +2,7 @@ defmodule Cympho.Finances do
   import Ecto.Query, warn: false
 
   alias Ecto.Multi
+  alias Cympho.{Agents, Companies, Issues, Wakes}
   alias Cympho.Repo
 
   alias Cympho.Finances.TokenUsage
@@ -10,6 +11,13 @@ defmodule Cympho.Finances do
   alias Cympho.Finances.FinanceEvent
   alias Cympho.Finances.Biller
   alias Cympho.Finances.WorkProduct
+  alias Cympho.HeartbeatEngine
+  alias Cympho.HeartbeatEngine.Run
+  alias Cympho.Issues.Issue
+  alias Cympho.Orchestrator.Dispatcher
+  alias Cympho.Companies.Company
+
+  require Logger
 
   # Token Usage
 
@@ -37,6 +45,12 @@ defmodule Cympho.Finances do
   end
 
   def record_token_usage(attrs) do
+    with :ok <- validate_heartbeat_run_scope(attrs) do
+      do_record_token_usage(attrs)
+    end
+  end
+
+  defp do_record_token_usage(attrs) do
     Multi.new()
     |> Multi.insert(:token_usage, TokenUsage.changeset(%TokenUsage{}, attrs))
     |> Multi.insert(:finance_event, fn %{token_usage: tu} ->
@@ -48,19 +62,30 @@ defmodule Cympho.Finances do
         description: "Token usage: #{tu.provider}/#{tu.model}"
       })
     end)
-    |> Multi.run(:check_budgets, fn _repo, %{token_usage: tu} ->
-      case check_budget_thresholds(tu) do
-        {:ok, :checked} -> {:ok, :checked}
-        {:error, :budget_blocked} -> {:error, :budget_blocked}
-      end
+    |> Multi.run(:budget_evaluation, fn _repo, %{token_usage: token_usage} ->
+      check_budget_thresholds(token_usage)
     end)
     |> Repo.transaction()
     |> case do
       {:ok, result} ->
-        {:ok, result.token_usage}
+        enforce_hard_stops(result.budget_evaluation.blocked_policies)
 
-      {:error, :check_budgets, :budget_blocked, _changes} ->
-        {:error, :budget_blocked}
+        if result.budget_evaluation.blocked_policies == [] do
+          {:ok, result.token_usage}
+        else
+          # The provider spend already happened. Keep the usage, finance
+          # event, and incident committed, then reject future work.
+          {:error, :budget_blocked}
+        end
+
+      {:error, :token_usage, %Ecto.Changeset{} = changeset, changes} ->
+        case existing_heartbeat_run_usage(attrs, changeset) do
+          %TokenUsage{} = token_usage ->
+            {:ok, token_usage}
+
+          nil ->
+            {:error, :token_usage, changeset, changes}
+        end
 
       {:error, failed_operation, failed_value, changes} ->
         {:error, failed_operation, failed_value, changes}
@@ -83,6 +108,43 @@ defmodule Cympho.Finances do
       count: count(t.id)
     })
     |> Repo.one()
+  end
+
+  @doc """
+  Checks active hard-stop policies before a runtime run is created.
+
+  The returned shape is shared by both `Runtime.preflight/3` and the
+  heartbeat run creator so callers cannot bypass a committed hard stop by
+  skipping the higher-level preflight.
+  """
+  @spec check_runtime_budget(map(), map()) :: {:ok, map()} | {:error, {:budget_blocked, map()}}
+  def check_runtime_budget(issue, agent) when is_map(issue) and is_map(agent) do
+    company_id = Map.get(issue, :company_id) || Map.get(agent, :company_id)
+
+    blocked_policy =
+      company_id
+      |> active_budget_policies()
+      |> Enum.find(fn policy ->
+        policy.action_on_exceed == "block" and
+          policy_applies_to_runtime?(policy, issue, agent) and
+          budget_exhausted?(policy)
+      end)
+
+    case blocked_policy do
+      nil ->
+        {:ok, %{status: "available"}}
+
+      %BudgetPolicy{} = policy ->
+        {:error,
+         {:budget_blocked,
+          %{
+            policy_id: policy.id,
+            scope: policy.scope,
+            scope_id: policy.scope_id,
+            period: policy.period,
+            limit_usd: Decimal.to_string(policy.budget_limit_usd)
+          }}}
+    end
   end
 
   # Budget Policies
@@ -242,42 +304,37 @@ defmodule Cympho.Finances do
 
   defp filter_by_period(query, _period, _from, _to), do: query
 
-  defp check_budget_thresholds(token_usage) do
-    policies =
-      BudgetPolicy
-      |> where(company_id: ^token_usage.company_id)
-      |> where(is_active: true)
-      |> Repo.all()
-
-    results =
-      Enum.map(policies, fn policy ->
-        # Lock the policy row to prevent concurrent budget checks
+  defp check_budget_thresholds(%TokenUsage{} = token_usage) do
+    token_usage.company_id
+    |> active_budget_policies()
+    |> Enum.filter(&policy_applies_to_usage?(&1, token_usage))
+    |> Enum.reduce_while(
+      {:ok, %{blocked_policies: [], incidents: []}},
+      fn policy, {:ok, evaluation} ->
+        # The policy lock serializes spend aggregation and incident creation
+        # for concurrent provider callbacks in the same scope.
         locked_policy =
           from(p in BudgetPolicy, where: p.id == ^policy.id, lock: "FOR UPDATE")
           |> Repo.one!()
 
-        check_policy_threshold(locked_policy, token_usage)
-      end)
+        case check_policy_threshold(locked_policy, token_usage) do
+          {:ok, %{blocked?: blocked?, incident: incident, spend: spend}} ->
+            evaluation =
+              evaluation
+              |> maybe_add_incident(incident)
+              |> maybe_add_blocked_policy(blocked?, locked_policy, spend)
 
-    # If any policy blocked, return the error
-    if {:error, :budget_blocked} in results do
-      {:error, :budget_blocked}
-    else
-      {:ok, :checked}
-    end
+            {:cont, {:ok, evaluation}}
+
+          {:error, reason} ->
+            {:halt, {:error, reason}}
+        end
+      end
+    )
   end
 
   defp check_policy_threshold(policy, token_usage) do
-    period_start = period_start(policy.period)
-
-    usage_query =
-      from t in TokenUsage,
-        where: t.company_id == ^policy.company_id,
-        where: t.inserted_at >= ^period_start,
-        select: coalesce(sum(t.cost_usd), 0)
-
-    usage_query = scope_query(usage_query, policy)
-    current_spend = Repo.one(usage_query)
+    current_spend = policy_spend(policy)
 
     threshold_pct =
       Decimal.mult(
@@ -286,35 +343,417 @@ defmodule Cympho.Finances do
       )
 
     cond do
-      Decimal.gt?(current_spend, policy.budget_limit_usd) ->
-        if policy.action_on_exceed == "block" do
-          # Block action: reject the token usage
-          {:error, :budget_blocked}
-        else
-          # Warn action: create incident and continue
-          create_incident(policy, token_usage, "budget_exceeded", current_spend, threshold_pct)
-          :ok
+      not Decimal.lt?(current_spend, policy.budget_limit_usd) ->
+        with {:ok, incident} <-
+               ensure_incident(
+                 policy,
+                 token_usage,
+                 "budget_exceeded",
+                 current_spend,
+                 threshold_pct
+               ) do
+          {:ok,
+           %{
+             blocked?: policy.action_on_exceed == "block",
+             incident: incident,
+             spend: current_spend
+           }}
         end
 
       Decimal.gt?(threshold_pct, policy.warning_threshold_pct) ->
-        create_incident(policy, token_usage, "warning", current_spend, threshold_pct)
+        with {:ok, incident} <-
+               ensure_incident(policy, token_usage, "warning", current_spend, threshold_pct) do
+          {:ok, %{blocked?: false, incident: incident, spend: current_spend}}
+        end
 
       true ->
-        :ok
+        {:ok, %{blocked?: false, incident: nil, spend: current_spend}}
     end
   end
 
-  defp create_incident(policy, token_usage, event_type, spend, threshold_pct) do
-    %BudgetIncident{}
-    |> BudgetIncident.changeset(%{
+  defp ensure_incident(policy, token_usage, event_type, spend, threshold_pct) do
+    existing =
+      Repo.one(
+        from i in BudgetIncident,
+          where:
+            i.budget_policy_id == ^policy.id and i.event_type == ^event_type and
+              is_nil(i.resolved_at),
+          order_by: [desc: i.inserted_at],
+          limit: 1
+      )
+
+    if existing do
+      {:ok, existing}
+    else
+      %BudgetIncident{}
+      |> BudgetIncident.changeset(%{
+        budget_policy_id: policy.id,
+        company_id: token_usage.company_id,
+        event_type: event_type,
+        spend_usd: spend,
+        budget_limit_usd: policy.budget_limit_usd,
+        threshold_pct: threshold_pct,
+        metadata: %{
+          "token_usage_id" => token_usage.id,
+          "scope" => policy.scope,
+          "scope_id" => policy.scope_id,
+          "action_on_exceed" => policy.action_on_exceed
+        }
+      })
+      |> Repo.insert()
+    end
+  end
+
+  defp maybe_add_incident(evaluation, nil), do: evaluation
+
+  defp maybe_add_incident(evaluation, incident),
+    do: Map.update!(evaluation, :incidents, &[incident | &1])
+
+  defp existing_heartbeat_run_usage(attrs, changeset) do
+    heartbeat_run_id = Map.get(attrs, :heartbeat_run_id) || Map.get(attrs, "heartbeat_run_id")
+    company_id = Map.get(attrs, :company_id) || Map.get(attrs, "company_id")
+
+    duplicate_run? =
+      Enum.any?(changeset.errors, fn
+        {:heartbeat_run_id, {_message, opts}} -> opts[:constraint] == :unique
+        _error -> false
+      end)
+
+    if duplicate_run? and is_binary(heartbeat_run_id) and is_binary(company_id) do
+      Repo.get_by(TokenUsage, heartbeat_run_id: heartbeat_run_id, company_id: company_id)
+    end
+  end
+
+  defp validate_heartbeat_run_scope(attrs) do
+    case Map.get(attrs, :heartbeat_run_id) || Map.get(attrs, "heartbeat_run_id") do
+      nil ->
+        :ok
+
+      heartbeat_run_id when is_binary(heartbeat_run_id) ->
+        case Repo.get(Run, heartbeat_run_id) do
+          %Run{} = run -> validate_usage_run_ids(attrs, run)
+          nil -> {:error, :heartbeat_run_not_found}
+        end
+
+      _heartbeat_run_id ->
+        {:error, :heartbeat_run_not_found}
+    end
+  end
+
+  defp validate_usage_run_ids(attrs, %Run{} = run) do
+    company_id = Map.get(attrs, :company_id) || Map.get(attrs, "company_id")
+    agent_id = Map.get(attrs, :agent_id) || Map.get(attrs, "agent_id")
+    issue_id = Map.get(attrs, :issue_id) || Map.get(attrs, "issue_id")
+    project_id = Map.get(attrs, :project_id) || Map.get(attrs, "project_id")
+    goal_id = Map.get(attrs, :goal_id) || Map.get(attrs, "goal_id")
+
+    case Repo.get(Issue, run.issue_id) do
+      %Issue{} = issue ->
+        expected_company_id = issue.company_id || run.company_id
+
+        if company_id == expected_company_id and
+             agent_id == run.agent_id and
+             issue_id == run.issue_id and
+             project_id == issue.project_id and
+             goal_id == issue.goal_id do
+          :ok
+        else
+          {:error, :heartbeat_run_scope_mismatch}
+        end
+
+      nil ->
+        {:error, :heartbeat_run_scope_mismatch}
+    end
+  end
+
+  defp maybe_add_blocked_policy(evaluation, false, _policy, _spend), do: evaluation
+
+  defp maybe_add_blocked_policy(evaluation, true, policy, spend) do
+    Map.update!(evaluation, :blocked_policies, &[%{policy: policy, spend: spend} | &1])
+  end
+
+  defp enforce_hard_stops(blocked_policies) do
+    blocked_policies
+    |> Enum.uniq_by(& &1.policy.id)
+    |> Enum.sort_by(&hard_stop_order/1)
+    |> Enum.each(&safely_enforce_hard_stop/1)
+  end
+
+  # Stop issue-level work before pausing agents, and pause the whole company
+  # last. Dispatcher cleanup can idle an assignee, so this ordering preserves
+  # the strongest final pause when one usage crosses multiple policies.
+  defp hard_stop_order(%{policy: %BudgetPolicy{scope: scope}})
+       when scope in ["issue", "project", "goal"],
+       do: 0
+
+  defp hard_stop_order(%{policy: %BudgetPolicy{scope: "agent"}}), do: 1
+  defp hard_stop_order(%{policy: %BudgetPolicy{scope: "company"}}), do: 2
+  defp hard_stop_order(_blocked), do: 3
+
+  defp safely_enforce_hard_stop(%{policy: %BudgetPolicy{} = policy} = blocked) do
+    enforce_hard_stop(blocked)
+  rescue
+    error ->
+      log_hard_stop_failure(policy, :enforcement, error, __STACKTRACE__)
+  catch
+    kind, reason ->
+      log_hard_stop_failure(policy, :enforcement, {kind, reason}, __STACKTRACE__)
+  end
+
+  defp enforce_hard_stop(
+         %{
+           policy:
+             %BudgetPolicy{scope: "agent", scope_id: agent_id, company_id: company_id} = policy
+         } = blocked
+       )
+       when is_binary(agent_id) do
+    reason =
+      "Budget hard stop #{policy.id}: agent spend #{Decimal.to_string(blocked.spend)} USD exceeded #{Decimal.to_string(policy.budget_limit_usd)} USD. Raise or resolve the budget before resuming."
+
+    case Agents.get_agent(agent_id) do
+      {:ok, %{company_id: ^company_id}} ->
+        active_agent_issue_ids(company_id, agent_id)
+        |> Enum.each(fn issue_id ->
+          run_hard_stop_step(policy, :stop_agent_runtime, fn ->
+            Dispatcher.stop_issue(issue_id, reason)
+          end)
+        end)
+
+        # Keep exact agent-run cleanup independent from dispatcher/orchestrator
+        # shutdown so a partial stop cannot leave a provider turn alive.
+        run_hard_stop_step(policy, :cancel_agent_runs, fn ->
+          HeartbeatEngine.cancel_active_runs_for_agent(company_id, agent_id, reason)
+        end)
+
+        run_hard_stop_step(policy, :cancel_agent_wakes, fn ->
+          Wakes.cancel_agent_wakes(agent_id, reason)
+        end)
+
+        run_hard_stop_step(policy, :pause_agent, fn -> Agents.pause_agent(agent_id, reason) end)
+
+      {:ok, _other_company_agent} ->
+        log_hard_stop_failure(policy, :load_agent, :company_mismatch)
+
+      {:error, reason} ->
+        log_hard_stop_failure(policy, :load_agent, reason)
+    end
+  end
+
+  defp enforce_hard_stop(
+         %{policy: %BudgetPolicy{scope: "company", company_id: company_id} = policy} = blocked
+       ) do
+    reason = hard_stop_reason(policy, blocked.spend)
+
+    run_hard_stop_step(policy, :stop_company_runtime, fn ->
+      case Repo.get(Company, company_id) do
+        %Company{} = company -> Companies.stop_company_runtime(company, reason)
+        nil -> {:error, :company_not_found}
+      end
+    end)
+
+    # Companies.stop_company_runtime/2 already delegates here. A second
+    # idempotent attempt gives a transient/partial dispatcher failure one more
+    # chance without coupling it to the durable company pause update.
+    run_hard_stop_step(policy, :confirm_company_runtime_stopped, fn ->
+      Dispatcher.stop_company(company_id, reason)
+    end)
+
+    # Keep wake cleanup independent from the company status update/dispatcher
+    # stop so a partial runtime-control failure cannot leave queued work alive.
+    run_hard_stop_step(policy, :cancel_company_wakes, fn ->
+      Wakes.cancel_company_wakes(company_id, reason)
+    end)
+  end
+
+  defp enforce_hard_stop(
+         %{policy: %BudgetPolicy{scope: "issue", scope_id: issue_id} = policy} = blocked
+       )
+       when is_binary(issue_id) do
+    reason = hard_stop_reason(policy, blocked.spend)
+
+    case scoped_issue(policy.company_id, issue_id) do
+      %Issue{} = issue ->
+        run_hard_stop_step(policy, :pause_issue_runtime, fn ->
+          Issues.pause_issue_runtime(issue, reason: reason)
+        end)
+
+        stop_issue_runtime(policy, issue_id, reason)
+
+      nil ->
+        log_hard_stop_failure(policy, :load_issue, :issue_not_found)
+    end
+  end
+
+  defp enforce_hard_stop(
+         %{policy: %BudgetPolicy{scope: scope, scope_id: scope_id} = policy} = blocked
+       )
+       when scope in ["project", "goal"] and is_binary(scope_id) do
+    reason = hard_stop_reason(policy, blocked.spend)
+
+    policy
+    |> open_scope_issue_ids()
+    |> Enum.each(&stop_issue_runtime(policy, &1, reason))
+  end
+
+  defp enforce_hard_stop(%{policy: %BudgetPolicy{} = policy}) do
+    Logger.error("Finances: hard stop committed but policy scope cannot be enforced",
       budget_policy_id: policy.id,
-      company_id: token_usage.company_id,
-      event_type: event_type,
-      spend_usd: spend,
-      budget_limit_usd: policy.budget_limit_usd,
-      threshold_pct: threshold_pct
-    })
-    |> Repo.insert()
+      company_id: policy.company_id,
+      scope: policy.scope,
+      scope_id: policy.scope_id
+    )
+  end
+
+  defp stop_issue_runtime(policy, issue_id, reason) do
+    run_hard_stop_step(policy, :stop_issue_runtime, fn ->
+      Dispatcher.stop_issue(issue_id, reason)
+    end)
+
+    # Keep run cancellation independent from orchestrator/checkout cleanup.
+    # It is idempotent after a successful Dispatcher.stop_issue/2 and remains
+    # effective if that broader stop fails partway through.
+    run_hard_stop_step(policy, :cancel_issue_runs, fn ->
+      HeartbeatEngine.cancel_active_runs_for_issue(issue_id, reason)
+    end)
+
+    run_hard_stop_step(policy, :cancel_issue_wakes, fn ->
+      Wakes.cancel_issue_wakes(issue_id, reason)
+    end)
+  end
+
+  defp scoped_issue(company_id, issue_id) do
+    Repo.one(from i in Issue, where: i.company_id == ^company_id and i.id == ^issue_id)
+  end
+
+  defp active_agent_issue_ids(company_id, agent_id) do
+    Issue
+    |> where([i], i.company_id == ^company_id)
+    |> where([i], i.assignee_id == ^agent_id and i.status == :in_progress)
+    |> select([i], i.id)
+    |> Repo.all()
+  end
+
+  defp open_scope_issue_ids(%BudgetPolicy{
+         company_id: company_id,
+         scope: scope,
+         scope_id: scope_id
+       }) do
+    scope_field = String.to_existing_atom("#{scope}_id")
+
+    Issue
+    |> where([i], i.company_id == ^company_id)
+    |> where([i], field(i, ^scope_field) == ^scope_id)
+    |> where([i], i.status not in [:done, :cancelled])
+    |> select([i], i.id)
+    |> Repo.all()
+  end
+
+  defp run_hard_stop_step(%BudgetPolicy{} = policy, step, callback) do
+    case callback.() do
+      :ok ->
+        :ok
+
+      {:ok, _updated, %{errors: errors}} when is_list(errors) and errors != [] ->
+        log_hard_stop_failure(policy, step, {:partial_failure, errors})
+
+      {:ok, _updated, _result} ->
+        :ok
+
+      {:ok, %{errors: errors}} when is_list(errors) and errors != [] ->
+        log_hard_stop_failure(policy, step, {:partial_failure, errors})
+
+      {:ok, _result} ->
+        :ok
+
+      {:error, reason} ->
+        log_hard_stop_failure(policy, step, reason)
+
+      other ->
+        log_hard_stop_failure(policy, step, {:unexpected_result, other})
+    end
+  rescue
+    error ->
+      log_hard_stop_failure(policy, step, error, __STACKTRACE__)
+  catch
+    kind, reason ->
+      log_hard_stop_failure(policy, step, {kind, reason}, __STACKTRACE__)
+  end
+
+  defp log_hard_stop_failure(policy, step, error, stacktrace \\ []) do
+    Logger.error("Finances: budget hard-stop cleanup failed",
+      budget_policy_id: policy.id,
+      company_id: policy.company_id,
+      scope: policy.scope,
+      scope_id: policy.scope_id,
+      step: step,
+      error: Exception.format(:error, error, stacktrace)
+    )
+  end
+
+  defp hard_stop_reason(policy, spend) do
+    "Budget hard stop #{policy.id}: #{policy.scope} spend #{Decimal.to_string(spend)} USD reached #{Decimal.to_string(policy.budget_limit_usd)} USD. Raise or resolve the budget before resuming."
+  end
+
+  defp active_budget_policies(nil), do: []
+
+  defp active_budget_policies(company_id) do
+    BudgetPolicy
+    |> where(company_id: ^company_id)
+    |> where(is_active: true)
+    |> Repo.all()
+  end
+
+  defp policy_applies_to_usage?(%BudgetPolicy{scope: "company"}, _token_usage), do: true
+
+  defp policy_applies_to_usage?(%BudgetPolicy{scope: scope, scope_id: scope_id}, token_usage)
+       when scope in ["agent", "project", "goal", "issue"] and is_binary(scope_id) do
+    Map.get(token_usage, String.to_existing_atom("#{scope}_id")) == scope_id
+  end
+
+  defp policy_applies_to_usage?(_policy, _token_usage), do: false
+
+  defp policy_applies_to_runtime?(%BudgetPolicy{scope: "company"}, _issue, _agent), do: true
+
+  defp policy_applies_to_runtime?(
+         %BudgetPolicy{scope: "agent", scope_id: scope_id},
+         _issue,
+         agent
+       ),
+       do: scope_id == Map.get(agent, :id)
+
+  defp policy_applies_to_runtime?(
+         %BudgetPolicy{scope: "project", scope_id: scope_id},
+         issue,
+         _agent
+       ),
+       do: scope_id == Map.get(issue, :project_id)
+
+  defp policy_applies_to_runtime?(
+         %BudgetPolicy{scope: "goal", scope_id: scope_id},
+         issue,
+         _agent
+       ),
+       do: scope_id == Map.get(issue, :goal_id)
+
+  defp policy_applies_to_runtime?(
+         %BudgetPolicy{scope: "issue", scope_id: scope_id},
+         issue,
+         _agent
+       ),
+       do: scope_id == Map.get(issue, :id)
+
+  defp policy_applies_to_runtime?(_policy, _issue, _agent), do: false
+
+  defp budget_exhausted?(%BudgetPolicy{} = policy),
+    do: not Decimal.lt?(policy_spend(policy), policy.budget_limit_usd)
+
+  defp policy_spend(%BudgetPolicy{} = policy) do
+    TokenUsage
+    |> where(company_id: ^policy.company_id)
+    |> where([t], t.inserted_at >= ^period_start(policy.period))
+    |> scope_query(policy)
+    |> select([t], coalesce(sum(t.cost_usd), 0))
+    |> Repo.one()
   end
 
   defp period_start("daily"), do: DateTime.utc_now() |> DateTime.add(-86400, :second)

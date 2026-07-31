@@ -1,7 +1,7 @@
 <.page size="wide" data-ui-complex-page class="ember-aurora">
   <div class="relative z-[1]">
     <.header>
-      <span class="ember-eyebrow">
+      <span class="ui-advanced-only ember-eyebrow">
         Portfolio · {@project_overview.active_projects} active
       </span>
       <h1 class="ember-ink mt-3 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
@@ -273,8 +273,11 @@
               <span :if={project.repo_url not in [nil, ""]} class="truncate">
                 {strip_protocol(project.repo_url)}
               </span>
-              <span :if={project.repo_url in [nil, ""]} class="truncate">
+              <span :if={project.repo_url in [nil, ""]} class="ui-advanced-only truncate">
                 No repository configured
+              </span>
+              <span :if={project.repo_url in [nil, ""]} class="ui-simple-only truncate">
+                No code repo yet
               </span>
             </div>
 

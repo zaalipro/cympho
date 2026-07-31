@@ -150,13 +150,16 @@ defmodule CymphoWeb.KanbanLive.Components do
         {@blocker_count} {pluralize(@blocker_count, "blocker")}
       </span>
 
+      <%!-- Simple mode keeps the amber dot but drops the "15d" text: when every
+           card is stale the number stops being a signal and becomes noise. The
+           title attribute still carries the age for anyone who hovers. --%>
       <span
         :if={@stale_hours}
         class="flex shrink-0 items-center gap-1 text-amber-300/90"
         title={"No movement for #{stale_age_title(@stale_hours)}"}
       >
         <span class="h-1 w-1 rounded-full bg-amber-400"></span>
-        {stale_age_label(@stale_hours)}
+        <span class="ui-advanced-only">{stale_age_label(@stale_hours)}</span>
       </span>
 
       <span class="ml-auto flex shrink-0 items-center gap-2">

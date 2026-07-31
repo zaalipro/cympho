@@ -3,6 +3,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
 
   alias Cympho.Agents.Agent
   alias Cympho.Companies
+  alias Cympho.Onboarding
 
   @steps [
     %{
@@ -35,6 +36,12 @@ defmodule CymphoWeb.OnboardingLive.Index do
   @impl true
   def mount(_params, _session, socket) do
     blueprints = Companies.autonomous_company_blueprints()
+    current_company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+    draft = Onboarding.get_draft(socket.assigns.current_user.id, current_company_id)
+    onboarding_path = restore_onboarding_path(draft, socket.assigns[:current_company])
+    company_form = restore_company_form(draft, onboarding_path)
+    current_step = restore_current_step(draft, onboarding_path)
+    improvement_submission_id = restore_improvement_submission_id(draft, onboarding_path)
 
     socket =
       socket
@@ -43,27 +50,12 @@ defmodule CymphoWeb.OnboardingLive.Index do
       |> assign(:blueprints, blueprints)
       |> assign(:blueprint_query, "")
       |> assign(:filtered_blueprints, blueprints)
-      |> assign(:current_step, 0)
+      |> assign(:onboarding_path, onboarding_path)
+      |> assign(:current_step, current_step)
       |> assign(:step_error, nil)
       |> assign(:bootstrap_result, nil)
-      |> assign(:company_form, %{
-        "blueprint" => "software",
-        "name" => "Autonomous Software Company",
-        "goal_title" => "Build and run the business autonomously",
-        "project_name" => "Company OS",
-        "issue_prefix" => "LLM",
-        "engineer_count" => "2",
-        "engineer_names" => [],
-        "adapter" => "claude_code",
-        "runtime_command" => "",
-        "runtime_model" => "",
-        "role_overrides" => false,
-        "role_runtimes" => %{
-          "ceo" => %{"adapter" => "", "model" => "", "command" => ""},
-          "cto" => %{"adapter" => "", "model" => "", "command" => ""},
-          "engineer" => %{"adapter" => "", "model" => "", "command" => ""}
-        }
-      })
+      |> assign(:improvement_submission_id, improvement_submission_id)
+      |> assign(:company_form, company_form)
 
     {:ok, socket}
   end
@@ -76,10 +68,15 @@ defmodule CymphoWeb.OnboardingLive.Index do
       :ok ->
         max = length(socket.assigns.steps) - 1
         next = min(socket.assigns.current_step + 1, max)
-        {:noreply, socket |> assign(:current_step, next) |> assign(:step_error, nil)}
+
+        {:noreply,
+         socket
+         |> assign(:current_step, next)
+         |> assign(:step_error, nil)
+         |> persist_draft()}
 
       {:error, message} ->
-        {:noreply, assign(socket, :step_error, message)}
+        {:noreply, socket |> assign(:step_error, message) |> persist_draft()}
     end
   end
 
@@ -87,7 +84,8 @@ defmodule CymphoWeb.OnboardingLive.Index do
     {:noreply,
      socket
      |> assign(:current_step, max(socket.assigns.current_step - 1, 0))
-     |> assign(:step_error, nil)}
+     |> assign(:step_error, nil)
+     |> persist_draft()}
   end
 
   def handle_event("skip", _params, socket) do
@@ -101,14 +99,16 @@ defmodule CymphoWeb.OnboardingLive.Index do
   def handle_event("update_company_form", %{"company" => params}, socket) do
     params = maybe_apply_blueprint_defaults(params, socket.assigns.company_form)
     form = deep_merge_form(socket.assigns.company_form, params)
-    {:noreply, socket |> assign(:company_form, form) |> assign(:step_error, nil)}
+
+    {:noreply,
+     socket |> assign(:company_form, form) |> assign(:step_error, nil) |> persist_draft()}
   end
 
   def handle_event("toggle_role_overrides", _params, socket) do
     form =
       Map.update(socket.assigns.company_form, "role_overrides", true, &(!&1))
 
-    {:noreply, assign(socket, :company_form, form)}
+    {:noreply, socket |> assign(:company_form, form) |> persist_draft()}
   end
 
   def handle_event("filter_blueprints", %{"blueprint_query" => query}, socket) do
@@ -120,13 +120,76 @@ defmodule CymphoWeb.OnboardingLive.Index do
      |> assign(:filtered_blueprints, filter_blueprints(socket.assigns.blueprints, query))}
   end
 
+  def handle_event("select_onboarding_path", %{"path" => "start"}, socket) do
+    {:noreply,
+     socket
+     |> assign(:onboarding_path, :start)
+     |> assign(:current_step, 0)
+     |> assign(:company_form, default_company_form())
+     |> assign(:step_error, nil)
+     |> persist_draft()}
+  end
+
+  def handle_event("select_onboarding_path", %{"path" => "improve"}, socket) do
+    if socket.assigns[:current_company] do
+      {:noreply,
+       socket
+       |> assign(:onboarding_path, :improve)
+       |> assign(:current_step, 0)
+       |> assign(:improvement_submission_id, Ecto.UUID.generate())
+       |> assign(
+         :company_form,
+         default_company_form()
+         |> Map.put("goal_title", "")
+         |> Map.put("improvement_details", "")
+       )
+       |> assign(:step_error, nil)
+       |> persist_draft()}
+    else
+      {:noreply, assign(socket, :step_error, "Create your first company to continue.")}
+    end
+  end
+
+  def handle_event("select_onboarding_path", _params, socket) do
+    {:noreply, assign(socket, :step_error, "Choose how you want to get started.")}
+  end
+
+  def handle_event("change_onboarding_path", _params, socket) do
+    if socket.assigns[:current_company] do
+      _ = Onboarding.clear_draft(socket.assigns.current_user.id)
+
+      {:noreply,
+       socket
+       |> assign(:onboarding_path, nil)
+       |> assign(:current_step, 0)
+       |> assign(:improvement_submission_id, nil)
+       |> assign(:company_form, default_company_form())
+       |> assign(:step_error, nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   # Ignores repeat clicks after a successful launch (the ready step already
   # shows the result); a second transaction would create a duplicate company.
   def handle_event("start_autonomous_company", _params, socket) do
-    if socket.assigns.bootstrap_result do
-      {:noreply, socket}
-    else
-      launch_company(socket)
+    cond do
+      socket.assigns.bootstrap_result -> {:noreply, socket}
+      socket.assigns.onboarding_path != :start -> {:noreply, socket}
+      true -> launch_company(socket)
+    end
+  end
+
+  def handle_event("create_improvement", _params, socket) do
+    cond do
+      socket.assigns.bootstrap_result ->
+        {:noreply, socket}
+
+      socket.assigns.onboarding_path != :improve or is_nil(socket.assigns[:current_company]) ->
+        {:noreply, assign(socket, :step_error, "Choose a company improvement first.")}
+
+      true ->
+        create_improvement(socket)
     end
   end
 
@@ -156,29 +219,102 @@ defmodule CymphoWeb.OnboardingLive.Index do
          :ok <- validate_runtime_compat(attrs) do
       case create_company_safely(attrs) do
         {:ok, result} ->
+          _ = Onboarding.clear_draft(socket.assigns.current_user.id)
+
           {:noreply,
            socket
            |> assign(:bootstrap_result, result)
+           |> assign(:company_form, default_company_form())
            |> assign(:step_error, nil)
            |> assign(:current_step, 4)}
 
         {:error, _reason} ->
           {:noreply,
-           assign(
-             socket,
+           socket
+           |> assign(
              :step_error,
              "We couldn't launch the company. Review the company and AI settings, then try again."
-           )}
+           )
+           |> persist_draft()}
       end
     else
       # Send the owner back to the team step (where AI runtimes are picked) so
       # they can fix a model/runtime mismatch instead of launching into a
       # company whose agents can never dispatch.
       {:error, :runtime_incompatible, message} ->
-        {:noreply, socket |> assign(:current_step, 2) |> assign(:step_error, message)}
+        {:noreply,
+         socket
+         |> assign(:current_step, 2)
+         |> assign(:step_error, message)
+         |> persist_draft()}
 
       {:error, message} ->
-        {:noreply, socket |> assign(:current_step, 1) |> assign(:step_error, message)}
+        {:noreply,
+         socket
+         |> assign(:current_step, 1)
+         |> assign(:step_error, message)
+         |> persist_draft()}
+    end
+  end
+
+  defp create_improvement(socket) do
+    company = socket.assigns.current_company
+    user = socket.assigns.current_user
+
+    attrs =
+      Map.put(
+        socket.assigns.company_form,
+        "submission_id",
+        socket.assigns.improvement_submission_id || Ecto.UUID.generate()
+      )
+
+    case Onboarding.create_improvement(company.id, user.id, attrs) do
+      {:ok, %{goal: goal, issue: issue}} ->
+        result = %{
+          mode: :improve,
+          company: company,
+          goal: goal,
+          issue: issue,
+          agents: [],
+          seed_issues: [issue]
+        }
+
+        {:noreply,
+         socket
+         |> assign(:bootstrap_result, result)
+         |> assign(:improvement_submission_id, nil)
+         |> assign(:company_form, default_company_form())
+         |> assign(:step_error, nil)}
+
+      {:error, :goal_required} ->
+        {:noreply,
+         socket
+         |> assign(:step_error, "Improvement goal is required.")
+         |> persist_draft()}
+
+      {:error, :sensitive_content} ->
+        {:noreply,
+         socket
+         |> assign(
+           :step_error,
+           "Remove credentials or secrets before saving this improvement."
+         )
+         |> persist_draft()}
+
+      {:error, :forbidden} ->
+        {:noreply,
+         socket
+         |> assign(
+           :step_error,
+           "Only a company owner, admin, or board member can create company improvements."
+         )
+         |> persist_draft()}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(:step_error, "We couldn't create this improvement. Review it and try again.")
+         |> persist_draft()}
     end
   end
 
@@ -399,5 +535,83 @@ defmodule CymphoWeb.OnboardingLive.Index do
       end)
 
     if model in [nil, ""], do: "#{label} · default model", else: "#{label} · #{model}"
+  end
+
+  defp default_company_form do
+    %{
+      "blueprint" => "software",
+      "name" => "Autonomous Software Company",
+      "goal_title" => "Build and run the business autonomously",
+      "improvement_details" => "",
+      "project_name" => "Company OS",
+      "issue_prefix" => "LLM",
+      "engineer_count" => "2",
+      "engineer_names" => [],
+      "adapter" => "claude_code",
+      "runtime_command" => "",
+      "runtime_model" => "",
+      "role_overrides" => false,
+      "role_runtimes" => %{
+        "ceo" => %{"adapter" => "", "model" => "", "command" => ""},
+        "cto" => %{"adapter" => "", "model" => "", "command" => ""},
+        "engineer" => %{"adapter" => "", "model" => "", "command" => ""}
+      }
+    }
+  end
+
+  defp restore_onboarding_path(_draft, nil), do: :start
+
+  defp restore_onboarding_path(draft, _current_company) do
+    case draft["path"] do
+      "start" -> :start
+      "improve" -> :improve
+      _ -> nil
+    end
+  end
+
+  defp restore_company_form(%{"path" => path, "form" => form}, onboarding_path)
+       when is_map(form) and path in ["start", "improve"] do
+    if path == to_string(onboarding_path),
+      do: deep_merge_form(default_company_form(), form),
+      else: default_company_form()
+  end
+
+  defp restore_company_form(_draft, _onboarding_path), do: default_company_form()
+
+  defp restore_current_step(draft, :start) do
+    case draft["current_step"] do
+      step when is_integer(step) -> step |> max(0) |> min(3)
+      _ -> 0
+    end
+  end
+
+  defp restore_current_step(_draft, _path), do: 0
+
+  defp restore_improvement_submission_id(draft, :improve) do
+    draft["submission_id"] || Ecto.UUID.generate()
+  end
+
+  defp restore_improvement_submission_id(_draft, _path), do: nil
+
+  defp persist_draft(socket) do
+    case socket.assigns[:onboarding_path] do
+      path when path in [:start, :improve] ->
+        _ =
+          Onboarding.save_draft(socket.assigns.current_user.id, %{
+            "path" => to_string(path),
+            "current_step" => socket.assigns.current_step,
+            "company_id" =>
+              if(path == :improve,
+                do: socket.assigns[:current_company] && socket.assigns.current_company.id
+              ),
+            "submission_id" => socket.assigns[:improvement_submission_id],
+            "form" => socket.assigns.company_form
+          })
+
+        socket
+
+      _ ->
+        socket
+    end
   end
 end

@@ -43,12 +43,41 @@
               :if={@brief_readiness.status != :ready}
               type="button"
               phx-click="use_launch_scaffold"
-              class="mt-2 inline-flex items-center gap-1.5 text-xs font-590 text-text-tertiary transition-colors hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+              class="ui-advanced-only mt-2 inline-flex items-center gap-1.5 text-xs font-590 text-text-tertiary transition-colors hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
             >
               <.icon name="hero-document-plus-mini" class="h-3.5 w-3.5" />
               Use a structured template
             </button>
           </div>
+
+          <fieldset data-testid="issue-work-mode" class="space-y-2">
+            <legend class="text-sm font-590 text-text-primary">How should the team begin?</legend>
+            <div class="grid gap-2 sm:grid-cols-3">
+              <label
+                :for={{label, value, simple_help, contract} <- work_mode_options()}
+                class={[
+                  "cursor-pointer rounded-xl border px-3 py-3 transition-colors",
+                  to_string(@form[:work_mode].value || :standard) == value &&
+                    "border-brand/50 bg-brand/10",
+                  to_string(@form[:work_mode].value || :standard) != value &&
+                    "border-border bg-surface/55 hover:border-border-hover"
+                ]}
+              >
+                <input
+                  type="radio"
+                  name={@form[:work_mode].name}
+                  value={value}
+                  checked={to_string(@form[:work_mode].value || :standard) == value}
+                  class="sr-only"
+                />
+                <span class="block text-sm font-590 text-text-primary">{label}</span>
+                <span class="mt-1 block text-xs leading-5 text-text-tertiary">{simple_help}</span>
+                <span class="ui-advanced-only mt-2 block text-[11px] leading-4 text-text-quaternary">
+                  Contract: {contract}
+                </span>
+              </label>
+            </div>
+          </fieldset>
 
           <details class="group rounded-xl border border-border bg-surface/55">
             <summary class="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-590 text-text-secondary transition-colors hover:text-text-primary">
@@ -165,9 +194,15 @@
               class="mt-0.5 h-4 w-4 rounded border-border bg-canvas text-brand focus:ring-brand/40 disabled:cursor-not-allowed"
             />
             <span class="min-w-0">
-              <span class="block text-sm font-590 text-text-primary">Queue after creating</span>
+              <span class="ui-advanced-only block text-sm font-590 text-text-primary">
+                Queue after creating
+              </span>
+              <span class="ui-simple-only block text-sm font-590 text-text-primary">
+                Start right away
+              </span>
               <span :if={queue_focus_disabled?} class="mt-0.5 block text-xs text-text-quaternary">
-                Add enough detail to make the brief ready.
+                <span class="ui-advanced-only">Add enough detail to make the brief ready.</span>
+                <span class="ui-simple-only">Write a bit more first.</span>
               </span>
             </span>
           </label>

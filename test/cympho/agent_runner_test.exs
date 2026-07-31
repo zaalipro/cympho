@@ -95,6 +95,64 @@ defmodule Cympho.AgentRunnerTest do
       assert result["type"] == "result"
     end
 
+    test "uses Claude plan permissions without the bypass in Plan and Ask modes" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-read-only-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+      command = write_permission_probe!(tmp_dir)
+
+      for mode <- [:planning, :ask] do
+        issue = %{
+          id: "claude-#{mode}",
+          title: "#{mode} permissions",
+          description: "Inspect without writing",
+          work_mode: mode
+        }
+
+        session_id =
+          AgentRunner.run(issue, "agent-1", self(),
+            cwd: tmp_dir,
+            config: %{"command" => command},
+            env: %{"ANTHROPIC_API_KEY" => "test-key"},
+            stall_timeout: 1_000
+          )
+
+        assert_receive {:session_started, ^session_id}, @receive_timeout
+        assert_receive {:turn_completed, ^session_id, result}, @receive_timeout
+        assert resume_probe_text(result) == "read-only"
+      end
+    end
+
+    test "keeps the Claude permissions bypass for Standard mode" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-writable-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+      command = write_permission_probe!(tmp_dir)
+
+      issue = %{
+        id: "claude-standard",
+        title: "Standard permissions",
+        description: "Retain writable execution",
+        work_mode: :standard
+      }
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", self(),
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 1_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert_receive {:turn_completed, ^session_id, result}, @receive_timeout
+      assert resume_probe_text(result) == "writable"
+    end
+
     test "ignores requested resume when cwd is not scoped to the issue workspace" do
       shared_dir =
         Path.join(System.tmp_dir!(), "cympho-agent-runner-shared-#{System.unique_integer()}")
@@ -366,6 +424,35 @@ defmodule Cympho.AgentRunnerTest do
       case " $* " in
         *" --resume "*) text="resume" ;;
         *) text="fresh" ;;
+      esac
+      printf '{"type":"result","content":[{"type":"text","text":"%s"}]}\\n' "$text"
+      """
+    )
+
+    File.chmod!(command, 0o755)
+    command
+  end
+
+  defp write_permission_probe!(dir) do
+    command = Path.join(dir, "fake-claude-permissions")
+
+    File.write!(
+      command,
+      """
+      #!/bin/sh
+      case " $* " in
+        *" --permission-mode plan "*" --dangerously-skip-permissions "*|*" --dangerously-skip-permissions "*" --permission-mode plan "*)
+          exit 9
+          ;;
+        *" --permission-mode plan "*)
+          text="read-only"
+          ;;
+        *" --dangerously-skip-permissions "*)
+          text="writable"
+          ;;
+        *)
+          exit 9
+          ;;
       esac
       printf '{"type":"result","content":[{"type":"text","text":"%s"}]}\\n' "$text"
       """

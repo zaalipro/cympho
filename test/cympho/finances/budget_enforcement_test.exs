@@ -64,7 +64,7 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
       assert hd(incidents).event_type == "budget_exceeded"
     end
 
-    test "action: 'block' prevents token usage when budget exceeded" do
+    test "action: 'block' persists crossing usage and creates a hard-stop incident" do
       company_id = company_fixture().id
 
       # Create a policy with $10 limit and block action
@@ -105,17 +105,17 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
       # Should be blocked
       assert {:error, :budget_blocked} = result
 
-      # Usage should still be 1 (the second one was rejected)
+      # Provider spend already happened, so the crossing usage remains durable.
       usages = Finances.list_token_usages(company_id)
-      assert length(usages) == 1
+      assert length(usages) == 2
 
-      # No budget_exceeded incident should be created (blocked, no incident)
+      # The committed incident is what blocks future runtime creation.
       incidents = Repo.all(BudgetIncident)
       budget_exceeded = Enum.filter(incidents, fn i -> i.event_type == "budget_exceeded" end)
-      assert length(budget_exceeded) == 0
+      assert length(budget_exceeded) == 1
     end
 
-    test "action: 'block' allows usage within budget limit" do
+    test "action: 'block' persists and blocks usage exactly at the budget limit" do
       company_id = company_fixture().id
 
       # Create a policy with $10 limit and block action
@@ -139,24 +139,25 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
           cost_usd: Decimal.new("8.00")
         })
 
-      # Record $2 more (exactly at limit)
-      {:ok, _tu2} =
-        Finances.record_token_usage(%{
-          company_id: company_id,
-          provider: "anthropic",
-          model: "claude-3",
-          total_tokens: 250,
-          cost_usd: Decimal.new("2.00")
-        })
+      # Record $2 more (exactly at limit). The provider spend remains durable,
+      # but the hard stop takes effect at equality for all future work.
+      assert {:error, :budget_blocked} =
+               Finances.record_token_usage(%{
+                 company_id: company_id,
+                 provider: "anthropic",
+                 model: "claude-3",
+                 total_tokens: 250,
+                 cost_usd: Decimal.new("2.00")
+               })
 
       # Both usages should be recorded
       usages = Finances.list_token_usages(company_id)
       assert length(usages) == 2
 
-      # No budget_exceeded incidents
+      # The exact-limit crossing creates the authoritative incident.
       incidents = Repo.all(BudgetIncident)
       budget_exceeded = Enum.filter(incidents, fn i -> i.event_type == "budget_exceeded" end)
-      assert length(budget_exceeded) == 0
+      assert length(budget_exceeded) == 1
     end
   end
 
@@ -212,13 +213,17 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
       assert successes <= 1
       assert blocked >= 2
 
-      # Verify total spend doesn't exceed budget
+      # Provider spend cannot be rolled back. All callbacks remain auditable,
+      # while every crossing callback reports the hard-stop outcome.
       all_usages = Finances.list_token_usages(company_id)
 
       total_cost =
         Enum.reduce(all_usages, Decimal.new("0"), fn u, acc -> Decimal.add(acc, u.cost_usd) end)
 
-      assert Decimal.compare(total_cost, Decimal.new("20.00")) in [:lt, :eq]
+      assert Decimal.eq?(total_cost, Decimal.new("45.00"))
+
+      incidents = Repo.all(BudgetIncident)
+      assert Enum.count(incidents, &(&1.event_type == "budget_exceeded")) == 1
     end
 
     test "concurrent warn actions create incidents correctly" do
@@ -326,7 +331,7 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
         })
 
       usages = Finances.list_token_usages(company_id)
-      assert length(usages) == 2
+      assert length(usages) == 3
     end
   end
 end

@@ -17,7 +17,7 @@ defmodule Cympho.HeartbeatEngine do
   alias Cympho.Adapters.Error, as: AdapterError
   alias Cympho.Budgets.Budget
   alias Cympho.HeartbeatEngine.Run
-  alias Cympho.{Agents, Issues, Workspace}
+  alias Cympho.{Agents, Finances, Issues, Workspace}
   alias Cympho.Issues.Issue
   require Logger
 
@@ -35,14 +35,17 @@ defmodule Cympho.HeartbeatEngine do
   @doc """
   Creates a new run in pending state after validating budget and workspace.
   """
-  @spec create_run(map()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | atom()}
+  @spec create_run(map()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
   def create_run(attrs) do
     with {:ok, agent} <- Agents.get_agent(attrs.agent_id),
-         :ok <- check_budget(agent, attrs[:issue_id]) do
-      %Run{}
-      |> Run.create_changeset(attrs)
-      |> Repo.insert()
-      |> tap_ok(&log_audit(&1, "run_created"))
+         :ok <- validate_run_company_scope(agent, attrs),
+         :ok <- check_budget(agent, attrs[:issue_id]),
+         :ok <- check_finance_budget(agent, attrs[:issue_id]),
+         {:ok, run} <- %Run{} |> Run.create_changeset(attrs) |> Repo.insert(),
+         {:ok, run} <- maybe_bind_checkout(run, attrs) do
+      log_audit(run, "run_created")
+      _ = Cympho.OwnerAttention.notify_changed(run.company_id)
+      {:ok, run}
     end
   end
 
@@ -77,7 +80,7 @@ defmodule Cympho.HeartbeatEngine do
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_completed")
-      record_cost_event(updated)
+      record_usage_event(updated)
       CymphoWeb.Events.broadcast_run_status(updated, :run_completed)
       _ = Cympho.ReviewNudges.reconcile_issue(updated.issue_id)
     end)
@@ -111,7 +114,7 @@ defmodule Cympho.HeartbeatEngine do
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_failed")
-      record_cost_event(updated)
+      record_usage_event(updated)
       CymphoWeb.Events.broadcast_run_status(updated, :run_failed)
     end)
   end
@@ -185,6 +188,36 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   def cancel_active_runs_for_issue(_issue_id, _reason), do: {:ok, 0}
+
+  @doc """
+  Cancels every pending, queued, or running run for one company-scoped agent.
+
+  Budget hard stops use both identifiers so cleanup cannot cross a tenant
+  boundary even when a malformed or stale run row references the agent.
+  """
+  @spec cancel_active_runs_for_agent(String.t() | nil, String.t() | nil, String.t()) ::
+          {:ok, non_neg_integer()}
+  def cancel_active_runs_for_agent(company_id, agent_id, reason \\ "Agent stopped")
+
+  def cancel_active_runs_for_agent(company_id, agent_id, _reason)
+      when is_binary(company_id) and is_binary(agent_id) do
+    Run
+    |> where(
+      [r],
+      r.company_id == ^company_id and r.agent_id == ^agent_id and
+        r.status in ["pending", "queued", "running"]
+    )
+    |> Repo.all()
+    |> Enum.reduce({:ok, 0}, fn
+      run, {:ok, count} ->
+        case cancel_run(run) do
+          {:ok, _cancelled} -> {:ok, count + 1}
+          {:error, _reason} -> {:ok, count}
+        end
+    end)
+  end
+
+  def cancel_active_runs_for_agent(_company_id, _agent_id, _reason), do: {:ok, 0}
 
   # ---------------------------------------------------------------------------
   # Query helpers
@@ -314,6 +347,20 @@ defmodule Cympho.HeartbeatEngine do
   # Budget checks
   # ---------------------------------------------------------------------------
 
+  defp validate_run_company_scope(_agent, %{issue_id: issue_id}) when issue_id in [nil, ""],
+    do: :ok
+
+  defp validate_run_company_scope(agent, attrs) do
+    with {:ok, %Issue{} = issue} <- Issues.get_issue(attrs.issue_id) do
+      company_ids =
+        [agent.company_id, issue.company_id, Map.get(attrs, :company_id)]
+        |> Enum.filter(&is_binary/1)
+        |> Enum.uniq()
+
+      if length(company_ids) <= 1, do: :ok, else: {:error, :company_mismatch}
+    end
+  end
+
   defp check_budget(agent, issue_id) do
     budget = get_agent_budget(agent)
 
@@ -349,6 +396,21 @@ defmodule Cympho.HeartbeatEngine do
       nil
   end
 
+  defp check_finance_budget(_agent, issue_id) when issue_id in [nil, ""], do: :ok
+
+  defp check_finance_budget(agent, issue_id) do
+    with {:ok, %Issue{} = issue} <- Issues.get_issue(issue_id) do
+      if is_binary(issue.company_id) do
+        case Finances.check_runtime_budget(issue, agent) do
+          {:ok, _budget} -> :ok
+          {:error, _reason} = error -> error
+        end
+      else
+        :ok
+      end
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Workspace resolution
   # ---------------------------------------------------------------------------
@@ -359,15 +421,37 @@ defmodule Cympho.HeartbeatEngine do
     end
   end
 
+  defp maybe_bind_checkout(%Run{} = run, attrs) do
+    if Map.get(attrs, :bind_checkout, Map.get(attrs, "bind_checkout", false)) do
+      case Issues.bind_checkout_run(run.issue_id, run.agent_id, run.id) do
+        {:ok, _issue} ->
+          {:ok, run}
+
+        {:error, reason} ->
+          _ = cancel_run(run)
+          {:error, {:checkout_run_bind_failed, reason}}
+      end
+    else
+      {:ok, run}
+    end
+  end
+
   defp release_terminal_run_checkout(%Run{issue_id: nil}), do: :ok
 
   defp release_terminal_run_checkout(%Run{} = run) do
-    with {:ok, %Issue{} = issue} <- Issues.get_issue(run.issue_id),
-         true <- terminal_run_holds_checkout?(run, issue) do
+    with {:ok, %Issue{} = issue} <- Issues.get_issue(run.issue_id) do
       target_status = if issue.status == :in_progress, do: :todo, else: issue.status
 
-      case Issues.clear_checkout_lock(issue, target_status) do
+      case Issues.clear_checkout_lock_for_run(
+             issue.id,
+             run.agent_id,
+             run.id,
+             target_status
+           ) do
         {:ok, _issue} ->
+          :ok
+
+        {:error, :checkout_not_owned} ->
           :ok
 
         {:error, reason} ->
@@ -378,16 +462,6 @@ defmodule Cympho.HeartbeatEngine do
     else
       _ -> :ok
     end
-  end
-
-  defp terminal_run_holds_checkout?(%Run{} = run, %Issue{} = issue) do
-    same_run? = issue.checkout_run_id == run.id
-
-    legacy_checkout? =
-      is_nil(issue.checkout_run_id) and issue.assignee_id == run.agent_id and
-        issue.status == :in_progress and not is_nil(issue.checked_out_at)
-
-    same_run? or legacy_checkout?
   end
 
   @doc """
@@ -587,17 +661,84 @@ defmodule Cympho.HeartbeatEngine do
     end
   end
 
-  defp record_cost_event(%Run{} = run) do
+  defp record_usage_event(%Run{} = run) do
     cost = run.cost_usd || Decimal.new("0")
+    input_tokens = run.input_tokens || 0
+    output_tokens = run.output_tokens || 0
 
-    if Decimal.compare(cost, Decimal.new("0")) == :gt do
-      Logger.info("HeartbeatEngine: recording cost event for run #{run.id}, cost: #{cost}")
+    if input_tokens > 0 or output_tokens > 0 or Decimal.positive?(cost) do
+      with {:ok, %Issue{} = issue} <- Issues.get_issue(run.issue_id),
+           company_id when is_binary(company_id) <- issue.company_id || run.company_id do
+        attrs = %{
+          company_id: company_id,
+          agent_id: run.agent_id,
+          project_id: issue.project_id,
+          goal_id: issue.goal_id,
+          issue_id: issue.id,
+          heartbeat_run_id: run.id,
+          provider: run_provider(run),
+          model: run_model(run),
+          input_tokens: input_tokens,
+          output_tokens: output_tokens,
+          cost_usd: cost,
+          metadata: %{
+            "heartbeat_run_id" => run.id,
+            "run_status" => run.status,
+            "invocation_source" => run.invocation_source
+          }
+        }
 
-      :ok
+        case Finances.record_token_usage(attrs) do
+          {:ok, _usage} ->
+            :ok
+
+          {:error, :budget_blocked} ->
+            # The usage and incident committed before the hard stop was
+            # returned; this is an enforcement outcome, not a ledger failure.
+            Logger.warning("HeartbeatEngine: runtime usage crossed a hard-stop budget",
+              run_id: run.id,
+              company_id: company_id,
+              agent_id: run.agent_id
+            )
+
+          error ->
+            Logger.error("HeartbeatEngine: failed to persist runtime usage",
+              run_id: run.id,
+              company_id: company_id,
+              error: inspect(error)
+            )
+        end
+      else
+        _ ->
+          Logger.error("HeartbeatEngine: cannot persist runtime usage without an issue company",
+            run_id: run.id,
+            issue_id: run.issue_id
+          )
+      end
     end
 
     :ok
   end
+
+  defp run_provider(%Run{} = run) do
+    runtime_metadata_value(run, "provider") || run.adapter || "unknown"
+  end
+
+  defp run_model(%Run{} = run) do
+    runtime_metadata_value(run, "model") || "unknown"
+  end
+
+  defp runtime_metadata_value(%Run{run_metadata: metadata}, "provider") when is_map(metadata) do
+    runtime = Map.get(metadata, "runtime") || Map.get(metadata, :runtime) || %{}
+    Map.get(runtime, "provider") || Map.get(runtime, :provider) || Map.get(metadata, "provider")
+  end
+
+  defp runtime_metadata_value(%Run{run_metadata: metadata}, "model") when is_map(metadata) do
+    runtime = Map.get(metadata, "runtime") || Map.get(metadata, :runtime) || %{}
+    Map.get(runtime, "model") || Map.get(runtime, :model) || Map.get(metadata, "model")
+  end
+
+  defp runtime_metadata_value(_run, _key), do: nil
 
   # ---------------------------------------------------------------------------
   # Audit logging
@@ -607,6 +748,8 @@ defmodule Cympho.HeartbeatEngine do
     Logger.info(
       "HeartbeatEngine: #{action} run=#{run.id} agent=#{run.agent_id} issue=#{run.issue_id}"
     )
+
+    Cympho.Telemetry.run_lifecycle(run, action)
 
     :ok
   end

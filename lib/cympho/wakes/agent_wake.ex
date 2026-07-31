@@ -53,6 +53,11 @@ defmodule Cympho.Wakes.AgentWake do
     ci_failed
     merge_conflict_detected
     pr_ready_to_merge
+    interaction_suggest_tasks_accepted
+    interaction_suggest_tasks_rejected
+    interaction_ask_user_questions_responded
+    interaction_request_confirmation_accepted
+    interaction_request_confirmation_rejected
   )
 
   def changeset(agent_wake, attrs) do

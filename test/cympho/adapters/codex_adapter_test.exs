@@ -121,6 +121,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
       case " $* " in *' approval_policy="never" '*) ;; *) echo "missing approval policy: $*"; exit 9 ;; esac
       case " $* " in *' default_permissions="cympho_issue_workspace" '*) ;; *) echo "missing permission selection: $*"; exit 9 ;; esac
       case " $* " in *' permissions.cympho_issue_workspace={extends=":workspace",filesystem={":workspace_roots"={".git"="write"}'*) ;; *) echo "missing issue permission profile: $*"; exit 9 ;; esac
+      case " $* " in *' default_permissions="cympho_read_only_workspace" '*) echo "unexpected read-only permission profile: $*"; exit 9 ;; esac
       case " $* " in *'"/proc"="deny"'*) ;; *) echo "missing proc denial: $*"; exit 9 ;; esac
       case " $* " in *'trust_level="untrusted"'*) ;; *) echo "missing untrusted project override: $*"; exit 9 ;; esac
       case " $* " in *' projects={"/workspace"='*) ;; *) echo "missing sandbox workspace project: $*"; exit 9 ;; esac
@@ -132,6 +133,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
       [ "$CYMPHO_PROVIDER_CAPABILITY" != "runtime-test-key" ] || { echo "real key used as broker capability"; exit 9; }
       [ "$HOME" = "/home/codex" ] || { echo "HOME is not isolated: $HOME"; exit 9; }
       [ "$CODEX_HOME" = "/home/codex/.codex" ] || { echo "CODEX_HOME is not isolated: $CODEX_HOME"; exit 9; }
+      [ "$CYMPHO_TEST_WORKSPACE_MOUNT" = "read-write" ] || { echo "standard workspace mount is not writable"; exit 9; }
       [ ! -e "$HOME/.config/gh" ] || { echo "host gh config is visible"; exit 9; }
       [ ! -e "$HOME/.ssh" ] || { echo "host ssh config is visible"; exit 9; }
       printf '%s\n' '{"type":"thread.started","thread_id":"thread-1"}'
@@ -167,6 +169,51 @@ defmodule Cympho.Adapters.CodexAdapterTest do
                           "usage" => %{"input_tokens" => 12, "output_tokens" => 3}
                         }},
                        6_000
+      end
+    )
+  end
+
+  test "uses a read-only permission profile and workspace bind in Plan and Ask modes" do
+    configured_repo_url = "https://github.com/example/cympho-runtime.git"
+
+    issues =
+      Enum.map([:planning, :ask], fn mode ->
+        issue = %{
+          id: "codex-#{mode}-#{System.unique_integer([:positive])}",
+          project_id: "project-#{mode}",
+          title: "#{mode} issue",
+          description: "Inspect the checkout without changing it.",
+          work_mode: mode
+        }
+
+        workspace = Workspace.workspace_path(issue)
+        init_git_repo!(workspace, "git@github.com:example/cympho-runtime.git")
+        on_exit(fn -> File.rm_rf!(workspace) end)
+        {issue, workspace}
+      end)
+
+    with_fake_codex(
+      ~S'''
+      case " $* " in *' default_permissions="cympho_read_only_workspace" '*) ;; *) echo "missing read-only permission selection: $*"; exit 9 ;; esac
+      case " $* " in *' permissions.cympho_read_only_workspace={extends=":read-only",filesystem={":workspace_roots"={".git"="deny"}'*'network={enabled=true}'*) ;; *) echo "missing read-only permission profile: $*"; exit 9 ;; esac
+      case " $* " in *' default_permissions="cympho_issue_workspace" '*|*' default_permissions="cympho_restricted_workspace" '*) echo "writable permission profile selected: $*"; exit 9 ;; esac
+      [ "$CYMPHO_TEST_WORKSPACE_MOUNT" = "read-only" ] || { echo "workspace mount is not read-only"; exit 9; }
+      printf '%s\n' '{"result":"READ_ONLY_WORK_MODE_OK"}'
+      ''',
+      fn ->
+        Enum.each(issues, fn {issue, workspace} ->
+          session_id =
+            CodexAdapter.run(issue, "agent-1", self(),
+              config: %{"timeout" => 5_000},
+              cwd: workspace,
+              runtime_context: trusted_runtime_context(issue, workspace, configured_repo_url)
+            )
+
+          assert_receive {:session_started, ^session_id}
+
+          assert_receive {:turn_completed, ^session_id, %{"result" => "READ_ONLY_WORK_MODE_OK"}},
+                         6_000
+        end)
       end
     )
   end
@@ -551,7 +598,15 @@ defmodule Cympho.Adapters.CodexAdapterTest do
       while [ "$#" -gt 0 ]; do
         case "$1" in
           --setenv) export "$2=$3"; shift 3 ;;
-          --ro-bind|--bind|--symlink) shift 3 ;;
+          --ro-bind)
+            [ "$3" = "/workspace" ] && export CYMPHO_TEST_WORKSPACE_MOUNT="read-only"
+            shift 3
+            ;;
+          --bind)
+            [ "$3" = "/workspace" ] && export CYMPHO_TEST_WORKSPACE_MOUNT="read-write"
+            shift 3
+            ;;
+          --symlink) shift 3 ;;
           --dir|--tmpfs|--cap-drop|--chdir) shift 2 ;;
           --) shift; exec "$@" ;;
           *) shift ;;

@@ -24,7 +24,6 @@ defmodule Cympho.Runtime do
 
   alias Cympho.Agents.Agent
   alias Cympho.Companies.Company
-  alias Cympho.Finances.BudgetPolicy
   alias Cympho.Issues.Issue
   alias Cympho.Workspaces.ProjectWorkspace
 
@@ -400,70 +399,8 @@ defmodule Cympho.Runtime do
   defp verify_budget(%Issue{company_id: nil}, _agent), do: {:ok, %{status: "unscoped"}}
 
   defp verify_budget(%Issue{} = issue, %Agent{} = agent) do
-    blocked_policy =
-      issue.company_id
-      |> Finances.list_budget_policies(is_active: true)
-      |> Enum.find(fn policy ->
-        policy.action_on_exceed == "block" and policy_applies?(policy, issue, agent) and
-          budget_exhausted?(policy)
-      end)
-
-    case blocked_policy do
-      nil ->
-        {:ok, %{status: "available"}}
-
-      %BudgetPolicy{} = policy ->
-        {:error,
-         {:budget_blocked,
-          %{
-            policy_id: policy.id,
-            scope: policy.scope,
-            scope_id: policy.scope_id,
-            period: policy.period,
-            limit_usd: Decimal.to_string(policy.budget_limit_usd)
-          }}}
-    end
+    Finances.check_runtime_budget(issue, agent)
   end
-
-  defp policy_applies?(%BudgetPolicy{scope: "company"}, _issue, _agent), do: true
-
-  defp policy_applies?(%BudgetPolicy{scope: "agent", scope_id: scope_id}, _issue, agent),
-    do: scope_id == agent.id
-
-  defp policy_applies?(%BudgetPolicy{scope: "project", scope_id: scope_id}, issue, _agent),
-    do: scope_id == issue.project_id
-
-  defp policy_applies?(%BudgetPolicy{scope: "goal", scope_id: scope_id}, issue, _agent),
-    do: scope_id == issue.goal_id
-
-  defp policy_applies?(%BudgetPolicy{scope: "issue", scope_id: scope_id}, issue, _agent),
-    do: scope_id == issue.id
-
-  defp policy_applies?(_policy, _issue, _agent), do: false
-
-  defp budget_exhausted?(%BudgetPolicy{} = policy) do
-    opts =
-      [period: policy.period, from: period_start(policy.period)]
-      |> scoped_budget_opts(policy)
-
-    usage = Finances.aggregate_usage(policy.company_id, opts)
-    spent = usage[:total_cost] || Decimal.new("0")
-
-    not Decimal.lt?(spent, policy.budget_limit_usd)
-  end
-
-  defp scoped_budget_opts(opts, %BudgetPolicy{scope: "company"}), do: opts
-
-  defp scoped_budget_opts(opts, %BudgetPolicy{scope: scope, scope_id: scope_id})
-       when scope in ["agent", "project", "goal", "issue"] and not is_nil(scope_id) do
-    Keyword.put(opts, String.to_existing_atom("#{scope}_id"), scope_id)
-  end
-
-  defp scoped_budget_opts(opts, _policy), do: opts
-
-  defp period_start("daily"), do: DateTime.utc_now() |> DateTime.add(-86_400, :second)
-  defp period_start("weekly"), do: DateTime.utc_now() |> DateTime.add(-604_800, :second)
-  defp period_start(_monthly), do: DateTime.utc_now() |> DateTime.add(-2_592_000, :second)
 
   defp resolve_workspace(%Issue{} = issue, opts) do
     cond do

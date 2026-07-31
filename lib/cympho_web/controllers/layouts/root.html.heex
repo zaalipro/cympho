@@ -33,7 +33,7 @@
     >
     </script>
   </head>
-  <body class="h-screen bg-canvas text-text-primary font-sans antialiased overflow-hidden">
+  <body class="h-[100dvh] min-h-[100svh] bg-canvas text-text-primary font-sans antialiased overflow-hidden">
     <a href="#main-content" class="skip-to-content">Skip to main content</a>
     <p id="interface-mode-help" class="sr-only">
       Simple shows guided essentials. Advanced shows full controls and diagnostics.
@@ -42,10 +42,10 @@
     <div
       id="toast-container"
       phx-hook="Toast"
-      class="fixed top-4 right-4 z-[70] flex flex-col gap-2 pointer-events-none"
+      class="safe-area-toast fixed z-[70] flex flex-col gap-2 pointer-events-none"
     >
     </div>
-    <div class="flex h-screen w-full overflow-hidden">
+    <div class="flex h-[100dvh] min-h-[100svh] w-full overflow-hidden">
       <!-- Sidebar overlay for mobile -->
       <div
         id="sidebar-overlay"
@@ -303,7 +303,7 @@
 <!-- Main content -->
       <main
         id="main-content"
-        class="cympho-ambient h-screen flex-1 min-w-0 overflow-x-hidden overflow-y-auto lg:ml-[var(--sidebar-w)] pt-16 pb-16 lg:pb-0 lg:pt-0"
+        class="cympho-ambient mobile-shell-content h-[100dvh] min-h-[100svh] flex-1 min-w-0 overflow-x-hidden overflow-y-auto lg:ml-[var(--sidebar-w)] pt-16 lg:pt-0"
       >
         <div class="page-enter relative z-[1]">
           {@inner_content}
@@ -375,6 +375,7 @@
           <span
             :if={(assigns[:inbox_badge_count] || 0) > 0}
             class="absolute top-1 right-2 min-w-[14px] rounded-full bg-brand px-1 text-[9px] font-590 leading-[14px] text-on-primary text-center"
+            data-testid="mobile-nav-badge-inbox"
           >
             {min(assigns[:inbox_badge_count] || 0, 99)}
           </span>
@@ -436,12 +437,12 @@
     <div
       id="quick-create-modal"
       data-ui-complex-page
-      class="hidden fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-6 sm:py-10"
+      class="safe-area-dialog hidden fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-6 sm:py-10"
     >
       <form
         action={~p"/issues/quick-create"}
         method="post"
-        class="max-h-[calc(100vh-3rem)] w-full max-w-3xl overflow-y-auto rounded-2xl border border-hairline bg-surface-2 shadow-dialog"
+        class="max-h-[calc(100dvh-3rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))] w-full max-w-3xl overflow-y-auto rounded-2xl border border-hairline bg-surface-2 shadow-dialog"
         id="quick-create-form"
       >
         <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
@@ -500,6 +501,25 @@
               }
               value={if quick_default_goal, do: quick_default_goal.id, else: ""}
             />
+          </div>
+
+          <div>
+            <span class="mb-1 block text-[11px] font-590 uppercase tracking-[0.08em] text-ink-tertiary">
+              Begin with
+            </span>
+            <.select_menu
+              id="quick-create-work-mode"
+              name="work_mode"
+              value="standard"
+              options={[
+                {"Start work", "standard"},
+                {"Plan first", "planning"},
+                {"Ask me first", "ask"}
+              ]}
+            />
+            <p class="ui-advanced-only mt-1 text-[10px] leading-4 text-text-quaternary">
+              Planning and Ask pause side effects until the owner responds.
+            </p>
           </div>
 
           <div class="ui-advanced-only">

@@ -5,7 +5,13 @@ defmodule CymphoWeb.InboxLiveTest do
   import Ecto.Query
 
   alias Cympho.Agents
+  alias Cympho.Approvals
+  alias Cympho.BoardApprovals
+  alias Cympho.Companies
+  alias Cympho.Finances.{BudgetIncident, BudgetPolicy}
+  alias Cympho.HeartbeatEngine.Run
   alias Cympho.Inbox
+  alias Cympho.IssueThreadInteractions
   alias Cympho.Issues
   alias Cympho.Repo
   alias Cympho.ReviewNudges
@@ -475,6 +481,314 @@ defmodule CymphoWeb.InboxLiveTest do
     end
   end
 
+  describe "owner decisions" do
+    test "refreshes a mounted Inbox when a pending question is created and resolved", %{
+      conn: conn
+    } do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Live Question Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Choose the live launch audience",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, html} = live(conn, "/inbox?status=action")
+      refute html =~ "Answer needed · Choose the live launch audience"
+
+      {:ok, interaction} =
+        IssueThreadInteractions.create_interaction(%{
+          issue_id: issue.id,
+          kind: :ask_user_questions,
+          payload: %{"questions" => [%{"label" => "Which audience?"}]},
+          created_by_agent_id: agent.id
+        })
+
+      wait_until(fn ->
+        assert render(view) =~ "Answer needed · Choose the live launch audience"
+      end)
+
+      assert {:ok, _resolved} =
+               IssueThreadInteractions.resolve_interaction(interaction, %{
+                 status: :responded,
+                 resolved_by_user_id: user.id,
+                 response: "Start with existing customers."
+               })
+
+      wait_until(fn ->
+        refute render(view) =~ "Answer needed · Choose the live launch audience"
+      end)
+    end
+
+    test "surfaces a pending agent question without echoing its payload", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Question Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Choose the launch audience",
+          status: :blocked,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, _interaction} =
+        IssueThreadInteractions.create_interaction(%{
+          issue_id: issue.id,
+          kind: :ask_user_questions,
+          payload: %{"questions" => [%{"label" => "provider-secret-must-not-render"}]},
+          created_by_agent_id: agent.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, _view, html} = live(conn, "/inbox?status=action&density=detailed")
+
+      assert html =~ "Answer needed · Choose the launch audience"
+      assert html =~ "An agent needs your answer before this work can continue."
+      assert html =~ "Your decision"
+      assert html =~ ~s(href="/issues/#{issue.id}")
+      assert html =~ "Answer on issue"
+      assert html =~ "Ask user questions · Pending owner response"
+      refute html =~ "provider-secret-must-not-render"
+      assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*1\s*<\/span>/s
+    end
+
+    test "renders and resolves an ordinary approval inline", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Approval Request Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, approval} =
+        Approvals.create_approval(%{
+          type: "deploy_release",
+          requested_by_agent_id: agent.id,
+          payload: %{
+            "title" => "Approve the production release",
+            "description" => "The release is ready for the owner's decision."
+          }
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, html} = live(conn, "/inbox?status=action&density=detailed")
+
+      assert html =~ "Approve the production release"
+      assert html =~ "The release is ready for the owner&#39;s decision."
+      assert html =~ "Your decision"
+      assert html =~ ~s(href="/approvals/#{approval.id}")
+      assert has_element?(view, "button[phx-click='approve_approval']", "Approve")
+      assert has_element?(view, "button[phx-click='deny_approval']", "Deny")
+
+      view
+      |> element("button[phx-click='approve_approval'][phx-value-approval_id='#{approval.id}']")
+      |> render_click()
+
+      assert {:ok, resolved} = Approvals.get_company_approval(company.id, approval.id)
+      assert resolved.status == :approved
+      refute render(view) =~ "Approve the production release"
+    end
+
+    test "links board decisions to their authoritative workflow without inline resolution", %{
+      conn: conn
+    } do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, approval} =
+        BoardApprovals.create_board_approval(%{
+          title: "Approve the new operating policy",
+          description: "The board must vote before this policy can take effect.",
+          category: "policy_change",
+          company_id: company.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, html} = live(conn, "/inbox?status=action")
+
+      assert html =~ "Approve the new operating policy"
+      assert html =~ "The board must vote before this policy can take effect."
+      assert html =~ ~s(href="/board-approvals/#{approval.id}")
+
+      refute has_element?(
+               view,
+               "button[phx-value-approval_id='#{approval.id}'][phx-click='approve_approval']"
+             )
+    end
+
+    test "surfaces a failed run with plain guidance and advanced-only diagnostics", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Failed Runtime Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Prepare launch assets",
+          status: :in_progress,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "codex",
+        error_reason: "Provider connection closed with bearer provider-secret-do-not-expose",
+        log_excerpt: "request token=raw-provider-token",
+        completed_at: now,
+        inserted_at: now,
+        updated_at: now
+      })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, _view, html} = live(conn, "/inbox?status=action&density=detailed")
+
+      assert html =~ "Run failed · Prepare launch assets"
+      assert html =~ "Run needs attention"
+      assert html =~ "This work stopped before the agent could finish."
+      assert html =~ ~s(href="/issues/#{issue.id}")
+      assert html =~ "Inspect failed run"
+      assert html =~ ~s(data-testid="owner-attention-diagnostic")
+      assert html =~ "ui-advanced-only"
+      assert html =~ "Codex · Failed · Provider connectivity"
+      refute html =~ "provider-secret-do-not-expose"
+      refute html =~ "raw-provider-token"
+      refute html =~ "Provider connection closed with bearer"
+    end
+
+    test "surfaces company spend alerts with simple guidance and advanced-only provenance", %{
+      conn: conn
+    } do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      unique = System.unique_integer([:positive])
+
+      policy = insert_budget_policy!(company, %{action_on_exceed: "block"})
+
+      incident =
+        insert_budget_incident!(policy, "budget_exceeded", %{
+          spend_usd: "125.50",
+          threshold_pct: "125.5"
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Foreign budget #{unique}",
+          slug: "foreign-budget-#{unique}"
+        })
+
+      other_policy = insert_budget_policy!(other_company)
+      foreign_incident = insert_budget_incident!(other_policy, "warning")
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, html} = live(conn, "/inbox?status=action&density=detailed")
+
+      assert html =~ "Company budget needs immediate attention"
+      assert html =~ "Spend needs attention"
+      assert html =~ "Spending has reached a configured limit."
+      assert html =~ "To Company budget"
+      assert html =~ ~s(href="/costs")
+      assert html =~ "Review costs"
+
+      assert has_element?(
+               view,
+               "[data-testid='owner-attention-diagnostic'].ui-advanced-only"
+             )
+
+      assert html =~ "Policy #{policy.id}"
+      assert html =~ "Spend USD 125.5 of USD 100"
+      assert html =~ "Observed 125.5%; warning at 80%"
+      assert html =~ "Company scope"
+      assert html =~ "Monthly period"
+      assert html =~ "Block on exceed"
+      refute html =~ foreign_incident.id
+      refute html =~ "Policy #{other_policy.id}"
+      assert incident.company_id == company.id
+    end
+
+    test "rejects a review action carrying a wake from another company", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      unique = System.unique_integer([:positive])
+
+      {:ok, current_issue} =
+        Issues.create_issue(%{
+          title: "Current company review",
+          status: :in_review,
+          company_id: company.id
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Foreign review #{unique}",
+          slug: "foreign-review-#{unique}"
+        })
+
+      {:ok, other_agent} =
+        Agents.create_agent(%{
+          name: "Foreign Review Agent",
+          role: :engineer,
+          company_id: other_company.id
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Foreign company review",
+          status: :in_review,
+          company_id: other_company.id,
+          assignee_id: other_agent.id
+        })
+
+      {:ok, foreign_wake} =
+        Wakes.do_wake_agent(
+          other_agent.id,
+          other_issue.id,
+          "final_review_required",
+          "system",
+          "test",
+          %{}
+        )
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/inbox")
+
+      render_hook(view, "request_review_changes", %{
+        "issue_id" => current_issue.id,
+        "wake_id" => foreign_wake.id
+      })
+
+      assert {:ok, unchanged_issue} = Issues.get_company_issue(company.id, current_issue.id)
+      assert unchanged_issue.status == :in_review
+      assert {:ok, unchanged_wake} = Wakes.get_agent_wake(foreign_wake.id)
+      assert unchanged_wake.status == "pending"
+    end
+  end
+
   describe "pagination" do
     test "limits results to default page size", %{conn: _conn} do
       {:ok, agent} =
@@ -593,5 +907,38 @@ defmodule CymphoWeb.InboxLiveTest do
     |> Plug.Test.init_test_session(%{})
     |> Plug.Conn.put_session("user_id", user.id)
     |> Plug.Conn.put_session("company_id", company.id)
+  end
+
+  defp insert_budget_policy!(company, attrs \\ %{}) do
+    %BudgetPolicy{}
+    |> BudgetPolicy.changeset(
+      Map.merge(
+        %{
+          company_id: company.id,
+          scope: "company",
+          period: "monthly",
+          budget_limit_usd: "100",
+          warning_threshold_pct: "80",
+          action_on_exceed: "warn"
+        },
+        attrs
+      )
+    )
+    |> Repo.insert!()
+  end
+
+  defp insert_budget_incident!(policy, event_type, attrs \\ %{}) do
+    defaults = %{
+      budget_policy_id: policy.id,
+      company_id: policy.company_id,
+      event_type: event_type,
+      spend_usd: "82",
+      budget_limit_usd: policy.budget_limit_usd,
+      threshold_pct: "82"
+    }
+
+    %BudgetIncident{}
+    |> BudgetIncident.changeset(Map.merge(defaults, attrs))
+    |> Repo.insert!()
   end
 end

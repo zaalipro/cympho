@@ -38,6 +38,46 @@ defmodule Cympho.MultiTenancyPr1Test do
       refute Enum.any?(a_issues, &(&1.title == "b-only"))
     end
 
+    test "create_issue overrides a forged atom-key company scope", %{a: a, b: b, u: u} do
+      title = "plugin-atom-scope-#{u}"
+
+      assert {:ok, issue} =
+               HostServices.create_issue(
+                 a.id,
+                 %{
+                   title: title,
+                   company_id: b.id,
+                   status: :todo,
+                   skip_auto_assign: true
+                 },
+                 ["write:issues"]
+               )
+
+      assert issue.company_id == a.id
+      assert Enum.any?(HostServices.list_issues(a.id, %{}, ["read:issues"]), &(&1.id == issue.id))
+      refute Enum.any?(HostServices.list_issues(b.id, %{}, ["read:issues"]), &(&1.id == issue.id))
+    end
+
+    test "create_issue overrides a forged string-key company scope", %{a: a, b: b, u: u} do
+      title = "plugin-string-scope-#{u}"
+
+      assert {:ok, issue} =
+               HostServices.create_issue(
+                 a.id,
+                 %{
+                   "title" => title,
+                   "company_id" => b.id,
+                   "status" => "todo",
+                   "skip_auto_assign" => true
+                 },
+                 ["write:issues"]
+               )
+
+      assert issue.company_id == a.id
+      assert Enum.any?(HostServices.list_issues(a.id, %{}, ["read:issues"]), &(&1.id == issue.id))
+      refute Enum.any?(HostServices.list_issues(b.id, %{}, ["read:issues"]), &(&1.id == issue.id))
+    end
+
     test "get_agent returns own-company agents and not-found for foreign ones", %{a: a, b: b} do
       {:ok, agent} = Agents.create_agent(%{name: "ag", role: :engineer, company_id: a.id})
 

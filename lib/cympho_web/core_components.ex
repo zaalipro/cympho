@@ -67,4 +67,60 @@ defmodule CymphoWeb.CoreComponents do
     <span class={[@name, @class]} {@rest} />
     """
   end
+
+  @doc """
+  Renders an issue priority.
+
+  Advanced mode shows the word in a tinted pill ("High"). Simple mode shows the
+  same information as a single arrow — up for urgent, down for low — because a
+  row of "High / High / High" pills reads as decoration, while an arrow reads as
+  direction at a glance.
+
+  Both variants render; CSS picks one (see the `.ui-simple-only` /
+  `.ui-advanced-only` convention). The arrow keeps the word as its accessible
+  name so screen readers and hover still get "High priority".
+
+      <.priority_mark priority={issue.priority} pill_class={priority_badge_class(issue.priority)} />
+  """
+  attr :priority, :any, required: true
+  attr :pill_class, :string, default: nil
+  attr :class, :string, default: nil
+
+  def priority_mark(assigns) do
+    assigns = assign(assigns, :label, priority_word(assigns.priority))
+
+    ~H"""
+    <span class={["inline-flex items-center", @class]}>
+      <span class={["ui-advanced-only rounded-full px-2 py-0.5 text-[11px] font-510", @pill_class]}>
+        {@label}
+      </span>
+      <span
+        class="ui-simple-only inline-flex items-center"
+        title={"#{@label} priority"}
+        aria-label={"#{@label} priority"}
+      >
+        <span class={[priority_arrow_icon(@priority), "h-4 w-4", priority_arrow_tone(@priority)]}>
+        </span>
+      </span>
+    </span>
+    """
+  end
+
+  defp priority_word(priority) when is_atom(priority) and not is_nil(priority),
+    do: priority |> Atom.to_string() |> String.capitalize()
+
+  defp priority_word(priority) when is_binary(priority), do: String.capitalize(priority)
+  defp priority_word(_), do: "None"
+
+  defp priority_arrow_icon(p) when p in [:critical, "critical"],
+    do: "hero-chevron-double-up-mini"
+
+  defp priority_arrow_icon(p) when p in [:high, "high"], do: "hero-chevron-up-mini"
+  defp priority_arrow_icon(p) when p in [:low, "low"], do: "hero-chevron-down-mini"
+  defp priority_arrow_icon(_), do: "hero-minus-mini"
+
+  defp priority_arrow_tone(p) when p in [:critical, "critical"], do: "text-red-400"
+  defp priority_arrow_tone(p) when p in [:high, "high"], do: "text-amber-400"
+  defp priority_arrow_tone(p) when p in [:low, "low"], do: "text-sky-300"
+  defp priority_arrow_tone(_), do: "text-text-quaternary"
 end

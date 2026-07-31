@@ -106,6 +106,23 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               align="right"
             />
           </div>
+          <div class="flex items-center justify-between gap-3" data-testid="issue-work-mode-control">
+            <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Begin with
+            </span>
+            <.combobox
+              id="issue-work-mode-combobox"
+              options={work_mode_combobox_options()}
+              selected={to_string(@issue.work_mode || :standard)}
+              on_change="combobox_work_mode"
+              searchable?={false}
+              clearable?={false}
+              align="right"
+            />
+          </div>
+          <p class="ui-advanced-only text-[11px] leading-4 text-text-quaternary">
+            {work_mode_contract(@issue.work_mode)}
+          </p>
           <div :if={@issue.due_on} class="flex items-center justify-between gap-3">
             <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Due
@@ -131,7 +148,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
                 {mission_context_title(@issue)}
               </p>
             </div>
-            <span class="shrink-0 rounded-full border border-current/20 bg-black/10 px-2 py-0.5 text-[10px] font-510 uppercase tracking-[0.08em]">
+            <span class="ui-advanced-only shrink-0 rounded-full border border-current/20 bg-black/10 px-2 py-0.5 text-[10px] font-510 uppercase tracking-[0.08em]">
               {mission_context_badge(@issue)}
             </span>
           </div>
@@ -148,10 +165,12 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             >
               Open goal
             </.app_link>
+            <%!-- Two "open X" chips side by side is a choice, not a next step;
+                 simple mode keeps the goal link and drops the project one. --%>
             <.app_link
               :if={@issue.project}
               navigate={~p"/projects/#{@issue.project.id}"}
-              class="rounded border border-current/20 bg-black/10 px-2 py-1 text-[10px] font-510 hover:bg-black/15"
+              class="ui-advanced-only rounded border border-current/20 bg-black/10 px-2 py-1 text-[10px] font-510 hover:bg-black/15"
             >
               Open project
             </.app_link>
@@ -251,11 +270,10 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
                 <.icon name="hero-exclamation-triangle-mini" class="h-4 w-4 text-white" />
               </span>
               <div class="min-w-0 flex-1">
-                <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/70">
-                  Setup needed
-                </p>
-                <p class="mt-0.5 truncate text-sm font-590 text-white">
-                  {item_value(simple_setup_action, :label)}
+                <%!-- The warning icon already says "setup needed"; the eyebrow
+                     repeating it in caps was the third label in a 4-line card. --%>
+                <p class="truncate text-sm font-590 text-white">
+                  {simple_preflight_action_label(simple_setup_action)}
                 </p>
                 <p class="mt-0.5 text-[11px] leading-4 text-white/60">
                   {simple_preflight_action_detail(simple_setup_action)}
@@ -265,7 +283,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
                   navigate={item_value(simple_setup_action, :target_path)}
                   class="mt-1.5 inline-flex text-[11px] font-590 text-white underline underline-offset-2"
                 >
-                  {item_value(simple_setup_action, :target_label) || "Fix setup"}
+                  Fix this
                 </.app_link>
               </div>
             </div>
@@ -894,6 +912,26 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
     """
   end
 
+  defp work_mode_combobox_options do
+    [
+      %{id: "standard", label: "Start work"},
+      %{id: "planning", label: "Plan first"},
+      %{id: "ask", label: "Ask me first"}
+    ]
+  end
+
+  defp work_mode_contract(mode) when mode in [:planning, "planning"] do
+    "Planning contract: the agent can prepare a plan and request confirmation, but cannot implement or delegate until accepted."
+  end
+
+  defp work_mode_contract(mode) when mode in [:ask, "ask"] do
+    "Ask contract: the agent must pause at structured questions and wait for your response."
+  end
+
+  defp work_mode_contract(_mode) do
+    "Standard contract: the agent may execute its normal role workflow."
+  end
+
   defp ceo_launch_preview(issue, orchestrator_enabled?, preflight) do
     if dispatchable_issue?(issue) do
       if ceo_role?(Map.get(preflight, :agent_role)) do
@@ -1021,14 +1059,28 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
   defp simple_preflight_action(preflight), do: relaunch_setup_action(preflight)
 
+  # Simple mode names the thing that is missing, in words an owner would use.
+  # The advanced card keeps the precise runtime vocabulary.
+  defp simple_preflight_action_label(action) do
+    case item_value(action, :label) do
+      "Workspace isolation" -> "No safe place to work"
+      "Repo-capable runtime" -> "Can't change files"
+      "Delivery brief" -> "Needs more detail"
+      "Dispatch eligibility" -> "Nobody free to do it"
+      "Runtime paused" -> "The team is paused"
+      "Runtime command" -> "Needs a way to run"
+      label -> label || "Needs setup"
+    end
+  end
+
   defp simple_preflight_action_detail(action) do
     case item_value(action, :label) do
-      "Workspace isolation" -> "Attach a worktree before agents edit files."
-      "Repo-capable runtime" -> "Choose a harness that can change files."
-      "Delivery brief" -> "Tighten the issue brief before launch."
-      "Dispatch eligibility" -> "Free or assign an eligible agent."
-      "Runtime paused" -> "Resume company runtime before agents start."
-      _ -> "Fix before dispatch."
+      "Workspace isolation" -> "Give it its own copy of the code."
+      "Repo-capable runtime" -> "Pick a setup that can edit files."
+      "Delivery brief" -> "Say a bit more about what you want."
+      "Dispatch eligibility" -> "Free someone up or pick another person."
+      "Runtime paused" -> "Turn the team back on to start."
+      _ -> "Pick how this agent runs."
     end
   end
 

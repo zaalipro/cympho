@@ -22,6 +22,173 @@ defmodule Cympho.HeartbeatEngineTest do
       assert run.agent_id == agent_id
       assert run.issue_id == issue_id
     end
+
+    test "a nil issue id reaches the run changeset instead of the finance gate" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               HeartbeatEngine.create_run(%{
+                 agent_id: agent_id,
+                 issue_id: nil,
+                 adapter: "claude_local"
+               })
+
+      assert "can't be blank" in errors_on(changeset).issue_id
+    end
+
+    test "rejects an agent and issue from different scoped companies without binding checkout" do
+      first_company =
+        Cympho.Repo.insert!(%Cympho.Companies.Company{
+          name: "HB Agent Company #{System.unique_integer([:positive])}",
+          slug: "hb-agent-company-#{System.unique_integer([:positive])}"
+        })
+
+      second_company =
+        Cympho.Repo.insert!(%Cympho.Companies.Company{
+          name: "HB Issue Company #{System.unique_integer([:positive])}",
+          slug: "hb-issue-company-#{System.unique_integer([:positive])}"
+        })
+
+      agent =
+        Cympho.Repo.insert!(%Cympho.Agents.Agent{
+          name: "cross-company-run-agent",
+          role: :engineer,
+          status: :idle,
+          company_id: first_company.id
+        })
+
+      issue =
+        Cympho.Repo.insert!(%Cympho.Issues.Issue{
+          title: "cross-company run issue",
+          company_id: second_company.id
+        })
+
+      assert {:error, :company_mismatch} =
+               HeartbeatEngine.create_run(%{
+                 company_id: second_company.id,
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 adapter: "claude_local"
+               })
+
+      refute Cympho.Repo.exists?(
+               from r in Run, where: r.agent_id == ^agent.id and r.issue_id == ^issue.id
+             )
+    end
+  end
+
+  describe "checkout run ownership" do
+    test "binds the pending run to the checked-out issue before execution" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      issue = insert_checked_out_issue(agent_id)
+
+      assert {:ok, run} =
+               HeartbeatEngine.create_run(%{
+                 agent_id: agent_id,
+                 issue_id: issue.id,
+                 adapter: "claude_local",
+                 bind_checkout: true
+               })
+
+      reloaded = Cympho.Repo.get!(Cympho.Issues.Issue, issue.id)
+      assert reloaded.checkout_run_id == run.id
+      assert reloaded.status == :in_progress
+      assert reloaded.assignee_id == agent_id
+    end
+
+    test "cancels a duplicate pending run when another run owns the checkout" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      issue = insert_checked_out_issue(agent_id)
+
+      assert {:ok, owner_run} =
+               HeartbeatEngine.create_run(%{
+                 agent_id: agent_id,
+                 issue_id: issue.id,
+                 adapter: "claude_local",
+                 bind_checkout: true
+               })
+
+      assert {:error, {:checkout_run_bind_failed, :checkout_run_conflict}} =
+               HeartbeatEngine.create_run(%{
+                 agent_id: agent_id,
+                 issue_id: issue.id,
+                 adapter: "claude_local",
+                 bind_checkout: true
+               })
+
+      reloaded = Cympho.Repo.get!(Cympho.Issues.Issue, issue.id)
+      assert reloaded.checkout_run_id == owner_run.id
+
+      assert Enum.any?(
+               HeartbeatEngine.list_runs_for_issue(issue.id),
+               &(&1.id != owner_run.id and &1.status == "cancelled")
+             )
+    end
+
+    test "a terminal old run cannot clear a successor run's checkout" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      issue = insert_checked_out_issue(agent_id)
+
+      assert {:ok, old_run} =
+               HeartbeatEngine.create_run(%{
+                 agent_id: agent_id,
+                 issue_id: issue.id,
+                 adapter: "claude_local",
+                 bind_checkout: true
+               })
+
+      assert {:ok, started_old_run} = HeartbeatEngine.start_run(old_run)
+
+      assert {:ok, successor_run} =
+               HeartbeatEngine.create_run(%{
+                 agent_id: agent_id,
+                 issue_id: issue.id,
+                 adapter: "claude_local"
+               })
+
+      issue
+      |> Cympho.Repo.reload!()
+      |> Ecto.Changeset.change(checkout_run_id: successor_run.id)
+      |> Cympho.Repo.update!()
+
+      assert {:ok, _completed} = HeartbeatEngine.complete_run(started_old_run, %{})
+
+      reloaded = Cympho.Repo.get!(Cympho.Issues.Issue, issue.id)
+      assert reloaded.checkout_run_id == successor_run.id
+      assert reloaded.status == :in_progress
+      assert reloaded.checked_out_at
+    end
+
+    test "a terminal legacy run cannot clear a newer unbound checkout by the same agent" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      issue = insert_checked_out_issue(agent_id)
+
+      assert {:ok, old_run} =
+               HeartbeatEngine.create_run(%{
+                 agent_id: agent_id,
+                 issue_id: issue.id,
+                 adapter: "claude_local"
+               })
+
+      assert {:ok, started_old_run} = HeartbeatEngine.start_run(old_run)
+      assert {:ok, released} = Cympho.Issues.clear_checkout_lock(issue, :todo)
+      assert {:ok, successor_checkout} = Cympho.Issues.checkout_issue(released, agent_id)
+      assert is_nil(successor_checkout.checkout_run_id)
+      assert successor_checkout.status == :in_progress
+      assert successor_checkout.checked_out_at
+
+      assert {:ok, _recovered} = HeartbeatEngine.recover_stale_run(started_old_run)
+
+      reloaded = Cympho.Repo.get!(Cympho.Issues.Issue, issue.id)
+      assert is_nil(reloaded.checkout_run_id)
+      assert reloaded.status == :in_progress
+      assert reloaded.checked_out_at == successor_checkout.checked_out_at
+    end
   end
 
   describe "start_run/1" do
@@ -105,7 +272,7 @@ defmodule Cympho.HeartbeatEngineTest do
       assert completed.completed_at
     end
 
-    test "clears a checked-out issue when a run completes without changing status" do
+    test "clears a checked-out issue when its owning run completes without changing status" do
       agent_id = Ecto.UUID.generate()
       insert_agent(agent_id)
       issue = insert_checked_out_issue(agent_id)
@@ -114,7 +281,8 @@ defmodule Cympho.HeartbeatEngineTest do
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
           issue_id: issue.id,
-          adapter: "claude_local"
+          adapter: "claude_local",
+          bind_checkout: true
         })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
@@ -178,7 +346,7 @@ defmodule Cympho.HeartbeatEngineTest do
       assert Decimal.eq?(failed.cost_usd, Decimal.new("1.25"))
     end
 
-    test "clears a checked-out issue when a run fails" do
+    test "clears a checked-out issue when its owning run fails" do
       agent_id = Ecto.UUID.generate()
       insert_agent(agent_id)
       issue = insert_checked_out_issue(agent_id)
@@ -187,7 +355,8 @@ defmodule Cympho.HeartbeatEngineTest do
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
           issue_id: issue.id,
-          adapter: "claude_local"
+          adapter: "claude_local",
+          bind_checkout: true
         })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
@@ -240,7 +409,7 @@ defmodule Cympho.HeartbeatEngineTest do
       assert cancelled.status == "cancelled"
     end
 
-    test "clears a checked-out issue when a run is cancelled" do
+    test "clears a checked-out issue when its owning run is cancelled" do
       agent_id = Ecto.UUID.generate()
       insert_agent(agent_id)
       issue = insert_checked_out_issue(agent_id)
@@ -249,7 +418,8 @@ defmodule Cympho.HeartbeatEngineTest do
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
           issue_id: issue.id,
-          adapter: "claude_local"
+          adapter: "claude_local",
+          bind_checkout: true
         })
 
       assert {:ok, cancelled} = HeartbeatEngine.cancel_run(run)
@@ -392,7 +562,7 @@ defmodule Cympho.HeartbeatEngineTest do
       assert recovered.error_reason == "stale_run_recovered"
     end
 
-    test "clears a checked-out issue when stale run recovery fails it" do
+    test "clears a checked-out issue when stale owned run recovery fails it" do
       agent_id = Ecto.UUID.generate()
       insert_agent(agent_id)
       issue = insert_checked_out_issue(agent_id)
@@ -401,7 +571,8 @@ defmodule Cympho.HeartbeatEngineTest do
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
           issue_id: issue.id,
-          adapter: "claude_local"
+          adapter: "claude_local",
+          bind_checkout: true
         })
 
       {:ok, started} = HeartbeatEngine.start_run(run)

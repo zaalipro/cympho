@@ -36,6 +36,15 @@ defmodule CymphoWeb.FallbackController do
     |> render(:error, message: "Invalid state transition")
   end
 
+  def call(conn, {:error, :stale_target_revision}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: CymphoWeb.ErrorJSON)
+    |> render(:error,
+      message: "The target document changed. Review the latest revision before confirming."
+    )
+  end
+
   def call(conn, {:error, reason}) do
     conn
     |> put_status(:bad_request)

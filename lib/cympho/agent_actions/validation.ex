@@ -27,6 +27,9 @@ defmodule Cympho.AgentActions.Validation do
   @active_run_statuses ~w(pending queued running)
 
   @success_like_action_types ~w(submit_review approve_issue swarm_worker_complete)
+  @ask_mode_action_types ~w(comment ask_user_questions)
+  @planning_mode_action_types ~w(comment attach_work_product ask_user_questions request_confirmation)
+  @interaction_action_types ~w(ask_user_questions request_confirmation)
   @blocked_declaration_patterns [
     ~r/(^|\s)\[blocked\]/i,
     ~r/\b(unable|can't|cannot|can not)\s+(to\s+)?(proceed|continue|complete|finish|do|perform)\b/i,
@@ -34,6 +37,53 @@ defmodule Cympho.AgentActions.Validation do
     ~r/\b(needs?|requires?|awaiting|waiting for)\s+(human|owner|user)\s+(input|approval|decision|access|credential|credentials)\b/i,
     ~r/\b(blocked by permission|blocked by permissions|permission settings)\b/i
   ]
+
+  def ensure_work_mode_actions(%Issue{work_mode: mode}, actions)
+      when mode in [:ask, "ask"] do
+    with :ok <- ensure_mode_action_types(actions, :ask, @ask_mode_action_types),
+         :ok <- ensure_single_interaction(actions, :ask, "ask_user_questions") do
+      :ok
+    end
+  end
+
+  def ensure_work_mode_actions(%Issue{work_mode: mode}, actions)
+      when mode in [:planning, "planning"] do
+    with :ok <- ensure_mode_action_types(actions, :planning, @planning_mode_action_types),
+         :ok <- ensure_planning_artifacts(actions),
+         :ok <- ensure_single_interaction(actions, :planning, :any) do
+      :ok
+    end
+  end
+
+  def ensure_work_mode_actions(%Issue{}, _actions), do: :ok
+
+  defp ensure_mode_action_types(actions, mode, allowed_types) do
+    case Enum.find(actions, fn action -> Map.get(action, "type") not in allowed_types end) do
+      nil -> :ok
+      action -> {:error, {:work_mode_action_forbidden, mode, Map.get(action, "type")}}
+    end
+  end
+
+  defp ensure_planning_artifacts(actions) do
+    case Enum.find(actions, fn
+           %{"type" => "attach_work_product", "kind" => kind} -> kind != "document"
+           %{"type" => "attach_work_product"} -> true
+           _ -> false
+         end) do
+      nil -> :ok
+      action -> {:error, {:work_mode_action_forbidden, :planning, action["type"]}}
+    end
+  end
+
+  defp ensure_single_interaction(actions, mode, required_type) do
+    interactions = Enum.filter(actions, &(Map.get(&1, "type") in @interaction_action_types))
+
+    case interactions do
+      [%{"type" => type}] when required_type == :any or type == required_type -> :ok
+      [] -> {:error, {:work_mode_interaction_required, mode}}
+      _ -> {:error, {:work_mode_interaction_count, mode, 1}}
+    end
+  end
 
   def ensure_no_contradictory_success(actions) do
     success_action =

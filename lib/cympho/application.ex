@@ -5,6 +5,10 @@ defmodule Cympho.Application do
 
   @impl true
   def start(_type, _args) do
+    # Optional and fail-open: absent configuration is a no-op, while malformed
+    # exporter configuration is contained and never blocks Cympho startup.
+    _ = Cympho.OpenTelemetry.setup()
+
     # Register the Sentry :logger handler before children start so early-boot
     # crashes are captured. The handler is a no-op when SENTRY_DSN is unset
     # (default in dev/test), so registration is unconditional.
@@ -36,6 +40,7 @@ defmodule Cympho.Application do
       health_checker_child(),
       # Plugin system
       Cympho.Plugins.Registry,
+      {Registry, keys: :unique, name: Cympho.Plugins.ProcessRegistry},
       {Cympho.Plugins.Supervisor, []},
       # Skill hot-reload for development
       {Cympho.Skills.HotReloader, []},
@@ -70,6 +75,7 @@ defmodule Cympho.Application do
         # Routine triggers are scheduled in a task so a transient failure
         # doesn't take down boot.
         schedule_routine_triggers()
+        restore_catalog_plugins()
 
         {:ok, pid}
 
@@ -160,6 +166,16 @@ defmodule Cympho.Application do
       Task.Supervisor.start_child(
         Cympho.TaskSupervisor,
         fn -> Cympho.RoutineTriggers.schedule_all_triggers() end,
+        restart: :temporary
+      )
+    end
+  end
+
+  defp restore_catalog_plugins do
+    if Application.get_env(:cympho, :restore_catalog_plugins?, true) do
+      Task.Supervisor.start_child(
+        Cympho.TaskSupervisor,
+        fn -> Cympho.Plugins.Runtime.restore_enabled_plugins() end,
         restart: :temporary
       )
     end

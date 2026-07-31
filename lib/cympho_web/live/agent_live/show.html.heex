@@ -168,14 +168,16 @@
 
     <%!-- ── Tabs ──────────────────────────────────────────────────── --%>
     <div class="mb-5 flex items-center gap-1 border-b border-border">
+      <%!-- Simple mode keeps Dashboard, Setup and History. Instructions and
+           Skills stay advanced — they are prompt engineering, not operation. --%>
       <button
         :for={
-          {key, label} <- [
-            {"dashboard", "Dashboard"},
-            {"instructions", "Instructions"},
-            {"skills", "Skills"},
-            {"configuration", "Configuration"},
-            {"runs", "Runs"}
+          {key, label, simple_label} <- [
+            {"dashboard", "Dashboard", "Overview"},
+            {"instructions", "Instructions", nil},
+            {"skills", "Skills", nil},
+            {"configuration", "Configuration", "Setup"},
+            {"runs", "Runs", "History"}
           ]
         }
         type="button"
@@ -183,7 +185,7 @@
         phx-value-tab={key}
         class={[
           "border-b-2 px-3 py-2 text-sm transition-colors duration-200 -mb-px",
-          key != "dashboard" && "ui-advanced-only",
+          is_nil(simple_label) && "ui-advanced-only",
           if(@current_tab == key,
             do:
               "border-brand text-text-primary font-510 shadow-[0_4px_12px_-4px_rgba(217,119,87,0.5)]",
@@ -191,23 +193,26 @@
           )
         ]}
       >
-        {label}
+        <span class={simple_label && "ui-advanced-only"}>{label}</span>
+        <span :if={simple_label} class="ui-simple-only">{simple_label}</span>
       </button>
     </div>
 
+    <%!-- Only the two tabs simple mode still hides get the fallback. Setup and
+         History are reachable now, so pointing them at Advanced would be a lie. --%>
     <div
-      :if={@current_tab != "dashboard"}
+      :if={@current_tab in ["instructions", "skills"]}
       data-testid="agent-simple-tab-fallback"
       class="ui-simple-only rounded-xl border border-brand/20 bg-brand/[0.06] px-5 py-6"
     >
       <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div class="min-w-0">
           <p class="text-sm font-590 text-text-primary">
-            This workspace is available in Advanced
+            This part lives in Advanced
           </p>
           <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
-            Simple keeps the agent's day-to-day status and actions together on Dashboard. Nothing has
-            been removed from the agent configuration.
+            Writing instructions and picking skills is fiddly work. Nothing has been removed —
+            switch to Advanced when you want it.
           </p>
         </div>
         <button
@@ -216,7 +221,7 @@
           phx-value-tab="dashboard"
           class="inline-flex min-h-[40px] shrink-0 items-center justify-center gap-2 rounded-lg border border-brand/25 bg-panel px-4 py-2 text-sm font-590 text-brand transition-colors hover:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
         >
-          <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to Dashboard
+          <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to Overview
         </button>
       </div>
     </div>
@@ -959,7 +964,6 @@
       id={"agent-config-fields-#{@agent.id}"}
       data-testid="agent-configuration-panel"
       phx-hook="AdapterConfigFields"
-      class="ui-advanced-only"
     >
       <% selected_adapter = @selected_adapter || "claude_code" %>
       <.simple_form
@@ -969,9 +973,13 @@
         class="space-y-6"
       >
         <%!-- Identity --%>
+        <%!-- Simple mode keeps this form but only the two panels an owner
+             actually decides: who the agent is, and how it runs. The rest of
+             the form still renders (one form, one submit) but is gated. --%>
         <.panel class="ember-glass p-5">
           <h3 class="mb-4 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Identity
+            <span class="ui-advanced-only">Identity</span>
+            <span class="ui-simple-only">Basics</span>
           </h3>
           <div class="grid gap-5 sm:grid-cols-2">
             <.input field={@form[:name]} label="Name" required />
@@ -1003,7 +1011,7 @@
         <% prompt_contract = instruction_studio.prompt_contract %>
         <% instruction_guardrails =
           instruction_save_guardrails(instruction_studio, @latest_config_revision) %>
-        <.panel id="agent-instruction-studio" class="overflow-hidden">
+        <.panel id="agent-instruction-studio" class="ui-advanced-only overflow-hidden">
           <div class="flex flex-col gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div class="flex flex-wrap items-center gap-2">
@@ -1533,7 +1541,8 @@
         <%!-- Adapter --%>
         <.panel class="p-5">
           <h3 class="mb-4 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Runtime Profile
+            <span class="ui-advanced-only">Runtime Profile</span>
+            <span class="ui-simple-only">How it runs</span>
           </h3>
           <div class="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
             <div class="space-y-1.5">
@@ -1619,7 +1628,10 @@
             </div>
           </div>
 
-          <div class="mb-4 flex items-center justify-between gap-3 border-t border-border pt-4">
+          <%!-- Raw adapter control and concurrency are advanced: in simple mode
+               the profile picker and the quick presets above already set them,
+               and these inputs stay in the DOM so one submit saves everything. --%>
+          <div class="ui-advanced-only mb-4 flex items-center justify-between gap-3 border-t border-border pt-4">
             <div>
               <h4 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                 Adapter
@@ -1629,7 +1641,7 @@
               </p>
             </div>
           </div>
-          <div class="grid gap-5 sm:grid-cols-2">
+          <div class="ui-advanced-only grid gap-5 sm:grid-cols-2">
             <.input
               field={@form[:adapter]}
               type="select"
@@ -1674,7 +1686,7 @@
               secret_count: @secret_count,
               secret_keys: @secret_keys
             }) %>
-          <div class="mt-5 border-t border-border pt-4">
+          <div class="ui-advanced-only mt-5 border-t border-border pt-4">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h4 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
@@ -1775,7 +1787,7 @@
               @form[:max_concurrent_jobs].value || 3,
               @recent_runs
             ) %>
-          <div class="mt-4 rounded-lg border border-border bg-surface px-3 py-3">
+          <div class="ui-advanced-only mt-4 rounded-lg border border-border bg-surface px-3 py-3">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h4 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
@@ -1815,7 +1827,7 @@
           <div
             data-adapter-panel="claude_code"
             hidden={selected_adapter != "claude_code"}
-            class="mt-4 rounded-lg border border-border bg-surface px-3 py-3"
+            class="ui-advanced-only mt-4 rounded-lg border border-border bg-surface px-3 py-3"
           >
             <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
               Runtime command
@@ -1830,7 +1842,7 @@
           <div
             data-adapter-panel="codex"
             hidden={selected_adapter != "codex"}
-            class="mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+            class="ui-advanced-only mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto]"
           >
             <div class="space-y-1.5">
               <label for="agent-codex-model" class="block text-xs font-510 text-text-secondary">
@@ -1861,7 +1873,7 @@
           <div
             data-adapter-panel="cursor"
             hidden={selected_adapter != "cursor"}
-            class="mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+            class="ui-advanced-only mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
           >
             <div class="space-y-1.5">
               <label for="agent-cursor-command" class="block text-xs font-510 text-text-secondary">
@@ -1905,7 +1917,7 @@
           <div
             data-adapter-panel="openai_chat"
             hidden={selected_adapter != "openai_chat"}
-            class="mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+            class="ui-advanced-only mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
           >
             <div class="space-y-1.5">
               <label
@@ -1946,7 +1958,7 @@
           <div
             data-adapter-panel="openclaw"
             hidden={selected_adapter != "openclaw"}
-            class="mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 lg:grid-cols-2"
+            class="ui-advanced-only mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 lg:grid-cols-2"
           >
             <div class="space-y-1.5">
               <label
@@ -2044,7 +2056,7 @@
           <div
             data-adapter-panel="process"
             hidden={selected_adapter != "process"}
-            class="mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 lg:grid-cols-2"
+            class="ui-advanced-only mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 lg:grid-cols-2"
           >
             <div class="space-y-1.5">
               <label for="agent-process-preset" class="block text-xs font-510 text-text-secondary">
@@ -2152,7 +2164,7 @@
         </.panel>
 
         <%!-- Environment Variables --%>
-        <.panel id="agent-env-vars" class="overflow-hidden">
+        <.panel id="agent-env-vars" class="ui-advanced-only overflow-hidden">
           <div class="flex items-center justify-between border-b border-border px-5 py-3">
             <div>
               <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
@@ -2219,7 +2231,7 @@
         </.panel>
 
         <%!-- Permissions --%>
-        <.panel class="overflow-hidden">
+        <.panel class="ui-advanced-only overflow-hidden">
           <div class="border-b border-border px-5 py-3">
             <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Permissions
@@ -2257,6 +2269,53 @@
     </div>
 
     <%!-- ── Runs tab ──────────────────────────────────────────────── --%>
+    <div
+      :if={@current_tab == "runs"}
+      data-testid="agent-simple-runs-panel"
+      class="ui-simple-only"
+    >
+      <.panel class="overflow-hidden">
+        <div class="border-b border-border px-4 py-3">
+          <h3 class="text-sm font-590 text-text-primary">What this agent has done</h3>
+        </div>
+
+        <div
+          :if={Enum.empty?(@recent_runs)}
+          class="px-4 py-10 text-center text-sm text-text-tertiary"
+        >
+          Nothing yet. This agent hasn't been asked to do anything.
+        </div>
+
+        <%!-- One row per attempt: outcome icon, what happened in words, when.
+             No run ids, token counts, or adapter names — those are the detail
+             pane in Advanced, and none of them is a thing an owner acts on. --%>
+        <ul :if={!Enum.empty?(@recent_runs)} class="divide-y divide-border">
+          <li :for={run <- @recent_runs} class="flex items-start gap-3 px-4 py-3">
+            <span class={[
+              "mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border",
+              simple_run_tone_class(run.status)
+            ]}>
+              <span class={[simple_run_icon(run.status), "h-4 w-4"]}></span>
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-510 text-text-primary">
+                {simple_run_headline(run)}
+              </p>
+              <p
+                :if={simple_run_detail(run, adapter_error_for_run(run))}
+                class="mt-0.5 line-clamp-2 text-xs leading-5 text-text-tertiary"
+              >
+                {simple_run_detail(run, adapter_error_for_run(run))}
+              </p>
+            </div>
+            <span class="shrink-0 text-[11px] text-text-quaternary">
+              {format_relative(run.inserted_at)}
+            </span>
+          </li>
+        </ul>
+      </.panel>
+    </div>
+
     <div
       :if={@current_tab == "runs"}
       data-testid="agent-runs-panel"

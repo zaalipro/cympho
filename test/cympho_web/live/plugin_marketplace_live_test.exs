@@ -1,10 +1,11 @@
 defmodule CymphoWeb.PluginMarketplaceLiveTest do
-  use CymphoWeb.LiveCase, async: true
+  use CymphoWeb.LiveCase, async: false
 
   alias Cympho.Companies
   alias Cympho.Repo
   alias Cympho.Skills
   alias Cympho.Skills.Plugin
+  alias Cympho.Plugins.Runtime
 
   setup %{conn: conn, current_company: company} = context do
     unless context[:regular_member] do
@@ -18,12 +19,44 @@ defmodule CymphoWeb.PluginMarketplaceLiveTest do
 
   describe "mount" do
     test "renders the available plugins catalog", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/plugins/marketplace")
+      {:ok, view, html} = live(conn, "/plugins/marketplace")
 
-      assert html =~ "Plugin Marketplace"
+      assert html =~ "Plugin Catalog"
+      assert html =~ "source-backed entries"
       assert html =~ "GitHub Integration"
-      assert html =~ "Slack Notifications"
-      assert html =~ "Jira Sync"
+      assert html =~ "Custom Webhooks"
+      assert html =~ "Plugin SDK Example"
+      assert has_element?(view, "[data-testid='plugin-catalog-source']")
+
+      marketplace_html = render(view)
+      refute marketplace_html =~ "docs.cympho.com"
+      refute marketplace_html =~ ~s(title="Installs")
+      refute marketplace_html =~ "1247"
+      refute marketplace_html =~ "4.8"
+    end
+
+    test "shows install actions only for installable source entries", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/plugins/marketplace")
+
+      assert has_element?(
+               view,
+               "[data-plugin-identifier='example-plugin'] button[phx-click='install']"
+             )
+
+      refute has_element?(
+               view,
+               "[data-plugin-identifier='github-integration'] button[phx-click='install']"
+             )
+
+      refute has_element?(
+               view,
+               "[data-plugin-identifier='custom-webhook'] button[phx-click='install']"
+             )
+
+      assert has_element?(
+               view,
+               "[data-plugin-identifier='github-integration'] [data-testid='plugin-catalog-not-installable']"
+             )
     end
   end
 
@@ -34,14 +67,31 @@ defmodule CymphoWeb.PluginMarketplaceLiveTest do
     } do
       {:ok, view, _html} = live(conn, "/plugins/marketplace")
 
-      _html = render_click(view, "install", %{"identifier" => "github-integration"})
+      _html = render_click(view, "install", %{"identifier" => "example-plugin"})
 
       assert {:ok, %Plugin{} = plugin} =
-               Skills.get_plugin_by_identifier("github-integration", company.id)
+               Skills.get_plugin_by_identifier("example-plugin", company.id)
 
-      assert plugin.name == "GitHub Integration"
-      assert plugin.status == "installed"
+      assert plugin.name == "Plugin SDK Example"
+      assert plugin.status == "active"
       assert plugin.enabled == true
+      assert plugin.manifest["source"] == "local_catalog"
+      assert plugin.manifest["entrypoint"] == "Cympho.Plugins.ExamplePlugin"
+      assert plugin.manifest["capabilities"] == ["read:issues"]
+      assert is_pid(Runtime.whereis(plugin))
+
+      assert has_element?(
+               view,
+               "[data-plugin-identifier='example-plugin']",
+               "Installed"
+             )
+
+      refute has_element?(
+               view,
+               "[data-plugin-identifier='example-plugin'] button[phx-click='install']"
+             )
+
+      assert :ok = Runtime.stop_plugin(plugin)
     end
 
     test "is a no-op when the identifier is not in the available catalog", %{conn: conn} do
@@ -50,6 +100,18 @@ defmodule CymphoWeb.PluginMarketplaceLiveTest do
       _html = render_click(view, "install", %{"identifier" => "does-not-exist"})
 
       assert Repo.all(Plugin) == []
+    end
+
+    test "is a no-op for a source reference that is not installable", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, view, _html} = live(conn, "/plugins/marketplace")
+
+      render_click(view, "install", %{"identifier" => "github-integration"})
+
+      assert {:error, :not_found} =
+               Skills.get_plugin_by_identifier("github-integration", company.id)
     end
 
     @tag regular_member: true
@@ -62,14 +124,30 @@ defmodule CymphoWeb.PluginMarketplaceLiveTest do
       assert html =~ ~s(data-testid="plugin-marketplace-read-only")
       refute has_element?(view, "button[phx-click='install']")
 
-      render_click(view, "install", %{"identifier" => "github-integration"})
+      render_click(view, "install", %{"identifier" => "example-plugin"})
 
       assert {:error, :not_found} =
-               Skills.get_plugin_by_identifier("github-integration", company.id)
+               Skills.get_plugin_by_identifier("example-plugin", company.id)
     end
   end
 
   describe "uninstall event" do
+    test "stops the supervised worker before deleting a catalog plugin", %{
+      conn: conn,
+      current_company: company
+    } do
+      entry = Enum.find(Cympho.Plugins.Catalog.entries(), & &1.installable?)
+      assert {:ok, plugin} = Runtime.install_catalog_entry(entry, company.id)
+      pid = Runtime.whereis(plugin)
+      assert is_pid(pid)
+
+      {:ok, view, _html} = live(conn, "/plugins/marketplace")
+      _html = render_click(view, "uninstall", %{"id" => plugin.id})
+
+      refute Process.alive?(pid)
+      assert {:error, :not_found} = Skills.get_plugin_by_identifier(entry.identifier, company.id)
+    end
+
     test "deletes the plugin row scoped to the current company", %{
       conn: conn,
       current_company: company
@@ -119,13 +197,13 @@ defmodule CymphoWeb.PluginMarketplaceLiveTest do
     test "updates the search query and narrows the rendered list", %{conn: conn} do
       {:ok, view, html} = live(conn, "/plugins/marketplace")
 
-      assert html =~ "Slack Notifications"
-      assert html =~ "Jira Sync"
+      assert html =~ "GitHub Integration"
+      assert html =~ "Plugin SDK Example"
 
-      narrowed = render_change(view, "search", %{"query" => "slack"})
+      narrowed = render_change(view, "search", %{"query" => "webhook"})
 
-      assert narrowed =~ "Slack Notifications"
-      refute narrowed =~ "Jira Sync"
+      assert narrowed =~ "Custom Webhooks"
+      refute narrowed =~ "Plugin SDK Example"
     end
   end
 end

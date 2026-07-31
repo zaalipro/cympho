@@ -468,9 +468,7 @@
         </div>
 
         <div :if={@digest_density == "detailed"} class="hidden md:block">
-          <span class={"inline-flex rounded-full px-2 py-0.5 text-[11px] font-510 #{priority_badge_class(issue.priority)}"}>
-            {String.capitalize(to_string(issue.priority))}
-          </span>
+          <.priority_mark priority={issue.priority} pill_class={priority_badge_class(issue.priority)} />
         </div>
 
         <div

@@ -388,6 +388,15 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
               >
                 {Map.get(entry.data.payload, "details")}
               </div>
+              <p
+                :if={Map.has_key?(entry.data.payload, "target_revision_number")}
+                class="text-xs text-text-quaternary"
+              >
+                Pinned to {Map.get(entry.data.payload, "target_document_title", "plan")} revision {Map.get(
+                  entry.data.payload,
+                  "target_revision_number"
+                )}.
+              </p>
               <div :if={entry.data.status == :pending} class="flex items-center gap-2 pt-2">
                 <.button
                   type="button"

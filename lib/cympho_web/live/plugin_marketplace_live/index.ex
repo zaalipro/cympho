@@ -2,66 +2,9 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
   use CymphoWeb, :live_view
 
   alias Cympho.{Companies, Skills}
+  alias Cympho.Plugins.{Catalog, Runtime}
 
   @mutation_forbidden_message "Only company owners, admins, and board members can change plugins."
-
-  @available_plugins [
-    %{
-      identifier: "github-integration",
-      name: "GitHub Integration",
-      version: "1.0.0",
-      description: "Sync issues with GitHub repositories and pull requests",
-      author: "Cympho",
-      capabilities: ["read:issues", "write:issues"],
-      rating: 4.8,
-      downloads: 1247,
-      documentation_url: "https://docs.cympho.com/plugins/github"
-    },
-    %{
-      identifier: "slack-notifications",
-      name: "Slack Notifications",
-      version: "1.2.0",
-      description: "Send issue updates and agent notifications to Slack channels",
-      author: "Cympho",
-      capabilities: ["notify"],
-      rating: 4.5,
-      downloads: 892,
-      documentation_url: "https://docs.cympho.com/plugins/slack"
-    },
-    %{
-      identifier: "jira-sync",
-      name: "Jira Sync",
-      version: "2.1.0",
-      description: "Bidirectional sync with Jira projects and issues",
-      author: "Cympho",
-      capabilities: ["read:issues", "write:issues"],
-      rating: 4.2,
-      downloads: 654,
-      documentation_url: "https://docs.cympho.com/plugins/jira"
-    },
-    %{
-      identifier: "analytics-dashboard",
-      name: "Analytics Dashboard",
-      version: "1.0.0",
-      description: "Track team productivity and issue resolution metrics",
-      author: "Cympho",
-      capabilities: ["read:issues", "read:agents"],
-      rating: 4.7,
-      downloads: 1089,
-      documentation_url: "https://docs.cympho.com/plugins/analytics"
-    },
-    %{
-      identifier: "custom-webhook",
-      name: "Custom Webhooks",
-      version: "1.1.0",
-      description: "Trigger external services on issue events with custom payloads",
-      author: "Cympho",
-      capabilities: ["webhook"],
-      rating: 4.6,
-      downloads: 743,
-      documentation_url: "https://docs.cympho.com/plugins/webhooks"
-    }
-  ]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -69,10 +12,11 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
 
     {:ok,
      socket
-     |> assign(:page_title, "Plugin Marketplace")
+     |> assign(:page_title, "Plugin Catalog")
      |> assign(:company_id, company_id)
      |> assign(:can_manage_plugins, can_manage_plugins?(socket))
-     |> assign(:available_plugins, @available_plugins)
+     |> assign(:available_plugins, Catalog.entries())
+     |> assign(:installed_identifiers, installed_identifiers(company_id))
      |> assign(:search_query, "")}
   end
 
@@ -94,20 +38,24 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
       if is_nil(company_id) do
         {:noreply, put_flash(socket, :error, "No company selected")}
       else
-        case find_available_plugin(identifier) do
-          nil ->
+        case Catalog.fetch(identifier) do
+          {:error, :not_found} ->
             {:noreply, put_flash(socket, :error, "Plugin not found")}
 
-          available_plugin ->
+          {:ok, %{installable?: false} = available_plugin} ->
+            {:noreply,
+             put_flash(socket, :error, "#{available_plugin.name} is a source reference only")}
+
+          {:ok, available_plugin} ->
             case install_plugin(available_plugin, company_id) do
               {:ok, _plugin} ->
                 {:noreply,
                  socket
                  |> put_flash(:info, "#{available_plugin.name} installed successfully")
-                 |> assign(:company_id, company_id)}
+                 |> assign(:installed_identifiers, installed_identifiers(company_id))}
 
-              {:error, changeset} ->
-                error_msg = extract_error_message(changeset)
+              {:error, reason} ->
+                error_msg = extract_error_message(reason)
                 {:noreply, put_flash(socket, :error, "Failed to install: #{error_msg}")}
             end
         end
@@ -120,11 +68,12 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
     authorize_plugin_mutation(socket, fn ->
       case fetch_company_plugin(socket, id) do
         {:ok, plugin} ->
-          case Skills.delete_plugin(plugin) do
+          case Runtime.uninstall_plugin(plugin) do
             {:ok, _} ->
               {:noreply,
                socket
-               |> put_flash(:info, "Plugin uninstalled successfully")}
+               |> put_flash(:info, "Plugin uninstalled successfully")
+               |> assign(:installed_identifiers, installed_identifiers(socket.assigns.company_id))}
 
             {:error, _} ->
               {:noreply, put_flash(socket, :error, "Failed to uninstall plugin")}
@@ -144,9 +93,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
     end
   end
 
-  defp find_available_plugin(identifier) do
-    Enum.find(@available_plugins, &(&1.identifier == identifier))
-  end
+  defp installed_identifiers(nil), do: []
 
   defp installed_identifiers(company_id) do
     Skills.list_plugins(company_id: company_id)
@@ -154,34 +101,21 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
   end
 
   defp install_plugin(available_plugin, company_id) do
-    attrs = %{
-      identifier: available_plugin.identifier,
-      name: available_plugin.name,
-      version: available_plugin.version,
-      description: available_plugin.description,
-      author: available_plugin.author,
-      manifest: %{
-        capabilities: available_plugin.capabilities,
-        documentation_url: available_plugin.documentation_url
-      },
-      status: "installed",
-      capabilities: available_plugin.capabilities,
-      enabled: true,
-      company_id: company_id
-    }
-
-    Skills.create_plugin(attrs)
+    Runtime.install_catalog_entry(available_plugin, company_id)
   end
 
-  defp extract_error_message(changeset) do
+  defp extract_error_message(%Ecto.Changeset{} = changeset) do
     changeset.errors
     |> Enum.map(fn {field, {msg, _opts}} -> "#{field} #{msg}" end)
     |> Enum.join(", ")
   end
 
-  defp filtered_plugins(available_plugins, search_query, company_id) do
-    installed = installed_identifiers(company_id)
+  defp extract_error_message({:runtime_start_failed, _reason, _plugin}),
+    do: "the supervised worker could not start"
 
+  defp extract_error_message(_reason), do: "the plugin could not be installed"
+
+  defp filtered_plugins(available_plugins, search_query, installed) do
     available_plugins
     |> Enum.filter(fn p ->
       String.downcase(p.name) =~ String.downcase(search_query) ||

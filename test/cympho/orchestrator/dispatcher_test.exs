@@ -281,4 +281,51 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       refute MapSet.member?(state.running_issue_ids, issue.id)
     end
   end
+
+  test "orchestrator ownership conflict preserves a successor run checkout", %{
+    company: company,
+    agent: agent,
+    issue: issue
+  } do
+    test_pid = self()
+
+    with_mocks([
+      {Runtime, [], [dispatchable?: fn _issue, _agent -> :ok end]},
+      {Orchestrator, [],
+       [
+         start_and_run: fn checked_out, agent_id ->
+           assert {:ok, successor_run} =
+                    Cympho.HeartbeatEngine.create_run(%{
+                      company_id: checked_out.company_id,
+                      agent_id: agent_id,
+                      issue_id: checked_out.id,
+                      adapter: "claude_code",
+                      bind_checkout: true
+                    })
+
+           send(test_pid, {:successor_run, successor_run.id})
+           {:error, {:checkout_run_bind_failed, :checkout_run_conflict}}
+         end,
+         whereis: fn _issue_id -> nil end,
+         stop: fn _issue_id, _reason -> :ok end
+       ]}
+    ]) do
+      assert {:noreply, %State{} = state} =
+               Dispatcher.handle_info({:poll_company, company.id}, State.new())
+
+      assert_received {:successor_run, successor_run_id}
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :in_progress
+      assert reloaded.assignee_id == agent.id
+      assert reloaded.checkout_run_id == successor_run_id
+      assert reloaded.checked_out_at
+
+      assert {:ok, %{status: "pending"}} =
+               Cympho.HeartbeatEngine.get_run(successor_run_id)
+
+      assert %{attempts: 1} = state.retry_attempts[issue.id]
+      refute MapSet.member?(state.running_issue_ids, issue.id)
+    end
+  end
 end
