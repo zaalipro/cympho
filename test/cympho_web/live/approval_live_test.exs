@@ -205,7 +205,10 @@ defmodule CymphoWeb.ApprovalLiveTest do
       assert html =~ "Payload includes action, risk."
       assert html =~ "Decision actions"
       assert html =~ "Ship detail flow"
-      assert html =~ "Payload keys"
+      # A "Payload keys" panel listed the same labels the Evidence list already
+      # prints beside their values.
+      refute html =~ "Payload keys"
+      assert html =~ "Risk"
       assert html =~ "release_gate"
 
       approved_html = render_click(view, :approve)

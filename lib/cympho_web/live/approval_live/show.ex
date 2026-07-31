@@ -87,7 +87,6 @@ defmodule CymphoWeb.ApprovalLive.Show do
       stance: decision_stance(approval.status),
       recommendation: decision_recommendation(approval, linked_issue_count, payload_keys),
       linked_issue_count: linked_issue_count,
-      payload_keys: payload_keys,
       requested_by: requested_by_label(approval),
       resolved_by: resolved_by_label(approval),
       age: approval_age_label(approval.inserted_at),
@@ -235,7 +234,4 @@ defmodule CymphoWeb.ApprovalLive.Show do
   def detail_stat_class do
     "rounded-lg border border-border bg-surface-1 px-4 py-3"
   end
-
-  def status_badge_class(:pending), do: "bg-brand/15 text-brand"
-  def status_badge_class(_), do: "bg-surface text-text-tertiary"
 end

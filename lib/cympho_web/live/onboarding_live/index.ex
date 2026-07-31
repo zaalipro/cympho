@@ -415,6 +415,22 @@ defmodule CymphoWeb.OnboardingLive.Index do
     Enum.find(blueprints, &(&1.key == form["blueprint"])) || List.first(blueprints)
   end
 
+  # The team step already gives CEO and CTO a card each; the blueprint's role
+  # summary then listed them again as the first two names.
+  def other_roles_summary(blueprint) do
+    blueprint.role_summary
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 in ["CEO", "CTO"]))
+    |> Enum.join(", ")
+  end
+
+  # The issue prefix input is advanced-only. When the company step refuses to
+  # advance because of it, the field has to come back into view or a simple-mode
+  # user is stuck on an error they cannot act on.
+  def prefix_error?(nil), do: false
+  def prefix_error?(message), do: String.contains?(message, "Issue prefix")
+
   # The prefix cap is 7 (not the schema's 10) because the launch engine
   # truncates prefixes to 7 characters; the name minimum is 3 because the
   # company slug derived from it must satisfy validate_length(:slug, min: 3).
@@ -485,16 +501,29 @@ defmodule CymphoWeb.OnboardingLive.Index do
     end)
   end
 
+  def blueprint_short_name(name), do: String.replace_suffix(name, " company", "")
+
+  # nil when the catalog's starter-issue counts differ, in which case the cards
+  # keep printing their own.
+  def shared_seed_issue_count(blueprints) do
+    case blueprints |> Enum.map(& &1.seed_issue_count) |> Enum.uniq() do
+      [count] -> count
+      _ -> nil
+    end
+  end
+
   defp role_label(role), do: Agent.role_label(role)
 
   # ── AI provider helpers (team step) ────────────────────────────────────
 
+  # "HTTP" named a transport, not a thing anyone has an account with, and it is
+  # the one option whose endpoint and model live in advanced-only fields.
   def adapter_options do
     [
       {"Claude Code", "claude_code"},
       {"Codex (OpenAI)", "codex"},
       {"Cursor", "cursor"},
-      {"HTTP", "http"}
+      {"Custom HTTP endpoint", "http"}
     ]
   end
 

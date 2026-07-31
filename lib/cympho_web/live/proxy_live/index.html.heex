@@ -1,8 +1,11 @@
 <.settings_layout active={:proxies}>
-  <.header
-    title={@page_title}
-    subtitle="Reusable company proxy profiles for routing agent traffic and checking it works."
-  >
+  <.header title={@page_title}>
+    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      Reusable company proxy profiles for routing agent traffic and checking it works.
+    </p>
+    <p class="ui-simple-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      Send agent traffic out through a specific network.
+    </p>
     <:actions>
       <button
         :if={@proxy_admin?}
@@ -84,9 +87,16 @@
       </button>
     </div>
 
+    <%!-- Chrome treats any text input preceding a password as the username of a
+         login form, so every text field ahead of the password below opts out. --%>
     <.simple_form for={@form} phx-submit="save" class="space-y-4">
       <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
-        <.input field={@form[:name]} label="Profile name" placeholder="managed-egress-a" />
+        <.input
+          field={@form[:name]}
+          label="Profile name"
+          placeholder="managed-egress-a"
+          autocomplete="off"
+        />
         <.input
           field={@form[:proxy_type]}
           type="select"
@@ -99,19 +109,31 @@
         field={@form[:proxy_url]}
         label="Proxy URL"
         placeholder="socks5://user:password@proxy.example.com:1080"
+        autocomplete="off"
       />
 
       <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
-        <.input field={@form[:host]} label="Host" placeholder="proxy.example.com" />
+        <.input
+          field={@form[:host]}
+          label="Host"
+          placeholder="proxy.example.com"
+          autocomplete="off"
+        />
         <.input field={@form[:port]} type="number" label="Port" placeholder="1080" />
       </div>
 
       <div class="grid gap-4 lg:grid-cols-2">
-        <.input field={@form[:username]} label="Username" placeholder="optional" />
+        <.input
+          field={@form[:username]}
+          label="Username"
+          placeholder="optional"
+          autocomplete="off"
+        />
         <.input
           field={@form[:password]}
           type="password"
           label="Password"
+          autocomplete="new-password"
           placeholder={
             if @selected_proxy && has_password?(@selected_proxy),
               do: "Leave blank to keep current password",
@@ -141,8 +163,11 @@
     class="rounded-lg border border-border bg-panel px-4 py-10 text-center"
   >
     <p class="text-sm font-590 text-text-primary">No proxy profiles yet</p>
-    <p class="mt-1 text-sm text-text-tertiary">
+    <p class="ui-advanced-only mt-1 text-sm text-text-tertiary">
       Add HTTP, HTTPS, SOCKS4, or SOCKS5 profiles here, then choose random or selected proxies from the swarm panel.
+    </p>
+    <p class="ui-simple-only mt-1 text-sm text-text-tertiary">
+      Most teams never need one. Add one if agent traffic has to leave through a specific network.
     </p>
   </div>
 

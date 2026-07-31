@@ -118,7 +118,10 @@ defmodule CymphoWeb.LaunchItemLiveTest do
              "Ship launch checklist"
            )
 
-    assert html =~ "Blocked titles"
+    # The blocked titles used to be listed a second time inside the readiness
+    # summary; the summary now only carries the count.
+    refute html =~ "Blocked titles"
+    assert html =~ "1 blocked"
 
     assert {:ok, blocked_item} = LaunchItems.get_company_launch_item(company.id, item.id)
     assert blocked_item.is_blocked

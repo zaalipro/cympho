@@ -205,7 +205,14 @@
               </span>
               <span :if={queue_focus_disabled?} class="mt-0.5 block text-xs text-text-quaternary">
                 <span class="ui-advanced-only">Add enough detail to make the brief ready.</span>
-                <span class="ui-simple-only">Write a bit more first.</span>
+                <%!-- Simple mode hides the readiness panel that names the missing
+                     signal, so say it here instead of only "write more". --%>
+                <span class="ui-simple-only">
+                  Write a bit more first.
+                  <span :if={@brief_readiness.status != :ready}>
+                    {@brief_readiness.next_prompt}
+                  </span>
+                </span>
               </span>
             </span>
           </label>

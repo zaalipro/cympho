@@ -1,8 +1,12 @@
 <.settings_layout active={:appearance}>
-  <.header
-    title="Appearance"
-    subtitle="Pick a theme. It applies instantly and is saved to your account, so it follows you across devices."
-  />
+  <.header title="Appearance">
+    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      Pick a theme. It applies instantly and is saved to your account, so it follows you across devices.
+    </p>
+    <p class="ui-simple-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      Pick a theme. It applies straight away.
+    </p>
+  </.header>
 
   <section :for={{group, themes} <- @grouped} class="mb-10">
     <h2 class="mb-3 font-serif text-[15px] font-510 italic tracking-[0.01em] text-brand/90">

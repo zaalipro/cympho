@@ -138,12 +138,15 @@ defmodule CymphoWeb.CompanyLive.Index do
 
   defp launch_posture(_total, active_count, paused_count) do
     %{
-      label: "#{active_count} active companies",
+      label: "#{active_count} active #{pluralize(active_count, "company", "companies")}",
       detail:
         "#{paused_count} paused. Use blueprints for new operating companies or import a portable backup.",
       tone: :ready
     }
   end
+
+  defp pluralize(1, singular, _plural), do: singular
+  defp pluralize(_count, _singular, plural), do: plural
 
   defp posture_badge_class(:ready),
     do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"

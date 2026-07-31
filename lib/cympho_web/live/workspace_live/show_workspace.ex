@@ -42,11 +42,19 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
   @impl true
   def render(assigns) do
     ~H"""
-    <.page size="wide">
-      <.header
-        title={@workspace.name}
-        subtitle="Project workspace command center for execution lanes, previews, and reusable runtime services."
-      >
+    <.page size="wide" data-ui-complex-page>
+      <%!-- The subtitle named the three panels the page already shows. It stays
+           on hover and for screen readers. --%>
+      <.header>
+        <h1
+          class="flex items-center gap-2 text-headline text-text-primary"
+          title="Project workspace command center for execution lanes, previews, and reusable runtime services."
+        >
+          <span class="min-w-0 truncate">{@workspace.name}</span>
+          <span class="sr-only">
+            — project workspace command center for execution lanes, previews, and reusable runtime services.
+          </span>
+        </h1>
         <:actions>
           <.app_link
             navigate={~p"/workspaces"}
@@ -78,12 +86,12 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
               </span>
             </div>
 
-            <h2 class="mt-2 text-lg font-590 text-text-primary">
-              {@workspace_command.heading}
+            <%!-- The detail sentence spelled out the same counts as the metric
+                 strip below and the same next step as the panel empty states. --%>
+            <h2 class="mt-2 text-lg font-590 text-text-primary" title={@workspace_command.detail}>
+              {@workspace_command.heading}<span class="sr-only">
+                — {@workspace_command.detail}</span>
             </h2>
-            <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-              {@workspace_command.detail}
-            </p>
 
             <div class="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
               <span class="max-w-full truncate rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
@@ -113,7 +121,7 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
           </.app_link>
         </div>
 
-        <div class="grid grid-cols-2 border-t border-border sm:grid-cols-4">
+        <div class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-4">
           <.workspace_detail_metric
             :for={metric <- @workspace_command.metrics}
             label={metric.label}
@@ -126,9 +134,12 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
       <div class="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
         <section class="overflow-hidden rounded-lg border border-border bg-panel">
           <div class="border-b border-border px-4 py-3">
-            <p class="text-sm font-590 text-text-primary">Execution lanes</p>
-            <p class="mt-1 text-xs leading-5 text-text-tertiary">
-              Open lanes are worktrees or isolated directories where agents can make changes.
+            <p
+              class="text-sm font-590 text-text-primary"
+              title="Open lanes are worktrees or isolated directories where agents can make changes."
+            >
+              Execution lanes<span class="sr-only">
+                — open lanes are worktrees or isolated directories where agents can make changes.</span>
             </p>
           </div>
 
@@ -173,7 +184,7 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
           <.empty_state
             :if={Enum.empty?(@execution_workspaces)}
             title="No execution lanes"
-            message="The next assigned issue can create an isolated lane from this project workspace."
+            message="Assign an issue to an agent and one opens here."
           >
             <:icon_slot>
               <.icon name="hero-square-3-stack-3d-mini" class="h-5 w-5" />
@@ -183,9 +194,12 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
 
         <section class="overflow-hidden rounded-lg border border-border bg-panel">
           <div class="border-b border-border px-4 py-3">
-            <p class="text-sm font-590 text-text-primary">Runtime services</p>
-            <p class="mt-1 text-xs leading-5 text-text-tertiary">
-              Running services with a port or URL can be inspected from previews.
+            <p
+              class="text-sm font-590 text-text-primary"
+              title="Running services with a port or URL can be inspected from previews."
+            >
+              Runtime services<span class="sr-only">
+                — running services with a port or URL can be inspected from previews.</span>
             </p>
           </div>
 
@@ -236,7 +250,7 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
           <.empty_state
             :if={Enum.empty?(@runtime_services)}
             title="No runtime services"
-            message="Start a dev server from an execution lane to make previews inspectable."
+            message="Start a dev server in a lane and it shows up here."
           >
             <:icon_slot>
               <.icon name="hero-bolt-mini" class="h-5 w-5" />

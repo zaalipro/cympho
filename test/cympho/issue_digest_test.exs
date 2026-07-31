@@ -143,7 +143,7 @@ defmodule Cympho.IssueDigestTest do
     runtime = Enum.find(digest.role_run_summaries, &(&1.key == :runtime))
 
     assert review.status == :missing
-    assert review.next_action =~ "Add `[review] Verdict"
+    assert review.next_action =~ "Add a tagged `[review]`"
     assert runtime.title == "Swarm evidence"
     assert runtime.status == :waiting
     assert runtime.summary =~ "Worker packets are closed"

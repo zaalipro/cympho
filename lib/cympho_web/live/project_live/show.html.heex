@@ -2,12 +2,15 @@
   <div class="relative z-[1]">
     <.header>
       <span class="ember-eyebrow">Project command</span>
-      <h1 class="ember-ink mt-3 truncate font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-        {@project.name}
+      <%!-- The subtitle listed the five panels the page already shows. It stays
+           on hover and for screen readers. --%>
+      <h1
+        class="ember-ink mt-3 truncate font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]"
+        title="Project command center for strategy, issue flow, runtime readiness, repository context, and agent environment."
+      >
+        {@project.name}<span class="sr-only">
+          — project command center for strategy, issue flow, runtime readiness, repository context, and agent environment.</span>
       </h1>
-      <p class="ui-advanced-only mt-2 max-w-2xl text-body-sm text-text-tertiary">
-        Project command center for strategy, issue flow, runtime readiness, repository context, and agent environment.
-      </p>
       <:actions>
         <.app_link
           navigate={~p"/projects"}
@@ -92,12 +95,13 @@
       <section class="overflow-hidden rounded-lg border border-border bg-panel">
         <div class="px-4 py-3">
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p class="text-sm font-590 text-text-primary">Work queue</p>
-              <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
-                Recent project issues, newest first. Open the full queue when blockers or reviews pile up.
-              </p>
-            </div>
+            <p
+              class="text-sm font-590 text-text-primary"
+              title="Recent project issues, newest first. Open the full queue when blockers or reviews pile up."
+            >
+              Work queue<span class="sr-only">
+                — recent project issues, newest first. Open the full queue when blockers or reviews pile up.</span>
+            </p>
             <.app_link
               navigate={~p"/issues?project_id=#{@project.id}"}
               class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
@@ -197,23 +201,24 @@
                     />
                   </a>
                   <p :if={@project.repo_url in [nil, ""]} class="mt-1 text-xs text-text-tertiary">
-                    Not configured. Add a repository URL in project settings.
+                    Add one in project settings below.
                   </p>
                 </div>
               </div>
             </div>
 
             <div class="p-4">
+              <%!-- The count is already in the metrics strip at the top of the
+                   page, and the sentence described the panel rather than this
+                   project. Both stay on hover and for screen readers. --%>
               <div class="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <p class="text-sm font-590 text-text-primary">Workspaces</p>
-                  <p class="mt-1 text-xs text-text-tertiary">
-                    Project workspaces isolate agent execution and previews.
-                  </p>
-                </div>
-                <span class="font-serif text-lg font-590 text-text-primary">
-                  {length(@project_workspaces)}
-                </span>
+                <p
+                  class="text-sm font-590 text-text-primary"
+                  title="Project workspaces isolate agent execution and previews."
+                >
+                  Workspaces<span class="sr-only">
+                    — project workspaces isolate agent execution and previews.</span>
+                </p>
               </div>
 
               <div :if={!Enum.empty?(@project_workspaces)} class="space-y-2">
@@ -234,20 +239,19 @@
               </p>
             </div>
 
-            <div class="p-4">
-              <div class="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <p class="text-sm font-590 text-text-primary">Environment keys</p>
-                  <p class="mt-1 text-xs text-text-tertiary">
-                    Values are encrypted and injected into project-scoped agent runs.
-                  </p>
-                </div>
-                <span class="font-serif text-lg font-590 text-text-primary">
-                  {length(@env_keys)}
-                </span>
-              </div>
+            <%!-- Empty, this row was a bordered box stating its own emptiness
+                 next to the Environment variables panel that already says it
+                 and carries the form to fix it. --%>
+            <div :if={!Enum.empty?(@env_keys)} class="p-4">
+              <p
+                class="mb-3 text-sm font-590 text-text-primary"
+                title="Values are encrypted and injected into project-scoped agent runs."
+              >
+                Environment keys<span class="sr-only">
+                  — values are encrypted and injected into project-scoped agent runs.</span>
+              </p>
 
-              <div :if={!Enum.empty?(@env_keys)} class="flex flex-wrap gap-2">
+              <div class="flex flex-wrap gap-2">
                 <span
                   :for={key <- @env_keys}
                   class="rounded-full border border-border bg-surface px-2 py-1 font-mono text-xs text-text-secondary"
@@ -255,9 +259,6 @@
                   {key}
                 </span>
               </div>
-              <p :if={Enum.empty?(@env_keys)} class="text-xs text-text-tertiary">
-                No project environment keys.
-              </p>
             </div>
           </div>
         </section>
@@ -268,12 +269,13 @@
         >
           <div class="px-4 py-3">
             <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-590 text-text-primary">Goals</p>
-                <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
-                  Root goals connected to this project and their issue progress.
-                </p>
-              </div>
+              <p
+                class="text-sm font-590 text-text-primary"
+                title="Root goals connected to this project and their issue progress."
+              >
+                Goals<span class="sr-only">
+                  — root goals connected to this project and their issue progress.</span>
+              </p>
               <.app_link
                 navigate={~p"/goals"}
                 class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
@@ -335,9 +337,12 @@
     >
       <section class="overflow-hidden rounded-lg border border-border bg-panel">
         <div class="px-4 py-3">
-          <p class="text-sm font-590 text-text-primary">Project settings</p>
-          <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
-            Update the project identity, repo, and sidebar color agents see in context.
+          <p
+            class="text-sm font-590 text-text-primary"
+            title="Update the project identity, repo, and sidebar color agents see in context."
+          >
+            Project settings<span class="sr-only">
+              — update the project identity, repo, and sidebar color agents see in context.</span>
           </p>
           <hr class="ember-rule mt-3" />
         </div>
@@ -388,9 +393,12 @@
         class="ui-advanced-only overflow-hidden rounded-lg border border-border bg-panel"
       >
         <div class="px-4 py-3">
-          <p class="text-sm font-590 text-text-primary">Environment variables</p>
-          <p class="mt-1 text-xs leading-5 text-text-tertiary">
-            Store project-scoped runtime credentials. Values are never displayed after save.
+          <p
+            class="text-sm font-590 text-text-primary"
+            title="Store project-scoped runtime credentials. Values are never displayed after save."
+          >
+            Environment variables<span class="sr-only">
+              — store project-scoped runtime credentials. Values are never displayed after save.</span>
           </p>
           <hr class="ember-rule mt-3" />
         </div>

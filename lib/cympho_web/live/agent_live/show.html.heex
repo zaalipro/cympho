@@ -167,7 +167,11 @@
     </div>
 
     <%!-- ── Tabs ──────────────────────────────────────────────────── --%>
-    <div class="mb-5 flex items-center gap-1 border-b border-border">
+    <%!-- Scrolls on narrow screens: five advanced tabs measure 463px, and an
+         ancestor is overflow-x-hidden, so at phone width "Runs" was clipped
+         73px past the edge with no gesture that could reach it. shrink-0 keeps
+         the labels from compressing into each other instead of scrolling. --%>
+    <div class="mb-5 flex items-center gap-1 overflow-x-auto border-b border-border [&>button]:shrink-0">
       <%!-- Simple mode keeps Dashboard, Setup and History. Instructions and
            Skills stay advanced — they are prompt engineering, not operation. --%>
       <button
@@ -868,12 +872,14 @@
 
       <.panel id="agent-skill-library" class="overflow-hidden">
         <div class="border-b border-border px-5 py-3">
-          <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Company skills library
+          <% library_help =
+            "Tick a skill to give it to this agent. Only prompt-ready ones reach the agent at runtime." %>
+          <h3
+            class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+            title={library_help}
+          >
+            Company skills library<span class="sr-only"> — {library_help}</span>
           </h3>
-          <p class="mt-0.5 text-xs text-text-quaternary">
-            Toggle assignments. Only prompt-ready assigned skills are injected into runtime prompts.
-          </p>
         </div>
 
         <div :if={Enum.empty?(@plugins)} class="px-5 py-8 text-center text-sm text-text-tertiary">
@@ -995,8 +1001,15 @@
                 <span class="rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-510 text-text-tertiary">
                   {instruction_studio.score}/100
                 </span>
-                <span class={eval_coverage_badge_class(instruction_studio.eval_coverage.status)}>
-                  Eval {instruction_studio.eval_coverage.passed}/{instruction_studio.eval_coverage.total}
+                <%!-- The badge, the sentence under it, and the Eval details
+                     summary all said the same thing. The badge keeps the count
+                     and carries the sentence on hover. --%>
+                <span
+                  class={eval_coverage_badge_class(instruction_studio.eval_coverage.status)}
+                  title={"Eval coverage: #{instruction_studio.eval_coverage.summary}"}
+                >
+                  Eval {instruction_studio.eval_coverage.passed}/{instruction_studio.eval_coverage.total}<span class="sr-only">
+                    — Eval coverage: {instruction_studio.eval_coverage.summary}</span>
                 </span>
                 <details class="group relative inline-flex">
                   <summary
@@ -1017,9 +1030,6 @@
               </div>
               <p class="mt-2 text-sm leading-6 text-text-tertiary">
                 {instruction_studio.summary}
-              </p>
-              <p class="mt-1 text-xs leading-5 text-text-quaternary">
-                Eval coverage: {instruction_studio.eval_coverage.summary}
               </p>
               <details class="mt-3 rounded-lg border border-border bg-surface">
                 <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-590 text-text-secondary hover:bg-surface-hover [&::-webkit-details-marker]:hidden">
@@ -1126,15 +1136,11 @@
 
           <div class="grid gap-px bg-border lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)]">
             <div class="bg-panel p-5">
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h4 class="text-sm font-590 text-text-primary">Custom instructions</h4>
-                  <p class="mt-1 text-xs leading-5 text-text-quaternary">
-                    These are layered after the injected role playbook. Keep them short, specific,
-                    and compatible with the contract.
-                  </p>
-                </div>
-              </div>
+              <% custom_instructions_help =
+                "Layered after the role playbook Cympho already injects. Keep them short and specific — the Instructions tab is where longer reusable files live." %>
+              <h4 class="text-sm font-590 text-text-primary" title={custom_instructions_help}>
+                Custom instructions<span class="sr-only"> — {custom_instructions_help}</span>
+              </h4>
               <textarea
                 id={@form[:instructions].id}
                 name={@form[:instructions].name}
@@ -1143,56 +1149,50 @@
                 class="mt-3 w-full rounded-lg border border-border bg-canvas px-3 py-3 text-sm leading-6 text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                 placeholder="Add company-specific guardrails, review expectations, or domain context. The role contract is injected automatically."
               ><%= form_instructions %></textarea>
-              <p class="mt-2 text-xs leading-5 text-text-quaternary">
-                For longer reusable files, use the Instructions tab. This field is for compact
-                agent-specific overrides.
-              </p>
-              <div class="mt-3 rounded-lg border border-border bg-surface px-3 py-3">
-                <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <p class="text-xs font-590 text-text-primary">Required final comment</p>
+              <%!-- The template and the three playbook checklists below are
+                   reference text Cympho injects for you — nothing here is edited
+                   on this page, so each one opens on demand. --%>
+              <details class="mt-3 rounded-lg border border-border bg-surface px-3 py-3">
+                <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
+                  <span class="text-xs font-590 text-text-primary">Required final comment</span>
                   <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
                     issue digest source
                   </span>
-                </div>
-                <code class="block whitespace-pre-wrap font-mono text-[11px] leading-5 text-text-tertiary">
+                </summary>
+                <code class="mt-2 block whitespace-pre-wrap font-mono text-[11px] leading-5 text-text-tertiary">
                   {prompt_contract.required_template}
                 </code>
-              </div>
-              <div
+              </details>
+              <details
                 id="runtime-drill-guide"
                 data-testid="runtime-drill-guide"
                 class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
               >
-                <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <p class="text-xs font-590 text-text-primary">Runtime drill</p>
+                <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
+                  <span class="text-xs font-590 text-text-primary">Runtime drill</span>
                   <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
-                    one-turn checklist
+                    one-turn checklist · every step is a gate
                   </span>
-                </div>
-                <div class="grid gap-2">
+                </summary>
+                <div class="mt-2 grid gap-2">
                   <div
                     :for={item <- instruction_studio.runtime_drill}
                     class="rounded-md border border-border bg-canvas px-3 py-2"
                   >
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                      <p class="text-xs font-590 text-text-primary">{item.label}</p>
-                      <span class="rounded bg-surface px-1.5 py-0.5 text-[10px] text-text-tertiary">
-                        Gate
-                      </span>
-                    </div>
+                    <p class="text-xs font-590 text-text-primary">{item.label}</p>
                     <p class="mt-1 text-xs leading-5 text-text-quaternary">{item.detail}</p>
                     <p class="mt-1 text-[11px] leading-4 text-text-quaternary">{item.gate}</p>
                   </div>
                 </div>
-              </div>
-              <div class="mt-3 rounded-lg border border-border bg-surface px-3 py-3">
-                <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <p class="text-xs font-590 text-text-primary">Turn guide</p>
+              </details>
+              <details class="mt-3 rounded-lg border border-border bg-surface px-3 py-3">
+                <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
+                  <span class="text-xs font-590 text-text-primary">Turn guide</span>
                   <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
                     injected playbook
                   </span>
-                </div>
-                <div class="grid gap-2">
+                </summary>
+                <div class="mt-2 grid gap-2">
                   <div
                     :for={item <- instruction_studio.turn_guide}
                     class="rounded-md border border-border bg-canvas px-3 py-2"
@@ -1206,19 +1206,19 @@
                     <p class="mt-1 text-xs leading-5 text-text-quaternary">{item.detail}</p>
                   </div>
                 </div>
-              </div>
-              <div
+              </details>
+              <details
                 id="turn-ledger-guide"
                 data-testid="turn-ledger-guide"
                 class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
               >
-                <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <p class="text-xs font-590 text-text-primary">Turn ledger</p>
+                <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
+                  <span class="text-xs font-590 text-text-primary">Turn ledger</span>
                   <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
                     restartable evidence
                   </span>
-                </div>
-                <div class="grid gap-2">
+                </summary>
+                <div class="mt-2 grid gap-2">
                   <div
                     :for={item <- instruction_studio.turn_ledger}
                     class="rounded-md border border-border bg-canvas px-3 py-2"
@@ -1232,7 +1232,7 @@
                     <p class="mt-1 text-xs leading-5 text-text-quaternary">{item.detail}</p>
                   </div>
                 </div>
-              </div>
+              </details>
             </div>
 
             <div class="bg-panel p-5">
@@ -1250,20 +1250,25 @@
                     <p class="text-xs font-510 text-text-secondary">{check.label}</p>
                   </div>
                   <p class="mt-1 text-xs leading-5 text-text-quaternary">{check.detail}</p>
-                  <p class="mt-1 text-[11px] leading-4 text-text-quaternary">{check.fix}</p>
+                  <%!-- Passing checks all carried the same "No change needed."
+                       line; only a check with something to do shows its fix. --%>
+                  <p
+                    :if={check.status != :ok}
+                    class="mt-1 text-[11px] leading-4 text-text-quaternary"
+                  >
+                    {check.fix}
+                  </p>
                 </div>
               </div>
             </div>
           </div>
 
           <div class="border-t border-border px-5 py-4">
-            <div class="flex flex-col gap-1">
-              <h4 class="text-sm font-590 text-text-primary">Effective prompt preview</h4>
-              <p class="text-xs leading-5 text-text-quaternary">
-                This is the instruction stack Cympho assembles around the agent before runtime
-                context is added.
-              </p>
-            </div>
+            <% preview_help =
+              "The instruction stack Cympho builds around this agent before runtime context is added." %>
+            <h4 class="text-sm font-590 text-text-primary" title={preview_help}>
+              Effective prompt preview<span class="sr-only"> — {preview_help}</span>
+            </h4>
             <div class="mt-3 grid gap-2 lg:grid-cols-2">
               <details
                 :for={section <- instruction_studio.effective_sections}
@@ -1287,21 +1292,22 @@
                       {section.source}
                     </span>
                   </div>
-                  <p class="mt-1 text-xs leading-5 text-text-quaternary">{section.summary}</p>
                 </summary>
-                <pre class="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-text-tertiary"><%= section.preview %></pre>
+                <%!-- The one-line description of each section used to sit in
+                     the closed summary, so eight of them read as a wall before
+                     you had opened anything. It leads the opened section now. --%>
+                <p class="mt-2 text-xs leading-5 text-text-quaternary">{section.summary}</p>
+                <pre class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-text-tertiary"><%= section.preview %></pre>
               </details>
             </div>
           </div>
 
           <div class="border-t border-border px-5 py-4">
-            <div class="flex flex-col gap-1">
-              <h4 class="text-sm font-590 text-text-primary">Scenario checks</h4>
-              <p class="text-xs leading-5 text-text-quaternary">
-                Role-specific situations Cympho expects this agent to handle without creating
-                ambiguous handoffs.
-              </p>
-            </div>
+            <% scenario_help =
+              "Situations this role has to handle without leaving a vague handoff behind." %>
+            <h4 class="text-sm font-590 text-text-primary" title={scenario_help}>
+              Scenario checks<span class="sr-only"> — {scenario_help}</span>
+            </h4>
             <div class="mt-3 grid gap-2 lg:grid-cols-3">
               <div
                 :for={scenario <- instruction_studio.scenarios}
@@ -1326,13 +1332,11 @@
           </div>
 
           <div class="border-t border-border px-5 py-4">
-            <div class="flex flex-col gap-1">
-              <h4 class="text-sm font-590 text-text-primary">Quick snippets</h4>
-              <p class="text-xs leading-5 text-text-quaternary">
-                Use these exact tags in comments, review notes, or instruction files so issue pages
-                can summarize the agent's work cleanly.
-              </p>
-            </div>
+            <% snippet_help =
+              "Use these tags in comments and review notes so issue pages can summarize the work." %>
+            <h4 class="text-sm font-590 text-text-primary" title={snippet_help}>
+              Quick snippets<span class="sr-only"> — {snippet_help}</span>
+            </h4>
             <div class="mt-3 grid gap-2 lg:grid-cols-2">
               <div
                 :for={snippet <- prompt_contract.snippets}
@@ -1356,13 +1360,11 @@
               Enum.reject(instruction_studio.patches, &Map.get(&1, :present?)) %>
             <% recommended_instruction_patches = Enum.take(pending_instruction_patches, 5) %>
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div class="flex flex-col gap-1">
-                <h4 class="text-sm font-590 text-text-primary">Suggested instruction patches</h4>
-                <p class="text-xs leading-5 text-text-quaternary">
-                  Apply patches into the custom instructions field when you want the default
-                  contract reinforced for this specific agent. Nothing is persisted until you save.
-                </p>
-              </div>
+              <% patch_help =
+                "Applying one drops its text into the custom instructions above. Nothing is saved until you press Save changes." %>
+              <h4 class="text-sm font-590 text-text-primary" title={patch_help}>
+                Suggested instruction patches<span class="sr-only"> — {patch_help}</span>
+              </h4>
               <button
                 :if={recommended_instruction_patches != []}
                 type="button"
@@ -1390,7 +1392,19 @@
                   <p class="text-xs font-590 text-text-primary">{patch.title}</p>
                   <p class="mt-1 text-xs leading-5 text-text-quaternary">{patch.reason}</p>
                 </div>
-                <pre class="mt-3 whitespace-pre-wrap rounded-md border border-border bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-text-secondary"><%= patch.body %></pre>
+                <%!-- The Apply button is the interface; the patch text only
+                     matters when you want to read it first. Ten identical
+                     "read the text" links became one marker per row. --%>
+                <details class="mt-3">
+                  <summary
+                    class="inline-flex cursor-pointer list-none items-center text-text-quaternary hover:text-text-secondary [&::-webkit-details-marker]:hidden"
+                    title="Read the patch text"
+                    aria-label="Read the patch text"
+                  >
+                    <.icon name="hero-document-text-mini" class="h-4 w-4" />
+                  </summary>
+                  <pre class="mt-2 whitespace-pre-wrap rounded-md border border-border bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-text-secondary"><%= patch.body %></pre>
+                </details>
                 <button
                   type="button"
                   phx-click="apply_instruction_patch"
@@ -1412,11 +1426,11 @@
 
           <div class="border-t border-border px-5 py-4">
             <div class="flex flex-col gap-1">
-              <h4 class="text-sm font-590 text-text-primary">Instruction history</h4>
-              <p class="text-xs leading-5 text-text-quaternary">
-                Every saved instruction/runtime contract change gets a score snapshot so prompt
-                tuning can be reviewed and rolled back.
-              </p>
+              <% history_help =
+                "Every saved change gets a score snapshot, so you can compare it and roll it back." %>
+              <h4 class="text-sm font-590 text-text-primary" title={history_help}>
+                Instruction history<span class="sr-only"> — {history_help}</span>
+              </h4>
               <p
                 :if={@latest_prompt_tuning_revision}
                 class="text-xs leading-5 text-brand"
@@ -1426,12 +1440,9 @@
                 )} · {format_datetime(@latest_prompt_tuning_revision.inserted_at)}
               </p>
             </div>
-            <div
-              :if={@config_revisions == []}
-              class="mt-3 rounded-lg border border-dashed border-border bg-surface px-3 py-4 text-sm text-text-tertiary"
-            >
+            <p :if={@config_revisions == []} class="mt-2 text-sm text-text-tertiary">
               No revisions yet. The first configuration save will create a baseline.
-            </div>
+            </p>
             <div :if={@config_revisions != []} class="mt-3 grid gap-2">
               <div
                 :for={{revision, index} <- Enum.with_index(@config_revisions)}
@@ -1517,11 +1528,14 @@
           </h3>
           <div class="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
             <div class="space-y-1.5">
+              <% profile_help =
+                "A profile sets the adapter, command, model and provider for you. Pick Custom when you want to set them yourself." %>
               <label
                 for="agent-runtime-profile"
                 class="block text-xs font-510 text-text-secondary"
+                title={profile_help}
               >
-                Profile
+                Profile<span class="sr-only"> — {profile_help}</span>
               </label>
               <select
                 id="agent-runtime-profile"
@@ -1537,10 +1551,6 @@
                   {profile.name}
                 </option>
               </select>
-              <p class="text-xs leading-5 text-text-quaternary">
-                Profiles apply adapter, command, model, and provider defaults. Use Custom when you
-                need raw adapter control.
-              </p>
             </div>
 
             <div class="rounded-lg border border-border bg-surface px-3 py-3">
@@ -1566,16 +1576,14 @@
           </div>
 
           <div class="mb-5 rounded-lg border border-border bg-surface px-3 py-3">
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h4 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  Quick presets
-                </h4>
-                <p class="mt-1 text-xs text-text-quaternary">
-                  Apply a safe profile and concurrency posture, then save when it looks right.
-                </p>
-              </div>
-            </div>
+            <% preset_help =
+              "Each one sets a profile and a job count. Save when it looks right." %>
+            <h4
+              class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+              title={preset_help}
+            >
+              Quick presets<span class="sr-only"> — {preset_help}</span>
+            </h4>
             <div class="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               <button
                 :for={preset <- quick_runtime_presets()}
@@ -1583,13 +1591,16 @@
                 phx-click="apply_runtime_preset"
                 phx-value-preset={preset.id}
                 data-runtime-preset={preset.id}
+                title={preset.description}
                 class="rounded-lg border border-border bg-panel px-3 py-2 text-left transition-colors hover:border-brand/40 hover:bg-surface-hover"
               >
-                <span class="block text-sm font-590 text-text-primary">{preset.name}</span>
-                <span class="mt-1 block text-xs leading-5 text-text-quaternary">
-                  {preset.description}
+                <%!-- The preset name plus its profile and slot count is what
+                     you pick on; the paragraph explaining each one rides on
+                     hover. --%>
+                <span class="block text-sm font-590 text-text-primary">
+                  {preset.name}<span class="sr-only"> — {preset.description}</span>
                 </span>
-                <span class="mt-2 block font-mono text-[11px] text-text-tertiary">
+                <span class="mt-1 block font-mono text-[11px] text-text-tertiary">
                   {preset.profile_id} · {preset.max_concurrent_jobs} slot{if preset.max_concurrent_jobs ==
                                                                                1,
                                                                              do: "",
@@ -1603,14 +1614,13 @@
                the profile picker and the quick presets above already set them,
                and these inputs stay in the DOM so one submit saves everything. --%>
           <div class="ui-advanced-only mb-4 flex items-center justify-between gap-3 border-t border-border pt-4">
-            <div>
-              <h4 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Adapter
-              </h4>
-              <p class="mt-1 text-xs text-text-quaternary">
-                The profile chooses the adapter unless Custom is selected.
-              </p>
-            </div>
+            <% adapter_help = "The profile picks this for you unless you chose Custom." %>
+            <h4
+              class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+              title={adapter_help}
+            >
+              Adapter<span class="sr-only"> — {adapter_help}</span>
+            </h4>
           </div>
           <div class="ui-advanced-only grid gap-5 sm:grid-cols-2">
             <.input
@@ -1660,14 +1670,15 @@
           <div class="ui-advanced-only mt-5 border-t border-border pt-4">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h4 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  Agent preflight
+                <% preflight_help =
+                  "Checks the fields, the local command and the credentials without starting the agent or calling a provider." %>
+                <h4
+                  class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+                  title={preflight_help}
+                >
+                  Agent preflight<span class="sr-only"> — {preflight_help}</span>
                 </h4>
                 <p class="mt-1 text-xs text-text-quaternary">{readiness.summary}</p>
-                <p class="mt-1 text-[11px] leading-4 text-text-quaternary">
-                  Read-only check. It validates saved or unsaved fields, local commands, and
-                  credential signals without starting an agent or calling a provider.
-                </p>
               </div>
               <div class="flex flex-wrap items-center gap-2">
                 <button
@@ -2137,14 +2148,14 @@
         <%!-- Environment Variables --%>
         <.panel id="agent-env-vars" class="ui-advanced-only overflow-hidden">
           <div class="flex items-center justify-between border-b border-border px-5 py-3">
-            <div>
-              <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Environment Variables
-              </h3>
-              <p class="mt-0.5 text-xs text-text-quaternary">
-                Forwarded to the adapter subprocess. Secrets override these on conflict.
-              </p>
-            </div>
+            <% env_help =
+              "Passed through to the adapter when it runs. A secret with the same name wins." %>
+            <h3
+              class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+              title={env_help}
+            >
+              Environment Variables<span class="sr-only"> — {env_help}</span>
+            </h3>
             <button
               type="button"
               phx-click="add_env_row"
@@ -2480,19 +2491,16 @@
                 @selected_run.log_excerpt in [nil, ""] and
                 is_nil(@selected_run.error_reason) and is_nil(selected_adapter_error)
             }
-            class="rounded-lg border border-border bg-surface px-4 py-8 text-center text-sm text-text-tertiary"
+            class="text-sm text-text-tertiary"
           >
             No transcript or log captured for this run.
           </div>
         </div>
       </.panel>
 
-      <div
-        :if={!@selected_run}
-        class="rounded-lg border border-border bg-panel px-4 py-8 text-center text-sm text-text-tertiary"
-      >
+      <p :if={!@selected_run} class="self-start text-sm text-text-tertiary">
         Select a run on the left to see its details.
-      </div>
+      </p>
     </div>
   </div>
 </.page>

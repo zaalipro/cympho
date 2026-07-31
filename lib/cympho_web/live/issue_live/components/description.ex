@@ -51,7 +51,7 @@ defmodule CymphoWeb.IssueLive.Show.Description do
             type="button"
             phx-click="start_editing"
             phx-value-field="description"
-            class="shrink-0 opacity-0 group-hover:opacity-100 text-ink-tertiary hover:text-ink-muted transition-all"
+            class="shrink-0 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 text-ink-tertiary hover:text-ink-muted transition-all"
             aria-label="Edit description"
             title="Edit description"
           >

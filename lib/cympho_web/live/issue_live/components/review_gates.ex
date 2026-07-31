@@ -26,6 +26,10 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
   attr :orchestrator_enabled?, :boolean, default: false
   attr :show_work_product_form, :boolean, default: false
   attr :work_product_form, :any, default: nil
+  # State label the executive digest already shows once at the top of the page.
+  # Badges below drop only a byte-identical restatement; the owner, the blocker
+  # chip and every action stay put.
+  attr :hoisted_state_label, :string, default: nil
 
   def review_gates(assigns) do
     gate_resolution =
@@ -74,10 +78,16 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
         <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              <span
+                class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+                title={"Next owner — #{@next_owner.status_label}"}
+              >
                 Next owner
               </span>
-              <span class={next_owner_status_class(@next_owner.status)}>
+              <span
+                :if={@next_owner.status_label != @hoisted_state_label}
+                class={next_owner_status_class(@next_owner.status)}
+              >
                 {@next_owner.status_label}
               </span>
               <span
@@ -159,20 +169,24 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
         <div class="flex flex-col gap-3 border-b border-amber-500/20 px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div class="flex flex-wrap items-center gap-2">
-              <h2 class="font-serif text-[15px] font-510 tracking-[-0.01em] text-ink">
+              <h2
+                class="font-serif text-[15px] font-510 tracking-[-0.01em] text-ink"
+                title={gate_headline_badge(@gate_resolution)}
+              >
                 {if @gate_resolution.mode == :pre_runtime,
                   do: "Start runtime first",
                   else: "Resolve review gates"}
               </h2>
-              <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 text-amber-200">
-                {if @gate_resolution.mode == :pre_runtime,
-                  do: "Launch needed",
-                  else: "#{length(@gate_resolution.blockers)} blocking"}
+              <span
+                :if={gate_headline_badge(@gate_resolution) != @hoisted_state_label}
+                class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 text-amber-200"
+              >
+                {gate_headline_badge(@gate_resolution)}
               </span>
             </div>
             <p class="mt-1 max-w-3xl text-sm leading-5 text-ink-muted">
               <%= if @gate_resolution.mode == :pre_runtime do %>
-                Start runtime first. This issue has no agent run evidence yet, so delivery notes and
+                This issue has no agent run evidence yet, so delivery notes and
                 artifacts should come after focused dispatch.
               <% else %>
                 The issue cannot move to review or close until these evidence gaps are handled.
@@ -369,4 +383,7 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
     </section>
     """
   end
+
+  defp gate_headline_badge(%{mode: :pre_runtime}), do: "Launch needed"
+  defp gate_headline_badge(%{blockers: blockers}), do: "#{length(blockers)} blocking"
 end

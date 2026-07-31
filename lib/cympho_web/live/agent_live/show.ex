@@ -2794,10 +2794,14 @@ defmodule CymphoWeb.AgentLive.Show do
 
   def permission_row(assigns) do
     ~H"""
-    <label class="flex cursor-pointer items-start justify-between gap-4 px-5 py-4 hover:bg-surface-hover/40">
+    <label
+      class="flex cursor-pointer items-center justify-between gap-4 px-5 py-4 hover:bg-surface-hover/40"
+      title={@help}
+    >
       <div class="min-w-0 flex-1">
-        <p class="text-sm font-510 text-text-primary">{@label}</p>
-        <p :if={@help} class="mt-0.5 text-xs text-text-quaternary">{@help}</p>
+        <p class="text-sm font-510 text-text-primary">
+          {@label}<span :if={@help} class="sr-only"> — {@help}</span>
+        </p>
       </div>
       <div class="relative pt-0.5">
         <input type="hidden" name={@name} value="false" />

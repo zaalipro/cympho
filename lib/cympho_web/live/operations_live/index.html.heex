@@ -838,10 +838,10 @@
                     :if={candidate.brief_repair_scaffold}
                     class="mt-2 rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-2"
                   >
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-amber-300">
-                        Brief repair scaffold
-                      </p>
+                    <%!-- No eyebrow here: unlike the two standalone panels above,
+                         this box sits inside a candidate row where the copy button
+                         beside it already reads "Copy repair scaffold". --%>
+                    <div class="flex flex-wrap items-center justify-end gap-2">
                       <button
                         type="button"
                         data-copy-text={candidate.brief_repair_scaffold}
@@ -868,10 +868,13 @@
                   </div>
                 </div>
                 <details class="group mt-2">
+                  <%!-- The chevron alone was a 14x14 target, ~1/10th of the 44px
+                       the rest of the app standardises on. Padding grows the hit
+                       area without changing where the glyph sits. --%>
                   <summary
                     title="Focus this issue"
                     aria-label="Focus this issue"
-                    class="inline-flex cursor-pointer list-none items-center gap-1.5 text-[11px] font-510 text-brand hover:text-brand/80 [&::-webkit-details-marker]:hidden"
+                    class="-m-2.5 inline-flex min-h-[44px] min-w-[44px] cursor-pointer list-none items-center justify-center gap-1.5 p-2.5 text-[11px] font-510 text-brand hover:text-brand/80 [&::-webkit-details-marker]:hidden"
                   >
                     <span class="hero-chevron-down-mini h-3.5 w-3.5 transition-transform group-open:rotate-180">
                     </span>
@@ -3048,11 +3051,14 @@
         </div>
       </section>
 
+      <% shared_slots = shared_slot_label(@pressure_agents) %>
       <section class="ui-advanced-only rounded-lg border border-border bg-panel">
         <div class="border-b border-border px-5 py-4">
           <h2 class="text-sm font-590 text-text-primary">Highest Pressure Agents</h2>
           <p class="mt-1 text-xs text-text-quaternary">
-            Local CLI adapters consume real OS memory; BEAM processes stay lightweight.
+            Local CLI adapters consume real OS memory; BEAM processes stay lightweight.<span :if={
+              shared_slots
+            }> Every agent has {shared_slots}.</span>
           </p>
           <hr class="ember-rule mt-3" />
         </div>
@@ -3081,7 +3087,7 @@
                 >
                   {item.pressure.label}
                 </span>
-                <span class="font-mono text-xs text-text-quaternary">
+                <span :if={is_nil(shared_slots)} class="font-mono text-xs text-text-quaternary">
                   {item.pressure.slot_label}
                 </span>
               </div>

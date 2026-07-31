@@ -6,7 +6,9 @@
         <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           {@page_title}
         </h1>
-        <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+        <%!-- The launch console directly below repeats this sentence almost
+             word for word, so simple mode only needs it said once. --%>
+        <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
           Launch, import, and govern autonomous companies from working blueprints.
         </p>
       </div>
@@ -52,15 +54,20 @@
     >
       <div class="grid gap-0 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
         <div class="p-6 lg:p-8">
-          <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-xs font-510 text-brand">
+          <div class="ui-advanced-only mb-4 inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-xs font-510 text-brand">
             <.icon name="hero-building-office-2-mini" class="h-4 w-4" /> Company launch console
           </div>
           <h2 class="font-serif text-2xl font-510 text-text-primary">
             Launch autonomous companies from working blueprints
           </h2>
-          <p class="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
+          <p class="ui-advanced-only mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
             Create a complete operating company with a CEO, CTO, specialist agents, a mission goal,
             project, and first work queue. Use import when you are restoring a portable company export.
+          </p>
+          <%!-- The import half of that sentence points at a button simple mode
+               hides, so the simple copy stops at what the visible button does. --%>
+          <p class="ui-simple-only mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
+            Pick a blueprint and Cympho creates the team, the goal, and the first issues for you.
           </p>
 
           <div class="mt-6 flex flex-wrap gap-3">
@@ -125,7 +132,9 @@
                 Active
               </div>
             </div>
-            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
+            <%!-- Totals summed across the whole blueprint catalog, not across
+                 your companies — trivia until you are comparing blueprints. --%>
+            <div class="ui-advanced-only ember-stat rounded-lg border border-border bg-surface p-4">
               <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
                 {@launch_summary.default_agent_count}
               </div>
@@ -133,7 +142,7 @@
                 Default agents
               </div>
             </div>
-            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
+            <div class="ui-advanced-only ember-stat rounded-lg border border-border bg-surface p-4">
               <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
                 {@launch_summary.capability_count}
               </div>
@@ -141,7 +150,7 @@
                 Capabilities
               </div>
             </div>
-            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
+            <div class="ui-advanced-only ember-stat rounded-lg border border-border bg-surface p-4">
               <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
                 {@launch_summary.seed_issue_count}
               </div>
@@ -160,10 +169,16 @@
     >
       <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 class="font-serif text-xl font-510 text-text-primary">Blueprint catalog</h3>
-          <p class="mt-1 text-sm text-text-secondary">
-            Each blueprint creates a real org chart, project, mission goal, and starting queue.
-          </p>
+          <%!-- Both panels used to print a sentence describing themselves above
+               content that already demonstrates it. Kept on hover and for
+               screen readers, as in issue_digest's panel_heading. --%>
+          <h3
+            class="font-serif text-xl font-510 text-text-primary"
+            title="Each blueprint creates a real org chart, project, mission goal, and starting queue."
+          >
+            Blueprint catalog<span class="sr-only">
+              — Each blueprint creates a real org chart, project, mission goal, and starting queue.</span>
+          </h3>
         </div>
         <.app_link
           navigate={~p"/onboarding"}
@@ -201,10 +216,13 @@
     <section data-testid="company-fleet" class="rounded-xl border border-border bg-surface p-6">
       <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 class="font-serif text-xl font-510 text-text-primary">Company fleet</h3>
-          <p class="mt-1 text-sm text-text-secondary">
-            Open a company to manage members, pause or resume autonomy, export backups, or tune governance.
-          </p>
+          <h3
+            class="font-serif text-xl font-510 text-text-primary"
+            title="Open a company to manage members, pause or resume autonomy, export backups, or tune governance."
+          >
+            Company fleet<span class="sr-only">
+              — Open a company to manage members, pause or resume autonomy, export backups, or tune governance.</span>
+          </h3>
         </div>
       </div>
 
@@ -252,29 +270,38 @@
               </p>
             </div>
 
+            <%!-- Export / Edit / Delete printed on every row said the same three
+                 words once per company. The icons carry it; the verb stays as
+                 the accessible name and the hover tooltip. --%>
             <div class="flex shrink-0 flex-wrap gap-2 sm:justify-end">
               <.app_link
                 :if={can_manage_company?(@current_user, company)}
                 navigate={~p"/companies/#{company}/export"}
-                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
+                title={"Export #{company.name}"}
+                aria-label={"Export #{company.name}"}
+                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface p-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
               >
-                <.icon name="hero-arrow-down-tray-mini" class="h-4 w-4" /> Export
+                <.icon name="hero-arrow-down-tray-mini" class="h-4 w-4" />
               </.app_link>
               <.app_link
                 :if={can_manage_company?(@current_user, company)}
                 navigate={~p"/companies/#{company}/edit"}
-                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
+                title={"Edit #{company.name}"}
+                aria-label={"Edit #{company.name}"}
+                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface p-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
               >
-                <.icon name="hero-pencil-square-mini" class="h-4 w-4" /> Edit
+                <.icon name="hero-pencil-square-mini" class="h-4 w-4" />
               </.app_link>
               <button
                 :if={can_manage_company?(@current_user, company)}
                 phx-click="delete_company"
                 phx-value-id={company.id}
-                class="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-300 hover:bg-red-500/15"
+                title={"Delete #{company.name}"}
+                aria-label={"Delete #{company.name}"}
+                class="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 p-2 text-xs font-510 text-red-300 hover:bg-red-500/15"
                 data-confirm={"Delete #{company.name}? This removes the company workspace from the fleet and cannot be undone."}
               >
-                <.icon name="hero-trash-mini" class="h-4 w-4" /> Delete
+                <.icon name="hero-trash-mini" class="h-4 w-4" />
               </button>
             </div>
           </div>

@@ -801,8 +801,10 @@ defmodule CymphoWeb.Components do
   def select(assigns) do
     ~H"""
     <div class="space-y-1.5">
+      <%!-- The visible <label> cannot use for/id here: the control is a button,
+           not the (aria-hidden) native select, so the name is passed down. --%>
       <label class="block text-xs font-510 text-text-secondary">{@label}</label>
-      <.select_menu name={@name} value={@value} options={@options} {@rest} />
+      <.select_menu name={@name} value={@value} options={@options} label={@label} {@rest} />
     </div>
     """
   end
@@ -815,6 +817,11 @@ defmodule CymphoWeb.Components do
   attr :disabled, :boolean, default: false
   attr :invalid, :boolean, default: false
   attr :class, :any, default: nil
+
+  attr :label, :string,
+    default: nil,
+    doc: "names the control for assistive tech; without it the trigger announces only its value"
+
   attr :rest, :global
 
   @doc """
@@ -835,9 +842,12 @@ defmodule CymphoWeb.Components do
 
     ~H"""
     <div data-select-menu data-disabled={to_string(@disabled)} class={["relative", @class]}>
-      <%!-- Real <select> is the value vehicle: it posts with the form, is keyboard/
-            screen-reader and LiveViewTest drivable, and the document-delegated JS in
-            app.js mirrors picks from the styled popover below back onto it. --%>
+      <%!-- Real <select> is the value vehicle: it posts with the form and is
+            LiveViewTest drivable, and the document-delegated JS in app.js mirrors
+            picks from the styled popover below back onto it. It is aria-hidden and
+            out of the tab order, so it is NOT what assistive tech or the keyboard
+            uses — the trigger button below carries that role, which is why the
+            button needs an explicit name. --%>
       <select
         id={@id}
         name={@name}
@@ -854,6 +864,8 @@ defmodule CymphoWeb.Components do
         type="button"
         data-select-trigger
         disabled={@disabled}
+        title={@label}
+        aria-label={@label}
         aria-haspopup="listbox"
         aria-expanded="false"
         class={[

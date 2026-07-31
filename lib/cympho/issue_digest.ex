@@ -1108,7 +1108,7 @@ defmodule Cympho.IssueDigest do
     if ceo_first_turn_required?(issue, metrics) do
       "Start the CEO turn; it must leave `[owner_update]`, `[handoff]`, or `[blocked]`, and split execution into scoped child issues when work can proceed."
     else
-      "Add `[owner_update] What happened: ... Business status: shipped/not shipped/ready for owner signoff. Evidence inspected: ... Verification: ... Remaining risk: ... Current state: ... Next decision: ... Owner decision needed: ... Restart packet: ...`."
+      "Add a tagged `[owner_update]` covering status, evidence, remaining risk, and the next owner decision."
     end
   end
 
@@ -1174,7 +1174,7 @@ defmodule Cympho.IssueDigest do
     if metrics.open_child_issues > 0 do
       "Review the open child issues first."
     else
-      "Add `[review] Verdict: accepted/request changes/blocked. What happened: ... Evidence inspected: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ... Restart packet: ...`."
+      "Add a tagged `[review]` with the verdict, the evidence inspected, and any gaps or follow-ups."
     end
   end
 

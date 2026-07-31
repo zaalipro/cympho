@@ -24,7 +24,10 @@
       
 <!-- Step content -->
       <div :if={@onboarding_path == :start} class="text-center mb-8">
-        <span class="ember-eyebrow">
+        <%!-- Eyebrows are hidden in simple mode because they usually restate the
+             heading in operator jargon. This one is the only thing that says how
+             far through the wizard you are, so it opts back in. --%>
+        <span class="ember-eyebrow ui-simple-keep">
           Step {@current_step + 1} of {length(@steps)}
         </span>
         <h1 class="ember-ink mt-4 mb-2 font-serif text-[clamp(28px,4vw,40px)] font-510 leading-[1.1] tracking-[-0.02em]">
@@ -176,11 +179,17 @@
           </div>
         </form>
 
+        <% shared_seeds = shared_seed_issue_count(@filtered_blueprints) %>
         <form id="blueprint-form" phx-change="update_company_form">
+          <%!-- Every blueprint seeds the same number of starter issues, so the
+               per-card count printed one identical number 17 times. Say it once
+               here; the cards keep it if the catalog ever varies. --%>
           <div class="mb-2 flex items-center justify-between gap-3">
             <label class="block text-xs font-510 text-text-tertiary">Company blueprint</label>
             <span class="text-[11px] text-text-quaternary">
-              Creates agents and first issues
+              {if shared_seeds,
+                do: "Creates agents and #{shared_seeds} first issues",
+                else: "Creates agents and first issues"}
             </span>
           </div>
           <div class="grid min-w-0 grid-cols-1 max-h-[42vh] gap-2 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
@@ -201,8 +210,13 @@
                 checked={@company_form["blueprint"] == blueprint.key}
                 class="onboarding-blueprint-input sr-only"
               />
-              <span class="min-w-0 break-words text-sm font-590 leading-5 text-text-primary">
-                {blueprint.name}
+              <%!-- All 17 names end in "company", in a grid already labelled
+                   "Company blueprint". Full name stays as the tooltip. --%>
+              <span
+                class="min-w-0 break-words text-sm font-590 leading-5 text-text-primary"
+                title={blueprint.name}
+              >
+                {blueprint_short_name(blueprint.name)}
               </span>
               <span
                 class="mt-1 block w-full min-w-0 truncate text-[11px] leading-4 text-text-tertiary"
@@ -219,6 +233,7 @@
                   {blueprint.default_agent_count}
                 </span>
                 <span
+                  :if={is_nil(shared_seeds)}
                   class="inline-flex items-center gap-1"
                   title={"#{blueprint.seed_issue_count} starter issues"}
                 >
@@ -268,7 +283,16 @@
               The first project your agents work in — you can rename it later in project settings.
             </p>
           </div>
-          <div id="onboarding-issue-prefix" class="ui-advanced-only max-w-[200px]">
+          <%!-- Normally advanced-only, but the company step refuses to advance on
+               an invalid prefix — so when that is what is blocking, the field
+               has to be reachable in simple mode too or the step dead-ends. --%>
+          <div
+            id="onboarding-issue-prefix"
+            class={[
+              "max-w-[200px]",
+              !prefix_error?(@step_error) && "ui-advanced-only"
+            ]}
+          >
             <label class="block text-xs font-510 text-text-tertiary mb-1.5">Issue prefix</label>
             <input
               name="company[issue_prefix]"
@@ -296,14 +320,22 @@
             </p>
           </div>
         </div>
+        <%!-- The summary starts "CEO, CTO, …", which is the two cards directly
+             above it read out a second time. --%>
         <p class="mb-4 text-xs text-text-quaternary">
-          Also on the team: {selected_blueprint(@blueprints, @company_form).role_summary}
+          Also on the team: {other_roles_summary(selected_blueprint(@blueprints, @company_form))}
         </p>
 
         <form id="team-step-form" phx-change="update_company_form" class="space-y-4">
           <div class="max-w-[200px]">
-            <label class="block text-xs font-510 text-text-tertiary mb-1.5">Engineers</label>
+            <label
+              for="company-engineer-count"
+              class="block text-xs font-510 text-text-tertiary mb-1.5"
+            >
+              Engineers
+            </label>
             <input
+              id="company-engineer-count"
               type="number"
               min="0"
               max="8"
@@ -314,10 +346,14 @@
           </div>
           <div :if={engineer_count(@company_form) > 0} class="grid gap-2 sm:grid-cols-2">
             <div :for={index <- 1..engineer_count(@company_form)}>
-              <label class="block text-xs font-510 text-text-tertiary mb-1.5">
+              <label
+                for={"company-engineer-name-#{index}"}
+                class="block text-xs font-510 text-text-tertiary mb-1.5"
+              >
                 Engineer {index} name
               </label>
               <input
+                id={"company-engineer-name-#{index}"}
                 name="company[engineer_names][]"
                 value={engineer_name_value(@company_form, index)}
                 class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
@@ -370,8 +406,11 @@
             <p class="ui-advanced-only mt-2 text-[11px] leading-4 text-text-quaternary">
               Used by every agent. Leave blank to use the defaults.
             </p>
+            <%!-- Simple mode hides the model and command inputs, so this is the
+                 only thing explaining a choice a first-time user has no basis
+                 for. Say what to pick on and what happens if the key is missing. --%>
             <p class="ui-simple-only mt-2 text-[11px] leading-4 text-text-quaternary">
-              Used by every agent.
+              Used by every agent. Pick the one you have an account with — Cympho asks for its key after launch.
             </p>
 
             <button
@@ -589,7 +628,9 @@
             </p>
           <% end %>
 
-          <div class="border-t border-border pt-4">
+          <%!-- Five keyboard shortcuts for an app the reader has not opened yet.
+               They belong to someone who already knows their way around. --%>
+          <div class="ui-advanced-only border-t border-border pt-4">
             <p class="mb-3 text-xs text-text-quaternary">
               A few keys that make Cympho faster to move around:
             </p>

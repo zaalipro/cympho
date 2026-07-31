@@ -1589,6 +1589,10 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     %{
       active?: blockers != [],
       mode: if(pre_runtime?, do: :pre_runtime, else: :evidence),
+      # The executive digest at the top of the page prints this same label as its
+      # state chip. Panels further down receive it so they can drop a byte-identical
+      # restatement and keep only what they alone know (owner, blocker, step).
+      digest_label: digest.label,
       blockers: blockers,
       actions: review_gate_actions(issue, blockers, pre_runtime?, child_issues),
       nudges: Enum.uniq_by(gate_nudges ++ contract_nudges, & &1.key),

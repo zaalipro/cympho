@@ -99,12 +99,11 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                   <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-current/80">
                     Readiness summary
                   </p>
-                  <h2 class="mt-2 text-2xl font-590 text-current">
-                    {@summary.headline}
+                  <%!-- @summary.detail spells out the same four counts the tiles
+                       below already show ("2 open, 2 blocked, 1 completed…"). --%>
+                  <h2 class="mt-2 text-2xl font-590 text-current" title={@summary.detail}>
+                    {@summary.headline}<span class="sr-only"> — {@summary.detail}</span>
                   </h2>
-                  <p class="mt-1 max-w-2xl text-sm leading-6 text-current/80">
-                    {@summary.detail}
-                  </p>
                 </div>
 
                 <div class="rounded-2xl border border-current/15 bg-black/10 px-4 py-3 text-right">
@@ -125,20 +124,9 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                 </div>
               </div>
 
-              <div
-                :if={@summary.blocked_titles != []}
-                class="mt-4 rounded-xl border border-current/15 bg-black/10 px-3 py-3"
-              >
-                <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
-                  Blocked titles
-                </p>
-                <ul class="mt-2 space-y-1 text-sm text-current/85">
-                  <li :for={title <- @summary.blocked_titles} class="truncate">
-                    {title}
-                  </li>
-                </ul>
-              </div>
-
+              <%!-- The blocked titles were listed here, again in the Blocked work
+                   panel, and a third time in the item list. The Blocked work
+                   panel is the one with the unblock affordance, so it keeps them. --%>
               <div class="mt-4 grid gap-3 sm:grid-cols-4">
                 <div class="rounded-xl border border-current/15 bg-black/10 px-3 py-3">
                   <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
@@ -176,13 +164,13 @@ defmodule CymphoWeb.LaunchItemLive.Index do
             <div class="rounded-2xl border border-border bg-panel p-5 shadow-card">
               <div class="flex items-start justify-between gap-3">
                 <div>
-                  <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                    New launch item
-                  </p>
-                  <h2 class="mt-2 text-lg font-590 text-text-primary">Add work to the tracker</h2>
-                  <p class="mt-1 text-sm leading-6 text-text-tertiary">
-                    Capture a title, owner, status, and blocked state in one pass.
-                  </p>
+                  <h2
+                    class="text-lg font-590 text-text-primary"
+                    title="Capture a title, owner, status, and blocked state in one pass."
+                  >
+                    Add work to the tracker<span class="sr-only">
+                      — capture a title, owner, status, and blocked state in one pass.</span>
+                  </h2>
                 </div>
               </div>
 
@@ -233,12 +221,7 @@ defmodule CymphoWeb.LaunchItemLive.Index do
               class="rounded-2xl border border-border bg-panel p-5 shadow-card"
             >
               <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                    Blocked work
-                  </p>
-                  <h2 class="mt-2 text-lg font-590 text-text-primary">Items needing attention</h2>
-                </div>
+                <h2 class="text-lg font-590 text-text-primary">Blocked work</h2>
 
                 <span class="rounded-full border border-rose-500/25 bg-rose-500/10 px-3 py-1 text-xs font-590 text-rose-300">
                   {@summary.blocked_count} blocked
@@ -261,29 +244,21 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                   id={"blocked-launch-item-#{item.id}"}
                   class="card-lift rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3"
                 >
-                  <div class="flex flex-wrap items-center justify-between gap-3">
-                    <div class="min-w-0">
-                      <h3 class="truncate text-sm font-590 text-rose-100">{item.title}</h3>
-                      <p class="mt-1 text-xs text-rose-100/70">
-                        Owner: {owner_label(item.owner_user)}
-                      </p>
-                    </div>
-                    <span class="rounded-full border border-rose-500/25 px-2.5 py-1 text-xs font-590 uppercase tracking-[0.08em] text-rose-200">
-                      {status_label(item.status)}
-                    </span>
-                  </div>
+                  <%!-- Owner and status are already on this item's row in the
+                       list below, next to the controls that change them. --%>
+                  <h3
+                    class="truncate text-sm font-590 text-rose-100"
+                    title={"#{status_label(item.status)} · #{owner_label(item.owner_user)}"}
+                  >
+                    {item.title}
+                  </h3>
                 </article>
               </div>
             </div>
 
             <div class="rounded-2xl border border-border bg-panel p-5 shadow-card">
               <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                    Items
-                  </p>
-                  <h2 class="mt-2 text-lg font-590 text-text-primary">Manage launch execution</h2>
-                </div>
+                <h2 class="text-lg font-590 text-text-primary">Everything on the tracker</h2>
 
                 <span class="rounded-full border border-border bg-surface px-3 py-1 text-xs font-590 text-text-secondary">
                   {@summary.total} item{if @summary.total == 1, do: "", else: "s"}
@@ -321,9 +296,8 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                           {item.title}
                         </h3>
                       </div>
-                      <p class="mt-1 text-sm text-text-tertiary">
-                        Owner: {owner_label(item.owner_user)}
-                      </p>
+                      <%!-- The owner select two lines down shows the same name
+                           and is the control that changes it. --%>
                     </div>
 
                     <button
@@ -349,11 +323,12 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                       class="space-y-1"
                     >
                       <input type="hidden" name="_id" value={item.id} />
-                      <label class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                        Owner
-                      </label>
+                      <%!-- "Owner" and "Status" were printed above every row's
+                           controls; the controls say what they are. --%>
                       <select
                         name="owner_user_id"
+                        aria-label="Owner"
+                        title="Owner"
                         class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20"
                       >
                         <option
@@ -367,10 +342,12 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                     </form>
 
                     <div class="space-y-1">
-                      <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                        Status
-                      </p>
-                      <div class="flex flex-wrap gap-2">
+                      <div
+                        role="group"
+                        aria-label="Status"
+                        title="Status"
+                        class="flex flex-wrap gap-2"
+                      >
                         <button
                           type="button"
                           phx-click="update_status"
@@ -411,26 +388,9 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                     </div>
                   </div>
 
-                  <div class="mt-4 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
-                    <span class={[
-                      "rounded-full border px-2.5 py-1 font-590 uppercase tracking-[0.08em]",
-                      status_badge_class(item.status)
-                    ]}>
-                      {status_label(item.status)}
-                    </span>
-                    <span
-                      :if={item.is_blocked}
-                      class="rounded-full border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 font-590 uppercase tracking-[0.08em] text-rose-300"
-                    >
-                      Blocked
-                    </span>
-                    <span
-                      :if={item.status == "completed" and not item.is_blocked}
-                      class="inline-flex items-center gap-1 text-emerald-300/80"
-                    >
-                      <.icon name="hero-check-circle-mini" class="h-3.5 w-3.5" /> Done
-                    </span>
-                  </div>
+                  <%!-- This row restated the status a third time: the dot next to
+                       the title carries it, the highlighted Status button carries
+                       it, and the Unblock/Mark blocked button carries blocked. --%>
                 </article>
               </div>
             </div>
@@ -572,12 +532,6 @@ defmodule CymphoWeb.LaunchItemLive.Index do
 
   def blocked_badge_class(true), do: "border-rose-500/30 bg-rose-500/10 text-rose-300"
   def blocked_badge_class(false), do: "border-border bg-surface text-text-tertiary"
-
-  def status_badge_class("completed"),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  def status_badge_class("in_progress"), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
-  def status_badge_class(_), do: "border-border bg-surface text-text-secondary"
 
   def status_button_class(current_status, status) do
     if current_status == status do

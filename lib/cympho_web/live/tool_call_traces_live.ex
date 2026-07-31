@@ -608,6 +608,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
             <div>
               <label class="block text-xs font-510 text-text-secondary mb-1.5">Status</label>
               <.select_menu
+                label="Status"
                 name="filter[status]"
                 value={@filters.status || ""}
                 options={[
@@ -623,6 +624,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
             <div>
               <label class="block text-xs font-510 text-text-secondary mb-1.5">Agent</label>
               <.select_menu
+                label="Agent"
                 name="filter[agent_id]"
                 value={@filters.agent_id || ""}
                 options={[{"All Agents", ""} | Enum.map(@agents, &{&1.name, &1.id})]}

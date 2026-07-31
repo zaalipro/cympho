@@ -42,7 +42,12 @@
       {@flash["info"]}
     </div>
 
-    <div class="ui-simple-only stagger-children mb-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+    <%!-- With nothing in any lane these four cards read 0 four times directly
+         above three panels that already name their lane and say it is empty. --%>
+    <div
+      :if={@stats.total > 0}
+      class="ui-simple-only stagger-children mb-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4"
+    >
       <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
         <span class="ui-simple-icon">
           <span class="hero-check-circle-mini h-4 w-4"></span>
@@ -169,7 +174,8 @@
         </.app_link>
       </div>
 
-      <div class="grid grid-cols-2 border-t border-hairline sm:grid-cols-5">
+      <%!-- Same reason: five zeroed tiles on a clear queue. --%>
+      <div :if={@stats.total > 0} class="grid grid-cols-2 border-t border-hairline sm:grid-cols-5">
         <div class="border-r border-hairline px-4 py-3 last:border-r-0">
           <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
             Ready

@@ -312,13 +312,21 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
 
               <div class="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.75fr)]">
                 <div class="rounded-md border border-hairline bg-surface-1/50 px-3 py-2">
-                  <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
+                  <p
+                    class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary"
+                    title={@ceo_launch_packet.readiness_next}
+                  >
                     Owner brief readiness
                   </p>
                   <p class="mt-1 text-sm font-510 text-ink">
                     {@ceo_launch_packet.readiness_label} ({@ceo_launch_packet.readiness_score})
                   </p>
-                  <p class="mt-1 text-caption leading-5 text-ink-tertiary">
+                  <%!-- The packet's next action a few lines above already ends with this
+                       exact prompt whenever the brief is what blocks launch. --%>
+                  <p
+                    :if={!readiness_next_restated?(@ceo_launch_packet)}
+                    class="mt-1 text-caption leading-5 text-ink-tertiary"
+                  >
                     {@ceo_launch_packet.readiness_next}
                   </p>
                 </div>
@@ -2111,6 +2119,13 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
 
   defp normalize_non_negative_count(value) when is_integer(value), do: max(value, 0)
   defp normalize_non_negative_count(_), do: 0
+
+  defp readiness_next_restated?(%{readiness_next: next, next_action: action})
+       when is_binary(next) and next != "" and is_binary(action) do
+    String.contains?(action, next)
+  end
+
+  defp readiness_next_restated?(_packet), do: true
 
   defp prompt_context_chip_class("context_window_risk"),
     do: "rounded border border-brand/35 bg-brand/10 px-2 py-1 text-brand"

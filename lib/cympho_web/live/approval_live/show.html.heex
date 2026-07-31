@@ -5,12 +5,13 @@
         <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
           Your decision
         </p>
-        <h1 class="mt-1 font-serif text-[clamp(24px,3.5vw,34px)] font-510 leading-[1.1] tracking-[-0.01em] text-text-primary">
-          {humanize_type(@approval.type)}
+        <h1
+          class="mt-1 font-serif text-[clamp(24px,3.5vw,34px)] font-510 leading-[1.1] tracking-[-0.01em] text-text-primary"
+          title="An agent is asking for your go-ahead. Review what's below, then decide."
+        >
+          {humanize_type(@approval.type)}<span class="sr-only">
+            — an agent is asking for your go-ahead. Review what's below, then decide.</span>
         </h1>
-        <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-          An agent is asking for your go-ahead. Review what's below, then decide.
-        </p>
       </div>
       <:actions>
         <.app_link
@@ -34,12 +35,13 @@
       <div class="px-5 py-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
-            <h2 class="text-card-title text-text-primary">
-              {@decision_packet.stance}
+            <%!-- The recommendation restated the linked-issue count on the row
+                 below it, the payload keys the Evidence list already names, and
+                 the approve/deny guidance next to the buttons. --%>
+            <h2 class="text-card-title text-text-primary" title={@decision_packet.recommendation}>
+              {@decision_packet.stance}<span class="sr-only">
+                — {@decision_packet.recommendation}</span>
             </h2>
-            <p class="mt-2 max-w-3xl text-sm leading-6 text-text-secondary">
-              {@decision_packet.recommendation}
-            </p>
           </div>
           <span class={[
             "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-510",
@@ -77,20 +79,10 @@
     <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
       <div class="space-y-6">
         <div class="rounded-xl border border-border bg-panel p-5">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p class="text-eyebrow uppercase text-text-quaternary">Request</p>
-              <h3 class="mt-1 text-card-title text-text-primary">
-                {humanize_type(@approval.type)}
-                <span class="ml-2 font-mono text-xs font-400 text-text-quaternary">
-                  {@approval.type}
-                </span>
-              </h3>
-            </div>
-            <span class={"rounded-full px-2.5 py-1 text-xs font-510 capitalize " <> status_badge_class(@approval.status)}>
-              {@approval.status}
-            </span>
-          </div>
+          <%!-- The heading and status badge repeated the page title and the
+               decision packet badge; only the raw gate slug was new. --%>
+          <p class="text-eyebrow uppercase text-text-quaternary">Request</p>
+          <p class="mt-1 font-mono text-xs text-text-quaternary">{@approval.type}</p>
 
           <div class="mt-5 grid gap-3 sm:grid-cols-2">
             <div class={detail_stat_class()}>
@@ -107,8 +99,9 @@
         </div>
 
         <div class="rounded-xl border border-border bg-panel p-5">
-          <p class="text-eyebrow uppercase text-text-quaternary">Evidence</p>
-          <h3 class="mt-1 text-card-title text-text-primary">What the agent submitted</h3>
+          <h3 class="text-card-title text-text-primary" title="What the agent submitted">
+            Evidence<span class="sr-only"> — what the agent submitted</span>
+          </h3>
 
           <div
             :if={payload_entries(@approval.payload) == []}
@@ -142,24 +135,16 @@
           </details>
         </div>
 
-        <div class="rounded-xl border border-border bg-panel p-5">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-eyebrow uppercase text-text-quaternary">Linked work</p>
-              <h3 class="mt-1 text-card-title text-text-primary">
-                Issues waiting on this decision
-              </h3>
-            </div>
-          </div>
+        <%!-- With nothing linked this was a bordered box saying "No linked
+             issues" under a heading saying the same, while the row at the top
+             of the page already reads "0 linked issues". --%>
+        <div
+          :if={!Enum.empty?(@approval.issues)}
+          class="rounded-xl border border-border bg-panel p-5"
+        >
+          <h3 class="text-card-title text-text-primary">Issues waiting on this decision</h3>
 
-          <div
-            :if={Enum.empty?(@approval.issues)}
-            class="mt-4 rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-text-tertiary"
-          >
-            No linked issues.
-          </div>
-
-          <div :if={!Enum.empty?(@approval.issues)} class="mt-4 space-y-2">
+          <div class="mt-4 space-y-2">
             <.app_link
               :for={issue <- @approval.issues}
               navigate={~p"/issues/#{issue.id}"}
@@ -187,6 +172,7 @@
               <button
                 type="button"
                 phx-click="approve"
+                title="Approving unblocks the linked work immediately."
                 class="btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-590 text-white transition-colors hover:bg-emerald-700"
               >
                 <.icon name="hero-check-mini" class="h-4 w-4" /> Approve
@@ -195,13 +181,11 @@
                 type="button"
                 phx-click="deny"
                 data-confirm="Deny this approval? The requesting agent will be told to stop or revise."
+                title="Denying returns a stop signal to the requesting agent."
                 class="btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 text-sm font-590 text-red-300 transition-colors hover:bg-red-500/20"
               >
                 <.icon name="hero-x-mark-mini" class="h-4 w-4" /> Deny
               </button>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Approving unblocks the linked work immediately. Denying returns a stop signal to the requesting agent.
-              </p>
             </div>
           <% else %>
             <p class="mt-3 text-sm leading-6 text-text-tertiary">
@@ -210,23 +194,8 @@
           <% end %>
         </div>
 
-        <div class="ui-advanced-only rounded-xl border border-border bg-panel p-5">
-          <p class="text-eyebrow uppercase text-text-quaternary">Payload keys</p>
-          <div
-            :if={@decision_packet.payload_keys == []}
-            class="mt-3 rounded-lg border border-dashed border-border px-3 py-4 text-sm text-text-tertiary"
-          >
-            No payload keys.
-          </div>
-          <div :if={@decision_packet.payload_keys != []} class="mt-3 flex flex-wrap gap-2">
-            <span
-              :for={key <- @decision_packet.payload_keys}
-              class="rounded-full border border-border bg-surface px-2.5 py-1 font-mono text-xs text-text-secondary"
-            >
-              {key}
-            </span>
-          </div>
-        </div>
+        <%!-- A "Payload keys" panel listed exactly the labels the Evidence list
+             already prints next to their values. --%>
       </aside>
     </div>
   </div>

@@ -96,13 +96,15 @@
       </section>
 
       <aside class="ui-advanced-only space-y-4" data-testid="project-setup-rail">
-        <section
+        <%!-- Steps 1 and 2 restated the form sections they sit next to. Worth
+             keeping for a first project, not worth a column of prose every visit. --%>
+        <details
           data-testid="project-setup-checklist"
           class="rounded-xl border border-border bg-panel p-4 shadow-card"
         >
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          <summary class="cursor-pointer list-none text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary [&::-webkit-details-marker]:hidden">
             Setup checklist
-          </p>
+          </summary>
           <div class="mt-4 space-y-3">
             <div class="flex gap-3">
               <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
@@ -138,7 +140,7 @@
               </div>
             </div>
           </div>
-        </section>
+        </details>
       </aside>
 
       <div

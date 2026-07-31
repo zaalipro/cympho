@@ -35,7 +35,7 @@ defmodule CymphoWeb.SkillLive.Show do
     end
   end
 
-  defp apply_action(socket, :show, _params) do
+  defp apply_action(socket, action, _params) when action in [nil, :show] do
     socket
     |> assign(:page_title, socket.assigns.skill.name)
   end

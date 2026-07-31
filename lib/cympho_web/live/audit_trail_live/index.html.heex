@@ -1,8 +1,12 @@
 <.settings_layout active={:audit}>
-  <.header
-    title={@page_title}
-    subtitle="Governance-grade event history for policies, approvals, runtime sessions, and agent changes."
-  />
+  <.header title={@page_title}>
+    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      Governance-grade event history for policies, approvals, runtime sessions, and agent changes.
+    </p>
+    <p class="ui-simple-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      A record of who changed what, and when.
+    </p>
+  </.header>
 
   <section
     data-testid="audit-command"
@@ -10,7 +14,10 @@
   >
     <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
       <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
+        <%!-- The eyebrow names the card and the badge restates the heading
+             underneath it ("Empty" over "No audit events have been recorded
+             yet"), so simple mode keeps only the heading. --%>
+        <div class="ui-advanced-only flex flex-wrap items-center gap-2">
           <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Audit command
           </p>
@@ -193,13 +200,17 @@
 
   <section id="audit-events" class="overflow-hidden rounded-lg border border-border bg-panel">
     <div class="border-b border-border px-4 py-3">
-      <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-        Audit events
+      <%!-- A panel describing its own sort order and disclosure behaviour, both
+           of which the list demonstrates. Kept on hover and for screen readers,
+           as in issue_digest's panel_heading. --%>
+      <p
+        class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+        title="Newest events appear first. Payloads stay collapsed until inspection."
+      >
+        Audit events<span class="sr-only">
+          — Newest events appear first. Payloads stay collapsed until inspection.</span>
       </p>
       <hr class="ember-rule mt-2 w-24" />
-      <p class="mt-2 text-xs text-text-tertiary">
-        Newest events appear first. Payloads stay collapsed until inspection.
-      </p>
     </div>
 
     <.infinite_scroll

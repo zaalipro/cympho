@@ -113,6 +113,27 @@ defmodule CymphoWeb.SimpleModeCopyTest do
       assert html =~ ~s(aria-label="High priority")
       assert html =~ ~s(aria-label="Critical priority")
     end
+
+    test "the disabled start-now checkbox names the missing signal in both modes", %{conn: conn} do
+      {conn, _user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, _ceo} =
+        Cympho.Agents.create_agent(%{
+          name: "CEO",
+          role: :ceo,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, _view, html} = live(conn, "/issues/new")
+
+      assert html =~ "Add enough detail to make the brief ready."
+      assert html =~ "Write a bit more first."
+      # The readiness panel that names the missing signal is advanced-only, so
+      # the simple half has to carry the concrete prompt itself — otherwise
+      # simple mode says "write a bit more" with no way to learn what is missing.
+      assert html =~ "Outcome: Name the owner-visible result the CEO should optimize for."
+    end
   end
 
   describe "simple-mode home destinations stay reachable" do

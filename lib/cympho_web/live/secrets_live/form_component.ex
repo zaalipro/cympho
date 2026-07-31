@@ -211,11 +211,15 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
           id="secret-form"
         >
           <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <%!-- Key/Value is a text+password pair, which Chrome reads as a
+                 login form: without these it offers to fill the signed-in
+                 user's own email and password into a company secret. --%>
             <.input
               field={@form[:key]}
               label="Key"
               placeholder="API_KEY, DATABASE_URL, etc."
               disabled={@form_mode in [:edit, :rotate]}
+              autocomplete="off"
               required
             />
 
@@ -251,6 +255,7 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
               label={if @form_mode == :rotate, do: "New Value", else: "Value"}
               type="password"
               placeholder="Secret value"
+              autocomplete="new-password"
               required={@form_mode in [:create, :rotate]}
             />
 

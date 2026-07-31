@@ -30,25 +30,26 @@
           <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
             Routine launch plan
           </p>
-          <h2 class="mt-1 text-lg font-590 text-text-primary">
-            Create the recurring work packet
+          <%!-- Each section below printed a sentence describing itself before any
+               field. They stay on hover and for screen readers. --%>
+          <h2
+            class="mt-1 text-lg font-590 text-text-primary"
+            title="Give the routine enough owner and project context that each run creates useful, reviewable work instead of floating tasks."
+          >
+            Create the recurring work packet<span class="sr-only">
+              — give the routine enough owner and project context that each run creates useful, reviewable work instead of floating tasks.</span>
           </h2>
-          <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-            Give the routine enough owner and project context that each run creates useful,
-            reviewable work instead of floating tasks.
-          </p>
         </div>
 
         <div class="space-y-6 p-5">
           <section class="space-y-4">
-            <div>
-              <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-                Work packet
-              </p>
-              <p class="mt-1 text-sm text-text-tertiary">
-                This becomes the issue brief every time the routine fires.
-              </p>
-            </div>
+            <p
+              class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary"
+              title="This becomes the issue brief every time the routine fires."
+            >
+              Work packet<span class="sr-only">
+                — this becomes the issue brief every time the routine fires.</span>
+            </p>
 
             <.input
               field={@form[:name]}
@@ -66,14 +67,13 @@
           </section>
 
           <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
-            <div>
-              <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-                Ownership
-              </p>
-              <p class="mt-1 text-sm text-text-tertiary">
-                Pick the default agent and project context for work created by this routine.
-              </p>
-            </div>
+            <p
+              class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary"
+              title="Pick the default agent and project context for work created by this routine."
+            >
+              Ownership<span class="sr-only">
+                — pick the default agent and project context for work created by this routine.</span>
+            </p>
 
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
               <.input
@@ -94,14 +94,13 @@
           </section>
 
           <section class="space-y-4">
-            <div>
-              <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-                Run policy
-              </p>
-              <p class="mt-1 text-sm text-text-tertiary">
-                Decide how the routine behaves when a previous run is still active.
-              </p>
-            </div>
+            <p
+              class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary"
+              title="Decide how the routine behaves when a previous run is still active."
+            >
+              Run policy<span class="sr-only">
+                — decide how the routine behaves when a previous run is still active.</span>
+            </p>
 
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
               <.input
@@ -150,13 +149,16 @@
       </section>
 
       <aside class="ui-advanced-only space-y-4">
-        <section
+        <%!-- Steps 1 and 2 restated the form sections they sit next to. The
+             checklist is worth keeping for a first routine, not worth the
+             column of prose on every visit, so it opens on demand. --%>
+        <details
           data-testid="routine-setup-checklist"
           class="rounded-xl border border-border bg-panel p-4 shadow-card"
         >
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          <summary class="cursor-pointer list-none text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary [&::-webkit-details-marker]:hidden">
             Setup checklist
-          </p>
+          </summary>
           <div class="mt-4 space-y-3">
             <div class="flex gap-3">
               <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
@@ -192,33 +194,29 @@
               </div>
             </div>
           </div>
-        </section>
-
-        <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
-            Create behavior
-          </p>
-          <p class="mt-2 text-sm font-590 text-text-primary">Starts active, needs a trigger</p>
-          <p class="mt-1 text-xs leading-5 text-text-tertiary">
-            Save the routine, open its detail page, then attach the schedule or webhook that should
-            create work.
-          </p>
-        </section>
+        </details>
       </aside>
 
-      <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2">
-        <.app_link
-          navigate={~p"/routines"}
-          class="inline-flex min-h-[40px] items-center justify-center rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-        >
-          Cancel
-        </.app_link>
-        <button
-          type="submit"
-          class="inline-flex min-h-[40px] items-center justify-center cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-        >
-          Create Routine
-        </button>
+      <div class="border-t border-border pt-4 lg:col-span-2">
+        <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+          <.app_link
+            navigate={~p"/routines"}
+            class="inline-flex min-h-[40px] items-center justify-center rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+          >
+            Cancel
+          </.app_link>
+          <button
+            type="submit"
+            class="inline-flex min-h-[40px] items-center justify-center cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+          >
+            Create Routine
+          </button>
+        </div>
+        <%!-- Was a "Create behavior" prose panel beside the form, matching
+             /projects/new: one sentence under the button that triggers it. --%>
+        <p class="mt-2 text-xs leading-5 text-text-tertiary sm:text-right">
+          Starts active. Attach a schedule or webhook trigger after save to make it run.
+        </p>
       </div>
     </.form>
   </div>

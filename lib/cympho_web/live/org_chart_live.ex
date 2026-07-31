@@ -520,15 +520,19 @@ defmodule CymphoWeb.OrgChartLive do
       <div class="flex justify-center gap-4 lg:gap-6">
         <%= for node <- @nodes do %>
           <div class="flex flex-col items-center">
-            <div
+            <%!-- A bare phx-click div is mouse-only: no role, no tab stop, no key
+                 handler, so keyboard and screen-reader users could not open any
+                 agent from this chart. button semantics give all three for free. --%>
+            <button
+              type="button"
               phx-click="select_agent"
               phx-value-agent_id={node.id}
               title={"#{node.name} details"}
               aria-label={"#{node.name} details"}
-              class="cursor-pointer transition-transform hover:scale-105"
+              class="cursor-pointer rounded-xl transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
             >
               <.agent_card node={node} />
-            </div>
+            </button>
             <%= if not Enum.empty?(node.children) do %>
               <div class="h-5 w-px bg-border"></div>
               <div class="mb-5 h-px w-full min-w-24 bg-border"></div>

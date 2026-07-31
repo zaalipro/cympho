@@ -21,23 +21,26 @@
         <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
           Skill launch plan
         </p>
-        <h2 class="mt-1 text-lg font-590 text-text-primary">Create an agent-ready capability</h2>
-        <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-          Define what the skill does, where it can be used, and the manifest fields agents need for
-          auditable capability routing.
-        </p>
+        <%!-- Every section on this form printed a sentence describing itself
+             before any field. They stay on hover and for screen readers. --%>
+        <h2
+          class="mt-1 text-lg font-590 text-text-primary"
+          title="Define what the skill does, where it can be used, and the manifest fields agents need for auditable capability routing."
+        >
+          Create an agent-ready capability<span class="sr-only">
+            — define what the skill does, where it can be used, and the manifest fields agents need for auditable capability routing.</span>
+        </h2>
       </div>
 
       <div class="space-y-6 p-5">
         <section class="space-y-4">
-          <div>
-            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Capability brief
-            </p>
-            <p class="mt-1 text-sm text-text-tertiary">
-              Keep this narrow enough that an agent knows exactly when to use it.
-            </p>
-          </div>
+          <p
+            class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary"
+            title="Keep this narrow enough that an agent knows exactly when to use it."
+          >
+            Capability brief<span class="sr-only">
+              — keep this narrow enough that an agent knows exactly when to use it.</span>
+          </p>
 
           <div class="grid gap-5 sm:grid-cols-2">
             <.input field={@form[:name]} label="Name" required placeholder="Repository Auditor" />
@@ -59,14 +62,13 @@
         </section>
 
         <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
-          <div>
-            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Runtime manifest
-            </p>
-            <p class="mt-1 text-sm text-text-tertiary">
-              These fields build the manifest that skill health checks and agent prompts inspect.
-            </p>
-          </div>
+          <p
+            class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary"
+            title="These fields build the manifest that skill health checks and agent prompts inspect."
+          >
+            Runtime manifest<span class="sr-only">
+              — these fields build the manifest that skill health checks and agent prompts inspect.</span>
+          </p>
 
           <div class="grid gap-4 md:grid-cols-2">
             <.input
@@ -86,14 +88,13 @@
         </section>
 
         <section class="space-y-4">
-          <div>
-            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Scope and ownership
-            </p>
-            <p class="mt-1 text-sm text-text-tertiary">
-              Scope the skill before assigning it to agents so capability access remains deliberate.
-            </p>
-          </div>
+          <p
+            class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary"
+            title="Scope the skill before assigning it to agents so capability access remains deliberate."
+          >
+            Scope and ownership<span class="sr-only">
+              — scope the skill before assigning it to agents so capability access remains deliberate.</span>
+          </p>
 
           <div class="grid gap-5 sm:grid-cols-2">
             <.input field={@form[:version]} label="Version" placeholder="0.1.0" />
@@ -120,13 +121,15 @@
     </.panel>
 
     <aside class="ui-advanced-only space-y-4">
-      <section
+      <%!-- Steps 1 and 2 restated the form sections they sit next to. Worth
+           keeping for a first skill, not worth a column of prose every visit. --%>
+      <details
         data-testid="skill-setup-checklist"
         class="rounded-xl border border-border bg-panel p-4 shadow-card"
       >
-        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+        <summary class="cursor-pointer list-none text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary [&::-webkit-details-marker]:hidden">
           Setup checklist
-        </p>
+        </summary>
         <div class="mt-4 space-y-3">
           <div class="flex gap-3">
             <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
@@ -162,30 +165,26 @@
             </div>
           </div>
         </div>
-      </section>
-
-      <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
-        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
-          Create behavior
-        </p>
-        <p class="mt-2 text-sm font-590 text-text-primary">Creates a valid manifest</p>
-        <p class="mt-1 text-xs leading-5 text-text-tertiary">
-          Metadata, entrypoint, and capabilities are saved into the manifest map used by health
-          checks and skill routing.
-        </p>
-      </section>
+      </details>
     </aside>
 
-    <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2">
-      <.app_link
-        navigate={~p"/skills"}
-        class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-      >
-        Cancel
-      </.app_link>
-      <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
-        Create Skill
-      </.button>
+    <div class="border-t border-border pt-4 lg:col-span-2">
+      <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+        <.app_link
+          navigate={~p"/skills"}
+          class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+        >
+          Cancel
+        </.app_link>
+        <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
+          Create Skill
+        </.button>
+      </div>
+      <%!-- Was a "Create behavior" prose panel beside the form, matching
+           /projects/new: one sentence under the button that triggers it. --%>
+      <p class="mt-2 text-xs leading-5 text-text-tertiary sm:text-right">
+        Creates a valid manifest from the metadata, entrypoint, and capabilities above.
+      </p>
     </div>
   </.form>
 </.page>

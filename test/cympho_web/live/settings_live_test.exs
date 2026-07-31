@@ -52,15 +52,25 @@ defmodule CymphoWeb.SettingsLiveTest do
       # The select_user event should persist the session binding
     end
 
-    test "shows user picker when no user available" do
-      # With no session and no valid user_id param, shows user picker
+    test "without a user_id it shows the signed-in user's own settings" do
+      # These are your own notification settings, so the page no longer opens a
+      # picker asking which of the install's users you are.
       {:ok, _view, html} = live(build_conn_(), "/settings/notifications")
+
+      assert html =~ "Notifications"
+      assert html =~ "Channels"
+      refute html =~ "Choose a user"
+      refute html =~ "No users found"
+    end
+
+    test "an unknown user_id still falls back to the picker", %{user: user} do
+      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=fake-id")
 
       # The picker used to render under a "No users found" heading. Whichever
       # branch renders, exactly one of the two headings must be present.
       assert html =~ "Choose a user" or html =~ "No users found"
       refute html =~ "Choose a user" and html =~ "No users found"
-      assert html =~ "Notifications"
+      assert html =~ user.email
     end
   end
 

@@ -80,10 +80,17 @@
     class="ui-advanced-only grid grid-cols-1 gap-4 lg:grid-cols-3"
   >
     <section class="rounded-xl border border-border bg-surface p-5 lg:col-span-2">
-      <h2 class="mb-4 text-sm font-590 text-text-primary">
-        {if @live_action == :settings, do: "Settings", else: "Manifest"}
-      </h2>
-      <pre class="max-h-[520px] overflow-auto rounded-lg border border-border bg-panel p-4 text-xs leading-5 text-text-secondary"><%= Jason.encode!(if(@live_action == :settings, do: @plugin.settings || %{}, else: @plugin.manifest || %{}), pretty: true) %></pre>
+      <%!-- The pretty-printed blob repeated the name, identifier, version,
+           author, and permissions the Details and Permissions panels beside it
+           already show in plain rows. --%>
+      <details class="group">
+        <summary class="flex cursor-pointer list-none items-center gap-1.5 text-sm font-590 text-text-primary [&::-webkit-details-marker]:hidden">
+          <span class="hero-chevron-right-mini h-3.5 w-3.5 transition-transform group-open:rotate-90">
+          </span>
+          {if @live_action == :settings, do: "Settings", else: "Manifest"}
+        </summary>
+        <pre class="mt-4 max-h-[520px] overflow-auto rounded-lg border border-border bg-panel p-4 text-xs leading-5 text-text-secondary"><%= Jason.encode!(if(@live_action == :settings, do: @plugin.settings || %{}, else: @plugin.manifest || %{}), pretty: true) %></pre>
+      </details>
     </section>
 
     <aside class="space-y-4">

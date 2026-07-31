@@ -119,7 +119,13 @@
                 </div>
 
                 <div class="mt-4 grid gap-3 md:grid-cols-3">
-                  <label class="flex min-h-[68px] items-start gap-3 rounded-lg border border-border bg-surface/80 px-3 py-3">
+                  <%!-- Help text stays in the label for screen readers and on hover,
+                       but is not painted: this block renders once per stage, so three
+                       stages printed the same three sentences nine times. --%>
+                  <label
+                    title="Reviewer cannot be the executor."
+                    class="flex min-h-[68px] items-start gap-3 rounded-lg border border-border bg-surface/80 px-3 py-3"
+                  >
                     <input
                       type="hidden"
                       name={"execution_policy[stage_#{index}_require_different_actor]"}
@@ -143,13 +149,14 @@
                       <span class="block text-xs font-510 text-text-secondary">
                         Different actor
                       </span>
-                      <span class="mt-1 block text-xs leading-5 text-text-tertiary">
-                        Reviewer cannot be the executor.
-                      </span>
+                      <span class="sr-only">Reviewer cannot be the executor.</span>
                     </span>
                   </label>
 
-                  <label class="flex min-h-[68px] items-start gap-3 rounded-lg border border-border bg-surface/80 px-3 py-3">
+                  <label
+                    title="Requires an explicit human gate."
+                    class="flex min-h-[68px] items-start gap-3 rounded-lg border border-border bg-surface/80 px-3 py-3"
+                  >
                     <input
                       type="hidden"
                       name={"execution_policy[stage_#{index}_require_human]"}
@@ -173,13 +180,14 @@
                       <span class="block text-xs font-510 text-text-secondary">
                         Human approval
                       </span>
-                      <span class="mt-1 block text-xs leading-5 text-text-tertiary">
-                        Requires an explicit human gate.
-                      </span>
+                      <span class="sr-only">Requires an explicit human gate.</span>
                     </span>
                   </label>
 
-                  <label class="flex min-h-[68px] items-start gap-3 rounded-lg border border-border bg-surface/80 px-3 py-3">
+                  <label
+                    title="Continue when the stage passes."
+                    class="flex min-h-[68px] items-start gap-3 rounded-lg border border-border bg-surface/80 px-3 py-3"
+                  >
                     <input
                       type="hidden"
                       name={"execution_policy[stage_#{index}_auto_advance]"}
@@ -203,9 +211,7 @@
                       <span class="block text-xs font-510 text-text-secondary">
                         Auto-advance
                       </span>
-                      <span class="mt-1 block text-xs leading-5 text-text-tertiary">
-                        Continue when the stage passes.
-                      </span>
+                      <span class="sr-only">Continue when the stage passes.</span>
                     </span>
                   </label>
                 </div>

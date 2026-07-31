@@ -1497,6 +1497,24 @@ defmodule CymphoWeb.OperationsLive.Index do
 
   defp shared_preflight_blocker(_candidates), do: nil
 
+  # Same idea as shared_preflight_blocker/1: with one runtime profile in play
+  # every agent row carried an identical slot count, so the roster repeated
+  # "1 local CLI slot" once per agent instead of stating the capacity once.
+  defp shared_slot_label([_, _ | _] = agents) do
+    agents
+    |> Enum.map(fn
+      %{pressure: %{slot_label: label}} when is_binary(label) -> label
+      _ -> nil
+    end)
+    |> Enum.uniq()
+    |> case do
+      [label] when is_binary(label) -> label
+      _ -> nil
+    end
+  end
+
+  defp shared_slot_label(_agents), do: nil
+
   defp preflight_action_target_path(action) when is_map(action) do
     Map.get(action, :target_path) || Map.get(action, "target_path")
   end

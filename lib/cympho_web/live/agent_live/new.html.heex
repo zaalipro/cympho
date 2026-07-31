@@ -95,14 +95,17 @@
               data-testid="new-agent-identity-section"
               class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5"
             >
-              <div>
-                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  1 · Identity and reporting
-                </p>
-                <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                  Give the agent a clear role and manager so handoffs land in the right part of the org.
-                </p>
-              </div>
+              <%!-- The page lead above already asks for a role and a reporting
+                   line; each section keeps its explanation on hover instead of
+                   repeating it. --%>
+              <% identity_help =
+                "The role and manager decide where this agent's handoffs land in the org." %>
+              <p
+                class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+                title={identity_help}
+              >
+                1 · Identity and reporting<span class="sr-only"> — {identity_help}</span>
+              </p>
 
               <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_220px]">
                 <.input field={@form[:name]} label="Name" required placeholder="Elixir Engineer" />
@@ -160,14 +163,13 @@
               data-testid="new-agent-runtime-section"
               class="ui-advanced-only space-y-4"
             >
-              <div>
-                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  2 · Runtime profile
-                </p>
-                <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                  Pick the execution backend before tuning adapter-specific details.
-                </p>
-              </div>
+              <% runtime_help = "Pick where this agent runs before tuning adapter details." %>
+              <p
+                class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+                title={runtime_help}
+              >
+                2 · Runtime profile<span class="sr-only"> — {runtime_help}</span>
+              </p>
 
               <div
                 data-testid="new-agent-runtime-profile"
@@ -175,11 +177,14 @@
               >
                 <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
                   <div class="space-y-1.5">
+                    <% profile_help =
+                      "A profile sets the adapter, command, model and endpoint for you. Pick Custom to set them yourself." %>
                     <label
                       for="new-agent-runtime-profile-select"
                       class="block text-xs font-510 text-text-secondary"
+                      title={profile_help}
                     >
-                      Runtime profile
+                      Runtime profile<span class="sr-only"> — {profile_help}</span>
                     </label>
                     <select
                       id="new-agent-runtime-profile-select"
@@ -195,10 +200,6 @@
                         {profile.name}
                       </option>
                     </select>
-                    <p class="text-xs leading-5 text-text-quaternary">
-                      Profiles apply adapter, command, model, and endpoint defaults before the agent is
-                      created. Choose Custom for raw adapter fields.
-                    </p>
                   </div>
 
                   <div class="rounded-lg border border-border bg-panel px-3 py-3">
@@ -252,14 +253,14 @@
             </section>
 
             <section data-testid="new-agent-adapter-section" class="ui-advanced-only space-y-4">
-              <div>
-                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  3 · Adapter configuration
-                </p>
-                <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                  Runtime profiles fill this in automatically; use custom settings only when needed.
-                </p>
-              </div>
+              <% adapter_help =
+                "The profile above fills this in. Change it only when you need something else." %>
+              <p
+                class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+                title={adapter_help}
+              >
+                3 · Adapter configuration<span class="sr-only"> — {adapter_help}</span>
+              </p>
 
               <div class="max-w-md">
                 <.input
@@ -587,15 +588,14 @@
               data-testid="new-agent-guide-section"
               class="ui-advanced-only space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5"
             >
-              <div>
-                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  4 · Operating guide
-                </p>
-                <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                  Role templates set the base loop — the defaults below already work. Edit only to
-                  add company-specific rules.
-                </p>
-              </div>
+              <% guide_help =
+                "The role already sets the working defaults. Add rules here only if your company needs them." %>
+              <p
+                class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+                title={guide_help}
+              >
+                4 · Operating guide<span class="sr-only"> — {guide_help}</span>
+              </p>
 
               <.input
                 field={@form[:instructions]}
@@ -606,8 +606,10 @@
               />
 
               <div class="space-y-1.5">
-                <label class="block text-xs font-510 text-text-secondary">
-                  Environment Variables
+                <% env_help =
+                  "One KEY=VALUE per line, passed to the adapter when it runs. Put API keys in Secrets instead — a secret with the same name wins." %>
+                <label class="block text-xs font-510 text-text-secondary" title={env_help}>
+                  Environment Variables<span class="sr-only"> — {env_help}</span>
                 </label>
                 <textarea
                   name="agent[env_text]"
@@ -617,24 +619,18 @@
                   }
                   class="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                 ><%= @env_text %></textarea>
-                <p class="text-xs leading-5 text-text-quaternary">
-                  One <code>KEY=VALUE</code>
-                  per line. Forwarded to the adapter subprocess. Sensitive
-                  values, including API keys, should go in Secrets because secrets override these on
-                  conflict.
-                </p>
               </div>
             </section>
           </div>
 
           <div
             data-testid="new-agent-form-actions"
-            class="flex flex-col gap-3 border-t border-border bg-surface/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+            class="flex flex-col gap-3 border-t border-border bg-surface/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6"
           >
-            <p class="max-w-2xl text-xs leading-5 text-text-tertiary">
-              New agents start with this role contract, runtime profile, and reporting line. Demand-backed
-              hires also pick up waiting matching work after save.
-            </p>
+            <%!-- The sentence that used to sit here only restated the form. It
+                 now rides along on the button that acts on it. --%>
+            <% hire_help =
+              "New agents start with this role contract, runtime profile, and reporting line. Demand-backed hires also pick up waiting matching work after save." %>
             <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
               <.app_link
                 navigate={~p"/agents"}
@@ -645,9 +641,10 @@
               <.button
                 type="submit"
                 variant="primary"
+                title={hire_help}
                 class="cta-glow min-h-[40px] w-full sm:w-auto"
               >
-                Hire {role_name}
+                Hire {role_name}<span class="sr-only"> — {hire_help}</span>
               </.button>
             </div>
           </div>
@@ -658,39 +655,33 @@
             <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Hire checklist
             </p>
+            <%!-- Three reminders, one line each. The reasoning behind each one
+                 stays on hover rather than doubling the checklist's height. --%>
             <div class="mt-4 space-y-3">
-              <div class="flex gap-3">
-                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
-                  1
+              <div
+                :for={
+                  {index, badge, label, why} <- [
+                    {"1", "border-success/30 bg-success/10 text-success", "Match role to backlog",
+                     "The role decides what gets auto-assigned to this agent and how it hands work off."},
+                    {"2", "border-brand/30 bg-brand/10 text-brand", "Choose runtime capacity",
+                     "Chat profiles are cheap for triage; process profiles are better for repo delivery."},
+                    {"3", "border-amber-500/30 bg-amber-500/10 text-amber-200",
+                     "Keep secrets out of env",
+                     "Provider keys belong in Secrets, where you can see who used them."}
+                  ]
+                }
+                class="flex items-center gap-3"
+                title={why}
+              >
+                <span class={[
+                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-590",
+                  badge
+                ]}>
+                  {index}
                 </span>
-                <div>
-                  <p class="text-sm font-590 text-text-primary">Match role to backlog</p>
-                  <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                    The role controls auto-assignment, prompt contract, and handoff behavior.
-                  </p>
-                </div>
-              </div>
-              <div class="flex gap-3">
-                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
-                  2
-                </span>
-                <div>
-                  <p class="text-sm font-590 text-text-primary">Choose runtime capacity</p>
-                  <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                    Chat profiles are cheap for triage; process profiles are better for repo delivery.
-                  </p>
-                </div>
-              </div>
-              <div class="flex gap-3">
-                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
-                  3
-                </span>
-                <div>
-                  <p class="text-sm font-590 text-text-primary">Keep secrets out of env</p>
-                  <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                    Store provider keys in Secrets so runtime injection stays auditable.
-                  </p>
-                </div>
+                <p class="text-sm font-590 text-text-primary">
+                  {label}<span class="sr-only"> — {why}</span>
+                </p>
               </div>
             </div>
           </section>
@@ -702,10 +693,10 @@
             <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Selected role
             </p>
-            <p class="mt-2 text-sm font-590 text-text-primary">{role_name}</p>
-            <p class="mt-1 text-xs leading-5 text-text-tertiary">
-              This hire will receive the {role_name} playbook, including owner-readable updates,
-              explicit handoffs, and recoverable blockers.
+            <% role_guide_help =
+              "The #{role_name} playbook makes this agent post updates you can read, hand work off clearly, and say when it is stuck." %>
+            <p class="mt-2 text-sm font-590 text-text-primary" title={role_guide_help}>
+              {role_name}<span class="sr-only"> — {role_guide_help}</span>
             </p>
           </section>
         </aside>

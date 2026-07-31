@@ -103,8 +103,18 @@ defmodule CymphoWeb.Components.IssueDigest do
           <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <p class="text-eyebrow uppercase text-brand">CEO flow snapshot</p>
-                <span class={ceo_flow_snapshot_badge_class(@ceo_flow_snapshot.status)}>
+                <p
+                  class="text-eyebrow uppercase text-brand"
+                  title={"CEO flow snapshot — #{@ceo_flow_snapshot.status_label}"}
+                >
+                  CEO flow snapshot
+                </p>
+                <%!-- The digest's own state chip sits in the same card a few lines
+                     above; repeating its exact wording here said nothing new. --%>
+                <span
+                  :if={@ceo_flow_snapshot.status_label != @digest.label}
+                  class={ceo_flow_snapshot_badge_class(@ceo_flow_snapshot.status)}
+                >
                   {@ceo_flow_snapshot.status_label}
                 </span>
               </div>

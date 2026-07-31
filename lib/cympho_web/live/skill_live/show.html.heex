@@ -15,8 +15,17 @@
 
   <div class="grid gap-4 lg:grid-cols-[1fr_280px]">
     <.panel class="p-5">
-      <h2 class="mb-3 text-xs font-510 uppercase tracking-wide text-text-secondary">Manifest</h2>
-      <pre class="overflow-x-auto rounded-lg border border-border bg-black/20 p-4 text-xs text-text-secondary"><%= Jason.encode!(@skill.manifest || %{}, pretty: true) %></pre>
+      <%!-- The pretty-printed manifest was the longest thing on the page and
+           repeated the name, description, identifier, version, author, and
+           capabilities that the panel beside it already shows in plain rows. --%>
+      <details class="group">
+        <summary class="flex cursor-pointer list-none items-center gap-1.5 text-xs font-510 uppercase tracking-wide text-text-secondary [&::-webkit-details-marker]:hidden">
+          <span class="hero-chevron-right-mini h-3.5 w-3.5 transition-transform group-open:rotate-90">
+          </span>
+          Manifest
+        </summary>
+        <pre class="mt-3 overflow-x-auto rounded-lg border border-border bg-black/20 p-4 text-xs text-text-secondary"><%= Jason.encode!(@skill.manifest || %{}, pretty: true) %></pre>
+      </details>
     </.panel>
 
     <.panel class="space-y-4 p-5">

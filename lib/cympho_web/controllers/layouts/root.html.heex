@@ -474,6 +474,7 @@
             </span>
             <.select_menu
               id="quick-create-project"
+              label="Project"
               name="project_id"
               placeholder="No project"
               options={
@@ -491,6 +492,7 @@
             </span>
             <.select_menu
               id="quick-create-goal"
+              label="Goal"
               name="goal_id"
               placeholder="No goal"
               options={
@@ -509,6 +511,7 @@
             </span>
             <.select_menu
               id="quick-create-work-mode"
+              label="Begin with"
               name="work_mode"
               value="standard"
               options={[
@@ -528,6 +531,7 @@
             </span>
             <.select_menu
               id="quick-create-assignee"
+              label="Assignee"
               name="assignee_id"
               options={[{"Unassigned", ""} | Enum.map(quick_agents, &{&1.name, &1.id})]}
               value={if quick_ceo, do: quick_ceo.id, else: ""}
@@ -540,6 +544,7 @@
             </span>
             <.select_menu
               id="quick-create-status"
+              label="Status"
               name="status"
               value="todo"
               options={[
