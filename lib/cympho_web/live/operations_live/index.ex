@@ -1478,6 +1478,25 @@ defmodule CymphoWeb.OperationsLive.Index do
 
   defp launch_preview_footer(_launch_preview), do: nil
 
+  # A queue is usually stuck behind one environment problem — a single missing
+  # CLI, one unset key — so every candidate row printed the same sentence. Return
+  # that sentence only when it is common to the whole queue; any candidate that
+  # differs (or has no action) keeps every row explaining itself individually.
+  defp shared_preflight_blocker([_, _ | _] = candidates) do
+    candidates
+    |> Enum.map(fn
+      %{preflight: %{first_action: %{detail: detail}}} when is_binary(detail) -> detail
+      _ -> nil
+    end)
+    |> Enum.uniq()
+    |> case do
+      [detail] when is_binary(detail) -> detail
+      _ -> nil
+    end
+  end
+
+  defp shared_preflight_blocker(_candidates), do: nil
+
   defp preflight_action_target_path(action) when is_map(action) do
     Map.get(action, :target_path) || Map.get(action, "target_path")
   end

@@ -120,12 +120,25 @@ defmodule CymphoWeb.CostLive.Index do
 
   defp parse_days(_), do: 30
 
+  # Sub-cent precision matters for per-run spend, but padding round amounts out
+  # to "$0.0000" is noise, so the extra digits only survive when they carry one.
   def format_cost(cost) do
     "$" <>
       (cost
        |> decimal_or_zero()
        |> Decimal.round(4)
-       |> Decimal.to_string(:normal))
+       |> Decimal.to_string(:normal)
+       |> trim_cost_precision())
+  end
+
+  defp trim_cost_precision(amount) do
+    case String.split(amount, ".") do
+      [whole, fraction] ->
+        whole <> "." <> (fraction |> String.trim_trailing("0") |> String.pad_trailing(2, "0"))
+
+      _ ->
+        amount
+    end
   end
 
   def format_tokens(tokens) when is_integer(tokens) and tokens > 0 do
@@ -286,6 +299,7 @@ defmodule CymphoWeb.CostLive.Index do
       title: "Freeze spend until budget is resolved",
       summary:
         "#{pluralize(count, "budget control")} need attention before more autonomous runtime is launched.",
+      simple_summary: "Spending has hit its limit.",
       action_label: "Review budgets",
       action_path: "/budgets",
       driver: budget_driver(exceeded_budgets, posture)
@@ -301,6 +315,7 @@ defmodule CymphoWeb.CostLive.Index do
       title: "Price missing before the next run",
       summary:
         "Token usage exists with zero recorded cost. Treat this as unknown spend until pricing or provider reporting is configured.",
+      simple_summary: "Some runs reported no price, so this total is incomplete.",
       action_label: "Inspect drivers",
       action_path: "#top-cost-drivers",
       driver:
@@ -320,6 +335,7 @@ defmodule CymphoWeb.CostLive.Index do
       badge: "Spend watch",
       title: "Triage spend before the next run",
       summary: watch_summary(posture),
+      simple_summary: simple_watch_summary(posture),
       action_label: "Inspect drivers",
       action_path: "#top-cost-drivers",
       driver: top_cost_driver(by_agent, by_issue, by_provider, approaching_budgets)
@@ -347,6 +363,7 @@ defmodule CymphoWeb.CostLive.Index do
           else:
             "No spend has landed yet, but a budget cap makes launch decisions safer once agents start running."
         ),
+      simple_summary: "No spending limit is set yet.",
       action_label: "Create budget",
       action_path: "/budgets/new",
       driver:
@@ -361,6 +378,7 @@ defmodule CymphoWeb.CostLive.Index do
       title: "Add a company budget envelope",
       summary:
         "#{pluralize(posture.budget_control_count, "scoped control")} exist, but there is no comparable company-wide spend limit.",
+      simple_summary: "There is no company-wide spending limit yet.",
       action_label: "Create company budget",
       action_path: "/budgets/new",
       driver: nil
@@ -377,6 +395,7 @@ defmodule CymphoWeb.CostLive.Index do
       badge: "Spend under control",
       title: "Cost posture is clear for the next run",
       summary: "Spend is inside the active budget envelope for this period.",
+      simple_summary: "Spending is inside the limit.",
       action_label: "Review budgets",
       action_path: "#active-budgets",
       driver: top_cost_driver(by_agent, by_issue, by_provider, [])
@@ -386,18 +405,32 @@ defmodule CymphoWeb.CostLive.Index do
   # `Costs.spend_posture/2` also returns `:watch` when an unresolved budget
   # incident from an earlier period is still open, so the threshold sentence is
   # a false alarm whenever this window's usage is below the warning line.
+  # The remediation the old second sentence spelled out is what the card's
+  # "Inspect drivers" action and the Budgets link already do, so the sentence
+  # stops at the diagnosis.
   defp watch_summary(%{budget_used_percent: used, budget_warning_threshold_pct: threshold})
        when is_integer(used) do
     if used >= Decimal.to_integer(Decimal.round(threshold, 0)) do
-      "Spend is near the configured warning threshold. Check the largest driver before approving more runtime."
+      "Spend is near the configured warning threshold."
     else
-      "This window's spend is inside the limit, but an earlier budget alert is still open. Resolve it in Budgets, or check the largest driver first."
+      "This window's spend is inside the limit, but an earlier budget alert is still open."
     end
   end
 
   defp watch_summary(_posture) do
-    "An open budget alert is unresolved. Resolve it in Budgets, or check the largest driver before approving more runtime."
+    "An open budget alert is unresolved."
   end
+
+  defp simple_watch_summary(%{budget_used_percent: used, budget_warning_threshold_pct: threshold})
+       when is_integer(used) do
+    if used >= Decimal.to_integer(Decimal.round(threshold, 0)) do
+      "Spending is close to the limit."
+    else
+      "An older spending alert is still open."
+    end
+  end
+
+  defp simple_watch_summary(_posture), do: "An older spending alert is still open."
 
   defp budget_driver([budget | _], _posture),
     do: "#{budget.name}: #{budget_utilization_pct(budget)} used"
@@ -626,6 +659,7 @@ defmodule CymphoWeb.CostLive.Index do
     assigns =
       assigns
       |> assign_new(:icon, fn -> "hero-chart-bar-square-mini" end)
+      |> assign_new(:simple_detail, fn -> nil end)
       |> assign_new(:primary_label, fn -> nil end)
       |> assign_new(:primary_path, fn -> nil end)
       |> assign_new(:secondary_label, fn -> nil end)
@@ -640,8 +674,11 @@ defmodule CymphoWeb.CostLive.Index do
         <.icon name={@icon} class="h-5 w-5" />
       </div>
       <h3 class="text-sm font-590 text-text-primary">{@title}</h3>
+      <%!-- Two of these panels render in both modes, so they carry a plain
+           sentence alongside the operator one. --%>
       <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
-        {@detail}
+        <span class={@simple_detail && "ui-advanced-only"}>{@detail}</span>
+        <span :if={@simple_detail} class="ui-simple-only">{@simple_detail}</span>
       </p>
       <div :if={@primary_label || @secondary_label} class="mt-5 flex flex-wrap justify-center gap-2">
         <.app_link

@@ -84,7 +84,7 @@
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              <p class="ui-advanced-only text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                 Cost command
               </p>
               <span class={[
@@ -98,7 +98,8 @@
               {@cost_command.title}
             </h2>
             <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
-              {@cost_command.summary}
+              <span class="ui-advanced-only">{@cost_command.summary}</span>
+              <span class="ui-simple-only">{@cost_command.simple_summary}</span>
             </p>
             <p :if={@cost_command.driver} class="mt-2 text-xs font-510 text-text-secondary">
               {@cost_command.driver}
@@ -307,7 +308,8 @@
         testid="cost-breakdowns-empty"
         icon="hero-chart-bar-square-mini"
         title="No spend recorded in this window"
-        detail="Trends and the breakdowns by agent, issue, model and provider appear here once agent runs report token usage. Set a spending limit before launching more runtime, or open Operations if you expected runs to produce usage."
+        detail="Breakdowns by agent, issue, model and provider appear once agent runs report token usage. Set a spending limit before launching more runtime."
+        simple_detail="Costs appear here once agents start running."
         primary_label="Create budget"
         primary_path={~p"/budgets/new"}
         secondary_label="Open Operations"
@@ -744,6 +746,7 @@
           icon="hero-shield-check-mini"
           title="No active budgets"
           detail="Create a company budget so runtime launches have a clear spend envelope."
+          simple_detail="Set a limit so spending can't run away."
           primary_label="Create budget"
           primary_path={~p"/budgets/new"}
         />

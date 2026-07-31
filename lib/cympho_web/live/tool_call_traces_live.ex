@@ -317,8 +317,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
       tone: :attention,
       badge: "No traces yet",
       title: "Launch runtime to capture tool evidence",
-      summary:
-        "No tool calls have been recorded for this company. Once agents use tools, immutable trace evidence will appear here.",
+      summary: "Nothing recorded yet. Tool calls appear here as soon as agents start working.",
       action_label: "Open operations",
       action_event: nil,
       action_path: "/operations#runtime-launch-checklist",
@@ -707,8 +706,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                             {if filters_active?(@filters),
                               do:
                                 "Clear filters to return to the full trace chain, or open Operations if you expected runtime activity.",
-                              else:
-                                "Launch runtime from Operations; every agent tool call will land here with arguments, result, actor, and chain hash."}
+                              else: "Launch runtime from Operations and every tool call lands here."}
                           </p>
                           <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
                             <button

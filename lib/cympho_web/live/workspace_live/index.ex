@@ -45,7 +45,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
             Workspaces
           </h1>
           <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-            Execution directories, runtime services, previews, probes, and leases available to autonomous agents.
+            Folders, services, and previews your agents can use.
           </p>
           <:actions>
             <.app_link
@@ -127,7 +127,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
               Workspace inventory
             </p>
             <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
-              Each card shows whether agents have an active execution lane, an inspectable service, and a clean preview path.
+              One card per workspace, with what is running in it.
             </p>
           </div>
 
@@ -220,7 +220,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
           <.empty_state
             :if={Enum.empty?(@workspace_inventory)}
             title="No workspaces found"
-            message="Attach a project workspace before agents run commands, host previews, or lease shared environments."
+            message="Add a workspace to a project so agents have somewhere to run."
           >
             <:icon_slot>
               <.icon name="hero-folder-mini" class="h-5 w-5" />

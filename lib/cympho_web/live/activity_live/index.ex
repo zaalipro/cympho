@@ -181,8 +181,7 @@ defmodule CymphoWeb.ActivityLive.Index do
             tone: :healthy,
             badge: "Live",
             heading: "Activity stream is recording company work",
-            detail:
-              "Recent issue, runtime, and governance changes are available here as an owner-readable audit trail.",
+            detail: "Everything that changed recently, newest first.",
             action_path: ~p"/activity#activity-feed",
             action_label: "Review feed"
           }

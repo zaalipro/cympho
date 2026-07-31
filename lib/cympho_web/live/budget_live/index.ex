@@ -243,8 +243,7 @@ defmodule CymphoWeb.BudgetLive.Index do
       tone: :setup,
       badge: "No spending limit",
       title: "Set a company runtime budget before scaling agents",
-      summary:
-        "Autonomous runs can spend provider credits without an enforceable company budget. Create one hard-stop limit first.",
+      summary: "Agents can spend without a cap until you set a limit.",
       action_label: "Create limit",
       action_path: "/budgets/new",
       metrics: [

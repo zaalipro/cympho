@@ -249,7 +249,7 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
     assert html =~ ~s(data-testid="policy-command")
     assert html =~ "Create a default execution policy before scaling autonomy"
     assert html =~ "No governance policies configured yet."
-    assert html =~ "every run has a clear owner, reviewer, and approval path"
+    assert html =~ "Create one so every run has an owner, a reviewer, and an approver."
     assert html =~ "New policy"
   end
 

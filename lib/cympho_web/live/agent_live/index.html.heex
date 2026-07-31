@@ -302,16 +302,29 @@
       </.empty_state>
     </.panel>
 
+    <% shared_adapter = shared_adapter_label(@agents) %>
     <div :if={!Enum.empty?(@agents)} class="stagger-children space-y-4">
+      <%!-- Every agent runs the same adapter, so the roster says it once and
+           drops the column rather than printing the identical cell per row. --%>
+      <p :if={shared_adapter} class="ui-advanced-only px-1 text-xs text-text-quaternary">
+        All {length(@agents)} agents run on {shared_adapter}.
+      </p>
+
       <%!-- One column header for the whole stack. It used to live inside every
            role group, so the same eight labels printed once per group. --%>
       <div class="ui-advanced-only hidden gap-4 rounded-lg border border-border bg-panel/70 px-4 py-2 text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary lg:flex lg:items-center">
         <span class="lg:w-[240px] lg:shrink-0">Agent</span>
         <span class="lg:w-[110px] lg:shrink-0">Status</span>
         <span class="lg:w-[64px] lg:shrink-0">Load</span>
-        <div class="grid min-w-0 flex-1 gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]">
+        <div class={[
+          "grid min-w-0 flex-1 gap-4",
+          if(shared_adapter,
+            do: "lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]",
+            else: "lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]"
+          )
+        ]}>
           <span>Health</span>
-          <span>Adapter</span>
+          <span :if={!shared_adapter}>Adapter</span>
           <span>Runtime</span>
           <span>Heartbeat</span>
         </div>
@@ -407,7 +420,14 @@
             </span>
           </div>
 
-          <div class="ui-advanced-only grid min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)] lg:items-center lg:gap-4">
+          <div class={[
+            "ui-advanced-only grid min-w-0 flex-1 gap-3 lg:items-center lg:gap-4",
+            if(shared_adapter,
+              do: "lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]",
+              else:
+                "lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]"
+            )
+          ]}>
             <%!-- Healthy is the norm on every row, so it reads as a dot next to
                  the status pill; only a problem is worth spelling out. --%>
             <div>
@@ -427,7 +447,7 @@
               </span>
             </div>
 
-            <div class="truncate text-xs text-text-tertiary">
+            <div :if={!shared_adapter} class="truncate text-xs text-text-tertiary">
               {adapter_label(Map.get(agent, :adapter))}
             </div>
 

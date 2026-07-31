@@ -12,7 +12,7 @@ defmodule CymphoWeb.SkillLiveTest do
 
       assert html =~ ~s(data-testid="skills-empty")
       assert html =~ "No reusable skills configured yet"
-      assert html =~ "Create one narrow capability with a valid manifest"
+      assert html =~ "Add one skill and assign it to the agents that need it."
       assert html =~ "New skill"
       # The health block said "no skills" twice more and added a third CTA; the
       # empty state's second destination went with it.

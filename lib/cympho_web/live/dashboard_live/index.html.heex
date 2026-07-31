@@ -346,7 +346,10 @@
           <h2 class="mt-1 text-base font-590 text-text-primary">
             First useful CEO result
           </h2>
-          <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+          <p
+            class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary"
+            title={@ceo_command_lane.summary_detail}
+          >
             {@ceo_command_lane.summary}
           </p>
 
@@ -487,8 +490,11 @@
           <h2 class="mt-1 text-base font-590 text-text-primary">
             Can agents run, inspect, and report safely?
           </h2>
-          <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
-            {@autonomy_readiness.summary}
+          <p
+            class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary"
+            title={@autonomy_readiness.summary}
+          >
+            {readiness_count_summary(@autonomy_readiness)}
           </p>
         </div>
 
@@ -508,8 +514,11 @@
       <div
         :if={@autonomy_readiness.paperclip}
         data-testid="operating-readiness"
+        title={@autonomy_readiness.paperclip.summary}
         class="mt-4 flex flex-col gap-3 rounded-lg border border-border bg-canvas/55 p-3 lg:flex-row lg:items-start lg:justify-between"
       >
+        <%!-- The ready / review / setup counters beside this label restate the
+             paperclip summary, so the sentence lives on the box's title. --%>
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
             <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
@@ -519,9 +528,6 @@
               {@autonomy_readiness.paperclip.label}
             </span>
           </div>
-          <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
-            {@autonomy_readiness.paperclip.summary}
-          </p>
         </div>
 
         <div class="grid shrink-0 grid-cols-3 divide-x divide-border overflow-hidden rounded-md border border-border bg-surface/40">
@@ -560,6 +566,7 @@
         <a
           :for={signal <- readiness_cards(@autonomy_readiness)}
           href={signal.path}
+          title={signal.summary}
           class={"group rounded-lg border px-3 py-3 transition hover:bg-surface-hover/50 #{readiness_signal_class(signal.level)}"}
         >
           <div class="flex items-start justify-between gap-2">
@@ -579,7 +586,7 @@
             </span>
           </div>
           <p class="mt-2 line-clamp-2 min-h-8 text-xs leading-4 text-text-tertiary">
-            {signal.summary}
+            {readiness_card_detail(signal)}
           </p>
           <div class="mt-3 flex items-center justify-between gap-2 text-[11px] font-590 text-text-secondary transition group-hover:text-text-primary">
             <span>{Map.get(signal, :action_label, "Open")}</span>
@@ -916,6 +923,7 @@
         <div :if={!Enum.empty?(@active_agent_list)} class="divide-y divide-border">
           <div
             :for={agent <- @active_agent_list}
+            title={agent_role_label(agent)}
             class="group flex items-center gap-3 border-l-2 border-transparent px-4 py-3 transition hover:border-brand hover:bg-surface-hover/70"
           >
             <div class="relative shrink-0">
@@ -936,8 +944,11 @@
             </div>
             <div class="min-w-0 flex-1">
               <p class="truncate text-sm font-510 text-text-primary">{agent.name}</p>
-              <p class="truncate text-[11px] text-text-quaternary">
-                {agent.title || status_label(agent.role)}
+              <p
+                :if={agent_role_subtitle(agent)}
+                class="truncate text-[11px] text-text-quaternary"
+              >
+                {agent_role_subtitle(agent)}
               </p>
             </div>
             <span class="hidden font-mono text-[10px] uppercase tracking-[0.1em] text-text-quaternary group-hover:inline">

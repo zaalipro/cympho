@@ -254,6 +254,20 @@ defmodule CymphoWeb.AgentLive.Index do
     |> Enum.map_join(" ", &String.capitalize/1)
   end
 
+  @doc """
+  Label for the adapter every agent shares, or `nil` when the roster mixes them.
+  A whole column of the same value says nothing, so the roster states it once
+  and drops the column.
+  """
+  def shared_adapter_label([_, _ | _] = agents) do
+    case Enum.uniq_by(agents, &Map.get(&1, :adapter)) do
+      [agent] -> adapter_label(Map.get(agent, :adapter))
+      _ -> nil
+    end
+  end
+
+  def shared_adapter_label(_agents), do: nil
+
   def health_label(status), do: status |> to_string() |> String.replace("_", " ")
 
   def health_pill_class(:healthy), do: "border-success/25 bg-success/10 text-success"

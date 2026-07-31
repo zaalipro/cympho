@@ -11,8 +11,7 @@ defmodule Cympho.Plugins.Catalog do
       identifier: "github-integration",
       name: "GitHub Integration",
       version: "1.0.0",
-      description:
-        "Built-in GitHub webhook subsystem reference. It is visible for capability discovery but is not a standalone plugin worker.",
+      description: "Receives GitHub webhooks. Built in, so there is nothing to install.",
       author: "Cympho",
       capabilities: ["read:issues", "write:issues"],
       installable?: false,
@@ -23,8 +22,7 @@ defmodule Cympho.Plugins.Catalog do
       identifier: "custom-webhook",
       name: "Custom Webhooks",
       version: "1.1.0",
-      description:
-        "Built-in webhook record subsystem reference. It is visible for capability discovery but is not a standalone plugin worker.",
+      description: "Stores incoming webhook records. Built in, so there is nothing to install.",
       author: "Cympho",
       capabilities: ["webhook"],
       installable?: false,

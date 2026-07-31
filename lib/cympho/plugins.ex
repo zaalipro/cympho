@@ -183,8 +183,7 @@ defmodule Cympho.Plugins do
       key: :review_marketplace,
       tone: :ok,
       label: "Review marketplace",
-      detail:
-        "Installed plugins are supervised, quiet, and capability-scoped. Add only extensions with a clear owner workflow.",
+      detail: "Nothing needs attention. Only add plugins someone will own.",
       cta: "Browse marketplace"
     }
   end
@@ -293,7 +292,7 @@ defmodule Cympho.Plugins do
   end
 
   defp plugin_health_summary(%{enabled_plugins: enabled}) do
-    "#{enabled} enabled #{plural(enabled, "plugin")} #{verb(enabled, "is", "are")} supervised and capability-scoped."
+    "#{enabled} enabled #{plural(enabled, "plugin")} #{verb(enabled, "is", "are")} running cleanly."
   end
 
   # Owner-facing health copy reads as a sentence: "1 plugin is disabled",

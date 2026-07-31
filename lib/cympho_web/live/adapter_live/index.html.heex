@@ -7,7 +7,7 @@
       {@page_title}
     </h1>
     <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-      Bring your own agent runtime, test adapter health, and see whether the company is ready to launch work.
+      Connect an agent runtime and check that it works.
     </p>
     <:actions>
       <button
@@ -162,11 +162,16 @@
         <% end %>
 
         <div class="flex flex-wrap items-center gap-2 pt-2">
+          <%!-- Matches the Test Health button beside it, which has been icon-only
+               all along; the word repeated once per adapter card while its
+               neighbour did not. --%>
           <.app_link
             navigate={~p"/settings/adapters/#{adapter.key}"}
-            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center justify-center"
+            title="Configure"
+            aria-label={"Configure #{adapter.name}"}
+            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-2 min-h-[44px] min-w-[44px] rounded-lg transition-colors inline-flex items-center justify-center"
           >
-            Configure
+            <.icon name="hero-cog-6-tooth-mini" class="h-4 w-4" />
           </.app_link>
           <button
             type="button"

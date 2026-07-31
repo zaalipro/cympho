@@ -119,8 +119,7 @@ defmodule CymphoWeb.AuditTrailLive.Index do
       tone: :idle,
       badge: "Empty",
       heading: "No audit events have been recorded yet",
-      detail:
-        "Create issues, approve work, run agents, or change policies to build the company governance record.",
+      detail: "Events appear here as work gets created, approved, and run.",
       focus_label: nil,
       focus_detail: nil,
       actor_summary: nil,

@@ -523,6 +523,8 @@ defmodule CymphoWeb.OrgChartLive do
             <div
               phx-click="select_agent"
               phx-value-agent_id={node.id}
+              title={"#{node.name} details"}
+              aria-label={"#{node.name} details"}
               class="cursor-pointer transition-transform hover:scale-105"
             >
               <.agent_card node={node} />
@@ -546,7 +548,7 @@ defmodule CymphoWeb.OrgChartLive do
   def agent_card(assigns) do
     ~H"""
     <div class={[
-      "card-lift group block w-56 rounded-xl border bg-surface px-4 py-3 hover:bg-surface-hover",
+      "card-lift block w-56 rounded-xl border bg-surface px-4 py-3 hover:bg-surface-hover",
       if(@node.status == :error,
         do: "border-red-500/30 hover:border-red-400/50",
         else: "border-border hover:border-border-hover"
@@ -580,7 +582,10 @@ defmodule CymphoWeb.OrgChartLive do
         </div>
       </div>
 
-      <div class="mt-3 flex items-center justify-between gap-3 border-t border-border pt-2.5 text-xs">
+      <%!-- The legend above the tree already says a card opens its stats, and
+           every card carried the same "Details →" hint. The wrapper's title and
+           aria-label keep the affordance without printing it seven times. --%>
+      <div class="mt-3 flex items-center gap-3 border-t border-border pt-2.5 text-xs">
         <span class="truncate text-text-quaternary">
           <%= if @node.children == [] do %>
             <%!-- Leaves without a distinct title already show the role above. --%>
@@ -588,9 +593,6 @@ defmodule CymphoWeb.OrgChartLive do
           <% else %>
             {length(@node.children)} direct {plural_noun(length(@node.children), "report")}
           <% end %>
-        </span>
-        <span class="shrink-0 text-text-quaternary opacity-0 transition-opacity group-hover:opacity-100 group-hover:text-brand">
-          Details →
         </span>
       </div>
     </div>

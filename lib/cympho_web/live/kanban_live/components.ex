@@ -21,6 +21,7 @@ defmodule CymphoWeb.KanbanLive.Components do
   attr :editing_card_id, :any, default: nil
   attr :card_action_open, :any, default: nil
   attr :launch_readiness, :map, default: nil
+  attr :digest_cause_hoisted, :boolean, default: false
 
   def issue_card(assigns) do
     ~H"""
@@ -54,6 +55,7 @@ defmodule CymphoWeb.KanbanLive.Components do
         issue={@issue}
         density={@digest_density}
         variant={if @digest_density == "compact", do: "inline", else: "card"}
+        cause_hoisted={@digest_cause_hoisted}
         class={["mt-2", @digest_density == "compact" && "ui-advanced-only"]}
       />
 

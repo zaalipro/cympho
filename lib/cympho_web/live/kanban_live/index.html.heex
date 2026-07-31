@@ -283,6 +283,7 @@
     <% flow_metrics = board_flow_metrics(computed) %>
     <% attention_metrics =
       Enum.filter(flow_metrics, &(&1.label in ["Blocked", "Review"] and &1.count > 0)) %>
+    <% shared_digest = shared_board_digest(computed) %>
 
     <section
       :if={attention_metrics != []}
@@ -296,6 +297,25 @@
         class="rounded-full border border-border bg-panel px-2 py-0.5 text-xs text-text-tertiary"
       >
         {metric.count} {String.downcase(metric.label)}
+      </span>
+    </section>
+
+    <%!-- Every card on the board is in the same state, so the pill and headline
+         are stated once here instead of once per card. Mirrors the per-card
+         digest's visibility so simple mode never gains a line it wasn't shown. --%>
+    <section
+      :if={shared_digest}
+      id="kanban-shared-digest"
+      class={[
+        "ember-glass mb-3 flex flex-wrap items-center gap-2 px-3 py-2",
+        @digest_density == "compact" && "ui-advanced-only"
+      ]}
+    >
+      <span class="rounded-full border border-border bg-panel px-2 py-0.5 text-[11px] font-510 text-text-secondary">
+        {shared_digest.label}
+      </span>
+      <span class="text-xs text-text-tertiary">
+        All {shared_digest.count} cards: {shared_digest.headline}
       </span>
     </section>
 
@@ -443,6 +463,7 @@
                               <.issue_digest_card
                                 issue={issue}
                                 density={@digest_density}
+                                cause_hoisted={shared_digest != nil}
                                 class="mt-2"
                               />
                               <.link
@@ -478,6 +499,7 @@
                           agent_heartbeat_states={@agent_heartbeat_states}
                           pending_wake={Map.get(@pending_wakes, issue.id)}
                           launch_readiness={Map.get(@launch_readiness_by_issue, issue.id)}
+                          digest_cause_hoisted={shared_digest != nil}
                         />
                       <% end %>
                     <% end %>

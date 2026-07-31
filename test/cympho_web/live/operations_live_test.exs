@@ -406,7 +406,10 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "Owner brief readiness: Too thin for autonomy (1/6 signals)"
       assert html =~ "Brief repair scaffold"
       assert html =~ "Copy repair scaffold"
-      assert html =~ ~s(data-copy-error-label="Scaffold below")
+      # The scaffold body now sits behind a "Preview" disclosure, so the
+      # clipboard fallback points at that instead of at text "below".
+      assert html =~ ~s(data-copy-error-label="Open preview")
+      assert html =~ "Preview the repair scaffold"
       assert html =~ "Goal: Define company strategy"
 
       assert html =~

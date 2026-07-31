@@ -495,11 +495,13 @@ defmodule CymphoWeb.DashboardLive.Index do
   defp ceo_command_lane(%{next_action: next_action} = flow) do
     next_action = next_action || %{}
     stage = Map.get(flow, :stage)
+    summary = Map.get(flow, :summary, "Open Operations to inspect the CEO flow.")
 
     %{
       stage: stage,
       label: Map.get(flow, :label, "CEO flow"),
-      summary: Map.get(flow, :summary, "Open Operations to inspect the CEO flow."),
+      summary: compact_lane_summary(summary),
+      summary_detail: summary,
       action_label: Map.get(next_action, :label, "Open Operations"),
       action_path: dashboard_operations_path(Map.get(next_action, :path)),
       action_tone: Map.get(next_action, :tone, :ok),
@@ -509,6 +511,13 @@ defmodule CymphoWeb.DashboardLive.Index do
   end
 
   defp ceo_command_lane(_flow), do: nil
+
+  # Operations tells the whole CEO-flow story; Home gets one line. The stage
+  # badge beside the sentence already says "Setup blocked", so the lead-in is
+  # dropped and only the cause survives. The full sentence stays on the
+  # paragraph's title attribute.
+  defp compact_lane_summary("The next CEO launch is blocked: " <> cause), do: cause
+  defp compact_lane_summary(summary), do: summary
 
   defp dashboard_ceo_command_candidate(stage, flow)
        when stage in [:brief_repair, :launch_ready, :blocked] do
@@ -1219,6 +1228,30 @@ defmodule CymphoWeb.DashboardLive.Index do
   def cost_text_class(:unbudgeted), do: "text-text-quaternary"
   def cost_text_class(_), do: "text-text-quaternary"
 
+  # The score, the badge, and the cards below already carry the readiness
+  # sentence's content, so Home shows the counts instead and hands the sentence
+  # to the section's title attribute.
+  def readiness_count_summary(%{counts: counts}) do
+    [{:critical, "critical"}, {:warning, "need review"}, {:setup, "need setup"}]
+    |> Enum.filter(fn {level, _label} -> Map.get(counts, level, 0) > 0 end)
+    |> Enum.map_join(" · ", fn {level, label} -> "#{Map.get(counts, level)} #{label}" end)
+    |> case do
+      "" -> "All areas ready"
+      counts_text -> counts_text
+    end
+  end
+
+  # Healthy cards say everything in their metric and health label; the rest keep
+  # the diagnosis and leave the remediation to the linked page (and the card's
+  # title attribute), so no env-var sentence lands on Home.
+  def readiness_card_detail(%{level: :healthy}), do: ""
+
+  def readiness_card_detail(%{summary: summary}) when is_binary(summary) do
+    summary |> String.split(~r/(?<=\.)\s+/, parts: 2) |> hd()
+  end
+
+  def readiness_card_detail(_signal), do: ""
+
   # The readiness section renders one card per concern. Operating primitives
   # keyed like a signal (org, runtime, agent guides) copy that signal's summary
   # verbatim, so only the primitives with a key of their own are appended.
@@ -1411,6 +1444,24 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> Enum.join()
     |> String.upcase()
   end
+
+  # The roster prints a name over a role, which repeats itself whenever the
+  # agent is named after the role ("Engineer 1 / Software Engineer", "Design
+  # Lead / Design Lead"). Drop the second line when the name already carries the
+  # role's head noun; the full role stays on the row's title attribute.
+  def agent_role_subtitle(agent) do
+    role = agent_role_label(agent)
+
+    name_words =
+      agent.name |> to_string() |> String.downcase() |> String.split(~r/\W+/, trim: true)
+
+    case role |> String.downcase() |> String.split(~r/\W+/, trim: true) |> List.last() do
+      nil -> role
+      head_noun -> if head_noun in name_words, do: nil, else: role
+    end
+  end
+
+  def agent_role_label(agent), do: agent.title || status_label(agent.role)
 
   def format_cost(cost) when not is_nil(cost) do
     "$" <> :erlang.float_to_binary(Decimal.to_float(cost), decimals: 2)

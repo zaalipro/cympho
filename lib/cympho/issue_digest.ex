@@ -1280,7 +1280,10 @@ defmodule Cympho.IssueDigest do
     |> Enum.filter(&(get_in(&1, [:counts, :runs]) > 0))
   end
 
-  defp contribution_names([]), do: "No owner yet"
+  # nil rather than a filler string: with nothing assigned anywhere, all four role
+  # cards printed the same "Owner: No owner yet" line, and each card's status
+  # badge already says it is unowned. Callers drop the line when this is nil.
+  defp contribution_names([]), do: nil
 
   defp contribution_names(contributions) do
     names =
@@ -1290,7 +1293,7 @@ defmodule Cympho.IssueDigest do
       |> Enum.uniq()
 
     case names do
-      [] -> "No owner yet"
+      [] -> nil
       [one] -> one
       [one, two] -> "#{one}, #{two}"
       [one, two | rest] -> "#{one}, #{two} +#{length(rest)}"

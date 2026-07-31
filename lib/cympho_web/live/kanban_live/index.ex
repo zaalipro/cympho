@@ -706,6 +706,22 @@ defmodule CymphoWeb.KanbanLive.Index do
     ]
   end
 
+  @doc """
+  When every visible card carries the same digest state, the board states that
+  cause once in a banner instead of printing the same pill and headline on each
+  card. Returns `nil` as soon as the cards disagree.
+  """
+  def shared_board_digest([_, _ | _] = issues) do
+    digests = Enum.map(issues, &Cympho.IssueDigest.build/1)
+
+    if match?([_], Enum.uniq_by(digests, & &1.state)) do
+      digest = hd(digests)
+      %{label: digest.label, headline: digest.headline, count: length(issues)}
+    end
+  end
+
+  def shared_board_digest(_issues), do: nil
+
   def kanban_url(project_id, density) do
     query =
       %{

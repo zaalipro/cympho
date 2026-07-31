@@ -65,8 +65,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.Index do
       tone: :idle,
       badge: "No policies",
       heading: "Create a default execution policy before scaling autonomy",
-      detail:
-        "Policies define who executes, reviews, and approves autonomous work. Start with executor, reviewer, and approver stages.",
+      detail: "A policy says who does the work, who reviews it, and who approves it.",
       focus_label: nil,
       focus_detail: nil,
       action_path: ~p"/settings/policies/new",

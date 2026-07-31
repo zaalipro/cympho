@@ -110,15 +110,11 @@
           <p class="font-serif text-base font-510 text-text-primary">
             No governance policies configured yet.
           </p>
+          <%!-- The "New policy" button already sits in the page header and in
+               the command card directly above; a third copy here is noise. --%>
           <p class="mt-1 max-w-sm text-xs leading-5 text-text-tertiary">
-            Create a default executor-reviewer-approver policy before assigning autonomous work so every run has a clear owner, reviewer, and approval path.
+            Create one so every run has an owner, a reviewer, and an approver.
           </p>
-          <.app_link
-            navigate={~p"/settings/policies/new"}
-            class="mt-4 inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-          >
-            <.icon name="hero-plus-mini" class="h-4 w-4" /> New policy
-          </.app_link>
         </div>
       </:empty>
 

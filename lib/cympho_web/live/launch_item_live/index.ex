@@ -70,7 +70,7 @@ defmodule CymphoWeb.LaunchItemLive.Index do
             Launch Tracker
           </h1>
           <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-            Create launch items, keep owners assigned, and surface blocked work before the next launch decision.
+            What is left before launch, and who owns each piece.
           </p>
           <:actions>
             <.app_link

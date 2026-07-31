@@ -270,7 +270,7 @@ defmodule CymphoWeb.SkillLive.Index do
   end
 
   def skill_empty_detail(_company_id) do
-    "Create one narrow capability with a valid manifest, assign it only where agents can produce evidence, then watch health here."
+    "Add one skill and assign it to the agents that need it."
   end
 
   def scope_label(%{company: %{name: name}}) when is_binary(name), do: name

@@ -144,12 +144,10 @@ defmodule CymphoWeb.Components.IssueDigest do
         <div class="mt-4 rounded-md border border-hairline bg-canvas px-3 py-3">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div class="min-w-0">
-              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Digest actions
-              </p>
-              <p class="mt-1 text-sm leading-5 text-ink-muted">
-                Resolve the highest-signal gaps from here without hunting through the full timeline.
-              </p>
+              <.panel_heading
+                title="Digest actions"
+                description="Resolve the highest-signal gaps from here without hunting through the full timeline."
+              />
             </div>
             <div
               id="issue-digest-actions"
@@ -229,14 +227,10 @@ defmodule CymphoWeb.Components.IssueDigest do
 
         <div class="mt-4 rounded-md border border-hairline bg-canvas">
           <div class="flex flex-col gap-2 border-b border-hairline px-3 py-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                What happened so far
-              </p>
-              <p class="mt-1 text-sm leading-5 text-ink-muted">
-                Compact operational memory from agent comments, runs, artifacts, and sub-issues.
-              </p>
-            </div>
+            <.panel_heading
+              title="What happened so far"
+              description="Compact operational memory from agent comments, runs, artifacts, and sub-issues."
+            />
             <p class="max-w-[360px] text-caption leading-5 text-ink-tertiary">
               {@memory.noise_summary}
             </p>
@@ -273,17 +267,10 @@ defmodule CymphoWeb.Components.IssueDigest do
 
         <div class="mt-4 rounded-md border border-hairline bg-canvas">
           <div class="flex flex-col gap-2 border-b border-hairline px-3 py-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Role run summaries
-              </p>
-              <p class="mt-1 text-sm leading-5 text-ink-muted">
-                The short version of what delivery, review, owner update, and runtime evidence say right now.
-              </p>
-            </div>
-            <p class="max-w-[360px] text-caption leading-5 text-ink-tertiary">
-              These cards are deterministic rollups from comments, runs, work products, and sub-issues.
-            </p>
+            <.panel_heading
+              title="Role run summaries"
+              description="The short version of what delivery, review, owner update, and runtime evidence say right now. These cards are deterministic rollups from comments, runs, work products, and sub-issues."
+            />
           </div>
 
           <div class="grid gap-px bg-hairline lg:grid-cols-2">
@@ -299,7 +286,7 @@ defmodule CymphoWeb.Components.IssueDigest do
                       {summary.role}
                     </span>
                   </div>
-                  <p class="mt-1 text-caption text-ink-tertiary">
+                  <p :if={summary.owner} class="mt-1 text-caption text-ink-tertiary">
                     Owner: {summary.owner}
                   </p>
                 </div>
@@ -331,17 +318,10 @@ defmodule CymphoWeb.Components.IssueDigest do
 
         <div class="mt-4 rounded-md border border-hairline bg-canvas">
           <div class="flex flex-col gap-2 border-b border-hairline px-3 py-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Completion contract
-              </p>
-              <p class="mt-1 text-sm leading-5 text-ink-muted">
-                What each role must leave behind before this issue can be trusted as complete.
-              </p>
-            </div>
-            <p class="max-w-[360px] text-caption leading-5 text-ink-tertiary">
-              These are the same evidence requirements agents see in their prompt before they act.
-            </p>
+            <.panel_heading
+              title="Completion contract"
+              description="What each role must leave behind before this issue can be trusted as complete. These are the same evidence requirements agents see in their prompt before they act."
+            />
           </div>
 
           <div class="grid gap-px bg-hairline lg:grid-cols-3">
@@ -407,7 +387,13 @@ defmodule CymphoWeb.Components.IssueDigest do
                   Pending nudge for {contract.contract_nudge.agent_name} · {contract.contract_nudge.status_label}
                 </div>
               </div>
-              <div class="mt-3 rounded-md border border-hairline bg-surface-1 px-2.5 py-2">
+              <%!-- Skipped when there is nothing to audit: the contract's own status line
+                   above already says it is unmet, so an empty box per contract was
+                   three bordered panels asserting only their own emptiness. --%>
+              <div
+                :if={contract.evidence || contract.pending_nudge}
+                class="mt-3 rounded-md border border-hairline bg-surface-1 px-2.5 py-2"
+              >
                 <p class="text-[10px] font-590 uppercase text-ink-tertiary">Contract audit</p>
                 <div :if={contract.evidence} class="mt-1.5">
                   <div class="flex flex-wrap items-center gap-1.5 text-[11px] leading-4 text-ink-muted">
@@ -444,12 +430,6 @@ defmodule CymphoWeb.Components.IssueDigest do
                     {contract.pending_nudge.summary}
                   </p>
                 </div>
-                <p
-                  :if={!contract.evidence && !contract.pending_nudge}
-                  class="mt-1.5 text-[11px] leading-4 text-ink-tertiary"
-                >
-                  No matching evidence yet.
-                </p>
               </div>
             </div>
           </div>
@@ -517,14 +497,10 @@ defmodule CymphoWeb.Components.IssueDigest do
 
         <div class="mt-4 rounded-md border border-hairline bg-canvas">
           <div class="flex flex-col gap-2 border-b border-hairline px-3 py-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Agent-by-agent ledger
-              </p>
-              <p class="mt-1 text-sm leading-5 text-ink-muted">
-                What each role has contributed, the evidence it produced, and the next follow-up.
-              </p>
-            </div>
+            <.panel_heading
+              title="Agent-by-agent ledger"
+              description="What each role has contributed, the evidence it produced, and the next follow-up."
+            />
             <span class="rounded-full border border-hairline bg-surface-1 px-2.5 py-1 text-caption text-ink-tertiary">
               {length(@digest.contributions)} active
             </span>
@@ -884,6 +860,23 @@ defmodule CymphoWeb.Components.IssueDigest do
     """
   end
 
+  # Each digest panel used to print one or two sentences describing itself before
+  # showing any issue content — together they cost more of the page than the
+  # objective did. The description stays on hover and for screen readers.
+  attr :title, :string, required: true
+  attr :description, :string, required: true
+
+  defp panel_heading(assigns) do
+    ~H"""
+    <p
+      class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+      title={@description}
+    >
+      {@title}<span class="sr-only"> — {@description}</span>
+    </p>
+    """
+  end
+
   attr :action, :map, required: true
 
   def action_help(assigns) do
@@ -930,6 +923,10 @@ defmodule CymphoWeb.Components.IssueDigest do
   attr :density, :string, default: "detailed"
   attr :variant, :string, default: "card"
   attr :class, :any, default: ""
+  # Set when the surrounding page already states this digest's state + headline
+  # once (e.g. every board card is blocked on the same thing). The per-issue
+  # lines below still render; only the repeated cause is dropped.
+  attr :cause_hoisted, :boolean, default: false
 
   def issue_digest_card(assigns) do
     assigns =
@@ -946,7 +943,10 @@ defmodule CymphoWeb.Components.IssueDigest do
     <%!-- Inline variant: one borderless signal line (pill + headline). Keeps
          dense surfaces like the board + inbox from nesting a card-in-card. --%>
     <div :if={@inline?} class={["flex min-w-0 items-center gap-1.5", @class]}>
-      <span class={"shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{digest_state_class(@digest.state)}"}>
+      <span
+        :if={!@cause_hoisted}
+        class={"shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{digest_state_class(@digest.state)}"}
+      >
         {@digest.label}
       </span>
       <%!-- The mission label is capped at 9rem and every card on a board shares
@@ -963,7 +963,9 @@ defmodule CymphoWeb.Components.IssueDigest do
       >
         <span class="hero-flag-mini block h-3 w-3"></span>
       </span>
-      <span class="line-clamp-1 text-[11px] leading-4 text-text-tertiary">{@digest.headline}</span>
+      <span :if={!@cause_hoisted} class="line-clamp-1 text-[11px] leading-4 text-text-tertiary">
+        {@digest.headline}
+      </span>
     </div>
 
     <div
@@ -974,7 +976,10 @@ defmodule CymphoWeb.Components.IssueDigest do
       ]}
     >
       <div class="flex flex-wrap items-center gap-1.5">
-        <span class={"rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{digest_state_class(@digest.state)}"}>
+        <span
+          :if={!@cause_hoisted}
+          class={"rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{digest_state_class(@digest.state)}"}
+        >
           {@digest.label}
         </span>
         <span
@@ -987,10 +992,13 @@ defmodule CymphoWeb.Components.IssueDigest do
         >
           <span class="hero-flag-mini block h-3 w-3"></span>
         </span>
-        <span class={[
-          "font-510 text-text-secondary",
-          if(@compact?, do: "line-clamp-1 text-[11px] leading-4", else: "text-xs leading-5")
-        ]}>
+        <span
+          :if={!@cause_hoisted}
+          class={[
+            "font-510 text-text-secondary",
+            if(@compact?, do: "line-clamp-1 text-[11px] leading-4", else: "text-xs leading-5")
+          ]}
+        >
           {@digest.headline}
         </span>
       </div>

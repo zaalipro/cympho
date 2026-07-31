@@ -31,6 +31,19 @@ defmodule CymphoWeb.SimpleModeCopyTest do
       assert html =~ "Limits"
     end
 
+    test "costs states both the operator and the plain wording", %{conn: conn} do
+      {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, _view, html} = live(conn, "/costs")
+
+      # Cost command summary.
+      assert html =~ "No spend has landed yet, but a budget cap makes launch decisions safer"
+      assert html =~ "No spending limit is set yet."
+      # Breakdown empty state.
+      assert html =~ "Set a spending limit before launching more runtime"
+      assert html =~ "Costs appear here once agents start running."
+    end
+
     test "a project without a repo names it both ways", %{conn: conn} do
       {conn, _user, company} = ConnCase.register_and_log_in_user(conn)
 
