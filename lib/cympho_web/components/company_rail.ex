@@ -172,17 +172,24 @@ defmodule CymphoWeb.Components.CompanyRail do
     assigns = assign(assigns, :company, company)
 
     ~H"""
-    <div class="flex items-center gap-3">
-      <div :if={@company.logo_url} class="w-6 h-6 rounded-lg overflow-hidden">
+    <%!-- min-w-0 on the flex wrapper and the shrink guards on the badge are what
+         make `truncate` actually work: a flex child defaults to min-width:auto,
+         so without them a long company name pushes the runtime control off the
+         rail instead of ellipsing. --%>
+    <div class="flex min-w-0 items-center gap-3">
+      <div :if={@company.logo_url} class="h-6 w-6 shrink-0 overflow-hidden rounded-lg">
         <img src={@company.logo_url} alt={@company.name} class="w-full h-full object-cover" />
       </div>
       <div
         :if={!@company.logo_url}
-        class="w-6 h-6 rounded-lg bg-brand/12 flex items-center justify-center"
+        class="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-brand/12"
       >
         <span class="text-[11px] font-590 text-brand">{company_initials(@company.name)}</span>
       </div>
-      <span class="text-sm font-590 text-text-primary truncate hidden md:inline">
+      <span
+        class="hidden min-w-0 truncate text-sm font-590 text-text-primary md:inline"
+        title={@company.name}
+      >
         {@company.name}
       </span>
     </div>

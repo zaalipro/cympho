@@ -69,7 +69,7 @@
             {@agent.name}
           </h1>
           <div class="mt-1.5 flex min-w-0 flex-wrap items-center gap-2">
-            <span class="ember-eyebrow">{role_label(@agent.role)}</span>
+            <.role_mark role={@agent.role} />
             <span
               :if={@agent.adapter}
               class="ui-advanced-only rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 text-text-tertiary"

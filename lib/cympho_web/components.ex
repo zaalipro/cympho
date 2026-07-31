@@ -451,7 +451,9 @@ defmodule CymphoWeb.Components do
             d="M12 5h.01M12 12h.01M12 19h.01"
           />
         </svg>
-        <span :if={@trigger_text}>{@trigger_text}</span>
+        <%!-- The kebab glyph is already the affordance; simple mode drops the
+             word beside it. `label` still supplies the accessible name. --%>
+        <span :if={@trigger_text} class="ui-advanced-only">{@trigger_text}</span>
       </summary>
       <div class={[
         "cympho-menu-panel absolute z-30 mt-2 min-w-44 rounded-xl border border-border bg-panel p-1 shadow-dialog",
@@ -539,7 +541,15 @@ defmodule CymphoWeb.Components do
       title={pending_wake_title(@wake, @agent, @age_seconds)}
     >
       <span aria-hidden="true">⏱</span>
-      <span class="font-mono tabular-nums">{pending_wake_label(@wake, @agent, @age_seconds)}</span>
+      <%!-- On a full board every card repeats "Waiting on agent"; the clock
+           glyph and the column already carry that. Simple keeps just the age,
+           and `title` still spells the whole thing out on hover. --%>
+      <span class="ui-advanced-only font-mono tabular-nums">
+        {pending_wake_label(@wake, @agent, @age_seconds)}
+      </span>
+      <span class="ui-simple-only font-mono tabular-nums">
+        {format_wake_age(@age_seconds)}
+      </span>
     </span>
     """
   end

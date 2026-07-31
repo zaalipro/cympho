@@ -348,7 +348,12 @@
               </div>
               <div class="min-w-0">
                 <p class="truncate text-sm font-590 text-text-primary">{agent.name}</p>
-                <p class="mt-0.5 truncate text-xs text-text-tertiary">
+                <%!-- Many agents are titled the same as their name ("Design Lead
+                     / Design Lead"). Simple drops the echo. --%>
+                <p class={[
+                  "mt-0.5 truncate text-xs text-text-tertiary",
+                  agent.title == agent.name && "ui-advanced-only"
+                ]}>
                   {agent.title || "Role: #{role_label(agent.role)}"}
                 </p>
               </div>
@@ -356,7 +361,11 @@
           </.app_link>
 
           <div class="min-w-0 lg:w-[110px] lg:shrink-0">
-            <span class={"inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(agent.status)}"}>
+            <%!-- Six rows of an identical "Idle" pill is decoration. Advanced
+                 keeps the pill; simple shows a bare dot (an empty pill with the
+                 word removed reads as a stray stub). The label survives as the
+                 dot's accessible name. --%>
+            <span class={"ui-advanced-only inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(agent.status)}"}>
               <span class={[
                 "h-1.5 w-1.5 shrink-0 rounded-full",
                 agent.status == :running && "cympho-pulse-dot",
@@ -364,6 +373,18 @@
               ]}>
               </span>
               {status_label(agent.status)}
+            </span>
+            <span
+              class="ui-simple-only inline-flex items-center"
+              title={status_label(agent.status)}
+              aria-label={status_label(agent.status)}
+            >
+              <span class={[
+                "h-2.5 w-2.5 shrink-0 rounded-full",
+                agent.status == :running && "cympho-pulse-dot",
+                status_dot_class(agent.status)
+              ]}>
+              </span>
             </span>
             <p
               :if={agent.status == :running && session_progress_note(@session_progress, agent.id)}

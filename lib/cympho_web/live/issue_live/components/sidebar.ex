@@ -65,8 +65,11 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
       <div class="p-4 lg:p-5 space-y-4 lg:sticky lg:top-0 lg:max-h-screen lg:overflow-y-auto">
         <div class="space-y-3">
           <div class="flex items-center justify-between gap-3">
-            <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            <span class="ui-advanced-only font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Status
+            </span>
+            <span class="ui-simple-only" title="Status" aria-label="Status">
+              <span class="hero-signal-mini block h-4 w-4 text-brand/80"></span>
             </span>
             <.combobox
               id="issue-status-combobox"
@@ -79,8 +82,11 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             />
           </div>
           <div class="flex items-center justify-between gap-3">
-            <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            <span class="ui-advanced-only font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Priority
+            </span>
+            <span class="ui-simple-only" title="Priority" aria-label="Priority">
+              <span class="hero-flag-mini block h-4 w-4 text-brand/80"></span>
             </span>
             <.combobox
               id="issue-priority-combobox"
@@ -93,8 +99,11 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             />
           </div>
           <div class="flex items-center justify-between gap-3">
-            <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            <span class="ui-advanced-only font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Assignee
+            </span>
+            <span class="ui-simple-only" title="Assignee" aria-label="Assignee">
+              <span class="hero-user-circle-mini block h-4 w-4 text-brand/80"></span>
             </span>
             <.combobox
               id="issue-assignee-combobox"
@@ -107,8 +116,11 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             />
           </div>
           <div class="flex items-center justify-between gap-3" data-testid="issue-work-mode-control">
-            <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            <span class="ui-advanced-only font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Begin with
+            </span>
+            <span class="ui-simple-only" title="Begin with" aria-label="Begin with">
+              <span class="hero-play-circle-mini block h-4 w-4 text-brand/80"></span>
             </span>
             <.combobox
               id="issue-work-mode-combobox"
@@ -124,8 +136,11 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             {work_mode_contract(@issue.work_mode)}
           </p>
           <div :if={@issue.due_on} class="flex items-center justify-between gap-3">
-            <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            <span class="ui-advanced-only font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Due
+            </span>
+            <span class="ui-simple-only" title="Due" aria-label="Due">
+              <span class="hero-calendar-mini block h-4 w-4 text-brand/80"></span>
             </span>
             <span class="text-caption text-ink">
               {Calendar.strftime(@issue.due_on, "%b %-d, %Y")}

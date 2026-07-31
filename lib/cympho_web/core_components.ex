@@ -69,6 +69,52 @@ defmodule CymphoWeb.CoreComponents do
   end
 
   @doc """
+  Renders an agent role.
+
+  Advanced shows the role as an uppercase eyebrow ("ENGINEER"). Simple shows the
+  role's icon instead — on a page that already groups agents by role, and where
+  the agent's title usually says the same thing, the word is a third repeat.
+  """
+  attr :role, :any, required: true
+  attr :class, :string, default: nil
+
+  def role_mark(assigns) do
+    ~H"""
+    <span class={["inline-flex items-center", @class]}>
+      <span class="ui-advanced-only ember-eyebrow">{role_word(@role)}</span>
+      <span class="ui-simple-only" title={role_word(@role)} aria-label={role_word(@role)}>
+        <span class={[role_glyph(@role), "block h-4 w-4", role_glyph_color(@role)]}></span>
+      </span>
+    </span>
+    """
+  end
+
+  defp role_word(role) when is_atom(role) and not is_nil(role),
+    do: role |> Atom.to_string() |> String.replace("_", " ") |> String.capitalize()
+
+  defp role_word(role) when is_binary(role),
+    do: role |> String.replace("_", " ") |> String.capitalize()
+
+  defp role_word(_), do: "Agent"
+
+  defp role_glyph(r) when r in [:ceo, "ceo"], do: "hero-sparkles-mini"
+  defp role_glyph(r) when r in [:cto, "cto"], do: "hero-cpu-chip-mini"
+  defp role_glyph(r) when r in [:engineer, "engineer"], do: "hero-wrench-screwdriver-mini"
+
+  defp role_glyph(r) when r in [:product_manager, "product_manager"],
+    do: "hero-clipboard-document-check-mini"
+
+  defp role_glyph(r) when r in [:designer, "designer"], do: "hero-paint-brush-mini"
+  defp role_glyph(_), do: "hero-user-mini"
+
+  defp role_glyph_color(r) when r in [:ceo, "ceo"], do: "text-brand"
+  defp role_glyph_color(r) when r in [:cto, "cto"], do: "text-sky-300"
+  defp role_glyph_color(r) when r in [:engineer, "engineer"], do: "text-emerald-300"
+  defp role_glyph_color(r) when r in [:product_manager, "product_manager"], do: "text-amber-300"
+  defp role_glyph_color(r) when r in [:designer, "designer"], do: "text-fuchsia-300"
+  defp role_glyph_color(_), do: "text-text-quaternary"
+
+  @doc """
   Renders an issue priority.
 
   Advanced mode shows the word in a tinted pill ("High"). Simple mode shows the

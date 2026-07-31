@@ -292,13 +292,19 @@
               "flex flex-wrap items-center gap-x-2 gap-y-1 text-xs",
               if(@digest_density == "compact", do: "mb-1", else: "mb-1.5")
             ]}>
+              <%!-- The tile icon to the left already carries the kind, and with
+                   19 rows the chip repeats verbatim down the whole column. Simple
+                   drops it; the icon keeps the meaning via its own aria-label. --%>
               <span
                 :if={kind_chip_label(item_kind(item))}
                 class={[
-                  "rounded-full border px-2 py-0.5 font-510",
+                  "ui-advanced-only rounded-full border px-2 py-0.5 font-510",
                   kind_chip_class(item_kind(item))
                 ]}
               >
+                {kind_chip_label(item_kind(item))}
+              </span>
+              <span :if={kind_chip_label(item_kind(item))} class="ui-simple-only sr-only">
                 {kind_chip_label(item_kind(item))}
               </span>
               <span
@@ -334,9 +340,16 @@
                   {item.title}
                 </.app_link>
 
+                <%!-- Failed-run summaries are boilerplate: the same sentence on
+                     every failure row. Simple hides it (the title already reads
+                     "Run failed · X"); every other kind carries a real summary
+                     and keeps it. --%>
                 <p
                   :if={item.summary not in [nil, ""]}
-                  class="mt-1.5 max-w-3xl text-sm leading-6 text-text-tertiary"
+                  class={[
+                    "mt-1.5 max-w-3xl text-sm leading-6 text-text-tertiary",
+                    item_kind(item) == :failure && "ui-advanced-only"
+                  ]}
                 >
                   {item.summary}
                 </p>
@@ -402,7 +415,8 @@
                     priority={item.issue.priority}
                     pill_class={"border #{priority_badge_class(item.issue.priority)}"}
                   />
-                  <span :if={item.issue.assigned_role}>
+                  <%!-- "To CEO" in the row header already names the owner. --%>
+                  <span :if={item.issue.assigned_role} class="ui-advanced-only">
                     Role: {item.issue.assigned_role}
                   </span>
                 </div>
