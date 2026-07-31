@@ -1532,13 +1532,6 @@ defmodule CymphoWeb.AgentLive.Show do
   def skill_metric_text(:ok), do: "text-emerald-300"
   def skill_metric_text(_), do: "text-text-primary"
 
-  def skill_recommendation_class(:critical), do: "border-red-500/20 bg-red-500/10 text-red-100"
-
-  def skill_recommendation_class(:warning),
-    do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
-
-  def skill_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
-
   def skill_next_action_class(:critical), do: "border-red-500/25 bg-red-500/10 text-red-100"
   def skill_next_action_class(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-100"
 

@@ -32,6 +32,22 @@ defmodule CymphoWeb.ProjectLive.New do
     end
   end
 
+  attr :text, :string, required: true
+
+  @doc "Collapses a form section's help paragraph into a hoverable `?` marker."
+  def field_hint(assigns) do
+    ~H"""
+    <span
+      role="img"
+      aria-label={@text}
+      title={@text}
+      class="inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-[11px] font-590 text-text-quaternary"
+    >
+      ?
+    </span>
+    """
+  end
+
   defp project_scope(socket) do
     case socket.assigns[:current_company] do
       %{id: company_id} -> %{"company_id" => company_id}

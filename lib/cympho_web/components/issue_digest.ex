@@ -949,14 +949,19 @@ defmodule CymphoWeb.Components.IssueDigest do
       <span class={"shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{digest_state_class(@digest.state)}"}>
         {@digest.label}
       </span>
+      <%!-- The mission label is capped at 9rem and every card on a board shares
+           one mission, so this only ever rendered as "Mission: Build and opera…".
+           The glyph carries the same meaning and `title` still holds the full
+           text for hover and for assertions. --%>
       <span
         title={@mission_context.title}
+        aria-label={@mission_context.label}
         class={[
-          "inline-flex min-w-0 max-w-[9rem] shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-510",
+          "inline-flex shrink-0 items-center rounded-full border p-1",
           @mission_context.class
         ]}
       >
-        <span class="truncate">{@mission_context.label}</span>
+        <span class="hero-flag-mini block h-3 w-3"></span>
       </span>
       <span class="line-clamp-1 text-[11px] leading-4 text-text-tertiary">{@digest.headline}</span>
     </div>
@@ -974,12 +979,13 @@ defmodule CymphoWeb.Components.IssueDigest do
         </span>
         <span
           title={@mission_context.title}
+          aria-label={@mission_context.label}
           class={[
-            "inline-flex min-w-0 max-w-[11rem] items-center rounded-full border px-1.5 py-0.5 text-[10px] font-510",
+            "inline-flex items-center rounded-full border p-1",
             @mission_context.class
           ]}
         >
-          <span class="truncate">{@mission_context.label}</span>
+          <span class="hero-flag-mini block h-3 w-3"></span>
         </span>
         <span class={[
           "font-510 text-text-secondary",

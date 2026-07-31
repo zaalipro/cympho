@@ -117,16 +117,8 @@
         </div>
       </div>
 
-      <div class="ui-advanced-only grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
-        <div :for={metric <- @cost_command.metrics} class="bg-surface px-4 py-3">
-          <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            {metric.label}
-          </p>
-          <p class="mt-1 break-words font-mono text-sm font-590 text-text-primary">
-            {metric.value}
-          </p>
-        </div>
-      </div>
+      <%!-- No metric strip here: spend, limit and used are the summary cards
+           below, and printing them twice let the two disagree. --%>
     </section>
 
     <section
@@ -229,7 +221,6 @@
         <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
           {format_tokens(@summary.total_tokens)}
         </div>
-        <div class="text-xs text-text-quaternary mt-1">Last {@days} days</div>
       </div>
 
       <div class="ember-stat bg-surface border border-border rounded-xl p-5">
@@ -250,7 +241,7 @@
           </svg>
         </div>
         <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-          {format_cost(@summary.budget_limit)}
+          {posture_limit(@spend_posture)}
         </div>
         <div class="text-xs text-text-quaternary mt-1">Active budgets</div>
       </div>
@@ -273,9 +264,9 @@
           </svg>
         </div>
         <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-          {format_cost(@summary.budget_spent)}
+          {format_cost(@spend_posture.budget_spend)}
         </div>
-        <% pace = spend_pace(@summary) %>
+        <% pace = spend_pace(@spend_posture) %>
         <div class={["text-xs mt-1 leading-5", spend_pace_text_class(pace.tone)]}>
           {pace.text}
         </div>
@@ -310,8 +301,25 @@
       </div>
     </section>
     
+<!-- One empty panel instead of nine cards each saying "no X yet" -->
+    <div :if={@spend_breakdowns_empty?} class="mb-6">
+      <.cost_empty_state
+        testid="cost-breakdowns-empty"
+        icon="hero-chart-bar-square-mini"
+        title="No spend recorded in this window"
+        detail="Trends and the breakdowns by agent, issue, model and provider appear here once agent runs report token usage. Set a spending limit before launching more runtime, or open Operations if you expected runs to produce usage."
+        primary_label="Create budget"
+        primary_path={~p"/budgets/new"}
+        secondary_label="Open Operations"
+        secondary_path={~p"/operations#runtime-launch-checklist"}
+      />
+    </div>
+    
 <!-- Daily Cost Chart -->
-    <div class="ui-advanced-only bg-surface border border-border rounded-xl p-6 mb-6">
+    <div
+      :if={not @spend_breakdowns_empty?}
+      class="ui-advanced-only bg-surface border border-border rounded-xl p-6 mb-6"
+    >
       <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90 mb-4">
         Daily Cost Trend
       </h2>
@@ -333,7 +341,7 @@
           testid="daily-cost-empty"
           icon="hero-chart-bar-square-mini"
           title="No spend captured in this window"
-          detail="Create a spend guardrail before launching more runtime, or open Operations when you expected agent runs to produce usage."
+          detail="Create a spending limit before launching more runtime, or open Operations when you expected agent runs to produce usage."
           primary_label="Create budget"
           primary_path={~p"/budgets/new"}
           secondary_label="Open Operations"
@@ -343,7 +351,10 @@
     </div>
     
 <!-- Sparklines -->
-    <div class="ui-advanced-only grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <div
+      :if={not @spend_breakdowns_empty?}
+      class="ui-advanced-only grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6"
+    >
       <div class="bg-surface border border-border rounded-xl p-6">
         <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90 mb-4">
           7-Day Cost Trend
@@ -406,7 +417,10 @@
     </div>
     
 <!-- Cost by Mission / Goal -->
-    <div class="ui-advanced-only grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <div
+      :if={not @spend_breakdowns_empty?}
+      class="ui-advanced-only grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6"
+    >
       <div class="bg-surface border border-border rounded-xl p-6">
         <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90 mb-4">
           Cost by Mission
@@ -492,6 +506,7 @@
     </div>
 
     <div
+      :if={not @spend_breakdowns_empty?}
       id="top-cost-drivers"
       class="ui-advanced-only grid scroll-mt-6 grid-cols-1 gap-6 mb-6 lg:grid-cols-2"
     >
@@ -584,7 +599,10 @@
       </div>
     </div>
 
-    <div class="ui-advanced-only grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <div
+      :if={not @spend_breakdowns_empty?}
+      class="ui-advanced-only grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6"
+    >
       <!-- Costs by Model -->
       <div class="bg-surface border border-border rounded-xl p-6">
         <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90 mb-4">

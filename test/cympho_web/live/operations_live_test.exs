@@ -91,8 +91,13 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ ~s(phx-hook="CopyToClipboard")
       assert html =~ "Broad restart command"
       assert html =~ "Copy command"
-      assert html =~ "Required launch env"
-      assert html =~ "Optional automation env"
+      # The per-env cards under the launch checklist repeated the Runtime
+      # Services list verbatim; they are replaced by a link to that section,
+      # where the same switches are grouped under two subheads.
+      refute html =~ "Required launch env"
+      refute html =~ "Optional automation env"
+      assert html =~ ~s(href="#runtime-services")
+      assert html =~ "Every switch this command flips is described in"
       assert html =~ "Core launch"
       assert html =~ "Optional automation"
       assert html =~ "CYMPHO_START_BACKLOG_PLANNER"
@@ -129,7 +134,10 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{launch_issue.id}"
       assert html =~ "Ops Console Engineer"
       assert html =~ "High pressure"
-      assert html =~ "Operator action"
+      # "Operator action" + "Set CYMPHO_X=1 and restart the server." repeated on
+      # all eight service cards; the instruction now lives once in the header.
+      refute html =~ "Operator action"
+      assert html =~ "To turn one on, set its variable to 1 and restart the server."
       assert html =~ "Tune Ops Console Engineer"
       assert html =~ "Fix Ops Console Engineer"
       assert html =~ "Needs attention"
@@ -147,7 +155,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       html =
         view
-        |> element("#runtime-queue-dispatch-focus-#{launch_issue.id}", "Queue dispatch focus")
+        |> element("#runtime-queue-dispatch-focus-#{launch_issue.id}", "Run this one first")
         |> render_click()
 
       assert html =~ "Dispatch focus queued."

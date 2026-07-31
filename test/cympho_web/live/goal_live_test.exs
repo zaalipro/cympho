@@ -163,16 +163,23 @@ defmodule CymphoWeb.GoalLiveTest do
 
   describe "Goals new" do
     test "renders the alignment planning form", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/goals/new")
+      {:ok, view, html} = live(conn, "/goals/new")
 
-      assert html =~ "Goal alignment plan"
-      assert html =~ "Strategy hierarchy"
-      assert html =~ "Outcome brief"
+      # The section eyebrows restated the fields under them and each carried a
+      # help paragraph; the help is now a ? marker's title/aria-label.
+      refute html =~ "Goal alignment plan"
+      refute html =~ "Strategy hierarchy"
+      refute html =~ "Outcome brief"
+      assert html =~ "Anchor work to an outcome"
+      assert html =~ "Write this like the owner-visible result agents should optimize for."
+      assert html =~ "Missions sit at the top."
       assert html =~ "Goal type"
       assert html =~ "Parent goal"
       assert html =~ "Project context"
       assert html =~ "Setup checklist"
       assert html =~ "Root goals become missions"
+      # The aside was the only panel on this page with no mode gate at all.
+      assert has_element?(view, "aside.ui-advanced-only [data-testid='goal-setup-checklist']")
     end
 
     test "renders current-company project and parent choices", %{conn: conn} do
@@ -240,8 +247,9 @@ defmodule CymphoWeb.GoalLiveTest do
 
       {:ok, _view, html} = live(conn, "/goals/#{goal.id}/edit")
 
-      assert html =~ "Goal alignment plan"
+      refute html =~ "Goal alignment plan"
       assert html =~ "Maintain the strategic target"
+      assert html =~ "Move this goal carefully."
       assert html =~ "Goal type"
       assert html =~ "Parent goal"
       assert html =~ "Project context"

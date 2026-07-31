@@ -94,9 +94,10 @@ defmodule CymphoWeb.PluginLiveTest do
       assert has_element?(view, "[data-testid='plugin-next-action']")
       assert html =~ "Plugin Health"
       assert html =~ "Watch"
-      assert html =~ "Cap gaps"
+      assert html =~ "Capability gaps"
       assert html =~ "Scope capabilities"
-      assert html =~ "Next operator move"
+      assert html =~ "Do this next"
+      refute html =~ "Next operator move"
       assert html =~ "Open plugin settings"
     end
 

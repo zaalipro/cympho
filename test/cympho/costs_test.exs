@@ -282,6 +282,47 @@ defmodule Cympho.CostsTest do
       assert posture.budget_incident_count == 1
     end
 
+    test "a stale warning incident no longer pins the posture to :watch" do
+      company = insert_company()
+      policy = insert_budget_policy(company, budget_limit_usd: Decimal.new("100.00"))
+
+      # Written last quarter and never resolved. Spend is measured over a rolling
+      # window, so an incident from outside that window must not describe today.
+      company
+      |> insert_budget_incident(policy, "warning")
+      |> age_incident(days: 120)
+
+      posture = Costs.spend_posture(company.id, Decimal.new("0.00"))
+
+      assert posture.budget_status == :on_track,
+             "a 120-day-old warning still forced :watch at $0 spend"
+    end
+
+    test "a recent warning incident still produces :watch" do
+      company = insert_company()
+      policy = insert_budget_policy(company, budget_limit_usd: Decimal.new("100.00"))
+
+      insert_budget_incident(company, policy, "warning")
+
+      posture = Costs.spend_posture(company.id, Decimal.new("0.00"))
+
+      assert posture.budget_status == :watch
+    end
+
+    test "a stale exceeded incident is NOT aged out — a hard stop must persist" do
+      company = insert_company()
+      policy = insert_budget_policy(company, budget_limit_usd: Decimal.new("100.00"))
+
+      company
+      |> insert_budget_incident(policy, "budget_exceeded")
+      |> age_incident(days: 120)
+
+      posture = Costs.spend_posture(company.id, Decimal.new("0.00"))
+
+      assert posture.budget_status == :over_budget,
+             "an unresolved hard stop must not be hidden by the incident window"
+    end
+
     test "reports unbudgeted spend when no controls exist" do
       company = insert_company()
 
@@ -369,5 +410,15 @@ defmodule Cympho.CostsTest do
       threshold_pct: Decimal.new("125.0")
     })
     |> Repo.insert!()
+  end
+
+  # `inserted_at` is set by the changeset, so back-date it directly to simulate
+  # an incident left unresolved from an earlier billing window.
+  defp age_incident(%BudgetIncident{} = incident, days: days) do
+    at = DateTime.utc_now() |> DateTime.add(-days * 86_400, :second) |> DateTime.truncate(:second)
+
+    incident
+    |> Ecto.Changeset.change(inserted_at: at)
+    |> Repo.update!()
   end
 end

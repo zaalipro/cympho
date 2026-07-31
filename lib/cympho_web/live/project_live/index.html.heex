@@ -89,14 +89,14 @@
       </div>
     </div>
 
-    <div class="ui-advanced-only mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+    <div class="ui-advanced-only mb-5">
       <.panel class="overflow-hidden">
         <div class="border-b border-border px-5 py-4">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p class="text-eyebrow uppercase text-text-quaternary">Workstream health</p>
               <h2 class="mt-1 text-card-title text-text-primary">
-                {@project_overview.open_issues} open issues across {@project_overview.active_projects} active projects
+                {workstream_summary(@project_overview)}
               </h2>
             </div>
             <span class={[
@@ -147,39 +147,6 @@
             <p class="mt-1 font-serif text-2xl font-590 text-amber-300">
               {@project_overview.missing_repo_projects}
             </p>
-          </div>
-        </div>
-      </.panel>
-
-      <.panel class="overflow-hidden">
-        <div class="border-b border-border px-5 py-4">
-          <p class="text-eyebrow uppercase text-text-quaternary">Attention</p>
-          <h2 class="mt-1 text-card-title text-text-primary">Project queue signals</h2>
-        </div>
-        <div class="space-y-3 p-5">
-          <div class="flex items-center justify-between rounded-lg border border-border bg-surface-1 px-3 py-2.5">
-            <span class="text-sm text-text-tertiary">Blocked projects</span>
-            <span class="font-serif text-lg font-590 text-red-300">
-              {@project_overview.blocked_projects}
-            </span>
-          </div>
-          <div class="flex items-center justify-between rounded-lg border border-border bg-surface-1 px-3 py-2.5">
-            <span class="text-sm text-text-tertiary">Waiting review</span>
-            <span class="font-serif text-lg font-590 text-cyan-300">
-              {@project_overview.review_projects}
-            </span>
-          </div>
-          <div class="flex items-center justify-between rounded-lg border border-border bg-surface-1 px-3 py-2.5">
-            <span class="text-sm text-text-tertiary">Idle active projects</span>
-            <span class="font-serif text-lg font-590 text-amber-300">
-              {@project_overview.idle_projects}
-            </span>
-          </div>
-          <div class="flex items-center justify-between rounded-lg border border-border bg-surface-1 px-3 py-2.5">
-            <span class="text-sm text-text-tertiary">Missing repos</span>
-            <span class="font-serif text-lg font-590 text-text-primary">
-              {@project_overview.missing_repo_projects}
-            </span>
           </div>
         </div>
       </.panel>

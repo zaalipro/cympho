@@ -75,7 +75,9 @@ defmodule CymphoWeb.SettingsHubTest do
       assert html =~ "LLMotions runtime"
       assert html =~ "DASHSCOPE_API_KEY is stored as an encrypted active secret."
       assert html =~ "Claude Code runtime"
-      assert html =~ "Add ANTHROPIC_API_KEY at company scope."
+      # "at company scope" repeated on all five cards without changing the action.
+      assert html =~ "Add ANTHROPIC_API_KEY."
+      refute html =~ "at company scope"
       assert html =~ "key=ANTHROPIC_API_KEY"
       assert html =~ "qwen3.6-flash for smoke"
       assert html =~ "qwen3.7-plus"

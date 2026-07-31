@@ -1113,6 +1113,8 @@ defmodule CymphoWeb.InboxLive.Index do
   defp issue_link(issue) when is_nil(issue), do: "#"
   defp issue_link(issue), do: ~p"/issues/#{issue.id}"
 
+  defp owner_decision_label(item), do: item.target_label || "Open details"
+
   defp owner_decision_item?(item) do
     Map.get(item, :kind) in [
       :approval,

@@ -4,17 +4,19 @@ defmodule CymphoWeb.BudgetLiveTest do
   alias Cympho.Budgets
 
   describe "BudgetLive.Index" do
-    test "shows a command when no runtime guardrail exists" do
+    test "shows a command when no runtime spending limit exists" do
       {conn, _company} = board_conn()
 
       {:ok, _view, html} = live(conn, "/budgets")
 
       assert html =~ "Budget command"
-      assert html =~ "No guardrail"
+      assert html =~ "No spending limit"
       assert html =~ "Set a company runtime budget before scaling agents"
-      assert html =~ "No spend guardrails yet"
+      assert html =~ "No spending limits yet"
       assert html =~ "provider spend has a hard stop"
       assert html =~ ~s(href="/budgets/new")
+      # "Budget Overview" repeated the command strip's four numbers verbatim.
+      refute html =~ "Budget Overview"
     end
 
     test "creates an enforceable company runtime guardrail from the new form", %{

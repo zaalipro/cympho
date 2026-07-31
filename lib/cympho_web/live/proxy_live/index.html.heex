@@ -1,7 +1,7 @@
 <.settings_layout active={:proxies}>
   <.header
     title={@page_title}
-    subtitle="Reusable company proxy profiles for swarm routing and runtime diagnostics."
+    subtitle="Reusable company proxy profiles for routing agent traffic and checking it works."
   >
     <:actions>
       <button
@@ -24,7 +24,8 @@
   </div>
 
   <% stats = profile_stats(@proxy_profiles) %>
-  <section class="mb-4 rounded-lg border border-border bg-panel p-4">
+  <%!-- Four tiles reading 0 tell you nothing the empty state below doesn't. --%>
+  <section :if={stats.total > 0} class="mb-4 rounded-lg border border-border bg-panel p-4">
     <div class="grid gap-3 sm:grid-cols-4">
       <div class="rounded-md border border-border bg-canvas px-3 py-2">
         <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">

@@ -641,8 +641,8 @@ defmodule CymphoWeb.IssueLive.Index do
       minutes < 1 -> "just now"
       minutes < 60 -> "#{minutes}m"
       minutes < 60 * 24 -> "#{div(minutes, 60)}h"
-      minutes < 60 * 24 * 7 -> "#{div(minutes, 60 * 24)}d quiet"
-      true -> "#{div(minutes, 60 * 24 * 7)}w quiet"
+      minutes < 60 * 24 * 7 -> "#{div(minutes, 60 * 24)}d"
+      true -> "#{div(minutes, 60 * 24 * 7)}w"
     end
   end
 

@@ -36,7 +36,7 @@
       </section>
     <% else %>
       <.header>
-        <span class="ui-advanced-only ember-eyebrow">Spend guardrails</span>
+        <span class="ui-advanced-only ember-eyebrow">Spend limits</span>
         <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           {@page_title}
         </h1>
@@ -106,36 +106,11 @@
         </div>
       </section>
 
-      <div class="ui-advanced-only mb-6 bg-surface border border-border rounded-xl p-6">
-        <h2 class="text-xs font-590 text-text-secondary uppercase tracking-wider mb-4">
-          Budget Overview
-        </h2>
-        <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <div class="ember-stat text-center">
-            <div class="text-2xl font-510 text-text-primary">{@summary.total}</div>
-            <div class="text-xs text-text-quaternary mt-1">Total Budgets</div>
-          </div>
-          <div class="ember-stat text-center">
-            <div class="text-2xl font-510 text-green-400">{@summary.active}</div>
-            <div class="text-xs text-text-quaternary mt-1">Active</div>
-          </div>
-          <div class="ember-stat text-center">
-            <div class="text-2xl font-510 text-brand">
-              {format_currency(@summary.total_limit)}
-            </div>
-            <div class="text-xs text-text-quaternary mt-1">Total Limit</div>
-          </div>
-          <div class="ember-stat text-center">
-            <div class="text-2xl font-510 text-amber-400">
-              {format_currency(@summary.total_spent)}
-            </div>
-            <div class="text-xs text-text-quaternary mt-1">Total Spent</div>
-          </div>
-        </div>
-      </div>
+      <%!-- No "Budget Overview" strip: its four numbers are the same
+           budgets/active/limit/spent the command strip prints directly above. --%>
 
       <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90 mb-3">
-        <span class="ui-advanced-only">Guardrails</span>
+        <span class="ui-advanced-only">Spending limits</span>
         <span class="ui-simple-only">Limits</span>
       </p>
 
@@ -149,7 +124,7 @@
           class="only:block hidden col-span-full rounded-card border border-dashed border-border bg-panel/50 px-6 py-12 text-center"
         >
           <p class="text-sm font-590 text-text-primary">
-            <span class="ui-advanced-only">No spend guardrails yet</span>
+            <span class="ui-advanced-only">No spending limits yet</span>
             <span class="ui-simple-only">No spending limit yet</span>
           </p>
           <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">

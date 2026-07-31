@@ -57,22 +57,8 @@
         </.app_link>
       </div>
 
-      <div class="grid grid-cols-2 border-t border-border sm:grid-cols-3 lg:grid-cols-6">
-        <div
-          :for={metric <- @activity_command.metrics}
-          class="ember-stat border-r border-border px-4 py-3 last:border-r-0"
-        >
-          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            {metric.label}
-          </p>
-          <p class={[
-            "mt-1 font-mono text-xl font-590 tabular-nums",
-            activity_metric_value_class(metric.tone)
-          ]}>
-            {metric.value}
-          </p>
-        </div>
-      </div>
+      <%!-- No metric strip: the audit lane cards below carry the same per-family
+           counts next to the label that explains them. --%>
 
       <div class="border-t border-border px-4 py-3">
         <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
@@ -88,9 +74,14 @@
         data-testid="activity-audit-lanes"
         class="grid gap-px border-t border-border bg-border md:grid-cols-2 xl:grid-cols-5"
       >
-        <div
+        <%!-- The whole card is the link, so the repeated "Open feed" row is
+             gone; the state pill only appears when the lane has events. --%>
+        <.app_link
           :for={lane <- @activity_audit_lanes}
-          class={"bg-panel px-4 py-3 #{activity_lane_card_class(lane.category)}"}
+          navigate={lane.action_path}
+          title={lane.action_label}
+          aria-label={lane.action_label}
+          class={"block bg-panel px-4 py-3 transition-colors hover:bg-surface-hover #{activity_lane_card_class(lane.category)}"}
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
@@ -103,20 +94,15 @@
               <p class={"font-mono text-xl font-590 tabular-nums #{activity_lane_count_class(lane.category)}"}>
                 {lane.count}
               </p>
-              <span class={"rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{activity_lane_badge_class(lane.category, lane.count)}"}>
+              <span
+                :if={lane.show_state?}
+                class={"rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{activity_lane_badge_class(lane.category, lane.count)}"}
+              >
                 {lane.state_label}
               </span>
             </div>
           </div>
-
-          <.app_link
-            navigate={lane.action_path}
-            class="mt-3 inline-flex items-center gap-1.5 text-xs font-590 text-text-secondary hover:text-brand"
-          >
-            {lane.action_label}
-            <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" />
-          </.app_link>
-        </div>
+        </.app_link>
       </div>
     </section>
 
@@ -230,7 +216,12 @@
                   <span class="text-sm font-590 text-text-primary">
                     {actor_name(activity)}
                   </span>
-                  <span class="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 text-text-tertiary">
+                  <%!-- System rows printed "System" twice; only show the pill
+                       when it adds something the name does not. --%>
+                  <span
+                    :if={format_actor_type(activity.actor_type) != actor_name(activity)}
+                    class="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 text-text-tertiary"
+                  >
                     {format_actor_type(activity.actor_type)}
                   </span>
                   <span class="text-xs font-510 text-text-secondary">

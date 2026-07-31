@@ -47,8 +47,11 @@ defmodule CymphoWeb.AuditTrailLiveTest do
   test "shows the empty state when there are no events", %{conn: conn} do
     {:ok, _view, html} = live(conn, "/settings/audit")
     assert html =~ ~s(data-testid="audit-command")
+    # The page used to say "no events" twice with different wording; the feed
+    # slot now carries only the way out.
     assert html =~ "No audit events have been recorded yet"
-    assert html =~ "No audit events found."
+    refute html =~ "No audit events found."
+    assert html =~ "Clear filters or create governable work to populate the audit trail."
   end
 
   test "audit command prioritizes reversed governance decisions", %{

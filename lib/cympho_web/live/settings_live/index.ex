@@ -66,22 +66,6 @@ defmodule CymphoWeb.SettingsLive.Index do
     end
   end
 
-  def handle_event("toggle_pref_enabled", %{"pref_id" => pref_id}, socket) do
-    pref = Enum.find(socket.assigns.prefs, &(&1.id == pref_id))
-    new_enabled = not pref.enabled
-
-    case Users.upsert_notification_pref(socket.assigns.user_id, pref.channel_type, %{
-           enabled: new_enabled
-         }) do
-      {:ok, _} ->
-        prefs = Users.list_notification_prefs(socket.assigns.user_id)
-        {:noreply, assign(socket, :prefs, prefs)}
-
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to update preference")}
-    end
-  end
-
   def handle_event("toggle_event", %{"pref_id" => pref_id, "event" => event}, socket) do
     pref = Enum.find(socket.assigns.prefs, &(&1.id == pref_id))
     events = Map.get(pref.config, "events", Users.default_event_config())
@@ -278,9 +262,6 @@ defmodule CymphoWeb.SettingsLive.Index do
   defp switch_knob_class(false) do
     "inline-block h-4 w-4 translate-x-0.5 rounded-full bg-text-quaternary shadow-sm transition-transform"
   end
-
-  defp status_word_class(true), do: "text-xs font-590 text-success"
-  defp status_word_class(false), do: "text-xs font-510 text-text-quaternary"
 
   defp event_toggle_class(true) do
     "flex w-full items-center justify-between rounded-lg border border-success/20 bg-success/10 px-3 py-2 text-left text-xs font-510 text-success transition-colors hover:bg-success/15"

@@ -188,4 +188,11 @@ defmodule CymphoWeb.ProjectLive.Index do
 
   def active_goal_label(1), do: "1 active goal"
   def active_goal_label(count), do: "#{count} active goals"
+
+  def workstream_summary(%{open_issues: open_issues, active_projects: active_projects}) do
+    "#{open_issues} open #{plural(open_issues, "issue")} across #{active_projects} active #{plural(active_projects, "project")}"
+  end
+
+  defp plural(1, word), do: word
+  defp plural(_count, word), do: word <> "s"
 end

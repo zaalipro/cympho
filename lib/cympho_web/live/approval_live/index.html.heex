@@ -86,7 +86,10 @@
         </div>
       </div>
 
-      <div class="grid min-w-0 gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+      <%!-- No "Queue pressure" card: it repeated the Pending count two tiles to
+           its left. The oldest pending gate moves onto that tile, and the lane
+           sub-captions that just restated the label above are gone. --%>
+      <div class="px-5 py-4">
         <div class="stagger-children grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <.link
             :for={lane <- @approval_command.lanes}
@@ -95,34 +98,13 @@
           >
             <span class="text-eyebrow uppercase text-text-quaternary">{lane.label}</span>
             <span class={approval_lane_count_class(lane)}>{lane.count}</span>
-            <span class="mt-1 block text-xs text-text-tertiary">{lane.state}</span>
-          </.link>
-        </div>
-
-        <div class="min-w-0 rounded-lg border border-border bg-surface-1 px-4 py-3">
-          <p class="text-eyebrow uppercase text-text-quaternary">Queue pressure</p>
-          <div class="mt-3 grid grid-cols-2 gap-3">
-            <div>
-              <p class="font-mono text-2xl font-590 text-text-primary">
-                {@approval_command.pending_count}
-              </p>
-              <p class="text-xs text-text-tertiary">pending</p>
-            </div>
-            <div>
-              <p class="font-mono text-2xl font-590 text-text-primary">
-                {@approval_command.linked_issue_count}
-              </p>
-              <p class="text-xs text-text-tertiary">linked issues</p>
-            </div>
-          </div>
-          <p class="mt-3 text-xs text-text-tertiary">
-            Oldest pending:
-            <span class="font-mono text-text-secondary">
-              {if @approval_command.oldest_pending,
-                do: @approval_command.oldest_pending.type,
-                else: "none"}
+            <span
+              :if={lane.status == :pending}
+              class="mt-1 block text-xs text-text-tertiary"
+            >
+              Oldest: {@approval_command.oldest_pending_label}
             </span>
-          </p>
+          </.link>
         </div>
       </div>
     </div>

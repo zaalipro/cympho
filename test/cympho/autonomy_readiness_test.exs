@@ -202,12 +202,12 @@ defmodule Cympho.AutonomyReadinessTest do
       assert mission_primitive.metric == 100
       assert mission_primitive.summary =~ "100% of open work"
       assert mission_primitive.path == "/goals"
-      assert mission_primitive.action_label == "Open goals"
+      assert mission_primitive.action_label == "Goals"
       assert budget_primitive.level == :healthy
       assert budget_primitive.health_label in ["On track", "Scoped controls", "Guarded"]
       assert budget_primitive.summary =~ "budget guardrail"
       assert budget_primitive.path == "/budgets"
-      assert budget_primitive.action_label == "Open budgets"
+      assert budget_primitive.action_label == "Budgets"
     end
 
     test "summarizes warning and setup gaps with readable copy" do

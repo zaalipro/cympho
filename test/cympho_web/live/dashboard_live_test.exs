@@ -126,15 +126,19 @@ defmodule CymphoWeb.DashboardLiveTest do
       refute html =~ "parity"
       assert html =~ "operating primitives"
       assert html =~ "Mission links"
-      assert html =~ "Wake loop"
       assert html =~ "Cost guardrails"
-      assert html =~ "Issue memory"
       assert html =~ "Extension surface"
 
-      operating_readiness = element_text(html, "[data-testid='operating-readiness']")
+      # Readiness renders one card per concern: the org, runtime, and agent
+      # guide primitives restated their signal card's summary verbatim.
+      refute html =~ "Org hierarchy"
+      refute html =~ "Wake loop"
+      refute html =~ "Issue memory"
 
-      assert operating_readiness =~ "Create mission"
-      assert operating_readiness =~ "Create budget"
+      readiness = element_text(html, "[data-testid='autonomy-readiness']")
+
+      assert readiness =~ "Create mission"
+      assert readiness =~ "Create budget"
       assert html =~ ~s(href="/budgets/new")
     end
 
@@ -544,7 +548,7 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ "Autonomy patrol"
+      assert html =~ "Stuck work"
       assert html =~ "Intervention ready"
       assert html =~ "1 stalled issue needs supervisor intervention."
       assert html =~ "1 supervisor wake already queued."

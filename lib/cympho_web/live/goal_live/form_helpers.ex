@@ -1,9 +1,25 @@
 defmodule CymphoWeb.GoalLive.FormHelpers do
   @moduledoc false
 
-  import Phoenix.Component, only: [assign: 3]
+  use Phoenix.Component
 
   alias Cympho.{Goals, Projects}
+
+  attr :text, :string, required: true
+
+  @doc "Collapses a form section's help paragraph into a hoverable `?` marker."
+  def field_hint(assigns) do
+    ~H"""
+    <span
+      role="img"
+      aria-label={@text}
+      title={@text}
+      class="inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-[11px] font-590 text-text-quaternary"
+    >
+      ?
+    </span>
+    """
+  end
 
   def assign_context_options(socket, opts \\ []) do
     company_id = current_company_id(socket)

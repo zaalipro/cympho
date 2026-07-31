@@ -21,6 +21,7 @@
     </.header>
 
     <section
+      :if={@skill_health.metrics.total_skills > 0}
       data-testid="skill-health"
       class="ui-advanced-only ember-glass mb-5 px-5 py-4"
     >
@@ -49,7 +50,8 @@
             tone={if @skill_health.metrics.invalid_manifest_skills > 0, do: :critical, else: :ok}
           />
           <.skill_health_metric
-            label="Cap gaps"
+            label="Capability gaps"
+            title="Enabled skills with a valid manifest but no capability list"
             value={@skill_health.metrics.capabilityless_enabled_skills}
             tone={
               if @skill_health.metrics.capabilityless_enabled_skills > 0,
@@ -63,8 +65,9 @@
             tone={if @skill_health.metrics.disabled_skills > 0, do: :warning, else: :ok}
           />
           <.skill_health_metric
-            label="Watcher"
-            value={if @skill_health.metrics.hot_reloader_running?, do: "on", else: "off"}
+            label="Auto-reload"
+            title="Whether edited skill manifests refresh without a restart"
+            value={if @skill_health.metrics.hot_reloader_running?, do: "On", else: "Off"}
             tone={if @skill_health.metrics.hot_reloader_running?, do: :ok, else: :warning}
           />
         </div>
@@ -100,7 +103,7 @@
           class={"rounded-md border px-3 py-3 #{skill_next_action_class(@skill_health.next_action.tone)}"}
         >
           <p class="text-[11px] font-590 uppercase tracking-[0.1em] opacity-75">
-            Next operator move
+            Do this next
           </p>
           <p class="mt-1 text-sm font-590">{@skill_health.next_action.label}</p>
           <p class="mt-1 text-xs leading-5 opacity-85">{@skill_health.next_action.detail}</p>
@@ -152,17 +155,12 @@
           <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
             {skill_empty_detail(@selected_company_id)}
           </p>
-          <div class="mt-5 flex flex-wrap justify-center gap-2">
-            <.app_link navigate={~p"/skills/new"} class={skill_empty_action_class(:primary)}>
-              New skill
-            </.app_link>
-            <.app_link
-              navigate={~p"/operations#runtime-launch-checklist"}
-              class={skill_empty_action_class(:neutral)}
-            >
-              Runtime checklist
-            </.app_link>
-          </div>
+          <.app_link
+            navigate={~p"/skills/new"}
+            class="mt-5 inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-white transition-colors hover:bg-primary-hover"
+          >
+            New skill
+          </.app_link>
         </div>
       </:empty>
 

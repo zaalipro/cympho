@@ -80,8 +80,14 @@ defmodule CymphoWeb.GoalLive.Show do
     }
   end
 
-  def count_color(0, _color), do: "text-text-quaternary"
-  def count_color(_count, color), do: color
+  # Row-level status reads as a colored dot: every row in a young goal carries the
+  # same word, so the pill was six repetitions of "Todo" instead of a signal.
+  def status_dot_class(:todo), do: "bg-accent"
+  def status_dot_class(:in_progress), do: "bg-brand"
+  def status_dot_class(:in_review), do: "bg-violet-300"
+  def status_dot_class(:done), do: "bg-emerald-400"
+  def status_dot_class(:blocked), do: "bg-red-400"
+  def status_dot_class(_status), do: "bg-text-quaternary"
 
   def progress_width(percent) when is_integer(percent),
     do: "width: #{max(min(percent, 100), 0)}%"
@@ -111,7 +117,13 @@ defmodule CymphoWeb.GoalLive.Show do
       navigate={~p"/issues/#{@issue.id}"}
       class="group flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-surface-2 hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
     >
-      <.badge variant="status" value={to_string(@issue.status)} />
+      <span
+        role="img"
+        aria-label={status_label(@issue.status)}
+        title={status_label(@issue.status)}
+        class={["h-2 w-2 shrink-0 rounded-full", status_dot_class(@issue.status)]}
+      >
+      </span>
       <span :if={@issue.identifier} class="font-mono text-caption text-ink-tertiary shrink-0">
         {@issue.identifier}
       </span>

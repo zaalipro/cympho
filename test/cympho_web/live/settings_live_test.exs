@@ -56,12 +56,11 @@ defmodule CymphoWeb.SettingsLiveTest do
       # With no session and no valid user_id param, shows user picker
       {:ok, _view, html} = live(build_conn_(), "/settings/notifications")
 
-      if html =~ "No users found" do
-        assert html =~ "No users found"
-      else
-        # If there are users in DB from other tests, shows picker with list
-        assert html =~ "Notifications"
-      end
+      # The picker used to render under a "No users found" heading. Whichever
+      # branch renders, exactly one of the two headings must be present.
+      assert html =~ "Choose a user" or html =~ "No users found"
+      refute html =~ "Choose a user" and html =~ "No users found"
+      assert html =~ "Notifications"
     end
   end
 
@@ -77,9 +76,16 @@ defmodule CymphoWeb.SettingsLiveTest do
 
     test "shows enabled status for email channel", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
 
-      assert html =~ "On"
+      # The word beside the switch is screen-reader only now; the switch itself
+      # carries the state.
+      assert has_element?(
+               view,
+               "#channel-email button[phx-click='toggle_channel'][aria-pressed='true']"
+             )
+
+      assert has_element?(view, "#channel-email span.sr-only", "On")
     end
 
     test "shows event notification section", %{user: user} do
@@ -90,11 +96,13 @@ defmodule CymphoWeb.SettingsLiveTest do
       assert html =~ "Human Approval Required"
     end
 
-    test "shows empty state when user not found" do
+    test "shows the user picker when the requested user is not found" do
       fake_id = "00000000-0000-0000-0000-000000000000"
       {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{fake_id}")
 
-      assert html =~ "No users found"
+      # Users exist, so the page offers a choice instead of claiming there are none.
+      assert html =~ "Choose a user"
+      refute html =~ "No users found"
     end
   end
 
@@ -260,17 +268,21 @@ defmodule CymphoWeb.SettingsLiveTest do
       assert result =~ "On" or result =~ "Off" or result =~ "event"
     end
 
-    test "toggle pref channel enabled", %{user: user} do
+    test "a channel has exactly one enable switch", %{user: user} do
       Users.ensure_default_prefs(user.id)
 
       {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
 
-      result =
-        view
-        |> element("#events-email button[phx-click='toggle_pref_enabled']")
-        |> render_click()
+      # The Event Notifications card used to carry a second, independent switch
+      # for the same channel. Enabling now lives only in the Channels section.
+      refute has_element?(view, "#events-email button[phx-click='toggle_pref_enabled']")
+      assert has_element?(view, "#channel-email button[phx-click='toggle_channel']")
 
-      assert result =~ "Off" or result =~ "On"
+      view
+      |> element("#channel-email button[phx-click='toggle_channel']")
+      |> render_click()
+
+      assert has_element?(view, "#events-email", "Channel off")
     end
   end
 

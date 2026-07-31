@@ -633,7 +633,10 @@ defmodule CymphoWeb.Components do
   attr :value, :any, default: nil
   attr :phx_change, :string, default: nil
   attr :id, :string, default: nil
-  attr :rest, :global
+  # `autocomplete` is not one of Phoenix's default global attributes, but form
+  # fields need it to stop browsers autofilling credentials into unrelated pairs
+  # of text+password inputs.
+  attr :rest, :global, include: ~w(autocomplete)
 
   def input(assigns) do
     assigns = assign(assigns, :errors, input_errors(assigns.field))
@@ -643,11 +646,33 @@ defmodule CymphoWeb.Components do
     ~H"""
     <div class="space-y-1.5">
       <label
-        :if={@label}
+        :if={@label && @type != "checkbox"}
         for={input_id(@field, @id)}
         class="block text-xs font-510 text-text-secondary"
       >
         {@label}
+      </label>
+      <%!-- A checkbox needs its own branch: the generic input below is styled
+           `w-full … px-3.5 py-2`, which stretched every checkbox into a
+           full-width box floating under a block label. Here the box stays 16px
+           and the label sits beside it, inside the same <label> so the text is
+           part of the hit target. --%>
+      <label :if={@type == "checkbox"} class="flex items-center gap-2">
+        <input type="hidden" name={input_name(@field, @name)} value="false" />
+        <input
+          id={input_id(@field, @id)}
+          type="checkbox"
+          name={input_name(@field, @name)}
+          value="true"
+          checked={checked?(input_value(@field, @value))}
+          required={@required}
+          disabled={@disabled}
+          aria-describedby={@has_errors && @error_id}
+          aria-invalid={@has_errors}
+          class="h-4 w-4 shrink-0 rounded border-border bg-canvas text-brand focus:ring-2 focus:ring-brand/40"
+          {@rest}
+        />
+        <span :if={@label} class="text-sm text-text-primary">{@label}</span>
       </label>
       <textarea
         :if={@type == "textarea"}
@@ -707,7 +732,7 @@ defmodule CymphoWeb.Components do
         {@rest}
       />
       <input
-        :if={@type not in ["textarea", "select", "date", "time", "datetime-local"]}
+        :if={@type not in ["textarea", "select", "date", "time", "datetime-local", "checkbox"]}
         id={input_id(@field, @id)}
         type={@type}
         name={input_name(@field, @name)}
@@ -969,6 +994,10 @@ defmodule CymphoWeb.Components do
 
   defp format_input_error(message) when is_binary(message), do: message
   defp format_input_error(message), do: inspect(message)
+
+  defp checked?(true), do: true
+  defp checked?("true"), do: true
+  defp checked?(_), do: false
 
   defp input_border_class([]),
     do:

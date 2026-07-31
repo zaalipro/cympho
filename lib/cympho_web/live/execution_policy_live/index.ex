@@ -172,6 +172,9 @@ defmodule CymphoWeb.ExecutionPolicyLive.Index do
     }
   end
 
+  defp policy_metric_total(%{metrics: [%{value: total} | _]}), do: total
+  defp policy_metric_total(_command), do: 0
+
   defp policy_metrics(posture) do
     [
       %{label: "Policies", value: posture.total, tone: :neutral},

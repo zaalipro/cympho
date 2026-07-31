@@ -84,10 +84,16 @@ defmodule CymphoWeb.LaunchItemLive.Index do
 
         <div class="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
           <section class="space-y-5">
-            <div class={[
-              "relative rounded-2xl border p-5 shadow-[inset_0_1px_0_0_rgba(255,250,245,0.08),0_1px_2px_rgb(var(--shadow-rgb)/0.3),0_24px_64px_rgb(var(--shadow-rgb)/0.28)]",
-              summary_tone_class(@summary.tone)
-            ]}>
+            <%!-- An empty tracker had a 0% ring, four zeroed tiles, and three
+                 different "nothing here yet" messages. With no items the list
+                 below carries the only empty state. --%>
+            <div
+              :if={@summary.total > 0}
+              class={[
+                "relative rounded-2xl border p-5 shadow-[inset_0_1px_0_0_rgba(255,250,245,0.08),0_1px_2px_rgb(var(--shadow-rgb)/0.3),0_24px_64px_rgb(var(--shadow-rgb)/0.28)]",
+                summary_tone_class(@summary.tone)
+              ]}
+            >
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="min-w-0">
                   <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-current/80">
@@ -222,6 +228,7 @@ defmodule CymphoWeb.LaunchItemLive.Index do
 
           <section class="space-y-4">
             <div
+              :if={@summary.total > 0}
               id="blocked-work-view"
               class="rounded-2xl border border-border bg-panel p-5 shadow-card"
             >

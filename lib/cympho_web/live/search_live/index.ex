@@ -444,8 +444,6 @@ defmodule CymphoWeb.SearchLive.Index do
     end
   end
 
-  defp result_heading(_results, _total_count, _active_tab, ""), do: "Ready when you are"
-
   defp result_heading(results, total_count, active_tab, query) do
     count = active_result_count(results, total_count, active_tab)
     label = active_result_label(active_tab, count)

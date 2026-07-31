@@ -1073,13 +1073,23 @@ defmodule CymphoWeb.OperationsLive.Index do
 
   defp status_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
-  defp service_purpose_badge_class(:core),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp service_purpose_badge_class(:automation),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-
-  defp service_purpose_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+  # Two subheads replace the per-card "Core launch"/"Optional automation" pill,
+  # which carried no information a card-level grouping cannot.
+  defp service_groups(services) do
+    [
+      %{
+        label: "Core launch",
+        hint: "Required before agents pick up queued work.",
+        services: Enum.filter(services, &(&1.purpose == :core))
+      },
+      %{
+        label: "Optional automation",
+        hint: "Extra loops that wake agents on their own.",
+        services: Enum.filter(services, &(&1.purpose == :automation))
+      }
+    ]
+    |> Enum.reject(&(&1.services == []))
+  end
 
   defp capacity_badge_class(:safe), do: "border-green-500/25 bg-green-500/10 text-green-400"
   defp capacity_badge_class(:watch), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-300"

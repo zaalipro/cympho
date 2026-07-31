@@ -34,7 +34,11 @@
       </:actions>
     </.header>
 
+    <%!-- With nothing to run, the command card, the health card and the list
+         empty state each said "no routines, make one". The list keeps the empty
+         state; the header keeps the CTA. --%>
     <section
+      :if={@routine_health.metrics.total_routines > 0}
       data-testid="routine-command"
       class="mb-5 overflow-hidden rounded-lg border border-border bg-panel shadow-card"
     >
@@ -150,7 +154,7 @@
     </section>
 
     <section
-      :if={@digest_density == "detailed"}
+      :if={@digest_density == "detailed" and @routine_health.metrics.total_routines > 0}
       data-testid="routine-health"
       class="mb-5 rounded-lg border border-border bg-panel px-5 py-4"
     >
@@ -223,7 +227,7 @@
           class={"rounded-md border px-3 py-3 #{routine_next_action_class(@routine_health.next_action.tone)}"}
         >
           <p class="text-[11px] font-590 uppercase tracking-[0.1em] opacity-75">
-            Next operator move
+            Do this next
           </p>
           <p class="mt-1 text-sm font-590">{@routine_health.next_action.label}</p>
           <p class="mt-1 text-xs leading-5 opacity-85">{@routine_health.next_action.detail}</p>

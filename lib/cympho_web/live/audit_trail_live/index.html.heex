@@ -60,7 +60,11 @@
       </.app_link>
     </div>
 
-    <div class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-3 lg:grid-cols-7">
+    <%!-- Seven zeroes under a card that already says the trail is empty. --%>
+    <div
+      :if={audit_metric_total(@audit_command) > 0}
+      class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-3 lg:grid-cols-7"
+    >
       <div
         :for={metric <- @audit_command.metrics}
         class="ember-stat border-r border-border px-4 py-3 last:border-r-0"
@@ -208,8 +212,9 @@
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface">
             <.icon name="hero-clipboard-document-list-mini" class="h-6 w-6 text-text-tertiary" />
           </div>
-          <p class="text-sm font-510 text-text-secondary">No audit events found.</p>
-          <p class="mt-1 max-w-sm text-xs leading-5 text-text-tertiary">
+          <%!-- The Audit command card above already says there are no events;
+               this slot only carries the way out. --%>
+          <p class="max-w-sm text-sm leading-5 text-text-tertiary">
             Clear filters or create governable work to populate the audit trail.
           </p>
         </div>

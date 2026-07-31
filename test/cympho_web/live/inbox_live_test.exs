@@ -674,7 +674,7 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ "Run needs attention"
       assert html =~ "This work stopped before the agent could finish."
       assert html =~ ~s(href="/issues/#{issue.id}")
-      assert html =~ "Inspect failed run"
+      assert html =~ "See what happened"
       assert html =~ ~s(data-testid="owner-attention-diagnostic")
       assert html =~ "ui-advanced-only"
       assert html =~ "Codex · Failed · Provider connectivity"

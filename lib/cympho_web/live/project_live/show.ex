@@ -200,6 +200,13 @@ defmodule CymphoWeb.ProjectLive.Show do
   def status_label(:in_review), do: "In review"
   def status_label(s), do: s |> to_string() |> String.capitalize()
 
+  def status_dot_class(:todo), do: "bg-accent"
+  def status_dot_class(:in_progress), do: "bg-brand"
+  def status_dot_class(:in_review), do: "bg-violet-300"
+  def status_dot_class(:done), do: "bg-emerald-400"
+  def status_dot_class(:blocked), do: "bg-red-400"
+  def status_dot_class(_status), do: "bg-text-quaternary"
+
   attr :label, :string, required: true
   attr :value, :any, required: true
   attr :tone, :atom, default: :neutral
@@ -231,7 +238,6 @@ defmodule CymphoWeb.ProjectLive.Show do
 
     %{
       tone: state,
-      badge: project_state_label(state),
       heading: project_command_heading(state),
       detail: project_command_detail(project, state, health, goal_progress, project_workspaces),
       action_label: project_command_action_label(state),
@@ -272,10 +278,12 @@ defmodule CymphoWeb.ProjectLive.Show do
   defp project_focus(project, health, goal_progress, project_workspaces, env_keys) do
     cond do
       health.blocked > 0 ->
-        {"Blocked work", "#{health.blocked} issue(s) need escalation"}
+        {"Blocked work",
+         "#{health.blocked} #{plural(health.blocked, "issue")} #{verb(health.blocked, "needs", "need")} escalation"}
 
       health.in_review > 0 ->
-        {"Review queue", "#{health.in_review} issue(s) need a decision"}
+        {"Review queue",
+         "#{health.in_review} #{plural(health.in_review, "issue")} #{verb(health.in_review, "needs", "need")} a decision"}
 
       not repo_configured?(project) ->
         {"Repository setup", "Add a repo URL before agent work branches cleanly"}
@@ -291,7 +299,7 @@ defmodule CymphoWeb.ProjectLive.Show do
 
       true ->
         {"Execution ready",
-         "#{length(project_workspaces)} workspace(s), #{length(env_keys)} env key(s)"}
+         "#{length(project_workspaces)} #{plural(length(project_workspaces), "workspace")}, #{length(env_keys)} env #{plural(length(env_keys), "key")}"}
     end
   end
 
@@ -302,24 +310,32 @@ defmodule CymphoWeb.ProjectLive.Show do
   defp project_command_heading(:archived), do: "Project is archived"
   defp project_command_heading(:idle), do: "Project is ready for a sharper operating loop"
 
+  # Owner-facing copy should read like a sentence, not a form field:
+  # "1 issue is waiting", not "1 issue(s) are waiting".
+  defp plural(1, word), do: word
+  defp plural(_n, word), do: word <> "s"
+
+  defp verb(1, singular, _plural), do: singular
+  defp verb(_n, _singular, plural), do: plural
+
   defp project_command_detail(project, :archived, _health, _goal_progress, _project_workspaces) do
     "#{project.name} is archived. Re-activate it before assigning new agent work."
   end
 
   defp project_command_detail(_project, :blocked, health, _goal_progress, _project_workspaces) do
-    "#{health.blocked} blocked issue(s) are stopping flow. Open the queue, resolve blockers, or hand the decision to a lead."
+    "#{health.blocked} blocked #{plural(health.blocked, "issue")} #{verb(health.blocked, "is", "are")} stopping flow. Open the queue, resolve blockers, or hand the decision to a lead."
   end
 
   defp project_command_detail(_project, :review, health, _goal_progress, _project_workspaces) do
-    "#{health.in_review} issue(s) are waiting for review. Approve, request changes, or reassign review ownership."
+    "#{health.in_review} #{plural(health.in_review, "issue")} #{verb(health.in_review, "is", "are")} waiting for review. Approve, request changes, or reassign review ownership."
   end
 
   defp project_command_detail(_project, :active, health, goal_progress, project_workspaces) do
-    "#{health.open} open issue(s), #{length(goal_progress)} root goal(s), and #{length(project_workspaces)} workspace(s) are connected."
+    "#{health.open} open #{plural(health.open, "issue")}, #{length(goal_progress)} root #{plural(length(goal_progress), "goal")}, and #{length(project_workspaces)} #{plural(length(project_workspaces), "workspace")} connected."
   end
 
   defp project_command_detail(_project, :planned, _health, goal_progress, _project_workspaces) do
-    "#{length(goal_progress)} root goal(s) are active, but this project needs executable issues to move."
+    "#{length(goal_progress)} root #{plural(length(goal_progress), "goal")} #{verb(length(goal_progress), "is", "are")} active, but this project needs executable issues to move."
   end
 
   defp project_command_detail(_project, :idle, _health, _goal_progress, _project_workspaces) do
@@ -340,19 +356,6 @@ defmodule CymphoWeb.ProjectLive.Show do
 
   defp project_command_action_path(project, :archived), do: "/projects/#{project.id}/edit"
   defp project_command_action_path(project, _state), do: "/issues?project_id=#{project.id}"
-
-  defp project_state_label(:archived), do: "Archived"
-  defp project_state_label(:blocked), do: "Blocked"
-  defp project_state_label(:review), do: "Review"
-  defp project_state_label(:active), do: "Active"
-  defp project_state_label(:planned), do: "Planned"
-  defp project_state_label(:idle), do: "Idle"
-
-  def project_state_class(:blocked), do: "border-red-500/25 bg-red-500/10 text-red-300"
-  def project_state_class(:review), do: "border-cyan-500/25 bg-cyan-500/10 text-cyan-300"
-  def project_state_class(:active), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  def project_state_class(:planned), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def project_state_class(_state), do: "border-border bg-surface text-text-tertiary"
 
   defp project_action_class(:blocked),
     do: "border-red-500/25 bg-red-500/10 text-red-100 hover:bg-red-500/15"

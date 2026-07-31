@@ -166,14 +166,14 @@ defmodule Cympho.Skills do
       :repair_manifests,
       :critical,
       "Repair manifests",
-      "#{metrics.invalid_manifest_skills} skill manifest(s) are missing required runtime fields."
+      "#{metrics.invalid_manifest_skills} skill #{plural(metrics.invalid_manifest_skills, "manifest")} #{verb(metrics.invalid_manifest_skills, "is", "are")} missing required runtime fields."
     )
     |> maybe_recommend(
       metrics.capabilityless_enabled_skills > 0,
       :declare_capabilities,
       :warning,
       "Declare capabilities",
-      "#{metrics.capabilityless_enabled_skills} enabled skill(s) have valid manifests but no capability list."
+      "#{metrics.capabilityless_enabled_skills} enabled #{plural(metrics.capabilityless_enabled_skills, "skill")} #{verb(metrics.capabilityless_enabled_skills, "has", "have")} valid manifests but no capability list."
     )
     |> maybe_recommend(
       not metrics.hot_reloader_running? and metrics.total_skills > 0,
@@ -187,7 +187,7 @@ defmodule Cympho.Skills do
       :audit_disabled_skills,
       :info,
       "Audit disabled skills",
-      "#{metrics.disabled_skills} skill(s) are disabled and unavailable to agents."
+      "#{metrics.disabled_skills} #{plural(metrics.disabled_skills, "skill")} #{verb(metrics.disabled_skills, "is", "are")} disabled and unavailable to agents."
     )
   end
 
@@ -284,7 +284,7 @@ defmodule Cympho.Skills do
   end
 
   defp skill_health_summary(%{invalid_manifest_skills: invalid}) when invalid > 0 do
-    "#{invalid} skill manifest(s) need repair before agents can rely on them."
+    "#{invalid} skill #{plural(invalid, "manifest")} #{verb(invalid, "needs", "need")} repair before agents can rely on them."
   end
 
   defp skill_health_summary(%{
@@ -292,7 +292,7 @@ defmodule Cympho.Skills do
          disabled_skills: disabled,
          hot_reloader_running?: false
        }) do
-    "#{capabilityless} capability gap(s), #{disabled} disabled skill(s), and hot reload needs review."
+    "#{capabilityless} capability #{plural(capabilityless, "gap")}, #{disabled} disabled #{plural(disabled, "skill")}, and hot reload needs review."
   end
 
   defp skill_health_summary(%{
@@ -300,11 +300,11 @@ defmodule Cympho.Skills do
          disabled_skills: disabled
        })
        when capabilityless > 0 or disabled > 0 do
-    "#{capabilityless} capability gap(s) and #{disabled} disabled skill(s) need review."
+    "#{capabilityless} capability #{plural(capabilityless, "gap")} and #{disabled} disabled #{plural(disabled, "skill")} need review."
   end
 
   defp skill_health_summary(%{enabled_skills: enabled}) do
-    "#{enabled} enabled skill(s) have valid manifests and explicit capabilities."
+    "#{enabled} enabled #{plural(enabled, "skill")} #{verb(enabled, "has", "have")} valid manifests and explicit capabilities."
   end
 
   defp maybe_filter_by_company(query, nil), do: query
@@ -427,21 +427,21 @@ defmodule Cympho.Skills do
       :repair_assigned_skills,
       :critical,
       "Repair assigned skills",
-      "#{metrics.manifest_error_assignments} assigned skill(s) are errored or have manifest validation errors."
+      "#{metrics.manifest_error_assignments} assigned #{plural(metrics.manifest_error_assignments, "skill")} #{verb(metrics.manifest_error_assignments, "is", "are")} errored or #{verb(metrics.manifest_error_assignments, "has", "have")} manifest validation errors."
     )
     |> maybe_recommend(
       metrics.inactive_assignments > 0,
       :review_inactive_assignments,
       :warning,
       "Review inactive assignments",
-      "#{metrics.inactive_assignments} assigned skill(s) are disabled and will not reach the prompt."
+      "#{metrics.inactive_assignments} assigned #{plural(metrics.inactive_assignments, "skill")} #{verb(metrics.inactive_assignments, "is", "are")} disabled and will not reach the prompt."
     )
     |> maybe_recommend(
       metrics.capabilityless_assignments > 0,
       :scope_assigned_capabilities,
       :warning,
       "Scope assigned capabilities",
-      "#{metrics.capabilityless_assignments} prompt-usable assigned skill(s) declare no capabilities."
+      "#{metrics.capabilityless_assignments} prompt-usable assigned #{plural(metrics.capabilityless_assignments, "skill")} #{verb(metrics.capabilityless_assignments, "declares", "declare")} no capabilities."
     )
   end
 
@@ -540,7 +540,7 @@ defmodule Cympho.Skills do
   end
 
   defp agent_skill_summary_text(%{assigned_plugins: 0, available_plugins: available}) do
-    "#{available} skill(s) are available, but none are assigned to this agent."
+    "#{available} #{plural(available, "skill")} #{verb(available, "is", "are")} available, but none are assigned to this agent."
   end
 
   defp agent_skill_summary_text(%{
@@ -551,11 +551,11 @@ defmodule Cympho.Skills do
          capabilityless_assignments: capabilityless
        })
        when errors > 0 or inactive > 0 or capabilityless > 0 do
-    "#{ready}/#{assigned} assigned skill(s) are prompt-ready; #{errors} repair, #{inactive} inactive, #{capabilityless} capability gap(s)."
+    "#{ready}/#{assigned} assigned #{plural(assigned, "skill")} prompt-ready; #{errors} repair, #{inactive} inactive, #{capabilityless} capability #{plural(capabilityless, "gap")}."
   end
 
   defp agent_skill_summary_text(%{prompt_ready_plugins: ready, assigned_plugins: assigned}) do
-    "#{ready}/#{assigned} assigned skill(s) are prompt-ready for this agent."
+    "#{ready}/#{assigned} assigned #{plural(assigned, "skill")} prompt-ready for this agent."
   end
 
   defp prompt_usable_plugin?(%Plugin{} = plugin) do
@@ -781,4 +781,12 @@ defmodule Cympho.Skills do
         []
     end
   end
+
+  # Owner-facing summaries should read as sentences: "1 skill is available",
+  # not "1 skill(s) are available".
+  defp plural(1, word), do: word
+  defp plural(_n, word), do: word <> "s"
+
+  defp verb(1, singular, _plural), do: singular
+  defp verb(_n, _singular, plural), do: plural
 end

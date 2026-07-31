@@ -13,8 +13,13 @@ defmodule CymphoWeb.AdapterLiveTest do
       assert html =~ "no agents are assigned to a runtime yet"
       assert html =~ "Add agent"
       assert html =~ "Secrets"
-      assert html =~ "Healthy adapters"
-      assert html =~ "Unavailable"
+      # The duplicate "Healthy adapters / Degraded / Unhealthy / Unavailable"
+      # lane row was removed; the stat row is now the single health tally.
+      # Assert the row's own note strings, not the bare word "Healthy" — that
+      # matches almost any markup and would pass even if the tally vanished.
+      assert html =~ "Needs attention"
+      assert html =~ ~r/Healthy.*registered/s
+      assert html =~ ~r/\d+ unavailable/
     end
 
     test "summarizes assigned adapter usage for the current company", %{
@@ -33,7 +38,7 @@ defmodule CymphoWeb.AdapterLiveTest do
 
       assert html =~ "Runtime readiness"
       assert html =~ "Assigned agents"
-      assert html =~ "1 adapters in use"
+      assert html =~ "1 adapter is in use"
       assert html =~ "Operations"
     end
 

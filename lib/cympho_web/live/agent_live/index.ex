@@ -254,6 +254,8 @@ defmodule CymphoWeb.AgentLive.Index do
     |> Enum.map_join(" ", &String.capitalize/1)
   end
 
+  def health_label(status), do: status |> to_string() |> String.replace("_", " ")
+
   def health_pill_class(:healthy), do: "border-success/25 bg-success/10 text-success"
   def health_pill_class(:degraded), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def health_pill_class(:unavailable), do: "border-brand/25 bg-brand/10 text-brand"
@@ -332,14 +334,15 @@ defmodule CymphoWeb.AgentLive.Index do
       default_runtime_model(adapter, agent)
   end
 
+  # Returns nil when the agent runs on the adapter default; the row then prints
+  # nothing instead of repeating "No model override".
   def runtime_model(agent) do
     env = RuntimeEnv.from_agent(agent)
 
     env["ANTHROPIC_MODEL"] ||
       env["ANTHROPIC_DEFAULT_SONNET_MODEL"] ||
       env["OPENAI_MODEL"] ||
-      env["MODEL"] ||
-      "No model override"
+      env["MODEL"]
   end
 
   defp default_runtime_model(adapter, _agent) when adapter in [:codex, "codex"],
@@ -359,7 +362,7 @@ defmodule CymphoWeb.AgentLive.Index do
     Cympho.Adapters.RuntimeOptions.openclaw_default_model(provider)
   end
 
-  defp default_runtime_model(_adapter, _agent), do: "No model override"
+  defp default_runtime_model(_adapter, _agent), do: nil
 
   defp config_value(%{config: config}, key) when is_map(config), do: config[key]
   defp config_value(_, _), do: nil

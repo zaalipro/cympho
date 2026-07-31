@@ -668,18 +668,17 @@ defmodule CymphoWeb.DashboardLive.Index do
       href={Map.get(@action, :path, "/operations")}
       class={"card-lift group flex min-w-0 flex-col rounded-xl border p-4 transition hover:bg-surface-hover/40 #{next_action_card_class(Map.get(@action, :tone, :ok))}"}
     >
-      <span class={[
-        "ui-advanced-only self-start rounded-full border px-2 py-0.5 text-[10px] font-590 uppercase tracking-[0.1em]",
-        next_action_pill_class(Map.get(@action, :tone, :ok))
-      ]}>
-        {primary_action_badge(@action)}
-      </span>
-      <%!-- Simple mode replaces the uppercase pill with a single tone icon:
-           three identical "NEEDS SETUP" chips said nothing worth reading. --%>
-      <span class={[
-        "ui-simple-only self-start rounded-full border p-1.5",
-        next_action_pill_class(Map.get(@action, :tone, :ok))
-      ]}>
+      <%!-- A single tone icon in both modes: three identical "NEEDS SETUP"
+           chips said nothing worth reading. The badge word stays as the
+           accessible name. --%>
+      <span
+        title={primary_action_badge(@action)}
+        aria-label={primary_action_badge(@action)}
+        class={[
+          "self-start rounded-full border p-1.5",
+          next_action_pill_class(Map.get(@action, :tone, :ok))
+        ]}
+      >
         <span class={[
           simple_field(@action, :icon, "hero-information-circle-mini"),
           "block h-4 w-4"
@@ -814,8 +813,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       simple: %{
         icon: "hero-hand-thumb-up-mini",
         label: "Work is ready for you",
-        detail:
-          "#{count} #{pluralize(count, "update")} waiting on your yes or no.",
+        detail: "#{count} #{pluralize(count, "update")} waiting on your yes or no.",
         action: "Read #{if count == 1, do: "it", else: "them"}"
       }
     }
@@ -1220,6 +1218,24 @@ defmodule CymphoWeb.DashboardLive.Index do
   def cost_text_class(:scoped_controls), do: "text-sky-300"
   def cost_text_class(:unbudgeted), do: "text-text-quaternary"
   def cost_text_class(_), do: "text-text-quaternary"
+
+  # The readiness section renders one card per concern. Operating primitives
+  # keyed like a signal (org, runtime, agent guides) copy that signal's summary
+  # verbatim, so only the primitives with a key of their own are appended.
+  def readiness_cards(%{signals: signals} = readiness) do
+    signal_keys = MapSet.new(signals, & &1.key)
+
+    extras =
+      case Map.get(readiness, :paperclip) do
+        %{primitives: primitives} ->
+          Enum.reject(primitives, &MapSet.member?(signal_keys, &1.key))
+
+        _ ->
+          []
+      end
+
+    signals ++ extras
+  end
 
   def readiness_badge_class(:healthy), do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
   def readiness_badge_class(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"

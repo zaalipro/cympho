@@ -4,6 +4,8 @@ defmodule CymphoWeb.GoalLive.New do
   alias Cympho.Goals.Goal
   alias CymphoWeb.GoalLive.FormHelpers
 
+  import CymphoWeb.GoalLive.FormHelpers, only: [field_hint: 1]
+
   @impl true
   def mount(_params, _session, socket) do
     changeset = Goals.change_goal(%Goal{})

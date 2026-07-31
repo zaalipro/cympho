@@ -241,11 +241,11 @@ defmodule CymphoWeb.BudgetLive.Index do
   defp build_budget_command(%{total: 0}, _budgets) do
     %{
       tone: :setup,
-      badge: "No guardrail",
+      badge: "No spending limit",
       title: "Set a company runtime budget before scaling agents",
       summary:
-        "Autonomous runs can spend provider credits without an enforceable company budget. Create one hard-stop guardrail first.",
-      action_label: "Create guardrail",
+        "Autonomous runs can spend provider credits without an enforceable company budget. Create one hard-stop limit first.",
+      action_label: "Create limit",
       action_path: "/budgets/new",
       metrics: [
         %{label: "Budgets", value: "0"},

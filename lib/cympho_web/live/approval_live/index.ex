@@ -123,7 +123,7 @@ defmodule CymphoWeb.ApprovalLive.Index do
       pending_count: pending,
       resolved_count: resolved,
       linked_issue_count: linked_issue_count(approvals),
-      oldest_pending: oldest_pending,
+      oldest_pending_label: approval_type_label(oldest_pending),
       summary: approval_command_summary(pending, resolved, oldest_pending, active_status),
       lanes: approval_lanes(counts, active_status),
       actions: approval_command_actions(pending, active_status)
@@ -136,7 +136,7 @@ defmodule CymphoWeb.ApprovalLive.Index do
       pending_count: 0,
       resolved_count: 0,
       linked_issue_count: 0,
-      oldest_pending: nil,
+      oldest_pending_label: approval_type_label(nil),
       summary: "No approvals queued.",
       lanes: approval_lanes(%{}, nil),
       actions: [
@@ -216,16 +216,9 @@ defmodule CymphoWeb.ApprovalLive.Index do
       label: label,
       count: count,
       url: approval_filter_path(status),
-      active?: status == active_status,
-      state: approval_lane_state(status, count)
+      active?: status == active_status
     }
   end
-
-  defp approval_lane_state(:pending, 0), do: "Clear"
-  defp approval_lane_state(:pending, _count), do: "Needs decision"
-  defp approval_lane_state(:approved, _count), do: "Approved path"
-  defp approval_lane_state(:denied, _count), do: "Rejected path"
-  defp approval_lane_state(:cancelled, _count), do: "Stopped path"
 
   defp approval_command_actions(pending, active_status) do
     [

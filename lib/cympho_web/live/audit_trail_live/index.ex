@@ -236,6 +236,9 @@ defmodule CymphoWeb.AuditTrailLive.Index do
     })
   end
 
+  defp audit_metric_total(%{metrics: [%{value: total} | _]}), do: total
+  defp audit_metric_total(_command), do: 0
+
   defp audit_metrics(total, by_event_type) do
     counts = audit_counts(by_event_type)
 

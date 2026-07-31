@@ -55,6 +55,7 @@
             <div class="grid gap-2 sm:grid-cols-3">
               <label
                 :for={{label, value, simple_help, contract} <- work_mode_options()}
+                title={contract}
                 class={[
                   "cursor-pointer rounded-xl border px-3 py-3 transition-colors",
                   to_string(@form[:work_mode].value || :standard) == value &&
@@ -72,9 +73,11 @@
                 />
                 <span class="block text-sm font-590 text-text-primary">{label}</span>
                 <span class="mt-1 block text-xs leading-5 text-text-tertiary">{simple_help}</span>
-                <span class="ui-advanced-only mt-2 block text-[11px] leading-4 text-text-quaternary">
-                  Contract: {contract}
-                </span>
+                <%!-- The full contract stays reachable on hover (the label's
+                     title) and to screen readers instead of printing legalese on
+                     every card. Still advanced-only: simple mode deliberately
+                     keeps this out of the a11y tree too, not just off-screen. --%>
+                <span class="ui-advanced-only sr-only">{contract}</span>
               </label>
             </div>
           </fieldset>

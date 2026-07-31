@@ -14,7 +14,7 @@ defmodule Cympho.AutonomyReadiness do
       key: :org,
       label: "Org",
       path: "/org-chart",
-      action_label: "Open org chart",
+      action_label: "Org chart",
       fetch: &Cympho.OrgHealth.snapshot/1,
       metric: [:metrics, :total_agents]
     },
@@ -22,7 +22,7 @@ defmodule Cympho.AutonomyReadiness do
       key: :plugins,
       label: "Plugins",
       path: "/plugins",
-      action_label: "Open plugins",
+      action_label: "Plugins",
       fetch: &Cympho.Plugins.health_summary/1,
       metric: [:metrics, :enabled_plugins]
     },
@@ -30,7 +30,7 @@ defmodule Cympho.AutonomyReadiness do
       key: :workspaces,
       label: "Workspaces",
       path: "/workspaces",
-      action_label: "Open workspaces",
+      action_label: "Workspaces",
       fetch: &Cympho.Workspaces.health_summary/1,
       metric: [:metrics, :open_execution_workspaces]
     },
@@ -38,7 +38,7 @@ defmodule Cympho.AutonomyReadiness do
       key: :routines,
       label: "Routines",
       path: "/routines",
-      action_label: "Open routines",
+      action_label: "Routines",
       fetch: &Cympho.Routines.health_summary/1,
       metric: [:metrics, :active_routines]
     }
@@ -134,7 +134,7 @@ defmodule Cympho.AutonomyReadiness do
       summary: Map.get(doctor, :summary, "Runtime health is unavailable."),
       metric: length(findings),
       path: "/operations#runtime-services",
-      action_label: "Open runtime services"
+      action_label: "Runtime services"
     }
   end
 
@@ -168,7 +168,7 @@ defmodule Cympho.AutonomyReadiness do
       summary: "Operations health check is unavailable.",
       metric: 0,
       path: "/operations",
-      action_label: "Open Operations"
+      action_label: "Operations"
     }
   end
 
@@ -211,7 +211,7 @@ defmodule Cympho.AutonomyReadiness do
       summary: summary,
       metric: stale + waiting,
       path: "/operations#runtime-services",
-      action_label: "Open runtime services"
+      action_label: "Runtime services"
     }
   end
 
@@ -315,7 +315,7 @@ defmodule Cympho.AutonomyReadiness do
   defp mission_links_label(_), do: "Review"
 
   defp mission_links_action_label(:setup), do: "Create mission"
-  defp mission_links_action_label(_level), do: "Open goals"
+  defp mission_links_action_label(_level), do: "Goals"
 
   defp mission_links_summary(%{active_missions: 0}) do
     "Create an active mission so every issue can inherit business context."
@@ -416,7 +416,7 @@ defmodule Cympho.AutonomyReadiness do
   defp budget_path(_level), do: "/budgets"
 
   defp budget_action_label(:setup), do: "Create budget"
-  defp budget_action_label(_level), do: "Open budgets"
+  defp budget_action_label(_level), do: "Budgets"
 
   defp extension_surface_primitive(by_key) do
     extension_signals =
@@ -479,23 +479,23 @@ defmodule Cympho.AutonomyReadiness do
     |> Enum.find(fn signal -> signal.level in [:critical, :warning, :setup] end)
     |> case do
       %{action_label: label} when is_binary(label) -> label
-      %{label: label} -> "Open #{String.downcase(label)}"
-      _ -> "Open extensions"
+      %{label: label} -> label
+      _ -> "Extensions"
     end
   end
 
-  defp primitive_action_label(:org, _label), do: "Open org chart"
-  defp primitive_action_label(:runtime, _label), do: "Open launch checklist"
-  defp primitive_action_label(:agent_guides, _label), do: "Open guide repairs"
-  defp primitive_action_label(_key, label), do: "Open #{String.downcase(label)}"
+  defp primitive_action_label(:org, _label), do: "Org chart"
+  defp primitive_action_label(:runtime, _label), do: "Launch checklist"
+  defp primitive_action_label(:agent_guides, _label), do: "Guide repairs"
+  defp primitive_action_label(_key, label), do: label
 
   defp agent_guides_action_label(_prompt_counts, %{entries: entries}) when entries > 0,
-    do: "Open contract health"
+    do: "Contract health"
 
   defp agent_guides_action_label(%{watchlist: watchlist}, _contract_counts) when watchlist > 0,
-    do: "Open prompt radar"
+    do: "Prompt radar"
 
-  defp agent_guides_action_label(_prompt_counts, _contract_counts), do: "Open prompt radar"
+  defp agent_guides_action_label(_prompt_counts, _contract_counts), do: "Prompt radar"
 
   defp paperclip_label(:healthy), do: "Operating loop ready"
   defp paperclip_label(:warning), do: "Operating loop needs review"

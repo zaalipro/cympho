@@ -65,7 +65,10 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
     assert html =~ "Resolve review gates"
     assert html =~ "Blocked gates"
     assert html =~ "Open gated issue"
-    assert html =~ "Decision queue"
+    # Lane headings are plain English now; the uppercase eyebrow above each
+    # one only restated them.
+    assert html =~ "Waiting for your decision"
+    refute html =~ "Decision queue"
     assert html =~ "Approve and close"
     assert html =~ "Request changes"
     assert html =~ "Awaiting CTO review"
@@ -172,7 +175,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
 
     {:ok, _live, html} = live(conn, "/reviews")
 
-    assert html =~ "Kicked back to engineering"
+    assert html =~ "Sent back for rework"
     assert html =~ "Engineer fix needed"
     assert html =~ "last reviewed by"
   end
@@ -196,7 +199,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
 
     {:ok, _live, html} = live(conn, "/reviews")
 
-    assert html =~ "Spec review"
+    assert html =~ "Specs waiting on the CTO"
     assert html =~ "Initiative needing spec review"
     assert html =~ "proposed role: engineer"
   end
@@ -261,7 +264,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
       |> render_click()
 
     assert html =~ "Review returned to To Do for changes."
-    assert html =~ "Kicked back to engineering"
+    assert html =~ "Sent back for rework"
     assert html =~ "Needs reviewer changes"
 
     updated = Issues.get_issue!(issue.id)

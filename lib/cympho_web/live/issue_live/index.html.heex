@@ -2,10 +2,7 @@
   <div class="relative z-[1]">
     <.header>
       <div class="min-w-0">
-        <span class="ember-eyebrow">
-          {@total} in view
-        </span>
-        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           {@page_title}
         </h1>
         <p
@@ -255,7 +252,7 @@
           <.combobox
             id="filter-assignee"
             label="Assignee"
-            placeholder="Anyone"
+            placeholder="Any assignee"
             options={Enum.map(@agents, &%{id: &1.id, label: &1.name})}
             selected={@current_assignee_id}
             on_change="combobox_assignee"
@@ -468,7 +465,10 @@
         </div>
 
         <div :if={@digest_density == "detailed"} class="hidden md:block">
-          <.priority_mark priority={issue.priority} pill_class={priority_badge_class(issue.priority)} />
+          <.priority_mark
+            priority={issue.priority}
+            pill_class={priority_badge_class(issue.priority)}
+          />
         </div>
 
         <div
@@ -476,7 +476,7 @@
           class="hidden flex-col items-end justify-center gap-0.5 text-xs text-text-quaternary md:flex"
         >
           <span>{length(issue.comments)} {pluralize(length(issue.comments), "comment")}</span>
-          <span :if={issue_age(issue)}>{issue_age(issue)}</span>
+          <span :if={issue_age(issue)} title="Time since last activity">{issue_age(issue)}</span>
         </div>
 
         <div
@@ -484,7 +484,7 @@
           class="hidden justify-end text-xs text-text-quaternary md:flex"
           title={"#{length(issue.comments)} #{pluralize(length(issue.comments), "comment")}"}
         >
-          <span :if={issue_age(issue)}>{issue_age(issue)}</span>
+          <span :if={issue_age(issue)} title="Time since last activity">{issue_age(issue)}</span>
         </div>
 
         <div class="flex justify-end">

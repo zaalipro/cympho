@@ -72,8 +72,14 @@ defmodule CymphoWeb.Components.Combobox do
         ]}
         aria-haspopup="listbox"
         aria-expanded="false"
+        title={@label}
+        aria-label={@label}
       >
-        <span :if={@label} class="text-ink-muted shrink-0">{@label}:</span>
+        <%!-- "Status: Any status", "Priority: Any priority" — the placeholder
+             already names the dimension, so the prefix said it twice on every
+             filter. The word moves to the trigger's title/aria-label, which
+             also gives these controls an accessible name they lacked. --%>
+        <span :if={@label} class="ui-advanced-only text-ink-muted shrink-0">{@label}:</span>
         <span class="font-510 truncate">{@trigger_label}</span>
         <.chevron />
       </button>

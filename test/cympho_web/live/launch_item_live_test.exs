@@ -57,7 +57,10 @@ defmodule CymphoWeb.LaunchItemLiveTest do
     {:ok, view, html} = live(conn, "/launch-items")
 
     assert html =~ "Add work to the tracker"
-    assert html =~ "No blocked launch items"
+    # On an empty tracker the blocked panel and the readiness card each repeated
+    # the list's empty state; they only appear once there is work to report on.
+    refute html =~ "No blocked launch items"
+    refute html =~ "Readiness summary"
 
     html =
       view
@@ -72,6 +75,8 @@ defmodule CymphoWeb.LaunchItemLiveTest do
 
     assert html =~ "Ship launch checklist"
     assert html =~ owner_a.name
+    assert html =~ "No blocked launch items"
+    assert html =~ "Readiness summary"
 
     [item] = LaunchItems.list_company_launch_items(company.id)
 

@@ -85,7 +85,7 @@ defmodule Cympho.Costs do
   def spend_posture(company_id, spend_usd \\ Decimal.new("0")) do
     spend = decimal_or_zero(spend_usd)
     control = budget_control(company_id)
-    incidents = unresolved_budget_incidents(company_id)
+    incidents = unresolved_budget_incidents(company_id, control)
 
     build_spend_posture(spend, control, incidents)
   end
@@ -418,16 +418,31 @@ defmodule Cympho.Costs do
     end
   end
 
-  defp unresolved_budget_incidents(nil), do: %{}
+  defp unresolved_budget_incidents(nil, _control), do: %{}
 
-  defp unresolved_budget_incidents(company_id) do
+  # Spend is measured over a rolling window, but incidents were not: a single
+  # "warning" written months ago kept `budget_status/5` pinned to :watch forever,
+  # so a company at $0 spend was told "spend is near the warning threshold".
+  # Warning-class incidents are now scoped to the same window as the spend they
+  # describe. `budget_exceeded` is deliberately left unscoped — it represents a
+  # hard stop that must not be aged out by a date filter.
+  defp unresolved_budget_incidents(company_id, control) do
+    since = incident_window_start(control)
+
     BudgetIncident
     |> where([i], i.company_id == ^company_id and is_nil(i.resolved_at))
+    |> where([i], i.event_type == "budget_exceeded" or i.inserted_at >= ^since)
     |> group_by([i], i.event_type)
     |> select([i], {i.event_type, count(i.id)})
     |> Repo.all()
     |> Map.new()
   end
+
+  defp incident_window_start(%{period: period}), do: incident_window_start(period)
+  defp incident_window_start("daily"), do: DateTime.add(DateTime.utc_now(), -86_400, :second)
+  defp incident_window_start("weekly"), do: DateTime.add(DateTime.utc_now(), -604_800, :second)
+  defp incident_window_start("yearly"), do: DateTime.add(DateTime.utc_now(), -31_536_000, :second)
+  defp incident_window_start(_), do: DateTime.add(DateTime.utc_now(), -2_592_000, :second)
 
   defp build_spend_posture(spend, nil, incidents) do
     status = :unbudgeted

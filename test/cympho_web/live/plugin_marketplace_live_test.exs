@@ -22,7 +22,10 @@ defmodule CymphoWeb.PluginMarketplaceLiveTest do
       {:ok, view, html} = live(conn, "/plugins/marketplace")
 
       assert html =~ "Plugin Catalog"
-      assert html =~ "source-backed entries"
+      # The entry count was stated in the page eyebrow, a section eyebrow, and a
+      # stat tile. The stat tile is the one that stayed.
+      refute html =~ "source-backed entries"
+      assert html =~ "Catalog entries"
       assert html =~ "GitHub Integration"
       assert html =~ "Custom Webhooks"
       assert html =~ "Plugin SDK Example"

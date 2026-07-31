@@ -108,19 +108,6 @@
         <% end %>
       </div>
     </div>
-
-    <div class="ui-advanced-only grid gap-2 border-t border-border/70 px-5 py-4 sm:grid-cols-2 xl:grid-cols-4">
-      <div
-        :for={lane <- @runtime_readiness.lanes}
-        class={["ember-stat", runtime_lane_class(lane.tone)]}
-      >
-        <p class="text-eyebrow uppercase text-text-quaternary">{lane.label}</p>
-        <p class="mt-3 font-serif text-2xl font-590 text-text-primary tabular-nums">
-          {lane.value}
-        </p>
-        <p class="mt-1 text-xs capitalize text-text-tertiary">{lane.state}</p>
-      </div>
-    </div>
   </div>
   
 <!-- Adapter Grid -->
@@ -132,32 +119,36 @@
             <span class="text-lg">{adapter_icon(adapter.key)}</span>
             <h3 class="font-serif text-sm font-510 text-text-primary">{adapter.name}</h3>
           </div>
-          <%= with health <- Map.get(@health, adapter.key, %{status: :unknown}) do %>
+          <%= with status <- card_health_status(adapter, Map.get(@health, adapter.key, %{})) do %>
             <span class={[
               "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-510",
-              health_status_class(health.status)
+              health_status_class(status)
             ]}>
-              <span class={["h-1.5 w-1.5 rounded-full", health_dot_class(health.status)]}></span>
-              {health_status_label(health.status)}
+              <span class={["h-1.5 w-1.5 rounded-full", health_dot_class(status)]}></span>
+              {health_status_label(status)}
             </span>
           <% end %>
         </div>
 
-        <div class="space-y-2">
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-text-tertiary">Availability</span>
-            <span class={availability_class(adapter.available)}>
-              {availability_label(adapter.available)}
-            </span>
-          </div>
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-text-tertiary">Assigned Agents</span>
-            <span class="text-text-secondary">{agent_count(assigns, adapter.key)}</span>
-          </div>
-          <div class="ui-advanced-only flex items-center justify-between text-xs">
-            <span class="text-text-tertiary">Config Fields</span>
-            <span class="text-text-secondary">{length(adapter.config_schema)}</span>
-          </div>
+        <%!-- The badge above already states health, so the Availability row is
+             gone; the two counts read as icon + number. --%>
+        <div class="flex flex-wrap items-center gap-4 text-xs">
+          <span
+            class="inline-flex items-center gap-1.5 text-text-secondary"
+            title="Assigned Agents"
+            aria-label="Assigned Agents"
+          >
+            <.icon name="hero-users-mini" class="h-4 w-4 text-text-tertiary" />
+            {agent_count(assigns, adapter.key)}
+          </span>
+          <span
+            class="ui-advanced-only inline-flex items-center gap-1.5 text-text-secondary"
+            title="Config Fields"
+            aria-label="Config Fields"
+          >
+            <.icon name="hero-adjustments-horizontal-mini" class="h-4 w-4 text-text-tertiary" />
+            {length(adapter.config_schema)}
+          </span>
         </div>
 
         <%= with health <- Map.get(@health, adapter.key, %{}), msg <- Map.get(health, :message) do %>
@@ -181,9 +172,11 @@
             type="button"
             phx-click="test_adapter"
             phx-value-key={adapter.key}
-            class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
+            title="Test Health"
+            aria-label="Test Health"
+            class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-3 py-2 min-h-[44px] min-w-[44px] rounded-lg transition-colors inline-flex items-center justify-center"
           >
-            Test Health
+            <.icon name="hero-signal-mini" class="h-4 w-4" />
           </button>
         </div>
       </div>

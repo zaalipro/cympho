@@ -200,10 +200,11 @@ defmodule CymphoWeb.SkillLive.Index do
   attr :label, :string, required: true
   attr :value, :any, required: true
   attr :tone, :atom, default: :neutral
+  attr :title, :string, default: nil
 
   def skill_health_metric(assigns) do
     ~H"""
-    <div class="bg-surface/70 px-3 py-2 text-center">
+    <div class="bg-surface/70 px-3 py-2 text-center" title={@title}>
       <p class={"font-mono text-[18px] font-590 leading-none #{skill_metric_text(@tone)}"}>
         {@value}
       </p>
@@ -270,14 +271,6 @@ defmodule CymphoWeb.SkillLive.Index do
 
   def skill_empty_detail(_company_id) do
     "Create one narrow capability with a valid manifest, assign it only where agents can produce evidence, then watch health here."
-  end
-
-  def skill_empty_action_class(:primary) do
-    "inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-white transition-colors hover:bg-primary-hover"
-  end
-
-  def skill_empty_action_class(_tone) do
-    "inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
   end
 
   def scope_label(%{company: %{name: name}}) when is_binary(name), do: name

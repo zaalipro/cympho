@@ -55,8 +55,12 @@ defmodule CymphoWeb.ApprovalLiveTest do
       assert html =~ "Oldest: Launch gate"
       assert html =~ "Review pending"
       assert html =~ ~s(href="/approvals?status=pending")
-      assert html =~ "Queue pressure"
-      assert html =~ "linked issues"
+      # "Queue pressure" repeated the Pending count from two tiles to its left;
+      # the oldest pending gate now sits on the Pending tile itself.
+      refute html =~ "Queue pressure"
+      refute html =~ "Approved path"
+      assert html =~ "Oldest: Launch gate"
+      assert html =~ "Linked issues"
       assert html =~ "launch_gate"
       assert html =~ "Requested by"
       assert html =~ "Linked issues"

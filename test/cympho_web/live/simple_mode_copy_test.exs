@@ -15,16 +15,19 @@ defmodule CymphoWeb.SimpleModeCopyTest do
   alias CymphoWeb.ConnCase
 
   describe "paired copy" do
-    test "budgets empty state carries both the guardrail and the plain wording" do
+    test "budgets empty state carries both the operator and the plain wording" do
       {conn, _company} = board_conn()
 
       {:ok, _view, html} = live(conn, "/budgets")
 
-      assert html =~ "No spend guardrails yet"
+      # "Guardrail" is gone from this page; both halves now say "limit", but the
+      # advanced half still explains the hard stop and the simple half does not.
+      refute html =~ "guardrails yet"
+      assert html =~ "No spending limits yet"
       assert html =~ "No spending limit yet"
       assert html =~ "provider spend has a hard stop"
       assert html =~ "Set one so the team can&#39;t overspend."
-      assert html =~ "Guardrails"
+      assert html =~ "Spending limits"
       assert html =~ "Limits"
     end
 

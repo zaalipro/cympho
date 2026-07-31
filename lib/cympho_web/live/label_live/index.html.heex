@@ -2,8 +2,7 @@
   <div class="relative z-[1]">
     <.header>
       <div class="min-w-0">
-        <span class="ember-eyebrow">Taxonomy</span>
-        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           {@page_title}
         </h1>
         <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
@@ -15,13 +14,10 @@
     <div class="grid gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] lg:items-start">
       <section class="ember-glass overflow-hidden">
         <div class="border-b border-white/10 px-5 py-4">
-          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            {(@editing_label && "Edit label") || "New label"}
-          </p>
-          <h2 :if={@editing_label} class="mt-1 text-lg font-590 text-text-primary">
+          <h2 :if={@editing_label} class="text-lg font-590 text-text-primary">
             Editing: {@editing_label.name}
           </h2>
-          <h2 :if={!@editing_label} class="mt-1 text-lg font-590 text-text-primary">
+          <h2 :if={!@editing_label} class="text-lg font-590 text-text-primary">
             Create a label
           </h2>
         </div>
@@ -101,23 +97,27 @@
               </div>
             </div>
 
-            <div class="flex shrink-0 items-center gap-1.5">
+            <div class="flex shrink-0 items-center gap-1">
               <button
                 type="button"
                 phx-click="edit_label"
                 phx-value-id={label.id}
-                class="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:border-brand/40 hover:text-brand"
+                aria-label={"Edit #{label.name}"}
+                title={"Edit #{label.name}"}
+                class="inline-flex items-center justify-center rounded-lg border border-transparent p-1.5 text-text-quaternary transition-colors hover:border-border hover:bg-surface hover:text-text-secondary"
               >
-                Edit
+                <.icon name="hero-pencil-square-mini" class="h-3.5 w-3.5" />
               </button>
               <button
                 type="button"
                 phx-click="delete_label"
                 phx-value-id={label.id}
                 data-confirm="Delete this label?"
-                class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-510 text-red-300 transition-colors hover:bg-red-500/15"
+                aria-label={"Delete #{label.name}"}
+                title={"Delete #{label.name}"}
+                class="inline-flex items-center justify-center rounded-lg border border-transparent p-1.5 text-text-quaternary transition-colors hover:border-red-500/25 hover:bg-red-500/10 hover:text-red-300"
               >
-                Delete
+                <.icon name="hero-trash-mini" class="h-3.5 w-3.5" />
               </button>
             </div>
           </div>

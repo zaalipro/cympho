@@ -139,7 +139,9 @@ defmodule CymphoWeb.OrgChartLive do
           </:actions>
         </.header>
 
-        <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <%!-- No "Org health" tile here: the Org Health panel directly below
+             states the same level with its own badge. --%>
+        <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <div class="ember-stat cympho-panel px-4 py-3">
             <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Company agents
@@ -162,14 +164,6 @@ defmodule CymphoWeb.OrgChartLive do
             </p>
             <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
               {tree_depth(@org_chart)}
-            </p>
-          </div>
-          <div class="ember-stat cympho-panel px-4 py-3">
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Org health
-            </p>
-            <p class={"mt-1 font-serif text-2xl font-590 tabular-nums #{org_health_text(@org_health.level)}"}>
-              {@org_health.label}
             </p>
           </div>
         </div>
@@ -575,7 +569,12 @@ defmodule CymphoWeb.OrgChartLive do
             >
             </span>
           </div>
-          <p class="mt-0.5 truncate text-xs text-text-tertiary">
+          <%!-- The title clips in a 224px card, so the full string stays
+               reachable on hover. --%>
+          <p
+            class="mt-0.5 truncate text-xs text-text-tertiary"
+            title={@node.title || role_label(@node.role)}
+          >
             {@node.title || role_label(@node.role)}
           </p>
         </div>
@@ -584,7 +583,8 @@ defmodule CymphoWeb.OrgChartLive do
       <div class="mt-3 flex items-center justify-between gap-3 border-t border-border pt-2.5 text-xs">
         <span class="truncate text-text-quaternary">
           <%= if @node.children == [] do %>
-            {role_label(@node.role)}
+            <%!-- Leaves without a distinct title already show the role above. --%>
+            {leaf_footer_label(@node)}
           <% else %>
             {length(@node.children)} direct {plural_noun(length(@node.children), "report")}
           <% end %>
@@ -668,6 +668,14 @@ defmodule CymphoWeb.OrgChartLive do
 
   def role_label(role), do: Agent.role_label(role)
 
+  # nil when the footer would repeat the line printed under the agent name.
+  defp leaf_footer_label(node) do
+    label = role_label(node.role)
+    heading = node.title || label
+
+    if String.downcase(label) == String.downcase(heading), do: nil, else: label
+  end
+
   def status_title(status) do
     status |> to_string() |> String.replace("_", " ") |> String.capitalize()
   end
@@ -682,11 +690,6 @@ defmodule CymphoWeb.OrgChartLive do
   def status_color(:pending_approval), do: "#D97757"
   def status_color(:terminated), do: "#6B7280"
   def status_color(_), do: "#5A544C"
-
-  defp org_health_text(:critical), do: "text-red-300"
-  defp org_health_text(:warning), do: "text-amber-300"
-  defp org_health_text(:healthy), do: "text-emerald-300"
-  defp org_health_text(_), do: "text-text-primary"
 
   defp org_health_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
   defp org_health_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"

@@ -532,13 +532,16 @@ defmodule CymphoWeb.AdapterLive.Show do
   defp health_status_label(:unhealthy), do: "Unhealthy"
   defp health_status_label(_), do: "Unknown"
 
-  defp schema_type_label(:string), do: "Text"
-  defp schema_type_label(:integer), do: "Number"
-  defp schema_type_label(:boolean), do: "Toggle"
-  defp schema_type_label(:float), do: "Decimal"
-  defp schema_type_label(:map), do: "JSON"
-  defp schema_type_label(:list), do: "List"
-  defp schema_type_label(_), do: "Text"
+  # nil when the role would just repeat the agent name above it ("CEO" / "Ceo").
+  defp distinct_role_label(agent) do
+    label =
+      agent.role
+      |> Atom.to_string()
+      |> String.replace("_", " ")
+      |> String.capitalize()
+
+    if String.downcase(label) == String.downcase(agent.name || ""), do: nil, else: label
+  end
 
   defp format_datetime(nil), do: "Never"
   defp format_datetime(dt), do: CymphoWeb.Format.format_datetime(dt)

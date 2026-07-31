@@ -447,7 +447,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="ember-aurora p-6 lg:p-8 w-full min-w-0">
+    <div class="ember-aurora p-6 lg:p-8 w-full min-w-0" data-ui-complex-page>
       <div class="relative z-[1] mx-auto max-w-6xl">
         <.header>
           <div class="min-w-0">
@@ -525,7 +525,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
           </div>
         </section>
 
-        <div class="mb-6 flex flex-wrap gap-4 items-center justify-between">
+        <%!-- Audit tooling: the four export buttons are download icons that keep
+             their label as the accessible name, and the chain check already has
+             a primary button in the command strip above. --%>
+        <div class="ui-advanced-only mb-6 flex flex-wrap gap-4 items-center justify-between">
           <div class="flex gap-2">
             <button
               type="button"
@@ -538,53 +541,45 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
             <button
               :if={!@export_data_json}
               type="button"
-              class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              title="Export JSON"
+              aria-label="Export JSON"
+              class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-button px-3 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
               phx-click="export_json"
             >
-              Export JSON
+              <span class="hero-arrow-down-tray-mini h-4 w-4"></span> JSON
             </button>
 
             <a
               :if={@export_data_json}
               download={"tool-traces-#{Date.utc_today()}.json"}
               href={"data:application/json;charset=utf-8,#{URI.encode(@export_data_json)}"}
-              class="inline-flex items-center gap-2 rounded-lg border border-success/20 bg-success/10 px-4 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
+              title="Download JSON"
+              aria-label="Download JSON"
+              class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-success/20 bg-success/10 px-3 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                />
-              </svg>
-              Download JSON
+              <span class="hero-arrow-down-tray-mini h-4 w-4"></span> JSON
             </a>
 
             <button
               :if={!@export_data_csv}
               type="button"
-              class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              title="Export CSV"
+              aria-label="Export CSV"
+              class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-button px-3 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
               phx-click="export_csv"
             >
-              Export CSV
+              <span class="hero-arrow-down-tray-mini h-4 w-4"></span> CSV
             </button>
 
             <a
               :if={@export_data_csv}
               download={"tool-traces-#{Date.utc_today()}.csv"}
               href={"data:text/csv;charset=utf-8,#{URI.encode(@export_data_csv)}"}
-              class="inline-flex items-center gap-2 rounded-lg border border-success/20 bg-success/10 px-4 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
+              title="Download CSV"
+              aria-label="Download CSV"
+              class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-success/20 bg-success/10 px-3 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                />
-              </svg>
-              Download CSV
+              <span class="hero-arrow-down-tray-mini h-4 w-4"></span> CSV
             </a>
           </div>
 
@@ -595,6 +590,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
         <form
           id="trace-filters"
+          phx-change="filter"
           phx-submit="filter"
           class="mb-6 scroll-mt-6 bg-surface border border-border rounded-xl p-4"
         >
@@ -646,47 +642,23 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
             </div>
           </div>
 
+          <%!-- Filters apply on change like every other filter bar, so there is
+               no Apply button and Clear is an icon. --%>
           <div class="flex gap-2">
             <button
-              type="submit"
-              class="cta-glow rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-            >
-              Apply Filters
-            </button>
-
-            <button
               type="button"
-              class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              title="Clear Filters"
+              aria-label="Clear Filters"
+              class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-button text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
               phx-click="clear_filters"
             >
-              Clear Filters
+              <span class="hero-x-mark-mini h-4 w-4"></span>
             </button>
           </div>
         </form>
 
-        <%= if @statistics do %>
-          <div class="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="bg-surface border border-border rounded-xl p-4">
-              <div class="text-text-secondary text-sm mb-1">Total Calls</div>
-              <div class="text-2xl font-590 text-text-primary">{@statistics.total_calls}</div>
-            </div>
-
-            <div class="bg-surface border border-border rounded-xl p-4">
-              <div class="text-text-secondary text-sm mb-1">Success</div>
-              <div class="text-2xl font-590 text-green-400">{@statistics.success_calls}</div>
-            </div>
-
-            <div class="bg-surface border border-border rounded-xl p-4">
-              <div class="text-text-secondary text-sm mb-1">Errors</div>
-              <div class="text-2xl font-590 text-brand">{@statistics.error_calls}</div>
-            </div>
-
-            <div class="bg-surface border border-border rounded-xl p-4">
-              <div class="text-text-secondary text-sm mb-1">Pending</div>
-              <div class="text-2xl font-590 text-yellow-400">{@statistics.pending_calls}</div>
-            </div>
-          </div>
-        <% end %>
+        <%!-- Total/Success/Errors/Pending already sit in the Trace command
+             strip; the big-card copy of the same four numbers is gone. --%>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
           <div class="lg:col-span-2 min-w-0">

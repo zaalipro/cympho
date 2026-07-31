@@ -89,15 +89,15 @@ defmodule CymphoWeb.ActivityLiveTest do
     assert html =~ "Open costs"
     assert html =~ "Budget threshold exceeded"
     assert html =~ "Nina Owner"
-    assert html =~ "Governance"
-    assert html =~ "Costs"
-    assert html =~ "Runs"
+    # The six-number metric strip is gone; the audit lane cards are the only
+    # place the per-family counts render now.
     assert html =~ ~s(data-testid="activity-audit-lanes")
     assert html =~ "Audit lanes"
     assert html =~ "Issue changes"
     assert html =~ "Governance decisions"
     assert html =~ "Spend events"
     assert html =~ "Runtime events"
+    assert html =~ "Other events"
     assert html =~ "Show budget threshold exceeded"
     assert html =~ ~s(href="/activity?filter_action=budget_threshold_exceeded")
     assert html =~ "Show approval created"

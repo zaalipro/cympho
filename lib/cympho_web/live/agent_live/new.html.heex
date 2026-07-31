@@ -16,8 +16,7 @@
 
     <.header>
       <div class="min-w-0">
-        <span class="ember-eyebrow">Agent hire</span>
-        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           New Agent
         </h1>
         <p class="ui-simple-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
@@ -88,26 +87,9 @@
         <% role_value = @form[:role].value || "engineer" %>
         <% role_name = role_label(role_value) %>
 
+        <%!-- No panel preamble: the page h1 and its one sentence already
+             introduce the form, and each section below carries its own lead. --%>
         <.panel class="ember-glass overflow-hidden">
-          <div class="border-b border-border px-5 py-4 sm:px-6">
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Agent launch plan
-            </p>
-            <h2 class="ui-simple-only mt-1 text-lg font-590 text-text-primary">
-              Set identity and reporting
-            </h2>
-            <h2 class="ui-advanced-only mt-1 text-lg font-590 text-text-primary">
-              Configure the operator before work enters the queue
-            </h2>
-            <p class="ui-simple-only mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-              Name the teammate, choose the role, and decide who receives its handoffs.
-            </p>
-            <p class="ui-advanced-only mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-              Choose the role, reporting line, runtime profile, and operating guide that decide how this
-              agent picks up work and hands it off.
-            </p>
-          </div>
-
           <div class="space-y-8 p-5 sm:p-6">
             <section
               data-testid="new-agent-identity-section"

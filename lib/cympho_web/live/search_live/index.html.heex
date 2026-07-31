@@ -1,12 +1,11 @@
 <.page size="wide" data-ui-complex-page class="ember-aurora">
   <div class="relative z-[1]">
     <.header>
-      <span class="ember-eyebrow">Command surface</span>
-      <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+      <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
         Search
       </h1>
       <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-        Find company work, owners, projects, and goals from one scoped command surface.
+        Find issues, people, projects, and goals in this company.
       </p>
     </.header>
 
@@ -367,7 +366,7 @@
             <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Results
             </p>
-            <h2 class="mt-1 text-card-title text-text-primary">
+            <h2 :if={@query != ""} class="mt-1 text-card-title text-text-primary">
               {result_heading(@results, @total_count, @active_tab, @query)}
             </h2>
           </div>

@@ -58,6 +58,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
         </.header>
 
         <section
+          :if={@workspace_health.metrics.total_project_workspaces > 0}
           data-testid="workspace-command"
           class="mb-5 overflow-hidden rounded-lg border border-border bg-panel shadow-card"
         >
@@ -81,21 +82,6 @@ defmodule CymphoWeb.WorkspaceLive.Index do
               <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
                 {@workspace_command.detail}
               </p>
-
-              <div
-                :if={@workspace_command.focus_label}
-                class="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs"
-              >
-                <span class="max-w-full truncate rounded-full border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
-                  {@workspace_command.focus_label}
-                </span>
-                <span
-                  :if={@workspace_command.focus_detail}
-                  class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary"
-                >
-                  {@workspace_command.focus_detail}
-                </span>
-              </div>
             </div>
 
             <.app_link
@@ -281,8 +267,6 @@ defmodule CymphoWeb.WorkspaceLive.Index do
   end
 
   defp workspace_command(%{level: level, metrics: metrics, summary: summary}) do
-    focus = workspace_command_focus(metrics)
-
     %{
       tone: level,
       badge: workspace_command_badge(level),
@@ -290,8 +274,6 @@ defmodule CymphoWeb.WorkspaceLive.Index do
       detail: workspace_command_detail(level, summary),
       action_label: workspace_command_action_label(level),
       action_path: workspace_command_action_path(level),
-      focus_label: elem(focus, 0),
-      focus_detail: elem(focus, 1),
       metrics: workspace_command_metrics(metrics)
     }
   end
@@ -330,28 +312,6 @@ defmodule CymphoWeb.WorkspaceLive.Index do
         tone: count_tone(metrics.failed_probes, :critical)
       }
     ]
-  end
-
-  defp workspace_command_focus(metrics) do
-    cond do
-      metrics.unhealthy_services > 0 ->
-        {"Runtime health", "#{metrics.unhealthy_services} service(s) failing"}
-
-      metrics.failed_probes > 0 ->
-        {"Environment probes", "#{metrics.failed_probes} failing check(s)"}
-
-      metrics.previewless_services > 0 ->
-        {"Preview access", "#{metrics.previewless_services} running service(s) hidden"}
-
-      metrics.stale_execution_workspaces > 0 ->
-        {"Workspace cleanup", "#{metrics.stale_execution_workspaces} stale lane(s)"}
-
-      metrics.total_project_workspaces == 0 ->
-        {"Setup required", "No controlled execution directory"}
-
-      true ->
-        {"Runtime ready", "#{metrics.running_services} inspectable service(s)"}
-    end
   end
 
   defp workspace_command_badge(:critical), do: "Needs attention"

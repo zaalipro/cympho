@@ -105,7 +105,6 @@ defmodule CymphoWeb.AdapterLive.Index do
       summary: runtime_summary(counts, attention_adapter),
       tone: runtime_tone(counts),
       stats: runtime_stats(counts),
-      lanes: runtime_lanes(counts),
       attention_adapter: attention_adapter,
       actions: runtime_actions(counts)
     }
@@ -113,9 +112,6 @@ defmodule CymphoWeb.AdapterLive.Index do
 
   defp adapter_counts(adapters, health, agents_by_adapter) do
     healthy = Enum.count(adapters, &(health_status(health, &1.key) == :healthy))
-    degraded = Enum.count(adapters, &(health_status(health, &1.key) == :degraded))
-    unhealthy = Enum.count(adapters, &(health_status(health, &1.key) == :unhealthy))
-    unknown = Enum.count(adapters, &(health_status(health, &1.key) == :unknown))
     unavailable = Enum.count(adapters, &(not &1.available))
     assigned = agents_by_adapter |> Map.values() |> Enum.map(&length/1) |> Enum.sum()
     attention = Enum.count(adapters, &adapter_attention?(&1, health))
@@ -128,9 +124,6 @@ defmodule CymphoWeb.AdapterLive.Index do
     %{
       total: length(adapters),
       healthy: healthy,
-      degraded: degraded,
-      unhealthy: unhealthy,
-      unknown: unknown,
       unavailable: unavailable,
       assigned_agents: assigned,
       configured_adapters: configured,
@@ -152,20 +145,24 @@ defmodule CymphoWeb.AdapterLive.Index do
   defp runtime_summary(%{total: 0}, _attention_adapter), do: "No adapters are registered."
 
   defp runtime_summary(%{assigned_agents: 0} = counts, _attention_adapter) do
-    "#{counts.healthy} of #{counts.total} adapters are healthy, but no agents are assigned to a runtime yet."
+    "#{counts.healthy} of #{counts.total} #{adapter_noun(counts.total)} healthy, but no agents are assigned to a runtime yet."
   end
 
   defp runtime_summary(%{attention: 0} = counts, _attention_adapter) do
-    "#{counts.healthy} of #{counts.total} adapters are healthy with #{counts.assigned_agents} assigned #{pluralize(counts.assigned_agents, "agent")}."
+    "#{counts.healthy} of #{counts.total} #{adapter_noun(counts.total)} healthy with #{counts.assigned_agents} assigned #{pluralize(counts.assigned_agents, "agent")}."
   end
 
   defp runtime_summary(counts, nil) do
-    "#{counts.healthy} of #{counts.total} adapters are healthy; #{counts.attention} runtime signals need attention."
+    "#{counts.healthy} of #{counts.total} #{adapter_noun(counts.total)} healthy; #{counts.attention} runtime signals need attention."
   end
 
   defp runtime_summary(counts, adapter) do
-    "#{counts.healthy} of #{counts.total} adapters are healthy; check #{adapter.name} before routing more work."
+    "#{counts.healthy} of #{counts.total} #{adapter_noun(counts.total)} healthy; check #{adapter.name} before routing more work."
   end
+
+  # "1 adapter is healthy", not "1 adapters are healthy".
+  defp adapter_noun(1), do: "adapter is"
+  defp adapter_noun(_n), do: "adapters are"
 
   defp runtime_tone(%{total: 0}), do: :blocked
   defp runtime_tone(%{assigned_agents: 0}), do: :attention
@@ -179,7 +176,7 @@ defmodule CymphoWeb.AdapterLive.Index do
       %{
         label: "Assigned agents",
         value: counts.assigned_agents,
-        note: "#{counts.configured_adapters} adapters in use"
+        note: "#{counts.configured_adapters} #{adapter_noun(counts.configured_adapters)} in use"
       },
       %{
         label: "Needs attention",
@@ -188,37 +185,6 @@ defmodule CymphoWeb.AdapterLive.Index do
       }
     ]
   end
-
-  defp runtime_lanes(counts) do
-    [
-      %{
-        label: "Healthy adapters",
-        value: counts.healthy,
-        state: lane_state(counts.healthy, "ready", "missing"),
-        tone: :ready
-      },
-      %{
-        label: "Degraded",
-        value: counts.degraded,
-        state: lane_state(counts.degraded, "watch", "clear"),
-        tone: :warning
-      },
-      %{
-        label: "Unhealthy",
-        value: counts.unhealthy,
-        state: lane_state(counts.unhealthy, "repair", "clear"),
-        tone: :danger
-      },
-      %{
-        label: "Unavailable",
-        value: counts.unavailable,
-        state: lane_state(counts.unavailable, "install", "clear"),
-        tone: :muted
-      }
-    ]
-  end
-
-  defp lane_state(count, positive, zero), do: if(count > 0, do: positive, else: zero)
 
   defp runtime_actions(%{assigned_agents: 0}) do
     [
@@ -248,26 +214,28 @@ defmodule CymphoWeb.AdapterLive.Index do
     end
   end
 
+  # One health vocabulary per card: an adapter that is not installed reads
+  # "Unavailable" instead of contradicting a probe status of "Degraded".
+  defp card_health_status(%{available: false}, _health), do: :unavailable
+  defp card_health_status(_adapter, health), do: Map.get(health, :status, :unknown)
+
   defp health_status_class(:healthy), do: "bg-success/20 text-success"
   defp health_status_class(:degraded), do: "bg-amber-500/20 text-amber-400"
   defp health_status_class(:unhealthy), do: "bg-brand/20 text-brand"
+  defp health_status_class(:unavailable), do: "bg-brand/20 text-brand"
   defp health_status_class(_), do: "bg-text-quaternary/20 text-text-quaternary"
 
   defp health_dot_class(:healthy), do: "bg-success animate-pulse"
   defp health_dot_class(:degraded), do: "bg-amber-400 animate-pulse"
   defp health_dot_class(:unhealthy), do: "bg-brand animate-pulse"
+  defp health_dot_class(:unavailable), do: "bg-brand"
   defp health_dot_class(_), do: "bg-text-quaternary"
 
   defp health_status_label(:healthy), do: "Healthy"
   defp health_status_label(:degraded), do: "Degraded"
   defp health_status_label(:unhealthy), do: "Unhealthy"
+  defp health_status_label(:unavailable), do: "Unavailable"
   defp health_status_label(_), do: "Unknown"
-
-  defp availability_class(true), do: "text-success"
-  defp availability_class(false), do: "text-brand"
-
-  defp availability_label(true), do: "Available"
-  defp availability_label(false), do: "Unavailable"
 
   defp runtime_panel_class(:ready), do: "border-success/25 bg-success/10"
   defp runtime_panel_class(:attention), do: "border-amber-500/25 bg-amber-500/10"
@@ -281,15 +249,6 @@ defmodule CymphoWeb.AdapterLive.Index do
   defp runtime_action_class(_tone) do
     "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
   end
-
-  defp runtime_lane_class(:ready),
-    do: "rounded-lg border border-success/25 bg-success/10 px-4 py-3"
-
-  defp runtime_lane_class(:warning),
-    do: "rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3"
-
-  defp runtime_lane_class(:danger), do: "rounded-lg border border-brand/25 bg-brand/10 px-4 py-3"
-  defp runtime_lane_class(_tone), do: "rounded-lg border border-border bg-surface-1 px-4 py-3"
 
   defp pluralize(1, word), do: word
   defp pluralize(_count, word), do: word <> "s"

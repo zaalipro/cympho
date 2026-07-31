@@ -1,20 +1,9 @@
 <.settings_layout active={:profile}>
-  <.header
-    title="Profile"
-    subtitle="Your account details. Shown across Cympho and used as the sender for your notifications."
-  />
+  <.header title="Profile" subtitle="Your name and email, as they appear across Cympho." />
 
   <.panel class="max-w-xl overflow-hidden">
-    <div class="flex items-center gap-4 border-b border-border bg-gradient-to-b from-surface-2/40 to-transparent p-5">
-      <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-brand/25 bg-brand/10 font-serif text-lg font-590 text-brand">
-        {profile_initial(@user)}
-      </div>
-      <div class="min-w-0">
-        <p class="truncate text-sm font-590 text-text-primary">{@user.name || "Unnamed"}</p>
-        <p class="truncate text-xs text-text-tertiary">{@user.email}</p>
-      </div>
-    </div>
-
+    <%!-- The card header printed the name and email that the two inputs below
+         already show, prefilled with the same values. --%>
     <div class="p-5">
       <p class="mb-4 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
         Edit your details

@@ -1,8 +1,10 @@
 <.settings_layout active={:notifications}>
   <.header title={@page_title} />
 
+  <%!-- This card used to render for any nil user, so it announced "No users
+       found" directly above a picker listing real users. --%>
   <div
-    :if={@user == nil}
+    :if={@user == nil and @users == []}
     class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
   >
     <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-subtle text-text-tertiary">
@@ -25,7 +27,7 @@
     :if={@user == nil and @users != []}
     class="mt-4 rounded-xl border border-border bg-surface p-4"
   >
-    <h2 class="mb-3 text-xs font-590 uppercase tracking-wider text-text-secondary">Users</h2>
+    <h2 class="mb-3 text-sm font-590 text-text-primary">Choose a user</h2>
     <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
       <button
         :for={user <- @users}
@@ -59,7 +61,7 @@
               </div>
             </div>
             <div class="flex shrink-0 items-center gap-2.5">
-              <span class={status_word_class(channel_enabled?(@prefs, "email"))}>
+              <span class="sr-only">
                 {if channel_enabled?(@prefs, "email"), do: "On", else: "Off"}
               </span>
               <button
@@ -95,7 +97,7 @@
               </div>
             </div>
             <div class="flex shrink-0 items-center gap-2.5">
-              <span class={status_word_class(channel_enabled?(@prefs, "telegram"))}>
+              <span class="sr-only">
                 {if channel_enabled?(@prefs, "telegram"), do: "On", else: "Off"}
               </span>
               <button
@@ -172,7 +174,7 @@
               </div>
             </div>
             <div class="flex shrink-0 items-center gap-2.5">
-              <span class={status_word_class(channel_enabled?(@prefs, "webhook"))}>
+              <span class="sr-only">
                 {if channel_enabled?(@prefs, "webhook"), do: "On", else: "Off"}
               </span>
               <button
@@ -249,25 +251,19 @@
           id={"events-#{pref.channel_type}"}
           class="rounded-xl border border-border bg-panel p-4"
         >
+          <%!-- Each channel had two on/off switches — one here and one in
+               Channels above — with no way to tell which one won. Channels owns
+               turning a channel on; this card only picks the events it carries. --%>
           <div class="mb-3 flex items-center justify-between gap-3">
             <h3 class="text-sm font-590 text-text-primary">
               {String.capitalize(pref.channel_type)}
             </h3>
-            <div class="flex items-center gap-2.5">
-              <span class={status_word_class(pref.enabled)}>
-                {if pref.enabled, do: "On", else: "Off"}
-              </span>
-              <button
-                type="button"
-                aria-label={"Toggle #{pref.channel_type} channel"}
-                aria-pressed={to_string(pref.enabled)}
-                class={switch_track_class(pref.enabled)}
-                phx-click="toggle_pref_enabled"
-                phx-value-pref_id={pref.id}
-              >
-                <span class={switch_knob_class(pref.enabled)}></span>
-              </button>
-            </div>
+            <span
+              :if={not pref.enabled}
+              class="rounded-md border border-border bg-surface px-2 py-0.5 text-xs font-510 text-text-quaternary"
+            >
+              Channel off
+            </span>
           </div>
           <div class="space-y-2">
             <button

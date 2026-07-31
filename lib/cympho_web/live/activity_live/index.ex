@@ -8,11 +8,10 @@ defmodule CymphoWeb.ActivityLive.Index do
   )
   @cost_actions ~w(cost_incurred budget_threshold_exceeded)
   @runtime_actions ~w(heartbeat_started heartbeat_completed heartbeat_failed)
+  # Only actions whose metadata says something the action label does not. The
+  # rest ("assigned" -> "Assigned to agent") just restated the row above.
   @detail_actions ~w(
-    created title_changed description_changed priority_changed status_changed
-    assigned unassigned blocker_added blocker_removed comment_added approval_created
-    approval_resolved approval_approved approval_rejected approval_requested_changes
-    heartbeat_started heartbeat_completed heartbeat_failed cost_incurred
+    title_changed status_changed priority_changed cost_incurred
     budget_threshold_exceeded work_product_created
   )
 
@@ -108,12 +107,11 @@ defmodule CymphoWeb.ActivityLive.Index do
       focus_label: nil,
       focus_detail: nil,
       action_path: ~p"/issues/new",
-      action_label: "Create issue",
-      metrics: empty_activity_metrics()
+      action_label: "Create issue"
     }
   end
 
-  defp build_activity_command(%{total: 0, by_action: by_action}, true) do
+  defp build_activity_command(%{total: 0}, true) do
     %{
       empty_activity_command()
       | tone: :filtered,
@@ -122,16 +120,13 @@ defmodule CymphoWeb.ActivityLive.Index do
         detail:
           "The activity log may still have events outside the current action or actor filter.",
         action_path: ~p"/activity",
-        action_label: "Clear filters",
-        metrics: activity_metrics(0, by_action)
+        action_label: "Clear filters"
     }
   end
 
-  defp build_activity_command(%{total: 0, by_action: by_action}, false) do
-    %{empty_activity_command() | metrics: activity_metrics(0, by_action)}
-  end
+  defp build_activity_command(%{total: 0}, false), do: empty_activity_command()
 
-  defp build_activity_command(%{total: total, by_action: by_action, latest: latest}, _filtered?) do
+  defp build_activity_command(%{by_action: by_action, latest: latest}, _filtered?) do
     counts = command_counts(by_action)
     focus = activity_focus(latest)
 
@@ -193,26 +188,7 @@ defmodule CymphoWeb.ActivityLive.Index do
           }
       end
 
-    Map.merge(command, %{
-      focus_label: focus.label,
-      focus_detail: focus.detail,
-      metrics: activity_metrics(total, by_action)
-    })
-  end
-
-  defp empty_activity_metrics, do: activity_metrics(0, %{})
-
-  defp activity_metrics(total, by_action) do
-    counts = command_counts(by_action)
-
-    [
-      %{label: "Total", value: total, tone: :neutral},
-      %{label: "Issues", value: counts.issue, tone: :issue},
-      %{label: "Governance", value: counts.governance, tone: :governance},
-      %{label: "Costs", value: counts.cost, tone: :cost},
-      %{label: "Runs", value: counts.runtime, tone: :runtime},
-      %{label: "Other", value: counts.other, tone: :neutral}
-    ]
+    Map.merge(command, %{focus_label: focus.label, focus_detail: focus.detail})
   end
 
   defp build_activity_audit_lanes(%{by_action: by_action}, filtered?) do
@@ -272,7 +248,9 @@ defmodule CymphoWeb.ActivityLive.Index do
       summary: summary,
       action_label: activity_lane_action_label(action, filtered?),
       action_path: activity_lane_action_path(action, filtered?),
-      state_label: activity_lane_state_label(count, filtered?)
+      state_label: activity_lane_state_label(count, filtered?),
+      # An empty lane in an unfiltered view needs no pill; "filtered out" does.
+      show_state?: count > 0 or filtered?
     }
   end
 
@@ -466,12 +444,6 @@ defmodule CymphoWeb.ActivityLive.Index do
   defp activity_command_action_class(_),
     do: "border-border bg-surface text-text-secondary hover:bg-surface-hover"
 
-  defp activity_metric_value_class(:cost), do: "text-amber-300"
-  defp activity_metric_value_class(:runtime), do: "text-cyan-300"
-  defp activity_metric_value_class(:governance), do: "text-brand"
-  defp activity_metric_value_class(:issue), do: "text-emerald-300"
-  defp activity_metric_value_class(_), do: "text-text-primary"
-
   defp activity_lane_card_class(:issue), do: "border-l-2 border-l-emerald-400/70"
   defp activity_lane_card_class(:governance), do: "border-l-2 border-l-brand/70"
   defp activity_lane_card_class(:cost), do: "border-l-2 border-l-amber-400/70"
@@ -507,42 +479,12 @@ defmodule CymphoWeb.ActivityLive.Index do
   defp render_metadata(assigns) do
     ~H"""
     <%= case @action do %>
-      <% "created" -> %>
-        Created issue
       <% "title_changed" -> %>
         Changed title from <code class="text-xs bg-surface px-1 rounded">{@metadata["from"]}</code>
         to <code class="text-xs bg-surface px-1 rounded">{@metadata["to"]}</code>
-      <% "description_changed" -> %>
-        Updated description
       <% "status_changed" -> %>
         Changed status from <span class="text-xs">{@metadata["from"]}</span>
         to <span class="text-xs">{@metadata["to"]}</span>
-      <% "assigned" -> %>
-        Assigned to agent
-      <% "unassigned" -> %>
-        Unassigned
-      <% "blocker_added" -> %>
-        Added blocker
-      <% "blocker_removed" -> %>
-        Removed blocker
-      <% "comment_added" -> %>
-        Added a comment
-      <% "approval_created" -> %>
-        Created approval
-      <% "approval_approved" -> %>
-        Approved
-      <% "approval_rejected" -> %>
-        Rejected
-      <% "approval_requested_changes" -> %>
-        Requested changes
-      <% "approval_resolved" -> %>
-        Resolved approval
-      <% "heartbeat_started" -> %>
-        Started heartbeat
-      <% "heartbeat_completed" -> %>
-        Completed heartbeat
-      <% "heartbeat_failed" -> %>
-        Heartbeat failed
       <% "cost_incurred" -> %>
         Incurred cost: <span class="text-xs">{@metadata["amount"]}</span>
       <% "budget_threshold_exceeded" -> %>

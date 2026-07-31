@@ -48,12 +48,6 @@
       <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
-            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-              Project command
-            </p>
-            <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{project_state_class(@project_command.tone)}"}>
-              {@project_command.badge}
-            </span>
             <.badge variant="pill" value={@project.prefix} />
             <.badge variant="status" value={to_string(@project.status)} />
           </div>
@@ -120,7 +114,15 @@
             navigate={~p"/issues/#{issue.id}"}
             class="group flex min-w-0 items-center gap-3 p-4 transition-colors hover:bg-subtle hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
           >
-            <.badge variant="status" value={to_string(issue.status)} />
+            <%!-- A dot, not a pill: every row of a young project repeats the same
+                 status word, which crowds out the title without telling you anything. --%>
+            <span
+              role="img"
+              aria-label={status_label(issue.status)}
+              title={status_label(issue.status)}
+              class={["h-2 w-2 shrink-0 rounded-full", status_dot_class(issue.status)]}
+            >
+            </span>
             <span
               :if={issue.identifier}
               class="shrink-0 font-mono text-xs text-text-quaternary"
@@ -159,10 +161,17 @@
           class="ui-advanced-only overflow-hidden rounded-lg border border-border bg-panel"
         >
           <div class="px-4 py-3">
-            <p class="text-sm font-590 text-text-primary">Execution readiness</p>
-            <p class="mt-1 text-xs leading-5 text-text-tertiary">
-              The minimum context agents need before they can execute safely.
-            </p>
+            <div class="flex items-center gap-1.5">
+              <p class="text-sm font-590 text-text-primary">Setup</p>
+              <span
+                role="img"
+                aria-label="The minimum context agents need before they can execute safely."
+                title="The minimum context agents need before they can execute safely."
+                class="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-[10px] font-590 text-text-quaternary"
+              >
+                ?
+              </span>
+            </div>
             <hr class="ember-rule mt-3" />
           </div>
 
@@ -260,7 +269,7 @@
           <div class="px-4 py-3">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p class="text-sm font-590 text-text-primary">Mission control</p>
+                <p class="text-sm font-590 text-text-primary">Goals</p>
                 <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
                   Root goals connected to this project and their issue progress.
                 </p>
@@ -344,9 +353,12 @@
           <div data-ui-simple-single-column class="grid gap-5 sm:grid-cols-2">
             <.input field={@form[:prefix]} label="Prefix" required placeholder="PROJ" />
             <div class="ui-advanced-only" data-testid="project-status-field">
+              <%!-- Without `value` the trigger renders its placeholder, so an
+                   active project's Status read "Select…" until you touched it. --%>
               <.select
                 name="project[status]"
                 label="Status"
+                value={to_string(@project.status || :active)}
                 options={[Active: "active", Archived: "archived"]}
               />
             </div>
@@ -421,8 +433,22 @@
             phx-submit="add_env"
             class="grid grid-cols-1 items-end gap-2 border-t border-border pt-4 sm:grid-cols-[160px_1fr_auto]"
           >
-            <.input field={@env_form[:key]} label="Key" placeholder="GITHUB_TOKEN" />
-            <.input field={@env_form[:value]} type="password" label="Value" placeholder="ghp_..." />
+            <%!-- A text field followed by a password field looks like a login
+                 form to Chrome, which was autofilling the signed-in user's
+                 email and password into Key/Value. --%>
+            <.input
+              field={@env_form[:key]}
+              label="Key"
+              placeholder="GITHUB_TOKEN"
+              autocomplete="off"
+            />
+            <.input
+              field={@env_form[:value]}
+              type="password"
+              label="Value"
+              placeholder="ghp_..."
+              autocomplete="new-password"
+            />
             <:actions>
               <.button type="submit" variant="secondary">Add</.button>
             </:actions>

@@ -14,12 +14,14 @@ defmodule CymphoWeb.OnboardingLive.Index do
     %{
       id: :company,
       title: "Name the company",
-      description: "Set the company name, goal, and issue prefix"
+      description: "Set the company name, goal, and issue prefix",
+      simple_description: "Set the company name, its first goal, and its first project"
     },
     %{
       id: :team,
       title: "Build the team",
-      description: "Pick your engineers and which AI each role uses"
+      description: "Pick your engineers and which AI each role uses",
+      simple_description: "Pick your engineers and the AI they all run on"
     },
     %{
       id: :launch,
@@ -32,6 +34,10 @@ defmodule CymphoWeb.OnboardingLive.Index do
       description: "Your company structure and starting work are ready"
     }
   ]
+
+  # Simple mode hides the issue prefix and the per-role model fields, so the step
+  # subtitle must not promise controls the reader cannot see.
+  defp step_simple_description(step), do: Map.get(step, :simple_description, step.description)
 
   @impl true
   def mount(_params, _session, socket) do

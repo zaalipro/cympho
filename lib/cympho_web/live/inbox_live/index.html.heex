@@ -517,7 +517,7 @@
               navigate={item.target_path}
               class={"rounded-lg border border-border bg-surface text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary #{if @digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2"}"}
             >
-              {item.target_label || "Open details"}
+              {owner_decision_label(item)}
             </.app_link>
             <.app_link
               :if={item.review_nudge && item.review_nudge.target_path}

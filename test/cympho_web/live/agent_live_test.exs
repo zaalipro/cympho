@@ -462,7 +462,7 @@ defmodule CymphoWeb.AgentLiveTest do
       assert has_element?(view, "[data-testid='agent-skill-loadout']")
       assert html =~ "Agent skill loadout"
       assert html =~ "Prompt capability readiness"
-      assert html =~ "1/2 assigned skill(s) are prompt-ready"
+      assert html =~ "1/2 assigned skills prompt-ready"
       assert html =~ "Repair assigned skills"
       assert html =~ "Prompt Ready Skill"
       assert html =~ "Prompt-ready"
@@ -1789,7 +1789,9 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, view, html} = live(conn, "/agents/new")
 
       assert html =~ "Adapter"
-      assert html =~ "Agent launch plan"
+      # The "Agent launch plan" panel preamble was removed; the numbered first
+      # section is now the form's leading copy.
+      assert html =~ "1 · Identity and reporting"
       assert html =~ ~s(data-testid="new-agent-identity-section")
       assert html =~ ~s(data-testid="new-agent-adapter-section")
       assert html =~ ~s(data-testid="new-agent-guide-section")

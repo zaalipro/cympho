@@ -1,10 +1,7 @@
 <div class="ember-aurora p-6 lg:p-8 max-w-6xl mx-auto">
   <div class="relative z-[1]">
     <.header>
-      <span class="ember-eyebrow">
-        Local plugin catalog · {length(@available_plugins)} source-backed entries
-      </span>
-      <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+      <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
         {@page_title}
       </h1>
       <:actions>
@@ -94,9 +91,6 @@
     </div>
 
     <%!-- Plugin Grid --%>
-    <p class="mb-3 px-1 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-      Source-backed local extensions
-    </p>
     <div class="stagger-children grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       <%= for plugin <- filtered_plugins(@available_plugins, @search_query, @installed_identifiers) do %>
         <div
@@ -123,7 +117,7 @@
           </div>
 
           <%!-- Description --%>
-          <p class="text-xs leading-5 text-text-secondary line-clamp-2 flex-1 mb-4">
+          <p class="text-xs leading-5 text-text-secondary line-clamp-2 mb-4">
             {plugin.description}
           </p>
 
@@ -146,7 +140,7 @@
           </div>
 
           <%!-- Actions --%>
-          <div class="flex items-center gap-2">
+          <div class="mt-auto flex items-center gap-2">
             <%= if plugin.is_installed do %>
               <span class="flex-1 inline-flex items-center justify-center gap-1.5 text-center bg-success/10 text-success text-xs font-510 px-3 py-2 rounded-lg">
                 <.icon name="hero-check-circle-mini" class="w-4 h-4" /> Installed

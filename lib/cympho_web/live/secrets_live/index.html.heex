@@ -1,9 +1,6 @@
 <.settings_layout active={:secrets}>
   <.header>
-    <span class="ember-eyebrow">
-      Vault · {@runtime_credential_guide.ready_count} of {@runtime_credential_guide.total_count} lanes ready
-    </span>
-    <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+    <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
       {@page_title}
     </h1>
     <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
@@ -79,14 +76,6 @@
             {@runtime_credential_guide.summary}
           </p>
         </div>
-        <button
-          :if={@can_manage_secrets}
-          type="button"
-          phx-click="show_create_form"
-          class="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
-        >
-          <.icon name="hero-plus" class="h-4 w-4" /> Add any secret
-        </button>
       </div>
     </div>
 
@@ -119,25 +108,13 @@
           </div>
         </div>
 
-        <dl class="mt-3 grid gap-2 sm:grid-cols-2">
-          <div class="rounded-md border border-border bg-canvas/60 px-3 py-2">
-            <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Profile
-            </dt>
-            <dd class="mt-1 break-words text-xs text-text-secondary">{profile.profile}</dd>
-          </div>
-          <div class="rounded-md border border-border bg-canvas/60 px-3 py-2">
-            <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Model
-            </dt>
-            <dd class="mt-1 break-words text-xs text-text-secondary">{profile.model}</dd>
-          </div>
-          <div class="rounded-md border border-border bg-canvas/60 px-3 py-2 sm:col-span-2">
-            <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Endpoint
-            </dt>
-            <dd class="mt-1 break-words text-xs text-text-secondary">{profile.endpoint}</dd>
-          </div>
+        <dl class="mt-3 space-y-1 rounded-md border border-border bg-canvas/60 px-3 py-2 text-xs text-text-secondary">
+          <dt class="sr-only">Profile</dt>
+          <dd class="break-words" title="Profile">{profile.profile}</dd>
+          <dt class="sr-only">Model</dt>
+          <dd class="break-words" title="Model">{profile.model}</dd>
+          <dt class="sr-only">Endpoint</dt>
+          <dd class="break-words" title="Endpoint">{profile.endpoint}</dd>
         </dl>
 
         <div class="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">

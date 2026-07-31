@@ -42,9 +42,6 @@
         <h1 class="ember-ink flex items-center gap-2 font-serif text-[clamp(24px,3vw,32px)] font-510 leading-[1.1] tracking-[-0.02em]">
           <span class="min-w-0 truncate">{@page_title}</span>
         </h1>
-        <p class="ui-advanced-only ember-eyebrow mt-2">
-          {if @runtime_enabled?, do: "Execution board", else: "Review mode"}
-        </p>
       </div>
 
       <div
@@ -199,7 +196,7 @@
       <.combobox
         id="kanban-filter-assignee"
         label="Assignee"
-        placeholder="Anyone"
+        placeholder="Any assignee"
         options={Enum.map(@agents, &%{id: &1.id, label: &1.name})}
         selected={@filter_assignee_id}
         on_change="combobox_assignee"

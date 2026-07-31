@@ -266,7 +266,7 @@ defmodule Cympho.OwnerAttention do
         title: failed_run_title(run),
         summary: failed_run_summary(run),
         target_path: "/issues/#{run.issue_id}",
-        target_label: "Inspect failed run",
+        target_label: "See what happened",
         diagnostic: failed_run_diagnostic(run),
         severity: :critical,
         inserted_at: run.completed_at || run.inserted_at

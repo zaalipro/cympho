@@ -54,14 +54,4 @@ defmodule CymphoWeb.SettingsLive.Profile do
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
     assign(socket, :form, to_form(changeset))
   end
-
-  defp profile_initial(%{name: name}) when is_binary(name) and name != "" do
-    name |> String.trim() |> String.first() |> to_string() |> String.upcase()
-  end
-
-  defp profile_initial(%{email: email}) when is_binary(email) and email != "" do
-    email |> String.first() |> to_string() |> String.upcase()
-  end
-
-  defp profile_initial(_user), do: "?"
 end

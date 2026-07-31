@@ -126,35 +126,37 @@ defmodule Cympho.Plugins do
       :repair_manifests,
       :critical,
       "Repair manifests",
-      "#{metrics.status_error_plugins + metrics.manifest_error_plugins} plugin(s) have an error status or manifest validation errors."
+      (fn n ->
+         "#{n} #{plural(n, "plugin")} #{verb(n, "has", "have")} an error status or manifest validation errors."
+       end).(metrics.status_error_plugins + metrics.manifest_error_plugins)
     )
     |> maybe_recommend(
       metrics.recent_error_logs > 0,
       :inspect_error_logs,
       :critical,
       "Inspect error logs",
-      "#{metrics.recent_error_logs} plugin error log(s) were recorded in the last 24 hours."
+      "#{metrics.recent_error_logs} plugin error #{plural(metrics.recent_error_logs, "log")} #{verb(metrics.recent_error_logs, "was", "were")} recorded in the last 24 hours."
     )
     |> maybe_recommend(
       metrics.failing_webhooks > 0,
       :fix_webhooks,
       :warning,
       "Fix webhooks",
-      "#{metrics.failing_webhooks} enabled webhook(s) have delivery failures."
+      "#{metrics.failing_webhooks} enabled #{plural(metrics.failing_webhooks, "webhook")} #{verb(metrics.failing_webhooks, "has", "have")} delivery failures."
     )
     |> maybe_recommend(
       metrics.capabilityless_enabled_plugins > 0,
       :scope_capabilities,
       :warning,
       "Scope capabilities",
-      "#{metrics.capabilityless_enabled_plugins} enabled plugin(s) declare no capabilities."
+      "#{metrics.capabilityless_enabled_plugins} enabled #{plural(metrics.capabilityless_enabled_plugins, "plugin")} #{verb(metrics.capabilityless_enabled_plugins, "declares", "declare")} no capabilities."
     )
     |> maybe_recommend(
       metrics.disabled_plugins > 0,
       :audit_disabled_plugins,
       :info,
       "Audit disabled plugins",
-      "#{metrics.disabled_plugins} plugin(s) are disabled."
+      "#{metrics.disabled_plugins} #{plural(metrics.disabled_plugins, "plugin")} #{verb(metrics.disabled_plugins, "is", "are")} disabled."
     )
   end
 
@@ -267,7 +269,7 @@ defmodule Cympho.Plugins do
 
   defp plugin_health_summary(%{supervisor_running?: false, enabled_plugins: enabled})
        when enabled > 0 do
-    "Plugin supervisor is unavailable while #{enabled} plugin(s) are enabled."
+    "Plugin supervisor is unavailable while #{enabled} #{plural(enabled, "plugin")} #{verb(enabled, "is", "are")} enabled."
   end
 
   defp plugin_health_summary(%{
@@ -276,7 +278,9 @@ defmodule Cympho.Plugins do
          recent_error_logs: logs
        })
        when status_errors > 0 or manifest_errors > 0 or logs > 0 do
-    "#{status_errors + manifest_errors} plugin error(s) and #{logs} recent error log(s) need attention."
+    (fn n ->
+       "#{n} plugin #{plural(n, "error")} and #{logs} recent error #{plural(logs, "log")} need attention."
+     end).(status_errors + manifest_errors)
   end
 
   defp plugin_health_summary(%{
@@ -285,10 +289,18 @@ defmodule Cympho.Plugins do
          disabled_plugins: disabled
        })
        when webhooks > 0 or capabilityless > 0 or disabled > 0 do
-    "#{capabilityless} capability gap(s), #{webhooks} webhook issue(s), and #{disabled} disabled plugin(s) need review."
+    "#{capabilityless} capability #{plural(capabilityless, "gap")}, #{webhooks} webhook #{plural(webhooks, "issue")}, and #{disabled} disabled #{plural(disabled, "plugin")} need review."
   end
 
   defp plugin_health_summary(%{enabled_plugins: enabled}) do
-    "#{enabled} enabled plugin(s) are supervised and capability-scoped."
+    "#{enabled} enabled #{plural(enabled, "plugin")} #{verb(enabled, "is", "are")} supervised and capability-scoped."
   end
+
+  # Owner-facing health copy reads as a sentence: "1 plugin is disabled",
+  # not "1 plugin(s) are disabled".
+  defp plural(1, word), do: word
+  defp plural(_n, word), do: word <> "s"
+
+  defp verb(1, singular, _plural), do: singular
+  defp verb(_n, _singular, plural), do: plural
 end

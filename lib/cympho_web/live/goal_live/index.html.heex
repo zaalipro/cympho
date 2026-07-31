@@ -96,16 +96,8 @@
 
       <div
         :if={@digest_density == "detailed"}
-        class="grid grid-cols-2 border-t border-hairline sm:grid-cols-5"
+        class="grid grid-cols-2 border-t border-hairline sm:grid-cols-4"
       >
-        <div class="ember-stat border-r border-hairline px-4 py-3 last:border-r-0">
-          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Aligned
-          </p>
-          <p class="mt-1 font-mono text-xl font-590 text-text-primary tabular-nums">
-            {@goal_command.aligned_percent}%
-          </p>
-        </div>
         <div class="ember-stat border-r border-hairline px-4 py-3 last:border-r-0">
           <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
             Needs link
@@ -147,71 +139,34 @@
     >
       <.panel class="overflow-hidden">
         <div class="border-b border-border px-5 py-4">
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Mission alignment
-              </p>
-              <h2 class="mt-1 text-card-title text-text-primary">
-                {@alignment_summary.aligned_percent}% of open work is goal-linked
-              </h2>
-            </div>
-            <span class={[
-              "rounded-full border px-2.5 py-1 text-xs font-510",
-              alignment_status_class(@alignment_summary.status)
-            ]}>
-              {alignment_status_label(@alignment_summary.status)}
-            </span>
-          </div>
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Mission alignment
+          </p>
+          <h2 class="mt-1 text-card-title text-text-primary">
+            {@alignment_summary.aligned_percent}% of open work is goal-linked
+          </h2>
           <p class="mt-2 max-w-3xl text-body-sm text-text-tertiary">
             {alignment_status_detail(@alignment_summary.status)}
           </p>
           <hr class="ember-rule mt-4" />
         </div>
 
-        <div class="grid gap-5 px-5 py-5 lg:grid-cols-[220px_minmax(0,1fr)]">
-          <div>
-            <div class="flex items-end gap-2">
-              <span class="text-5xl font-650 leading-none text-text-primary">
-                {@alignment_summary.aligned_percent}
-              </span>
-              <span class="pb-1 text-sm font-510 text-text-tertiary">percent aligned</span>
-            </div>
-            <div class="mt-4 h-2 overflow-hidden rounded-full bg-surface-2">
-              <div
-                class="progress-spring h-full rounded-full bg-primary"
-                style={progress_width(@alignment_summary.aligned_percent)}
-              >
-              </div>
-            </div>
-            <p class="mt-3 text-caption text-text-tertiary">
-              {@alignment_summary.mission_aligned} goal-linked of {@alignment_summary.total_open} open issues.
+        <div class="grid grid-cols-2 gap-2 px-5 py-5 sm:grid-cols-3">
+          <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
+            <p class="text-eyebrow uppercase text-text-quaternary">Missions</p>
+            <p class="mt-1 text-card-title text-text-primary">
+              {@alignment_summary.active_missions}
             </p>
           </div>
-
-          <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
-              <p class="text-eyebrow uppercase text-text-quaternary">Missions</p>
-              <p class="mt-1 text-card-title text-text-primary">
-                {@alignment_summary.active_missions}
-              </p>
-            </div>
-            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
-              <p class="text-eyebrow uppercase text-text-quaternary">Active Goals</p>
-              <p class="mt-1 text-card-title text-text-primary">
-                {@alignment_summary.active_goals}
-              </p>
-            </div>
-            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
-              <p class="text-eyebrow uppercase text-text-quaternary">Idle Goals</p>
-              <p class="mt-1 text-card-title text-amber-300">
-                {@alignment_summary.goals_without_work}
-              </p>
-            </div>
-            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
-              <p class="text-eyebrow uppercase text-text-quaternary">Floating</p>
-              <p class="mt-1 text-card-title text-red-300">{@alignment_summary.floating}</p>
-            </div>
+          <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
+            <p class="text-eyebrow uppercase text-text-quaternary">Active Goals</p>
+            <p class="mt-1 text-card-title text-text-primary">
+              {@alignment_summary.active_goals}
+            </p>
+          </div>
+          <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
+            <p class="text-eyebrow uppercase text-text-quaternary">Floating</p>
+            <p class="mt-1 text-card-title text-red-300">{@alignment_summary.floating}</p>
           </div>
         </div>
       </.panel>
@@ -289,9 +244,11 @@
       id="goals"
       has_more={@infinite_scroll[:goals][:has_more?] || false}
       container_class={
+        # auto-fit, not fixed columns: with one goal a 3-column grid squeezed the
+        # card to a third of the row and truncated its title against dead space.
         if @digest_density == "compact",
-          do: "grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3",
-          else: "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
+          do: "grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-2",
+          else: "grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-4"
       }
       end_label="All goals loaded"
     >
@@ -336,7 +293,9 @@
               <p class="font-serif text-[12px] font-510 italic tracking-[0.02em] text-brand/80">
                 {goal_type_label(goal.goal_type)}
               </p>
-              <h3 class="mt-1 truncate text-base font-650 text-text-primary">{goal.title}</h3>
+              <h3 class="mt-1 truncate text-base font-650 text-text-primary" title={goal.title}>
+                {goal.title}
+              </h3>
             </div>
             <div class="flex shrink-0 items-center gap-1.5">
               <.badge variant="status" value={goal.status} />

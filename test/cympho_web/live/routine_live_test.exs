@@ -36,6 +36,8 @@ defmodule CymphoWeb.RoutineLiveTest do
 
   describe "Index" do
     test "renders the routines page", %{conn: conn} do
+      {:ok, _routine} = create_routine(%{name: "Rendered Routine"})
+
       {:ok, _view, html} = live(conn, "/routines")
       assert html =~ "Routines"
       assert html =~ "Routine command"
@@ -44,10 +46,15 @@ defmodule CymphoWeb.RoutineLiveTest do
       refute html =~ "Routine Health"
     end
 
-    test "shows empty state when no routines exist", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/routines")
-      assert html =~ "Create the first routine"
+    test "shows a single empty state when no routines exist", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/routines?density=detailed")
+      # The command card and health card both restated the list's empty state;
+      # with nothing to run only the list empty state and the header CTA remain.
+      refute has_element?(view, "[data-testid='routine-command']")
+      refute has_element?(view, "[data-testid='routine-health']")
       assert html =~ "No routines yet"
+      assert html =~ "Create the first routine to schedule autonomous work."
+      assert html =~ "New Routine"
     end
 
     test "shows routine health diagnostics", %{conn: conn} do
@@ -63,7 +70,7 @@ defmodule CymphoWeb.RoutineLiveTest do
       assert html =~ "Needs attention"
       assert html =~ "Trigger gaps"
       assert html =~ "Add triggers"
-      assert html =~ "Next operator move"
+      assert html =~ "Do this next"
       assert html =~ "Open trigger gaps"
     end
 

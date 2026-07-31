@@ -59,14 +59,24 @@
     </p>
   </.panel>
 
-  <div class="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-5">
+  <%!-- Only statuses that actually have work: a six-cell strip where five read 0
+       repeats the "0/6 issues done" line above it without adding anything. --%>
+  <% present_statuses =
+    Enum.filter(
+      [:backlog, :todo, :in_progress, :in_review, :done, :blocked],
+      &(Map.get(@status_counts, &1, 0) > 0)
+    ) %>
+
+  <div
+    :if={present_statuses != []}
+    class="grid grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-2 mb-5"
+  >
     <div
-      :for={status <- [:backlog, :todo, :in_progress, :in_review, :done, :blocked]}
+      :for={status <- present_statuses}
       class="ember-stat bg-surface-1 border border-hairline rounded-md px-3 py-2.5"
     >
-      <% count = Map.get(@status_counts, status, 0) %>
       <div class="text-eyebrow text-ink-tertiary uppercase">{status_label(status)}</div>
-      <div class={"text-card-title mt-0.5 #{count_color(count, "text-ink")}"}>{count}</div>
+      <div class="text-card-title mt-0.5 text-ink">{Map.get(@status_counts, status, 0)}</div>
     </div>
   </div>
 

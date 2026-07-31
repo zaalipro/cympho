@@ -419,7 +419,7 @@
 
         <div class="border-t border-border p-4 lg:border-l lg:border-t-0">
           <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Next operator move
+            Do this next
           </p>
           <a
             href={@ceo_command_lane.action_path}
@@ -505,9 +505,60 @@
         </div>
       </div>
 
-      <div class="stagger-children mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div
+        :if={@autonomy_readiness.paperclip}
+        data-testid="operating-readiness"
+        class="mt-4 flex flex-col gap-3 rounded-lg border border-border bg-canvas/55 p-3 lg:flex-row lg:items-start lg:justify-between"
+      >
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              Autonomous operating readiness
+            </p>
+            <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-510 #{readiness_badge_class(@autonomy_readiness.paperclip.level)}"}>
+              {@autonomy_readiness.paperclip.label}
+            </span>
+          </div>
+          <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+            {@autonomy_readiness.paperclip.summary}
+          </p>
+        </div>
+
+        <div class="grid shrink-0 grid-cols-3 divide-x divide-border overflow-hidden rounded-md border border-border bg-surface/40">
+          <div class="px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Ready
+            </p>
+            <p class="mt-1 font-mono text-[20px] font-590 leading-none tabular-nums text-teal-300">
+              {@autonomy_readiness.paperclip.ready_count}
+            </p>
+          </div>
+          <div class="px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Review
+            </p>
+            <p class="mt-1 font-mono text-[20px] font-590 leading-none tabular-nums text-amber-300">
+              {@autonomy_readiness.paperclip.attention_count}
+            </p>
+          </div>
+          <div class="px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Setup
+            </p>
+            <p class="mt-1 font-mono text-[20px] font-590 leading-none tabular-nums text-text-tertiary">
+              {@autonomy_readiness.paperclip.missing_count}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <%!-- One card per readiness concern. The operating primitives for org,
+           runtime, and agent guides restated their signal card's summary
+           verbatim, so readiness_cards/1 keeps only the primitives that add
+           a concern the signals do not already cover. --%>
+      <div class="stagger-children mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <a
-          :for={signal <- @autonomy_readiness.signals}
+          :for={signal <- readiness_cards(@autonomy_readiness)}
           href={signal.path}
           class={"group rounded-lg border px-3 py-3 transition hover:bg-surface-hover/50 #{readiness_signal_class(signal.level)}"}
         >
@@ -535,87 +586,6 @@
             <span class="hero-arrow-up-right-mini h-3.5 w-3.5 shrink-0"></span>
           </div>
         </a>
-      </div>
-
-      <div
-        :if={@autonomy_readiness.paperclip}
-        data-testid="operating-readiness"
-        class="mt-4 rounded-lg border border-border bg-canvas/55 p-3"
-      >
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                Autonomous operating readiness
-              </p>
-              <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-510 #{readiness_badge_class(@autonomy_readiness.paperclip.level)}"}>
-                {@autonomy_readiness.paperclip.label}
-              </span>
-            </div>
-            <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
-              {@autonomy_readiness.paperclip.summary}
-            </p>
-          </div>
-
-          <div class="grid shrink-0 grid-cols-3 divide-x divide-border overflow-hidden rounded-md border border-border bg-surface/40">
-            <div class="px-3 py-2">
-              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                Ready
-              </p>
-              <p class="mt-1 font-mono text-[20px] font-590 leading-none tabular-nums text-teal-300">
-                {@autonomy_readiness.paperclip.ready_count}
-              </p>
-            </div>
-            <div class="px-3 py-2">
-              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                Review
-              </p>
-              <p class="mt-1 font-mono text-[20px] font-590 leading-none tabular-nums text-amber-300">
-                {@autonomy_readiness.paperclip.attention_count}
-              </p>
-            </div>
-            <div class="px-3 py-2">
-              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                Setup
-              </p>
-              <p class="mt-1 font-mono text-[20px] font-590 leading-none tabular-nums text-text-tertiary">
-                {@autonomy_readiness.paperclip.missing_count}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div class="stagger-children mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          <a
-            :for={primitive <- @autonomy_readiness.paperclip.primitives}
-            href={primitive.path}
-            class={"group rounded-md border px-3 py-2.5 transition hover:bg-surface-hover/50 #{readiness_signal_class(primitive.level)}"}
-          >
-            <div class="flex items-start justify-between gap-2">
-              <div class="min-w-0">
-                <p class="truncate text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                  {primitive.label}
-                </p>
-                <p class={["mt-1 text-sm font-590", readiness_signal_text(primitive.level)]}>
-                  {primitive.health_label}
-                </p>
-              </div>
-              <span class={[
-                "shrink-0 font-mono text-[16px] font-590 tabular-nums",
-                readiness_signal_text(primitive.level)
-              ]}>
-                {primitive.metric}
-              </span>
-            </div>
-            <p class="mt-1.5 line-clamp-2 min-h-8 text-xs leading-4 text-text-tertiary">
-              {primitive.summary}
-            </p>
-            <div class="mt-3 flex items-center justify-between gap-2 text-[11px] font-590 text-text-secondary transition group-hover:text-text-primary">
-              <span>{Map.get(primitive, :action_label, "Open")}</span>
-              <span class="hero-arrow-up-right-mini h-3.5 w-3.5 shrink-0"></span>
-            </div>
-          </a>
-        </div>
       </div>
     </section>
 
@@ -927,10 +897,7 @@
     <div class="ui-advanced-only stagger-children mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-stretch">
       <.panel class="flex flex-col overflow-hidden">
         <div class="flex items-center justify-between border-b border-border px-4 py-3">
-          <div>
-            <h2 class="text-sm font-590 text-text-primary">Active Agents</h2>
-            <p class="mt-0.5 text-[11px] text-text-quaternary">Current execution roster</p>
-          </div>
+          <h2 class="text-sm font-590 text-text-primary">Active Agents</h2>
           <.app_link
             navigate={~p"/org-chart"}
             class="text-xs text-text-tertiary hover:text-text-primary"
@@ -1056,7 +1023,7 @@
             <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Bottlenecks
             </p>
-            <h2 class="mt-1 text-sm font-590 text-text-primary">Autonomy patrol</h2>
+            <h2 class="mt-1 text-sm font-590 text-text-primary">Stuck work</h2>
           </div>
           <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-510 #{patrol_badge_class(@patrol_summary.level)}"}>
             {@patrol_summary.label}
@@ -1104,10 +1071,7 @@
           :if={Enum.empty?(@patrol_summary.issues)}
           class="mt-4 rounded-lg border border-border bg-surface/30 px-3 py-3"
         >
-          <p class="text-sm font-510 text-text-primary">No patrol candidates</p>
-          <p class="mt-1 text-xs leading-4 text-text-tertiary">
-            In-progress, review, and blocked work are moving inside the current thresholds.
-          </p>
+          <p class="text-sm font-510 text-text-primary">Nothing stuck</p>
         </div>
 
         <div :if={!Enum.empty?(@patrol_summary.issues)} class="mt-4 space-y-2">

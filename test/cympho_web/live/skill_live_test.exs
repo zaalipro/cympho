@@ -14,7 +14,10 @@ defmodule CymphoWeb.SkillLiveTest do
       assert html =~ "No reusable skills configured yet"
       assert html =~ "Create one narrow capability with a valid manifest"
       assert html =~ "New skill"
-      assert html =~ "Runtime checklist"
+      # The health block said "no skills" twice more and added a third CTA; the
+      # empty state's second destination went with it.
+      refute html =~ ~s(data-testid="skill-health")
+      refute html =~ "Runtime checklist"
       refute html =~ "No skills found"
     end
 
@@ -51,9 +54,12 @@ defmodule CymphoWeb.SkillLiveTest do
       assert has_element?(view, "[data-testid='skill-health']")
       assert has_element?(view, "[data-testid='skill-next-action']")
       assert html =~ "Skill Health"
-      assert html =~ "Cap gaps"
+      # "Cap gaps" and "Next operator move" were unexplained jargon.
+      assert html =~ "Capability gaps"
+      assert html =~ "Auto-reload"
       assert html =~ "Declare capabilities"
-      assert html =~ "Next operator move"
+      assert html =~ "Do this next"
+      refute html =~ "Next operator move"
       assert html =~ "Current Company Skill"
       refute html =~ "Other Company Skill"
     end

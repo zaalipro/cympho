@@ -59,6 +59,8 @@ defmodule CymphoWeb.CostLive.Index do
     approaching_budgets = Costs.approaching_threshold_budgets(company_id)
     exceeded_budgets = Costs.exceeded_budgets(company_id)
     spend_posture = Costs.spend_posture(company_id, summary.total_cost)
+    sparkline_7d = Costs.sparkline(company_id, 7)
+    sparkline_30d = Costs.sparkline(company_id, 30)
 
     socket
     |> assign(:summary, summary)
@@ -69,8 +71,25 @@ defmodule CymphoWeb.CostLive.Index do
     |> assign(:daily_costs, daily_costs)
     |> assign(:by_goal, by_goal)
     |> assign(:by_mission, by_mission)
-    |> assign(:sparkline_7d, Costs.sparkline(company_id, 7))
-    |> assign(:sparkline_30d, Costs.sparkline(company_id, 30))
+    |> assign(:sparkline_7d, sparkline_7d)
+    |> assign(:sparkline_30d, sparkline_30d)
+    |> assign(
+      :spend_breakdowns_empty?,
+      Enum.all?(
+        [
+          daily_costs,
+          sparkline_7d,
+          sparkline_30d,
+          by_mission,
+          by_goal,
+          by_agent,
+          by_issue,
+          by_model,
+          by_provider
+        ],
+        &Enum.empty?/1
+      )
+    )
     |> assign(:active_budgets, active_budgets)
     |> assign(:approaching_budgets, approaching_budgets)
     |> assign(:exceeded_budgets, exceeded_budgets)
@@ -119,25 +138,17 @@ defmodule CymphoWeb.CostLive.Index do
 
   def format_tokens(_), do: "0"
 
-  def budget_spent_percentage(summary) do
-    summary.budget_spent
-    |> decimal_or_zero()
-    |> Decimal.div(decimal_or_zero(summary.budget_limit))
-    |> Decimal.mult(100)
-    |> format_percentage()
-  end
-
   @doc """
   Humane, plain-language read on where spend sits inside the active budget
   envelope so a large-but-safe number stays calm instead of alarming.
   """
-  def spend_pace(summary) do
-    limit = decimal_or_zero(summary.budget_limit)
-    spent = decimal_or_zero(summary.budget_spent)
+  def spend_pace(posture) do
+    limit = decimal_or_zero(posture.budget_limit)
+    spent = decimal_or_zero(posture.budget_spend)
 
     if Decimal.gt?(limit, Decimal.new("0")) do
       pct = Decimal.to_float(Decimal.mult(Decimal.div(spent, limit), 100))
-      pct_label = budget_spent_percentage(summary)
+      pct_label = format_percentage(Decimal.mult(Decimal.div(spent, limit), 100))
       envelope = format_cost(limit)
 
       cond do
@@ -277,14 +288,12 @@ defmodule CymphoWeb.CostLive.Index do
         "#{pluralize(count, "budget control")} need attention before more autonomous runtime is launched.",
       action_label: "Review budgets",
       action_path: "/budgets",
-      driver: budget_driver(exceeded_budgets, posture),
-      metrics: cost_command_metrics(posture)
+      driver: budget_driver(exceeded_budgets, posture)
     }
   end
 
   defp build_cost_command(%{
-         summary: %{has_unpriced_usage?: true} = summary,
-         spend_posture: posture
+         summary: %{has_unpriced_usage?: true} = summary
        }) do
     %{
       tone: :warning,
@@ -295,13 +304,7 @@ defmodule CymphoWeb.CostLive.Index do
       action_label: "Inspect drivers",
       action_path: "#top-cost-drivers",
       driver:
-        "#{format_tokens(summary.unpriced_tokens)} unpriced tokens across #{pluralize(summary.unpriced_request_count, "request")}.",
-      metrics: [
-        %{label: "Spend", value: format_cost(summary.total_cost)},
-        %{label: "Unpriced", value: format_tokens(summary.unpriced_tokens)},
-        %{label: "Requests", value: to_string(summary.unpriced_request_count)},
-        %{label: "Budget", value: posture_limit(posture)}
-      ]
+        "#{format_tokens(summary.unpriced_tokens)} unpriced tokens across #{pluralize(summary.unpriced_request_count, "request")}."
     }
   end
 
@@ -316,17 +319,15 @@ defmodule CymphoWeb.CostLive.Index do
       tone: :warning,
       badge: "Spend watch",
       title: "Triage spend before the next run",
-      summary:
-        "Spend is near the configured warning threshold. Check the largest driver before approving more runtime.",
+      summary: watch_summary(posture),
       action_label: "Inspect drivers",
       action_path: "#top-cost-drivers",
-      driver: top_cost_driver(by_agent, by_issue, by_provider, approaching_budgets),
-      metrics: cost_command_metrics(posture)
+      driver: top_cost_driver(by_agent, by_issue, by_provider, approaching_budgets)
     }
   end
 
   defp build_cost_command(%{
-         spend_posture: %{budget_status: :unbudgeted} = posture,
+         spend_posture: %{budget_status: :unbudgeted},
          summary: summary
        }) do
     has_spend? = Decimal.gt?(decimal_or_zero(summary.total_cost), Decimal.new("0"))
@@ -337,7 +338,7 @@ defmodule CymphoWeb.CostLive.Index do
       title:
         if(has_spend?,
           do: "Add a company budget before scaling agents",
-          else: "Set the first spend guardrail"
+          else: "Set the first spending limit"
         ),
       summary:
         if(has_spend?,
@@ -349,8 +350,7 @@ defmodule CymphoWeb.CostLive.Index do
       action_label: "Create budget",
       action_path: "/budgets/new",
       driver:
-        if(has_spend?, do: "Current period spend: #{format_cost(summary.total_cost)}", else: nil),
-      metrics: cost_command_metrics(posture)
+        if(has_spend?, do: "Current period spend: #{format_cost(summary.total_cost)}", else: nil)
     }
   end
 
@@ -363,13 +363,11 @@ defmodule CymphoWeb.CostLive.Index do
         "#{pluralize(posture.budget_control_count, "scoped control")} exist, but there is no comparable company-wide spend limit.",
       action_label: "Create company budget",
       action_path: "/budgets/new",
-      driver: nil,
-      metrics: cost_command_metrics(posture)
+      driver: nil
     }
   end
 
   defp build_cost_command(%{
-         spend_posture: posture,
          by_agent: by_agent,
          by_issue: by_issue,
          by_provider: by_provider
@@ -381,9 +379,24 @@ defmodule CymphoWeb.CostLive.Index do
       summary: "Spend is inside the active budget envelope for this period.",
       action_label: "Review budgets",
       action_path: "#active-budgets",
-      driver: top_cost_driver(by_agent, by_issue, by_provider, []),
-      metrics: cost_command_metrics(posture)
+      driver: top_cost_driver(by_agent, by_issue, by_provider, [])
     }
+  end
+
+  # `Costs.spend_posture/2` also returns `:watch` when an unresolved budget
+  # incident from an earlier period is still open, so the threshold sentence is
+  # a false alarm whenever this window's usage is below the warning line.
+  defp watch_summary(%{budget_used_percent: used, budget_warning_threshold_pct: threshold})
+       when is_integer(used) do
+    if used >= Decimal.to_integer(Decimal.round(threshold, 0)) do
+      "Spend is near the configured warning threshold. Check the largest driver before approving more runtime."
+    else
+      "This window's spend is inside the limit, but an earlier budget alert is still open. Resolve it in Budgets, or check the largest driver first."
+    end
+  end
+
+  defp watch_summary(_posture) do
+    "An open budget alert is unresolved. Resolve it in Budgets, or check the largest driver before approving more runtime."
   end
 
   defp budget_driver([budget | _], _posture),
@@ -422,20 +435,10 @@ defmodule CymphoWeb.CostLive.Index do
 
   defp top_cost_driver(_agents, _issues, _providers, _budgets), do: nil
 
-  defp cost_command_metrics(posture) do
-    [
-      %{label: "Spend", value: format_cost(posture.budget_spend)},
-      %{label: "Limit", value: posture_limit(posture)},
-      %{label: "Used", value: posture_used(posture)},
-      %{label: "Incidents", value: to_string(posture.budget_incident_count)}
-    ]
-  end
-
+  # The summary card reads the same posture the command strip does, so the page
+  # cannot show a $100 limit above a $0 limit.
   defp posture_limit(%{budget_limit: nil}), do: "Not set"
   defp posture_limit(%{budget_limit: limit}), do: format_cost(limit)
-
-  defp posture_used(%{budget_used_percent: nil}), do: "N/A"
-  defp posture_used(%{budget_used_percent: used}), do: format_percentage(used)
 
   defp cost_command_badge_class(:critical),
     do: "border-red-500/25 bg-red-500/10 text-red-300"

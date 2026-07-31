@@ -3,6 +3,7 @@ defmodule CymphoWeb.IssueLive.MyIssues do
   import Ecto.Query
   alias Cympho.Issues
   alias Cympho.Agents
+  alias Cympho.Repo
 
   @impl true
   def mount(_params, _session, socket) do
@@ -35,6 +36,8 @@ defmodule CymphoWeb.IssueLive.MyIssues do
       |> assign(:agents, agents)
       |> assign(:current_tab, tab)
 
+    socket = assign(socket, :multiple_projects?, multiple_projects?(socket))
+
     {:noreply, init_stream(socket, :issues, &fetch_issues(socket, &1))}
   end
 
@@ -55,27 +58,48 @@ defmodule CymphoWeb.IssueLive.MyIssues do
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   defp reload(socket) do
-    reset_stream(socket, :issues, &fetch_issues(socket, &1))
+    socket
+    |> assign(:multiple_projects?, multiple_projects?(socket))
+    |> reset_stream(:issues, &fetch_issues(socket, &1))
   end
 
   defp fetch_issues(socket, cursor) do
-    tab = socket.assigns.current_tab
+    case issues_query(socket) do
+      nil -> empty_page()
+      query -> Issues.paginate_issues_query(query, after: cursor)
+    end
+  end
+
+  defp issues_query(socket) do
     agent_ids = Enum.map(socket.assigns.agents, & &1.id)
     user = socket.assigns[:current_user]
     company = socket.assigns[:current_company]
 
-    query =
-      case tab do
-        "active" -> active_issues_query(agent_ids)
-        "created_by_me" -> user_created_issues_query(user, company)
-        "watching" -> watching_issues_query(agent_ids)
-        "all" -> all_company_issues_query(company, agent_ids)
-        _ -> nil
-      end
+    case socket.assigns.current_tab do
+      "active" -> active_issues_query(agent_ids)
+      "created_by_me" -> user_created_issues_query(user, company)
+      "watching" -> watching_issues_query(agent_ids)
+      "all" -> all_company_issues_query(company, agent_ids)
+      _ -> nil
+    end
+  end
 
-    case query do
-      nil -> empty_page()
-      query -> Issues.paginate_issues_query(query, after: cursor)
+  # The project chip repeats the same name on every row when the list covers a
+  # single project, so it only earns its space once the list spans more.
+  defp multiple_projects?(socket) do
+    case issues_query(socket) do
+      nil ->
+        false
+
+      query ->
+        project_ids =
+          query
+          |> where([i], not is_nil(i.project_id))
+          |> distinct(true)
+          |> select([i], i.project_id)
+          |> Repo.all()
+
+        length(project_ids) > 1
     end
   end
 
@@ -114,6 +138,10 @@ defmodule CymphoWeb.IssueLive.MyIssues do
     |> where([i], i.assignee_id in ^agent_ids or i.company_id == ^company.id)
     |> where([i], i.status not in [:done, :cancelled])
   end
+
+  def status_label(:in_progress), do: "In progress"
+  def status_label(:in_review), do: "In review"
+  def status_label(status), do: status |> to_string() |> String.capitalize()
 
   def status_color(:backlog), do: "bg-gray-400"
   def status_color(:todo), do: "bg-blue-400"

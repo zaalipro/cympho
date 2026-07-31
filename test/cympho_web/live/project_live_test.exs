@@ -54,7 +54,10 @@ defmodule CymphoWeb.ProjectLiveTest do
 
       assert html =~ "Workstream health"
       assert html =~ "3 open issues across 2 active projects"
-      assert html =~ "Project queue signals"
+      # The "Project queue signals" panel restated Blocked/Review/No Repo from the
+      # stat strip next to it; the strip is the single home for those counts now.
+      refute html =~ "Project queue signals"
+      assert html =~ "No Repo"
       assert html =~ "Flow Project"
       assert html =~ "No repository configured"
       assert html =~ "1 active goal"
@@ -117,12 +120,22 @@ defmodule CymphoWeb.ProjectLiveTest do
       {:ok, view, html} = live(conn, "/projects/new")
 
       assert html =~ "New project"
-      assert html =~ "Project launch plan"
-      assert html =~ "Operating boundary"
-      assert html =~ "Issue identifier"
-      assert html =~ "Workspace posture"
+      # The section eyebrows restated the fields under them and each carried a
+      # help paragraph; the help is now a ? marker's title/aria-label.
+      refute html =~ "Project launch plan"
+      refute html =~ "Operating boundary"
+      refute html =~ "Workspace posture"
+      assert html =~ "Create the workstream command center"
+
+      assert html =~
+               "Describe what belongs in this project so intake and handoffs do not blur together."
+
+      assert html =~ "Prefixes become issue IDs."
+      assert html =~ "Keep active work visible and give the sidebar a stable visual marker."
       assert html =~ "Setup checklist"
-      assert html =~ "Create behavior"
+      # "Create behavior" was a prose panel; it is one sentence under the button now.
+      refute html =~ "Create behavior"
+      assert html =~ "Creates an active workstream."
       assert has_element?(view, "[data-ui-complex-page]")
       assert has_element?(view, "form[data-ui-simple-single-column]")
 
@@ -261,8 +274,11 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert has_element?(view, "[data-testid='project-goals']")
       assert html =~ "Project command"
       assert html =~ "Project work is moving through execution"
-      assert html =~ "Execution readiness"
-      assert html =~ "Mission control"
+      # "Execution readiness" / "Mission control" were jargon for "Setup" and the
+      # goals list; the readiness sentence now rides a ? tooltip.
+      assert html =~ "The minimum context agents need before they can execute safely."
+      refute html =~ "Execution readiness"
+      refute html =~ "Mission control"
       assert html =~ "AILogic Workspace"
       assert html =~ "PROJECT_TOKEN"
       assert html =~ "Ship autonomous project command"

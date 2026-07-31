@@ -1,7 +1,7 @@
 <.settings_layout active={:policies}>
   <.header>
     <span class="ember-eyebrow">
-      Guardrails · {List.first(@policy_command.metrics).value} on file
+      Rules · {policy_metric_total(@policy_command)} on file
     </span>
     <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
       {@page_title}
@@ -65,7 +65,11 @@
       </.app_link>
     </div>
 
-    <div class="grid grid-cols-2 border-t border-hairline sm:grid-cols-4 lg:grid-cols-7">
+    <%!-- Seven zeroes under a card that already says the library is empty. --%>
+    <div
+      :if={policy_metric_total(@policy_command) > 0}
+      class="grid grid-cols-2 border-t border-hairline sm:grid-cols-4 lg:grid-cols-7"
+    >
       <div
         :for={metric <- @policy_command.metrics}
         class="ember-stat border-r border-hairline px-4 py-3 last:border-r-0"

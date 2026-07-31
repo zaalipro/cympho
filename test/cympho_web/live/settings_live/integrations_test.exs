@@ -16,7 +16,7 @@ defmodule CymphoWeb.SettingsLive.IntegrationsTest do
       assert html =~ "External AI control"
       assert html =~ "GET /api/mcp/tools"
       assert html =~ "POST /api/mcp/call"
-      assert html =~ "Next operator move"
+      assert html =~ "Do this next"
       assert html =~ "MCP setup checklist"
       assert html =~ "Agent identity"
       assert html =~ "Scoped API key"

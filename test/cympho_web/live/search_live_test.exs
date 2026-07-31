@@ -82,7 +82,10 @@ defmodule CymphoWeb.SearchLiveTest do
 
       {:ok, _view, html} = live(conn, "/search?q=#{needle}")
 
-      assert html =~ "Find company work"
+      # The subtitle used to end in "one scoped command surface", matching the
+      # "COMMAND SURFACE" eyebrow above it.
+      assert html =~ "Find issues, people, projects, and goals in this company."
+      refute html =~ "command surface"
       assert html =~ "Filters"
       assert html =~ ~s(data-testid="search-command")
       assert html =~ "Search command"

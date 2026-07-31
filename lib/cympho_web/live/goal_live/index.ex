@@ -314,13 +314,6 @@ defmodule CymphoWeb.GoalLive.Index do
   defp goal_type_rank(:milestone), do: 2
   defp goal_type_rank(_), do: 3
 
-  def alignment_status_label(:aligned), do: "Aligned"
-  def alignment_status_label(:floating_work), do: "Floating work"
-  def alignment_status_label(:missing_goal_links), do: "Missing goal links"
-  def alignment_status_label(:no_mission), do: "No active mission"
-  def alignment_status_label(:empty), do: "Ready for goals"
-  def alignment_status_label(_status), do: "Needs review"
-
   def alignment_status_detail(:aligned),
     do: "Open work is connected to a goal or project."
 
@@ -337,15 +330,6 @@ defmodule CymphoWeb.GoalLive.Index do
     do: "Set a mission and link issues as work starts."
 
   def alignment_status_detail(_status), do: "Check the goal links before starting more work."
-
-  def alignment_status_class(:aligned),
-    do: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
-
-  def alignment_status_class(status)
-      when status in [:floating_work, :missing_goal_links, :no_mission],
-      do: "border-amber-400/20 bg-amber-400/10 text-amber-300"
-
-  def alignment_status_class(_status), do: "border-border bg-surface-1 text-text-tertiary"
 
   def goal_type_label(:mission), do: "Mission"
   def goal_type_label(:initiative), do: "Initiative"

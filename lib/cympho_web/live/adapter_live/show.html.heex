@@ -108,9 +108,14 @@
             <span class="text-text-tertiary">Key</span>
             <span class="text-text-secondary font-mono">{@adapter_key}</span>
           </div>
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-text-tertiary">Module</span>
-            <span class="text-text-secondary font-mono text-[10px]">{@adapter.module}</span>
+          <div class="flex items-center justify-between gap-2 text-xs">
+            <span class="shrink-0 text-text-tertiary">Module</span>
+            <span
+              class="min-w-0 truncate text-text-secondary font-mono text-[10px]"
+              title={to_string(@adapter.module)}
+            >
+              {@adapter.module}
+            </span>
           </div>
           <div class="flex items-center justify-between text-xs">
             <span class="text-text-tertiary">Available</span>
@@ -184,9 +189,6 @@
                   step={input_step(field)}
                   class="flex-1 bg-surface-hover border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-quaternary focus:outline-none focus:border-brand transition-colors"
                 />
-                <span class="text-[10px] text-text-quaternary">
-                  {schema_type_label(field.type)}
-                </span>
               </div>
             </div>
 
@@ -213,7 +215,9 @@
           <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Assigned Agents
           </h2>
-          <span class="text-xs text-text-tertiary">{length(@agents)} agent(s)</span>
+          <span class="text-xs text-text-tertiary">
+            {length(@agents)} {if length(@agents) == 1, do: "agent", else: "agents"}
+          </span>
         </div>
 
         <div :if={Enum.empty?(@agents)} class="text-xs text-text-tertiary text-center py-6">
@@ -221,31 +225,29 @@
         </div>
 
         <div :if={not Enum.empty?(@agents)} class="space-y-2">
-          <div
+          <%!-- The whole row navigates, so the per-row "View" button is a
+               chevron; the role line is dropped when it just echoes the name. --%>
+          <.app_link
             :for={agent <- @agents}
-            class="flex items-center justify-between bg-subtle border border-border rounded-lg p-3"
+            navigate={~p"/agents/#{agent.id}"}
+            title={"View #{agent.name}"}
+            class="flex items-center justify-between gap-3 bg-subtle hover:bg-surface-hover border border-border rounded-lg p-3 transition-colors"
           >
-            <div class="flex items-center gap-3">
-              <div class="flex-1">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-510 text-text-primary">{agent.name}</span>
-                  <.badge variant="agent" value={to_string(agent.status)} />
-                </div>
-                <div class="text-xs text-text-tertiary mt-0.5">
-                  Role: {agent.role
-                  |> Atom.to_string()
-                  |> String.replace("_", " ")
-                  |> String.capitalize()}
-                </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-510 text-text-primary">{agent.name}</span>
+                <.badge variant="agent" value={to_string(agent.status)} />
+              </div>
+              <div :if={distinct_role_label(agent)} class="text-xs text-text-tertiary mt-0.5">
+                {distinct_role_label(agent)}
               </div>
             </div>
-            <.app_link
-              navigate={~p"/agents/#{agent.id}"}
-              class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
-            >
-              View
-            </.app_link>
-          </div>
+            <.icon
+              name="hero-chevron-right-mini"
+              class="h-4 w-4 shrink-0 text-text-tertiary"
+              aria-label={"View #{agent.name}"}
+            />
+          </.app_link>
         </div>
       </div>
     </div>

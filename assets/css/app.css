@@ -358,6 +358,16 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-hide] {
   display: none !important;
 }
 
+/* Page eyebrows are decorative small-caps labels above a heading that already
+   says the same thing ("VAULT · 0 OF 5 LANES READY" over "Secrets"), and they
+   are where most of the app's operator jargon lives. 45 of 50 call sites had no
+   mode gate, so all of it leaked into simple mode. Gating the class once here
+   beats adding ui-advanced-only to every site; `ui-simple-keep` opts an eyebrow
+   back in when it carries information the heading does not. */
+html[data-ui-mode="simple"] [data-ui-complex-page] .ember-eyebrow:not(.ui-simple-keep) {
+  display: none !important;
+}
+
 html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-single-column] {
   grid-template-columns: minmax(0, 1fr) !important;
 }

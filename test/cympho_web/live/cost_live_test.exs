@@ -6,19 +6,21 @@ defmodule CymphoWeb.CostLiveTest do
   alias Cympho.Repo
 
   describe "cost command" do
-    test "renders actionable analytics empty states when no spend exists", %{conn: conn} do
+    test "renders one actionable empty state when no spend exists", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/costs")
 
-      assert html =~ ~s(data-testid="daily-cost-empty")
-      assert html =~ "No spend captured in this window"
-      assert html =~ "Create a spend guardrail before launching more runtime"
+      # Nine breakdown cards each saying "no X yet" collapse into a single
+      # panel; the per-card empty states only appear when part of the data
+      # landed.
+      assert html =~ ~s(data-testid="cost-breakdowns-empty")
+      assert html =~ "No spend recorded in this window"
+      assert html =~ "Set a spending limit before launching more runtime"
       assert html =~ ~s(href="/budgets/new")
       assert html =~ ~s(href="/operations#runtime-launch-checklist")
 
-      assert html =~ ~s(data-testid="cost-agent-empty")
-      assert html =~ "No agent cost drivers yet"
-      assert html =~ ~s(data-testid="cost-provider-empty")
-      assert html =~ "No provider mix yet"
+      refute html =~ ~s(data-testid="daily-cost-empty")
+      refute html =~ ~s(data-testid="cost-agent-empty")
+      refute html =~ ~s(data-testid="cost-provider-empty")
       assert html =~ ~s(data-testid="active-budgets-empty")
     end
 

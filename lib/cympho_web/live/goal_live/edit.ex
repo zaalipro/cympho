@@ -3,6 +3,8 @@ defmodule CymphoWeb.GoalLive.Edit do
   alias Cympho.Goals
   alias CymphoWeb.GoalLive.FormHelpers
 
+  import CymphoWeb.GoalLive.FormHelpers, only: [field_hint: 1]
+
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     case get_scoped_goal(socket, id) do

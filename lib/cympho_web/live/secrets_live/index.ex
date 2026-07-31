@@ -529,15 +529,15 @@ defmodule CymphoWeb.SecretsLive.Index do
   defp runtime_credential_status(_ready, _total), do: :attention
 
   defp runtime_credential_summary(total, total) do
-    "All #{total} runtime credential lanes are ready for agent execution."
+    "All #{total} providers are ready for agent execution."
   end
 
-  defp runtime_credential_summary(0, total) do
-    "0 of #{total} runtime credential lanes are ready. Add a provider key before assigning runtime work."
+  defp runtime_credential_summary(0, _total) do
+    "No providers are ready. Add a provider key before assigning runtime work."
   end
 
-  defp runtime_credential_summary(ready, total) do
-    "#{ready} of #{total} runtime credential lanes are ready. Add the missing keys to broaden agent coverage."
+  defp runtime_credential_summary(_ready, _total) do
+    "Add the missing keys to broaden agent coverage."
   end
 
   defp runtime_credential_detail(_profile, present_key) when is_binary(present_key) do
@@ -545,7 +545,7 @@ defmodule CymphoWeb.SecretsLive.Index do
   end
 
   defp runtime_credential_detail(profile, _present_key) do
-    "Add #{profile.primary_key} at company scope."
+    "Add #{profile.primary_key}."
   end
 
   defp runtime_credential_setup_path(profile) do
