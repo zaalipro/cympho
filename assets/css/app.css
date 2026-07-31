@@ -364,7 +364,12 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-hide] {
    mode gate, so all of it leaked into simple mode. Gating the class once here
    beats adding ui-advanced-only to every site; `ui-simple-keep` opts an eyebrow
    back in when it carries information the heading does not. */
-html[data-ui-mode="simple"] [data-ui-complex-page] .ember-eyebrow:not(.ui-simple-keep) {
+/* Deliberately NOT scoped to [data-ui-complex-page] like the rules above: 16
+   pages render an eyebrow without ever opting into that attribute, so scoping
+   let their jargon leak into simple mode (/org-chart was the one that showed
+   up in a production sweep). The nav rail and user menu contain no eyebrows,
+   so a global rule is safe here where it would not be for .ui-advanced-only. */
+html[data-ui-mode="simple"] .ember-eyebrow:not(.ui-simple-keep) {
   display: none !important;
 }
 
