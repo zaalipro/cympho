@@ -73,9 +73,10 @@ defmodule Cympho.Comments do
           issue ->
             issue = Repo.preload(issue, :comments)
 
-            Cympho.RateLimiting.dedup_pubsub(
-              Cympho.PubSub,
-              "company:#{issue.company_id}:comments",
+            # Fail-closed: never company::comments from a nil company_id.
+            Cympho.PubSubGuard.company_broadcast(
+              issue.company_id,
+              "comments",
               {:comment_created, issue}
             )
         end
@@ -111,9 +112,9 @@ defmodule Cympho.Comments do
           issue ->
             issue = Repo.preload(issue, :comments)
 
-            Cympho.RateLimiting.dedup_pubsub(
-              Cympho.PubSub,
-              "company:#{issue.company_id}:comments",
+            Cympho.PubSubGuard.company_broadcast(
+              issue.company_id,
+              "comments",
               {:comment_updated, issue}
             )
         end
@@ -142,9 +143,9 @@ defmodule Cympho.Comments do
           issue ->
             issue = Repo.preload(issue, :comments)
 
-            Cympho.RateLimiting.dedup_pubsub(
-              Cympho.PubSub,
-              "company:#{issue.company_id}:comments",
+            Cympho.PubSubGuard.company_broadcast(
+              issue.company_id,
+              "comments",
               {:comment_deleted, issue}
             )
         end
@@ -159,9 +160,11 @@ defmodule Cympho.Comments do
   @doc """
   Subscribes to issue updates for real-time comment updates.
   """
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:comments")
   end
+
+  def subscribe(_company_id), do: :ok
 
   defp maybe_reconcile_review_nudges(comment) do
     unless auto_nudge_system_comment?(comment) do

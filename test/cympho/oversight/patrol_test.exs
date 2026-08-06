@@ -63,6 +63,72 @@ defmodule Cympho.Oversight.PatrolTest do
       refute Enum.any?(stuck, &(&1.id == issue.id))
     end
 
+    test "skips long checkout with a non-terminal live run", %{
+      company: company,
+      issue: issue,
+      engineer: engineer
+    } do
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {:ok, _} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: engineer.id,
+          checked_out_at: stale_at,
+          updated_at: stale_at
+        })
+
+      Repo.insert!(%Cympho.HeartbeatEngine.Run{
+        company_id: company.id,
+        agent_id: engineer.id,
+        issue_id: issue.id,
+        status: "running",
+        adapter: "process",
+        started_at: now,
+        last_heartbeat_at: now
+      })
+
+      stuck = Issues.list_stuck_issues(company.id, in_progress_minutes: 60)
+      refute Enum.any?(stuck, &(&1.id == issue.id))
+    end
+
+    test "skips long checkout with fresh terminal-run progress", %{
+      company: company,
+      issue: issue,
+      engineer: engineer
+    } do
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+
+      fresh_at = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {:ok, _} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: engineer.id,
+          checked_out_at: stale_at,
+          updated_at: stale_at
+        })
+
+      # Terminal run, but recent heartbeat = still productive (no thrash).
+      Repo.insert!(%Cympho.HeartbeatEngine.Run{
+        company_id: company.id,
+        agent_id: engineer.id,
+        issue_id: issue.id,
+        status: "completed",
+        adapter: "process",
+        started_at: stale_at,
+        completed_at: fresh_at,
+        last_heartbeat_at: fresh_at
+      })
+
+      stuck = Issues.list_stuck_issues(company.id, in_progress_minutes: 60)
+      refute Enum.any?(stuck, &(&1.id == issue.id))
+    end
+
     test "excludes synthetic backlog_planner issues", %{company: company} do
       stale_at =
         DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)

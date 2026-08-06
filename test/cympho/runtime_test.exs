@@ -177,6 +177,33 @@ defmodule Cympho.RuntimeTest do
     assert {:error, :company_paused} = Runtime.preflight(issue, agent)
   end
 
+  test "preflight rejects nil company_id on either side", %{company: company, agent: agent} do
+    {:ok, unscoped_issue} =
+      Issues.create_issue(%{title: "Unscoped runtime issue", status: :todo})
+
+    {:ok, unscoped_agent} =
+      Agents.create_agent(%{
+        name: "Unscoped Runtime Agent",
+        role: :engineer,
+        status: :idle,
+        adapter: :process,
+        config: %{"command" => "echo"}
+      })
+
+    {:ok, scoped_issue} =
+      Issues.create_issue(%{
+        company_id: company.id,
+        title: "Scoped runtime issue",
+        status: :todo
+      })
+
+    assert is_nil(unscoped_issue.company_id)
+    assert is_nil(unscoped_agent.company_id)
+    assert {:error, :company_mismatch} = Runtime.preflight(unscoped_issue, agent)
+    assert {:error, :company_mismatch} = Runtime.preflight(scoped_issue, unscoped_agent)
+    assert {:error, :company_mismatch} = Runtime.preflight(unscoped_issue, unscoped_agent)
+  end
+
   test "preflight blocks exhausted blocking budget policies", %{
     company: company,
     agent: agent,
@@ -587,6 +614,196 @@ defmodule Cympho.RuntimeTest do
         })
 
       assert {:ok, _context} = Runtime.preflight(issue, agent)
+    end
+  end
+
+  describe "provider environment preflight" do
+    alias Cympho.Workspaces.Drivers.Fake
+
+    setup %{company: company, issue: issue} do
+      unique = System.unique_integer([:positive])
+
+      {:ok, project} =
+        Projects.create_project(%{
+          company_id: company.id,
+          name: "Provider Project #{unique}",
+          prefix: "PRV"
+        })
+
+      cwd =
+        Path.join(System.tmp_dir!(), "cympho-provider-#{unique}")
+        |> tap(&File.mkdir_p!/1)
+
+      on_exit(fn -> File.rm_rf(cwd) end)
+
+      {:ok, project_workspace} =
+        Workspaces.create_project_workspace(%{
+          company_id: company.id,
+          project_id: project.id,
+          name: "Provider PW",
+          cwd: cwd
+        })
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          project_id: project.id,
+          project_workspace_id: project_workspace.id
+        })
+
+      %{
+        project: project,
+        project_workspace: project_workspace,
+        issue: issue,
+        cwd: cwd
+      }
+    end
+
+    test "preflight acquires Fake env when provider_type is set", %{
+      company: company,
+      agent: agent,
+      issue: issue,
+      project: project,
+      project_workspace: project_workspace,
+      cwd: cwd
+    } do
+      {:ok, ew} =
+        Workspaces.create_execution_workspace(%{
+          name: "Fake Exec",
+          status: "open",
+          cwd: cwd,
+          project_id: project.id,
+          company_id: company.id,
+          project_workspace_id: project_workspace.id,
+          provider_type: "fake"
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{execution_workspace_id: ew.id})
+
+      assert {:ok, context} = Runtime.preflight(issue, agent)
+      assert context.execution_workspace.id == ew.id
+      assert is_binary(context.execution_workspace.provider_ref)
+      assert String.starts_with?(context.execution_workspace.provider_ref, "fake-")
+      assert context.metadata["provider_type"] == "fake"
+      assert context.metadata["provider_ref"] == context.execution_workspace.provider_ref
+      assert context.env["CYMPHO_PROVIDER_REF"] == context.execution_workspace.provider_ref
+
+      reloaded = Workspaces.get_execution_workspace!(ew.id)
+      assert reloaded.provider_ref == context.execution_workspace.provider_ref
+
+      assert {:ok, _} = Fake.execute(reloaded.provider_ref, "echo preflight", %{})
+    end
+
+    test "preflight reuses existing provider_ref", %{
+      company: company,
+      agent: agent,
+      issue: issue,
+      project: project,
+      project_workspace: project_workspace,
+      cwd: cwd
+    } do
+      {:ok, ew} =
+        Workspaces.create_execution_workspace(%{
+          name: "Reuse Exec",
+          status: "open",
+          cwd: cwd,
+          project_id: project.id,
+          company_id: company.id,
+          project_workspace_id: project_workspace.id,
+          provider_type: "fake"
+        })
+
+      assert {:ok, acquired} = Workspaces.ensure_provider_environment(ew)
+      ref = acquired.provider_ref
+
+      {:ok, issue} = Issues.update_issue(issue, %{execution_workspace_id: acquired.id})
+
+      assert {:ok, context} = Runtime.preflight(issue, agent)
+      assert context.execution_workspace.provider_ref == ref
+    end
+
+    test "preflight fails closed on unknown provider", %{
+      company: company,
+      agent: agent,
+      issue: issue,
+      project: project,
+      project_workspace: project_workspace,
+      cwd: cwd
+    } do
+      {:ok, ew} =
+        Workspaces.create_execution_workspace(%{
+          name: "E2B Exec",
+          status: "open",
+          cwd: cwd,
+          project_id: project.id,
+          company_id: company.id,
+          project_workspace_id: project_workspace.id,
+          provider_type: "e2b"
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{execution_workspace_id: ew.id})
+
+      assert {:error, {:environment_provider_error, :unknown_provider}} =
+               Runtime.preflight(issue, agent)
+
+      reloaded = Workspaces.get_execution_workspace!(ew.id)
+      assert is_nil(reloaded.provider_ref)
+    end
+
+    test "preflight without provider_type leaves local workspace unchanged", %{
+      company: company,
+      agent: agent,
+      issue: issue,
+      project: project,
+      project_workspace: project_workspace,
+      cwd: cwd
+    } do
+      {:ok, ew} =
+        Workspaces.create_execution_workspace(%{
+          name: "Local Exec",
+          status: "open",
+          cwd: cwd,
+          project_id: project.id,
+          company_id: company.id,
+          project_workspace_id: project_workspace.id
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{execution_workspace_id: ew.id})
+
+      assert {:ok, context} = Runtime.preflight(issue, agent)
+      assert context.execution_workspace.id == ew.id
+      assert is_nil(context.execution_workspace.provider_ref)
+      refute Map.has_key?(context.metadata, "provider_type")
+      refute Map.has_key?(context.env, "CYMPHO_PROVIDER_REF")
+    end
+
+    test "release after preflight tears down Fake env", %{
+      company: company,
+      agent: agent,
+      issue: issue,
+      project: project,
+      project_workspace: project_workspace,
+      cwd: cwd
+    } do
+      {:ok, ew} =
+        Workspaces.create_execution_workspace(%{
+          name: "Terminal Exec",
+          status: "open",
+          cwd: cwd,
+          project_id: project.id,
+          company_id: company.id,
+          project_workspace_id: project_workspace.id,
+          provider_type: "fake"
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{execution_workspace_id: ew.id})
+      assert {:ok, context} = Runtime.preflight(issue, agent)
+      ref = context.execution_workspace.provider_ref
+
+      assert {:ok, released} =
+               Workspaces.release_provider_environment(context.execution_workspace)
+
+      assert is_nil(released.provider_ref)
+      assert {:error, :released} = Fake.execute(ref, "echo", %{})
     end
   end
 

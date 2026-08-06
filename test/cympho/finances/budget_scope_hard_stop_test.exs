@@ -316,6 +316,90 @@ defmodule Cympho.Finances.BudgetScopeHardStopTest do
     assert_durable_crossing(company, policy)
   end
 
+  @tag :capture_log
+  test "post-commit hard-stop failure leaves incomplete enforcement; recovery quiets the scope" do
+    company = company_fixture("hardstop-recover")
+    agent = agent_fixture(company, "hardstop-recover")
+    issue = issue_fixture(company, agent, "hardstop-recover")
+    run = run_fixture(company, agent, issue, "running")
+    wake = wake_fixture(agent, issue)
+    policy = blocking_policy(company, "issue", issue.id)
+
+    # Simulate a crash/partial failure after the finance ledger commit: stop,
+    # cancel-runs, and cancel-wakes all fail so active work remains.
+    capture_log(fn ->
+      with_mocks([
+        {Dispatcher, [:passthrough],
+         [stop_issue: fn _issue_id, _reason -> {:error, :simulated_post_commit_failure} end]},
+        {HeartbeatEngine, [:passthrough],
+         [
+           cancel_active_runs_for_issue: fn _issue_id, _reason ->
+             {:error, :simulated_post_commit_failure}
+           end
+         ]},
+        {Wakes, [:passthrough],
+         [
+           cancel_issue_wakes: fn _issue_id, _reason ->
+             {:error, :simulated_post_commit_failure}
+           end
+         ]}
+      ]) do
+        assert {:error, :budget_blocked} =
+                 record_crossing_usage(company, %{issue_id: issue.id, agent_id: agent.id})
+      end
+    end)
+
+    assert [%TokenUsage{}] = Finances.list_token_usages(company.id)
+
+    assert [%BudgetIncident{event_type: "budget_exceeded", enforcement_status: "incomplete"}] =
+             Repo.all(
+               from i in BudgetIncident,
+                 where: i.company_id == ^company.id and i.budget_policy_id == ^policy.id
+             )
+
+    assert Repo.get!(Run, run.id).status == "running"
+    assert Repo.get!(AgentWake, wake.id).status == "pending"
+
+    assert Finances.recover_incomplete_hard_stops() >= 1
+
+    assert Repo.get!(Run, run.id).status == "cancelled"
+    assert Repo.get!(AgentWake, wake.id).status == "cancelled"
+    assert Issues.issue_runtime_paused?(Issues.get_issue!(issue.id))
+
+    assert [%BudgetIncident{enforcement_status: "complete"}] =
+             Repo.all(
+               from i in BudgetIncident,
+                 where: i.company_id == ^company.id and i.budget_policy_id == ^policy.id
+             )
+
+    # Idempotent: a second recovery pass finds nothing incomplete.
+    assert Finances.recover_incomplete_hard_stops() == 0
+  end
+
+  test "budget_exceeded incident notifies OwnerAttention; resolve does too" do
+    company = company_fixture("hardstop-attention")
+    policy = blocking_policy(company, "company", nil)
+
+    :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:owner_attention")
+
+    assert {:error, :budget_blocked} = record_crossing_usage(company)
+
+    assert_receive {:owner_attention_changed, company_id}, 1_000
+    assert company_id == company.id
+
+    assert [incident] =
+             Repo.all(
+               from i in BudgetIncident,
+                 where: i.company_id == ^company.id and i.budget_policy_id == ^policy.id
+             )
+
+    assert incident.event_type == "budget_exceeded"
+    assert incident.enforcement_status == "complete"
+
+    assert {:ok, _resolved} = Finances.resolve_budget_incident(incident)
+    assert_receive {:owner_attention_changed, ^company_id}, 1_000
+  end
+
   test "heartbeat usage rejects project and goal IDs that do not belong to the run issue" do
     company = company_fixture("usage-scope")
     other_company = company_fixture("usage-scope-other")
@@ -521,7 +605,7 @@ defmodule Cympho.Finances.BudgetScopeHardStopTest do
   defp assert_durable_crossing(company, policy) do
     assert [%TokenUsage{}] = Finances.list_token_usages(company.id)
 
-    assert [%BudgetIncident{event_type: "budget_exceeded"}] =
+    assert [%BudgetIncident{event_type: "budget_exceeded", enforcement_status: "complete"}] =
              Repo.all(
                from i in BudgetIncident,
                  where: i.company_id == ^company.id and i.budget_policy_id == ^policy.id

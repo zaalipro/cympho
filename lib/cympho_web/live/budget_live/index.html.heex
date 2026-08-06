@@ -143,13 +143,14 @@
         </div>
 
         <%= for {dom_id, budget} <- @streams.budget do %>
-          <% state = budget_state(budget) %>
+          <% state = budget_state(budget, @budget_policies) %>
           <div
             id={dom_id}
             class={[
               "group card-lift flex flex-col rounded-card border border-border bg-surface/50 p-4 transition-colors hover:bg-surface-hover hover:border-border-hover",
               budget_card_accent(state.tone)
             ]}
+            data-testid="budget-card"
           >
             <div class="flex min-w-0 items-start justify-between gap-3">
               <div class="min-w-0">
@@ -180,15 +181,28 @@
             </div>
 
             <div class="mt-3 flex items-baseline justify-between gap-2">
-              <p class="font-serif text-lg font-510 tabular-nums text-text-primary">
-                {format_currency(budget.spent_amount, budget.currency)}
-              </p>
+              <div>
+                <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                  Used
+                </p>
+                <p
+                  class="font-serif text-lg font-510 tabular-nums text-text-primary"
+                  data-testid="budget-card-used"
+                >
+                  {format_currency(budget.spent_amount, budget.currency)}
+                </p>
+              </div>
               <p class="text-xs text-text-quaternary">
                 of {format_currency(budget.limit_amount, budget.currency)}
               </p>
             </div>
 
-            <p class="mt-2 text-xs leading-5 text-text-tertiary">{guardrail_note(budget)}</p>
+            <p
+              class="mt-2 text-xs leading-5 text-text-tertiary"
+              data-testid="budget-guardrail-note"
+            >
+              {guardrail_note(budget, @budget_policies)}
+            </p>
 
             <div class="mt-4 flex items-center justify-between border-t border-border pt-3">
               <.app_link

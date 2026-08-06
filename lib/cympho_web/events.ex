@@ -35,16 +35,22 @@ defmodule CymphoWeb.Events do
       Events.broadcast_issue_update(issue, :issue_updated)
       Events.broadcast_issue_update(issue, :issue_status_changed, %{from: :todo, to: :in_progress})
   """
+  def broadcast_issue_update(issue, event_type, metadata \\ %{})
+
   def broadcast_issue_update(
         %Issue{company_id: company_id, id: issue_id} = issue,
         event_type,
-        metadata \\ %{}
-      ) do
+        metadata
+      )
+      when is_binary(company_id) and company_id != "" do
     topic = "company:#{company_id}:issues"
     payload = build_event_payload(event_type, issue_id, metadata, issue)
 
     Cympho.RateLimiting.dedup_broadcast(topic, "issue_update", payload)
   end
+
+  # Fail-closed: never publish on "company::issues" from a nil/blank company_id.
+  def broadcast_issue_update(%Issue{}, _event_type, _metadata), do: :ok
 
   @doc """
   Broadcast a comment notification to WebSocket clients.
@@ -54,13 +60,16 @@ defmodule CymphoWeb.Events do
     # This is on the hot path (every comment) and the full row carries large
     # text columns we don't use here.
     case Repo.one(from i in Issue, where: i.id == ^issue_id, select: {i.company_id, i.project_id}) do
-      nil ->
-        :ok
-
-      {company_id, project_id} ->
+      {company_id, project_id}
+      when is_binary(company_id) and company_id != "" and is_binary(project_id) and
+             project_id != "" ->
         topic = "company:#{company_id}:project:#{project_id}:comments"
         payload = build_comment_payload(comment, event_type)
         Cympho.RateLimiting.dedup_broadcast(topic, "comment", payload)
+
+      _ ->
+        # Missing issue or nil/blank company_id/project_id — refuse malformed tenant topics.
+        :ok
     end
   end
 
@@ -69,10 +78,7 @@ defmodule CymphoWeb.Events do
   """
   def broadcast_run_status(%Run{id: _run_id, issue_id: issue_id} = run, event_type) do
     case Repo.one(from i in Issue, where: i.id == ^issue_id, select: i.company_id) do
-      nil ->
-        :ok
-
-      company_id ->
+      company_id when is_binary(company_id) and company_id != "" ->
         topic = "company:#{company_id}:runs"
         payload = build_run_payload(run, event_type)
 
@@ -83,6 +89,10 @@ defmodule CymphoWeb.Events do
         end
 
         result
+
+      _ ->
+        # Missing issue or nil/blank company_id — refuse "company::runs" leak.
+        :ok
     end
   end
 
@@ -93,7 +103,8 @@ defmodule CymphoWeb.Events do
         %Issue{company_id: company_id, id: issue_id},
         agent_id,
         heartbeat_data
-      ) do
+      )
+      when is_binary(company_id) and company_id != "" and is_binary(issue_id) and issue_id != "" do
     topic = "company:#{company_id}:issues:#{issue_id}:heartbeats"
 
     payload = %{
@@ -105,6 +116,8 @@ defmodule CymphoWeb.Events do
 
     Cympho.RateLimiting.dedup_broadcast(topic, "heartbeat", payload)
   end
+
+  def broadcast_agent_heartbeat(%Issue{}, _agent_id, _heartbeat_data), do: :ok
 
   @doc """
   Subscribe to issue events for a company via PubSub (for LiveView).

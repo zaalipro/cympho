@@ -380,6 +380,87 @@ defmodule CymphoWeb.UserAuthTest do
       assert live_assigns(view).inbox_badge_count == 1
       assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*1\s*<\/span>/s
     end
+
+    test "final_review_required wake bumps inbox badge without reload", %{
+      user: user,
+      company1: company
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Review Notify Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Needs final review",
+          status: :in_review,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      conn =
+        build_conn()
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session("user_id", user.id)
+        |> Plug.Conn.put_session("company_id", company.id)
+
+      {:ok, view, _html} = live(conn, "/issues")
+      assert live_assigns(view).inbox_badge_count == 0
+
+      assert {:ok, _wake} =
+               Cympho.Wakes.do_wake_agent(
+                 agent.id,
+                 issue.id,
+                 "final_review_required",
+                 "system",
+                 "test",
+                 %{}
+               )
+
+      wait_until(fn ->
+        render(view)
+        assert live_assigns(view).nav_inbox_count == 1
+        assert live_assigns(view).inbox_badge_count == 1
+      end)
+
+      assert Cympho.OwnerAttention.unresolved_count(company.id, user) == 1
+    end
+
+    test "pure agent unreads do not inflate the Needs you badge", %{
+      user: user,
+      company1: company
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Unread Only Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Unread noise",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      assert {:ok, _entry} = Inbox.ensure_inbox_entry(issue.id, agent.id)
+
+      conn =
+        build_conn()
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session("user_id", user.id)
+        |> Plug.Conn.put_session("company_id", company.id)
+
+      {:ok, view, html} = live(conn, "/issues")
+
+      assert live_assigns(view).nav_inbox_count == 0
+      assert live_assigns(view).inbox_badge_count == 0
+      refute html =~ ~s(data-testid="nav-badge-inbox")
+    end
   end
 
   defp live_assigns(view) do

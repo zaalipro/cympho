@@ -61,6 +61,45 @@
       </span>
     </div>
 
+    <div
+      :if={recovery_card?(@budget, @budget_policy)}
+      data-testid="budget-recovery-card"
+      class="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] px-5 py-4"
+    >
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
+          <h2 class="font-serif text-[15px] font-510 tracking-[-0.01em] text-text-primary">
+            <span class="ui-advanced-only">Hard stop recovery</span>
+            <span class="ui-simple-only">Spending hit its limit</span>
+          </h2>
+          <p class="mt-1 max-w-2xl text-sm leading-5 text-text-secondary">
+            <span class="ui-advanced-only">
+              Runtime blocked new work for this scope. Raise the limit so enforcement can clear, then resume paused agents.
+            </span>
+            <span class="ui-simple-only">
+              Raise the limit first, then resume agents that were paused by the stop.
+            </span>
+          </p>
+        </div>
+        <div class="flex shrink-0 flex-wrap gap-2">
+          <.app_link
+            navigate={~p"/budgets/#{@budget}/edit"}
+            data-testid="budget-raise-limit"
+            class="rounded-lg border border-brand/30 bg-brand/15 px-3 py-2 text-xs font-590 text-brand transition-colors hover:bg-brand/25"
+          >
+            Raise limit
+          </.app_link>
+          <.app_link
+            navigate={~p"/agents"}
+            data-testid="budget-resume-after-raise"
+            class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-510 text-amber-200 transition-colors hover:bg-amber-500/15"
+          >
+            Resume after raise
+          </.app_link>
+        </div>
+      </div>
+    </div>
+
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
       <div class="bg-surface border border-border rounded-xl p-6">
         <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
@@ -73,11 +112,12 @@
 
       <div class="bg-surface border border-border rounded-xl p-6">
         <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-          Amount Spent
+          Used
         </div>
-        <div class="text-2xl font-510 text-amber-400">
+        <div class="text-2xl font-510 text-amber-400" data-testid="budget-show-used">
           {format_currency(@budget.spent_amount, @budget.currency)}
         </div>
+        <p class="mt-1 text-xs text-text-quaternary">From provider token usage this period</p>
       </div>
 
       <div class="bg-surface border border-border rounded-xl p-6">
@@ -153,6 +193,15 @@
               Hard Stop
             </div>
             <div class="text-text-primary">{boolean_label(@budget.hard_stop)}</div>
+          </div>
+
+          <div>
+            <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+              Runtime enforcement
+            </div>
+            <div class="text-text-primary" data-testid="budget-runtime-enforcement">
+              {enforcement_label(@budget_policy)}
+            </div>
           </div>
 
           <div>

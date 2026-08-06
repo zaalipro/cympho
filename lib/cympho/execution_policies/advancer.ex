@@ -120,13 +120,11 @@ defmodule Cympho.ExecutionPolicies.Advancer do
           }
         )
 
-        if updated.company_id do
-          Phoenix.PubSub.broadcast(
-            Cympho.PubSub,
-            "company:#{updated.company_id}:execution_policies",
-            {:stage_advanced, %{issue: updated, policy: policy, stage_name: stage_name(config)}}
-          )
-        end
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "execution_policies",
+          {:stage_advanced, %{issue: updated, policy: policy, stage_name: stage_name(config)}}
+        )
 
         :ok
 

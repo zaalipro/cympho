@@ -13,9 +13,11 @@ defmodule Cympho.Inbox do
     Phoenix.PubSub.subscribe(@pubsub, "#{@topic}:#{agent_id}")
   end
 
-  def subscribe_company_badges(company_id) when is_binary(company_id) do
+  def subscribe_company_badges(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(@pubsub, "#{@company_badge_topic}:#{company_id}")
   end
+
+  def subscribe_company_badges(_company_id), do: :ok
 
   def unsubscribe(agent_id) do
     Phoenix.PubSub.unsubscribe(@pubsub, "#{@topic}:#{agent_id}")
@@ -25,7 +27,8 @@ defmodule Cympho.Inbox do
     Phoenix.PubSub.broadcast(@pubsub, "#{@topic}:#{agent_id}", msg)
   end
 
-  defp broadcast_company_badge_change(company_id) when is_binary(company_id) do
+  defp broadcast_company_badge_change(company_id)
+       when is_binary(company_id) and company_id != "" do
     count = unread_count_for_company(company_id)
 
     Phoenix.PubSub.broadcast(

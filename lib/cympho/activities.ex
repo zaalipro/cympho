@@ -148,9 +148,11 @@ defmodule Cympho.Activities do
     %{page | entries: Repo.preload(page.entries, [:issue])}
   end
 
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:activities")
   end
+
+  def subscribe(_company_id), do: :ok
 
   def log_activity(attrs) when is_map(attrs) do
     attrs = put_company_id(attrs)
@@ -159,19 +161,23 @@ defmodule Cympho.Activities do
       {:ok, activity} ->
         company_id = activity.company_id || issue_company_id(activity.issue_id)
 
-        Cympho.RateLimiting.dedup_pubsub(
-          Cympho.PubSub,
-          "company:#{company_id}:activities",
-          {:activity_created, activity}
-        )
+        # Fail-closed: only publish company-scoped activities when company_id is present.
+        # Never emit company::activities or the unscoped activities:* global topic.
+        if is_binary(company_id) and company_id != "" do
+          Cympho.RateLimiting.dedup_pubsub(
+            Cympho.PubSub,
+            "company:#{company_id}:activities",
+            {:activity_created, activity}
+          )
+        end
 
-        Cympho.RateLimiting.dedup_broadcast("activities:*", "activity_created", activity)
-
-        Cympho.RateLimiting.dedup_broadcast(
-          "issue:#{activity.issue_id}",
-          "activity_created",
-          activity
-        )
+        if is_binary(activity.issue_id) do
+          Cympho.RateLimiting.dedup_broadcast(
+            "issue:#{activity.issue_id}",
+            "activity_created",
+            activity
+          )
+        end
 
         {:ok, activity}
 

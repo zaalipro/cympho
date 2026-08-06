@@ -99,6 +99,15 @@ defmodule CymphoWeb.OnboardingLiveTest do
       assert membership.is_board_member
       assert membership.user.email =~ "live-user-"
 
+      # Onboarding default $100 → company cents + blocking Finances.BudgetPolicy.
+      assert company.budget_monthly_cents == 10_000
+
+      [budget_policy] =
+        Cympho.Finances.list_budget_policies(company.id, is_active: true, scope: "company")
+
+      assert budget_policy.action_on_exceed == "block"
+      assert Decimal.eq?(budget_policy.budget_limit_usd, Decimal.new("100.00"))
+
       agents = Companies.list_company_agents(company.id)
       engineer_names = agents |> Enum.filter(&(&1.role == :engineer)) |> Enum.map(& &1.name)
       assert Enum.sort(engineer_names) == ["Ada", "Grace"]
@@ -365,6 +374,30 @@ defmodule CymphoWeb.OnboardingLiveTest do
 
       html = view |> element("button", "Continue") |> render_click()
       assert html =~ "Company goal is required."
+      assert html =~ "Step 2 of 5"
+    end
+
+    test "blocks the company step when monthly budget is zero", %{conn: conn} do
+      {view, html} = open_start_onboarding(conn)
+      assert html =~ "Choose a blueprint"
+
+      view |> element("button", "Continue") |> render_click()
+      assert render(view) =~ "Monthly budget"
+
+      view
+      |> form("#company-step-form",
+        company: %{
+          "name" => "No Spend Cap Co",
+          "goal_title" => "Must set a budget",
+          "project_name" => "Ops",
+          "issue_prefix" => "NSC",
+          "budget_monthly_usd" => "0"
+        }
+      )
+      |> render_change()
+
+      html = view |> element("button", "Continue") |> render_click()
+      assert html =~ "Monthly budget must be a positive dollar amount."
       assert html =~ "Step 2 of 5"
     end
 

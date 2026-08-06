@@ -44,8 +44,11 @@
       <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
-            <p class="text-xs font-590 uppercase tracking-[0.12em] text-amber-200">
+            <p class="ui-advanced-only text-xs font-590 uppercase tracking-[0.12em] text-amber-200">
               Demand-backed hire
+            </p>
+            <p class="ui-simple-only text-xs font-590 uppercase tracking-[0.12em] text-amber-200">
+              Work is waiting
             </p>
             <span class="rounded-full border border-amber-500/25 bg-canvas/40 px-2 py-0.5 text-[11px] font-510 text-amber-100">
               {@hire_context.open_issues} open {plural_noun(@hire_context.open_issues, "issue")}
@@ -101,7 +104,13 @@
               <% identity_help =
                 "The role and manager decide where this agent's handoffs land in the org." %>
               <p
-                class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+                class="ui-simple-only font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+                title={identity_help}
+              >
+                Identity and reporting<span class="sr-only"> — {identity_help}</span>
+              </p>
+              <p
+                class="ui-advanced-only font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
                 title={identity_help}
               >
                 1 · Identity and reporting<span class="sr-only"> — {identity_help}</span>
@@ -142,19 +151,58 @@
 
             <section
               data-testid="new-agent-defaults-summary"
-              class="ui-simple-only rounded-xl border border-brand/20 bg-brand/[0.06] px-4 py-4 sm:px-5"
+              data-hire-readiness={@hire_readiness.status}
+              class={[
+                "ui-simple-only rounded-xl px-4 py-4 sm:px-5",
+                if(@hire_readiness.status == :needs_key,
+                  do: "border border-amber-500/30 bg-amber-500/[0.08]",
+                  else: "border border-brand/20 bg-brand/[0.06]"
+                )
+              ]}
             >
               <div class="flex items-start gap-3">
-                <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-brand/25 bg-panel text-brand">
-                  <.icon name="hero-check-circle-mini" class="h-4 w-4" />
+                <span class={[
+                  "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-panel",
+                  if(@hire_readiness.status == :needs_key,
+                    do: "border-amber-500/30 text-amber-200",
+                    else: "border-brand/25 text-brand"
+                  )
+                ]}>
+                  <.icon
+                    name={
+                      if(@hire_readiness.status == :needs_key,
+                        do: "hero-exclamation-triangle-mini",
+                        else: "hero-check-circle-mini"
+                      )
+                    }
+                    class="h-4 w-4"
+                  />
                 </span>
-                <div class="min-w-0">
-                  <p class="text-sm font-590 text-text-primary">Friendly defaults are ready</p>
-                  <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
-                    This agent starts with the {role_name} playbook, the company runtime defaults, and
-                    safe handoff behavior. Switch to Advanced only when you need to tune the runtime,
-                    adapter, instructions, or environment.
+                <div class="min-w-0 flex-1">
+                  <p
+                    class="text-sm font-590 text-text-primary"
+                    data-testid="new-agent-readiness-label"
+                  >
+                    {@hire_readiness.label}
                   </p>
+                  <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
+                    {@hire_readiness.summary}
+                  </p>
+                  <div
+                    :if={@hire_readiness.status == :needs_key and @hire_readiness.setup_path}
+                    class="mt-3 flex flex-wrap items-center gap-2"
+                  >
+                    <.app_link
+                      navigate={@hire_readiness.setup_path}
+                      data-testid="new-agent-add-key"
+                      class="inline-flex items-center justify-center rounded-md border border-amber-500/30 bg-amber-500/15 px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/25"
+                    >
+                      Add key
+                    </.app_link>
+                    <span class="text-[11px] font-510 text-text-quaternary">
+                      Returns here after save · {@hire_readiness.primary_key}
+                    </span>
+                  </div>
                 </div>
               </div>
             </section>
@@ -240,8 +288,18 @@
                         {runtime_profile_summary(@runtime_profile)}
                       </p>
                       <.app_link
-                        :if={runtime_profile_secret_setup_path(@runtime_profile)}
-                        navigate={runtime_profile_secret_setup_path(@runtime_profile)}
+                        :if={
+                          runtime_profile_secret_setup_path(
+                            @runtime_profile,
+                            @hire_form_path
+                          )
+                        }
+                        navigate={
+                          runtime_profile_secret_setup_path(
+                            @runtime_profile,
+                            @hire_form_path
+                          )
+                        }
                         class="inline-flex shrink-0 items-center justify-center rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand transition hover:bg-brand/15"
                       >
                         Add required key
@@ -630,7 +688,28 @@
             <%!-- The sentence that used to sit here only restated the form. It
                  now rides along on the button that acts on it. --%>
             <% hire_help =
-              "New agents start with this role contract, runtime profile, and reporting line. Demand-backed hires also pick up waiting matching work after save." %>
+              if @hire_readiness.status == :needs_key do
+                "Add #{@hire_readiness.primary_key} before hiring. This agent cannot run without a provider key."
+              else
+                "New agents start with this role, company defaults, and reporting line. If work is waiting for this role, it is assigned after hire."
+              end %>
+            <div
+              :if={@hire_readiness.status == :needs_key}
+              data-testid="new-agent-hire-gate"
+              class="w-full rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-sm leading-5 text-amber-50 sm:mr-auto sm:max-w-xl"
+            >
+              <p class="font-590">Hire is blocked until a key is added</p>
+              <p class="mt-0.5 text-xs text-amber-100/90">
+                {@hire_readiness.summary}
+              </p>
+              <.app_link
+                :if={@hire_readiness.setup_path}
+                navigate={@hire_readiness.setup_path}
+                class="mt-2 inline-flex items-center text-xs font-510 text-amber-100 underline decoration-amber-400/40 underline-offset-2 hover:text-white"
+              >
+                Add {@hire_readiness.primary_key}
+              </.app_link>
+            </div>
             <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
               <.app_link
                 navigate={~p"/agents"}
@@ -642,7 +721,12 @@
                 type="submit"
                 variant="primary"
                 title={hire_help}
-                class="cta-glow min-h-[40px] w-full sm:w-auto"
+                disabled={not @hire_readiness.can_hire}
+                data-testid="new-agent-hire-button"
+                class={[
+                  "cta-glow min-h-[40px] w-full sm:w-auto",
+                  not @hire_readiness.can_hire && "opacity-60"
+                ]}
               >
                 Hire {role_name}<span class="sr-only"> — {hire_help}</span>
               </.button>

@@ -76,7 +76,13 @@ defmodule Cympho.Integration.StuckEngineerRecoveryTest do
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Wire telemetry to dashboards",
-        description: "Plumb the metrics pipeline.",
+        description: """
+        Plumb the metrics pipeline into the owner dashboard.
+        Acceptance criteria: dashboard shows live agent heartbeat counters.
+        Evidence required: code_change work product or PR with the plumbing.
+        Verification required: run focused telemetry tests or name the blocker.
+        Definition of done: ready for CTO review with evidence and residual risk named.
+        """,
         company_id: company.id,
         status: :in_progress,
         assignee_id: engineer.id,
@@ -105,7 +111,16 @@ defmodule Cympho.Integration.StuckEngineerRecoveryTest do
 
     # ── Step 3: CTO scripts an `intervene reassign` payload. The mock
     # adapter delivers the cympho-actions JSON; AgentActions executes it.
+    # No manual fallback — intervene must succeed and stop any live session
+    # before transferring ownership.
     {:ok, stuck} = Issues.get_issue(issue.id)
+
+    reassign_reason =
+      "Engineer has been silent for hours; rerouting. " <>
+        "Acceptance criteria: finish the stalled implementation within the existing issue scope. " <>
+        "Evidence required: attach the code-change work product or PR plus a delivery note. " <>
+        "Verification required: run the focused test or name the blocker preventing it. " <>
+        "Definition of done: ready for CTO review with evidence, verification, and remaining risk named."
 
     MockAdapter.script(cto.id, stuck.id, [
       %{
@@ -114,8 +129,8 @@ defmodule Cympho.Integration.StuckEngineerRecoveryTest do
             %{
               "type" => "intervene",
               "mode" => "reassign",
-              "to_role" => "engineer",
-              "reason" => "Engineer has been silent for hours; rerouting."
+              "to_agent_id" => backup.id,
+              "reason" => reassign_reason
             }
           ])
       }
@@ -127,26 +142,23 @@ defmodule Cympho.Integration.StuckEngineerRecoveryTest do
 
     actions = extract_actions(cto_payload)
 
-    case AgentActions.execute(stuck, cto, actions) do
-      {:ok, _} ->
-        :ok
+    assert {:ok, %{results: [%{type: "intervene", mode: "reassign", to_agent_id: target_id}]}} =
+             AgentActions.execute(stuck, cto, actions)
 
-      # AgentActions may reject intervene if role authorization is strict;
-      # in that case reassign manually so the test still proves the
-      # recovery path. The wake / detect / script seam is what we care
-      # about here.
-      {:error, _} ->
-        {:ok, _} =
-          Issues.update_issue(stuck, %{
-            assignee_id: nil,
-            assigned_role: "engineer",
-            status: :todo
-          })
-    end
+    assert target_id == backup.id
 
-    # The original engineer is no longer holding the issue.
+    # The original engineer is no longer holding the issue; backup owns it
+    # on :todo with checkout cleared for dispatcher re-run.
     after_reassign = Issues.get_issue!(stuck.id)
+    assert after_reassign.assignee_id == backup.id
+    assert after_reassign.status == :todo
+    assert is_nil(after_reassign.checkout_run_id)
+    assert is_nil(after_reassign.checked_out_at)
     refute after_reassign.assignee_id == engineer.id
+
+    [manager_wake] = pending_wakes(backup.id, "manager_directive")
+    assert manager_wake.issue_id == stuck.id
+    assert manager_wake.metadata["via"] == "intervene"
 
     # ── Step 4: backup engineer takes the issue and delivers via a
     # scripted submit. Re-checkout to the backup engineer to mimic

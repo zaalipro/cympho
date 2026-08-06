@@ -68,6 +68,18 @@ defmodule Cympho.Issues.AutoAssignment do
     end
   end
 
+  @doc """
+  Assigns an owner and promotes `:backlog` → `:todo` so the dispatcher / heartbeat
+  can claim the issue. Never checks out to `:in_progress`.
+  """
+  @spec assign_and_promote_for_dispatch(Issue.t()) ::
+          {:ok, Issue.t()} | {:error, :no_eligible_agent, Issue.t()}
+  def assign_and_promote_for_dispatch(%Issue{} = issue) do
+    with {:ok, assigned} <- assign_owner_for_dispatch(issue) do
+      promote_backlog_to_todo(assigned)
+    end
+  end
+
   defp do_assign_issue(%Issue{} = issue) do
     primary_role = Router.infer_role(issue)
 
@@ -81,6 +93,13 @@ defmodule Cympho.Issues.AutoAssignment do
         {:error, :no_eligible_agent, issue}
     end
   end
+
+  defp promote_backlog_to_todo(%Issue{status: status} = issue)
+       when status in [:backlog, "backlog"] do
+    Cympho.Issues.update_issue(issue, %{status: :todo})
+  end
+
+  defp promote_backlog_to_todo(%Issue{} = issue), do: {:ok, issue}
 
   defp assignment_roles(role) when role in @repo_delivery_roles, do: [role]
   defp assignment_roles(role), do: [role | Router.fallback_chain(role)]
@@ -96,35 +115,66 @@ defmodule Cympho.Issues.AutoAssignment do
     end
   end
 
-  # Issue-without-company_id and legacy test paths scan all agents. Once an
-  # issue is company-scoped, assignment must stay inside that company.
-  defp eligible_agents(role, nil), do: Agents.list_eligible_agents(role)
-
+  # Fail-closed: never scan unscoped agents. Issues without a company_id get
+  # no eligible owners (same posture as Dispatcher / checkout).
   defp eligible_agents(role, company_id) when is_binary(company_id),
     do: Agents.list_eligible_agents(role, company_id)
 
+  defp eligible_agents(_role, _company_id), do: []
+
   @doc """
-  Re-evaluates backlog issues for one company and attempts to assign them.
-  Called when an agent in that company transitions to :idle so newly-available
-  capacity is utilised immediately.
+  Re-evaluates backlog issues for one company and prepares them for dispatch.
+
+  Assigns an owner, promotes `:backlog` → `:todo` (never `:in_progress` alone),
+  and enqueues a wake / poll so the dispatcher can claim the issue. Called when
+  an agent in that company transitions to `:idle` so newly-available capacity is
+  utilised immediately.
   """
   @spec reassign_backlog(binary() | nil) :: {:ok, non_neg_integer(), non_neg_integer()}
-  def reassign_backlog(company_id \\ nil) do
+  def reassign_backlog(company_id)
+
+  def reassign_backlog(company_id) when is_binary(company_id) do
     backlog_issues =
       Issue
-      |> where([i], i.status == :backlog and is_nil(i.assignee_id))
-      |> maybe_filter_company(company_id)
+      |> where(
+        [i],
+        i.status == :backlog and is_nil(i.assignee_id) and i.company_id == ^company_id
+      )
       |> Repo.all()
 
     {assigned, queued} =
       Enum.reduce(backlog_issues, {0, 0}, fn issue, {a, q} ->
-        case assign_issue(issue) do
-          {:ok, _} -> {a + 1, q}
-          {:error, :no_eligible_agent, _} -> {a, q + 1}
+        case assign_and_promote_for_dispatch(issue) do
+          {:ok, prepared} ->
+            _ = enqueue_reassign_wake(prepared)
+            {a + 1, q}
+
+          {:error, :no_eligible_agent, _} ->
+            {a, q + 1}
         end
       end)
 
     {:ok, assigned, queued}
+  end
+
+  # Fail-closed: unscoped reassignment is a no-op (never scan every tenant).
+  def reassign_backlog(_company_id), do: {:ok, 0, 0}
+
+  defp enqueue_reassign_wake(%Issue{} = issue) do
+    # Use allowlisted reason `manual_dispatch` (same family as demand-backed hire).
+    case Cympho.Orchestrator.Dispatcher.enqueue_wake(issue.id, "manual_dispatch", %{
+           "source" => "auto_assignment_reassign",
+           "agent_id" => issue.assignee_id
+         }) do
+      {:ok, _} = ok ->
+        ok
+
+      other ->
+        # Wake queue may be down; still nudge the dispatcher poll so :todo work
+        # is not stranded until the next 30s tick.
+        _ = Cympho.Orchestrator.Dispatcher.poll_now()
+        other
+    end
   end
 
   @doc """
@@ -150,7 +200,9 @@ defmodule Cympho.Issues.AutoAssignment do
   """
   @spec assign_waiting_role_work_with_issues(binary() | nil, atom() | String.t()) ::
           {:ok, [Issue.t()], non_neg_integer()}
-  def assign_waiting_role_work_with_issues(company_id, role) do
+  def assign_waiting_role_work_with_issues(company_id, role)
+
+  def assign_waiting_role_work_with_issues(company_id, role) when is_binary(company_id) do
     case Agent.normalize_role(role) do
       nil ->
         {:ok, [], 0}
@@ -160,10 +212,9 @@ defmodule Cympho.Issues.AutoAssignment do
           Issue
           |> where(
             [i],
-            i.status in ^@waiting_owner_statuses and is_nil(i.assignee_id) and
-              is_nil(i.hidden_at)
+            i.company_id == ^company_id and i.status in ^@waiting_owner_statuses and
+              is_nil(i.assignee_id) and is_nil(i.hidden_at)
           )
-          |> maybe_filter_company(company_id)
           |> Repo.all()
           |> Enum.filter(&(Router.infer_role(&1) == normalized_role))
 
@@ -179,10 +230,8 @@ defmodule Cympho.Issues.AutoAssignment do
     end
   end
 
-  defp maybe_filter_company(query, nil), do: query
-
-  defp maybe_filter_company(query, company_id) when is_binary(company_id),
-    do: where(query, [i], i.company_id == ^company_id)
+  # Fail-closed: no company scope → no cross-tenant waiting-work scan.
+  def assign_waiting_role_work_with_issues(_company_id, _role), do: {:ok, [], 0}
 
   @doc """
   Adds a system comment to an issue indicating it is queued for manual assignment.

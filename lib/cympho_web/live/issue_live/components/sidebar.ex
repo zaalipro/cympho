@@ -763,11 +763,12 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           </ul>
         </div>
 
-        <hr class="ui-advanced-only border-hairline" />
+        <hr class="border-hairline" />
 
+        <%!-- PR field stays visible in Simple mode so Set PR / proof chips work without Advanced panels. --%>
         <details
           id="issue-github-pr"
-          class="ui-advanced-only group"
+          class="group"
           open={@issue.github_pr_number not in [nil, 0] or @issue.github_pr_url not in [nil, ""]}
         >
           <summary class="flex items-center justify-between gap-2 cursor-pointer font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90 list-none">

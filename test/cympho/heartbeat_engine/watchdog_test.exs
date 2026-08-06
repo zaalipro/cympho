@@ -70,6 +70,45 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
       assert reloaded.status == "cancelled"
       assert is_nil(reloaded.error_reason)
     end
+
+    test "reclaims orphaned :in_progress issues and records results" do
+      # Fail-closed same_company? requires a shared non-nil company_id for checkout.
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Watchdog Orphan Co #{System.unique_integer([:positive])}",
+          slug: "wd-orphan-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Watchdog Issue Orphan Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Watchdog orphaned in_progress",
+          status: :todo,
+          assignee_id: agent.id,
+          company_id: company.id
+        })
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      assert checked_out.status == :in_progress
+      assert is_nil(Cympho.Orchestrator.whereis(checked_out.id))
+
+      assert :ok = Watchdog.check_now()
+      _ = :sys.get_state(Process.whereis(Watchdog))
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :todo
+      assert reloaded.assignee_id == agent.id
+
+      results = Watchdog.last_results()
+      assert results.orphaned_issues_recovered >= 1
+    end
   end
 
   describe "stranded wake recovery" do

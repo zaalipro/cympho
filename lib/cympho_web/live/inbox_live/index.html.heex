@@ -71,10 +71,12 @@
            filters sit after a divider so the eye stops at what needs work. --%>
       <div class="mt-4 flex flex-wrap items-center gap-2">
         <.link
-          patch={inbox_url(@selected_agent_id, @current_status, @digest_density, %{status: nil})}
+          patch={
+            inbox_url(@selected_agent_id, @current_status, @digest_density, %{status: "all"})
+          }
           class={[
             "inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-510 transition-colors",
-            status_tab_class(@current_status, nil)
+            status_tab_class(@current_status, "all")
           ]}
         >
           <span>All</span>
@@ -82,8 +84,8 @@
             {total_count(@inbox_counts)}
           </span>
         </.link>
-        <%!-- Simple mode keeps only "All" and the one lane that answers "is this
-             mine?". Unread/Awaiting review are ways of slicing the same list. --%>
+        <%!-- Simple mode keeps only "All" and Needs you (full OwnerAttention set,
+             including reviews). Advanced unread/review tabs slice the same list. --%>
         <.link
           :for={status <- ["action", "unread", "review"]}
           patch={
@@ -241,9 +243,9 @@
             {empty_state_heading(@current_status)}
           </p>
           <.link
-            :if={@current_status}
+            :if={@current_status not in [nil, "all"]}
             patch={
-              inbox_url(@selected_agent_id, @current_status, @digest_density, %{status: nil})
+              inbox_url(@selected_agent_id, @current_status, @digest_density, %{status: "all"})
             }
             class="mt-4 inline-flex items-center gap-1.5 text-xs font-590 text-text-secondary hover:text-brand"
           >
@@ -353,6 +355,47 @@
                 >
                   {item.summary}
                 </p>
+
+                <div
+                  :if={Map.get(item, :kind) == :interaction and item.card_body}
+                  class="mt-2 max-w-3xl space-y-1.5"
+                  data-testid="interaction-card-body"
+                >
+                  <ul
+                    :if={(item.card_body.lines || []) != []}
+                    class="space-y-1 text-sm leading-6 text-text-secondary"
+                  >
+                    <li
+                      :for={line <- item.card_body.lines}
+                      class="flex items-start gap-2"
+                    >
+                      <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-text-quaternary"></span>
+                      <span>{line}</span>
+                    </li>
+                  </ul>
+
+                  <form
+                    :if={Map.get(item, :interaction_kind) == :ask_user_questions}
+                    phx-submit="respond_questions"
+                    class="mt-2 space-y-2"
+                    data-testid="inbox-respond-questions"
+                  >
+                    <input type="hidden" name="_id" value={item.source_id} />
+                    <textarea
+                      name="response"
+                      rows="2"
+                      required
+                      placeholder="Type a short response…"
+                      class="min-h-[56px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+                    ></textarea>
+                    <button
+                      type="submit"
+                      class="rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-3 py-1.5 text-xs font-590 text-emerald-200 transition-colors hover:bg-emerald-500/25"
+                    >
+                      Respond
+                    </button>
+                  </form>
+                </div>
 
                 <p
                   :if={@digest_density == "detailed" and item.diagnostic not in [nil, ""]}
@@ -512,8 +555,80 @@
             >
               Approve
             </button>
+            <button
+              :if={
+                Map.get(item, :kind) == :interaction and
+                  Map.get(item, :interaction_kind) in [:request_confirmation, :suggest_tasks]
+              }
+              type="button"
+              phx-click="resolve_interaction"
+              phx-value-id={item.source_id}
+              phx-value-status="rejected"
+              class={[
+                "rounded-lg border border-rose-500/30 bg-rose-500/10 text-xs font-510 text-rose-200 transition-colors hover:bg-rose-500/15",
+                if(@digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2")
+              ]}
+            >
+              Reject
+            </button>
+            <button
+              :if={
+                Map.get(item, :kind) == :interaction and
+                  Map.get(item, :interaction_kind) in [:request_confirmation, :suggest_tasks]
+              }
+              type="button"
+              phx-click="resolve_interaction"
+              phx-value-id={item.source_id}
+              phx-value-status="accepted"
+              class={[
+                "rounded-lg border border-emerald-500/30 bg-emerald-500/15 text-xs font-590 text-emerald-200 transition-colors hover:bg-emerald-500/25",
+                if(@digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2")
+              ]}
+            >
+              {if Map.get(item, :interaction_kind) == :suggest_tasks,
+                do: "Accept tasks",
+                else: "Confirm"}
+            </button>
             <.app_link
-              :if={owner_decision_item?(item) and item.target_path}
+              :if={
+                Map.get(item, :kind) == :budget_incident and
+                  is_binary(Map.get(item, :raise_limit_path))
+              }
+              navigate={item.raise_limit_path}
+              data-testid="budget-raise-limit"
+              class={"rounded-lg border border-brand/30 bg-brand/15 text-xs font-590 text-brand transition-colors hover:bg-brand/25 #{if @digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2"}"}
+            >
+              Raise limit
+            </.app_link>
+            <.app_link
+              :if={
+                Map.get(item, :kind) == :budget_incident and
+                  is_binary(Map.get(item, :resume_path))
+              }
+              navigate={item.resume_path}
+              data-testid="budget-resume-after-raise"
+              class={"rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs font-510 text-amber-200 transition-colors hover:bg-amber-500/15 #{if @digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2"}"}
+            >
+              Resume after raise
+            </.app_link>
+            <button
+              :if={Map.get(item, :kind) == :budget_incident and Map.get(item, :dismissable)}
+              type="button"
+              phx-click="dismiss_budget_incident"
+              phx-value-incident_id={item.source_id}
+              data-confirm="Dismiss this budget alert from Needs you?"
+              class={[
+                "rounded-lg border border-border bg-surface text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary",
+                if(@digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2")
+              ]}
+            >
+              Dismiss
+            </button>
+            <.app_link
+              :if={
+                owner_decision_item?(item) && is_binary(item.target_path) &&
+                  Map.get(item, :kind) != :budget_incident
+              }
               navigate={item.target_path}
               class={"rounded-lg border border-border bg-surface text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary #{if @digest_density == "compact", do: "px-2.5 py-1.5", else: "px-3 py-2"}"}
             >

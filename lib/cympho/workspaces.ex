@@ -4,6 +4,7 @@ defmodule Cympho.Workspaces do
   runtime services, operations, and environment leases.
   """
   import Ecto.Query, warn: false
+  require Logger
   alias Cympho.Repo
 
   alias Cympho.Workspaces.ProjectWorkspace
@@ -12,8 +13,11 @@ defmodule Cympho.Workspaces do
   alias Cympho.Workspaces.WorkspaceOperation
   alias Cympho.Workspaces.EnvironmentLease
   alias Cympho.Workspaces.Environment
+  alias Cympho.Workspaces.EnvironmentLifecycle
   alias Cympho.Workspaces.EnvironmentProbe
   alias Cympho.Workspaces.ExecutionWorkspacePolicy
+  alias Cympho.Workspaces.EnvironmentDrivers
+  alias Cympho.Issues.Issue
 
   @stale_execution_after_seconds 4 * 60 * 60
   @lease_expiry_window_seconds 30 * 60
@@ -127,8 +131,408 @@ defmodule Cympho.Workspaces do
   end
 
   def destroy_execution_workspace(%ExecutionWorkspace{} = ew) do
-    update_execution_workspace(ew, %{status: "closed", closed_at: DateTime.utc_now()})
+    ew =
+      case cancel_provider_environment(ew, %{reason: "execution_workspace_destroyed"}) do
+        {:ok, released} ->
+          released
+
+        {:error, _} ->
+          case release_provider_environment(ew) do
+            {:ok, released} -> released
+            {:error, _} -> ew
+          end
+      end
+
+    update_execution_workspace(ew, %{
+      status: "closed",
+      closed_at: DateTime.utc_now(),
+      provider_ref: nil
+    })
   end
+
+  @doc """
+  Acquire or reuse a provider environment for an execution workspace.
+
+  No-op when `provider_type` is blank. Unknown providers fail closed.
+  """
+  @spec ensure_provider_environment(ExecutionWorkspace.t(), map() | keyword()) ::
+          {:ok, ExecutionWorkspace.t()} | {:error, term()}
+  def ensure_provider_environment(%ExecutionWorkspace{} = ew, opts \\ %{}) do
+    EnvironmentLifecycle.ensure_acquired(ew, opts)
+  end
+
+  @doc """
+  Release a provider environment for an execution workspace. Idempotent.
+  """
+  @spec release_provider_environment(ExecutionWorkspace.t(), map() | keyword()) ::
+          {:ok, ExecutionWorkspace.t()} | {:error, term()}
+  def release_provider_environment(%ExecutionWorkspace{} = ew, opts \\ %{}) do
+    EnvironmentLifecycle.release(ew, opts)
+  end
+
+  @doc """
+  Cancel and release a provider environment. Idempotent.
+  """
+  @spec cancel_provider_environment(ExecutionWorkspace.t(), map() | keyword()) ::
+          {:ok, ExecutionWorkspace.t()} | {:error, term()}
+  def cancel_provider_environment(%ExecutionWorkspace{} = ew, opts \\ %{}) do
+    EnvironmentLifecycle.cancel(ew, opts)
+  end
+
+  # --- Environment driver cancel / release ------------------------------------
+
+  @doc """
+  Cancel in-flight work (when the driver supports it) then release a remote
+  environment.
+
+  Accepts an `%ExecutionWorkspace{}`, `%Environment{}`, driver handle map, or a
+  bare `provider_ref` binary (with `opts[:provider]` / `opts[:provider_type]`).
+
+  Idempotent. Missing/blank `provider_ref` is a no-op (`:ok`). A present ref
+  with an unknown provider returns `{:error, :unknown_provider}` (fail-closed).
+  On success for a persisted workspace/environment, clears `provider_ref`.
+  """
+  @spec cancel_and_release_environment(term(), map() | keyword()) :: :ok | {:error, term()}
+  def cancel_and_release_environment(source, opts \\ %{})
+
+  def cancel_and_release_environment(source, opts) when is_list(opts),
+    do: cancel_and_release_environment(source, Map.new(opts))
+
+  def cancel_and_release_environment(source, opts) when is_map(opts) do
+    case extract_provider_target(source, opts) do
+      :noop ->
+        :ok
+
+      {:ok, provider, provider_ref, company_id, clear_target} ->
+        case EnvironmentDrivers.resolve(provider) do
+          {:ok, driver} ->
+            handle = build_driver_handle(provider_ref, company_id, provider)
+            driver_opts = Map.put(opts, :company_id, company_id)
+
+            _ = maybe_driver_cancel(driver, handle, driver_opts)
+
+            case driver.release(handle, driver_opts) do
+              :ok ->
+                _ = maybe_clear_provider_ref(clear_target)
+                :ok
+
+              {:error, _reason} = error ->
+                error
+            end
+
+          {:error, :unknown_provider} = error ->
+            Logger.warning(
+              "Workspaces: cannot cancel/release unknown environment provider",
+              component: "workspaces",
+              company_id: company_id,
+              provider: provider,
+              provider_ref: provider_ref
+            )
+
+            error
+        end
+    end
+  end
+
+  @doc """
+  Release a remote environment when `provider_ref` is present.
+
+  Idempotent. Missing/blank `provider_ref` is a no-op (`:ok`).
+  """
+  @spec release_environment(term(), map() | keyword()) :: :ok | {:error, term()}
+  def release_environment(source, opts \\ %{})
+
+  def release_environment(source, opts) when is_list(opts),
+    do: release_environment(source, Map.new(opts))
+
+  def release_environment(source, opts) when is_map(opts) do
+    case extract_provider_target(source, opts) do
+      :noop ->
+        :ok
+
+      {:ok, provider, provider_ref, company_id, clear_target} ->
+        case EnvironmentDrivers.resolve(provider) do
+          {:ok, driver} ->
+            handle = build_driver_handle(provider_ref, company_id, provider)
+            driver_opts = Map.put(opts, :company_id, company_id)
+
+            case driver.release(handle, driver_opts) do
+              :ok ->
+                _ = maybe_clear_provider_ref(clear_target)
+                :ok
+
+              {:error, _reason} = error ->
+                error
+            end
+
+          {:error, :unknown_provider} = error ->
+            Logger.warning(
+              "Workspaces: cannot release unknown environment provider",
+              component: "workspaces",
+              company_id: company_id,
+              provider: provider,
+              provider_ref: provider_ref
+            )
+
+            error
+        end
+    end
+  end
+
+  @doc """
+  Best-effort cancel+release for the execution workspace attached to an issue.
+
+  Looks up by `issue.execution_workspace_id` first, then by
+  `execution_workspaces.source_issue_id`. No-ops when no workspace or no
+  `provider_ref` is present. Tenant-scoped: refuses a workspace whose
+  `company_id` does not match the issue.
+  """
+  @spec cancel_and_release_for_issue(Issue.t() | String.t() | nil, map() | keyword()) ::
+          :ok | {:error, term()}
+  def cancel_and_release_for_issue(issue_or_id, opts \\ %{})
+
+  def cancel_and_release_for_issue(issue_or_id, opts) when is_list(opts),
+    do: cancel_and_release_for_issue(issue_or_id, Map.new(opts))
+
+  def cancel_and_release_for_issue(nil, _opts), do: :ok
+
+  def cancel_and_release_for_issue(%Issue{} = issue, opts) when is_map(opts) do
+    case resolve_execution_workspace_for_issue(issue) do
+      {:ok, %ExecutionWorkspace{} = ew} ->
+        if company_mismatch?(issue.company_id, ew.company_id) do
+          Logger.warning(
+            "Workspaces: refusing environment release across company boundary",
+            component: "workspaces",
+            issue_id: issue.id,
+            company_id: issue.company_id,
+            workspace_company_id: ew.company_id,
+            execution_workspace_id: ew.id
+          )
+
+          {:error, :company_mismatch}
+        else
+          cancel_and_release_environment(
+            ew,
+            opts
+            |> Map.put(:company_id, issue.company_id || ew.company_id)
+            |> Map.put_new(:issue_id, issue.id)
+          )
+        end
+
+      :none ->
+        :ok
+    end
+  end
+
+  def cancel_and_release_for_issue(issue_id, opts) when is_binary(issue_id) and is_map(opts) do
+    # Load via schema to avoid a context cycle with Cympho.Issues.
+    case Repo.get(Issue, issue_id) do
+      %Issue{} = issue ->
+        cancel_and_release_for_issue(issue, opts)
+
+      nil ->
+        case get_execution_workspace_for_issue(issue_id) do
+          {:ok, ew} -> cancel_and_release_environment(ew, Map.put(opts, :issue_id, issue_id))
+          {:error, :not_found} -> :ok
+        end
+    end
+  end
+
+  def cancel_and_release_for_issue(_other, _opts), do: :ok
+
+  defp resolve_execution_workspace_for_issue(
+         %Issue{id: issue_id, execution_workspace_id: ew_id, company_id: company_id} = _issue
+       )
+       when is_binary(ew_id) do
+    looked_up =
+      if is_binary(company_id) do
+        get_company_execution_workspace(company_id, ew_id)
+      else
+        get_execution_workspace(ew_id)
+      end
+
+    case looked_up do
+      {:ok, ew} -> {:ok, ew}
+      {:error, :not_found} -> resolve_execution_workspace_by_source_issue(issue_id, company_id)
+    end
+  end
+
+  defp resolve_execution_workspace_for_issue(%Issue{id: issue_id, company_id: company_id})
+       when is_binary(issue_id) do
+    resolve_execution_workspace_by_source_issue(issue_id, company_id)
+  end
+
+  defp resolve_execution_workspace_for_issue(_), do: :none
+
+  defp resolve_execution_workspace_by_source_issue(issue_id, company_id)
+       when is_binary(issue_id) do
+    case get_execution_workspace_for_issue(issue_id) do
+      {:ok, %ExecutionWorkspace{} = ew} ->
+        if company_mismatch?(company_id, ew.company_id), do: :none, else: {:ok, ew}
+
+      {:error, :not_found} ->
+        :none
+    end
+  end
+
+  defp company_mismatch?(left, right)
+       when is_binary(left) and is_binary(right) and left != right,
+       do: true
+
+  defp company_mismatch?(_left, _right), do: false
+
+  defp extract_provider_target(%ExecutionWorkspace{} = ew, opts) do
+    ref = present_ref(ew.provider_ref)
+    provider = present_provider(ew.provider_type) || present_provider(Map.get(opts, :provider))
+
+    if ref do
+      {:ok, provider || :unknown, ref, ew.company_id || Map.get(opts, :company_id),
+       {:execution_workspace, ew}}
+    else
+      :noop
+    end
+  end
+
+  defp extract_provider_target(%Environment{} = env, opts) do
+    ref = present_ref(env.provider_ref)
+    provider = present_provider(env.provider) || present_provider(Map.get(opts, :provider))
+
+    if ref do
+      {:ok, provider || :unknown, ref, env.company_id || Map.get(opts, :company_id),
+       {:environment, env}}
+    else
+      :noop
+    end
+  end
+
+  defp extract_provider_target(%{provider_ref: ref} = handle, opts) when is_binary(ref) do
+    extract_provider_target_from_map(handle, ref, opts)
+  end
+
+  defp extract_provider_target(%{"provider_ref" => ref} = handle, opts) when is_binary(ref) do
+    extract_provider_target_from_map(handle, ref, opts)
+  end
+
+  defp extract_provider_target(ref, opts) when is_binary(ref) do
+    case present_ref(ref) do
+      nil ->
+        :noop
+
+      provider_ref ->
+        provider =
+          present_provider(Map.get(opts, :provider)) ||
+            present_provider(Map.get(opts, :provider_type)) ||
+            :unknown
+
+        company_id = Map.get(opts, :company_id)
+        {:ok, provider, provider_ref, company_id, :none}
+    end
+  end
+
+  defp extract_provider_target(_source, _opts), do: :noop
+
+  defp extract_provider_target_from_map(handle, ref, opts) do
+    case present_ref(ref) do
+      nil ->
+        :noop
+
+      provider_ref ->
+        provider =
+          present_provider(
+            Map.get(handle, :provider) || Map.get(handle, "provider") ||
+              Map.get(handle, :provider_type) || Map.get(handle, "provider_type") ||
+              Map.get(opts, :provider) || Map.get(opts, :provider_type)
+          ) || :unknown
+
+        company_id =
+          Map.get(handle, :company_id) || Map.get(handle, "company_id") ||
+            Map.get(opts, :company_id)
+
+        {:ok, provider, provider_ref, company_id, :none}
+    end
+  end
+
+  defp present_ref(ref) when is_binary(ref) do
+    trimmed = String.trim(ref)
+    if trimmed == "", do: nil, else: trimmed
+  end
+
+  defp present_ref(_), do: nil
+
+  defp present_provider(provider) when provider in [nil, "", :unknown], do: nil
+  defp present_provider(provider) when is_atom(provider), do: provider
+
+  defp present_provider(provider) when is_binary(provider) do
+    trimmed = String.trim(provider)
+    if trimmed == "", do: nil, else: trimmed
+  end
+
+  defp present_provider(_), do: nil
+
+  defp build_driver_handle(provider_ref, company_id, provider) do
+    %{
+      provider_ref: provider_ref,
+      company_id: company_id,
+      provider: provider
+    }
+  end
+
+  defp maybe_driver_cancel(driver, handle, opts) do
+    if function_exported?(driver, :cancel, 2) do
+      driver.cancel(handle, opts)
+    else
+      :ok
+    end
+  rescue
+    error ->
+      Logger.warning(
+        "Workspaces: driver cancel raised; continuing to release",
+        component: "workspaces",
+        provider_ref: Map.get(handle, :provider_ref),
+        error: Exception.message(error)
+      )
+
+      :ok
+  end
+
+  defp maybe_clear_provider_ref({:execution_workspace, %ExecutionWorkspace{} = ew}) do
+    case update_execution_workspace(ew, %{provider_ref: nil}) do
+      {:ok, updated} ->
+        {:ok, updated}
+
+      {:error, reason} ->
+        Logger.warning(
+          "Workspaces: failed to clear execution workspace provider_ref after release",
+          component: "workspaces",
+          execution_workspace_id: ew.id,
+          error: inspect(reason)
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp maybe_clear_provider_ref({:environment, %Environment{} = env}) do
+    case env
+         |> Environment.changeset(%{provider_ref: nil})
+         |> Repo.update() do
+      {:ok, updated} ->
+        {:ok, updated}
+
+      {:error, reason} ->
+        Logger.warning(
+          "Workspaces: failed to clear environment provider_ref after release",
+          component: "workspaces",
+          environment_id: env.id,
+          error: inspect(reason)
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp maybe_clear_provider_ref(:none), do: :ok
+  defp maybe_clear_provider_ref(_), do: :ok
 
   # --- Worktree Helpers ---
 
@@ -279,12 +683,18 @@ defmodule Cympho.Workspaces do
   # --- Leases ---
 
   def create_lease(attrs \\ %{}) do
-    %EnvironmentLease{}
-    |> EnvironmentLease.changeset(attrs)
-    |> Repo.insert()
+    with {:ok, attrs} <- EnvironmentLifecycle.prepare_lease_attrs(attrs) do
+      %EnvironmentLease{}
+      |> EnvironmentLease.changeset(attrs)
+      |> Repo.insert()
+    end
   end
 
   def revoke_lease(%EnvironmentLease{} = lease) do
+    # Best-effort driver release; DB revoke always proceeds so leases cannot
+    # strand as "active" after an unknown/unavailable provider.
+    _ = EnvironmentLifecycle.release_for_lease(lease)
+
     lease
     |> EnvironmentLease.revoke_changeset()
     |> Repo.update()

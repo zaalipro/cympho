@@ -8,15 +8,16 @@ defmodule CymphoWeb.PluginLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    companies = Companies.list_companies()
+    companies = membership_companies(socket)
+    default_company_id = current_company_id(socket)
 
     {:ok,
      socket
      |> assign(:companies, companies)
      |> assign(:can_manage_plugins, can_manage_plugins?(socket))
-     |> assign(:selected_company_id, nil)
+     |> assign(:selected_company_id, default_company_id)
      |> assign(:selected_status, nil)
-     |> assign(:plugin_health, Plugins.health_summary())
+     |> assign(:plugin_health, Plugins.health_summary(default_company_id))
      |> assign(:infinite_scroll, %{})
      |> assign(:page_title, "Plugins")}
   end
@@ -27,7 +28,13 @@ defmodule CymphoWeb.PluginLive.Index do
   end
 
   defp apply_action(socket, :index, params) do
-    company_id = normalize_company_filter(params["company_id"], socket.assigns.companies)
+    company_id =
+      normalize_company_filter(
+        params["company_id"],
+        socket.assigns.companies,
+        current_company_id(socket)
+      )
+
     status = normalize_status_filter(params["status"])
 
     socket =
@@ -47,7 +54,13 @@ defmodule CymphoWeb.PluginLive.Index do
 
   @impl true
   def handle_event("filter", %{"company_id" => company_id, "status" => status}, socket) do
-    company_id = normalize_company_filter(company_id, socket.assigns.companies)
+    company_id =
+      normalize_company_filter(
+        company_id,
+        socket.assigns.companies,
+        current_company_id(socket)
+      )
+
     status = normalize_status_filter(status)
 
     socket =
@@ -114,37 +127,60 @@ defmodule CymphoWeb.PluginLive.Index do
   end
 
   defp fetch_plugins(socket, cursor) do
-    Skills.list_plugins_page(
-      company_id: socket.assigns[:selected_company_id],
-      status: socket.assigns[:selected_status],
-      after: cursor
-    )
-  end
+    company_id = socket.assigns[:selected_company_id] || current_company_id(socket)
 
-  defp normalize_company_filter(company_id, companies) when is_binary(company_id) do
-    company_id = String.trim(company_id)
-
-    cond do
-      company_id == "" -> nil
-      Enum.any?(companies, &(&1.id == company_id)) -> company_id
-      true -> nil
+    if is_binary(company_id) do
+      Skills.list_plugins_page(
+        company_id: company_id,
+        status: socket.assigns[:selected_status],
+        after: cursor
+      )
+    else
+      # Fail-closed: never list unscoped plugins across all tenants.
+      %Cympho.Pagination.Page{entries: [], next_cursor: nil, has_more?: false}
     end
   end
 
-  defp normalize_company_filter(_company_id, _companies), do: nil
+  defp membership_companies(socket) do
+    case socket.assigns[:current_user] do
+      %{id: user_id} when is_binary(user_id) -> Companies.list_companies_for_user(user_id)
+      _ -> []
+    end
+  end
+
+  defp current_company_id(socket) do
+    case socket.assigns[:current_company] do
+      %{id: id} when is_binary(id) -> id
+      _ -> nil
+    end
+  end
+
+  # Restrict company filter to memberships; empty/invalid falls back to current company (not unscoped).
+  defp normalize_company_filter(company_id, companies, default_id) when is_binary(company_id) do
+    company_id = String.trim(company_id)
+
+    cond do
+      company_id == "" -> default_id
+      Enum.any?(companies, &(&1.id == company_id)) -> company_id
+      true -> default_id
+    end
+  end
+
+  defp normalize_company_filter(_company_id, _companies, default_id), do: default_id
 
   defp normalize_status_filter(status) when status in @filter_statuses, do: status
   defp normalize_status_filter(_status), do: nil
 
   defp fetch_company_plugin(socket, id) do
-    case socket.assigns[:current_company] do
-      %{id: company_id} -> Skills.get_company_plugin(company_id, id)
+    case current_company_id(socket) do
+      company_id when is_binary(company_id) -> Skills.get_company_plugin(company_id, id)
       _ -> {:error, :not_found}
     end
   end
 
   defp refresh_plugin_health(socket) do
-    assign(socket, :plugin_health, Plugins.health_summary(socket.assigns[:selected_company_id]))
+    company_id = socket.assigns[:selected_company_id] || current_company_id(socket)
+    assign(socket, :plugin_health, Plugins.health_summary(company_id))
   end
 
   defp authorize_plugin_mutation(socket, fun) do
@@ -298,23 +334,27 @@ defmodule CymphoWeb.PluginLive.Index do
   def plugin_next_action_path(%{key: :audit_disabled_plugins}), do: "/plugins?status=disabled"
   def plugin_next_action_path(_action), do: "/plugins"
 
-  def plugin_filters_active?(company_id, status),
-    do: company_id not in [nil, ""] or status not in [nil, ""]
+  def plugin_filters_active?(company_id, status, default_company_id \\ nil) do
+    company_filtered? =
+      is_binary(company_id) and company_id != "" and company_id != default_company_id
 
-  def plugin_empty_icon(company_id, status) do
-    if plugin_filters_active?(company_id, status),
+    company_filtered? or status not in [nil, ""]
+  end
+
+  def plugin_empty_icon(company_id, status, default_company_id \\ nil) do
+    if plugin_filters_active?(company_id, status, default_company_id),
       do: "hero-funnel-mini",
       else: "hero-puzzle-piece-mini"
   end
 
-  def plugin_empty_title(company_id, status) do
-    if plugin_filters_active?(company_id, status),
+  def plugin_empty_title(company_id, status, default_company_id \\ nil) do
+    if plugin_filters_active?(company_id, status, default_company_id),
       do: "No plugins match these filters",
       else: "No runtime plugins installed yet"
   end
 
-  def plugin_empty_detail(company_id, status) do
-    if plugin_filters_active?(company_id, status) do
+  def plugin_empty_detail(company_id, status, default_company_id \\ nil) do
+    if plugin_filters_active?(company_id, status, default_company_id) do
       "Clear filters to return to the full extension inventory, or open the marketplace if this capability still needs to be installed."
     else
       "Install one tightly scoped extension, verify its manifest and capability boundary, then watch health and webhook evidence here."

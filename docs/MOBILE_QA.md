@@ -24,6 +24,8 @@ The test used a 390x844 Ego Lite viewport.
 - The Improve form kept its title input, context field, and both actions inside x=41..341. The primary action was above the mobile navigation in the full portrait viewport.
 - `/inbox?agent_id=all&density=detailed` kept the budget-warning action reachable. Simple mode hid `[data-testid="owner-attention-diagnostic"]`; Advanced mode displayed it. The diagnostic wrapped in its 265px content box (`scrollWidth == clientWidth`) and no actionable control extended beyond the viewport.
 - `document.documentElement.scrollWidth == document.documentElement.clientWidth`; the bottom navigation also had `scrollWidth == clientWidth`.
+- **Board geometry (G11 residual):** `/kanban` uses `.mobile-board-height` → `calc(100dvh - var(--mobile-header-height) - var(--mobile-shell-bottom))` so the board ends above `#mobile-nav`. At 390x844 with zero emulated safe-area, that is `844 - 64 - 64 = 716px` of board height; column cards scroll inside that box so the last card’s bottom edge stays above the nav top (y≈787).
+- **New Issue sticky CTA:** `/issues/new` submit bar uses `.sticky-above-mobile-nav` → `bottom: var(--mobile-nav-offset)` (`3.5rem` + safe-area). At 390x844 the sticky bar clears the fixed nav instead of sitting under it (`bottom-0`).
 
 ### keyboard resize
 
@@ -52,6 +54,8 @@ The landscape check used an 844x390 Ego Lite viewport, which remains on the mobi
 3. Open `/inbox?agent_id=all&density=detailed`. Toggle Simple and Advanced; confirm only Advanced shows the technical diagnostic and that its `scrollWidth <= clientWidth`.
 4. Return to the Improve form, focus `input[name="company[goal_title]"]`, reduce the viewport to 390x500 to model a keyboard, and scroll the primary action into view. Its bottom edge must be above `#mobile-nav`'s top edge.
 5. Switch to landscape at 844x390 and repeat the overflow and action-versus-navigation geometry checks.
+6. Open `/kanban` at 390x844. Confirm `#kanban-board` uses `.mobile-board-height` (not `100vh-64px`), scroll the last column card into view, and verify its bottom edge is above `#mobile-nav`'s top edge.
+7. Open `/issues/new` at 390x844. Confirm the sticky submit bar uses `.sticky-above-mobile-nav` and its bottom edge sits above `#mobile-nav` (not under it).
 
 ## Limits
 

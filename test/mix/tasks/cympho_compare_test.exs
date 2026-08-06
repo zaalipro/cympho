@@ -74,7 +74,7 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "server_inbox_badge_counts"))
 
-    assert evidence =~ "unread_count_for_company"
+    assert evidence =~ "OwnerAttention.unresolved_count"
     assert evidence =~ "company PubSub updates"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
@@ -396,8 +396,6 @@ defmodule Mix.Tasks.CymphoCompareTest do
 
     expected_open_gaps = [
       "remote_sandbox_execution",
-      "governed_dynamic_mcp",
-      "durable_eval_feedback",
       "selective_standard_portability"
     ]
 
@@ -409,13 +407,22 @@ defmodule Mix.Tasks.CymphoCompareTest do
     end
 
     assert Enum.find(rows, &(&1["slug"] == "remote_sandbox_execution"))["evidence"] =~
+             "Fake"
+
+    assert Enum.find(rows, &(&1["slug"] == "remote_sandbox_execution"))["evidence"] =~
              "real remote provider"
 
-    assert Enum.find(rows, &(&1["slug"] == "governed_dynamic_mcp"))["evidence"] =~
-             "local plugin lifecycle"
+    assert %{"verdict" => "parity", "evidence" => mcp_evidence} =
+             Enum.find(rows, &(&1["slug"] == "governed_dynamic_mcp"))
 
-    assert Enum.find(rows, &(&1["slug"] == "durable_eval_feedback"))["evidence"] =~
-             "saved evaluation runs"
+    assert mcp_evidence =~ "authorization and revocation"
+    assert mcp_evidence =~ "AgentActionLimiter"
+
+    assert %{"verdict" => "parity", "evidence" => durable_eval_evidence} =
+             Enum.find(rows, &(&1["slug"] == "durable_eval_feedback"))
+
+    assert durable_eval_evidence =~ "Saved evaluation runs"
+    assert durable_eval_evidence =~ "redacted traces"
 
     assert %{"verdict" => "parity", "evidence" => mobile_evidence} =
              Enum.find(rows, &(&1["slug"] == "mobile_safe_area_evidence"))
@@ -425,7 +432,7 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert mobile_evidence =~ "landscape evidence"
 
     assert Enum.find(rows, &(&1["slug"] == "selective_standard_portability"))["evidence"] =~
-             "local/GitHub/ref"
+             "GitHub/ref"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "secrets"))

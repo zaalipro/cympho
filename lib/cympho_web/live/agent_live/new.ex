@@ -13,6 +13,7 @@ defmodule CymphoWeb.AgentLive.New do
   alias Cympho.OrgHealth
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.RuntimeProfiles
+  alias Cympho.Secrets
   alias CymphoWeb.UserAuth
 
   @default_role "engineer"
@@ -35,18 +36,23 @@ defmodule CymphoWeb.AgentLive.New do
     runtime = runtime_form_from_params(attrs, selected_adapter, selected_profile_id)
     changeset = Agents.change_agent(%Agent{}, attrs)
 
+    env_text = env_text_from_profile(selected_profile_id)
+    profile = RuntimeProfiles.get!(selected_profile_id)
+
     {:ok,
      socket
      |> assign(:page_title, "New Agent")
      |> assign(:pending_approval_id, nil)
-     |> assign(:env_text, env_text_from_profile(selected_profile_id))
+     |> assign(:env_text, env_text)
      |> assign(:hire_context, hire_context(params, company, role))
+     |> assign(:hire_form_path, hire_form_path(params))
      |> assign(:return_to, return_to(params))
      |> assign(:selected_adapter, selected_adapter)
      |> assign_runtime_profile(selected_profile_id)
      |> assign_runtime_form(runtime)
      |> assign(:reports_to_options, reports_to_options(company, nil))
-     |> assign(:form, to_form(changeset))}
+     |> assign(:form, to_form(changeset))
+     |> assign_hire_readiness(company, selected_adapter, profile, env_text, runtime)}
   end
 
   @impl true
@@ -59,6 +65,7 @@ defmodule CymphoWeb.AgentLive.New do
     agent_params = Map.put(agent_params, "env_text", env_text)
     selected_adapter = selected_adapter_from_params(agent_params, selected_profile_id)
     runtime = runtime_form_from_params(agent_params, selected_adapter, selected_profile_id)
+    profile = RuntimeProfiles.get!(selected_profile_id)
 
     changeset =
       %Agent{}
@@ -79,7 +86,8 @@ defmodule CymphoWeb.AgentLive.New do
      |> assign(:selected_adapter, selected_adapter)
      |> assign_runtime_profile(selected_profile_id)
      |> assign_runtime_form(runtime)
-     |> assign(:form, to_form(changeset))}
+     |> assign(:form, to_form(changeset))
+     |> assign_hire_readiness(company, selected_adapter, profile, env_text, runtime)}
   end
 
   def handle_event("save", %{"agent" => agent_params}, socket) do
@@ -89,40 +97,66 @@ defmodule CymphoWeb.AgentLive.New do
     agent_params = Map.put(agent_params, "env_text", env_text)
     selected_adapter = selected_adapter_from_params(agent_params, selected_profile_id)
     runtime = runtime_form_from_params(agent_params, selected_adapter, selected_profile_id)
+    profile = RuntimeProfiles.get!(selected_profile_id)
 
-    params =
-      agent_params
-      |> maybe_apply_runtime_profile(selected_profile_id)
-      |> maybe_put_adapter_config(selected_adapter, runtime, selected_profile_id)
-      |> maybe_put_runtime_profile(selected_profile_id)
-      |> maybe_put_profile_concurrency(agent_params, selected_profile_id)
-      |> normalize_agent_params()
-      |> maybe_put_company_id(company)
+    readiness =
+      hire_readiness(
+        company,
+        selected_adapter,
+        profile,
+        env_text,
+        runtime,
+        socket.assigns[:hire_form_path]
+      )
 
-    case Agents.create_agent(params) do
-      {:ok, agent} ->
-        socket = maybe_assign_waiting_role_work(socket, agent)
-        {:noreply, push_navigate(socket, to: socket.assigns.return_to || ~p"/agents")}
+    if readiness.status == :needs_key do
+      {:noreply,
+       socket
+       |> assign(:env_text, env_text)
+       |> assign(:selected_adapter, selected_adapter)
+       |> assign_runtime_profile(selected_profile_id)
+       |> assign_runtime_form(runtime)
+       |> assign(:hire_readiness, readiness)
+       |> put_flash(
+         :error,
+         "Add #{readiness.primary_key} before hiring — this agent cannot run without a provider key."
+       )}
+    else
+      params =
+        agent_params
+        |> maybe_apply_runtime_profile(selected_profile_id)
+        |> maybe_put_adapter_config(selected_adapter, runtime, selected_profile_id)
+        |> maybe_put_runtime_profile(selected_profile_id)
+        |> maybe_put_profile_concurrency(agent_params, selected_profile_id)
+        |> normalize_agent_params()
+        |> maybe_put_company_id(company)
 
-      {:error, :pending_board_approval, approval_id} ->
-        socket =
-          socket
-          |> put_flash(
-            :info,
-            "Agent hire requires board approval. " <>
-              "A request has been submitted and is pending review."
-          )
-          |> assign(:pending_approval_id, approval_id)
+      case Agents.create_agent(params) do
+        {:ok, agent} ->
+          socket = maybe_assign_waiting_role_work(socket, agent)
+          {:noreply, push_navigate(socket, to: socket.assigns.return_to || ~p"/agents")}
 
-        {:noreply, socket}
+        {:error, :pending_board_approval, approval_id} ->
+          socket =
+            socket
+            |> put_flash(
+              :info,
+              "Agent hire requires board approval. " <>
+                "A request has been submitted and is pending review."
+            )
+            |> assign(:pending_approval_id, approval_id)
 
-      {:error, changeset} ->
-        {:noreply,
-         socket
-         |> assign(:selected_adapter, selected_adapter)
-         |> assign_runtime_profile(selected_profile_id)
-         |> assign_runtime_form(runtime)
-         |> assign(form: to_form(Map.put(changeset, :action, :insert)))}
+          {:noreply, socket}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> assign(:selected_adapter, selected_adapter)
+           |> assign_runtime_profile(selected_profile_id)
+           |> assign_runtime_form(runtime)
+           |> assign(:hire_readiness, readiness)
+           |> assign(form: to_form(Map.put(changeset, :action, :insert)))}
+      end
     end
   end
 
@@ -904,26 +938,260 @@ defmodule CymphoWeb.AgentLive.New do
   defp adapter_label("agrenting"), do: adapter_label(:agrenting)
   defp adapter_label(adapter) when is_binary(adapter), do: adapter
 
-  defp runtime_profile_secret_setup_path(%{id: id, adapter: "openai_chat"})
+  defp runtime_profile_secret_setup_path(%{id: id, adapter: "openai_chat"} = profile, return_to)
        when is_binary(id) do
-    cond do
-      String.contains?(id, "dashscope") ->
-        ~p"/settings/secrets?#{[key: "DASHSCOPE_API_KEY", scope: "company", description: "DashScope compatible-mode runtime credential"]}"
+    keys = openai_chat_credential_keys(profile)
+    primary = List.first(keys) || "OPENAI_API_KEY"
 
-      true ->
-        ~p"/settings/secrets?#{[key: "OPENAI_API_KEY", scope: "company", description: "OpenAI-compatible chat runtime credential"]}"
+    secret_setup_path(
+      primary,
+      "#{primary} for OpenAI-compatible chat runtime",
+      return_to
+    )
+  end
+
+  defp runtime_profile_secret_setup_path(%{adapter: "claude_code"}, return_to) do
+    secret_setup_path(
+      "ANTHROPIC_API_KEY",
+      "Anthropic-compatible runtime credential",
+      return_to
+    )
+  end
+
+  defp runtime_profile_secret_setup_path(%{adapter: "codex"}, return_to) do
+    secret_setup_path(
+      "OPENAI_API_KEY",
+      "OpenAI or Codex runtime credential",
+      return_to
+    )
+  end
+
+  defp runtime_profile_secret_setup_path(_profile, _return_to), do: nil
+
+  defp secret_setup_path(key, description, return_to) do
+    query =
+      %{
+        "key" => key,
+        "scope" => "company",
+        "description" => description
+      }
+      |> maybe_put_return_to(return_to)
+      |> URI.encode_query()
+
+    "/settings/secrets?#{query}"
+  end
+
+  defp maybe_put_return_to(query, return_to) when is_binary(return_to) and return_to != "" do
+    case UserAuth.safe_return_path(return_to) do
+      nil -> query
+      path -> Map.put(query, "return_to", path)
     end
   end
 
-  defp runtime_profile_secret_setup_path(%{adapter: "claude_code"}) do
-    ~p"/settings/secrets?#{[key: "ANTHROPIC_API_KEY", scope: "company", description: "Anthropic-compatible runtime credential"]}"
+  defp maybe_put_return_to(query, _return_to), do: query
+
+  defp assign_hire_readiness(socket, company, adapter, profile, env_text, runtime) do
+    hire_form_path = current_hire_form_path(socket, profile)
+
+    socket
+    |> assign(:hire_form_path, hire_form_path)
+    |> assign(
+      :hire_readiness,
+      hire_readiness(company, adapter, profile, env_text, runtime, hire_form_path)
+    )
   end
 
-  defp runtime_profile_secret_setup_path(%{adapter: "codex"}) do
-    ~p"/settings/secrets?#{[key: "OPENAI_API_KEY", scope: "company", description: "OpenAI or Codex runtime credential"]}"
+  defp hire_readiness(company, adapter, profile, env_text, runtime, hire_form_path) do
+    available_keys = available_credential_keys(company, env_text)
+    required_keys = required_provider_keys(adapter, profile, runtime)
+
+    case required_keys do
+      [] ->
+        # Simple-mode card only — keep free of runtime/adapter jargon.
+        ready_hire_readiness(
+          "Friendly defaults are ready",
+          "This agent starts with the role playbook, company defaults, and safe handoff behavior. No key is required for this setup."
+        )
+
+      keys ->
+        present_key = Enum.find(keys, &MapSet.member?(available_keys, &1))
+
+        if is_binary(present_key) do
+          ready_hire_readiness(
+            "Friendly defaults are ready",
+            "This agent starts with the role playbook, company defaults, and #{present_key}. Switch to Advanced only when you need to change how it runs."
+          )
+        else
+          primary = List.first(keys)
+          setup_path = secret_setup_path(primary, "#{primary} runtime credential", hire_form_path)
+
+          %{
+            status: :needs_key,
+            label: "Needs a key",
+            summary:
+              "Add #{primary} before hiring. Without it this agent cannot run, even though the role defaults look complete.",
+            primary_key: primary,
+            required_keys: keys,
+            setup_path: setup_path,
+            can_hire: false
+          }
+        end
+    end
   end
 
-  defp runtime_profile_secret_setup_path(_profile), do: nil
+  defp current_hire_form_path(socket, profile) do
+    form = socket.assigns[:form]
+    role = form_field_value(form, :role)
+    name = form_field_value(form, :name)
+    parent_id = form_field_value(form, :parent_id)
+    profile_id = Map.get(profile, :id) || socket.assigns[:selected_runtime_profile_id]
+
+    hire_form_path(%{
+      "role" => role,
+      "name" => name,
+      "parent_id" => parent_id,
+      "runtime_profile_id" => profile_id
+    })
+  end
+
+  defp form_field_value(%Phoenix.HTML.Form{} = form, field) do
+    case form[field] do
+      %{value: value} when value not in [nil, ""] -> to_string(value)
+      _ -> nil
+    end
+  end
+
+  defp form_field_value(_form, _field), do: nil
+
+  defp ready_hire_readiness(label, summary) do
+    %{
+      status: :ready,
+      label: label,
+      summary: summary,
+      primary_key: nil,
+      required_keys: [],
+      setup_path: nil,
+      can_hire: true
+    }
+  end
+
+  defp available_credential_keys(%{id: company_id}, env_text) when is_binary(company_id) do
+    secret_keys =
+      company_id
+      |> Secrets.list_secrets()
+      |> Enum.map(& &1.key)
+      |> MapSet.new()
+
+    env_keys =
+      env_text
+      |> RuntimeEnv.parse_text()
+      |> Map.keys()
+      |> MapSet.new()
+
+    MapSet.union(secret_keys, env_keys)
+  end
+
+  defp available_credential_keys(_company, env_text) do
+    env_text
+    |> RuntimeEnv.parse_text()
+    |> Map.keys()
+    |> MapSet.new()
+  end
+
+  defp required_provider_keys("openai_chat", profile, runtime) do
+    openai_chat_credential_keys(%{
+      endpoint:
+        runtime_value(runtime, :openai_chat_endpoint) || profile_config(profile, "endpoint"),
+      model: runtime_value(runtime, :model) || profile_config(profile, "model"),
+      id: Map.get(profile, :id)
+    })
+  end
+
+  defp required_provider_keys("codex", _profile, _runtime),
+    do: ["OPENAI_API_KEY", "CODEX_API_KEY"]
+
+  defp required_provider_keys("claude_code", profile, runtime) do
+    command =
+      first_present([
+        runtime_value(runtime, :command),
+        profile_config(profile, "command"),
+        "claude"
+      ])
+
+    # Wrapper commands (cz/cm) can source provider credentials outside Secrets.
+    if command in [nil, "", "claude"] do
+      ["ANTHROPIC_API_KEY"]
+    else
+      []
+    end
+  end
+
+  defp required_provider_keys("agrenting", _profile, _runtime), do: ["AGRENTING_API_KEY"]
+
+  defp required_provider_keys(_adapter, _profile, _runtime), do: []
+
+  defp openai_chat_credential_keys(runtime_or_profile) do
+    endpoint =
+      runtime_or_profile
+      |> runtime_value(:endpoint)
+      |> to_string()
+      |> String.downcase()
+
+    model =
+      runtime_or_profile
+      |> runtime_value(:model)
+      |> to_string()
+      |> String.downcase()
+
+    id =
+      runtime_or_profile
+      |> runtime_value(:id)
+      |> to_string()
+      |> String.downcase()
+
+    cond do
+      String.contains?(endpoint, "llmotions") or String.contains?(id, "llmotions") ->
+        ["LLMOTIONS_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"]
+
+      String.contains?(endpoint, "dashscope") or String.contains?(id, "dashscope") or
+          String.starts_with?(model, "qwen") ->
+        ["DASHSCOPE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "LLMOTIONS_API_KEY"]
+
+      true ->
+        ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY", "LLMOTIONS_API_KEY"]
+    end
+  end
+
+  defp profile_config(%{config: %{} = config}, key), do: Map.get(config, key)
+  defp profile_config(_profile, _key), do: nil
+
+  defp runtime_value(map, key) when is_map(map) do
+    Map.get(map, key) || Map.get(map, to_string(key))
+  end
+
+  defp runtime_value(_map, _key), do: nil
+
+  defp first_present(values) do
+    Enum.find(values, fn
+      value when value in [nil, ""] -> false
+      _value -> true
+    end)
+  end
+
+  defp hire_form_path(params) when is_map(params) do
+    query =
+      params
+      |> Map.take(["role", "name", "parent_id", "runtime_profile_id"])
+      |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+      |> Map.new()
+
+    case URI.encode_query(query) do
+      "" -> "/agents/new"
+      encoded -> "/agents/new?#{encoded}"
+    end
+  end
+
+  defp hire_form_path(_params), do: "/agents/new"
 
   defp issue_example_label(%{identifier: identifier, title: title})
        when is_binary(identifier) and identifier != "" do

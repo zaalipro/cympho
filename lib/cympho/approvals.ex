@@ -136,11 +136,7 @@ defmodule Cympho.Approvals do
           })
         end)
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          scoped_topic(approval),
-          {:approval_created, approval}
-        )
+        broadcast_approval(approval, {:approval_created, approval})
 
         {:ok, approval}
 
@@ -178,11 +174,7 @@ defmodule Cympho.Approvals do
           })
         end)
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          scoped_topic(updated),
-          {:approval_resolved, updated}
-        )
+        broadcast_approval(updated, {:approval_resolved, updated})
 
         maybe_wake_agent(updated)
         {:ok, updated}
@@ -201,11 +193,7 @@ defmodule Cympho.Approvals do
       |> Repo.update()
       |> case do
         {:ok, updated} ->
-          Phoenix.PubSub.broadcast(
-            Cympho.PubSub,
-            scoped_topic(updated),
-            {:approval_cancelled, updated}
-          )
+          broadcast_approval(updated, {:approval_cancelled, updated})
 
           {:ok, updated}
 
@@ -230,9 +218,9 @@ defmodule Cympho.Approvals do
     if count > 0 do
       company_id = issue_company_id_for_approval(issue_id)
 
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        (company_id && "company:#{company_id}:approvals") || "approvals",
+      Cympho.PubSubGuard.company_broadcast(
+        company_id,
+        "approvals",
         {:approvals_cancelled_for_issue, issue_id}
       )
     end
@@ -251,9 +239,11 @@ defmodule Cympho.Approvals do
     |> Repo.preload([:requested_by, :resolved_by, :issues])
   end
 
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:approvals")
   end
+
+  def subscribe(_company_id), do: :ok
 
   defp maybe_wake_agent(%Approval{} = approval) do
     approval = Repo.preload(approval, :requested_by)
@@ -267,20 +257,26 @@ defmodule Cympho.Approvals do
     end
   end
 
-  defp scoped_topic(%Approval{} = approval) do
+  # Fail-closed: never publish the unscoped "approvals" topic or company::approvals.
+  defp broadcast_approval(%Approval{} = approval, message) do
+    Cympho.PubSubGuard.company_broadcast(approval_company_id(approval), "approvals", message)
+  end
+
+  defp approval_company_id(%Approval{} = approval) do
     approval = Repo.preload(approval, [:issues, :requested_by])
 
     case approval.issues do
-      [issue | _] ->
-        "company:#{issue.company_id}:approvals"
+      [%{company_id: company_id} | _] when is_binary(company_id) and company_id != "" ->
+        company_id
 
-      [] ->
+      _ ->
         case approval.requested_by do
-          %Cympho.Agents.Agent{company_id: company_id} when not is_nil(company_id) ->
-            "company:#{company_id}:approvals"
+          %Cympho.Agents.Agent{company_id: company_id}
+          when is_binary(company_id) and company_id != "" ->
+            company_id
 
           _ ->
-            "approvals"
+            nil
         end
     end
   end

@@ -53,9 +53,9 @@ defmodule Cympho.AgentGovernance do
 
           Decisions.record_governance_decision(updated, "resume", "approved", actor)
 
-          Phoenix.PubSub.broadcast(
-            Cympho.PubSub,
-            "company:#{updated.company_id}:agents",
+          Cympho.PubSubGuard.company_broadcast(
+            updated.company_id,
+            "agents",
             {:agent_resumed, updated}
           )
 
@@ -197,9 +197,9 @@ defmodule Cympho.AgentGovernance do
 
         Decisions.record_governance_decision(updated, "pause", "approved", actor)
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.company_id}:agents",
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "agents",
           {:agent_paused, updated}
         )
 
@@ -229,9 +229,9 @@ defmodule Cympho.AgentGovernance do
 
         Decisions.record_governance_decision(updated, "terminate", "approved", actor)
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.company_id}:agents",
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "agents",
           {:agent_terminated, updated}
         )
 

@@ -11,6 +11,7 @@ defmodule Cympho.AgentActionsTest do
     PrincipalPermissions,
     Repo,
     Secrets,
+    Wakes,
     WorkProducts
   }
 
@@ -307,6 +308,31 @@ defmodule Cympho.AgentActionsTest do
       """
 
       assert {:error, {:invalid_json, _message}} = AgentActions.parse(body)
+    end
+  end
+
+  describe "execute/3 tenancy fail-closed" do
+    test "rejects when either side company_id is nil or unequal" do
+      u = System.unique_integer([:positive])
+
+      {:ok, company_a} =
+        Companies.create_company(%{name: "Act A #{u}", slug: "act-a-#{u}"})
+
+      {:ok, company_b} =
+        Companies.create_company(%{name: "Act B #{u}", slug: "act-b-#{u}"})
+
+      {:ok, agent_a} =
+        Agents.create_agent(%{name: "a", role: :engineer, company_id: company_a.id})
+
+      {:ok, issue_nil} = Issues.create_issue(%{title: "nil issue", status: :todo})
+
+      {:ok, issue_b} =
+        Issues.create_issue(%{title: "b issue", status: :todo, company_id: company_b.id})
+
+      actions = [%{"type" => "comment", "body" => "blocked"}]
+
+      assert {:error, :cross_company} = AgentActions.execute(issue_nil, agent_a, actions)
+      assert {:error, :cross_company} = AgentActions.execute(issue_b, agent_a, actions)
     end
   end
 
@@ -840,6 +866,14 @@ defmodule Cympho.AgentActionsTest do
                comment.author_type == "agent" and
                  String.starts_with?(comment.body, "[delivery]") and
                  String.contains?(String.downcase(comment.body), "cto review")
+             end)
+
+      wakes = Wakes.list_issue_wakes(issue.id)
+
+      assert Enum.any?(wakes, fn wake ->
+               wake.reason == "agent_handoff" and
+                 wake.agent_id == cto.id and
+                 wake.metadata["via"] == "submit_review"
              end)
 
       _ = ceo
@@ -1546,7 +1580,11 @@ defmodule Cympho.AgentActionsTest do
              end)
     end
 
-    test "request_changes reopens issue for target role", %{issue: issue, cto: cto} do
+    test "request_changes reopens issue for target role and wakes rework owner", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer
+    } do
       reason = request_changes_reason()
 
       actions = [%{"type" => "request_changes", "role" => "engineer", "reason" => reason}]
@@ -1557,13 +1595,21 @@ defmodule Cympho.AgentActionsTest do
       comments = Comments.list_comments(issue.id)
 
       assert updated.status == :todo
-      assert updated.assignee_id == nil
+      assert updated.assignee_id == engineer.id
       assert updated.assigned_role == "engineer"
 
       assert Enum.any?(
                comments,
                &(&1.author_type == "agent" and &1.body == "[review] #{reason}")
              )
+
+      wakes = Wakes.list_issue_wakes(issue.id)
+
+      assert Enum.any?(wakes, fn wake ->
+               wake.reason == "agent_handoff" and
+                 wake.agent_id == engineer.id and
+                 wake.metadata["via"] == "request_changes"
+             end)
     end
 
     test "request_changes without role recovers the legacy delivery owner from delegate audit", %{
@@ -1795,7 +1841,10 @@ defmodule Cympho.AgentActionsTest do
                AgentActions.execute(issue, ceo, actions)
     end
 
-    test "block_issue rejects unknown blocker_kind", %{issue: issue, ceo: ceo} do
+    test "block_issue rejects unknown blocker_kind with allowed-kind rejection comment", %{
+      issue: issue,
+      ceo: ceo
+    } do
       actions = [
         %{
           "type" => "block_issue",
@@ -1804,11 +1853,32 @@ defmodule Cympho.AgentActionsTest do
         }
       ]
 
-      assert {:error, {:invalid_blocker_kind, "made_up_kind", _}} =
+      assert {:error, {:invalid_blocker_kind, "made_up_kind", allowed}} =
                AgentActions.execute(issue, ceo, actions)
+
+      assert "owner_input_needed" in allowed
+      assert "external_dep" in allowed
+
+      assert AgentActions.retriable_contract_error?(
+               {:invalid_blocker_kind, "made_up_kind", allowed}
+             )
+
+      unchanged = Issues.get_issue!(issue.id)
+      refute unchanged.status == :blocked
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 comment.body =~ "block_issue rejected: unknown blocker_kind" and
+                 comment.body =~ "made_up_kind" and
+                 comment.body =~ "Allowed kinds:" and
+                 comment.body =~ "owner_input_needed" and
+                 comment.body =~ "external_dep"
+             end)
     end
 
-    test "block_issue maps a synonym blocker_kind to the canonical kind", %{
+    test "block_issue maps owner_clarification and other synonyms to canonical kinds", %{
       issue: issue,
       ceo: ceo
     } do
@@ -1817,13 +1887,21 @@ defmodule Cympho.AgentActionsTest do
                  "blocker_kind" => "owner_verification"
                })
 
+      assert %{"blocker_kind" => "owner_input_needed"} =
+               Cympho.AgentActions.Validation.canonicalize_blocker_kind(%{
+                 "blocker_kind" => "owner_clarification"
+               })
+
+      assert Cympho.AgentActions.Validation.block_reason_kinds() ==
+               ~w(external_dep ci_failure env_unavailable owner_input_needed conflicting_change other)
+
       # A thin-brief block: the CEO emits "missing_requirements", which is a
       # near-miss for owner_input_needed. It should block cleanly, not reject.
       actions = [
         %{
           "type" => "block_issue",
           "reason" => block_issue_reason(),
-          "blocker_kind" => "missing_requirements"
+          "blocker_kind" => "owner_clarification"
         }
       ]
 

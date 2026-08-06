@@ -26,12 +26,230 @@ defmodule CymphoWeb.InboxLiveTest do
 
       assert html =~ "Inbox"
       assert html =~ "Inbox command"
-      assert html =~ "caught up"
+      assert html =~ "Nothing needs you"
       assert html =~ "Action queue"
       assert html =~ "Reviews"
       assert html =~ "Runtime / evidence"
       assert html =~ "Unread"
       assert html =~ "Set aside"
+    end
+
+    test "mount without status defaults to the Needs you action filter", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Noise Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, unread_issue} =
+        Issues.create_issue(%{
+          title: "Unread noise should not be first paint",
+          description: "Only Needs you items should show by default.",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, _entry} = Inbox.ensure_inbox_entry(unread_issue.id, agent.id)
+
+      {:ok, action_issue} =
+        Issues.create_issue(%{
+          title: "Owner must unblock this",
+          description: "This belongs in Needs you.",
+          status: :blocked,
+          priority: :high,
+          company_id: company.id,
+          assignee_user_id: user.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, html} = live(conn, "/inbox")
+
+      assert html =~ "Needs you"
+      assert html =~ "Owner must unblock this"
+      assert html =~ ~s(href="/issues/#{action_issue.id}")
+      refute html =~ "Unread noise should not be first paint"
+      assert has_element?(view, "a[href*='status=action'].border-brand")
+    end
+
+    test "Needs you includes review wakes and matches nav badge", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Review Badge Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, review_issue} =
+        Issues.create_issue(%{
+          title: "Delivery waiting on your review",
+          description: "Should land in Simple Needs you.",
+          status: :in_review,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, _wake} =
+        Wakes.do_wake_agent(
+          agent.id,
+          review_issue.id,
+          "final_review_required",
+          "system",
+          "test",
+          %{}
+        )
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, html} = live(conn, "/inbox")
+
+      assert html =~ "Needs you"
+      assert html =~ "Delivery waiting on your review"
+      assert html =~ "Your review"
+      assert html =~ ~s(data-testid="nav-badge-inbox")
+      assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*1\s*<\/span>/s
+      assert has_element?(view, "button[phx-click='approve_review']")
+    end
+
+    test "final_review_required enqueue live-refreshes Needs you and badge", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Live Review Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Live review delivery",
+          status: :in_review,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, html} = live(conn, "/inbox")
+      refute html =~ "Live review delivery"
+      refute html =~ ~s(data-testid="nav-badge-inbox")
+
+      {:ok, _wake} =
+        Wakes.do_wake_agent(
+          agent.id,
+          issue.id,
+          "final_review_required",
+          "system",
+          "test",
+          %{}
+        )
+
+      wait_until(fn ->
+        rendered = render(view)
+        assert rendered =~ "Live review delivery"
+        # Root layout badge DOM is first-paint; live parity is the socket assign
+        # (same source as UserAuth's nav badge hook).
+        assert :sys.get_state(view.pid).socket.assigns.inbox_badge_count == 1
+        assert :sys.get_state(view.pid).socket.assigns.nav_inbox_count == 1
+      end)
+    end
+
+    test "approve_review clears Needs you and drops the nav badge", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Approve Review Agent",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"},
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Ready to approve and close",
+          description: "Owner request is clear.",
+          status: :in_review,
+          priority: :medium,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, _delivery} =
+        Cympho.Comments.create_comment(%{
+          body:
+            "[delivery] What happened: delivered the work for review. Files changed: evidence document. Evidence produced: closure evidence document and completed runtime. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the closure evidence document and completed runtime before deciding.",
+          author_type: "agent",
+          author_id: agent.id,
+          issue_id: issue.id
+        })
+
+      {:ok, _review} =
+        Cympho.Comments.create_comment(%{
+          body:
+            "[review] Verdict: accepted. What happened: verified the delivered work. Evidence inspected: closure evidence document and completed runtime. Verification: runtime passed. Gaps: none. Follow-up issues: none. Next decision: close. Restart packet: CEO can inspect the accepted review, closure evidence, and runtime result before closing.",
+          author_type: "agent",
+          author_id: agent.id,
+          issue_id: issue.id
+        })
+
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "completed",
+        adapter: "process",
+        continuation_summary: "Verification passed."
+      })
+
+      {:ok, _work_product} =
+        Cympho.WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          created_by_agent_id: agent.id,
+          kind: "document",
+          title: "Closure evidence",
+          description: "Evidence for closure."
+        })
+
+      {:ok, wake} =
+        Wakes.do_wake_agent(
+          agent.id,
+          issue.id,
+          "final_review_required",
+          "system",
+          "test",
+          %{}
+        )
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, html} = live(conn, "/inbox")
+      assert html =~ "Ready to approve and close"
+      assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*1\s*<\/span>/s
+      assert :sys.get_state(view.pid).socket.assigns.inbox_badge_count == 1
+
+      view
+      |> element("button[phx-click='approve_review']")
+      |> render_click()
+
+      wait_until(fn ->
+        rendered = render(view)
+        refute rendered =~ "Ready to approve and close"
+        assert :sys.get_state(view.pid).socket.assigns.inbox_badge_count == 0
+        assert :sys.get_state(view.pid).socket.assigns.nav_inbox_count == 0
+      end)
+
+      assert {:ok, closed} = Issues.get_company_issue(company.id, issue.id)
+      assert closed.status == :done
+      assert {:ok, consumed} = Wakes.get_agent_wake(wake.id)
+      assert consumed.status in ["consumed", "cancelled"]
     end
 
     test "shows agent selector", %{conn: conn} do
@@ -46,9 +264,9 @@ defmodule CymphoWeb.InboxLiveTest do
       {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
       {:ok, _view, html} = live(conn, "/inbox?agent_id=")
 
-      # The default 'all' shows agent selector
+      # The default 'all' shows agent selector; first paint is Needs you.
       assert html =~ "select_agent"
-      assert html =~ "caught up"
+      assert html =~ "Nothing needs you"
     end
   end
 
@@ -149,7 +367,7 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, _entry} = Inbox.ensure_inbox_entry(issue.id, agent.id)
 
       conn = live_session_conn(conn, user, company)
-      {:ok, _view, html} = live(conn, "/inbox?density=detailed")
+      {:ok, _view, html} = live(conn, "/inbox?status=all&density=detailed")
 
       assert html =~ "Review checkout failure"
       assert html =~ "Investigate the provider environment"
@@ -169,7 +387,7 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ "Open issue"
       assert html =~ "Mark read"
 
-      {:ok, _view, compact_html} = live(conn, "/inbox?density=compact")
+      {:ok, _view, compact_html} = live(conn, "/inbox?status=all&density=compact")
 
       assert compact_html =~ "Review checkout failure"
       assert compact_html =~ "Launch needed"
@@ -206,7 +424,7 @@ defmodule CymphoWeb.InboxLiveTest do
                ReviewNudges.execute(issue, nudge.key, blockers: [blocker], agents: [agent])
 
       conn = live_session_conn(conn, user, company)
-      {:ok, _view, html} = live(conn, "/inbox")
+      {:ok, _view, html} = live(conn, "/inbox?status=all")
 
       assert html =~ "Needs review evidence"
       assert html =~ "Review evidence needed"
@@ -249,7 +467,7 @@ defmodule CymphoWeb.InboxLiveTest do
         })
 
       conn = live_session_conn(conn, user, company)
-      {:ok, _view, html} = live(conn, "/inbox")
+      {:ok, _view, html} = live(conn, "/inbox?status=all")
 
       assert html =~ "Define issue for CEO"
       assert html =~ "Runtime launch needed"
@@ -354,7 +572,7 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, _entry} = Inbox.ensure_inbox_entry(blocked_issue.id, agent.id)
 
       conn = live_session_conn(conn, user, company)
-      {:ok, _view, html} = live(conn, "/inbox")
+      {:ok, _view, html} = live(conn, "/inbox?status=all")
 
       document = Floki.parse_document!(html)
 
@@ -410,11 +628,11 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, _second_entry} = Inbox.ensure_inbox_entry(second_issue.id, second_agent.id)
 
       conn = live_session_conn(conn, user, company)
-      {:ok, view, html} = live(conn, "/inbox")
+      {:ok, view, html} = live(conn, "/inbox?status=all")
 
       assert html =~ "Mark unread as read"
-      assert html =~ ~s(data-testid="nav-badge-inbox")
-      assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*2\s*<\/span>/s
+      # Nav badge tracks OwnerAttention (Needs you), not raw agent unreads.
+      refute html =~ ~s(data-testid="nav-badge-inbox")
 
       view
       |> element("button[phx-click='mark_unread_read']")
@@ -469,7 +687,7 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, _other_entry} = Inbox.ensure_inbox_entry(other_issue.id, other_agent.id)
 
       conn = live_session_conn(conn, user, company)
-      {:ok, view, _html} = live(conn, "/inbox?agent_id=#{selected_agent.id}")
+      {:ok, view, _html} = live(conn, "/inbox?agent_id=#{selected_agent.id}&status=all")
 
       view
       |> element("button[phx-click='mark_unread_read']")
@@ -530,7 +748,7 @@ defmodule CymphoWeb.InboxLiveTest do
       end)
     end
 
-    test "surfaces a pending agent question without echoing its payload", %{conn: conn} do
+    test "surfaces a pending agent question with safe card body fields only", %{conn: conn} do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
 
       {:ok, agent} =
@@ -548,25 +766,102 @@ defmodule CymphoWeb.InboxLiveTest do
           assignee_id: agent.id
         })
 
-      {:ok, _interaction} =
+      {:ok, interaction} =
         IssueThreadInteractions.create_interaction(%{
           issue_id: issue.id,
           kind: :ask_user_questions,
-          payload: %{"questions" => [%{"label" => "provider-secret-must-not-render"}]},
+          payload: %{
+            "message" => "Pick who we launch to first.",
+            "questions" => [
+              %{"question" => "Which audience should we start with?"},
+              %{"label" => "provider-secret-must-not-render"}
+            ]
+          },
           created_by_agent_id: agent.id
         })
 
       conn = live_session_conn(conn, user, company)
-      {:ok, _view, html} = live(conn, "/inbox?status=action&density=detailed")
+      {:ok, view, html} = live(conn, "/inbox?status=action&density=detailed")
 
       assert html =~ "Answer needed · Choose the launch audience"
-      assert html =~ "An agent needs your answer before this work can continue."
+      assert html =~ "Pick who we launch to first."
       assert html =~ "Your decision"
       assert html =~ ~s(href="/issues/#{issue.id}")
-      assert html =~ "Answer on issue"
+      assert html =~ "Open issue"
       assert html =~ "Ask user questions · Pending owner response"
+      assert html =~ ~s(data-testid="interaction-card-body")
+      assert html =~ "Which audience should we start with?"
+      assert has_element?(view, "[data-testid='inbox-respond-questions']")
       refute html =~ "provider-secret-must-not-render"
       assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*1\s*<\/span>/s
+
+      view
+      |> form("[data-testid='inbox-respond-questions']", %{
+        "_id" => interaction.id,
+        "response" => "Start with existing customers."
+      })
+      |> render_submit()
+
+      refute render(view) =~ "Answer needed · Choose the launch audience"
+      assert {:ok, resolved} = IssueThreadInteractions.get_interaction(interaction.id)
+      assert resolved.status == :responded
+    end
+
+    test "accepts and rejects pending confirmations from the card", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Confirm Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Ship the launch plan",
+          status: :blocked,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, interaction} =
+        IssueThreadInteractions.create_interaction(%{
+          issue_id: issue.id,
+          kind: :request_confirmation,
+          payload: %{
+            "message" => "Confirm we can ship this plan.",
+            "details" => "Covers pricing, audience, and rollout order."
+          },
+          created_by_agent_id: agent.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, html} = live(conn, "/inbox?status=action")
+
+      assert html =~ "Confirmation needed · Ship the launch plan"
+      assert html =~ "Confirm we can ship this plan."
+      assert html =~ "Covers pricing, audience, and rollout order."
+
+      assert has_element?(
+               view,
+               "button[phx-click='resolve_interaction'][phx-value-status='accepted']"
+             )
+
+      assert has_element?(
+               view,
+               "button[phx-click='resolve_interaction'][phx-value-status='rejected']"
+             )
+
+      view
+      |> element(
+        "button[phx-click='resolve_interaction'][phx-value-id='#{interaction.id}'][phx-value-status='accepted']"
+      )
+      |> render_click()
+
+      refute render(view) =~ "Confirmation needed · Ship the launch plan"
+      assert {:ok, resolved} = IssueThreadInteractions.get_interaction(interaction.id)
+      assert resolved.status == :accepted
     end
 
     test "renders and resolves an ordinary approval inline", %{conn: conn} do
@@ -683,9 +978,10 @@ defmodule CymphoWeb.InboxLiveTest do
       refute html =~ "Provider connection closed with bearer"
     end
 
-    test "surfaces company spend alerts with simple guidance and advanced-only provenance", %{
-      conn: conn
-    } do
+    test "surfaces company spend alerts with raise/resume recovery and advanced-only provenance",
+         %{
+           conn: conn
+         } do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
       unique = System.unique_integer([:positive])
 
@@ -713,8 +1009,11 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ "Spend needs attention"
       assert html =~ "Spending has reached a configured limit."
       assert html =~ "To Company budget"
-      assert html =~ ~s(href="/costs")
-      assert html =~ "Review costs"
+      assert has_element?(view, "[data-testid='budget-raise-limit']", "Raise limit")
+      assert has_element?(view, "[data-testid='budget-resume-after-raise']", "Resume after raise")
+      assert html =~ ~s(href="/budgets")
+      assert html =~ ~s(href="/agents")
+      assert has_element?(view, "button[phx-click='dismiss_budget_incident']", "Dismiss")
 
       assert has_element?(
                view,
@@ -730,6 +1029,44 @@ defmodule CymphoWeb.InboxLiveTest do
       refute html =~ foreign_incident.id
       refute html =~ "Policy #{other_policy.id}"
       assert incident.company_id == company.id
+
+      view
+      |> element(
+        "button[phx-click='dismiss_budget_incident'][phx-value-incident_id='#{incident.id}']"
+      )
+      |> render_click()
+
+      refute render(view) =~ "Company budget needs immediate attention"
+      reloaded = Cympho.Finances.get_budget_incident!(incident.id)
+      assert reloaded.resolved_at
+    end
+
+    test "incomplete hard-stop budget incidents cannot be dismissed", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      policy = insert_budget_policy!(company, %{action_on_exceed: "block"})
+
+      incident =
+        insert_budget_incident!(policy, "budget_exceeded", %{
+          spend_usd: "140",
+          threshold_pct: "140",
+          enforcement_status: "incomplete"
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, html} = live(conn, "/inbox?status=action&density=detailed")
+
+      assert html =~ "Raise the limit"
+      assert has_element?(view, "[data-testid='budget-raise-limit']", "Raise limit")
+      assert has_element?(view, "[data-testid='budget-resume-after-raise']", "Resume after raise")
+      refute has_element?(view, "button[phx-click='dismiss_budget_incident']")
+
+      # Domain guard remains fail-closed even if a client forges dismiss.
+      assert {:error, :enforcement_incomplete} =
+               Cympho.Finances.resolve_budget_incident(incident)
+
+      reloaded = Cympho.Finances.get_budget_incident!(incident.id)
+      assert is_nil(reloaded.resolved_at)
     end
 
     test "rejects a review action carrying a wake from another company", %{conn: conn} do
@@ -775,7 +1112,7 @@ defmodule CymphoWeb.InboxLiveTest do
         )
 
       conn = live_session_conn(conn, user, company)
-      {:ok, view, _html} = live(conn, "/inbox")
+      {:ok, view, _html} = live(conn, "/inbox?status=all")
 
       render_hook(view, "request_review_changes", %{
         "issue_id" => current_issue.id,

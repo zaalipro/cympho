@@ -182,6 +182,78 @@ defmodule Cympho.RuntimeOperations do
     {:ok, %{checked: 0, released: 0, failed: 0}}
   end
 
+  @doc """
+  Returns stale checked-out issues across all companies.
+
+  Used by the dispatcher poll and heartbeat watchdog so capacity-holding
+  checkouts are reclaimed without waiting for an operator Ops pass.
+  """
+  @spec stale_checked_out_issues_all(keyword()) :: [Issue.t()]
+  def stale_checked_out_issues_all(opts \\ []) do
+    minutes = Keyword.get(opts, :minutes, @stale_checkout_minutes)
+    limit = Keyword.get(opts, :limit, @stale_checkout_limit)
+    cutoff = DateTime.add(DateTime.utc_now(), -minutes * 60, :second)
+
+    Issue
+    |> where([i], i.status == :in_progress)
+    |> where([i], not is_nil(i.assignee_id))
+    |> where([i], not is_nil(i.checked_out_at))
+    |> where([i], i.checked_out_at < ^cutoff)
+    |> order_by([i], asc: i.checked_out_at)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  Clears stale checkout locks across all companies back to `:todo`.
+
+  Preserves assignee (via `Issues.clear_checkout_lock/2`). Skips issues that
+  still have a live Orchestrator or a non-terminal run so we do not race a
+  healthy session.
+  """
+  @spec recover_stale_checked_out_issues_all(keyword()) :: {:ok, map()}
+  def recover_stale_checked_out_issues_all(opts \\ []) do
+    issues = stale_checked_out_issues_all(opts)
+
+    results =
+      Enum.map(issues, fn issue ->
+        cond do
+          live_orchestrator?(issue.id) ->
+            {:skip, :live_orchestrator}
+
+          has_active_run?(issue.id) ->
+            {:skip, :active_run}
+
+          true ->
+            Issues.clear_checkout_lock(issue, :todo)
+        end
+      end)
+
+    {:ok,
+     %{
+       checked: length(issues),
+       released: Enum.count(results, &match?({:ok, _}, &1)),
+       failed: Enum.count(results, &match?({:error, _}, &1))
+     }}
+  end
+
+  defp live_orchestrator?(issue_id) do
+    case Cympho.Orchestrator.whereis(issue_id) do
+      nil -> false
+      pid -> Process.alive?(pid)
+    end
+  end
+
+  defp has_active_run?(issue_id) do
+    from(r in Run,
+      where: r.issue_id == ^issue_id and r.status in ^@active_run_statuses,
+      select: r.id,
+      limit: 1
+    )
+    |> Repo.one()
+    |> is_binary()
+  end
+
   def stale_comment_wake_minutes, do: @stale_comment_wake_minutes
 
   def snapshot(company_id, opts \\ []) do
@@ -817,7 +889,8 @@ defmodule Cympho.RuntimeOperations do
     Issue
     |> join(:left, [i], c in assoc(i, :company))
     |> where([i, c], i.status in ^@dispatch_preview_statuses)
-    |> where([i, c], is_nil(i.company_id) or c.status == "active")
+    # Fail-closed: only company-scoped issues on active companies (matches Dispatcher poll).
+    |> where([i, c], not is_nil(i.company_id) and c.status == "active")
     |> scoped(company_id)
     |> maybe_focus_dispatch_issue()
     |> preload([:blocked_by, :assignee, :project])

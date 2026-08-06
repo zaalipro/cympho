@@ -1,26 +1,43 @@
 defmodule Cympho.IssuesLifecycleTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.Issues
   alias Cympho.Agents
+  alias Cympho.Companies
+  alias Cympho.Issues
 
   @moduledoc """
   Integration tests for the full issue lifecycle including state transitions,
   blocker management, and agent checkout/release flows.
   """
 
+  defp company_fixture do
+    u = System.unique_integer([:positive])
+
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Lifecycle Co #{u}",
+        slug: "lifecycle-#{u}"
+      })
+
+    company
+  end
+
   describe "full issue lifecycle: create -> work -> review -> done" do
     test "issue progresses through all states correctly" do
+      company = company_fixture()
+
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Lifecycle Test Issue",
-          description: "Full lifecycle test"
+          description: "Full lifecycle test",
+          company_id: company.id
         })
 
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Lifecycle Agent",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       # Initial state should be :backlog
@@ -43,18 +60,22 @@ defmodule Cympho.IssuesLifecycleTest do
 
   describe "issue lifecycle with blocker chain" do
     test "issue blocked by open issue cannot be completed" do
+      company = company_fixture()
+
       {:ok, parent_issue} =
         Issues.create_issue(%{
           title: "Parent Issue",
           description: "Must be done first",
-          status: :in_review
+          status: :in_review,
+          company_id: company.id
         })
 
       {:ok, child_issue} =
         Issues.create_issue(%{
           title: "Child Issue",
           description: "Depends on parent",
-          status: :in_review
+          status: :in_review,
+          company_id: company.id
         })
 
       # Add blocker relationship
@@ -81,18 +102,22 @@ defmodule Cympho.IssuesLifecycleTest do
     end
 
     test "removing blocker allows completion" do
+      company = company_fixture()
+
       {:ok, blocker} =
         Issues.create_issue(%{
           title: "Blocker",
           description: "Will be removed",
-          status: :in_progress
+          status: :in_progress,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Blocked Issue",
           description: "Will be unblocked",
-          status: :in_review
+          status: :in_review,
+          company_id: company.id
         })
 
       {:ok, _} = Issues.add_blocker(issue, blocker)
@@ -114,22 +139,27 @@ defmodule Cympho.IssuesLifecycleTest do
 
   describe "agent checkout and release lifecycle" do
     test "released issue can be checked out by another agent" do
+      company = company_fixture()
+
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Shared Issue",
-          description: "Will be released"
+          description: "Will be released",
+          company_id: company.id
         })
 
       {:ok, agent1} =
         Agents.create_agent(%{
           name: "Agent 1",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, agent2} =
         Agents.create_agent(%{
           name: "Agent 2",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       # Agent 1 checks out
@@ -147,17 +177,21 @@ defmodule Cympho.IssuesLifecycleTest do
     end
 
     test "agent can continue working after releasing with in_review status" do
+      company = company_fixture()
+
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Agent",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Review Issue",
           description: "Will go to review",
-          status: :in_progress
+          status: :in_progress,
+          company_id: company.id
         })
 
       {:ok, checked_out} = Issues.checkout_issue(agent, issue)

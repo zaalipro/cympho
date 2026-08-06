@@ -204,56 +204,69 @@ defmodule CymphoWeb.OnboardingLive.Index do
   defp launch_company(socket) do
     form = socket.assigns.company_form
 
-    attrs = %{
-      "blueprint" => form["blueprint"],
-      "name" => form["name"],
-      "goal_title" => form["goal_title"],
-      "project_name" => form["project_name"],
-      "issue_prefix" => form["issue_prefix"],
-      "engineer_count" => engineer_count(form),
-      "engineer_names" => form["engineer_names"] || [],
-      "adapter" => sanitize_adapter(form["adapter"]),
-      "agent_runtime" => %{
-        "command" => form["runtime_command"],
-        "model" => form["runtime_model"]
-      },
-      "role_runtimes" => role_runtimes_attrs(form),
-      "owner_user_id" => socket.assigns.current_user.id
-    }
-
     with :ok <- validate_step(:company, form),
-         :ok <- validate_runtime_compat(attrs) do
-      case create_company_safely(attrs) do
-        {:ok, result} ->
-          _ = Onboarding.clear_draft(socket.assigns.current_user.id)
+         {:ok, budget_monthly_cents} <- parse_budget_monthly_cents(form) do
+      attrs = %{
+        "blueprint" => form["blueprint"],
+        "name" => form["name"],
+        "goal_title" => form["goal_title"],
+        "project_name" => form["project_name"],
+        "issue_prefix" => form["issue_prefix"],
+        "engineer_count" => engineer_count(form),
+        "engineer_names" => form["engineer_names"] || [],
+        "adapter" => sanitize_adapter(form["adapter"]),
+        "agent_runtime" => %{
+          "command" => form["runtime_command"],
+          "model" => form["runtime_model"]
+        },
+        "role_runtimes" => role_runtimes_attrs(form),
+        "owner_user_id" => socket.assigns.current_user.id,
+        "budget_monthly_cents" => budget_monthly_cents
+      }
 
+      with :ok <- validate_runtime_compat(attrs) do
+        case create_company_safely(attrs) do
+          {:ok, result} ->
+            _ = Onboarding.clear_draft(socket.assigns.current_user.id)
+
+            {:noreply,
+             socket
+             |> assign(:bootstrap_result, result)
+             |> assign(:company_form, default_company_form())
+             |> assign(:step_error, nil)
+             |> assign(:current_step, 4)}
+
+          {:error, :budget_required} ->
+            {:noreply,
+             socket
+             |> assign(:current_step, 1)
+             |> assign(
+               :step_error,
+               "A positive monthly budget is required before autonomous agents can run."
+             )
+             |> persist_draft()}
+
+          {:error, _reason} ->
+            {:noreply,
+             socket
+             |> assign(
+               :step_error,
+               "We couldn't launch the company. Review the company and AI settings, then try again."
+             )
+             |> persist_draft()}
+        end
+      else
+        # Send the owner back to the team step (where AI runtimes are picked) so
+        # they can fix a model/runtime mismatch instead of launching into a
+        # company whose agents can never dispatch.
+        {:error, :runtime_incompatible, message} ->
           {:noreply,
            socket
-           |> assign(:bootstrap_result, result)
-           |> assign(:company_form, default_company_form())
-           |> assign(:step_error, nil)
-           |> assign(:current_step, 4)}
-
-        {:error, _reason} ->
-          {:noreply,
-           socket
-           |> assign(
-             :step_error,
-             "We couldn't launch the company. Review the company and AI settings, then try again."
-           )
+           |> assign(:current_step, 2)
+           |> assign(:step_error, message)
            |> persist_draft()}
       end
     else
-      # Send the owner back to the team step (where AI runtimes are picked) so
-      # they can fix a model/runtime mismatch instead of launching into a
-      # company whose agents can never dispatch.
-      {:error, :runtime_incompatible, message} ->
-        {:noreply,
-         socket
-         |> assign(:current_step, 2)
-         |> assign(:step_error, message)
-         |> persist_draft()}
-
       {:error, message} ->
         {:noreply,
          socket
@@ -451,12 +464,28 @@ defmodule CymphoWeb.OnboardingLive.Index do
       not Regex.match?(~r/^[A-Z]{2,7}$/, form["issue_prefix"] || "") ->
         {:error, "Issue prefix must be 2-7 uppercase letters."}
 
+      match?({:error, _}, parse_budget_monthly_cents(form)) ->
+        {:error, "Monthly budget must be a positive dollar amount."}
+
       true ->
         :ok
     end
   end
 
   defp validate_step(_step, _form), do: :ok
+
+  # Form collects whole USD dollars; engine stores cents and creates a block policy.
+  def parse_budget_monthly_cents(form) when is_map(form) do
+    raw = form["budget_monthly_usd"] || form[:budget_monthly_usd]
+
+    case Integer.parse(String.trim(to_string(raw || ""))) do
+      {usd, ""} when usd > 0 ->
+        {:ok, usd * 100}
+
+      _ ->
+        {:error, "Monthly budget must be a positive dollar amount."}
+    end
+  end
 
   defp maybe_apply_blueprint_defaults(params, current_form) do
     selected = params["blueprint"] || current_form["blueprint"] || "software"
@@ -580,6 +609,8 @@ defmodule CymphoWeb.OnboardingLive.Index do
       "improvement_details" => "",
       "project_name" => "Company OS",
       "issue_prefix" => "LLM",
+      # Whole USD; converted to cents and a blocking BudgetPolicy at launch.
+      "budget_monthly_usd" => "100",
       "engineer_count" => "2",
       "engineer_names" => [],
       "adapter" => "claude_code",

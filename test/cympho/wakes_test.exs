@@ -23,18 +23,20 @@ defmodule Cympho.WakesTest do
       Agents.create_agent(%{
         name: "Wake Test Agent",
         role: :engineer,
-        status: :idle
+        status: :idle,
+        company_id: company.id
       })
 
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Wake Test Issue",
         project_id: project.id,
+        company_id: company.id,
         assignee_id: agent.id,
         status: :in_progress
       })
 
-    %{agent: agent, issue: issue, project: project}
+    %{agent: agent, issue: issue, project: project, company: company}
   end
 
   describe "list_review_nudges/2" do
@@ -489,11 +491,16 @@ defmodule Cympho.WakesTest do
   end
 
   describe "notify_children_completed/1" do
-    test "wakes parent assignee when all children are done", %{agent: agent, project: project} do
+    test "wakes parent assignee when all children are done", %{
+      agent: agent,
+      project: project,
+      company: company
+    } do
       {:ok, parent} =
         Issues.create_issue(%{
           title: "Parent Issue",
           project_id: project.id,
+          company_id: company.id,
           assignee_id: agent.id,
           status: :in_progress
         })
@@ -502,6 +509,7 @@ defmodule Cympho.WakesTest do
         Issues.create_issue(%{
           title: "Child 1",
           project_id: project.id,
+          company_id: company.id,
           parent_id: parent.id,
           status: :done
         })
@@ -510,6 +518,7 @@ defmodule Cympho.WakesTest do
         Issues.create_issue(%{
           title: "Child 2",
           project_id: project.id,
+          company_id: company.id,
           parent_id: parent.id,
           status: :done
         })
@@ -522,22 +531,24 @@ defmodule Cympho.WakesTest do
       assert agent_wake.reason == "issue_children_completed"
     end
 
-    test "returns error when child has no parent", %{project: project} do
+    test "returns error when child has no parent", %{project: project, company: company} do
       {:ok, orphan} =
         Issues.create_issue(%{
           title: "Orphan Issue",
           project_id: project.id,
+          company_id: company.id,
           status: :done
         })
 
       assert {:error, :no_parent} = Wakes.notify_children_completed(orphan)
     end
 
-    test "returns error when parent has no assignee", %{project: project} do
+    test "returns error when parent has no assignee", %{project: project, company: company} do
       {:ok, parent} =
         Issues.create_issue(%{
           title: "Unassigned Parent",
           project_id: project.id,
+          company_id: company.id,
           status: :in_progress
         })
 
@@ -545,6 +556,7 @@ defmodule Cympho.WakesTest do
         Issues.create_issue(%{
           title: "Child",
           project_id: project.id,
+          company_id: company.id,
           parent_id: parent.id,
           status: :done
         })
@@ -552,11 +564,16 @@ defmodule Cympho.WakesTest do
       assert {:error, :no_assignee} = Wakes.notify_children_completed(child)
     end
 
-    test "wakes parent when single child completes", %{agent: agent, project: project} do
+    test "wakes parent when single child completes", %{
+      agent: agent,
+      project: project,
+      company: company
+    } do
       {:ok, parent} =
         Issues.create_issue(%{
           title: "Parent Issue",
           project_id: project.id,
+          company_id: company.id,
           assignee_id: agent.id,
           status: :in_progress
         })
@@ -565,6 +582,7 @@ defmodule Cympho.WakesTest do
         Issues.create_issue(%{
           title: "Only Child",
           project_id: project.id,
+          company_id: company.id,
           parent_id: parent.id,
           status: :done
         })
@@ -577,11 +595,16 @@ defmodule Cympho.WakesTest do
       assert agent_wake.reason == "issue_children_completed"
     end
 
-    test "returns error when not all children are done", %{agent: agent, project: project} do
+    test "returns error when not all children are done", %{
+      agent: agent,
+      project: project,
+      company: company
+    } do
       {:ok, parent} =
         Issues.create_issue(%{
           title: "Parent Issue",
           project_id: project.id,
+          company_id: company.id,
           assignee_id: agent.id,
           status: :in_progress
         })
@@ -590,6 +613,7 @@ defmodule Cympho.WakesTest do
         Issues.create_issue(%{
           title: "Child 1",
           project_id: project.id,
+          company_id: company.id,
           parent_id: parent.id,
           status: :todo
         })
@@ -598,6 +622,7 @@ defmodule Cympho.WakesTest do
         Issues.create_issue(%{
           title: "Child 2",
           project_id: project.id,
+          company_id: company.id,
           parent_id: parent.id,
           status: :done
         })
@@ -607,11 +632,16 @@ defmodule Cympho.WakesTest do
   end
 
   describe "notify_blockers_resolved/1" do
-    test "wakes dependent assignee when blocker is resolved", %{agent: agent, project: project} do
+    test "wakes dependent assignee when blocker is resolved", %{
+      agent: agent,
+      project: project,
+      company: company
+    } do
       {:ok, blocker} =
         Issues.create_issue(%{
           title: "Blocker Issue",
           project_id: project.id,
+          company_id: company.id,
           status: :done
         })
 
@@ -619,6 +649,7 @@ defmodule Cympho.WakesTest do
         Issues.create_issue(%{
           title: "Blocked Issue",
           project_id: project.id,
+          company_id: company.id,
           assignee_id: agent.id,
           status: :blocked
         })
@@ -634,11 +665,16 @@ defmodule Cympho.WakesTest do
       assert agent_wake.reason == "issue_blockers_resolved"
     end
 
-    test "treats cancelled blockers as resolved", %{agent: agent, project: project} do
+    test "treats cancelled blockers as resolved", %{
+      agent: agent,
+      project: project,
+      company: company
+    } do
       {:ok, blocker} =
         Issues.create_issue(%{
           title: "Cancelled Blocker Issue",
           project_id: project.id,
+          company_id: company.id,
           status: :cancelled
         })
 
@@ -646,6 +682,7 @@ defmodule Cympho.WakesTest do
         Issues.create_issue(%{
           title: "Blocked Issue",
           project_id: project.id,
+          company_id: company.id,
           assignee_id: agent.id,
           status: :blocked
         })
@@ -658,11 +695,70 @@ defmodule Cympho.WakesTest do
       assert agent_wake.reason == "issue_blockers_resolved"
     end
 
-    test "returns empty list when blocker has no dependents", %{project: project} do
+    test "wakes after dependents are already :todo (post unblock_dependents)", %{
+      agent: agent,
+      project: project,
+      company: company
+    } do
+      {:ok, blocker} =
+        Issues.create_issue(%{
+          title: "Post-todo Blocker",
+          project_id: project.id,
+          company_id: company.id,
+          status: :done
+        })
+
+      {:ok, dependent} =
+        Issues.create_issue(%{
+          title: "Post-todo Dependent",
+          project_id: project.id,
+          company_id: company.id,
+          assignee_id: agent.id,
+          status: :todo
+        })
+
+      {:ok, _} = Issues.add_blocker(dependent, blocker)
+
+      assert [{:ok, agent_wake}] = Wakes.notify_blockers_resolved(blocker)
+      assert agent_wake.agent_id == agent.id
+      assert agent_wake.issue_id == dependent.id
+      assert agent_wake.reason == "issue_blockers_resolved"
+    end
+
+    test "unassigned dependent queues for dispatcher poll_now", %{
+      project: project,
+      company: company
+    } do
+      {:ok, blocker} =
+        Issues.create_issue(%{
+          title: "Unassigned Blocker",
+          project_id: project.id,
+          company_id: company.id,
+          status: :done
+        })
+
+      {:ok, dependent} =
+        Issues.create_issue(%{
+          title: "Unassigned Dependent",
+          project_id: project.id,
+          company_id: company.id,
+          status: :todo
+        })
+
+      {:ok, _} = Issues.add_blocker(dependent, blocker)
+
+      assert [{:ok, :queued_for_dispatch}] = Wakes.notify_blockers_resolved(blocker)
+    end
+
+    test "returns empty list when blocker has no dependents", %{
+      project: project,
+      company: company
+    } do
       {:ok, blocker} =
         Issues.create_issue(%{
           title: "Lone Blocker",
           project_id: project.id,
+          company_id: company.id,
           status: :done
         })
 
@@ -690,6 +786,51 @@ defmodule Cympho.WakesTest do
       assert agent_wake.triggered_by_type == "user"
       assert agent_wake.triggered_by_id == "test-user"
       assert agent_wake.metadata.comment_id == "test-comment-id"
+    end
+
+    test "final_review_required notifies OwnerAttention for the issue company", %{
+      agent: agent,
+      issue: issue,
+      company: company
+    } do
+      :ok = Cympho.OwnerAttention.subscribe(company.id)
+
+      assert {:ok, wake} =
+               Wakes.do_wake_agent(
+                 agent.id,
+                 issue.id,
+                 "final_review_required",
+                 "system",
+                 "test",
+                 %{}
+               )
+
+      assert_receive {:owner_attention_changed, company_id}
+      assert company_id == company.id
+      assert wake.reason == "final_review_required"
+
+      assert {:ok, _consumed} = Wakes.consume_wake(wake)
+      assert_receive {:owner_attention_changed, ^company_id}
+    end
+
+    test "non-review wakes do not notify OwnerAttention", %{
+      agent: agent,
+      issue: issue,
+      company: company
+    } do
+      :ok = Cympho.OwnerAttention.subscribe(company.id)
+
+      assert {:ok, _wake} =
+               Wakes.do_wake_agent(
+                 agent.id,
+                 issue.id,
+                 "issue_commented",
+                 "user",
+                 "test",
+                 %{}
+               )
+
+      refute_receive {:owner_attention_changed, _}, 50
     end
 
     test "works without issue_id", %{agent: agent} do

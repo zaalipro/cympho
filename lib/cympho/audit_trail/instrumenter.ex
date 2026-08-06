@@ -117,6 +117,10 @@ defmodule Cympho.AuditTrail.Instrumenter do
         args,
         result
       ) do
+    # Never re-emit raw tool args/results into the audit trail.
+    safe_args = Cympho.ToolCallTraces.redact_tool_arguments(args || %{})
+    safe_result = Cympho.ToolCallTraces.redact_tool_result(result)
+
     log(%{
       event_type: "orchestrator_tool_call",
       actor_type: "agent",
@@ -124,7 +128,7 @@ defmodule Cympho.AuditTrail.Instrumenter do
       resource_type: "orchestrator_session",
       resource_id: run_id,
       company_id: issue.company_id,
-      payload: %{tool: tool_name, args: args, result: result}
+      payload: %{tool: tool_name, args: safe_args, result: safe_result}
     })
   end
 

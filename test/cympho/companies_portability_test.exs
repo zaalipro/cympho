@@ -6,7 +6,7 @@ defmodule Cympho.CompaniesPortabilityTest do
   alias Cympho.Authentication
   alias Cympho.Comments.Comment
   alias Cympho.Companies
-  alias Cympho.Companies.{Company, CompanyMembership}
+  alias Cympho.Companies.{Company, CompanyMembership, PortablePackage, Portability}
   alias Cympho.Goals
   alias Cympho.Goals.Goal
   alias Cympho.Issues.Issue
@@ -37,6 +37,7 @@ defmodule Cympho.CompaniesPortabilityTest do
       assert record_counts() == before_counts
       assert plan.version == 1
       assert plan.ready?
+      assert plan.includes == :all
 
       assert plan.target == %{
                requested_slug: slug,
@@ -78,6 +79,23 @@ defmodule Cympho.CompaniesPortabilityTest do
       warning_codes = Enum.map(plan.warnings, & &1.code)
       assert :slug_collision_resolved in warning_codes
       assert :existing_users_reused in warning_codes
+    end
+
+    test "records selective includes on the plan without changing V1 whole-package default" do
+      package = valid_package(unique_slug("includes-plan"), unique_email())
+
+      assert {:ok, default_plan} = Companies.preview_import(package)
+      assert default_plan.includes == :all
+
+      assert {:ok, selective_plan} =
+               Companies.preview_import(package, includes: [:company, :agents, :projects])
+
+      assert selective_plan.includes == [:company, :agents, :projects]
+
+      assert {:error, %{errors: errors}} =
+               Companies.preview_import(package, includes: [:not_a_collection])
+
+      assert Enum.any?(errors, &(&1.code == :unsupported_includes))
     end
 
     test "rejects unsupported versions without writes" do
@@ -149,7 +167,283 @@ defmodule Cympho.CompaniesPortabilityTest do
     end
   end
 
+  describe "PortablePackage facade" do
+    test "export/preview/import/load_source/collision_modes shell preserve V1 whole-package path" do
+      slug = unique_slug("portable-facade")
+      {:ok, company} = Companies.create_company(%{name: "Facade Source", slug: slug})
+
+      {:ok, user} =
+        Authentication.register_user(%{
+          email: unique_email(),
+          name: "Facade Owner",
+          password: "password123",
+          company_id: company.id
+        })
+
+      {:ok, _membership} =
+        %CompanyMembership{}
+        |> CompanyMembership.changeset(%{
+          company_id: company.id,
+          user_id: user.id,
+          role: "owner",
+          is_board_member: true
+        })
+        |> Repo.insert()
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Facade Project",
+          prefix: unique_prefix(),
+          company_id: company.id
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Facade Codex",
+          role: :engineer,
+          company_id: company.id,
+          project_id: project.id,
+          adapter: :codex,
+          status: :idle,
+          runtime_config: %{
+            "model" => "gpt-5.5",
+            "command" => "codex",
+            "api_key" => "never-export-codex-key"
+          },
+          heartbeat_config: %{"enabled" => true, "interval_ms" => 30_000}
+        })
+
+      assert :suffix in PortablePackage.collision_modes()
+      assert :fail in PortablePackage.collision_modes()
+      assert :skip in PortablePackage.collision_modes()
+      assert :replace in PortablePackage.collision_modes()
+      assert :rename in PortablePackage.collision_modes()
+
+      assert {:ok, package} = PortablePackage.export(company.id)
+      assert package.version == 1
+      refute inspect(package) =~ "never-export-codex-key"
+
+      json = Jason.encode!(package)
+      assert {:ok, loaded_from_json} = PortablePackage.load_source(:json, json)
+      assert loaded_from_json["version"] == 1
+
+      path =
+        Path.join(System.tmp_dir!(), "cympho-portable-#{System.unique_integer([:positive])}.json")
+
+      try do
+        File.write!(path, json)
+        assert {:ok, loaded_from_path} = PortablePackage.load_source(:path, path)
+        assert loaded_from_path["company"]["slug"] == slug
+      after
+        File.rm(path)
+      end
+
+      assert {:ok, plan} = PortablePackage.preview(package)
+      assert plan.includes == :all
+      assert plan.ready?
+
+      assert {:ok, result} = PortablePackage.import({:json, json})
+      imported_agent = Repo.get!(Agent, Map.fetch!(result.id_maps.agents, agent.id))
+
+      assert imported_agent.adapter == :codex
+      assert imported_agent.runtime_config["model"] == "gpt-5.5"
+      assert imported_agent.runtime_config["command"] == "codex"
+      refute Map.has_key?(imported_agent.runtime_config, "api_key")
+      assert imported_agent.status == :paused
+      assert imported_agent.heartbeat_config["enabled"] == false
+      assert imported_agent.pause_reason =~ "portability"
+    end
+
+    test "load_source rejects unsafe or unreadable paths fail-closed" do
+      assert {:error, message} = PortablePackage.load_source(:path, "")
+      assert message =~ "empty"
+
+      assert {:error, message} =
+               PortablePackage.load_source(
+                 :path,
+                 "/tmp/does-not-exist-#{System.unique_integer([:positive])}.json"
+               )
+
+      assert message =~ "not found"
+
+      assert {:error, message} = PortablePackage.load_source(:path, System.tmp_dir!())
+      assert message =~ "file"
+
+      assert {:error, message} = PortablePackage.load_source(:github, "org/repo")
+      assert message =~ "Unsupported package source kind"
+    end
+
+    test "selective export includes filter package collections while keeping metadata" do
+      slug = unique_slug("selective-export")
+      {:ok, company} = Companies.create_company(%{name: "Selective Source", slug: slug})
+
+      {:ok, _project} =
+        Projects.create_project(%{
+          name: "Selective Project",
+          prefix: unique_prefix(),
+          company_id: company.id
+        })
+
+      {:ok, _agent} =
+        Agents.create_agent(%{
+          name: "Selective Agent",
+          role: :engineer,
+          company_id: company.id,
+          adapter: :process,
+          runtime_config: %{"command" => "echo"}
+        })
+
+      assert {:ok, package} =
+               PortablePackage.export(company.id, includes: [:company, :agents])
+
+      assert Map.has_key?(package, :company) or Map.has_key?(package, "company")
+      assert Map.has_key?(package, :agents) or Map.has_key?(package, "agents")
+      assert Map.has_key?(package, :version) or Map.has_key?(package, "version")
+      refute Map.has_key?(package, :projects)
+      refute Map.has_key?(package, "projects")
+
+      assert Portability.supported_includes() == [
+               :company
+               | ~w(users memberships projects agents issues goals labels secret_manifest)a
+             ]
+    end
+  end
+
   describe "import integrity" do
+    test "round-trips codex/http/process adapters with scrubbed runtime and paused heartbeats" do
+      slug = unique_slug("adapter-round-trip")
+      {:ok, company} = Companies.create_company(%{name: "Adapter Source", slug: slug})
+
+      {:ok, user} =
+        Authentication.register_user(%{
+          email: unique_email(),
+          name: "Adapter Owner",
+          password: "password123",
+          company_id: company.id
+        })
+
+      {:ok, _membership} =
+        %CompanyMembership{}
+        |> CompanyMembership.changeset(%{
+          company_id: company.id,
+          user_id: user.id,
+          role: "owner",
+          is_board_member: true
+        })
+        |> Repo.insert()
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Adapter Project",
+          prefix: unique_prefix(),
+          company_id: company.id
+        })
+
+      agent_specs = [
+        {:codex,
+         %{
+           name: "Codex Agent",
+           adapter: :codex,
+           runtime_config: %{
+             "model" => "o4-mini",
+             "command" => "codex",
+             "cwd" => "/workspace/codex",
+             "api_key" => "never-export-codex"
+           },
+           config: %{"model" => "o4-mini", "safe_flag" => true}
+         }},
+        {:http,
+         %{
+           name: "HTTP Agent",
+           adapter: :http,
+           runtime_config: %{
+             "url" => "https://agents.example.test/hooks/run",
+             "method" => "post",
+             "timeout_ms" => 45_000,
+             "headers" => %{"Authorization" => "Bearer never-export-http"}
+           },
+           config: %{"url" => "https://agents.example.test/hooks/run"}
+         }},
+        {:process,
+         %{
+           name: "Process Agent",
+           adapter: :process,
+           runtime_config: %{
+             "command" => "/usr/local/bin/agent-runner",
+             "cwd" => "/workspace/process",
+             "args" => ["--json"],
+             "env" => %{"OPENAI_API_KEY" => "never-export-process-env"}
+           },
+           config: %{"command" => "/usr/local/bin/agent-runner"}
+         }}
+      ]
+
+      source_agents =
+        Enum.map(agent_specs, fn {key, attrs} ->
+          {:ok, agent} =
+            Agents.create_agent(
+              Map.merge(
+                %{
+                  role: :engineer,
+                  company_id: company.id,
+                  project_id: project.id,
+                  status: :running,
+                  heartbeat_config: %{"enabled" => true, "interval_ms" => 15_000}
+                },
+                attrs
+              )
+            )
+
+          {key, agent}
+        end)
+
+      package = company.id |> Companies.export_company() |> Jason.encode!() |> Jason.decode!()
+      refute inspect(package) =~ "never-export-codex"
+      refute inspect(package) =~ "never-export-http"
+      refute inspect(package) =~ "never-export-process-env"
+
+      assert {:ok, result} = Companies.import_company(package)
+
+      Enum.each(source_agents, fn {key, source_agent} ->
+        imported = Repo.get!(Agent, Map.fetch!(result.id_maps.agents, source_agent.id))
+        assert imported.company_id == result.company.id
+        assert imported.project_id == Map.fetch!(result.id_maps.projects, project.id)
+        assert imported.status == :paused
+        assert imported.heartbeat_config["enabled"] == false
+        assert imported.pause_reason =~ "portability"
+
+        case key do
+          :codex ->
+            assert imported.adapter == :codex
+            assert imported.runtime_config["model"] == "o4-mini"
+            assert imported.runtime_config["command"] == "codex"
+            assert imported.runtime_config["cwd"] == "/workspace/codex"
+            refute Map.has_key?(imported.runtime_config, "api_key")
+            assert imported.config["model"] == "o4-mini"
+            assert imported.config["safe_flag"] == true
+            refute Map.has_key?(imported.config, "api_key")
+
+          :http ->
+            assert imported.adapter == :http
+            assert imported.runtime_config["url"] == "https://agents.example.test/hooks/run"
+            assert imported.runtime_config["method"] == "post"
+            assert imported.runtime_config["timeout_ms"] == 45_000
+            # headers are treated as credentials and scrubbed out of the restore.
+            refute Map.has_key?(imported.runtime_config, "headers")
+            assert imported.config["url"] == "https://agents.example.test/hooks/run"
+
+          :process ->
+            assert imported.adapter == :process
+            assert imported.runtime_config["command"] == "/usr/local/bin/agent-runner"
+            assert imported.runtime_config["cwd"] == "/workspace/process"
+            assert imported.runtime_config["args"] == ["--json"]
+            # env maps are secret-scoped and must not round-trip credential values.
+            refute Map.has_key?(imported.runtime_config, "env")
+            assert imported.config["command"] == "/usr/local/bin/agent-runner"
+        end
+      end)
+    end
+
     test "a valid V1 export round-trips with exact writes and tenant-scoped relationships" do
       slug = unique_slug("round-trip")
       {:ok, company} = Companies.create_company(%{name: "Round Trip Source", slug: slug})
@@ -289,6 +583,10 @@ defmodule Cympho.CompaniesPortabilityTest do
       assert imported_project.company_id == imported_company.id
       assert imported_agent.company_id == imported_company.id
       assert imported_agent.project_id == imported_project.id
+      assert imported_agent.status == :paused
+      assert imported_agent.heartbeat_config["enabled"] == false
+      assert imported_agent.config["safe_setting"] == "preserved"
+      refute Map.has_key?(imported_agent.config, "api_key")
       assert imported_goal.company_id == imported_company.id
       assert imported_goal.project_id == imported_project.id
       assert imported_issue.company_id == imported_company.id
@@ -305,10 +603,11 @@ defmodule Cympho.CompaniesPortabilityTest do
       assert Enum.find(imported_issue.comments, &(&1.author_type == "user")).author_id == user.id
 
       assert Repo.exists?(
-               from membership in CompanyMembership,
+               from(membership in CompanyMembership,
                  where:
                    membership.company_id == ^imported_company.id and
                      membership.user_id == ^user.id
+               )
              )
 
       assert Secrets.list_secrets(imported_company.id) == []
@@ -492,7 +791,7 @@ defmodule Cympho.CompaniesPortabilityTest do
       agents: Repo.aggregate(Agent, :count, :id),
       issues: Repo.aggregate(Issue, :count, :id),
       comments: Repo.aggregate(Comment, :count, :id),
-      issue_labels: Repo.one(from issue_label in "issue_labels", select: count()),
+      issue_labels: Repo.one(from(issue_label in "issue_labels", select: count())),
       goals: Repo.aggregate(Goal, :count, :id),
       labels: Repo.aggregate(Label, :count, :id)
     }

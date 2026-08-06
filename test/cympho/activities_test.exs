@@ -144,4 +144,63 @@ defmodule Cympho.ActivitiesTest do
       assert comment_added.actor_id == "agent-1"
     end
   end
+
+  describe "fail-closed pubsub (lb-pubsub-fail-closed)" do
+    test "broadcasts activity_created on company-scoped topic" do
+      company =
+        Cympho.Repo.insert!(%Cympho.Companies.Company{
+          name: "Act Co #{System.unique_integer()}",
+          slug: "act-co-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Act Issue",
+          description: "d",
+          company_id: company.id,
+          status: :todo
+        })
+
+      Activities.subscribe(company.id)
+
+      assert {:ok, activity} =
+               Activities.log_activity(%{
+                 issue_id: issue.id,
+                 company_id: company.id,
+                 actor_type: "system",
+                 action: "status_changed",
+                 metadata: %{"from" => "todo", "to" => "in_progress"}
+               })
+
+      assert_receive {:activity_created, received}
+      assert received.id == activity.id
+    end
+
+    test "does not publish company::activities when company_id is missing" do
+      {:ok, issue} =
+        Issues.create_issue(%{title: "No company act", description: "d", status: :todo})
+
+      issue =
+        issue
+        |> Ecto.Changeset.change(%{company_id: nil})
+        |> Cympho.Repo.update!()
+
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "company::activities")
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "activities:*")
+
+      assert {:ok, _activity} =
+               Activities.log_activity(%{
+                 issue_id: issue.id,
+                 actor_type: "system",
+                 action: "status_changed",
+                 metadata: %{}
+               })
+
+      refute_receive {:activity_created, _}, 50
+    end
+
+    test "subscribe with nil company_id is a no-op" do
+      assert :ok = Activities.subscribe(nil)
+    end
+  end
 end

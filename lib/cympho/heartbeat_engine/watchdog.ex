@@ -11,9 +11,11 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
 
   use GenServer, restart: :permanent
 
+  alias Cympho.AgentHeartbeat
+  alias Cympho.Finances
   alias Cympho.HeartbeatEngine
   alias Cympho.HeartbeatEngine.WakeupQueue
-  alias Cympho.AgentHeartbeat
+  alias Cympho.Orchestrator.Dispatcher
   require Logger
 
   @default_check_interval :timer.minutes(5)
@@ -181,17 +183,35 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
 
     stranded_wake_agents = rewake_stranded_agents()
 
+    # Reclaim stranded :in_progress issues and age-threshold checkouts that
+    # hold capacity without a live orchestrator/run. Same helpers the
+    # dispatcher poll uses so either cadence covers the other (including
+    # when autonomous dispatch is disabled).
+    orphaned_issues = Dispatcher.recover_orphaned_in_progress()
+    stale_checkouts = Dispatcher.recover_stale_checkouts()
+
+    # Budget hard-stop cleanup runs after the finance ledger commit. A crash
+    # between commit and stop/cancel/pause leaves incomplete incidents; re-drive
+    # them here (also covers node boot via the initial delay tick).
+    hard_stops_completed = Finances.recover_incomplete_hard_stops()
+
     results = %{
       stale_found: length(stale_runs),
       stale_recovered: length(stale_recovered),
       orphaned_found: length(orphaned_runs),
       orphaned_recovered: length(orphaned_recovered),
       stranded_wake_agents: length(stranded_wake_agents),
+      orphaned_issues_checked: orphaned_issues.checked,
+      orphaned_issues_recovered: orphaned_issues.recovered,
+      stale_checkouts_checked: stale_checkouts.checked,
+      stale_checkouts_released: stale_checkouts.released,
+      hard_stops_completed: hard_stops_completed,
       checked_at: DateTime.utc_now()
     }
 
     if results.stale_found > 0 or results.orphaned_found > 0 or
-         results.stranded_wake_agents > 0 do
+         results.stranded_wake_agents > 0 or results.orphaned_issues_recovered > 0 or
+         results.stale_checkouts_released > 0 or results.hard_stops_completed > 0 do
       Logger.info("Watchdog: #{inspect(results)}")
     end
 

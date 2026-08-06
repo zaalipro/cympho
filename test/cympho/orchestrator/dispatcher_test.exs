@@ -171,18 +171,26 @@ defmodule Cympho.Orchestrator.DispatcherTest do
   end
 
   describe "runnable_candidate?/1" do
+    @company_id Ecto.UUID.generate()
+
     test "parks blocked issues even when they have no blocker relations" do
-      refute Dispatcher.runnable_candidate?(%Issue{status: :blocked, blocked_by: []})
+      refute Dispatcher.runnable_candidate?(%Issue{
+               status: :blocked,
+               company_id: @company_id,
+               blocked_by: []
+             })
     end
 
     test "rejects issues with active blockers and accepts resolved blockers" do
       refute Dispatcher.runnable_candidate?(%Issue{
                status: :todo,
+               company_id: @company_id,
                blocked_by: [%Issue{status: :in_progress}]
              })
 
       assert Dispatcher.runnable_candidate?(%Issue{
                status: :todo,
+               company_id: @company_id,
                blocked_by: [%Issue{status: :cancelled}]
              })
     end
@@ -190,8 +198,18 @@ defmodule Cympho.Orchestrator.DispatcherTest do
     test "rejects issue-level paused work without changing workflow status" do
       refute Dispatcher.runnable_candidate?(%Issue{
                status: :todo,
+               company_id: @company_id,
                blocked_by: [],
                monitor_state: %{"issue_runtime" => %{"paused" => true}}
+             })
+    end
+
+    test "rejects issues with nil company_id (fail-closed tenancy)" do
+      refute Dispatcher.runnable_candidate?(%Issue{
+               status: :todo,
+               company_id: nil,
+               blocked_by: [],
+               monitor_state: %{}
              })
     end
   end
@@ -209,6 +227,7 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
   use Cympho.DataCase, async: false
 
   import Mock
+  import Cympho.WaitHelpers
 
   alias Cympho.{Agents, Companies, Issues, Orchestrator, Runtime}
   alias Cympho.Orchestrator.Dispatcher
@@ -326,6 +345,182 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
 
       assert %{attempts: 1} = state.retry_attempts[issue.id]
       refute MapSet.member?(state.running_issue_ids, issue.id)
+    end
+  end
+
+  describe "crash reclaim (orchestrator DOWN)" do
+    test "preserves assignee like orphan reclaim", %{agent: agent, issue: issue} do
+      ensure_dispatcher_for_db_tests()
+      dispatcher = Process.whereis(Dispatcher)
+      # Shared sandbox covers most cases; allow is belt-and-suspenders when
+      # the dispatcher GenServer predates this test's owner.
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), dispatcher)
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      assert checked_out.status == :in_progress
+      assert checked_out.assignee_id == agent.id
+      assert is_nil(Orchestrator.whereis(checked_out.id))
+
+      # Simulate a monitored fake orchestrator that dies non-gracefully so
+      # release_crashed_session_issue runs (brutal kill skips terminate/2).
+      fake_orchestrator = spawn(fn -> Process.sleep(:infinity) end)
+
+      :sys.replace_state(dispatcher, fn %State{} = state ->
+        ref = Process.monitor(fake_orchestrator)
+
+        %{
+          state
+          | running_issue_ids: MapSet.put(state.running_issue_ids, checked_out.id),
+            monitors: Map.put(state.monitors, ref, checked_out.id)
+        }
+      end)
+
+      Process.exit(fake_orchestrator, :kill)
+
+      wait_until(fn ->
+        reloaded = Issues.get_issue!(issue.id)
+        assert reloaded.status == :todo
+        assert is_nil(reloaded.checkout_run_id)
+        assert is_nil(reloaded.checked_out_at)
+        assert reloaded.assignee_id == agent.id
+      end)
+    end
+
+    test "does not clear a successor-bound checkout_run_id", %{
+      agent: agent,
+      company: company,
+      issue: issue
+    } do
+      ensure_dispatcher_for_db_tests()
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+      # Snapshot as the crashed path would see it (no run bound yet).
+      stale_snapshot = Issues.get_issue!(checked_out.id)
+      assert is_nil(stale_snapshot.checkout_run_id)
+
+      # Successor binds a run (bumps lock_version + sets checkout_run_id).
+      assert {:ok, successor_run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: checked_out.id,
+                 adapter: "claude_code",
+                 bind_checkout: true
+               })
+
+      bound = Issues.get_issue!(issue.id)
+      assert bound.checkout_run_id == successor_run.id
+      assert bound.lock_version > stale_snapshot.lock_version
+
+      # Stale clear_checkout_lock (same CAS used by crash reclaim) must lose.
+      assert {:error, :checkout_conflict} =
+               Issues.clear_checkout_lock(stale_snapshot, :todo)
+
+      still = Issues.get_issue!(issue.id)
+      assert still.checkout_run_id == successor_run.id
+      assert still.assignee_id == agent.id
+      assert still.status == :in_progress
+    end
+  end
+
+  describe "recover_orphaned_in_progress/0" do
+    test "reclaims stranded :in_progress keeping assignee when no orchestrator", %{
+      agent: agent,
+      issue: issue
+    } do
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      assert checked_out.status == :in_progress
+      assert checked_out.assignee_id == agent.id
+      assert is_nil(Orchestrator.whereis(checked_out.id))
+
+      result = Dispatcher.recover_orphaned_in_progress()
+
+      assert result.recovered >= 1
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :todo
+      assert reloaded.assignee_id == agent.id
+      assert is_nil(reloaded.checked_out_at)
+      assert is_nil(reloaded.checkout_run_id)
+    end
+
+    test "does not release when a live orchestrator is registered", %{
+      agent: agent,
+      issue: issue
+    } do
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      assert checked_out.status == :in_progress
+
+      {:ok, _} = Registry.register(Cympho.OrchestratorRegistry, checked_out.id, nil)
+      assert is_pid(Orchestrator.whereis(checked_out.id))
+
+      result = Dispatcher.recover_orphaned_in_progress()
+
+      assert result.skipped >= 1
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :in_progress
+      assert reloaded.assignee_id == agent.id
+    end
+
+    test "does not release when a non-terminal run exists", %{
+      agent: agent,
+      company: company,
+      issue: issue
+    } do
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+      {:ok, _run} =
+        Cympho.HeartbeatEngine.create_run(%{
+          company_id: company.id,
+          agent_id: agent.id,
+          issue_id: checked_out.id,
+          adapter: "claude_code"
+        })
+
+      assert is_nil(Orchestrator.whereis(checked_out.id))
+
+      result = Dispatcher.recover_orphaned_in_progress()
+
+      assert result.skipped >= 1
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :in_progress
+      assert reloaded.assignee_id == agent.id
+    end
+  end
+
+  describe "recover_stale_checkouts/0" do
+    test "clears age-threshold checkouts while preserving assignee", %{
+      agent: agent,
+      issue: issue
+    } do
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+      old =
+        DateTime.utc_now()
+        |> DateTime.add(-3 * 60 * 60, :second)
+        |> DateTime.truncate(:second)
+
+      checked_out
+      |> Ecto.Changeset.change(%{checked_out_at: old})
+      |> Cympho.Repo.update!()
+
+      result = Dispatcher.recover_stale_checkouts()
+
+      assert result.released >= 1
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :todo
+      assert reloaded.assignee_id == agent.id
+      assert is_nil(reloaded.checked_out_at)
+    end
+  end
+
+  defp ensure_dispatcher_for_db_tests do
+    unless Process.whereis(Dispatcher) do
+      {:ok, _} = Dispatcher.start_link([])
     end
   end
 end

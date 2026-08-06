@@ -2,15 +2,19 @@ defmodule CymphoWeb.BudgetLive.Show do
   use CymphoWeb, :live_view
 
   alias Cympho.Budgets
+  alias Cympho.Finances
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     case fetch_budget(socket, id) do
       {:ok, budget} ->
+        policy = Finances.matching_budget_policy(budget)
+
         {:ok,
          socket
          |> assign(:page_title, budget.name)
-         |> assign(:budget, budget)}
+         |> assign(:budget, enrich_budget_spend(budget))
+         |> assign(:budget_policy, policy)}
 
       {:error, :not_found} ->
         {:ok,
@@ -25,6 +29,10 @@ defmodule CymphoWeb.BudgetLive.Show do
       %{id: company_id} -> Budgets.get_company_budget(company_id, id)
       _ -> {:error, :not_found}
     end
+  end
+
+  defp enrich_budget_spend(budget) do
+    %{budget | spent_amount: Finances.spend_for_budget(budget)}
   end
 
   @impl true
@@ -111,6 +119,23 @@ defmodule CymphoWeb.BudgetLive.Show do
 
   def boolean_label(true), do: "Yes"
   def boolean_label(false), do: "No"
+
+  def enforcement_label(%{action_on_exceed: "block"}), do: "Block (hard stop)"
+  def enforcement_label(%{action_on_exceed: "warn"}), do: "Warn only — agents keep spending"
+  def enforcement_label(_), do: "Not runtime-enforced"
+
+  def recovery_card?(budget, policy) do
+    hard_stop? =
+      (is_map(policy) and Map.get(policy, :action_on_exceed) == "block") or
+        budget.hard_stop == true
+
+    exhausted? =
+      budget.status == "exhausted" or
+        (match?(%Decimal{}, budget.spent_amount) and match?(%Decimal{}, budget.limit_amount) and
+           not Decimal.lt?(budget.spent_amount, budget.limit_amount))
+
+    hard_stop? and exhausted?
+  end
 
   def format_datetime(nil), do: "Not set"
 

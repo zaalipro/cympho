@@ -282,4 +282,65 @@ defmodule Cympho.DocumentsTest do
       assert {:error, :not_found} = Documents.get_document_revision(nil, revision.id)
     end
   end
+
+  describe "fail-closed pubsub (lb-pubsub-fail-closed)" do
+    test "broadcasts document_created on company-scoped topic" do
+      company =
+        Cympho.Repo.insert!(%Cympho.Companies.Company{
+          name: "Docs Co #{System.unique_integer()}",
+          slug: "docs-co-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Doc Issue",
+          description: "d",
+          company_id: company.id,
+          status: :todo
+        })
+
+      Documents.subscribe(company.id)
+
+      assert {:ok, doc} =
+               Documents.create_document(%{
+                 key: "plan",
+                 title: "Plan",
+                 body: "body",
+                 issue_id: issue.id
+               })
+
+      assert_receive {:document_created, received}
+      assert received.id == doc.id
+    end
+
+    test "does not publish unscoped documents or company:: when company_id is nil" do
+      {:ok, issue} =
+        Issues.create_issue(%{title: "No company", description: "d", status: :todo})
+
+      # Ensure issue has no company (create_issue may attach one via project defaults).
+      issue =
+        issue
+        |> Ecto.Changeset.change(%{company_id: nil})
+        |> Cympho.Repo.update!()
+
+      assert is_nil(issue.company_id)
+
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "documents")
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "company::documents")
+
+      assert {:ok, _doc} =
+               Documents.create_document(%{
+                 key: "plan",
+                 title: "Plan",
+                 body: "body",
+                 issue_id: issue.id
+               })
+
+      refute_receive {:document_created, _}, 50
+    end
+
+    test "subscribe with nil company_id is a no-op" do
+      assert :ok = Documents.subscribe(nil)
+    end
+  end
 end

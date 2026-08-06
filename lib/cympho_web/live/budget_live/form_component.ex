@@ -2,6 +2,7 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
   use CymphoWeb, :live_component
 
   alias Cympho.Budgets
+  alias Cympho.Finances
 
   @impl true
   def update(%{budget: budget} = assigns, socket) do
@@ -30,6 +31,8 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
   defp save_budget(socket, :edit, budget_params) do
     case Budgets.update_budget(socket.assigns.budget, budget_params) do
       {:ok, budget} ->
+        _ = Finances.sync_budget_policy(budget)
+
         {:noreply,
          socket
          |> put_flash(:info, "Budget updated successfully")
@@ -54,6 +57,8 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
 
     case Budgets.create_budget(budget_params) do
       {:ok, budget} ->
+        _ = Finances.sync_budget_policy(budget)
+
         {:noreply,
          socket
          |> put_flash(:info, "Budget created successfully")
@@ -81,6 +86,14 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
     form
     |> field_value(:scope_type, budget.scope_type || "company")
     |> to_string()
+  end
+
+  defp hard_stop_enabled?(form, budget) do
+    case field_value(form, :hard_stop, budget.hard_stop) do
+      value when value in [true, "true", "on", 1, "1"] -> true
+      value when value in [false, "false", "off", 0, "0"] -> false
+      _ -> true
+    end
   end
 
   defp scoped_scope_id_value(form, budget) do

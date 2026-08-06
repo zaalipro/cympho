@@ -1,13 +1,14 @@
 defmodule Cympho.AgentActions.DecompositionDepsTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.{AgentActions, Companies, Issues}
+  alias Cympho.{AgentActions, Companies, Issues, PrincipalPermissions}
   alias Cympho.Repo
 
   setup do
     {:ok,
      %{
        company: company,
+       project: project,
        agents: [ceo, cto, engineer | _],
        seed_issues: [seed | _]
      }} =
@@ -19,7 +20,14 @@ defmodule Cympho.AgentActions.DecompositionDepsTest do
 
     {:ok, issue} = Issues.checkout_issue(seed, ceo, :ceo)
 
-    %{company: company, ceo: ceo, cto: cto, engineer: engineer, issue: issue}
+    %{
+      company: company,
+      project: project,
+      ceo: ceo,
+      cto: cto,
+      engineer: engineer,
+      issue: issue
+    }
   end
 
   describe "create_issue with depends_on (by sibling title)" do
@@ -89,7 +97,7 @@ defmodule Cympho.AgentActions.DecompositionDepsTest do
       assert api_issue.monitor_state["estimated_minutes"] == 90
     end
 
-    test "unresolved sibling title is counted but doesn't fail the parent",
+    test "unresolved depends_on parks the child as blocked with a system comment",
          %{cto: cto, issue: issue} do
       {:ok, _} = Issues.force_release_issue(issue, :todo)
       {:ok, cto_issue} = Issues.checkout_issue(issue, cto, :cto)
@@ -105,6 +113,65 @@ defmodule Cympho.AgentActions.DecompositionDepsTest do
 
       assert r.depends_on_resolved == 0
       assert r.depends_on_unresolved == 1
+      assert r.status == :blocked
+
+      child = Issues.get_issue!(r.issue_id)
+      assert child.status == :blocked
+      assert child.assignee_id == nil
+
+      assert Enum.any?(Cympho.Comments.list_comments(child.id), fn comment ->
+               comment.author_type == "system" and
+                 comment.body =~ "[blocked]" and
+                 comment.body =~ "Unresolved depends_on" and
+                 comment.body =~ "Does Not Exist"
+             end)
+    end
+
+    test "engineer create_issue auto-blocks parent left assignee+in_progress", %{
+      engineer: engineer,
+      project: project,
+      issue: issue
+    } do
+      {:ok, _grant} =
+        PrincipalPermissions.create_permission_grant(%{
+          principal_id: engineer.id,
+          principal_type: "agent",
+          permission: "tasks:assign",
+          scope_type: "project",
+          scope_id: project.id
+        })
+
+      {:ok, _} = Issues.force_release_issue(issue, :todo)
+      {:ok, eng_issue} = Issues.checkout_issue(issue, engineer, :engineer)
+      assert eng_issue.status == :in_progress
+      assert eng_issue.assignee_id == engineer.id
+
+      actions = [
+        delivery_issue_action(%{
+          "title" => "Engineer delegated slice",
+          "estimated_minutes" => 30
+        })
+      ]
+
+      assert {:ok,
+              %{
+                issue: final_issue,
+                results: [%{type: "create_issue", identifier: child_ref}]
+              }} = AgentActions.execute(eng_issue, engineer, actions)
+
+      assert final_issue.status == :blocked
+      assert final_issue.assignee_id == nil
+
+      reloaded = Issues.get_issue!(eng_issue.id)
+      assert reloaded.status == :blocked
+      assert reloaded.assignee_id == nil
+
+      assert Enum.any?(Cympho.Comments.list_comments(eng_issue.id), fn comment ->
+               comment.author_type == "agent" and
+                 comment.body =~ "[blocked]" and
+                 comment.body =~ "Waiting for delegated work" and
+                 comment.body =~ child_ref
+             end)
     end
   end
 

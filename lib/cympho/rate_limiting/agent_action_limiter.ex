@@ -30,6 +30,34 @@ defmodule Cympho.RateLimiting.AgentActionLimiter do
   def check(nil), do: :ok
 
   def check(agent_id) when is_binary(agent_id) do
+    do_check(agent_id)
+  end
+
+  @doc """
+  Tenant-aware rate check for multi-tenant mutation surfaces (MCP).
+
+  Requires a non-nil binary `company_id` (fail-closed). Shares the same
+  per-agent fixed window as `check/1` so AgentActions batches and MCP
+  create/comment mutations draw from one cap and cannot amplify spend by
+  routing through different entry points.
+  """
+  @spec check_for_company(String.t() | nil, String.t() | nil) :: :ok | {:error, :rate_limited}
+  def check_for_company(_agent_id, nil), do: {:error, :rate_limited}
+  def check_for_company(_agent_id, ""), do: {:error, :rate_limited}
+
+  def check_for_company(nil, company_id) when is_binary(company_id), do: :ok
+
+  def check_for_company(agent_id, company_id)
+      when is_binary(agent_id) and is_binary(company_id) do
+    do_check(agent_id)
+  end
+
+  def check_for_company(_agent_id, _company_id), do: {:error, :rate_limited}
+
+  @doc false
+  def reset, do: GenServer.call(__MODULE__, :reset)
+
+  defp do_check(agent_id) when is_binary(agent_id) do
     bucket = current_bucket()
     key = {agent_id, bucket}
     new_count = :ets.update_counter(@table, key, 1, {key, 0})
@@ -40,9 +68,6 @@ defmodule Cympho.RateLimiting.AgentActionLimiter do
       :ok
     end
   end
-
-  @doc false
-  def reset, do: GenServer.call(__MODULE__, :reset)
 
   @impl true
   def init(_) do

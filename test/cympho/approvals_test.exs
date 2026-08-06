@@ -238,6 +238,51 @@ defmodule Cympho.ApprovalsTest do
     end
   end
 
+  describe "fail-closed pubsub (lb-pubsub-fail-closed)" do
+    test "does not publish unscoped approvals or company:: when company cannot be resolved" do
+      # Agent with no company_id and no linked issues → no tenant topic.
+      agent = insert_agent()
+      assert is_nil(agent.company_id)
+
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "approvals")
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "company::approvals")
+
+      assert {:ok, _approval} =
+               Approvals.create_approval(%{
+                 type: "request_board_approval",
+                 requested_by_agent_id: agent.id
+               })
+
+      refute_receive {:approval_created, _}, 50
+    end
+
+    test "cancel_pending_for_issue publishes company-scoped only" do
+      company = insert_company()
+      agent = insert_agent(company_id: company.id)
+      issue = insert_issue(company_id: company.id)
+
+      {:ok, _} =
+        Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
+
+      Approvals.subscribe(company.id)
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "approvals")
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "company::approvals")
+
+      assert {:ok, 1} = Approvals.cancel_pending_for_issue(issue.id)
+      assert_receive {:approvals_cancelled_for_issue, issue_id}
+      assert issue_id == issue.id
+      refute_receive {:approvals_cancelled_for_issue, _}, 20
+    end
+
+    test "subscribe with nil company_id is a no-op" do
+      assert :ok = Approvals.subscribe(nil)
+    end
+  end
+
   describe "Approval changeset validations" do
     test "create_changeset validates status is valid" do
       changeset =

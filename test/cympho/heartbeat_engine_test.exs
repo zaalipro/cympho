@@ -921,6 +921,14 @@ defmodule Cympho.HeartbeatEngineTest do
       slug: "hb-checked-out-co-#{:rand.uniform(1_000_000)}"
     })
 
+    # Fail-closed checkout requires agent.company_id == issue.company_id.
+    # Align the pre-inserted agent so re-checkout paths exercise production rules.
+    agent = Cympho.Repo.get!(Cympho.Agents.Agent, agent_id)
+
+    agent
+    |> Ecto.Changeset.change(company_id: company_id)
+    |> Cympho.Repo.update!()
+
     Cympho.Repo.insert!(%Cympho.Issues.Issue{
       title: "checked out issue #{:rand.uniform(100_000)}",
       company_id: company_id,

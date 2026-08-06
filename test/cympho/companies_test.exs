@@ -1,8 +1,9 @@
 defmodule Cympho.CompaniesTest do
   use Cympho.DataCase
 
-  alias Cympho.{AgentInstructionStudio, Agents, Companies}
+  alias Cympho.{AgentInstructionStudio, Agents, Companies, Finances}
   alias Cympho.Companies.{Company, CompanyInvite, JoinRequest}
+  alias Cympho.Finances.BudgetPolicy
   alias Cympho.Goals.Goal
   alias Cympho.Projects
   alias Cympho.Secrets
@@ -711,6 +712,83 @@ defmodule Cympho.CompaniesTest do
 
       assert {:ok, _result} =
                Companies.create_autonomous_company(%{name: "Collision Co", engineer_count: 3})
+    end
+
+    test "creates company-scoped BudgetPolicy with action_on_exceed block" do
+      assert {:ok, result} =
+               Companies.create_autonomous_company(%{
+                 name: "Budget Guard Co",
+                 budget_monthly_cents: 2500
+               })
+
+      assert result.company.budget_monthly_cents == 2500
+      assert %BudgetPolicy{} = result.budget_policy
+      assert result.budget_policy.company_id == result.company.id
+      assert result.budget_policy.scope == "company"
+      assert result.budget_policy.period == "monthly"
+      assert result.budget_policy.action_on_exceed == "block"
+      assert result.budget_policy.is_active
+      # cents → USD conversion for Finances.BudgetPolicy.budget_limit_usd
+      assert Decimal.eq?(result.budget_policy.budget_limit_usd, Decimal.new("25.00"))
+
+      policies = Finances.list_budget_policies(result.company.id, is_active: true)
+      assert length(policies) == 1
+      assert hd(policies).id == result.budget_policy.id
+      assert hd(policies).action_on_exceed == "block"
+    end
+
+    test "defaults missing monthly budget to a safe positive block policy" do
+      assert {:ok, result} =
+               Companies.create_autonomous_company(%{name: "Default Budget Co"})
+
+      assert result.company.budget_monthly_cents == 10_000
+      assert result.budget_policy.action_on_exceed == "block"
+      assert Decimal.eq?(result.budget_policy.budget_limit_usd, Decimal.new("100.00"))
+    end
+
+    test "rejects zero monthly budget when autonomy is requested" do
+      assert {:error, :budget_required} =
+               Companies.create_autonomous_company(%{
+                 name: "Zero Budget Co",
+                 budget_monthly_cents: 0
+               })
+
+      assert {:error, :budget_required} =
+               Companies.create_autonomous_company(%{
+                 "name" => "Zero Budget String Co",
+                 "budget_monthly_cents" => "0"
+               })
+    end
+
+    test "check_runtime_budget returns budget_blocked after synthetic usage past bootstrap policy" do
+      assert {:ok, result} =
+               Companies.create_autonomous_company(%{
+                 name: "Spend Block Co",
+                 budget_monthly_cents: 100
+               })
+
+      company = result.company
+      agent = hd(result.agents)
+      issue = hd(result.seed_issues)
+
+      assert Decimal.eq?(result.budget_policy.budget_limit_usd, Decimal.new("1.00"))
+      assert {:ok, %{status: "available"}} = Finances.check_runtime_budget(issue, agent)
+
+      # Cross the $1.00 company block policy; usage still commits for audit.
+      assert {:error, :budget_blocked} =
+               Finances.record_token_usage(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 provider: "test",
+                 model: "test-model",
+                 total_tokens: 1000,
+                 cost_usd: Decimal.new("1.50")
+               })
+
+      assert {:error, {:budget_blocked, info}} = Finances.check_runtime_budget(issue, agent)
+      assert info.policy_id == result.budget_policy.id
+      assert info.scope == "company"
     end
   end
 end

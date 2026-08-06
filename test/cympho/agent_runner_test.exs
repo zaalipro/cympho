@@ -340,11 +340,56 @@ defmodule Cympho.AgentRunnerTest do
           cwd: tmp_dir,
           config: %{"command" => command},
           env: %{"ANTHROPIC_API_KEY" => "test-key"},
-          stall_timeout: 300
+          stall_timeout: 300,
+          max_run_ms: 60_000
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
       assert_receive {:turn_ended_with_error, ^session_id, :stall_timeout}, @receive_timeout
+      assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
+    end
+
+    test "max_run_ms kills a dripping process independent of stall resets" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-drip-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      # Drip non-JSON output forever so stall_timeout keeps resetting, but the
+      # absolute max_run_ms wall clock must still kill the session.
+      command = Path.join(tmp_dir, "fake-claude")
+
+      File.write!(
+        command,
+        """
+        #!/bin/sh
+        while true; do
+          printf 'Thinking...\\n'
+          sleep 0.05
+        done
+        """
+      )
+
+      File.chmod!(command, 0o755)
+
+      recipient = self()
+      issue = %{id: "drip-command", title: "Drip command", description: "Never finishes"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          # Stall is long enough that drip would keep resetting it forever.
+          stall_timeout: 5_000,
+          max_run_ms: 400
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert_receive {:turn_ended_with_error, ^session_id, :max_run_timeout}, 2_000
+      refute_receive {:turn_completed, ^session_id, _result}, 100
+      assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
     end
 
     test "a clean exit with no output fails with :no_output instead of ending silently" do
@@ -464,4 +509,18 @@ defmodule Cympho.AgentRunnerTest do
 
   defp resume_probe_text(%{"content" => [%{"text" => text} | _]}), do: text
   defp resume_probe_text(_result), do: nil
+
+  defp eventually(fun, attempts \\ 20) do
+    cond do
+      fun.() ->
+        true
+
+      attempts <= 1 ->
+        false
+
+      true ->
+        Process.sleep(25)
+        eventually(fun, attempts - 1)
+    end
+  end
 end

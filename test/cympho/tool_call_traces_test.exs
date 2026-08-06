@@ -803,4 +803,196 @@ defmodule Cympho.ToolCallTracesTest do
       assert {:error, _changeset} = ToolCallTraces.create_tool_call_trace(attrs)
     end
   end
+
+  describe "payload redaction" do
+    test "write path redacts secret-like keys from tool_arguments", %{company: company} do
+      attrs = %{
+        trace_type: "llm_tool_call",
+        tool_name: "http_request",
+        tool_arguments: %{
+          "url" => "https://api.example.com",
+          "api_key" => "sk-secret-value-12345",
+          "headers" => %{"Authorization" => "Bearer top-secret"},
+          "nested" => %{"password" => "hunter2", "path" => "/v1/data"}
+        },
+        status: "pending",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: Ecto.UUID.generate()
+      }
+
+      assert {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
+
+      assert trace.tool_arguments["url"] == "https://api.example.com"
+      assert trace.tool_arguments["api_key"] == "[REDACTED]"
+      assert trace.tool_arguments["headers"] == "[REDACTED]"
+      assert trace.tool_arguments["nested"]["password"] == "[REDACTED]"
+      assert trace.tool_arguments["nested"]["path"] == "/v1/data"
+
+      refute inspect(trace.tool_arguments) =~ "sk-secret-value"
+      refute inspect(trace.tool_arguments) =~ "hunter2"
+      refute inspect(trace.tool_arguments) =~ "top-secret"
+
+      assert :ok = ToolCallTraces.verify_content_hash(trace)
+      assert :ok = ToolCallTraces.verify_chain_integrity(company.id)
+    end
+
+    test "write path hashes tool_result when it contains secrets", %{company: company} do
+      secret_result = ~s({"token":"sk-live-abcdef012345","ok":true})
+
+      attrs = %{
+        trace_type: "llm_tool_call",
+        tool_name: "fetch_secret",
+        tool_arguments: %{"query" => "safe"},
+        tool_result: secret_result,
+        status: "success",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: Ecto.UUID.generate()
+      }
+
+      assert {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
+      assert trace.tool_result =~ ~r/^sha256:[a-f0-9]{64}$/
+      refute trace.tool_result =~ "sk-live"
+      assert :ok = ToolCallTraces.verify_content_hash(trace)
+      assert :ok = ToolCallTraces.verify_chain_integrity(company.id)
+    end
+
+    test "benign tool_result is stored as-is and integrity stays green", %{company: company} do
+      attrs = %{
+        trace_type: "llm_tool_call",
+        tool_name: "web_search",
+        tool_arguments: %{"query" => "public docs"},
+        tool_result: "result data",
+        status: "success",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: Ecto.UUID.generate()
+      }
+
+      assert {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
+      assert trace.tool_result == "result data"
+      assert :ok = ToolCallTraces.verify_content_hash(trace)
+    end
+
+    test "status update redacts secret-bearing results", %{company: company} do
+      {:ok, trace} =
+        ToolCallTraces.create_tool_call_trace(%{
+          trace_type: "llm_tool_call",
+          tool_name: "web_search",
+          tool_arguments: %{},
+          status: "pending",
+          company_id: company.id,
+          actor_type: "agent",
+          actor_id: Ecto.UUID.generate()
+        })
+
+      assert {:ok, updated} =
+               ToolCallTraces.update_tool_call_trace_status(
+                 trace,
+                 "success",
+                 ~s({"api_key":"sk-should-not-persist"})
+               )
+
+      assert updated.tool_result =~ ~r/^sha256:[a-f0-9]{64}$/
+      refute updated.tool_result =~ "sk-should-not-persist"
+      assert :ok = ToolCallTraces.verify_content_hash(updated)
+      assert :ok = ToolCallTraces.verify_chain_integrity(company.id)
+    end
+  end
+
+  describe "concurrent sequence assignment" do
+    test "concurrent creates produce contiguous sequences with intact chain", %{company: company} do
+      parent = self()
+      count = 12
+
+      results =
+        1..count
+        |> Enum.map(fn i ->
+          Task.async(fn ->
+            Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, parent, self())
+
+            ToolCallTraces.create_tool_call_trace(%{
+              trace_type: "llm_tool_call",
+              tool_name: "concurrent_tool_#{i}",
+              tool_arguments: %{"i" => i},
+              status: "pending",
+              company_id: company.id,
+              actor_type: "agent",
+              actor_id: Ecto.UUID.generate()
+            })
+          end)
+        end)
+        |> Enum.map(&Task.await(&1, 30_000))
+
+      assert Enum.all?(results, &match?({:ok, %ToolCallTrace{}}, &1))
+
+      traces = ToolCallTraces.get_chain_traces(company.id)
+      assert length(traces) == count
+      assert Enum.map(traces, & &1.sequence_number) == Enum.to_list(1..count)
+      assert :ok = ToolCallTraces.verify_chain_integrity(company.id)
+    end
+  end
+
+  describe "run_id correlation" do
+    test "stores and filters by run_id", %{company: company} do
+      {:ok, agent} =
+        Cympho.Agents.create_agent(%{
+          name: "Trace Agent",
+          role: "engineer",
+          company_id: company.id,
+          adapter_type: "process"
+        })
+
+      {:ok, issue} =
+        Cympho.Issues.create_issue(%{
+          title: "Trace issue",
+          description: "run correlation",
+          company_id: company.id,
+          status: :todo
+        })
+
+      {:ok, run} =
+        Cympho.HeartbeatEngine.create_run(%{
+          company_id: company.id,
+          agent_id: agent.id,
+          issue_id: issue.id,
+          adapter: "process"
+        })
+
+      {:ok, matched} =
+        ToolCallTraces.create_tool_call_trace(%{
+          trace_type: "tool_invocation",
+          tool_name: "read_file",
+          tool_arguments: %{"path" => "README.md"},
+          status: "pending",
+          company_id: company.id,
+          agent_id: agent.id,
+          issue_id: issue.id,
+          run_id: run.id,
+          actor_type: "agent",
+          actor_id: agent.id
+        })
+
+      {:ok, _other} =
+        ToolCallTraces.create_tool_call_trace(%{
+          trace_type: "tool_invocation",
+          tool_name: "other_tool",
+          tool_arguments: %{},
+          status: "pending",
+          company_id: company.id,
+          actor_type: "agent",
+          actor_id: agent.id
+        })
+
+      assert matched.run_id == run.id
+
+      filtered =
+        ToolCallTraces.list_tool_call_traces(company_id: company.id, run_id: run.id)
+
+      assert length(filtered) == 1
+      assert hd(filtered).id == matched.id
+      assert :ok = ToolCallTraces.verify_chain_integrity(company.id)
+    end
+  end
 end

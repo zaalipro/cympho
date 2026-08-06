@@ -91,8 +91,11 @@ defmodule Cympho.WorkProducts do
   # company_id column, so we resolve it from the parent issue.
   defp broadcast_work_product(message, issue_id) do
     case issue_company_id(issue_id) do
-      nil -> {:error, :no_company}
-      company_id -> Cympho.PubSubGuard.broadcast("company:#{company_id}:issues", message)
+      company_id when is_binary(company_id) and company_id != "" ->
+        Cympho.PubSubGuard.company_broadcast(company_id, "issues", message)
+
+      _ ->
+        {:error, :no_company}
     end
   end
 

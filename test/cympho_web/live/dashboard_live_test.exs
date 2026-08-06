@@ -8,6 +8,7 @@ defmodule CymphoWeb.DashboardLiveTest do
   alias Cympho.Agents
   alias Cympho.Comments
   alias Cympho.Companies
+  alias Cympho.Dashboard
   alias Cympho.Finances.BudgetPolicy
   alias Cympho.Goals
   alias Cympho.HeartbeatEngine.Run
@@ -75,6 +76,45 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ "Active"
       assert html =~ "Waiting"
       assert html =~ "Agents"
+    end
+
+    test "Needs you surfaces stuck in_progress work even with zero blocked or failures", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Stuck Engineer",
+          role: :engineer,
+          status: :idle,
+          url_key: "stuck-eng"
+        })
+
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Swarm task never finished",
+          description: "in progress past threshold",
+          status: :in_progress,
+          assignee_id: agent.id,
+          checked_out_at: stale_at
+        })
+
+      # Confirm patrol sees the stall and there are no blocked/failure signals.
+      patrol = Dashboard.patrol_summary(company.id)
+      assert patrol.stuck_count > 0
+      assert patrol.blocked_count == 0
+
+      {:ok, _view, html} = live(conn, "/dashboard")
+
+      assert html =~ "Swarm task never finished"
+      assert html =~ ~s(href="/issues/#{issue.id}")
+      refute html =~ "Nothing needs you. The team is working."
+      # Dual-mode copy: advanced keeps patrol vocabulary; simple stays plain.
+      assert html =~ "patrol thresholds"
+      assert html =~ "sitting too long"
     end
 
     test "app shell exposes clear desktop and mobile mode controls", %{conn: conn} do

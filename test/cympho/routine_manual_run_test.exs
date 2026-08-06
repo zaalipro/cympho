@@ -6,21 +6,31 @@ defmodule Cympho.RoutineManualRunTest do
 
   describe "manual_run/2" do
     setup do
+      u = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Manual Co #{u}",
+          slug: "manual-co-#{u}"
+        })
+
       {:ok, agent} =
         Cympho.Agents.create_agent(%{
           name: "Manual Agent",
           role: :engineer,
-          url_key: "manual-agent-#{:rand.uniform(100_000)}"
+          url_key: "manual-agent-#{u}",
+          company_id: company.id
         })
 
       {:ok, routine} =
         Routines.create_routine(%{
           name: "Manual Test",
           agent_id: agent.id,
+          company_id: company.id,
           concurrency_policy: :always_enqueue
         })
 
-      %{routine: routine, agent: agent}
+      %{routine: routine, agent: agent, company: company}
     end
 
     test "creates a run with trigger_type manual", %{routine: routine} do
@@ -31,11 +41,12 @@ defmodule Cympho.RoutineManualRunTest do
       assert run.trigger_id == nil
     end
 
-    test "creates an issue for the run", %{routine: routine} do
+    test "creates an issue for the run with company_id", %{routine: routine, company: company} do
       assert {:ok, %{run: run, issue: issue}} = RoutineTriggers.manual_run(routine)
       assert issue != nil
       assert issue.title =~ "Manual run"
       assert issue.assignee_id == routine.agent_id
+      assert issue.company_id == company.id
       assert run.issue_id == issue.id
     end
 
@@ -55,16 +66,34 @@ defmodule Cympho.RoutineManualRunTest do
       assert run1.id != run2.id
     end
 
-    test "skips a concurrent run when concurrency_policy is :skip_if_active", %{agent: agent} do
+    test "skips a concurrent run when concurrency_policy is :skip_if_active", %{
+      agent: agent,
+      company: company
+    } do
       {:ok, routine} =
         Routines.create_routine(%{
           name: "Skip Test",
           agent_id: agent.id,
+          company_id: company.id,
           concurrency_policy: :skip_if_active
         })
 
       assert {:ok, %{run: _}} = RoutineTriggers.manual_run(routine)
       assert {:skip, :skip_if_active} = RoutineTriggers.manual_run(routine)
+    end
+
+    test "rejects manual run when no company_id can be resolved" do
+      {:ok, agent} =
+        Cympho.Agents.create_agent(%{
+          name: "Unscoped Manual",
+          role: :engineer,
+          url_key: "unscoped-manual-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, routine} =
+        Routines.create_routine(%{name: "No Company Manual", agent_id: agent.id})
+
+      assert {:error, :missing_company_id} = RoutineTriggers.manual_run(routine)
     end
 
     test "returns error for non-existent routine id" do
@@ -75,15 +104,28 @@ defmodule Cympho.RoutineManualRunTest do
 
   describe "complete_run/1 and fail_run/1" do
     setup do
+      u = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Status Manual Co #{u}",
+          slug: "status-manual-co-#{u}"
+        })
+
       {:ok, agent} =
         Cympho.Agents.create_agent(%{
           name: "Status Agent",
           role: :engineer,
-          url_key: "status-agent-#{:rand.uniform(100_000)}"
+          url_key: "status-agent-#{u}",
+          company_id: company.id
         })
 
       {:ok, routine} =
-        Routines.create_routine(%{name: "Status Test", agent_id: agent.id})
+        Routines.create_routine(%{
+          name: "Status Test",
+          agent_id: agent.id,
+          company_id: company.id
+        })
 
       {:ok, %{run: run}} = RoutineTriggers.manual_run(routine)
       %{run: run}
@@ -104,15 +146,28 @@ defmodule Cympho.RoutineManualRunTest do
 
   describe "get_run/1 and get_run!/1" do
     setup do
+      u = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Get Co #{u}",
+          slug: "get-co-#{u}"
+        })
+
       {:ok, agent} =
         Cympho.Agents.create_agent(%{
           name: "Get Agent",
           role: :engineer,
-          url_key: "get-agent-#{:rand.uniform(100_000)}"
+          url_key: "get-agent-#{u}",
+          company_id: company.id
         })
 
       {:ok, routine} =
-        Routines.create_routine(%{name: "Get Test", agent_id: agent.id})
+        Routines.create_routine(%{
+          name: "Get Test",
+          agent_id: agent.id,
+          company_id: company.id
+        })
 
       {:ok, %{run: run}} = RoutineTriggers.manual_run(routine)
       %{run: run}

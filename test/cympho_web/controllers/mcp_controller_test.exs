@@ -1,7 +1,8 @@
 defmodule CymphoWeb.McpControllerTest do
-  use CymphoWeb.ConnCase, async: true
+  use CymphoWeb.ConnCase, async: false
 
   alias Cympho.{Agents, Authentication, Comments, Companies, Issues}
+  alias Cympho.RateLimiting.AgentActionLimiter
 
   setup %{conn: conn} do
     {:ok, company} =
@@ -62,5 +63,129 @@ defmodule CymphoWeb.McpControllerTest do
 
     assert %{"result" => %{"total" => 1, "comments" => [comment]}} = json_response(conn, 200)
     assert comment["body"] == "Visible through MCP."
+  end
+
+  test "create_issue flood returns stable rate_limited error with 429", %{conn: conn} do
+    AgentActionLimiter.reset()
+    original = Application.get_env(:cympho, :agent_actions, [])
+    Application.put_env(:cympho, :agent_actions, max_per_minute: 2)
+
+    on_exit(fn ->
+      Application.put_env(:cympho, :agent_actions, original)
+      AgentActionLimiter.reset()
+    end)
+
+    for i <- 1..2 do
+      c =
+        post(conn, "/api/mcp/call", %{
+          "tool" => "create_issue",
+          "args" => %{"title" => "http create #{i}"}
+        })
+
+      assert %{"result" => %{"success" => true}} = json_response(c, 200)
+    end
+
+    limited =
+      post(conn, "/api/mcp/call", %{
+        "tool" => "create_issue",
+        "args" => %{"title" => "http create blocked"}
+      })
+
+    body = json_response(limited, 429)
+    assert body["error"] == "rate_limited"
+    assert body["result"]["error"] == "rate_limited"
+    assert body["result"]["success"] == false
+  end
+
+  test "lists and calls only granted dynamic tools", %{
+    conn: conn,
+    company: company,
+    agent: agent
+  } do
+    alias Cympho.Mcp.{ToolGrants, ToolRegistry}
+
+    {:ok, _tool} =
+      ToolRegistry.register(company.id, %{
+        "name" => "http_dynamic_echo",
+        "description" => "HTTP dynamic tool"
+      })
+
+    # Not listed before grant
+    names =
+      conn
+      |> get("/api/mcp/tools")
+      |> json_response(200)
+      |> Map.fetch!("tools")
+      |> Enum.map(& &1["name"])
+
+    refute "http_dynamic_echo" in names
+
+    deny_conn =
+      post(conn, "/api/mcp/call", %{
+        "tool" => "http_dynamic_echo",
+        "args" => %{"x" => 1}
+      })
+
+    assert %{
+             "result" => %{
+               "error" => "Tool not authorized",
+               "decision" => "deny"
+             }
+           } = json_response(deny_conn, 200)
+
+    {:ok, grant} =
+      ToolGrants.create_grant(%{
+        company_id: company.id,
+        tool_name: "http_dynamic_echo",
+        agent_id: agent.id,
+        status: "allow"
+      })
+
+    names =
+      conn
+      |> get("/api/mcp/tools")
+      |> json_response(200)
+      |> Map.fetch!("tools")
+      |> Enum.map(& &1["name"])
+
+    assert "http_dynamic_echo" in names
+
+    allow_conn =
+      post(conn, "/api/mcp/call", %{
+        "tool" => "http_dynamic_echo",
+        "args" => %{"x" => 1}
+      })
+
+    assert %{
+             "result" => %{
+               "success" => true,
+               "dynamic" => true,
+               "tool" => "http_dynamic_echo"
+             }
+           } = json_response(allow_conn, 200)
+
+    {:ok, _} = ToolGrants.revoke(grant.id, "immediate hide")
+
+    names =
+      conn
+      |> get("/api/mcp/tools")
+      |> json_response(200)
+      |> Map.fetch!("tools")
+      |> Enum.map(& &1["name"])
+
+    refute "http_dynamic_echo" in names
+
+    revoked_conn =
+      post(conn, "/api/mcp/call", %{
+        "tool" => "http_dynamic_echo",
+        "args" => %{}
+      })
+
+    assert %{
+             "result" => %{
+               "error" => "Tool not authorized",
+               "decision" => "revoked"
+             }
+           } = json_response(revoked_conn, 200)
   end
 end

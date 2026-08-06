@@ -6,13 +6,44 @@ defmodule Cympho.Mcp.Server do
   that agent's `company_id`. Cross-tenant access is impossible by construction:
   the company_id is taken from the authenticated agent, never from request
   args.
+
+  Built-in tools are always listed. Dynamically registered tools
+  (`Cympho.Mcp.ToolRegistry`) are merged into the list only when
+  `Cympho.Mcp.ToolGrants.authorize_call/3` returns `:allow` for the calling
+  agent. Revocation hides them immediately.
   """
 
   import Ecto.Query, only: [from: 2]
-  alias Cympho.{Agents, Comments, Issues, Repo, Search}
+  require Logger
+
+  alias Cympho.{Agents, Comments, GovernanceAuditLogs, Issues, Repo, Search}
   alias Cympho.Agents.Agent
+  alias Cympho.Mcp.{ToolGrants, ToolRegistry}
+  alias Cympho.RateLimiting.AgentActionLimiter
+
+  # Stable error body returned to MCP clients when a mutation is throttled.
+  # Shape is intentional and part of the external contract — do not rename keys.
+  @rate_limited_error %{error: "rate_limited", success: false}
 
   def tools do
+    static_tools()
+  end
+
+  @doc """
+  Built-in tools plus dynamic tools the agent is explicitly allowed to call.
+  """
+  def tools_for(%Agent{} = agent) do
+    dynamic =
+      agent.company_id
+      |> ToolRegistry.list_allowed_for_agent(agent.id)
+      |> Enum.map(&ToolRegistry.to_mcp_descriptor/1)
+
+    static_tools() ++ dynamic
+  end
+
+  def tools_for(_), do: static_tools()
+
+  defp static_tools do
     [
       %{
         name: "list_issues",
@@ -156,7 +187,48 @@ defmodule Cympho.Mcp.Server do
       %{error: "Internal error", detail: Exception.message(e)}
   end
 
-  defp do_call("list_issues", args, agent) do
+  defp static_tool_names do
+    Enum.map(static_tools(), & &1.name)
+  end
+
+  defp do_call(name, args, agent) when is_binary(name) do
+    if name in static_tool_names() do
+      do_static_call(name, args, agent)
+    else
+      do_dynamic_call(name, args, agent)
+    end
+  end
+
+  defp do_call(_name, _args, _agent) do
+    %{error: "Unknown or malformed tool invocation"}
+  end
+
+  defp do_dynamic_call(name, args, %Agent{} = agent) do
+    decision = ToolGrants.authorize_call(agent.company_id, agent.id, name)
+
+    case decision do
+      :allow ->
+        case ToolRegistry.get_active(agent.company_id, name) do
+          {:ok, tool} ->
+            %{
+              success: true,
+              dynamic: true,
+              tool: tool.name,
+              plugin_id: tool.plugin_id,
+              args: args || %{},
+              message: "Dynamic tool call authorized"
+            }
+
+          {:error, :not_found} ->
+            %{error: "Tool not authorized", decision: "deny"}
+        end
+
+      other when other in [:deny, :pending, :revoked] ->
+        %{error: "Tool not authorized", decision: Atom.to_string(other)}
+    end
+  end
+
+  defp do_static_call("list_issues", args, agent) do
     params =
       args
       |> Map.take(["status", "priority", "assignee_id", "assigned_role", "project_id", "search"])
@@ -173,7 +245,7 @@ defmodule Cympho.Mcp.Server do
     }
   end
 
-  defp do_call("get_issue", %{"issue_id" => id}, agent) do
+  defp do_static_call("get_issue", %{"issue_id" => id}, agent) do
     case Issues.get_company_issue(agent.company_id, id) do
       {:ok, issue} ->
         comments = Comments.list_comments(issue.id)
@@ -199,7 +271,7 @@ defmodule Cympho.Mcp.Server do
     end
   end
 
-  defp do_call("list_issue_comments", %{"issue_id" => id} = args, agent) do
+  defp do_static_call("list_issue_comments", %{"issue_id" => id} = args, agent) do
     case Issues.get_company_issue(agent.company_id, id) do
       {:ok, issue} ->
         comments = Comments.list_comments(issue.id)
@@ -217,11 +289,12 @@ defmodule Cympho.Mcp.Server do
     end
   end
 
-  defp do_call("create_issue_comment", %{"issue_id" => id, "body" => body}, agent)
+  defp do_static_call("create_issue_comment", %{"issue_id" => id, "body" => body}, agent)
        when is_binary(body) do
     body = String.trim(body)
 
-    with :ok <- validate_comment_body(body),
+    with :ok <- authorize_mutation("create_issue_comment", agent),
+         :ok <- validate_comment_body(body),
          {:ok, issue} <- Issues.get_company_issue(agent.company_id, id),
          {:ok, comment} <-
            Comments.create_comment(%{
@@ -232,13 +305,14 @@ defmodule Cympho.Mcp.Server do
            }) do
       %{success: true, comment: summarize_comment(comment)}
     else
+      {:error, :rate_limited} -> @rate_limited_error
       {:error, :not_found} -> %{error: "Issue not found"}
       {:error, errors} when is_map(errors) -> %{success: false, errors: errors}
       {:error, changeset} -> %{success: false, errors: format_errors(changeset)}
     end
   end
 
-  defp do_call("create_issue", args, agent) do
+  defp do_static_call("create_issue", args, agent) do
     project_id =
       case args["project_id"] do
         nil ->
@@ -248,7 +322,8 @@ defmodule Cympho.Mcp.Server do
           if project_belongs_to_company?(id, agent.company_id), do: id, else: :forbidden
       end
 
-    with :ok <- validate_project_id(project_id),
+    with :ok <- authorize_mutation("create_issue", agent),
+         :ok <- validate_project_id(project_id),
          {:ok, routing_attrs} <- routing_attrs(args, agent.company_id) do
       attrs =
         %{
@@ -271,16 +346,17 @@ defmodule Cympho.Mcp.Server do
         {:error, changeset} -> %{success: false, errors: format_errors(changeset)}
       end
     else
+      {:error, :rate_limited} -> @rate_limited_error
       {:error, errors} -> %{success: false, errors: errors}
     end
   end
 
-  defp do_call("list_projects", _args, agent) do
+  defp do_static_call("list_projects", _args, agent) do
     Cympho.Companies.list_company_projects(agent.company_id)
     |> Enum.map(fn p -> %{id: p.id, name: p.name, prefix: p.prefix} end)
   end
 
-  defp do_call("list_agents", args, agent) do
+  defp do_static_call("list_agents", args, agent) do
     agents =
       Cympho.Companies.list_company_agents(agent.company_id)
       |> filter_by_status(args["status"])
@@ -290,7 +366,7 @@ defmodule Cympho.Mcp.Server do
     end)
   end
 
-  defp do_call("get_kanban_state", args, agent) do
+  defp do_static_call("get_kanban_state", args, agent) do
     params = %{"company_id" => agent.company_id, "per_page" => "1000"}
 
     params =
@@ -318,13 +394,71 @@ defmodule Cympho.Mcp.Server do
     end)
   end
 
-  defp do_call("search", %{"query" => query}, agent) when is_binary(query) do
+  defp do_static_call("search", %{"query" => query}, agent) when is_binary(query) do
     Search.search(query, company_id: agent.company_id)
   end
 
-  defp do_call(_name, _args, _agent) do
+  defp do_static_call(_name, _args, _agent) do
     %{error: "Unknown or malformed tool invocation"}
   end
+
+  # Rate-limit + audit gate for MCP mutations that can auto-ignite wakes or
+  # otherwise amplify spend. Fail-closed when company_id is missing.
+  defp authorize_mutation(tool, %Agent{id: agent_id, company_id: company_id} = agent)
+       when is_binary(agent_id) and is_binary(company_id) do
+    case AgentActionLimiter.check_for_company(agent_id, company_id) do
+      :ok ->
+        audit_authorize(agent, tool, "allowed")
+        :ok
+
+      {:error, :rate_limited} ->
+        audit_authorize(agent, tool, "rate_limited")
+
+        Logger.warning("MCP mutation rate limited",
+          agent_id: agent_id,
+          company_id: company_id,
+          component: "mcp",
+          tool: tool
+        )
+
+        {:error, :rate_limited}
+    end
+  end
+
+  defp authorize_mutation(tool, agent) do
+    audit_authorize(agent, tool, "denied")
+    {:error, :rate_limited}
+  end
+
+  defp audit_authorize(%Agent{} = agent, tool, decision) when is_binary(tool) do
+    _ =
+      GovernanceAuditLogs.log_action(
+        "mcp_mutation_authorize",
+        agent,
+        decision,
+        company_id: agent.company_id,
+        reasoning: "MCP #{tool} authorize decision: #{decision}",
+        metadata: %{
+          "tool" => tool,
+          "decision" => decision,
+          "surface" => "mcp"
+        }
+      )
+
+    :ok
+  rescue
+    e ->
+      Logger.warning("MCP authorize audit failed",
+        agent_id: Map.get(agent, :id),
+        company_id: Map.get(agent, :company_id),
+        component: "mcp",
+        error: Exception.message(e)
+      )
+
+      :ok
+  end
+
+  defp audit_authorize(_agent, _tool, _decision), do: :ok
 
   defp summarize_issue(issue) do
     %{

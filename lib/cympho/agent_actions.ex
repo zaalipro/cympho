@@ -124,6 +124,27 @@ defmodule Cympho.AgentActions do
 
   def execute(_issue, _agent, _actions), do: {:error, :invalid_execution_context}
 
+  @doc """
+  True when the failure is an action-contract mistake the agent can fix on the
+  next turn if assignment is kept (invalid kinds, thin reasons, quality gates,
+  unauthorized role actions, unresolved turns, parse errors, etc.).
+
+  Fail-closed tenant violations and executor crashes are not retriable — those
+  need operator review rather than another autonomous attempt.
+  """
+  @spec retriable_contract_error?(term()) :: boolean()
+  def retriable_contract_error?(:cross_company), do: false
+  def retriable_contract_error?(:invalid_execution_context), do: false
+  def retriable_contract_error?({:action_crashed, _}), do: false
+  def retriable_contract_error?(:unresolved_current_issue), do: true
+  def retriable_contract_error?(reason) when is_atom(reason), do: true
+
+  def retriable_contract_error?(reason) when is_tuple(reason) and tuple_size(reason) > 0 do
+    is_atom(elem(reason, 0))
+  end
+
+  def retriable_contract_error?(_), do: false
+
   defp prepare_paired_comment_actions(actions) do
     {actions, _last_comment} =
       Enum.reduce(actions, {[], nil}, fn action, {acc, last_comment} ->
@@ -600,6 +621,50 @@ defmodule Cympho.AgentActions do
 
   defp maybe_emit_rejection_comment(
          %Issue{} = issue,
+         {:invalid_blocker_kind, kind, allowed}
+       ) do
+    allowed_list =
+      allowed
+      |> List.wrap()
+      |> Enum.map(&to_string/1)
+      |> Enum.join(", ")
+
+    system_comment(
+      issue,
+      "block_issue rejected: unknown blocker_kind #{inspect(kind)}. " <>
+        "Allowed kinds: #{allowed_list}. " <>
+        "Common aliases (owner_clarification, missing_requirements, needs_info, thin_brief, " <>
+        "ci_failed, credentials, merge_conflict) map to the canonical set automatically — " <>
+        "retry with a valid kind and a full `[blocked]` reason packet."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:governance_reason_missing, action_name}
+       ) do
+    system_comment(
+      issue,
+      "#{action_name} rejected: `reason` is required. " <>
+        "For block_issue include a full `[blocked]` packet (Cause, Attempted fix, Needs, " <>
+        "Current state, Next decision, Restart packet) and a valid blocker_kind " <>
+        "(#{Enum.join(Validation.block_reason_kinds(), ", ")})."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:governance_reason_too_short, action_name, min_length}
+       ) do
+    system_comment(
+      issue,
+      "#{action_name} rejected: `reason` must be at least #{min_length} characters. " <>
+        "Expand the reason with a recoverable packet and retry — assignment is kept so you can self-correct."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
          {:approval_note_too_thin, role, missing, scaffold}
        ) do
     too_thin_comment(
@@ -685,13 +750,13 @@ defmodule Cympho.AgentActions do
   defp mutates_issue?(%{"type" => type}) when type in @mutating_action_types, do: true
   defp mutates_issue?(_), do: false
 
-  # Mirror the permissive policy used by `Issues.checkout_issue/3`: only
-  # reject when both sides have a non-nil company_id and they differ. Legacy
-  # fixtures and seed data may have nil company_ids; tightening fully is a
-  # data-migration job, not an authz change.
-  defp cross_company?(%Issue{company_id: nil}, _), do: false
-  defp cross_company?(_, %Agent{company_id: nil}), do: false
-  defp cross_company?(%Issue{company_id: a}, %Agent{company_id: b}), do: a != b
+  # Fail-closed: either side missing company_id, or unequal company_ids, is
+  # cross-tenant. Matches Issues.checkout_issue/3 and Runtime.preflight/3.
+  defp cross_company?(%Issue{company_id: a}, %Agent{company_id: b})
+       when is_binary(a) and is_binary(b),
+       do: a != b
+
+  defp cross_company?(_issue, _agent), do: true
 
   # Governance actions (approve, request_changes, block) require the agent to
   # hold a governance role. Lower-privileged agents that emit them are rejected.
@@ -966,6 +1031,17 @@ defmodule Cympho.AgentActions do
                |> stamp_last_review_sha(action)
                |> stamp_last_review_submitter(agent)
            }) do
+      # Wake the reviewer immediately (or poll_now when unassigned) so the
+      # review chain does not wait on the ~30s dispatcher poll.
+      # Reason must be an AgentWake-allowlisted string; agent_handoff is the
+      # existing next-owner signal used by handoff/spec approval.
+      _ =
+        wake_next_owner(updated, "agent_handoff", %{
+          "from_agent_id" => agent.id,
+          "role" => action["role"],
+          "via" => "submit_review"
+        })
+
       {:ok, %{type: "submit_review", issue_id: updated.id}}
     end
   end
@@ -994,6 +1070,9 @@ defmodule Cympho.AgentActions do
              assigned_role: action["role"],
              last_reviewer_id: agent.id
            }),
+         # Name a concrete rework owner when capacity exists so wake can target
+         # them immediately; fall back to role-pool + poll_now when none.
+         {:ok, updated} <- assign_handoff_owner_for_dispatch(updated, action["role"]),
          {:ok, _comment} <- maybe_agent_comment(issue, agent, reason) do
       _ =
         record_governance_decision(
@@ -1006,6 +1085,15 @@ defmodule Cympho.AgentActions do
         )
 
       _ = maybe_record_swarm_request_changes(updated, agent, action)
+
+      # Wake the rework owner (or poll_now when still unassigned) so delivery
+      # does not wait on the next dispatcher poll cycle.
+      _ =
+        wake_next_owner(updated, "agent_handoff", %{
+          "from_agent_id" => agent.id,
+          "role" => action["role"],
+          "via" => "request_changes"
+        })
 
       {:ok, %{type: "request_changes", issue_id: updated.id}}
     end
@@ -1721,14 +1809,18 @@ defmodule Cympho.AgentActions do
   # but we must surface the failure: a silent miss leaves the issue in :todo
   # with `assigned_role` set and no human-visible signal.
   defp handle_handoff_wakeup(issue, agent, action) do
-    role = action["role"]
-
-    payload = %{
+    wake_next_owner(issue, "agent_handoff", %{
       "from_agent_id" => agent.id,
-      "role" => role
-    }
+      "role" => action["role"]
+    })
+  end
 
-    case Cympho.Orchestrator.Dispatcher.enqueue_wake(issue.id, "agent_handoff", payload) do
+  # Enqueue a wake for the issue's current assignee, or poll_now when
+  # unassigned (`Dispatcher.enqueue_wake` already branches that way).
+  # Failures are logged + system-commented so the chain is not silently
+  # stranded on the poll interval.
+  defp wake_next_owner(%Issue{} = issue, reason, metadata) when is_map(metadata) do
+    case Cympho.Orchestrator.Dispatcher.enqueue_wake(issue.id, reason, metadata) do
       :ok ->
         :ok
 
@@ -1736,15 +1828,24 @@ defmodule Cympho.AgentActions do
         :ok
 
       other ->
+        role = Map.get(metadata, "role") || Map.get(metadata, :role)
+        from_agent = Map.get(metadata, "from_agent_id") || Map.get(metadata, :from_agent_id)
+
         Logger.error(
-          "[AgentActions] handoff wakeup enqueue failed: issue_id=#{issue.id} role=#{inspect(role)} from_agent=#{agent.id} result=#{inspect(other)}"
+          "next-owner wakeup enqueue failed",
+          issue_id: issue.id,
+          role: role,
+          from_agent_id: from_agent,
+          reason: reason,
+          result: inspect(other)
         )
 
-        # Best-effort fallback so the failure is visible on the issue itself.
         _ =
           system_comment(
             issue,
-            "Auto-wakeup failed for handoff to #{role}; awaiting dispatcher poll."
+            "Auto-wakeup failed for #{reason}" <>
+              if(role, do: " to #{role}", else: "") <>
+              "; awaiting dispatcher poll."
           )
 
         :ok
@@ -1805,13 +1906,13 @@ defmodule Cympho.AgentActions do
         with {:ok, created} <- Issues.create_issue(attrs),
              {:ok, created} <- assign_child_owner_for_dispatch(created),
              {:ok, blocker_results} <- attach_depends_on(created, issue, action["depends_on"]),
+             {:ok, created} <- maybe_park_unresolved_depends_on(created, blocker_results),
              {:ok, _comment} <- maybe_agent_comment(issue, agent, created_issue_note(created)) do
           # Wake the dispatcher so the child issue is picked up by its role
           # immediately instead of waiting up to one poll interval. Cascading
           # decomposition (CEO→CTO→engineers) otherwise accrues a 30s lag per
-          # level. Skip if the new issue has unresolved blockers — the
-          # dispatcher's `is_blocked?` check would reject it anyway.
-          if blocker_results.unresolved == 0 do
+          # level. Skip unresolved/parked children — they are not runnable.
+          if blocker_results.unresolved == 0 and created.status != :blocked do
             _ =
               Cympho.Orchestrator.Dispatcher.enqueue_wake(
                 created.id,
@@ -1835,8 +1936,11 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  defp maybe_auto_block_after_decomposition(%Issue{} = issue, %Agent{role: role} = agent, results)
-       when role in @governance_roles do
+  # Any agent that decomposes while still checked out on the parent leaves the
+  # parent stranded in :in_progress (action-contract failure). Auto-block so
+  # dispatch capacity is released for the delegated children — not just
+  # governance roles (CEO/CTO).
+  defp maybe_auto_block_after_decomposition(%Issue{} = issue, %Agent{} = agent, results) do
     if decomposition_left_parent_checked_out?(issue, agent, results) do
       note =
         tagged_blocked_note(
@@ -1864,8 +1968,6 @@ defmodule Cympho.AgentActions do
       issue
     end
   end
-
-  defp maybe_auto_block_after_decomposition(%Issue{} = issue, _agent, _results), do: issue
 
   defp decomposition_left_parent_checked_out?(%Issue{} = issue, %Agent{} = agent, results) do
     issue.status == :in_progress and issue.assignee_id == agent.id and
@@ -2073,33 +2175,84 @@ defmodule Cympho.AgentActions do
   #   - an issue id (UUID string)
   #   - a sibling issue title (string), looked up among siblings under the
   #     same parent issue or goal
-  # Failures are tracked but don't roll back the parent issue creation —
-  # the agent gets a per-issue resolved/unresolved count and can retry.
-  defp attach_depends_on(_created, _parent_issue, nil), do: {:ok, %{resolved: 0, unresolved: 0}}
-  defp attach_depends_on(_created, _parent_issue, []), do: {:ok, %{resolved: 0, unresolved: 0}}
+  # Unresolved refs fail closed via `maybe_park_unresolved_depends_on/2`
+  # (child parked `:blocked` + system comment) so runnable children are never
+  # left with a dangling dependency claim.
+  defp attach_depends_on(_created, _parent_issue, nil),
+    do: {:ok, %{resolved: 0, unresolved: 0, unresolved_refs: []}}
+
+  defp attach_depends_on(_created, _parent_issue, []),
+    do: {:ok, %{resolved: 0, unresolved: 0, unresolved_refs: []}}
 
   defp attach_depends_on(%Issue{} = created, %Issue{} = parent_issue, refs) when is_list(refs) do
     siblings = sibling_pool(created, parent_issue)
 
-    {resolved, unresolved} =
-      Enum.reduce(refs, {0, 0}, fn ref, {ok, fail} ->
+    {resolved, unresolved, unresolved_refs} =
+      Enum.reduce(refs, {0, 0, []}, fn ref, {ok, fail, missing} ->
         case resolve_blocker_ref(ref, siblings, created.company_id) do
           {:ok, blocker_issue} ->
             case Issues.add_blocker(created, blocker_issue) do
-              {:ok, _} -> {ok + 1, fail}
-              {:error, _} -> {ok, fail + 1}
+              {:ok, _} -> {ok + 1, fail, missing}
+              {:error, _} -> {ok, fail + 1, [ref | missing]}
             end
 
           :error ->
-            {ok, fail + 1}
+            {ok, fail + 1, [ref | missing]}
         end
       end)
 
-    {:ok, %{resolved: resolved, unresolved: unresolved}}
+    {:ok,
+     %{
+       resolved: resolved,
+       unresolved: unresolved,
+       unresolved_refs: Enum.reverse(unresolved_refs)
+     }}
   end
 
   defp attach_depends_on(_created, _parent_issue, _other),
-    do: {:ok, %{resolved: 0, unresolved: 0}}
+    do: {:ok, %{resolved: 0, unresolved: 0, unresolved_refs: []}}
+
+  # Park children whose depends_on could not be fully resolved so they are
+  # not dispatchable as if free of blockers. Fail-closed without rolling back
+  # sibling creates in the same batch.
+  defp maybe_park_unresolved_depends_on(%Issue{} = created, %{unresolved: n} = results)
+       when is_integer(n) and n > 0 do
+    refs =
+      results
+      |> Map.get(:unresolved_refs, [])
+      |> Enum.map(&to_string/1)
+      |> Enum.reject(&(&1 == ""))
+
+    label =
+      case refs do
+        [] -> "one or more dependencies"
+        list -> Enum.join(list, ", ")
+      end
+
+    with {:ok, parked} <-
+           Issues.update_issue(created, %{
+             status: :blocked,
+             assignee_id: nil,
+             checkout_run_id: nil,
+             checked_out_at: nil
+           }),
+         {:ok, _comment} <-
+           system_comment(
+             parked,
+             "[blocked] Unresolved depends_on: could not resolve #{label}. " <>
+               "Issue parked until dependencies are fixed or blockers are attached. " <>
+               "Cause: depends_on reference(s) missing or not attachable. " <>
+               "Attempted fix: looked up sibling titles/ids under the same parent/goal. " <>
+               "Needs: create missing dependency issues first or correct depends_on refs. " <>
+               "Current state: child is blocked and not runnable. " <>
+               "Next decision: fix dependencies, then unblock or recreate the child. " <>
+               "Restart packet: inspect sibling titles, attach real blockers, then reopen."
+           ) do
+      {:ok, parked}
+    end
+  end
+
+  defp maybe_park_unresolved_depends_on(%Issue{} = created, _results), do: {:ok, created}
 
   defp sibling_pool(%Issue{parent_id: nil, goal_id: goal_id}, _parent_issue)
        when is_binary(goal_id) do
@@ -2188,11 +2341,10 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  defp same_company_goal?(%Issue{company_id: nil}, _goal), do: true
-  defp same_company_goal?(_issue, %Cympho.Goals.Goal{company_id: nil}), do: true
-
-  defp same_company_goal?(%Issue{company_id: cid}, %Cympho.Goals.Goal{company_id: cid}),
-    do: true
+  # Fail-closed: both issue and goal must share a non-nil company_id.
+  defp same_company_goal?(%Issue{company_id: cid}, %Cympho.Goals.Goal{company_id: cid})
+       when is_binary(cid),
+       do: true
 
   defp same_company_goal?(_issue, _goal), do: false
 
@@ -2429,7 +2581,8 @@ defmodule Cympho.AgentActions do
   defp eligible_existing_agents(role, company_id) when is_binary(company_id),
     do: Agents.list_eligible_agents(role, company_id)
 
-  defp eligible_existing_agents(role, _company_id), do: Agents.list_eligible_agents(role)
+  # Fail-closed: never fall back to an unscoped agent list (cross-tenant risk).
+  defp eligible_existing_agents(_role, _company_id), do: []
 
   defp spawn_capacity_agents(agents, role) when role in @repo_delivery_roles do
     Enum.filter(
@@ -2752,6 +2905,9 @@ defmodule Cympho.AgentActions do
   # in the requested role) and wakes them with `manager_directive`. Issue
   # status flips to :todo so the dispatcher will run them on the next poll
   # via the existing checkout path.
+  #
+  # Live Orchestrator + AdapterSessions are stopped first so a dying session
+  # cannot finish_failed_session → block after ownership has moved.
   defp intervene_reassign(issue, agent, action) do
     reason = action["reason"] || "Supervisor reassigned this stalled issue."
 
@@ -2765,6 +2921,9 @@ defmodule Cympho.AgentActions do
              reason,
              "reassign"
            ),
+         :ok <- stop_live_issue_runtime(issue, "intervene_reassign"),
+         # Reload: run cancel / checkout clear may have bumped lock_version.
+         {:ok, issue} <- Issues.get_issue(issue.id),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -2822,6 +2981,8 @@ defmodule Cympho.AgentActions do
              reason,
              "force_handoff"
            ),
+         :ok <- stop_live_issue_runtime(issue, "intervene_force_handoff"),
+         {:ok, issue} <- Issues.get_issue(issue.id),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -2868,6 +3029,8 @@ defmodule Cympho.AgentActions do
 
     with :ok <- Validation.ensure_governance_quality(action, "intervene"),
          :ok <- Validation.ensure_intervene_unblock_delivery_brief_ready(issue, reason),
+         :ok <- stop_live_issue_runtime(issue, "intervene_unblock"),
+         {:ok, issue} <- Issues.get_issue(issue.id),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -2904,6 +3067,8 @@ defmodule Cympho.AgentActions do
     reason = action["reason"] || "Supervisor cancelled this issue."
 
     with :ok <- Validation.ensure_governance_quality(action, "intervene"),
+         :ok <- stop_live_issue_runtime(issue, "intervene_cancel"),
+         {:ok, issue} <- Issues.get_issue(issue.id),
          {:ok, updated} <-
            Issues.transition_issue_with_review_gates(issue, :cancelled),
          {:ok, released} <- Issues.force_release_issue(updated, :cancelled),
@@ -2924,6 +3089,44 @@ defmodule Cympho.AgentActions do
       {:ok, %{type: "intervene", mode: "cancel", issue_id: released.id}}
     end
   end
+
+  # Stop any live orchestrator (and its adapter worker via terminate) then
+  # cancel leftover non-terminal runs. Uses a graceful shutdown reason so
+  # dispatcher crash-reclaim does not race ownership updates. Best-effort:
+  # absence of runtime is not a failure for intervene.
+  defp stop_live_issue_runtime(%Issue{id: issue_id}, reason_label)
+       when is_binary(issue_id) do
+    case Cympho.Orchestrator.whereis(issue_id) do
+      nil ->
+        :ok
+
+      _pid ->
+        try do
+          # {:shutdown, :intervene} is graceful (no crash reclaim) and still
+          # cancels adapter sessions + finalizes active runs in terminate/2.
+          Cympho.Orchestrator.stop(issue_id, {:shutdown, :intervene})
+        catch
+          :exit, stop_reason ->
+            Logger.warning(
+              "[AgentActions] failed to stop orchestrator during #{reason_label}",
+              issue_id: issue_id,
+              error: inspect(stop_reason)
+            )
+
+            :ok
+        end
+    end
+
+    _ =
+      Cympho.HeartbeatEngine.cancel_active_runs_for_issue(
+        issue_id,
+        "Supervisor intervene (#{reason_label})"
+      )
+
+    :ok
+  end
+
+  defp stop_live_issue_runtime(_issue, _reason_label), do: :ok
 
   # Resolve the target for a reassign. Prefer the explicit to_agent_id;
   # otherwise pick the least-loaded eligible agent of the requested role

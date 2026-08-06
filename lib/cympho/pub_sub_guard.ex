@@ -7,15 +7,29 @@ defmodule Cympho.PubSubGuard do
   subscriber that built the same malformed topic would receive — a
   cross-tenant leak waiting to happen.
 
-  Use `broadcast/2` (or `broadcast/3` with an explicit pubsub) instead of
-  calling Phoenix.PubSub directly anywhere a `company_id` is interpolated
-  into the topic.
+  Prefer `company_broadcast/3` for tenant-scoped publishes: a missing
+  `company_id` is a silent no-op (fail-closed). Use `broadcast/2` (or
+  `broadcast/3` with an explicit pubsub) for non-company topics such as
+  `system:decisions`.
   """
 
   require Logger
 
   @default_pubsub Cympho.PubSub
   @malformed_marker "::"
+
+  @doc """
+  Broadcast on a company-scoped topic `"company:\#{company_id}:\#{suffix}"`.
+
+  Returns `:ok` when delivered. When `company_id` is missing/blank, returns
+  `:ok` without publishing (fail-closed multi-tenancy — never emit `company::`).
+  """
+  def company_broadcast(company_id, suffix, message)
+      when is_binary(company_id) and company_id != "" and is_binary(suffix) and suffix != "" do
+    broadcast("company:#{company_id}:#{suffix}", message)
+  end
+
+  def company_broadcast(_company_id, _suffix, _message), do: :ok
 
   def broadcast(topic, message), do: broadcast(@default_pubsub, topic, message)
 
@@ -24,13 +38,6 @@ defmodule Cympho.PubSubGuard do
       String.contains?(topic, @malformed_marker) ->
         Logger.warning(
           "[PubSubGuard] refusing broadcast on malformed topic #{inspect(topic)} — likely nil company_id"
-        )
-
-        {:error, :malformed_topic}
-
-      String.starts_with?(topic, "company:") and String.contains?(topic, "company::") ->
-        Logger.warning(
-          "[PubSubGuard] refusing broadcast on malformed company topic #{inspect(topic)}"
         )
 
         {:error, :malformed_topic}

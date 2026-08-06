@@ -39,6 +39,12 @@ automatic orchestration disabled.
 
 ## Run one controlled autonomy smoke
 
+Autonomous company bootstrap (`Companies.create_autonomous_company/1` and the
+onboarding wizard) always inserts a company-scoped `BudgetPolicy` with
+`action_on_exceed=block`. A positive monthly limit is required (missing defaults
+to $100; explicit `0` is rejected). Runtime hard-stop reads that policy via
+`Finances.check_runtime_budget/2` — not `company.budget_monthly_cents` alone.
+
 Before enabling agents, configure the intended project repository, execution
 workspace, adapter command/model, credentials, and budget in the UI. Then start
 with only the orchestrator enabled:

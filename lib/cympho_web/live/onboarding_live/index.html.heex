@@ -283,6 +283,26 @@
               The first project your agents work in — you can rename it later in project settings.
             </p>
           </div>
+          <div class="max-w-[200px]">
+            <label
+              for="company-budget-monthly-usd"
+              class="block text-xs font-510 text-text-tertiary mb-1.5"
+            >
+              Monthly budget (USD)
+            </label>
+            <input
+              id="company-budget-monthly-usd"
+              type="number"
+              min="1"
+              step="1"
+              name="company[budget_monthly_usd]"
+              value={@company_form["budget_monthly_usd"]}
+              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+            />
+            <p class="mt-1 text-xs text-text-quaternary">
+              Agents stop when this monthly spend limit is reached. Required for launch.
+            </p>
+          </div>
           <%!-- Normally advanced-only, but the company step refuses to advance on
                an invalid prefix — so when that is what is blocking, the field
                has to be reachable in simple mode too or the step dead-ends. --%>
@@ -530,6 +550,17 @@
             <span class="text-text-secondary">AI</span>
             <span class="text-text-primary font-590">
               {runtime_summary(@company_form["adapter"], @company_form["runtime_model"])}
+            </span>
+          </div>
+          <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
+            <span class="text-text-secondary">Monthly budget</span>
+            <span class="text-text-primary font-590">
+              <span class="ui-advanced-only">
+                ${@company_form["budget_monthly_usd"]}/mo · hard stop
+              </span>
+              <span class="ui-simple-only">
+                ${@company_form["budget_monthly_usd"]}/mo · agents stop at the limit
+              </span>
             </span>
           </div>
           <div

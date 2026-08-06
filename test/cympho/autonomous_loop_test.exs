@@ -126,7 +126,9 @@ defmodule Cympho.AutonomousLoopTest do
       :ok
     end
 
-    test "assigns a new top-level :backlog issue and emits a wake", %{company: company} do
+    test "assigns a new top-level :backlog issue as dispatchable :todo and emits a wake", %{
+      company: company
+    } do
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Build the marketing site",
@@ -142,7 +144,11 @@ defmodule Cympho.AutonomousLoopTest do
 
       ignited = Issues.get_issue!(issue.id)
       assert ignited.assignee_id != nil
-      assert ignited.status == :in_progress
+      # Owner assigned + promoted for dispatcher claim — not stranded :in_progress
+      # without a live orchestrator.
+      assert ignited.status == :todo
+      refute ignited.status == :in_progress
+      assert is_nil(ignited.checked_out_at)
 
       assignee = Agents.get_agent!(ignited.assignee_id)
       assert assignee.role == :ceo

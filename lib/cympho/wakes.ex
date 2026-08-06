@@ -14,6 +14,7 @@ defmodule Cympho.Wakes do
   alias Cympho.Companies
   alias Cympho.Companies.Company
   alias Cympho.Issues
+  alias Cympho.OwnerAttention
   alias Cympho.Repo
   alias Cympho.Wakes.AgentWake
   alias Cympho.Issues.Issue
@@ -22,6 +23,8 @@ defmodule Cympho.Wakes do
   require Logger
 
   @comment_wake_body_limit 4_000
+  # Wakes that surface in OwnerAttention review_queue / Simple Needs you.
+  @review_queue_reasons ~w(final_review_required child_status_changed issue_children_completed)
 
   @doc """
   Notifies the agent assigned to an issue about a new comment.
@@ -182,12 +185,22 @@ defmodule Cympho.Wakes do
   end
 
   @doc """
-  Notifies the agent assigned to a blocked issue when all blockers are resolved.
-  Called after an issue transitions to :done - checks if any dependent issues
-  had this issue as a blocker and all their blockers are now done.
+  Notifies dependents when a blocker issue is resolved (done/cancelled).
+
+  Production call site: `Issues.unblock_dependents/1` after dependents flip
+  to `:todo`. Also safe to call while dependents are still `:blocked` (tests
+  and direct callers).
+
+  Durable wake path uses `Orchestrator.Dispatcher.enqueue_wake/3`:
+    * assigned → pending `issue_blockers_resolved` AgentWake + heartbeat
+    * unassigned → `poll_now` so the dispatcher can claim the work
+
+  Only fires when every remaining blocker is terminal (`:done`/`:cancelled`)
+  and the dependent is resumable (`:blocked` or `:todo`).
   """
   @spec notify_blockers_resolved(Issue.t()) :: [
-          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+          {:ok, AgentWake.t() | :queued_for_dispatch}
+          | {:error, atom() | Ecto.Changeset.t()}
         ]
   def notify_blockers_resolved(%Issue{} = blocker_issue) do
     dependent_ids =
@@ -206,21 +219,59 @@ defmodule Cympho.Wakes do
         dependent ->
           dependent = Repo.preload(dependent, [:assignee, :blocked_by])
 
-          if all_blockers_done?(dependent) and dependent.status == :blocked and
-               dependent.assignee_id do
-            do_wake_agent(
-              dependent.assignee_id,
-              dependent.id,
-              "issue_blockers_resolved",
-              "system",
-              blocker_issue.id,
-              %{blocker_id: blocker_issue.id}
-            )
-          else
-            {:error, :not_fully_unblocked}
+          cond do
+            not all_blockers_done?(dependent) ->
+              {:error, :not_fully_unblocked}
+
+            dependent.status not in [:blocked, :todo] ->
+              {:error, :not_resumable}
+
+            true ->
+              wake_blockers_resolved(dependent, blocker_issue)
           end
       end
     end)
+  end
+
+  # Prefer the dispatcher path so unassigned dependents resume via poll_now
+  # (swarm/CTO work often has no assignee at unblock time). Fall back to a
+  # direct durable wake when Dispatcher is unavailable in pure unit paths.
+  defp wake_blockers_resolved(%Issue{} = dependent, %Issue{} = blocker_issue) do
+    metadata = %{blocker_id: blocker_issue.id}
+
+    case Cympho.Orchestrator.Dispatcher.enqueue_wake(
+           dependent.id,
+           "issue_blockers_resolved",
+           metadata
+         ) do
+      {:ok, %AgentWake{} = wake} ->
+        {:ok, wake}
+
+      {:ok, :queued_for_dispatch} ->
+        {:ok, :queued_for_dispatch}
+
+      {:ok, other} ->
+        {:ok, other}
+
+      {:error, :not_found} ->
+        {:error, :issue_not_found}
+
+      {:error, _} = error ->
+        # If the issue has an assignee, still attempt a direct durable wake so
+        # a transient dispatcher error does not strand the dependent forever.
+        if is_binary(dependent.assignee_id) do
+          do_wake_agent(
+            dependent.assignee_id,
+            dependent.id,
+            "issue_blockers_resolved",
+            "system",
+            blocker_issue.id,
+            metadata
+          )
+        else
+          error
+        end
+    end
   end
 
   @doc """
@@ -325,8 +376,9 @@ defmodule Cympho.Wakes do
           _ -> {:error, :no_assignee}
         end
 
-      role when is_atom(role) ->
-        role
+      # `nil` is an atom in Elixir — must not call list_agents_by_role(nil, ...).
+      normalized when is_atom(normalized) and not is_nil(normalized) ->
+        normalized
         |> Agents.list_agents_by_role(company_id)
         |> Enum.reject(&(&1.governance_status == "terminated"))
         |> Enum.sort_by(fn agent ->
@@ -588,6 +640,7 @@ defmodule Cympho.Wakes do
       case WakeupQueue.enqueue(attrs) do
         {:ok, agent_wake} ->
           Logger.info("Wakes: enqueued wake for agent #{agent_id}, reason: #{reason}")
+          maybe_notify_owner_attention_for_review(agent_wake)
           {:ok, agent_wake}
 
         {:error, _} = error ->
@@ -623,6 +676,8 @@ defmodule Cympho.Wakes do
 
   defp wake_runtime_allowed?(_agent_id, _issue_id), do: {:error, :invalid_issue}
 
+  # Fail-closed: missing agent, nil company_id on either side, or unequal
+  # company_ids all count as a mismatch (matches checkout / preflight).
   defp agent_matches_issue_company?(agent_id, issue_company_id)
        when is_binary(agent_id) and is_binary(issue_company_id) do
     case Repo.get(Agent, agent_id) do
@@ -630,11 +685,11 @@ defmodule Cympho.Wakes do
         agent_company_id == issue_company_id
 
       _ ->
-        true
+        false
     end
   end
 
-  defp agent_matches_issue_company?(_agent_id, _issue_company_id), do: true
+  defp agent_matches_issue_company?(_agent_id, _issue_company_id), do: false
 
   defp company_paused?(nil), do: false
 
@@ -691,7 +746,6 @@ defmodule Cympho.Wakes do
   def most_recent_pending_for_issues(_), do: %{}
 
   @comment_wake_reasons ~w(issue_commented issue_comment_mentioned)
-  @review_queue_reasons ~w(final_review_required child_status_changed issue_children_completed)
 
   def comment_wake_reasons, do: @comment_wake_reasons
 
@@ -804,7 +858,16 @@ defmodule Cympho.Wakes do
   the *reason* for the wake outside the agent loop and need to clear the
   queue entry directly.
   """
-  def consume_wake(%AgentWake{} = wake), do: WakeupQueue.mark_consumed(wake)
+  def consume_wake(%AgentWake{} = wake) do
+    case WakeupQueue.mark_consumed(wake) do
+      {:ok, _consumed} = ok ->
+        maybe_notify_owner_attention_for_review(wake)
+        ok
+
+      error ->
+        error
+    end
+  end
 
   @doc """
   Cancels every pending or running wake attached to one issue.
@@ -816,6 +879,8 @@ defmodule Cympho.Wakes do
   def cancel_issue_wakes(issue_id, reason \\ "Issue closed")
 
   def cancel_issue_wakes(issue_id, reason) when is_binary(issue_id) do
+    had_review_wake? = active_review_wake?(issue_id)
+
     {count, _} =
       AgentWake
       |> where([w], w.issue_id == ^issue_id and w.status in ["pending", "running"])
@@ -826,10 +891,48 @@ defmodule Cympho.Wakes do
         ]
       )
 
+    if count > 0 and had_review_wake? do
+      notify_owner_attention_for_issue(issue_id)
+    end
+
     {:ok, count}
   end
 
   def cancel_issue_wakes(_issue_id, _reason), do: {:ok, 0}
+
+  defp maybe_notify_owner_attention_for_review(%AgentWake{
+         reason: reason,
+         issue_id: issue_id
+       })
+       when reason in @review_queue_reasons and is_binary(issue_id) do
+    notify_owner_attention_for_issue(issue_id)
+  end
+
+  defp maybe_notify_owner_attention_for_review(_wake), do: :ok
+
+  defp notify_owner_attention_for_issue(issue_id) when is_binary(issue_id) do
+    case Repo.get(Issue, issue_id) do
+      %Issue{company_id: company_id} when is_binary(company_id) ->
+        OwnerAttention.notify_changed(company_id)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp notify_owner_attention_for_issue(_issue_id), do: :ok
+
+  defp active_review_wake?(issue_id) when is_binary(issue_id) do
+    Repo.exists?(
+      from(w in AgentWake,
+        where:
+          w.issue_id == ^issue_id and w.status in ["pending", "running"] and
+            w.reason in ^@review_queue_reasons
+      )
+    )
+  end
+
+  defp active_review_wake?(_issue_id), do: false
 
   @doc """
   Cancels every pending or running wake associated with a company.

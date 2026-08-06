@@ -317,23 +317,23 @@ defmodule Cympho.Documents do
     IssueDocument.changeset(document, attrs)
   end
 
+  # Fail-closed: never publish the unscoped "documents" topic or company::documents.
   defp broadcast_document_event({_event_type, document} = msg) do
-    topic =
-      case Repo.one(
-             from i in Cympho.Issues.Issue,
-               where: i.id == ^document.issue_id,
-               select: i.company_id
-           ) do
-        nil -> "documents"
-        company_id -> "company:#{company_id}:documents"
-      end
+    company_id =
+      Repo.one(
+        from i in Cympho.Issues.Issue,
+          where: i.id == ^document.issue_id,
+          select: i.company_id
+      )
 
-    Phoenix.PubSub.broadcast(Cympho.PubSub, topic, msg)
+    Cympho.PubSubGuard.company_broadcast(company_id, "documents", msg)
   end
 
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:documents")
   end
+
+  def subscribe(_company_id), do: :ok
 
   defp has_pending_approvals?(issue_id) do
     import Ecto.Query

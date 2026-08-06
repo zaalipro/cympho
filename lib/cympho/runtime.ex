@@ -45,6 +45,7 @@ defmodule Cympho.Runtime do
           | {:budget_blocked, map()}
           | {:workspace_unavailable, String.t()}
           | {:workspace_error, term()}
+          | {:environment_provider_error, term()}
           | {:repo_delivery_runtime_unavailable, atom()}
           | {:stage_gate_blocked, atom()}
 
@@ -60,7 +61,8 @@ defmodule Cympho.Runtime do
          {:ok, env} <- resolve_env(agent, opts),
          {:ok, adapter, adapter_config} <- resolve_adapter(agent, env, opts),
          {:ok, budget} <- verify_budget(issue, agent),
-         {:ok, workspace} <- resolve_workspace(issue, opts) do
+         {:ok, workspace} <- resolve_workspace(issue, opts),
+         {:ok, workspace} <- ensure_provider_environment(workspace) do
       runtime_env = Map.merge(env, runtime_identity_env(issue, agent, workspace, opts))
 
       {:ok,
@@ -122,19 +124,10 @@ defmodule Cympho.Runtime do
     end
   end
 
-  defp verify_company(%Issue{company_id: nil}, %Agent{company_id: nil}), do: :ok
-
-  defp verify_company(%Issue{company_id: nil}, %Agent{company_id: company_id})
-       when not is_nil(company_id) do
-    verify_company_active(company_id)
-  end
-
-  defp verify_company(%Issue{company_id: company_id}, %Agent{company_id: nil})
-       when not is_nil(company_id) do
-    verify_company_active(company_id)
-  end
-
-  defp verify_company(%Issue{company_id: company_id}, %Agent{company_id: company_id}) do
+  # Fail-closed: both issue and agent must share a non-nil company_id.
+  # A nil on either side previously allowed cross-tenant pairs through preflight.
+  defp verify_company(%Issue{company_id: company_id}, %Agent{company_id: company_id})
+       when is_binary(company_id) do
     verify_company_active(company_id)
   end
 
@@ -477,6 +470,21 @@ defmodule Cympho.Runtime do
     end
   end
 
+  # When the execution workspace names a remote provider, acquire (or reuse)
+  # via EnvironmentLifecycle / Fake driver and persist provider_ref.
+  # Blank provider_type stays local; unknown providers fail closed.
+  defp ensure_provider_environment(%{execution_workspace: nil} = workspace), do: {:ok, workspace}
+
+  defp ensure_provider_environment(%{execution_workspace: ew} = workspace) do
+    case Workspaces.ensure_provider_environment(ew) do
+      {:ok, updated} ->
+        {:ok, %{workspace | execution_workspace: updated}}
+
+      {:error, reason} ->
+        {:error, {:environment_provider_error, reason}}
+    end
+  end
+
   defp fallback_workspace(%Issue{} = issue) do
     case Workspace.ensure_for_issue(issue) do
       {:ok, cwd} ->
@@ -494,6 +502,12 @@ defmodule Cympho.Runtime do
   end
 
   defp runtime_identity_env(%Issue{} = issue, %Agent{} = agent, workspace, opts) do
+    provider_ref =
+      case workspace do
+        %{execution_workspace: %{provider_ref: ref}} when is_binary(ref) and ref != "" -> ref
+        _ -> nil
+      end
+
     [
       {"CYMPHO_RUN_ID", Keyword.get(opts, :run_id)},
       {"CYMPHO_COMPANY_ID", issue.company_id || agent.company_id},
@@ -502,6 +516,7 @@ defmodule Cympho.Runtime do
       {"CYMPHO_ISSUE_ID", issue.id},
       {"CYMPHO_AGENT_ID", agent.id},
       {"CYMPHO_WORKSPACE", workspace.cwd},
+      {"CYMPHO_PROVIDER_REF", provider_ref},
       {"AGENT_HOME", workspace.cwd}
     ]
     |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
@@ -514,6 +529,18 @@ defmodule Cympho.Runtime do
       "workspace_source" => workspace.source,
       "preflight_at" => DateTime.utc_now() |> DateTime.to_iso8601()
     }
+
+    metadata =
+      case workspace do
+        %{execution_workspace: %{provider_type: type, provider_ref: ref}}
+        when is_binary(type) and type != "" ->
+          metadata
+          |> Map.put("provider_type", type)
+          |> Map.put("provider_ref", ref)
+
+        _ ->
+          metadata
+      end
 
     case configured_project_repository_fingerprint(issue) do
       {:ok, fingerprint} -> Map.put(metadata, "project_repository_fingerprint", fingerprint)

@@ -1671,6 +1671,47 @@ defmodule Cympho.RuntimeOperationsTest do
       assert is_nil(released.checked_out_at)
     end
 
+    test "recover_stale_checked_out_issues_all clears age-threshold checkouts across companies" do
+      {:ok, company} =
+        Companies.create_company(%{name: "All Stale Checkout Co", slug: unique_slug()})
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "All Stale CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      old_checkout =
+        DateTime.utc_now()
+        |> DateTime.add(-3 * 60 * 60, :second)
+        |> DateTime.truncate(:second)
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Cross-company stale checkout",
+          status: :in_progress,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: agent.id,
+          checked_out_at: old_checkout
+        })
+
+      assert {:ok, %{checked: checked, released: released, failed: 0}} =
+               RuntimeOperations.recover_stale_checked_out_issues_all()
+
+      assert checked >= 1
+      assert released >= 1
+
+      assert {:ok, recovered} = Issues.get_issue(issue.id)
+      assert recovered.status == :todo
+      assert recovered.assignee_id == agent.id
+      assert is_nil(recovered.checked_out_at)
+    end
+
     test "summarizes prompt drift across agent instruction studios" do
       {:ok, company} = Companies.create_company(%{name: "Prompt Ops Co", slug: unique_slug()})
 

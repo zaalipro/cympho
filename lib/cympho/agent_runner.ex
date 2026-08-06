@@ -13,6 +13,9 @@ defmodule Cympho.AgentRunner do
   """
 
   @stall_timeout Application.compile_env(:cympho, :agent_runner_stall_timeout, 300_000)
+  # Absolute wall-clock cap independent of output drip. Stall timeout alone
+  # resets on any stdout, so a slow drip can burn spend forever without this.
+  @max_run_ms Application.compile_env(:cympho, :agent_runner_max_run_ms, 3_600_000)
   @fresh_turn_wake_reasons ~w(issue_commented issue_comment_mentioned)
 
   @doc """
@@ -22,14 +25,17 @@ defmodule Cympho.AgentRunner do
     - `:resume` — pass true to continue a multi-turn session
     - `:cwd` — working directory for the Claude CLI (defaults to workspace path)
     - `:command` — CLI command to run (defaults to CYMPHO_CLAUDE_COMMAND or claude)
-    - `: stall_timeout` — milliseconds before killing hung process (default 300_000 / 5 min)
+    - `:stall_timeout` — milliseconds of silence before killing hung process (default 300_000 / 5 min)
+    - `:max_run_ms` — absolute wall-clock milliseconds for the whole run, even if
+      output keeps dripping (default 3_600_000 / 1 hour). Also read from config.
   """
   def run(issue, agent_id, recipient_pid, opts \\ []) when is_pid(recipient_pid) do
     session_id = make_ref()
     config = option_value(opts, :config) || %{}
     cwd = option_value(opts, :cwd) || option_value(config, :cwd) || issue_workspace_path(issue)
     resume_decision = resume_decision(issue, cwd, resume_requested?(opts, config), opts)
-    stall_timeout = opts[:stall_timeout] || @stall_timeout
+    stall_timeout = resolve_timeout_ms(opts, config, :stall_timeout, @stall_timeout)
+    max_run_ms = resolve_timeout_ms(opts, config, :max_run_ms, @max_run_ms)
     env = opts[:env] || runtime_context_env(opts[:runtime_context])
 
     cmd = build_claude_command(issue, agent_id, resume_decision, opts)
@@ -37,7 +43,7 @@ defmodule Cympho.AgentRunner do
     worker =
       spawn(fn ->
         try do
-          do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, env)
+          do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, max_run_ms, env)
         after
           Cympho.AdapterSessions.unregister(session_id)
         end
@@ -46,6 +52,22 @@ defmodule Cympho.AgentRunner do
     Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
+  end
+
+  defp resolve_timeout_ms(opts, config, key, default) do
+    case option_value(opts, key) || option_value(config, key) do
+      value when is_integer(value) and value > 0 ->
+        value
+
+      value when is_binary(value) ->
+        case Integer.parse(String.trim(value)) do
+          {n, ""} when n > 0 -> n
+          _ -> default
+        end
+
+      _ ->
+        default
+    end
   end
 
   defp build_claude_command(issue, agent_id, resume_decision, opts) do
@@ -224,7 +246,7 @@ defmodule Cympho.AgentRunner do
     Cympho.AgentPrompt.build(issue, agent_id, opts)
   end
 
-  defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, runtime_env) do
+  defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, max_run_ms, runtime_env) do
     anthropic_api_key =
       runtime_env["ANTHROPIC_API_KEY"] || runtime_env[:ANTHROPIC_API_KEY] || api_key()
 
@@ -254,20 +276,23 @@ defmodule Cympho.AgentRunner do
 
     send(recipient_pid, {:session_started, session_id})
 
-    # Arm the stall watchdog immediately. Without this first tick the
-    # watchdog never fires and a hung adapter that produces no output at
-    # all blocks the run forever. Seed last_output_time with "now" so
-    # silence-from-the-start also counts as a stall.
-    schedule_stall_check(stall_timeout)
+    started_at = System.system_time(:millisecond)
 
-    loop(port, session_id, recipient_pid, stall_timeout, %{
-      last_output_time: System.system_time(:millisecond),
+    # Wall-clock and stall deadlines use receive-after (not send_after) so a
+    # flood of port output cannot starve the timer message. max_run_ms is
+    # absolute from started_at and is NOT reset by drip output; stall only
+    # tracks silence since last_output_time.
+    loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, %{
+      started_at: started_at,
+      last_output_time: started_at,
       turn_completed?: false,
       buffer: ""
     })
   end
 
-  defp loop(port, session_id, recipient_pid, stall_timeout, state) do
+  defp loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, state) do
+    wait_ms = watchdog_wait_ms(state, stall_timeout, max_run_ms)
+
     receive do
       {^port, {:data, output}} ->
         buffer = state.buffer <> output
@@ -286,7 +311,7 @@ defmodule Cympho.AgentRunner do
                 extract_and_send_tool_calls(result, session_id, recipient_pid)
                 send(recipient_pid, {:turn_completed, session_id, result})
 
-                loop(port, session_id, recipient_pid, stall_timeout, %{
+                loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, %{
                   state
                   | turn_completed?: true,
                     buffer: ""
@@ -298,12 +323,15 @@ defmodule Cympho.AgentRunner do
             end
 
           :continue ->
-            loop(port, session_id, recipient_pid, stall_timeout, %{state | buffer: ""})
+            loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, %{
+              state
+              | buffer: ""
+            })
 
           :incomplete ->
             # Looks like the head of a JSON document split across port
             # chunks — keep accumulating; exit_status settles the outcome.
-            loop(port, session_id, recipient_pid, stall_timeout, state)
+            loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, state)
 
           {:error, reason} ->
             send(recipient_pid, {:turn_ended_with_error, session_id, reason})
@@ -330,20 +358,26 @@ defmodule Cympho.AgentRunner do
       {^port, {:exit_status, code}} ->
         send(recipient_pid, {:turn_ended_with_error, session_id, {:exit_code, code}})
 
-      :stall_check ->
-        now = System.system_time(:millisecond)
-
-        if now - state.last_output_time > stall_timeout do
-          close_port(port)
-          send(recipient_pid, {:turn_ended_with_error, session_id, :stall_timeout})
-        else
-          schedule_stall_check(stall_timeout)
-          loop(port, session_id, recipient_pid, stall_timeout, state)
-        end
-
       {:cancel_session, ^session_id, reason} ->
         close_port(port)
         send(recipient_pid, {:turn_ended_with_error, session_id, {:cancelled, reason}})
+    after
+      wait_ms ->
+        now = System.system_time(:millisecond)
+
+        cond do
+          now - state.started_at >= max_run_ms ->
+            close_port(port)
+            send(recipient_pid, {:turn_ended_with_error, session_id, :max_run_timeout})
+
+          now - state.last_output_time >= stall_timeout ->
+            close_port(port)
+            send(recipient_pid, {:turn_ended_with_error, session_id, :stall_timeout})
+
+          true ->
+            # Clock resolution edge: re-enter and recompute remaining wait.
+            loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, state)
+        end
     end
   end
 
@@ -351,10 +385,13 @@ defmodule Cympho.AgentRunner do
     Cympho.PortKiller.close(port)
   end
 
-  defp schedule_stall_check(timeout) do
-    # Check slightly more often than the timeout to catch edge cases
-    check_interval = min(timeout, 30_000)
-    Process.send_after(self(), :stall_check, check_interval)
+  # Nearest of absolute max-run and stall-silence deadlines. Zero means the
+  # after clause fires immediately and classifies which budget was exhausted.
+  defp watchdog_wait_ms(state, stall_timeout, max_run_ms) do
+    now = System.system_time(:millisecond)
+    remaining_max = max(state.started_at + max_run_ms - now, 0)
+    remaining_stall = max(state.last_output_time + stall_timeout - now, 0)
+    min(remaining_max, remaining_stall)
   end
 
   defp parse_json_output(output) do

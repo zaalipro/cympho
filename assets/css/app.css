@@ -27,6 +27,16 @@
      w-[var(--sidebar-w)] / ml-[var(--sidebar-w)] / left-[var(--sidebar-w)]. */
   --sidebar-w: 16rem;
 
+  /* Mobile shell geometry — keep board height / sticky CTAs / scroll padding
+     in lockstep with root.html.heex (pt-16 top bar, #mobile-nav h-14). */
+  --mobile-header-height: 4rem; /* pt-16 */
+  --mobile-nav-height: 3.5rem; /* h-14 inside #mobile-nav */
+  --mobile-nav-offset: calc(
+    var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px)
+  );
+  /* Content pad under the fixed nav (nav + small cushion + safe-area). */
+  --mobile-shell-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+
   /* Canvas + surface ladder — warm "Claude" charcoal: canvas lifted to a
      paper-like warm tone; ladder steps up in warm lightness so elevation
      reads on the lighter canvas. (Legacy aliases below are var() refs and
@@ -241,14 +251,34 @@
 }
 
 .mobile-shell-content {
-  padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
-  scroll-padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  padding-bottom: var(--mobile-shell-bottom);
+  scroll-padding-bottom: var(--mobile-shell-bottom);
+}
+
+/* Full-height board: fill viewport minus mobile top bar + shell bottom pad. */
+.mobile-board-height {
+  height: calc(
+    100dvh - var(--mobile-header-height) - var(--mobile-shell-bottom)
+  );
+}
+
+/* Sticky primary actions sit above fixed #mobile-nav + home-indicator. */
+.sticky-above-mobile-nav {
+  bottom: var(--mobile-nav-offset);
 }
 
 @media (min-width: 1024px) {
   .mobile-shell-content {
     padding-bottom: 0;
     scroll-padding-bottom: 0;
+  }
+
+  .mobile-board-height {
+    height: 100dvh;
+  }
+
+  .sticky-above-mobile-nav {
+    bottom: 0;
   }
 
   .safe-area-dialog {

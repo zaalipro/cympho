@@ -4,9 +4,11 @@ defmodule Cympho.Budgets do
   """
 
   import Ecto.Query, warn: false
+  require Logger
+
   alias Cympho.Repo
   alias Cympho.Budgets.Budget
-  alias Cympho.{GovernanceAuditLogs, Activities, BoardApprovals}
+  alias Cympho.{Finances, GovernanceAuditLogs, Activities, BoardApprovals}
   alias Cympho.AuditTrail.Instrumenter
 
   @doc """
@@ -170,9 +172,12 @@ defmodule Cympho.Budgets do
           }
         )
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{budget.company_id}:budgets",
+        # Runtime enforces BudgetPolicy only — every write path must sync.
+        _ = sync_runtime_budget_policy(budget)
+
+        Cympho.PubSubGuard.company_broadcast(
+          budget.company_id,
+          "budgets",
           {:budget_created, budget}
         )
 
@@ -250,9 +255,12 @@ defmodule Cympho.Budgets do
           end
         end
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.company_id}:budgets",
+        # Keep runtime BudgetPolicy aligned (hard_stop, limit, active status).
+        _ = sync_runtime_budget_policy(updated)
+
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "budgets",
           {:budget_updated, updated}
         )
 
@@ -295,9 +303,9 @@ defmodule Cympho.Budgets do
           remaining: Budget.available_amount(updated)
         })
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.company_id}:budgets",
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "budgets",
           {:budget_spent, updated}
         )
 
@@ -344,8 +352,14 @@ defmodule Cympho.Budgets do
 
   @doc """
   Deletes a budget.
+
+  Deactivates any matching runtime `BudgetPolicy` so hard-stop cannot linger
+  after the UI budget is gone (API, board executor, and LiveView all use this).
   """
   def delete_budget(%Budget{} = budget, actor \\ nil) do
+    # Deactivate before delete so matching still sees company/scope fields.
+    _ = deactivate_runtime_budget_policy(budget)
+
     Repo.delete(budget)
     |> case do
       {:ok, deleted} ->
@@ -360,9 +374,9 @@ defmodule Cympho.Budgets do
           }
         )
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{deleted.company_id}:budgets",
+        Cympho.PubSubGuard.company_broadcast(
+          deleted.company_id,
+          "budgets",
           {:budget_deleted, deleted}
         )
 
@@ -373,12 +387,48 @@ defmodule Cympho.Budgets do
     end
   end
 
+  # Runtime only enforces Finances.BudgetPolicy. UI budgets without a synced
+  # policy leave hard_stop cosmetic — every domain write path must call these.
+  defp sync_runtime_budget_policy(budget) do
+    case Finances.sync_budget_policy(budget) do
+      {:ok, _} = ok ->
+        ok
+
+      {:error, reason} = err ->
+        Logger.warning("budget policy sync failed after budget write",
+          company_id: Map.get(budget, :company_id),
+          component: "budgets",
+          reason: inspect(reason)
+        )
+
+        err
+    end
+  end
+
+  defp deactivate_runtime_budget_policy(budget) do
+    case Finances.deactivate_budget_policy_for_budget(budget) do
+      {:ok, _} = ok ->
+        ok
+
+      {:error, reason} = err ->
+        Logger.warning("budget policy deactivate failed on budget delete",
+          company_id: Map.get(budget, :company_id),
+          component: "budgets",
+          reason: inspect(reason)
+        )
+
+        err
+    end
+  end
+
   @doc """
   Subscribes to budget events.
   """
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:budgets")
   end
+
+  def subscribe(_company_id), do: :ok
 
   defp get_active_budget(scope_type, scope_id) do
     from(b in Budget,
@@ -409,9 +459,9 @@ defmodule Cympho.Budgets do
         budget.limit_amount
       )
 
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "company:#{budget.company_id}:budgets",
+      Cympho.PubSubGuard.company_broadcast(
+        budget.company_id,
+        "budgets",
         {:budget_threshold_reached, budget}
       )
     end
@@ -431,9 +481,9 @@ defmodule Cympho.Budgets do
         }
       )
 
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "company:#{budget.company_id}:budgets",
+      Cympho.PubSubGuard.company_broadcast(
+        budget.company_id,
+        "budgets",
         {:budget_hard_stop, budget}
       )
     end

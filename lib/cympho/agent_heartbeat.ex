@@ -278,11 +278,16 @@ defmodule Cympho.AgentHeartbeat do
 
     cond do
       delegate_to_dispatcher?() and Process.whereis(Dispatcher) ->
+        # Dispatcher owns checkout, but idle ticks must still stamp
+        # last_heartbeat_at and self-heal transient :error status — both
+        # used to live only in do_heartbeat, which this branch skips.
+        _ = recover_and_touch(agent_id)
         if event_triggered?, do: _ = Dispatcher.poll_now()
         timer_ref = schedule_heartbeat(agent_id)
         {:noreply, %{state | timer_ref: timer_ref}}
 
       Agents.is_agent_at_capacity?(agent_id) ->
+        _ = Agents.touch_heartbeat(agent_id)
         timer_ref = schedule_heartbeat(agent_id)
         {:noreply, %{state | timer_ref: timer_ref}}
 
@@ -330,13 +335,31 @@ defmodule Cympho.AgentHeartbeat do
       component: "agent_heartbeat"
     )
 
-    case Agents.update_agent(agent, %{status: :idle}) do
+    case Agents.recover_error_status(agent) do
       {:ok, recovered} -> {:ok, recovered}
       {:error, _reason} -> {:skip, :error_status_recovery_failed}
     end
   end
 
   defp maybe_recover_error_status(agent), do: {:ok, agent}
+
+  # When work is delegated to the dispatcher, still stamp liveness and heal
+  # :error so the roster and eligibility do not freeze under the default path.
+  defp recover_and_touch(agent_id) do
+    case Agents.get_agent(agent_id) do
+      {:ok, %{status: :error} = agent} ->
+        # recover_error_status stamps last_heartbeat_at via update_agent_status.
+        _ = maybe_recover_error_status(agent)
+        :ok
+
+      {:ok, agent} ->
+        _ = Agents.touch_heartbeat(agent)
+        :ok
+
+      {:error, _} ->
+        :ok
+    end
+  end
 
   defp do_heartbeat_for_available_agent(state, agent) do
     agent_id = state.agent_id
@@ -379,6 +402,11 @@ defmodule Cympho.AgentHeartbeat do
             {:error, reason} ->
               _ =
                 Logger.error("[AgentHeartbeat] failed to start orchestrator: #{inspect(reason)}")
+
+              # Undo only the unbound checkout we just claimed. A successor run
+              # may have bound checkout_run_id after a bind race; unconditional
+              # release would clear that owner (same CAS as Dispatcher).
+              _ = Issues.release_unbound_checkout(checked_out_issue, :todo)
 
               Activities.log_heartbeat_event(checked_out_issue.id, :failed, %{
                 agent_id: agent_id,
@@ -454,10 +482,11 @@ defmodule Cympho.AgentHeartbeat do
 
   defp broadcast_idle_transition(agent_id) do
     case Agents.get_agent(agent_id) do
-      {:ok, %{company_id: company_id}} when is_binary(company_id) ->
+      {:ok, %{company_id: company_id}} when is_binary(company_id) and company_id != "" ->
         payload = {:agent_heartbeat_updated, agent_id, %{status: :idle, company_id: company_id}}
 
         # Per-company topic for LiveView consumers (kanban, dashboards).
+        # Not company:#{id}:… form, but still fail-closed on blank tenant ids.
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,
           "agent_heartbeats:#{company_id}",
@@ -472,6 +501,7 @@ defmodule Cympho.AgentHeartbeat do
         )
 
       _ ->
+        # Fail-closed: never publish tenant heartbeats without a company_id.
         :ok
     end
   end
@@ -577,7 +607,11 @@ defmodule Cympho.AgentHeartbeat do
     case Agents.get_agent(agent_id) do
       {:ok, agent} ->
         if agent.status != new_status do
-          Agents.update_agent(agent, %{status: new_status})
+          Agents.update_agent_status(agent, %{status: new_status})
+        else
+          # Status unchanged (e.g. idle with no work) — still advance the
+          # roster heartbeat clock so "Never" does not stick after real ticks.
+          Agents.touch_heartbeat(agent)
         end
 
       {:error, _} ->

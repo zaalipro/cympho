@@ -34,6 +34,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues.Issue
   alias Cympho.Wakes.AgentWake
+  alias Cympho.Workspaces
 
   @poll_interval Application.compile_env(:cympho, [:orchestrator, :poll_interval], 30_000)
   @max_concurrent Application.compile_env(:cympho, [:orchestrator, :max_concurrent_agents], 3)
@@ -206,21 +207,25 @@ defmodule Cympho.Orchestrator.Dispatcher do
   def init(_opts) do
     Process.flag(:trap_exit, true)
 
+    # Always recover orphans once on boot — even when the orchestrator is
+    # disabled — so live-node strands and non-dispatcher checkouts do not
+    # wait for a manual Ops pass or a full restart. Polling only runs when
+    # dispatch is enabled.
     if enabled?() do
       schedule_poll()
-      # Hand recovery off to handle_continue so init/1 returns fast even if
-      # the recovery scan hits a slow DB. Without this, a stuck Repo blocks
-      # the whole supervisor boot.
-      {:ok, State.new(), {:continue, :recover_orphans}}
-    else
-      {:ok, State.new()}
     end
+
+    # Hand recovery off to handle_continue so init/1 returns fast even if
+    # the recovery scan hits a slow DB. Without this, a stuck Repo blocks
+    # the whole supervisor boot.
+    {:ok, State.new(), {:continue, :recover_orphans}}
   end
 
   @impl true
   def handle_continue(:recover_orphans, %State{} = state) do
     recover_orphaned_runs()
-    recover_orphaned_in_progress()
+    _ = recover_orphaned_in_progress()
+    _ = recover_stale_checkouts()
     {:noreply, state}
   end
 
@@ -245,45 +250,126 @@ defmodule Cympho.Orchestrator.Dispatcher do
       :ok
   end
 
-  # Find any issue in :in_progress with no live Orchestrator process and
-  # release it back to :todo so the dispatcher (or another node) can pick
-  # it up. This handles three cases:
-  #   1. The orchestrator GenServer crashed mid-run.
-  #   2. The whole node died and restarted.
-  #   3. A bug stranded an issue (defensive).
-  defp recover_orphaned_in_progress do
-    in_progress_query =
-      from i in Cympho.Issues.Issue,
+  @doc """
+  Reclaims stranded `:in_progress` issues that have no live Orchestrator and
+  no non-terminal run.
+
+  Uses `Issues.clear_checkout_lock/2` so the intended assignee is preserved
+  for the next dispatch. Safe to call from boot, dispatcher poll, and the
+  heartbeat watchdog tick.
+
+  Returns `%{checked: n, recovered: n, skipped: n}`.
+  """
+  @spec recover_orphaned_in_progress() :: %{
+          checked: non_neg_integer(),
+          recovered: non_neg_integer(),
+          skipped: non_neg_integer()
+        }
+  def recover_orphaned_in_progress do
+    in_progress =
+      from(i in Issue,
         where: i.status == :in_progress,
         select: %{id: i.id, assignee_id: i.assignee_id}
+      )
+      |> Cympho.Repo.all()
 
-    Cympho.Repo.all(in_progress_query)
-    |> Enum.each(fn %{id: issue_id, assignee_id: assignee_id} ->
-      if Orchestrator.whereis(issue_id) == nil do
-        case Cympho.Issues.get_issue(issue_id) do
-          {:ok, issue} ->
-            case Cympho.Issues.force_release_issue(issue, :todo) do
-              {:ok, _} ->
-                Logger.warning(
-                  "[Dispatcher] recovered orphaned issue #{issue_id} (assignee=#{assignee_id || "none"}) → :todo"
-                )
+    issue_ids = Enum.map(in_progress, & &1.id)
+    active_run_issue_ids = issue_ids_with_active_runs(issue_ids)
 
-              {:error, reason} ->
-                Logger.error(
-                  "[Dispatcher] failed to release orphaned issue #{issue_id}: #{inspect(reason)}"
-                )
+    Enum.reduce(in_progress, %{checked: 0, recovered: 0, skipped: 0}, fn
+      %{id: issue_id, assignee_id: assignee_id}, acc ->
+        acc = %{acc | checked: acc.checked + 1}
+
+        cond do
+          live_orchestrator?(issue_id) ->
+            %{acc | skipped: acc.skipped + 1}
+
+          MapSet.member?(active_run_issue_ids, issue_id) ->
+            %{acc | skipped: acc.skipped + 1}
+
+          true ->
+            case reclaim_orphaned_issue(issue_id, assignee_id) do
+              :recovered -> %{acc | recovered: acc.recovered + 1}
+              :skipped -> %{acc | skipped: acc.skipped + 1}
             end
-
-          {:error, _} ->
-            :ok
         end
-      end
     end)
   rescue
-    # Recovery is best-effort; never let a transient DB issue block boot.
+    # Recovery is best-effort; never let a transient DB issue block boot/poll.
     error ->
       Logger.error("[Dispatcher] orphan recovery failed: #{inspect(error)}")
-      :ok
+      %{checked: 0, recovered: 0, skipped: 0}
+  end
+
+  defp reclaim_orphaned_issue(issue_id, assignee_id) do
+    case Issues.get_issue(issue_id) do
+      {:ok, %Issue{status: :in_progress} = issue} ->
+        # Release any remote env first so orphan recovery cannot leak sandbox spend.
+        _ =
+          Workspaces.cancel_and_release_for_issue(issue, %{
+            reason: "orphan_issue_reclaim",
+            company_id: issue.company_id
+          })
+
+        # Prefer clear_checkout_lock so ownership routing survives recovery.
+        case Issues.clear_checkout_lock(issue, :todo) do
+          {:ok, _} ->
+            Logger.warning(
+              "[Dispatcher] recovered orphaned issue #{issue_id} (assignee=#{assignee_id || "none"}) → :todo"
+            )
+
+            :recovered
+
+          {:error, reason} ->
+            Logger.error(
+              "[Dispatcher] failed to release orphaned issue #{issue_id}: #{inspect(reason)}"
+            )
+
+            :skipped
+        end
+
+      _ ->
+        :skipped
+    end
+  end
+
+  defp live_orchestrator?(issue_id) do
+    case Orchestrator.whereis(issue_id) do
+      nil -> false
+      pid -> Process.alive?(pid)
+    end
+  end
+
+  defp issue_ids_with_active_runs([]), do: MapSet.new()
+
+  defp issue_ids_with_active_runs(issue_ids) do
+    from(r in Run,
+      where: r.issue_id in ^issue_ids and r.status in ["pending", "queued", "running"],
+      select: r.issue_id,
+      distinct: true
+    )
+    |> Cympho.Repo.all()
+    |> MapSet.new()
+  end
+
+  @doc """
+  Sweeps stale checked-out issues (age threshold) back to `:todo` while
+  preserving assignee. Reuses `RuntimeOperations` company-agnostic recovery.
+  """
+  @spec recover_stale_checkouts() :: %{
+          checked: non_neg_integer(),
+          released: non_neg_integer(),
+          failed: non_neg_integer()
+        }
+  def recover_stale_checkouts do
+    case Cympho.RuntimeOperations.recover_stale_checked_out_issues_all() do
+      {:ok, result} -> result
+      _ -> %{checked: 0, released: 0, failed: 0}
+    end
+  rescue
+    error ->
+      Logger.error("[Dispatcher] stale checkout recovery failed: #{inspect(error)}")
+      %{checked: 0, released: 0, failed: 0}
   end
 
   @impl true
@@ -430,15 +516,25 @@ defmodule Cympho.Orchestrator.Dispatcher do
       end
 
     unless live_orchestrator? do
-      # Finalize the dead session's runs first (also releases the checkout
-      # it held), then release the issue if it is still stranded.
+      # Finalize the dead session's runs first (clear_checkout_lock_for_run CAS
+      # on each terminal run). Then reclaim any remaining stranded :in_progress
+      # checkout while preserving assignee — same ownership contract as orphan
+      # reclaim (Paperclip #1033: recovery must not silently unassign).
       _ = HeartbeatEngine.cancel_active_runs_for_issue(issue_id, "Orchestrator crashed")
 
       case Issues.get_issue(issue_id) do
         {:ok, %Issue{status: :in_progress} = issue} ->
-          case Issues.force_release_issue(issue, :todo) do
+          case Issues.clear_checkout_lock(issue, :todo) do
             {:ok, _released} ->
-              Logger.warning("[Dispatcher] released issue #{issue_id} after orchestrator crash")
+              Logger.warning(
+                "[Dispatcher] released issue #{issue_id} after orchestrator crash (assignee preserved)"
+              )
+
+            {:error, :checkout_conflict} ->
+              # Successor bound a new run (or bumped lock_version) — leave ownership alone.
+              Logger.info(
+                "[Dispatcher] skipped crash release for issue #{issue_id}: checkout already claimed by successor"
+              )
 
             {:error, release_reason} ->
               Logger.error(
@@ -511,7 +607,29 @@ defmodule Cympho.Orchestrator.Dispatcher do
     |> maybe_stop_orchestrator(issue.id, {:runtime_stop, acc.reason})
     |> maybe_release_issue(issue)
     |> cancel_issue_runs(issue.id)
+    |> release_issue_environment(issue)
     |> idle_agent(issue.assignee_id)
+  end
+
+  defp release_issue_environment(acc, %Issue{} = issue) do
+    _ =
+      Workspaces.cancel_and_release_for_issue(issue, %{
+        reason: "dispatcher_stop_#{acc.reason}",
+        company_id: issue.company_id
+      })
+
+    acc
+  rescue
+    error ->
+      Logger.warning(
+        "[Dispatcher] environment cancel/release failed during issue stop",
+        component: "dispatcher",
+        issue_id: issue.id,
+        company_id: issue.company_id,
+        error: Exception.message(error)
+      )
+
+      acc
   end
 
   defp track_issue(acc, issue_id), do: %{acc | issue_ids: [issue_id | acc.issue_ids]}
@@ -627,6 +745,11 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp do_poll(%State{} = state, company_id \\ nil) do
+    # Periodic reclaim: boot-only recovery left live-node strands until restart.
+    # Same helpers the watchdog tick uses so either cadence covers the other.
+    _ = recover_orphaned_in_progress()
+    _ = recover_stale_checkouts()
+
     state
     |> prune_stale_retries()
     |> reconcile_running()
@@ -776,7 +899,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
                        w.status == "pending" and
                        w.reason == "escalation_from_subordinate"
                )),
-        where: is_nil(i.company_id) or c.status == "active"
+        where: not is_nil(i.company_id) and c.status == "active"
 
     query =
       if company_id do
@@ -802,13 +925,17 @@ defmodule Cympho.Orchestrator.Dispatcher do
     |> Enum.filter(&runnable_candidate?/1)
   end
 
-  defp runtime_mode_allows_issue?(%Issue{company_id: nil}), do: true
+  # Unscoped issues are never dispatchable (fail-closed tenancy).
+  defp runtime_mode_allows_issue?(%Issue{company_id: nil}), do: false
 
   defp runtime_mode_allows_issue?(%Issue{company: %Company{} = company, priority: priority}) do
     not Companies.low_power?(company) or priority in @low_power_priorities
   end
 
-  defp runtime_mode_allows_issue?(_issue), do: true
+  defp runtime_mode_allows_issue?(%Issue{company_id: company_id}) when is_binary(company_id),
+    do: true
+
+  defp runtime_mode_allows_issue?(_issue), do: false
 
   defp pending_escalation_wake?(issue_id) when is_binary(issue_id) do
     Cympho.Repo.exists?(
@@ -871,6 +998,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
             # frees the concurrency slot and releases the issue.
             ref = Process.monitor(pid)
             Cympho.Telemetry.dispatch_started(checked_out, agent.id, required_role)
+            # Bind stamp: roster last_heartbeat_at must advance on real
+            # dispatch, not only on PATCH status.
+            _ = Agents.touch_heartbeat(agent)
 
             %{
               state
@@ -1045,27 +1175,52 @@ defmodule Cympho.Orchestrator.Dispatcher do
   defp assigned_agent_for_issue(%Cympho.Issues.Issue{} = issue) do
     case Agents.get_agent(issue.assignee_id) do
       {:ok, %Agent{} = agent} ->
-        required_role = Router.infer_role(issue)
+        case maybe_recover_error_agent(agent) do
+          {:ok, agent} ->
+            evaluate_assigned_agent(issue, agent)
 
-        cond do
-          agent.status != :idle ->
+          {:error, _} ->
             {:error, :no_agent_available}
-
-          Agents.is_agent_at_capacity?(agent) ->
-            {:error, :no_agent_available}
-
-          not same_company?(issue, agent) ->
-            {:error, :no_agent_available}
-
-          not Cympho.Issues.Issue.role_authorized?(agent.role, required_role) ->
-            {:error, :no_agent_available}
-
-          true ->
-            {:ok, agent}
         end
 
       {:error, _} ->
         {:error, :no_agent_available}
+    end
+  end
+
+  # Transient :error must self-heal under the dispatcher path — AgentHeartbeat
+  # skips do_heartbeat (and maybe_recover_error_status) when
+  # delegate_to_dispatcher is true (the default).
+  defp maybe_recover_error_agent(%Agent{status: :error} = agent) do
+    Logger.info("[Dispatcher] recovering agent from error status",
+      agent_id: agent.id,
+      company_id: agent.company_id,
+      component: "dispatcher"
+    )
+
+    Agents.recover_error_status(agent)
+  end
+
+  defp maybe_recover_error_agent(%Agent{} = agent), do: {:ok, agent}
+
+  defp evaluate_assigned_agent(%Cympho.Issues.Issue{} = issue, %Agent{} = agent) do
+    required_role = Router.infer_role(issue)
+
+    cond do
+      agent.status != :idle ->
+        {:error, :no_agent_available}
+
+      Agents.is_agent_at_capacity?(agent) ->
+        {:error, :no_agent_available}
+
+      not same_company?(issue, agent) ->
+        {:error, :no_agent_available}
+
+      not Cympho.Issues.Issue.role_authorized?(agent.role, required_role) ->
+        {:error, :no_agent_available}
+
+      true ->
+        {:ok, agent}
     end
   end
 
@@ -1074,29 +1229,33 @@ defmodule Cympho.Orchestrator.Dispatcher do
     fallback_roles = Router.fallback_chain(primary_role)
     all_roles = [primary_role | fallback_roles]
 
-    Enum.each(all_roles, fn role ->
-      eligible =
-        if issue.company_id do
-          Agents.list_eligible_agents(role, issue.company_id)
-        else
-          Agents.list_eligible_agents(role)
-        end
+    # Fail-closed: never fall back to an unscoped agent list when company_id is nil.
+    case issue.company_id do
+      company_id when is_binary(company_id) ->
+        Enum.each(all_roles, fn role ->
+          eligible = Agents.list_eligible_agents(role, company_id)
 
-      case Router.select_agent(role, eligible) do
-        {:ok, agent} -> throw({:found, agent})
-        {:error, _} -> :continue
-      end
-    end)
+          case Router.select_agent(role, eligible) do
+            {:ok, agent} -> throw({:found, agent})
+            {:error, _} -> :continue
+          end
+        end)
 
-    {:error, :no_agent_available}
+        {:error, :no_agent_available}
+
+      _ ->
+        {:error, :no_agent_available}
+    end
   catch
     {:found, agent} -> {:ok, agent}
   end
 
-  defp same_company?(%Cympho.Issues.Issue{company_id: nil}, _agent), do: true
-  defp same_company?(_issue, %Agent{company_id: nil}), do: true
-
-  defp same_company?(%Cympho.Issues.Issue{company_id: company_id}, %Agent{company_id: company_id}),
+  # Fail-closed: both sides must share a non-nil company_id.
+  defp same_company?(
+         %Cympho.Issues.Issue{company_id: company_id},
+         %Agent{company_id: company_id}
+       )
+       when is_binary(company_id),
        do: true
 
   defp same_company?(_issue, _agent), do: false

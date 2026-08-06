@@ -1,6 +1,8 @@
 defmodule Cympho.OwnerAttentionTest do
   use Cympho.DataCase, async: true
 
+  import Ecto.Query
+
   alias Cympho.Agents
   alias Cympho.Approvals
   alias Cympho.BoardApprovals
@@ -157,6 +159,58 @@ defmodule Cympho.OwnerAttentionTest do
     assert Enum.map(items, & &1.kind) == [:failed_run, :approval, :review_queue]
   end
 
+  test "list_action_items includes reviews so Needs you matches the badge set", context do
+    issue = issue!(context.company.id, "Needs review in action lane")
+    insert_wake!(context.agent, issue, "final_review_required")
+
+    action_items = OwnerAttention.list_action_items(context.company.id, context.user)
+    assert Enum.any?(action_items, &(&1.kind == :review_queue and &1.issue_id == issue.id))
+
+    assert length(action_items) ==
+             OwnerAttention.unresolved_count(context.company.id, context.user)
+  end
+
+  test "final_review_required enqueue notifies owner attention subscribers", context do
+    issue = issue!(context.company.id, "Notify on review wake")
+    :ok = OwnerAttention.subscribe(context.company.id)
+
+    assert {:ok, _wake} =
+             Wakes.do_wake_agent(
+               context.agent.id,
+               issue.id,
+               "final_review_required",
+               "system",
+               "test",
+               %{}
+             )
+
+    assert_receive {:owner_attention_changed, company_id}
+    assert company_id == context.company.id
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) == 1
+  end
+
+  test "consuming a review wake notifies and clears unresolved_count", context do
+    issue = issue!(context.company.id, "Consume review wake")
+
+    assert {:ok, wake} =
+             Wakes.do_wake_agent(
+               context.agent.id,
+               issue.id,
+               "final_review_required",
+               "system",
+               "test",
+               %{}
+             )
+
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) == 1
+    :ok = OwnerAttention.subscribe(context.company.id)
+
+    assert {:ok, _consumed} = Wakes.consume_wake(wake)
+    assert_receive {:owner_attention_changed, company_id}
+    assert company_id == context.company.id
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) == 0
+  end
+
   test "includes pending questions and confirmations from only the current company", context do
     question_issue = issue!(context.company.id, "Clarify launch plan")
     confirmation_issue = issue!(context.company.id, "Approve launch plan")
@@ -168,7 +222,13 @@ defmodule Cympho.OwnerAttentionTest do
       IssueThreadInteractions.create_interaction(%{
         issue_id: question_issue.id,
         kind: :ask_user_questions,
-        payload: %{"questions" => [%{"label" => "Never render provider-secret-value"}]},
+        payload: %{
+          "message" => "Need a launch scope decision.",
+          "questions" => [
+            %{"question" => "Which launch cohort first?"},
+            %{"label" => "Never render provider-secret-value"}
+          ]
+        },
         created_by_agent_id: context.agent.id
       })
 
@@ -179,7 +239,11 @@ defmodule Cympho.OwnerAttentionTest do
       IssueThreadInteractions.create_interaction(%{
         issue_id: confirmation_issue.id,
         kind: :request_confirmation,
-        payload: %{"prompt" => "Never render raw-confirmation-secret"},
+        payload: %{
+          "message" => "Confirm the launch plan.",
+          "details" => "Includes pricing and audience.",
+          "prompt" => "Never render raw-confirmation-secret"
+        },
         created_by_agent_id: context.agent.id
       })
 
@@ -200,6 +264,17 @@ defmodule Cympho.OwnerAttentionTest do
     assert Enum.any?(interactions, &(&1.title == "Answer needed · Clarify launch plan"))
     assert Enum.any?(interactions, &(&1.title == "Confirmation needed · Approve launch plan"))
     refute Enum.any?(interactions, &String.contains?(&1.summary, "secret"))
+
+    question_item = Enum.find(interactions, &(&1.source_id == question.id))
+    assert question_item.summary == "Need a launch scope decision."
+    assert question_item.interaction_kind == :ask_user_questions
+    assert question_item.card_body.message == "Need a launch scope decision."
+    assert question_item.card_body.lines == ["Which launch cohort first?"]
+    refute Enum.any?(question_item.card_body.lines, &String.contains?(&1, "secret"))
+
+    confirmation_item = Enum.find(interactions, &(&1.source_id == confirmation.id))
+    assert confirmation_item.summary == "Confirm the launch plan."
+    assert confirmation_item.card_body.lines == ["Includes pricing and audience."]
     assert OwnerAttention.unresolved_count(context.company.id, context.user) == 2
 
     {:ok, _resolved} =
@@ -251,6 +326,78 @@ defmodule Cympho.OwnerAttentionTest do
     assert issue_id == issue.id
   end
 
+  test "assigning a human enters human action, notifies, and bumps unresolved_count", context do
+    issue = issue!(context.company.id, "Needs owner decision")
+
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) == 0
+    :ok = OwnerAttention.subscribe(context.company.id)
+
+    {:ok, assigned} =
+      Issues.update_issue(issue, %{assignee_user_id: context.user.id})
+
+    assert_receive {:owner_attention_changed, company_id}
+    assert company_id == context.company.id
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) == 1
+
+    assert Enum.any?(
+             OwnerAttention.list_items(context.company.id, context.user),
+             &(&1.kind == :human_action and &1.issue_id == assigned.id)
+           )
+
+    {:ok, _cleared} = Issues.update_issue(assigned, %{assignee_user_id: nil})
+
+    assert_receive {:owner_attention_changed, ^company_id}
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) == 0
+  end
+
+  test "transition into and out of blocked notifies owner attention", context do
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Blocked work",
+        description: "Waiting on owner",
+        status: :todo,
+        priority: :medium,
+        company_id: context.company.id
+      })
+
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) == 0
+    :ok = OwnerAttention.subscribe(context.company.id)
+
+    {:ok, blocked} = Issues.transition_issue(issue, :blocked)
+
+    assert_receive {:owner_attention_changed, company_id}
+    assert company_id == context.company.id
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) >= 1
+
+    assert Enum.any?(
+             OwnerAttention.list_items(context.company.id, context.user),
+             &(&1.kind == :human_action and &1.issue_id == blocked.id)
+           )
+
+    {:ok, _todo} = Issues.transition_issue(blocked, :todo)
+
+    assert_receive {:owner_attention_changed, ^company_id}
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) == 0
+  end
+
+  test "unrelated field updates and same-audience status moves do not notify", context do
+    issue =
+      issue!(context.company.id, "Stable human work", assignee_user_id: context.user.id)
+
+    before_count = OwnerAttention.unresolved_count(context.company.id, context.user)
+    assert before_count >= 1
+
+    :ok = OwnerAttention.subscribe(context.company.id)
+
+    {:ok, retitled} = Issues.update_issue(issue, %{title: "Renamed human work"})
+    refute_receive {:owner_attention_changed, _}, 50
+
+    {:ok, _in_progress} = Issues.transition_issue(retitled, :in_progress)
+    refute_receive {:owner_attention_changed, _}, 50
+
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) == before_count
+  end
+
   test "includes only unresolved budget incidents from the current company", context do
     policy = insert_budget_policy!(context.company)
     incident = insert_budget_incident!(policy, "warning")
@@ -262,8 +409,10 @@ defmodule Cympho.OwnerAttentionTest do
     assert item.kind == :budget_incident
     assert item.source_id == incident.id
     assert item.severity == :high
-    assert item.target_path == "/costs"
-    assert item.target_label == "Review costs"
+    assert item.target_path == "/budgets"
+    assert item.target_label == "Raise limit"
+    assert item.raise_limit_path == "/budgets"
+    assert item.dismissable == true
     assert item.target_label_text == "Company budget"
     refute item.source_id == other_incident.id
 
@@ -273,6 +422,25 @@ defmodule Cympho.OwnerAttentionTest do
 
     assert OwnerAttention.list_action_items(context.company.id, context.user) == []
     assert OwnerAttention.unresolved_count(context.company.id, context.user) == 0
+  end
+
+  test "hard-stop incomplete budget incidents are not dismissable and expose raise/resume paths",
+       context do
+    policy = insert_budget_policy!(context.company, %{action_on_exceed: "block"})
+
+    incident =
+      insert_budget_incident!(policy, "budget_exceeded", %{
+        spend_usd: "150",
+        enforcement_status: "incomplete"
+      })
+
+    assert [item] = OwnerAttention.list_action_items(context.company.id, context.user)
+    assert item.source_id == incident.id
+    assert item.dismissable == false
+    assert item.raise_limit_path == "/budgets"
+    assert item.resume_path == "/agents"
+    assert item.target_label == "Raise limit"
+    assert item.summary =~ "Raise the limit"
   end
 
   test "deduplicates budget incidents by policy and keeps the most severe event", context do
@@ -306,6 +474,63 @@ defmodule Cympho.OwnerAttentionTest do
     assert OwnerAttention.unresolved_count(context.company.id, context.user) == length(items)
   end
 
+  test "includes company-scoped stuck in_progress issues past the patrol threshold", context do
+    stuck =
+      stuck_in_progress!(context.company.id, "Swarm engineer stalled",
+        assignee_id: context.agent.id
+      )
+
+    foreign =
+      stuck_in_progress!(context.other_company.id, "Foreign stall",
+        assignee_id: context.other_agent.id
+      )
+
+    # Fresh in_progress must not surface.
+    fresh = issue!(context.company.id, "Still moving")
+
+    {:ok, _fresh} =
+      Issues.update_issue(fresh, %{
+        status: :in_progress,
+        assignee_id: context.agent.id,
+        checked_out_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      })
+
+    items = OwnerAttention.list_items(context.company.id, context.user)
+    stuck_items = Enum.filter(items, &(&1.kind == :stuck_issue))
+
+    assert [%{issue_id: issue_id, severity: severity, target_path: path} = item] = stuck_items
+    assert issue_id == stuck.id
+    assert severity in [:high, :critical]
+    assert path == "/issues/#{stuck.id}"
+    assert item.title =~ "Swarm engineer stalled"
+    assert item.target_label == "Open stuck task"
+    refute Enum.any?(items, &(&1.issue_id == foreign.id))
+
+    count = OwnerAttention.unresolved_count(context.company.id, context.user)
+    assert count >= 1
+    assert count == length(items)
+  end
+
+  test "stuck blocked issues dedupe with human_action and keep high severity", context do
+    stale_at =
+      DateTime.utc_now() |> DateTime.add(-2 * 3600, :second) |> DateTime.truncate(:second)
+
+    blocked = issue!(context.company.id, "Blocked too long", assignee_user_id: context.user.id)
+
+    {:ok, blocked} = Issues.update_issue(blocked, %{status: :blocked})
+
+    Repo.update_all(from(i in Issues.Issue, where: i.id == ^blocked.id),
+      set: [updated_at: stale_at]
+    )
+
+    items = OwnerAttention.list_items(context.company.id, context.user)
+    matching = Enum.filter(items, &(&1.issue_id == blocked.id))
+
+    # human_action and stuck share issue: dedup — one row after merge.
+    assert length(matching) == 1
+    assert OwnerAttention.unresolved_count(context.company.id, context.user) == length(items)
+  end
+
   defp issue!(company_id, title, opts \\ []) do
     attrs = %{
       title: title,
@@ -323,6 +548,28 @@ defmodule Cympho.OwnerAttentionTest do
 
     {:ok, issue} = Issues.create_issue(attrs)
     issue
+  end
+
+  defp stuck_in_progress!(company_id, title, opts) do
+    stale_at =
+      DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+
+    issue = issue!(company_id, title)
+
+    attrs =
+      %{
+        status: :in_progress,
+        checked_out_at: stale_at
+      }
+      |> then(fn attrs ->
+        case Keyword.get(opts, :assignee_id) do
+          nil -> attrs
+          id -> Map.put(attrs, :assignee_id, id)
+        end
+      end)
+
+    {:ok, stuck} = Issues.update_issue(issue, attrs)
+    stuck
   end
 
   defp insert_run!(company, agent, issue, status, at \\ nil) do

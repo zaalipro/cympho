@@ -42,6 +42,31 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Edit settings"
     end
 
+    test "roster shows Never until last_heartbeat_at is stamped, then a real time", %{
+      conn: conn
+    } do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Heartbeat Roster Agent",
+          role: :engineer,
+          status: :idle
+        })
+
+      assert is_nil(agent.last_heartbeat_at)
+      assert CymphoWeb.AgentLive.Index.format_heartbeat(agent) == "Never"
+
+      {:ok, _view, html} = live(conn, "/agents")
+      assert html =~ "Heartbeat Roster Agent"
+      assert html =~ "Never"
+
+      assert {:ok, stamped} = Agents.touch_heartbeat(agent)
+      assert stamped.last_heartbeat_at != nil
+      refute CymphoWeb.AgentLive.Index.format_heartbeat(stamped) == "Never"
+
+      assert CymphoWeb.AgentLive.Index.format_heartbeat(stamped) =~
+               Calendar.strftime(stamped.last_heartbeat_at, "%b")
+    end
+
     test "renders status dashboard with counts", %{conn: conn} do
       {:ok, _idle1} = create_agent(%{name: "Idle Agent 1", role: :engineer, status: :idle})
       {:ok, _idle2} = create_agent(%{name: "Idle Agent 2", role: :engineer, status: :idle})
@@ -1816,6 +1841,15 @@ defmodule CymphoWeb.AgentLiveTest do
       conn: conn,
       current_company: company
     } do
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "DASHSCOPE_API_KEY",
+          value: "test-dashscope-key",
+          description: "DashScope key for hire readiness"
+        })
+
       {:ok, view, html} =
         live(
           conn,
@@ -1833,6 +1867,8 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "key=DASHSCOPE_API_KEY"
       assert html =~ ~r/<option[^>]+value="openai-chat-qwen-dashscope-flash"[^>]+selected/
       assert html =~ ~r/<option[^>]+value="openai_chat"[^>]+selected/
+      assert html =~ "Friendly defaults are ready"
+      assert has_element?(view, "[data-hire-readiness='ready']")
 
       view
       |> form("form", %{
@@ -1861,6 +1897,115 @@ defmodule CymphoWeb.AgentLiveTest do
       assert created.runtime_config["profile_id"] == "openai-chat-qwen-dashscope-flash"
       assert created.max_concurrent_jobs == 1
       refute Map.has_key?(created.config, "api_key")
+    end
+
+    test "simple hire never claims ready without required provider secret", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, view, html} =
+        live(
+          conn,
+          "/agents/new?role=ceo&name=Blocked%20CEO&runtime_profile_id=openai-chat-qwen-dashscope-flash"
+        )
+
+      assert html =~ ~s(data-testid="new-agent-defaults-summary")
+      assert html =~ "Needs a key"
+      assert html =~ "DASHSCOPE_API_KEY"
+      refute html =~ "Friendly defaults are ready"
+      assert has_element?(view, "[data-hire-readiness='needs_key']")
+      assert has_element?(view, "[data-testid='new-agent-add-key']")
+      assert has_element?(view, "[data-testid='new-agent-hire-gate']")
+      assert has_element?(view, "[data-testid='new-agent-hire-button'][disabled]")
+      assert html =~ "return_to="
+      assert html =~ "Add key"
+      # Advanced runtime section still renders for advanced mode
+      assert has_element?(view, "[data-testid='new-agent-runtime-section'].ui-advanced-only")
+      assert html =~ "Add required key"
+
+      html =
+        view
+        |> form("form", %{
+          "agent" => %{
+            "name" => "Blocked CEO",
+            "role" => "ceo",
+            "parent_id" => "",
+            "runtime_profile_id" => "openai-chat-qwen-dashscope-flash",
+            "adapter" => "claude_code",
+            "instructions" => "Should not be hired without a key."
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "Add DASHSCOPE_API_KEY before hiring"
+      assert html =~ "Needs a key"
+
+      refute company.id
+             |> Agents.list_agents_by_company()
+             |> Enum.any?(&(&1.name == "Blocked CEO"))
+    end
+
+    test "simple hire is ready when required provider secret is present", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "DASHSCOPE_API_KEY",
+          value: "ready-key",
+          description: "DashScope for hire readiness soft pass"
+        })
+
+      {:ok, view, html} =
+        live(
+          conn,
+          "/agents/new?role=engineer&name=Ready%20Engineer&runtime_profile_id=openai-chat-qwen-dashscope-flash"
+        )
+
+      assert html =~ "Friendly defaults are ready"
+      assert html =~ "DASHSCOPE_API_KEY"
+      refute html =~ "Needs a key"
+      assert has_element?(view, "[data-hire-readiness='ready']")
+      refute has_element?(view, "[data-testid='new-agent-hire-gate']")
+      refute has_element?(view, "[data-testid='new-agent-hire-button'][disabled]")
+      # Advanced runtime remains available
+      assert has_element?(view, "[data-testid='new-agent-runtime-section'].ui-advanced-only")
+
+      result =
+        view
+        |> form("form", %{
+          "agent" => %{
+            "name" => "Ready Engineer",
+            "role" => "engineer",
+            "parent_id" => "",
+            "runtime_profile_id" => "openai-chat-qwen-dashscope-flash",
+            "adapter" => "claude_code",
+            "instructions" => "Ship with configured credentials."
+          }
+        })
+        |> render_submit()
+
+      assert {:error, {:live_redirect, %{to: "/agents"}}} = result
+
+      created =
+        company.id
+        |> Agents.list_agents_by_company()
+        |> Enum.find(&(&1.name == "Ready Engineer"))
+
+      assert created
+      assert created.adapter == :openai_chat
+    end
+
+    test "wrapper runtime soft-passes hire readiness without company secrets", %{conn: conn} do
+      {:ok, view, html} =
+        live(conn, "/agents/new?role=engineer&runtime_profile_id=claude-cz")
+
+      assert html =~ "Friendly defaults are ready"
+      assert has_element?(view, "[data-hire-readiness='ready']")
+      refute has_element?(view, "[data-testid='new-agent-hire-gate']")
+      assert has_element?(view, "[data-testid='new-agent-runtime-section'].ui-advanced-only")
     end
 
     test "new agent form marks process Codex profile as repo capable", %{
@@ -1953,6 +2098,15 @@ defmodule CymphoWeb.AgentLiveTest do
       conn: conn,
       current_company: company
     } do
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "DASHSCOPE_API_KEY",
+          value: "demand-hire-key",
+          description: "DashScope for demand-backed hire"
+        })
+
       {:ok, ceo} =
         create_agent(%{
           name: "CEO",

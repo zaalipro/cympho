@@ -1,11 +1,17 @@
 defmodule CymphoWeb.InboxLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Approvals
-  alias Cympho.Inbox
   alias Cympho.Agents
+  alias Cympho.Finances
+  alias Cympho.Inbox
+  alias Cympho.IssueThreadInteractions
   alias Cympho.OwnerAttention
 
-  @statuses ~w(action unread read dismissed archived review)
+  # "all" is the explicit unified feed; missing status defaults to "action"
+  # (Needs you = full OwnerAttention set, reviews included) so Simple first
+  # paint matches the nav badge and stays decision-first, not noise-first.
+  @statuses ~w(action unread read dismissed archived review all)
+  @default_status "action"
 
   @impl true
   def mount(_params, _session, socket) do
@@ -21,7 +27,7 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:selected_agent_id, nil)
       |> assign(:selected_agent, nil)
       |> assign(:subscribed_agent_id, nil)
-      |> assign(:current_status, nil)
+      |> assign(:current_status, @default_status)
       |> assign(:digest_density, "compact")
       |> assign(:infinite_scroll, %{})
       |> assign(:inbox_counts, %{})
@@ -79,9 +85,20 @@ defmodule CymphoWeb.InboxLive.Index do
   end
 
   def handle_info({:owner_attention_changed, company_id}, socket) do
-    if socket.assigns[:current_company] && socket.assigns.current_company.id == company_id,
-      do: {:noreply, load_inbox(socket)},
-      else: {:noreply, socket}
+    if socket.assigns[:current_company] && socket.assigns.current_company.id == company_id do
+      # Keep nav badge parity with Needs you when review wakes land while Inbox is open.
+      # UserAuth's owner_attention hook also updates these assigns (cont for this view).
+      count =
+        min(99, OwnerAttention.unresolved_count(company_id, socket.assigns[:current_user]))
+
+      {:noreply,
+       socket
+       |> assign(:nav_inbox_count, count)
+       |> assign(:inbox_badge_count, count)
+       |> load_inbox()}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({event, _payload}, socket)
@@ -183,6 +200,18 @@ defmodule CymphoWeb.InboxLive.Index do
     resolve_approval(socket, approval_id, :denied, "Denied from Inbox")
   end
 
+  def handle_event("resolve_interaction", %{"id" => id, "status" => status}, socket) do
+    resolve_interaction(socket, id, status)
+  end
+
+  def handle_event("respond_questions", %{"_id" => id, "response" => response}, socket) do
+    respond_questions(socket, id, response)
+  end
+
+  def handle_event("dismiss_budget_incident", %{"incident_id" => incident_id}, socket) do
+    dismiss_budget_incident(socket, incident_id)
+  end
+
   def handle_event("filter_status", %{"status" => status}, socket) do
     {:noreply, push_patch(socket, to: build_url(socket, %{"status" => status}))}
   end
@@ -277,11 +306,11 @@ defmodule CymphoWeb.InboxLive.Index do
   # Update just the affected row instead of resetting the whole stream (which
   # discards scrolled-in pages and the scroll position). Recompute counts, then
   # keep the row (in place, or prepended for new items) when its status still
-  # matches the active filter, otherwise drop it. The unified "all" feed and
-  # bounded "review" feed include pseudo-items, so reload them to preserve
+  # matches the active filter, otherwise drop it. Attention-backed feeds
+  # (all/action/review) include pseudo-items, so reload them to preserve
   # ordering and issue-level deduplication.
   defp apply_inbox_change(socket, updated, opts \\ []) do
-    if socket.assigns[:current_status] in [nil, "review"] do
+    if socket.assigns[:current_status] in [nil, "all", "action", "review"] do
       load_inbox(socket)
     else
       socket = assign_inbox_counts(socket)
@@ -297,7 +326,7 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp inbox_item_visible?(socket, item) do
     case socket.assigns[:current_status] do
-      nil -> true
+      status when status in [nil, "all"] -> true
       status -> item.status == status
     end
   end
@@ -343,6 +372,147 @@ defmodule CymphoWeb.InboxLive.Index do
          socket
          |> put_flash(:error, "Could not resolve this approval.")
          |> load_inbox()}
+    end
+  end
+
+  defp resolve_interaction(socket, id, status) do
+    user_id = current_user_id(socket)
+
+    with {:ok, atom_status} <- parse_interaction_status(status),
+         {:ok, interaction} <- scoped_interaction(socket, id),
+         {:ok, _updated} <-
+           IssueThreadInteractions.resolve_interaction(interaction, %{
+             "status" => atom_status,
+             "resolved_by_user_id" => user_id
+           }) do
+      message =
+        case atom_status do
+          :accepted -> "Accepted from Inbox."
+          :rejected -> "Rejected from Inbox."
+          _ -> "Interaction updated."
+        end
+
+      {:noreply,
+       socket
+       |> put_flash(:info, message)
+       |> load_inbox()}
+    else
+      {:error, :stale_target_revision} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "This plan changed after the confirmation was requested. Review the latest revision before confirming it."
+         )}
+
+      {:error, :invalid_transition} ->
+        {:noreply, put_flash(socket, :error, "Could not resolve this interaction.")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Interaction not found.")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Could not resolve this interaction.")}
+    end
+  end
+
+  defp respond_questions(socket, id, response) do
+    user_id = current_user_id(socket)
+    response = response |> to_string() |> String.trim()
+
+    with true <- response != "",
+         {:ok, interaction} <- scoped_interaction(socket, id),
+         true <- interaction.kind == :ask_user_questions,
+         {:ok, _updated} <-
+           IssueThreadInteractions.resolve_interaction(interaction, %{
+             "status" => :responded,
+             "resolved_by_user_id" => user_id,
+             "response" => response
+           }) do
+      {:noreply,
+       socket
+       |> put_flash(:info, "Response sent.")
+       |> load_inbox()}
+    else
+      false ->
+        {:noreply, put_flash(socket, :error, "Add a short response before sending.")}
+
+      {:error, :invalid_transition} ->
+        {:noreply, put_flash(socket, :error, "Could not send this response.")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Interaction not found.")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Could not send this response.")}
+    end
+  end
+
+  defp dismiss_budget_incident(socket, incident_id) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         {:ok, incident} <- scoped_budget_incident(company_id, incident_id),
+         {:ok, _resolved} <- Finances.resolve_budget_incident(incident) do
+      OwnerAttention.notify_changed(company_id)
+
+      {:noreply,
+       socket
+       |> put_flash(:info, "Budget alert dismissed.")
+       |> load_inbox()}
+    else
+      {:error, :enforcement_incomplete} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :error,
+           "Hard stop is still active. Raise the limit first, then resume paused agents."
+         )
+         |> load_inbox()}
+
+      _ ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Could not dismiss this budget alert.")
+         |> load_inbox()}
+    end
+  end
+
+  defp scoped_interaction(socket, id) do
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+
+    with true <- is_binary(company_id),
+         {:ok, interaction} <- IssueThreadInteractions.get_interaction(id),
+         {:ok, _issue} <- Cympho.Issues.get_company_issue(company_id, interaction.issue_id) do
+      {:ok, interaction}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp scoped_budget_incident(company_id, incident_id)
+       when is_binary(company_id) and is_binary(incident_id) do
+    case Finances.get_budget_incident!(incident_id) do
+      %{company_id: ^company_id, resolved_at: nil} = incident ->
+        {:ok, incident}
+
+      _ ->
+        {:error, :not_found}
+    end
+  rescue
+    Ecto.NoResultsError -> {:error, :not_found}
+  end
+
+  defp scoped_budget_incident(_company_id, _incident_id), do: {:error, :not_found}
+
+  defp parse_interaction_status(status) when status in ["accepted", "rejected", "responded"] do
+    {:ok, String.to_existing_atom(status)}
+  end
+
+  defp parse_interaction_status(_status), do: {:error, :invalid_transition}
+
+  defp current_user_id(socket) do
+    case socket.assigns[:current_user] do
+      %{id: id} -> to_string(id)
+      _ -> nil
     end
   end
 
@@ -405,24 +575,26 @@ defmodule CymphoWeb.InboxLive.Index do
     attention_items = socket.assigns[:owner_attention_items] || []
 
     cond do
-      is_nil(status) ->
+      status in [nil, "all"] ->
         capped_page(all_items || build_all_inbox_items(socket, attention_items))
 
       status == "review" ->
         capped_page(Enum.filter(attention_items, &(&1.kind == :review_queue)))
 
+      # Needs you = full OwnerAttention set (reviews included) so Simple default
+      # matches the nav badge / unresolved_count membership.
       status == "action" ->
-        capped_page(Enum.reject(attention_items, &(&1.kind == :review_queue)))
+        capped_page(attention_items)
 
       agent_id == "all" and company_id ->
-        opts = [limit: 100] ++ if(status, do: [status: status], else: [])
+        opts = [limit: 100, status: status]
         capped_page(Inbox.list_recent_for_company(company_id, opts))
 
       agent_id in [nil, "", "all"] ->
         capped_page([])
 
       true ->
-        opts = [after: cursor] ++ if(status, do: [status: status], else: [])
+        opts = [after: cursor, status: status]
         Inbox.list_inbox_for_agent_page(agent_id, opts)
     end
   end
@@ -447,7 +619,7 @@ defmodule CymphoWeb.InboxLive.Index do
     counts =
       counts
       |> Map.put("review", Enum.count(attention_items, &(&1.kind == :review_queue)))
-      |> Map.put("action", Enum.count(attention_items, &(&1.kind != :review_queue)))
+      |> Map.put("action", length(attention_items))
       |> Map.put("all", all_count || length(build_all_inbox_items(socket, attention_items)))
 
     agent_counts = if company_id, do: Inbox.counts_by_agent_for_company(company_id), else: %{}
@@ -756,7 +928,7 @@ defmodule CymphoWeb.InboxLive.Index do
   defp first_action_item(socket) do
     socket.assigns[:owner_attention_items]
     |> List.wrap()
-    |> Enum.find(&(&1.kind != :review_queue))
+    |> List.first()
   end
 
   defp build_all_inbox_items(socket, attention_items) do
@@ -919,7 +1091,7 @@ defmodule CymphoWeb.InboxLive.Index do
   end
 
   defp normalize_status(status) when status in @statuses, do: status
-  defp normalize_status(_), do: nil
+  defp normalize_status(_), do: @default_status
 
   defp normalize_digest_density("compact"), do: "compact"
   defp normalize_digest_density("detailed"), do: "detailed"
@@ -979,6 +1151,7 @@ defmodule CymphoWeb.InboxLive.Index do
   defp marked_read_message(count), do: "Marked #{count} unread inbox items as read."
 
   defp status_filter_label(nil), do: "All"
+  defp status_filter_label("all"), do: "All"
   defp status_filter_label("action"), do: "Needs my action"
   defp status_filter_label("review"), do: "Awaiting review"
   defp status_filter_label(status), do: String.capitalize(status)
@@ -1047,6 +1220,7 @@ defmodule CymphoWeb.InboxLive.Index do
   defp kind_chip_class(_), do: "border-border bg-surface text-text-tertiary"
 
   defp empty_state_heading(nil), do: "You're caught up"
+  defp empty_state_heading("all"), do: "You're caught up"
   defp empty_state_heading("action"), do: "Nothing needs you"
   defp empty_state_heading("unread"), do: "You're caught up"
   defp empty_state_heading("review"), do: "Review queue is clear"
@@ -1056,7 +1230,15 @@ defmodule CymphoWeb.InboxLive.Index do
   defp empty_state_heading(_), do: "You're caught up"
 
   defp status_tab_class(current, status) do
-    if current == status do
+    current_key = if current in [nil, "all"] and status in [nil, "all"], do: status, else: current
+
+    active? =
+      cond do
+        status in [nil, "all"] -> current in [nil, "all"]
+        true -> current_key == status
+      end
+
+    if active? do
       "border-brand bg-brand/15 text-text-primary"
     else
       "border-border bg-surface text-text-tertiary hover:border-border-hover hover:bg-surface-hover hover:text-text-secondary"

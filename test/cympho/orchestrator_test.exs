@@ -1221,12 +1221,19 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
-    test "labels parsed action execution failures separately from invalid action blocks", %{
-      agent_id: agent_id,
-      issue: issue
-    } do
+    test "retriable action-contract failures keep assignment and fail the run without force-parking",
+         %{
+           agent_id: agent_id,
+           issue: issue
+         } do
       session_id = "session-action-exec-failure"
       run_id = Ecto.UUID.generate()
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: agent_id
+        })
 
       result = %{
         "content" => [
@@ -1250,9 +1257,15 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.HeartbeatEngine, [],
          [
-           create_run: fn _ -> {:ok, %{id: run_id}} end,
-           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           create_run: fn _ -> {:ok, %{id: run_id, status: "running", agent_id: agent_id}} end,
+           get_run: fn ^run_id ->
+             {:ok, %{id: run_id, status: "running", agent_id: agent_id, issue_id: issue.id}}
+           end,
            start_run: fn _ -> :ok end,
+           fail_run: fn run, reason, _usage ->
+             send(self(), {:run_failed_reason, reason})
+             {:ok, Map.merge(run, %{status: "failed", error_reason: inspect(reason)})}
+           end,
            complete_run: fn _run, _attrs -> {:ok, %{id: run_id}} end
          ]},
         {Cympho.AgentRunner, [],
@@ -1266,10 +1279,15 @@ defmodule Cympho.OrchestratorTest do
 
         comments = Comments.list_comments(issue.id)
 
+        # Specific rejection comment from AgentActions (not a force-park comment).
         assert Enum.any?(comments, fn comment ->
                  comment.author_type == "system" and
-                   comment.body =~
-                     "Agent cympho-actions block parsed, but action execution failed: :unauthorized_action"
+                   comment.body =~ "only CEO/CTO agents may emit approve_issue"
+               end)
+
+        refute Enum.any?(comments, fn comment ->
+                 comment.author_type == "system" and
+                   comment.body =~ "action execution failed: :unauthorized_action"
                end)
 
         refute Enum.any?(comments, fn comment ->
@@ -1277,11 +1295,14 @@ defmodule Cympho.OrchestratorTest do
                    comment.body =~ "did not include a valid cympho-actions block"
                end)
 
-        assert Issues.get_issue!(issue.id).status == :blocked
+        reloaded = Issues.get_issue!(issue.id)
+        refute reloaded.status == :blocked
+        assert reloaded.assignee_id == agent_id
+        assert Repo.get!(Agent, agent_id).no_progress_failure_count == 1
       end
     end
 
-    test "marks no-progress action-contract turns as failed runs", %{
+    test "marks no-progress action-contract turns as failed runs without force-parking", %{
       agent_id: agent_id,
       issue: issue
     } do
@@ -1326,18 +1347,23 @@ defmodule Cympho.OrchestratorTest do
         assert run.error_reason == "Agent action contract failed"
         assert run.log_excerpt == ":unresolved_current_issue"
         assert run.run_metadata["adapter_error"]["category"] == "action_contract_failed"
-        assert Issues.get_issue!(issue.id).status == :blocked
+
+        reloaded = Issues.get_issue!(issue.id)
+        # Retriable: checkout released to :todo, assignee kept for self-heal.
+        refute reloaded.status == :blocked
+        assert reloaded.assignee_id == agent_id
         assert Repo.get!(Agent, agent_id).no_progress_failure_count == 1
 
         assert Enum.any?(Comments.list_comments(issue.id), fn comment ->
                  comment.author_type == "system" and
                    comment.body =~ "Agent actions did not resolve the current issue." and
-                   comment.body =~ "Emit a resolving action"
+                   comment.body =~ "Emit a resolving action" and
+                   comment.body =~ "Assignment is kept"
                end)
       end
     end
 
-    test "pauses agent after repeated no-progress action-contract failures", %{
+    test "pauses agent and parks with blocker_packet after N consecutive contract failures", %{
       agent_id: agent_id,
       company: company
     } do
@@ -1380,7 +1406,7 @@ defmodule Cympho.OrchestratorTest do
            resolve: fn %{config: config} -> {:ok, MockAdapter, config} end
          ]}
       ]) do
-        last_issue =
+        issues =
           for i <- 1..3 do
             {:ok, issue_i} =
               Issues.create_issue(%{
@@ -1401,9 +1427,24 @@ defmodule Cympho.OrchestratorTest do
             assert {:ok, pid} = Orchestrator.start_and_run(issue_i, agent_id)
             assert :ok = wait_until_stopped(pid)
 
-            issue_i
+            Issues.get_issue!(issue_i.id)
           end
-          |> List.last()
+
+        [first, second, last_issue] = issues
+
+        # First two retriable failures keep assignment; only the Nth parks.
+        refute first.status == :blocked
+        assert first.assignee_id == agent_id
+        refute second.status == :blocked
+        assert second.assignee_id == agent_id
+
+        assert last_issue.status == :blocked
+        assert is_nil(last_issue.assignee_id)
+        assert last_issue.monitor_state["blocker_packet"]["schema"] == "cympho.blocker_packet.v1"
+        assert last_issue.monitor_state["blocker_packet"]["kind"] == "other"
+
+        assert last_issue.monitor_state["blocker_packet"]["cause"] =~
+                 "consecutive non-resolving or contract-invalid"
 
         reloaded_agent = Repo.get!(Agent, agent_id)
         assert reloaded_agent.no_progress_failure_count == 0
@@ -1420,6 +1461,77 @@ defmodule Cympho.OrchestratorTest do
                  comment.author_type == "system" and
                    comment.body =~ "No-progress circuit breaker paused this agent" and
                    comment.body =~ "cancelled" and comment.body =~ "queued wake"
+               end)
+      end
+    end
+
+    test "invalid blocker_kind is retriable: keeps assignment, fails run, lists allowed kinds", %{
+      company: company
+    } do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Blocker Kind CEO",
+          role: "ceo",
+          company_id: company.id,
+          adapter: :claude_code,
+          adapter_type: "claude_code"
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Needs a clean block",
+          description: "CEO will emit an invalid blocker_kind.",
+          company_id: company.id,
+          status: :in_progress,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        })
+
+      reason =
+        "Cause: owner must clarify success metric.\\nAttempted fix: re-read the brief.\\nNeeds: owner metric.\\nCurrent state: paused.\\nNext decision: wait for owner.\\nRestart packet: resume after metric is named."
+
+      result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            Blocking for owner input.
+
+            ```cympho-actions
+            {"actions":[{"type":"block_issue","reason":"#{reason}","blocker_kind":"made_up_kind"}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      MockAdapter.script(ceo.id, issue.id, [%{result: result}])
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{config: config} -> {:ok, MockAdapter, config} end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, ceo.id)
+        assert :ok = wait_until_stopped(pid)
+
+        reloaded = Issues.get_issue!(issue.id)
+        refute reloaded.status == :blocked
+        assert reloaded.assignee_id == ceo.id
+
+        [run] = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
+        assert run.status == "failed"
+        assert run.run_metadata["adapter_error"]["category"] == "action_contract_failed"
+
+        assert Enum.any?(Comments.list_comments(issue.id), fn comment ->
+                 comment.author_type == "system" and
+                   comment.body =~ "unknown blocker_kind" and
+                   comment.body =~ "Allowed kinds:" and
+                   comment.body =~ "owner_input_needed"
                end)
       end
     end
@@ -1978,6 +2090,96 @@ defmodule Cympho.OrchestratorTest do
 
         assert :ok = wait_until_stopped(pid)
         assert Issues.get_issue!(issue.id).status == :blocked
+      end
+    end
+  end
+
+  describe "heartbeat honesty on session end" do
+    test "completed turn stamps last_heartbeat_at and leaves agent idle", %{
+      agent_id: agent_id,
+      agent: agent,
+      issue: issue
+    } do
+      assert is_nil(agent.last_heartbeat_at)
+      session_id = "session-hb-complete"
+      run_id = Ecto.UUID.generate()
+
+      result = %{
+        "result" => """
+        Delivered.
+
+        ```cympho-actions
+        {"actions":[{"type":"comment","body":"[owner_update] What happened: finished the turn."}]}
+        ```
+        """
+      }
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           complete_run: fn _run, _attrs -> {:ok, %{id: run_id}} end,
+           fail_run: fn _run, _reason, _usage -> {:ok, %{id: run_id}} end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        send(pid, {:turn_completed, session_id, result})
+        assert :ok = wait_until_stopped(pid)
+
+        reloaded = Repo.get!(Agent, agent_id)
+        assert reloaded.status == :idle
+        assert reloaded.last_heartbeat_at != nil
+      end
+    end
+
+    test "failed turn stamps last_heartbeat_at and leaves agent idle", %{
+      agent_id: agent_id,
+      agent: agent,
+      issue: issue
+    } do
+      assert is_nil(agent.last_heartbeat_at)
+      session_id = "session-hb-fail"
+      run_id = Ecto.UUID.generate()
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{status: :in_progress, assignee_id: agent_id})
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           fail_run: fn _run, _reason, _usage -> {:ok, %{id: run_id}} end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
+
+        send(pid, {:turn_ended_with_error, session_id, {:exit_code, 1}})
+        assert :ok = wait_until_stopped(pid)
+
+        reloaded = Repo.get!(Agent, agent_id)
+        assert reloaded.status == :idle
+        assert reloaded.last_heartbeat_at != nil
       end
     end
   end

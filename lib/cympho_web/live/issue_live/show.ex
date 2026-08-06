@@ -70,6 +70,7 @@ defmodule CymphoWeb.IssueLive.Show do
            comment_templates: comment_templates(),
            work_product_form: blank_work_product_form(),
            show_work_product_form: false,
+           show_pr_form: false,
            agents: list_idle_agents(socket),
            all_agents: list_company_agents(socket),
            orchestrator_enabled?: Cympho.Orchestrator.Dispatcher.enabled?(),
@@ -425,6 +426,34 @@ defmodule CymphoWeb.IssueLive.Show do
        show_work_product_form: false,
        work_product_form: blank_work_product_form()
      )}
+  end
+
+  def handle_event("set_github_pr_url", %{"url" => raw_url}, socket) do
+    url = raw_url |> to_string() |> String.trim()
+
+    if url == "" do
+      {:noreply, put_flash(socket, :error, "Enter a pull request URL.")}
+    else
+      attrs = %{github_pr_url: url, github_pr_number: nil}
+
+      case Issues.update_issue(socket.assigns.issue, attrs) do
+        {:ok, issue} ->
+          {:noreply,
+           socket
+           |> assign(
+             issue: %{issue | project: socket.assigns.issue.project},
+             show_pr_form: false
+           )
+           |> put_flash(:info, "PR link saved.")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to save PR link.")}
+      end
+    end
+  end
+
+  def handle_event("cancel_pr_form", _params, socket) do
+    {:noreply, assign(socket, :show_pr_form, false)}
   end
 
   @impl true
@@ -908,18 +937,7 @@ defmodule CymphoWeb.IssueLive.Show do
              "status" => String.to_existing_atom(status),
              "resolved_by_user_id" => user_id
            }) do
-      interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-
-      timeline =
-        build_timeline(
-          socket.assigns.issue,
-          socket.assigns.runs,
-          interactions,
-          socket.assigns.work_products,
-          socket.assigns.tool_call_traces
-        )
-
-      {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
+      {:noreply, refresh_interaction_thread(socket)}
     else
       {:error, :stale_target_revision} ->
         {:noreply,
@@ -956,18 +974,8 @@ defmodule CymphoWeb.IssueLive.Show do
              "resolved_by_user_id" => user_id,
              "response" => response
            }) do
-      interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-
-      timeline =
-        build_timeline(
-          socket.assigns.issue,
-          socket.assigns.runs,
-          interactions,
-          socket.assigns.work_products,
-          socket.assigns.tool_call_traces
-        )
-
-      {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
+      # Response is posted as a comment; reload issue so Simple thread shows it.
+      {:noreply, refresh_interaction_thread(socket)}
     else
       {:error, :invalid_transition} ->
         {:noreply, put_flash(socket, :error, "Invalid state transition")}
@@ -1696,6 +1704,7 @@ defmodule CymphoWeb.IssueLive.Show do
   defp resolve_review_gate(socket, "work_product") do
     socket
     |> assign(:show_work_product_form, true)
+    |> assign(:show_pr_form, false)
     |> assign(:timeline_filter, "artifacts")
     |> put_flash(:info, "Work product form opened.")
   end
@@ -1734,7 +1743,10 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   defp resolve_review_gate(socket, "code_reference") do
-    put_flash(socket, :info, "Use the GitHub PR field in the sidebar to set the code reference.")
+    socket
+    |> assign(:show_pr_form, true)
+    |> assign(:show_work_product_form, false)
+    |> put_flash(:info, "Set the pull request URL below.")
   end
 
   defp resolve_review_gate(socket, _action), do: socket
@@ -1811,6 +1823,20 @@ defmodule CymphoWeb.IssueLive.Show do
             {:noreply, put_flash(socket, :error, "Failed to update status")}
         end
     end
+  end
+
+  # Reload issue (comments) + interactions after a resolve/respond so the
+  # Simple thread and Advanced timeline both show the new state immediately.
+  defp refresh_interaction_thread(socket) do
+    issue =
+      case get_scoped_issue(socket, socket.assigns.issue.id) do
+        {:ok, reloaded} -> reloaded
+        {:error, _} -> socket.assigns.issue
+      end
+
+    socket
+    |> assign(:issue, issue)
+    |> maybe_rebuild_timeline()
   end
 
   # Rebuild timeline when issue updates (status changes, etc.)

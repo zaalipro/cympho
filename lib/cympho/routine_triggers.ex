@@ -155,7 +155,8 @@ defmodule Cympho.RoutineTriggers do
     trigger_type = Keyword.get(opts, :trigger_type, trigger.type)
     variables = Keyword.get(opts, :variables, %{})
 
-    with {:ok, :enqueue} <- apply_concurrency_policy(routine) do
+    with {:ok, company_id} <- resolve_routine_company_id(routine),
+         {:ok, :enqueue} <- apply_concurrency_policy(routine) do
       now = DateTime.utc_now()
 
       run_attrs = %{
@@ -171,7 +172,7 @@ defmodule Cympho.RoutineTriggers do
         Ecto.Multi.new()
         |> Ecto.Multi.insert(:run, RoutineRun.changeset(%RoutineRun{}, run_attrs))
         |> Ecto.Multi.run(:issue, fn repo, %{run: run} ->
-          create_run_issue(repo, run, trigger, routine, now)
+          create_run_issue(repo, run, trigger, routine, company_id, now)
         end)
         |> Ecto.Multi.run(:update_run, fn repo, %{issue: issue, run: run} ->
           run
@@ -194,7 +195,7 @@ defmodule Cympho.RoutineTriggers do
     end
   end
 
-  defp create_run_issue(repo, run, trigger, routine, now) do
+  defp create_run_issue(repo, run, trigger, routine, company_id, now) do
     issue_attrs = %{
       "title" =>
         "[Routine] #{routine.name} — #{format_trigger_type(run.trigger_type)} #{Calendar.strftime(now, "%Y-%m-%d %H:%M")}",
@@ -202,7 +203,8 @@ defmodule Cympho.RoutineTriggers do
       "status" => "todo",
       "priority" => routine_priority(routine),
       "assignee_id" => routine.agent_id,
-      "project_id" => routine.project_id
+      "project_id" => routine.project_id,
+      "company_id" => company_id
     }
 
     case %Cympho.Issues.Issue{}
@@ -210,6 +212,31 @@ defmodule Cympho.RoutineTriggers do
          |> repo.insert() do
       {:ok, issue} -> {:ok, issue}
       {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  # Resolve company_id for issues created by routine fire/manual run.
+  # Prefer routine.company_id, then agent, then project — fail closed if none.
+  defp resolve_routine_company_id(%Routine{} = routine) do
+    company_id =
+      cond do
+        is_binary(routine.company_id) ->
+          routine.company_id
+
+        match?(%{company_id: id} when is_binary(id), routine.agent) ->
+          routine.agent.company_id
+
+        match?(%{company_id: id} when is_binary(id), routine.project) ->
+          routine.project.company_id
+
+        true ->
+          nil
+      end
+
+    if is_binary(company_id) do
+      {:ok, company_id}
+    else
+      {:error, :missing_company_id}
     end
   end
 
@@ -377,7 +404,8 @@ defmodule Cympho.RoutineTriggers do
   defp do_manual_run(routine, opts) do
     variables = Keyword.get(opts, :variables, %{})
 
-    with {:ok, :enqueue} <- apply_concurrency_policy(routine) do
+    with {:ok, company_id} <- resolve_routine_company_id(routine),
+         {:ok, :enqueue} <- apply_concurrency_policy(routine) do
       now = DateTime.utc_now()
 
       run_attrs = %{
@@ -393,7 +421,7 @@ defmodule Cympho.RoutineTriggers do
         Ecto.Multi.new()
         |> Ecto.Multi.insert(:run, RoutineRun.changeset(%RoutineRun{}, run_attrs))
         |> Ecto.Multi.run(:issue, fn repo, %{run: run} ->
-          create_manual_run_issue(repo, run, routine, now)
+          create_manual_run_issue(repo, run, routine, company_id, now)
         end)
         |> Ecto.Multi.run(:update_run, fn repo, %{issue: issue, run: run} ->
           run
@@ -416,7 +444,7 @@ defmodule Cympho.RoutineTriggers do
     end
   end
 
-  defp create_manual_run_issue(repo, _run, routine, now) do
+  defp create_manual_run_issue(repo, _run, routine, company_id, now) do
     issue_attrs = %{
       "title" =>
         "[Routine] #{routine.name} — Manual run #{Calendar.strftime(now, "%Y-%m-%d %H:%M")}",
@@ -429,7 +457,8 @@ defmodule Cympho.RoutineTriggers do
       "status" => "todo",
       "priority" => routine_priority(routine),
       "assignee_id" => routine.agent_id,
-      "project_id" => routine.project_id
+      "project_id" => routine.project_id,
+      "company_id" => company_id
     }
 
     case %Cympho.Issues.Issue{}

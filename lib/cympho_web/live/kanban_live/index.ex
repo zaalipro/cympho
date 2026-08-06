@@ -3,6 +3,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   import CymphoWeb.KanbanLive.Components
   alias Cympho.Issues
   alias Cympho.Issues.Issue
+  alias Cympho.Issues.StateMachine
   alias Cympho.AgentHeartbeat
   alias Cympho.HeartbeatEngine
   alias Cympho.Orchestrator.Dispatcher
@@ -167,12 +168,23 @@ defmodule CymphoWeb.KanbanLive.Index do
     {:noreply, apply_project_filter(socket, socket.assigns[:selected_project_id])}
   end
 
+  # Fired after blocker-resolution wakes land (status-only broadcasts race ahead
+  # of WakeupQueue.enqueue). Refresh badges without a full board reload.
+  def handle_info({:pending_wakes_changed, company_id}, socket) do
+    if current_company_id(socket) == company_id do
+      {:noreply, assign(socket, :pending_wakes, load_pending_wakes(socket.assigns.issues))}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_info({:issue_created, issue}, socket) do
     issues = [issue | socket.assigns.issues]
 
     {:noreply,
      socket
      |> assign(:issues, issues)
+     |> assign(:pending_wakes, load_pending_wakes(issues))
      |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
   end
 
@@ -185,6 +197,7 @@ defmodule CymphoWeb.KanbanLive.Index do
     {:noreply,
      socket
      |> assign(:issues, issues)
+     |> assign(:pending_wakes, load_pending_wakes(issues))
      |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
   end
 
@@ -194,6 +207,7 @@ defmodule CymphoWeb.KanbanLive.Index do
     {:noreply,
      socket
      |> assign(:issues, issues)
+     |> assign(:pending_wakes, load_pending_wakes(issues))
      |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
   end
 
@@ -595,13 +609,19 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   def issues_for_status(issues, status), do: Enum.filter(issues, &(&1.status == status))
 
-  def valid_next_statuses(:backlog), do: [:todo, :cancelled]
-  def valid_next_statuses(:todo), do: [:in_progress, :blocked, :cancelled]
-  def valid_next_statuses(:in_progress), do: [:in_review, :blocked, :done, :cancelled]
-  def valid_next_statuses(:in_review), do: [:done, :in_progress, :cancelled]
-  def valid_next_statuses(:blocked), do: [:todo, :in_progress, :cancelled]
-  def valid_next_statuses(:done), do: []
-  def valid_next_statuses(:cancelled), do: []
+  # Menus and DnD validity must track the state machine — do not hardcode a
+  # lagging graph here.
+  def valid_next_statuses(status) when is_atom(status), do: StateMachine.valid_transitions(status)
+
+  def valid_next_statuses(status) when is_binary(status) do
+    try do
+      status |> String.to_existing_atom() |> StateMachine.valid_transitions()
+    rescue
+      ArgumentError -> []
+    end
+  end
+
+  def valid_next_statuses(_status), do: []
 
   def status_label(:backlog), do: "Backlog"
   def status_label(:todo), do: "To Do"

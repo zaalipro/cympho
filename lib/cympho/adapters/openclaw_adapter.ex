@@ -8,6 +8,15 @@ defmodule Cympho.Adapters.OpenClawAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  alias Cympho.Adapters.RuntimeTimeout
+
+  # Bounded request wall clock. Without this, :httpc hangs forever and the
+  # registered adapter session holds issue checkout until operator cancel.
+  @default_timeout 300_000
+  @max_timeout 3_600_000
+  @health_timeout 5_000
+  @connect_timeout 30_000
+
   @impl true
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
     session_id = make_ref()
@@ -48,6 +57,7 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   defp dispatch_to_openclaw(issue, agent_id, config, opts) do
     endpoint = get_endpoint(config)
     api_key = get_api_key(config)
+    timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
 
     cond do
       is_nil(endpoint) or endpoint == "" ->
@@ -56,7 +66,7 @@ defmodule Cympho.Adapters.OpenClawAdapter do
       true ->
         payload = build_openclaw_payload(issue, agent_id, config)
         attach_payload_telemetry(opts, payload)
-        make_openclaw_request(endpoint, api_key, payload)
+        make_openclaw_request(endpoint, api_key, payload, timeout)
     end
   end
 
@@ -119,18 +129,18 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   defp maybe_put_context(payload, nil), do: payload
   defp maybe_put_context(payload, context), do: put_in(payload, ["task", "context"], context)
 
-  defp make_openclaw_request(endpoint, api_key, payload) do
+  defp make_openclaw_request(endpoint, api_key, payload, timeout) do
     # Ensure inets application is started before using :httpc
     case Application.ensure_all_started(:inets) do
       {:ok, _} ->
-        do_make_openclaw_request(endpoint, api_key, payload)
+        do_make_openclaw_request(endpoint, api_key, payload, timeout)
 
       {:error, reason} ->
         {:error, {:inets_start_failed, reason}}
     end
   end
 
-  defp do_make_openclaw_request(endpoint, api_key, payload) do
+  defp do_make_openclaw_request(endpoint, api_key, payload, timeout) do
     url = build_openclaw_url(endpoint)
 
     headers = [
@@ -146,11 +156,12 @@ defmodule Cympho.Adapters.OpenClawAdapter do
       end
 
     body = Jason.encode!(payload)
+    http_options = httpc_http_options(timeout)
 
     case :httpc.request(
            :post,
            {url, headers, "application/json", body},
-           [],
+           http_options,
            body_format: :binary
          ) do
       {:ok, {{_, status_code, _}, _headers, response_body}} when status_code in 200..299 ->
@@ -159,9 +170,20 @@ defmodule Cympho.Adapters.OpenClawAdapter do
       {:ok, {{_, status_code, _}, _headers, response_body}} ->
         {:error, {:http_error, status_code, response_body}}
 
+      {:error, :timeout} ->
+        {:error, :timeout}
+
       {:error, reason} ->
         {:error, {:request_failed, reason}}
     end
+  end
+
+  # :httpc has no default timeout — empty options hang forever on a stuck peer.
+  defp httpc_http_options(timeout) when is_integer(timeout) and timeout > 0 do
+    [
+      {:timeout, timeout},
+      {:connect_timeout, min(timeout, @connect_timeout)}
+    ]
   end
 
   defp build_openclaw_url(endpoint) do
@@ -230,7 +252,9 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   end
 
   defp do_health_check_request(health_url) do
-    case :httpc.request(:get, {health_url, []}, [], []) do
+    http_options = httpc_http_options(@health_timeout)
+
+    case :httpc.request(:get, {health_url, []}, http_options, []) do
       {:ok, {{_, 200, _}, _, _}} ->
         %{
           status: :healthy,
@@ -270,6 +294,21 @@ defmodule Cympho.Adapters.OpenClawAdapter do
         required: false,
         default: nil,
         description: "OpenClaw API key for authentication"
+      },
+      %{
+        key: :timeout,
+        type: :integer,
+        required: false,
+        default: @default_timeout,
+        description:
+          "Request timeout in milliseconds. Prefer timeout_sec for human-entered values."
+      },
+      %{
+        key: :timeout_sec,
+        type: :integer,
+        required: false,
+        default: div(@default_timeout, 1_000),
+        description: "Request timeout in seconds; conflicts with timeout/timeout_ms are rejected."
       },
       %{
         key: :provider,
@@ -331,6 +370,7 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   def validate_config(config) do
     with :ok <- validate_endpoint(config["endpoint"] || config[:endpoint]),
          :ok <- validate_api_key(config["api_key"] || config[:api_key]),
+         :ok <- validate_timeout(config),
          :ok <- validate_string(config["provider"] || config[:provider], "provider"),
          :ok <- validate_string(config["model"] || config[:model], "model"),
          :ok <- validate_runtime(config["agent_runtime"] || config[:agent_runtime]),
@@ -339,6 +379,9 @@ defmodule Cympho.Adapters.OpenClawAdapter do
       :ok
     end
   end
+
+  defp validate_timeout(config),
+    do: RuntimeTimeout.validate(config, max_ms: @max_timeout, field: "timeout")
 
   defp validate_endpoint(nil), do: {:error, "endpoint is required"}
   defp validate_endpoint(""), do: {:error, "endpoint cannot be empty"}

@@ -36,6 +36,23 @@ defmodule Cympho.RateLimiting.AgentActionLimiterTest do
     assert :ok = RateLimiter.check(nil)
   end
 
+  test "check_for_company is fail-closed without company_id" do
+    agent_id = "tenant-#{System.unique_integer([:positive])}"
+    assert {:error, :rate_limited} = RateLimiter.check_for_company(agent_id, nil)
+    assert {:error, :rate_limited} = RateLimiter.check_for_company(agent_id, "")
+  end
+
+  test "check_for_company shares the per-agent cap with check/1" do
+    agent_id = "shared-#{System.unique_integer([:positive])}"
+    company_id = "company-#{System.unique_integer([:positive])}"
+
+    assert :ok = RateLimiter.check(agent_id)
+    assert :ok = RateLimiter.check_for_company(agent_id, company_id)
+    assert :ok = RateLimiter.check_for_company(agent_id, company_id)
+    assert {:error, :rate_limited} = RateLimiter.check_for_company(agent_id, company_id)
+    assert {:error, :rate_limited} = RateLimiter.check(agent_id)
+  end
+
   test "concurrent calls for the same agent only allow `cap` successes" do
     agent_id = "race-#{System.unique_integer([:positive])}"
 

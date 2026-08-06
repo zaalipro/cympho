@@ -254,22 +254,37 @@ user_attrs = %{
   company_id: company.id
 }
 
-# Create or Update the admin user
-case Repo.get_by(User, email: admin_email) do
-  nil ->
-    %User{}
-    |> User.registration_changeset(user_attrs)
-    |> Repo.insert()
-    |> case do
-      {:ok, _user} -> 
-        IO.puts("Admin user created successfully!")
-      {:error, changeset} -> 
-        IO.puts("Failed to create admin user:")
-        IO.inspect(changeset.errors)
-    end
-  _user ->
-    IO.puts("Admin user with this email already exists.")
-end
+# Create or update the admin user, then ensure owner+board membership.
+# UserAuth resolves current_company from company_memberships only — users.company_id
+# alone is not enough and would bounce the admin to /onboarding after login.
+user =
+  case Repo.get_by(User, email: admin_email) do
+    nil ->
+      case %User{}
+           |> User.registration_changeset(user_attrs)
+           |> Repo.insert() do
+        {:ok, user} ->
+          IO.puts("Admin user created successfully!")
+          user
+
+        {:error, changeset} ->
+          IO.puts("Failed to create admin user:")
+          IO.inspect(changeset.errors)
+          raise "install seed failed to create admin user"
+      end
+
+    existing ->
+      IO.puts("Admin user with this email already exists.")
+
+      existing
+      |> Ecto.Changeset.change(company_id: company.id)
+      |> Repo.update!()
+  end
+
+membership = Companies.ensure_owner_membership!(user.id, company.id)
+IO.puts(
+  "Owner membership ensured (role=#{membership.role}, is_board_member=#{membership.is_board_member})."
+)
 EOF
 
 mix run seed_admin.exs

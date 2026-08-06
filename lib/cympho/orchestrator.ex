@@ -240,9 +240,9 @@ defmodule Cympho.Orchestrator do
     agent_id = session.agent_id
 
     {updated_tool_traces, _trace_id} =
-      capture_tool_call(tool_call, issue, agent_id, session.tool_traces)
+      capture_tool_call(tool_call, issue, agent_id, session.tool_traces, session.run_id)
 
-    # Record tool call
+    # Record tool call (args/results redacted — never re-emit raw payloads)
     _ =
       Instrumenter.record_tool_call(
         session,
@@ -483,7 +483,29 @@ defmodule Cympho.Orchestrator do
     # from being blocked and the agent from being released below.
     create_agent_comment(issue, agent_id, error_body)
 
-    block_issue(issue)
+    # Intervene reassign / crash reclaim / successor bind may have already
+    # moved ownership. Re-blocking would undo that recovery (stuck sessions
+    # thrash between :todo reassignment and :blocked from a dying session).
+    case Issues.get_issue(issue.id) do
+      {:ok, latest} ->
+        if session_still_owns_failure_path?(latest, session) do
+          block_issue(latest)
+        else
+          _ = maybe_clear_session_owned_checkout(session, latest)
+
+          Logger.info(
+            "[Orchestrator] finish_failed_session skipped block — ownership already moved",
+            issue_id: issue.id,
+            agent_id: agent_id,
+            current_assignee_id: latest.assignee_id,
+            current_status: latest.status,
+            checkout_run_id: latest.checkout_run_id
+          )
+        end
+
+      {:error, _} ->
+        block_issue(issue)
+    end
 
     if provider_limit_failure?(reason) do
       pause_agent_for_provider_limit(agent_id, issue, reason)
@@ -492,6 +514,45 @@ defmodule Cympho.Orchestrator do
     end
 
     {:stop, :normal, session}
+  end
+
+  # Only park when this session still owns the live failure path. A reassign,
+  # force handoff, or successor run bind means someone else owns recovery.
+  #
+  # `fail_engine_run/2` already clears checkout to `:todo` while keeping the
+  # assignee — that release is still *our* failure path and must block. Only
+  # skip when ownership truly moved away from this session.
+  defp session_still_owns_failure_path?(%Issue{} = latest, %__MODULE__{} = session) do
+    successor_owns_checkout? =
+      is_binary(latest.checkout_run_id) and is_binary(session.run_id) and
+        latest.checkout_run_id != session.run_id
+
+    reassigned_to_other? =
+      is_binary(latest.assignee_id) and latest.assignee_id != session.agent_id
+
+    already_terminal? = latest.status in [:done, :cancelled]
+
+    not successor_owns_checkout? and not reassigned_to_other? and not already_terminal?
+  end
+
+  defp maybe_clear_session_owned_checkout(%__MODULE__{run_id: nil}, _latest), do: :ok
+
+  defp maybe_clear_session_owned_checkout(%__MODULE__{} = session, %Issue{} = latest) do
+    if latest.checkout_run_id == session.run_id and latest.assignee_id == session.agent_id do
+      target = if latest.status == :in_progress, do: :todo, else: latest.status
+
+      case Issues.clear_checkout_lock_for_run(
+             latest.id,
+             session.agent_id,
+             session.run_id,
+             target
+           ) do
+        {:ok, _} -> :ok
+        {:error, _} -> :ok
+      end
+    else
+      :ok
+    end
   end
 
   @impl true
@@ -550,7 +611,15 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp finalize_active_run_on_shutdown(%__MODULE__{run_id: nil}, _reason), do: :ok
+  defp finalize_active_run_on_shutdown(%__MODULE__{run_id: nil} = session, reason) do
+    # No run row — still drop any remote env bound to the issue on cancel/stop.
+    if cancellation_shutdown_reason?(reason) do
+      _ = cancel_issue_environment(session)
+    end
+
+    :ok
+  end
+
   defp finalize_active_run_on_shutdown(%__MODULE__{}, :normal), do: :ok
 
   defp finalize_active_run_on_shutdown(%__MODULE__{} = session, reason) do
@@ -571,9 +640,18 @@ defmodule Cympho.Orchestrator do
           Logger.warning(
             "[Orchestrator] failed to finalize run #{session.run_id} during shutdown: #{inspect(error)}"
           )
+
+          # Run finalize failed; still attempt env release so stop paths cannot
+          # leak sandbox spend when provider_ref is present.
+          _ = cancel_issue_environment(session)
       end
     else
-      _ -> :ok
+      _ ->
+        if cancellation_shutdown_reason?(reason) do
+          _ = cancel_issue_environment(session)
+        end
+
+        :ok
     end
   rescue
     error ->
@@ -581,6 +659,29 @@ defmodule Cympho.Orchestrator do
         "[Orchestrator] failed to finalize run #{session.run_id} during shutdown: #{Exception.message(error)}"
       )
   end
+
+  defp cancel_issue_environment(%__MODULE__{issue: issue}) when not is_nil(issue) do
+    issue_id = Map.get(issue, :id)
+
+    try do
+      Cympho.Workspaces.cancel_and_release_for_issue(issue, %{
+        reason: "orchestrator_shutdown",
+        company_id: Map.get(issue, :company_id)
+      })
+    rescue
+      error ->
+        Logger.warning(
+          "[Orchestrator] environment cancel/release failed during shutdown",
+          component: "orchestrator",
+          issue_id: issue_id,
+          error: Exception.message(error)
+        )
+
+        :ok
+    end
+  end
+
+  defp cancel_issue_environment(_session), do: :ok
 
   defp active_run_status?(status), do: status in ["pending", "queued", "running"]
 
@@ -1186,27 +1287,31 @@ defmodule Cympho.Orchestrator do
     set_agent_idle(agent_id)
   end
 
-  defp finalize_agent_after_completed_turn(issue, agent_id, {:error, :unresolved_current_issue}) do
-    case record_no_progress_failure(agent_id) do
-      {:ok, _count} ->
-        set_agent_idle(agent_id)
+  defp finalize_agent_after_completed_turn(issue, agent_id, {:error, reason}) do
+    if AgentActions.retriable_contract_error?(reason) do
+      case record_no_progress_failure(agent_id) do
+        {:ok, _count} ->
+          # Keep assignment: fail_run already released checkout to :todo while
+          # preserving assignee so the agent can self-correct on the next wake.
+          set_agent_idle(agent_id)
 
-      {:tripped, failure_count, cancelled_wakes} ->
-        create_system_comment(
-          issue,
-          "No-progress circuit breaker paused this agent after #{failure_count} consecutive action-contract failures and cancelled #{cancelled_wakes} queued #{pluralize(cancelled_wakes, "wake")}. The agent kept producing non-resolving work; fix its instructions, runtime profile, or model choice, then resume it."
-        )
+        {:tripped, failure_count, cancelled_wakes} ->
+          park_issue_for_repeated_contract_failure(issue, agent_id, failure_count, reason)
 
-      {:failed_to_trip, failure_count} ->
-        create_system_comment(
-          issue,
-          "No-progress circuit breaker reached #{failure_count} consecutive action-contract failures, but Cympho could not pause the agent automatically. The agent was left in error state for operator repair."
-        )
+          create_system_comment(
+            issue,
+            "No-progress circuit breaker paused this agent after #{failure_count} consecutive action-contract failures and cancelled #{cancelled_wakes} queued #{pluralize(cancelled_wakes, "wake")}. The agent kept producing non-resolving work; fix its instructions, runtime profile, or model choice, then resume it."
+          )
+
+        {:failed_to_trip, failure_count} ->
+          create_system_comment(
+            issue,
+            "No-progress circuit breaker reached #{failure_count} consecutive action-contract failures, but Cympho could not pause the agent automatically. The agent was left in error state for operator repair."
+          )
+      end
+    else
+      set_agent_idle(agent_id)
     end
-  end
-
-  defp finalize_agent_after_completed_turn(_issue, agent_id, {:error, _reason}) do
-    set_agent_idle(agent_id)
   end
 
   defp reset_no_progress_failure(agent_id) do
@@ -1552,9 +1657,12 @@ defmodule Cympho.Orchestrator do
         handle_parsed_agent_actions(issue, agent_id, body, actions)
 
       {:error, reason} ->
-        block_issue_with_comment(
+        # Parse/shape mistakes are retriable: leave a system note, keep
+        # assignment, and fail the run so the agent can emit a valid block.
+        create_system_comment(
           issue,
-          "Agent response did not include a valid cympho-actions block: #{inspect(reason)}"
+          "Agent response did not include a valid cympho-actions block: #{inspect(reason)}. " <>
+            "Assignment is kept so you can retry with exactly one fenced cympho-actions JSON block."
         )
 
         {:error, reason}
@@ -1567,9 +1675,13 @@ defmodule Cympho.Orchestrator do
         maybe_create_completion_handoff_comment(issue, agent_id, body, actions, result)
 
         if AgentActions.unresolved_current_issue?(issue, agent_id) do
-          block_issue_with_comment(
+          # Comment-only / non-resolving batches are retriable contract failures.
+          # Do not force-park or clear assignee — only N consecutive failures
+          # (or a true block_issue wait) park with a structured blocker_packet.
+          create_system_comment(
             issue,
-            "Agent actions did not resolve the current issue. Emit a resolving action: handoff, block_issue, submit_review, approve_issue, or swarm_worker_complete."
+            "Agent actions did not resolve the current issue. Emit a resolving action: handoff, block_issue, submit_review, approve_issue, or swarm_worker_complete. " <>
+              "Assignment is kept so you can self-correct on the next turn."
           )
 
           {:error, :unresolved_current_issue}
@@ -1578,12 +1690,82 @@ defmodule Cympho.Orchestrator do
         end
 
       {:error, reason} ->
-        block_issue_with_comment(
-          issue,
-          "Agent cympho-actions block parsed, but action execution failed: #{inspect(reason)}"
-        )
+        handle_action_execution_failure(issue, reason)
+    end
+  end
 
-        {:error, reason}
+  # Retriable action-contract errors (invalid blocker_kind, thin reasons,
+  # quality gates, unauthorized role actions, …) already received a rejection
+  # comment from AgentActions. Keep assignment + fail the run; do not force-block.
+  # Non-retriable failures (cross-tenant, executor crash) still park for operators.
+  defp handle_action_execution_failure(issue, reason) do
+    if AgentActions.retriable_contract_error?(reason) do
+      {:error, reason}
+    else
+      block_issue_with_comment(
+        issue,
+        "Agent cympho-actions block parsed, but action execution failed: #{inspect(reason)}"
+      )
+
+      {:error, reason}
+    end
+  end
+
+  # After N consecutive retriable contract failures the circuit breaker pauses
+  # the agent; also park the issue with a structured blocker_packet so owners
+  # see a recoverable packet rather than a bare Blocked state.
+  defp park_issue_for_repeated_contract_failure(issue, agent_id, failure_count, reason) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+    packet = %{
+      "schema" => "cympho.blocker_packet.v1",
+      "kind" => "other",
+      "reason" =>
+        "Paused after #{failure_count} consecutive action-contract failures: #{inspect(reason)}",
+      "cause" =>
+        "Agent produced #{failure_count} consecutive non-resolving or contract-invalid turns.",
+      "attempted_fix" =>
+        "Server rejection comments listed the contract repair; agent did not self-correct in time.",
+      "needs" =>
+        "Operator repair of agent instructions, runtime profile, or model choice; then resume the agent.",
+      "current_state" =>
+        "Agent paused by no-progress circuit breaker; issue parked for owner recovery.",
+      "next_decision" =>
+        "Fix the agent, resume it, and re-dispatch this issue — or reassign ownership.",
+      "restart_packet" =>
+        "After resume, re-read the latest system rejection comments and emit a valid resolving action.",
+      "blocked_by_agent_id" => agent_id,
+      "blocked_at" => now
+    }
+
+    case Issues.get_issue(issue.id) do
+      {:ok, latest} ->
+        monitor =
+          (latest.monitor_state || %{})
+          |> Map.put("block_reason_kind", "other")
+          |> Map.put("blocker_packet", packet)
+          |> Map.put("no_progress_failure_count", failure_count)
+
+        case Issues.update_issue(latest, %{
+               status: :blocked,
+               assignee_id: nil,
+               checkout_run_id: nil,
+               checked_out_at: nil,
+               monitor_state: monitor
+             }) do
+          {:ok, _} ->
+            :ok
+
+          {:error, update_reason} ->
+            Logger.warning(
+              "[Orchestrator] Failed to park issue #{issue.id} after contract circuit trip: #{inspect(update_reason)}"
+            )
+
+            block_issue(latest)
+        end
+
+      {:error, _} ->
+        block_issue(issue)
     end
   end
 
@@ -1835,11 +2017,15 @@ defmodule Cympho.Orchestrator do
     case safe_get_agent(agent_id) do
       {:ok, %{status: status}} when status in [:paused, :terminated, :pending_approval] ->
         # An operator (or a circuit breaker) parked this agent mid-run;
-        # finishing the session must not silently resurrect it.
+        # finishing the session must not silently resurrect it. Still stamp
+        # liveness so the roster does not show Never after a real run.
+        _ = Agents.touch_heartbeat(agent_id)
         :ok
 
       {:ok, agent} ->
-        Agents.update_agent(agent, %{status: :idle})
+        # Status transition stamps last_heartbeat_at so complete/fail runs
+        # clear roster "Never" without relying on PATCH /status.
+        Agents.update_agent_status(agent, %{status: :idle})
 
       {:error, _} ->
         :error
@@ -1849,7 +2035,7 @@ defmodule Cympho.Orchestrator do
   defp set_agent_error(agent_id) do
     case safe_get_agent(agent_id) do
       {:ok, agent} ->
-        Agents.update_agent(agent, %{status: :error})
+        Agents.update_agent_status(agent, %{status: :error})
 
       {:error, _} ->
         :error
@@ -1915,6 +2101,12 @@ defmodule Cympho.Orchestrator do
   end
 
   defp release_issue_after_adapter_error(%Issue{} = issue) do
+    _ =
+      Cympho.Workspaces.cancel_and_release_for_issue(issue, %{
+        reason: "orchestrator_adapter_error",
+        company_id: issue.company_id
+      })
+
     case Issues.force_release_issue(issue, :todo) do
       {:ok, _updated} ->
         :ok
@@ -1927,6 +2119,11 @@ defmodule Cympho.Orchestrator do
   end
 
   defp release_issue_after_adapter_error(issue) do
+    _ =
+      Cympho.Workspaces.cancel_and_release_for_issue(issue, %{
+        reason: "orchestrator_adapter_error"
+      })
+
     Issues.transition_issue(issue, :todo)
   end
 
@@ -2001,7 +2198,11 @@ defmodule Cympho.Orchestrator do
     Enum.each(tool_traces, fn {_tool_use_id, trace_id} ->
       case Cympho.ToolCallTraces.get_tool_call_trace(trace_id) do
         {:ok, trace} ->
-          status = if reason == :stall_timeout, do: "timeout", else: "error"
+          status =
+            if reason in [:stall_timeout, :max_run_timeout, :timeout],
+              do: "timeout",
+              else: "error"
+
           error_message = "Session error: #{inspect(reason)}"
 
           case Cympho.ToolCallTraces.update_tool_call_trace_status(trace, status, error_message) do
@@ -2020,7 +2221,7 @@ defmodule Cympho.Orchestrator do
     end)
   end
 
-  defp capture_tool_call(tool_call, issue, agent_id, tool_traces) do
+  defp capture_tool_call(tool_call, issue, agent_id, tool_traces, run_id) do
     try do
       attrs = %{
         trace_type: "tool_invocation",
@@ -2030,6 +2231,7 @@ defmodule Cympho.Orchestrator do
         company_id: issue.company_id,
         agent_id: agent_id,
         issue_id: issue.id,
+        run_id: run_id,
         actor_type: "agent",
         actor_id: agent_id,
         occurred_at: DateTime.utc_now()
@@ -2047,6 +2249,7 @@ defmodule Cympho.Orchestrator do
               company_id: issue.company_id,
               agent_id: agent_id,
               issue_id: issue.id,
+              run_id: run_id,
               trace_id: trace.id
             }
           )

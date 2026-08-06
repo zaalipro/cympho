@@ -11,6 +11,7 @@ defmodule Cympho.OwnerAttention do
 
   alias Cympho.Approvals
   alias Cympho.BoardApprovals
+  alias Cympho.Budgets
   alias Cympho.Finances.BudgetIncident
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues
@@ -39,14 +40,42 @@ defmodule Cympho.OwnerAttention do
 
   @doc "Notifies subscribed UI surfaces that the company attention count changed."
   def notify_changed(company_id) when is_binary(company_id) do
-    Phoenix.PubSub.broadcast(
-      @pubsub,
-      attention_topic(company_id),
+    Cympho.PubSubGuard.company_broadcast(
+      company_id,
+      "owner_attention",
       {:owner_attention_changed, company_id}
     )
   end
 
   def notify_changed(_company_id), do: :ok
+
+  @doc """
+  Notifies when an issue enters or leaves the human-action attention set.
+
+  Matches `Issues.human_action_query/3` membership: non-terminal issues that are
+  either assigned to a human (`assignee_user_id`) or `:blocked` (visible to every
+  owner). Unrelated field updates and status moves that keep the same audience
+  (e.g. `:todo` → `:in_progress` with the same assignee) do not notify.
+  """
+  def maybe_notify_human_action_membership(previous, current)
+
+  def maybe_notify_human_action_membership(nil, %Issue{} = current) do
+    if human_action_audience(current) != :none do
+      notify_changed(current.company_id)
+    else
+      :ok
+    end
+  end
+
+  def maybe_notify_human_action_membership(%Issue{} = previous, %Issue{} = current) do
+    if human_action_audience(previous) != human_action_audience(current) do
+      notify_changed(current.company_id || previous.company_id)
+    else
+      :ok
+    end
+  end
+
+  def maybe_notify_human_action_membership(_previous, _current), do: :ok
 
   @doc "Returns unresolved owner-attention items, highest severity and newest first."
   def list_items(company_id, user, opts \\ [])
@@ -63,11 +92,15 @@ defmodule Cympho.OwnerAttention do
 
   def list_items(_company_id, _user, _opts), do: []
 
-  @doc "Returns items shown in the Inbox `Needs my action` lane."
+  @doc """
+  Returns items shown in the Inbox `Needs you` / action lane.
+
+  Same membership as `list_items/3` (including `:review_queue`) so Simple default
+  and the nav badge share one source of truth. Advanced "Awaiting review" still
+  slices via `list_review_items/3`.
+  """
   def list_action_items(company_id, user, opts \\ []) do
-    company_id
-    |> list_items(user, opts)
-    |> Enum.reject(&(&1.kind == :review_queue))
+    list_items(company_id, user, opts)
   end
 
   @doc "Returns items shown in the Inbox review lane."
@@ -77,7 +110,12 @@ defmodule Cympho.OwnerAttention do
     |> Enum.filter(&(&1.kind == :review_queue))
   end
 
-  @doc "Counts unresolved owner decisions without loading the full Inbox rows."
+  @doc """
+  Counts unresolved owner decisions without loading the full Inbox rows.
+
+  Membership matches `list_items/3` after issue-level dedup (reviews included).
+  Prefer this for nav badges so Simple Needs you and the badge stay in lockstep.
+  """
   def unresolved_count(company_id, user) when is_binary(company_id) do
     user_id = user_id(user)
 
@@ -87,7 +125,8 @@ defmodule Cympho.OwnerAttention do
       BoardApprovals.count_pending_for_company(company_id) +
       unresolved_interaction_count(company_id) +
       unresolved_failure_count(company_id) +
-      unresolved_budget_incident_count(company_id) -
+      unresolved_budget_incident_count(company_id) +
+      unresolved_stuck_only_count(company_id, user_id) -
       unresolved_interaction_human_overlap_count(company_id, user_id)
   end
 
@@ -113,6 +152,7 @@ defmodule Cympho.OwnerAttention do
       board_approval_items(company_id, agent_id) ++
       interaction_items(company_id, agent_id) ++
       failed_run_items(company_id, agent_id) ++
+      stuck_issue_items(company_id) ++
       budget_incident_items(company_id)
   end
 
@@ -227,6 +267,8 @@ defmodule Cympho.OwnerAttention do
     |> preload([:issue, :created_by_agent])
     |> Repo.all()
     |> Enum.map(fn interaction ->
+      card_body = interaction_card_body(interaction)
+
       attention_item(%{
         id: "interaction-#{interaction.id}",
         dedup_key: "issue:#{interaction.issue_id}",
@@ -236,8 +278,10 @@ defmodule Cympho.OwnerAttention do
         issue_id: interaction.issue_id,
         agent: interaction.created_by_agent,
         agent_id: interaction.created_by_agent_id,
+        interaction_kind: interaction.kind,
         title: interaction_title(interaction),
-        summary: interaction_summary(interaction.kind),
+        summary: interaction_summary(interaction),
+        card_body: card_body,
         target_path: "/issues/#{interaction.issue_id}",
         target_label: interaction_target_label(interaction.kind),
         diagnostic: "#{humanize(interaction.kind)} · Pending owner response",
@@ -279,6 +323,10 @@ defmodule Cympho.OwnerAttention do
     |> unresolved_budget_incident_query()
     |> Repo.all()
     |> Enum.map(fn incident ->
+      raise_path = budget_raise_limit_path(incident)
+      resume_path = budget_resume_path(incident)
+      dismissable? = budget_incident_dismissable?(incident)
+
       attention_item(%{
         id: "budget-incident-#{incident.id}",
         dedup_key: "budget-policy:#{incident.budget_policy_id}",
@@ -287,11 +335,37 @@ defmodule Cympho.OwnerAttention do
         target_label_text: "Company budget",
         title: budget_incident_title(incident),
         summary: budget_incident_summary(incident),
-        target_path: "/costs",
-        target_label: "Review costs",
+        target_path: raise_path || "/costs",
+        target_label: if(raise_path, do: "Raise limit", else: "Open costs"),
+        raise_limit_path: raise_path,
+        resume_path: resume_path,
+        dismissable: dismissable?,
         diagnostic: budget_incident_diagnostic(incident),
         severity: budget_incident_severity(incident.event_type),
         inserted_at: incident.inserted_at
+      })
+    end)
+  end
+
+  # Swarm / in_progress / in_review / blocked stalls past patrol thresholds.
+  # Shares issue: dedup with human_action and interactions so one issue is one row.
+  defp stuck_issue_items(company_id) do
+    company_id
+    |> Issues.list_stuck_issues()
+    |> Enum.map(fn issue ->
+      attention_item(%{
+        id: "stuck-#{issue.id}",
+        dedup_key: "issue:#{issue.id}",
+        kind: :stuck_issue,
+        issue: issue,
+        issue_id: issue.id,
+        title: stuck_issue_title(issue),
+        summary: stuck_issue_summary(issue),
+        target_path: "/issues/#{issue.id}",
+        target_label: "Open stuck task",
+        diagnostic: stuck_issue_diagnostic(issue),
+        severity: stuck_issue_severity(issue),
+        inserted_at: issue.updated_at || issue.checked_out_at || issue.inserted_at
       })
     end)
   end
@@ -301,9 +375,14 @@ defmodule Cympho.OwnerAttention do
       %{
         agent: nil,
         agent_id: nil,
+        card_body: nil,
         diagnostic: nil,
+        dismissable: false,
+        interaction_kind: nil,
         issue: nil,
         issue_id: nil,
+        raise_limit_path: nil,
+        resume_path: nil,
         review_nudge: nil,
         source_id: nil,
         status: "action",
@@ -423,6 +502,89 @@ defmodule Cympho.OwnerAttention do
   defp human_action_count(_company_id, nil), do: 0
   defp human_action_count(company_id, user_id), do: Issues.human_action_count(company_id, user_id)
 
+  # Stuck issues that are not already counted as human_action or pending interaction
+  # (those share issue: dedup keys in list_items).
+  defp unresolved_stuck_only_count(company_id, user_id) do
+    interaction_issue_ids = pending_interaction_issue_ids(company_id)
+
+    company_id
+    |> Issues.list_stuck_issues()
+    |> Enum.count(fn issue ->
+      not human_action_issue?(issue, user_id) and
+        not MapSet.member?(interaction_issue_ids, issue.id)
+    end)
+  end
+
+  defp pending_interaction_issue_ids(company_id) do
+    company_id
+    |> unresolved_interaction_query()
+    |> exclude(:order_by)
+    |> select([interaction, _issue], interaction.issue_id)
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  defp human_action_issue?(_issue, nil), do: false
+
+  defp human_action_issue?(%Issue{} = issue, user_id) do
+    issue.assignee_user_id == user_id or issue.status == :blocked
+  end
+
+  defp human_action_issue?(_issue, _user_id), do: false
+
+  defp stuck_issue_title(%Issue{title: title, status: status}) when is_binary(title) do
+    "#{stuck_issue_status_label(status)} · #{title}"
+  end
+
+  defp stuck_issue_title(%Issue{status: status}), do: stuck_issue_status_label(status)
+
+  defp stuck_issue_status_label(:blocked), do: "Blocked too long"
+  defp stuck_issue_status_label(:in_review), do: "Review stalled"
+  defp stuck_issue_status_label(_status), do: "Work stalled"
+
+  defp stuck_issue_summary(%Issue{status: :blocked}) do
+    "This task has been blocked past the patrol threshold. Unblock it or reassign so the team can move."
+  end
+
+  defp stuck_issue_summary(%Issue{status: :in_review}) do
+    "This task has been in review too long. Approve, request changes, or reassign the reviewer."
+  end
+
+  defp stuck_issue_summary(_issue) do
+    "This task has been in progress past the patrol threshold with no completion. Check the agent or reassign."
+  end
+
+  defp stuck_issue_diagnostic(%Issue{} = issue) do
+    [
+      humanize(issue.status),
+      stuck_age_label(issue),
+      if(issue.assignee_id, do: "Agent assigned", else: "No agent assignee")
+    ]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" · ")
+  end
+
+  defp stuck_age_label(%Issue{status: :in_progress, checked_out_at: %DateTime{} = at}) do
+    "Checked out #{stuck_age_minutes(at)}m ago"
+  end
+
+  defp stuck_age_label(%Issue{updated_at: %DateTime{} = at}) do
+    "Updated #{stuck_age_minutes(at)}m ago"
+  end
+
+  defp stuck_age_label(_issue), do: nil
+
+  defp stuck_age_minutes(%DateTime{} = at) do
+    DateTime.diff(DateTime.utc_now(), at, :minute) |> max(0)
+  end
+
+  defp stuck_issue_severity(%Issue{status: :blocked}), do: :critical
+
+  defp stuck_issue_severity(%Issue{priority: priority}) when priority in [:critical, "critical"],
+    do: :critical
+
+  defp stuck_issue_severity(_issue), do: :high
+
   defp maybe_filter_run_agent(query, agent_id) when is_binary(agent_id),
     do: where(query, [r], r.agent_id == ^agent_id)
 
@@ -460,18 +622,109 @@ defmodule Cympho.OwnerAttention do
   defp interaction_title_prefix(:request_confirmation), do: "Confirmation needed"
   defp interaction_title_prefix(:suggest_tasks), do: "Task proposal needs review"
 
-  defp interaction_summary(:ask_user_questions),
+  defp interaction_summary(%IssueThreadInteraction{kind: kind, payload: payload}) do
+    case payload_message(payload) do
+      message when is_binary(message) and message != "" -> message
+      _ -> interaction_summary_fallback(kind)
+    end
+  end
+
+  defp interaction_summary_fallback(:ask_user_questions),
     do: "An agent needs your answer before this work can continue."
 
-  defp interaction_summary(:request_confirmation),
+  defp interaction_summary_fallback(:request_confirmation),
     do: "An agent needs your confirmation before this work can continue."
 
-  defp interaction_summary(:suggest_tasks),
+  defp interaction_summary_fallback(:suggest_tasks),
     do: "An agent proposed follow-up work and needs your review."
 
-  defp interaction_target_label(:ask_user_questions), do: "Answer on issue"
-  defp interaction_target_label(:request_confirmation), do: "Review confirmation"
-  defp interaction_target_label(:suggest_tasks), do: "Review proposed tasks"
+  defp interaction_summary_fallback(_kind),
+    do: "An agent is waiting for your decision before this work can continue."
+
+  # Safe, structured fields for Inbox card bodies. Only well-known keys are
+  # projected so raw agent payload maps (and secret-like labels) never dump.
+  defp interaction_card_body(%IssueThreadInteraction{kind: kind, payload: payload}) do
+    payload = payload || %{}
+
+    %{
+      kind: kind,
+      message: payload_message(payload),
+      lines: interaction_payload_lines(kind, payload)
+    }
+  end
+
+  defp interaction_payload_lines(:ask_user_questions, payload) do
+    payload
+    |> Map.get("questions", [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      q when is_map(q) ->
+        # Prefer the canonical "question" key used by the issue thread UI.
+        # Do not fall back to arbitrary "label" values — those are not
+        # guaranteed safe for owner surfaces.
+        case Map.get(q, "question") || Map.get(q, "text") do
+          text when is_binary(text) and text != "" -> [truncate_card_text(text)]
+          _ -> []
+        end
+
+      text when is_binary(text) and text != "" ->
+        [truncate_card_text(text)]
+
+      _ ->
+        []
+    end)
+    |> Enum.take(5)
+  end
+
+  defp interaction_payload_lines(:suggest_tasks, payload) do
+    payload
+    |> Map.get("tasks", [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      task when is_map(task) ->
+        case Map.get(task, "title") do
+          title when is_binary(title) and title != "" -> [truncate_card_text(title)]
+          _ -> []
+        end
+
+      _ ->
+        []
+    end)
+    |> Enum.take(5)
+  end
+
+  defp interaction_payload_lines(:request_confirmation, payload) do
+    case Map.get(payload, "details") do
+      details when is_binary(details) and details != "" -> [truncate_card_text(details)]
+      _ -> []
+    end
+  end
+
+  defp interaction_payload_lines(_kind, _payload), do: []
+
+  defp payload_message(payload) when is_map(payload) do
+    case Map.get(payload, "message") do
+      message when is_binary(message) ->
+        message = String.trim(message)
+        if message == "", do: nil, else: truncate_card_text(message)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp payload_message(_payload), do: nil
+
+  defp truncate_card_text(text) when is_binary(text) do
+    text
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+    |> String.slice(0, 180)
+  end
+
+  defp interaction_target_label(:ask_user_questions), do: "Open issue"
+  defp interaction_target_label(:request_confirmation), do: "Open issue"
+  defp interaction_target_label(:suggest_tasks), do: "Open issue"
 
   defp failed_run_title(%Run{issue: %Issue{title: title}}), do: "Run failed · #{title}"
   defp failed_run_title(_run), do: "Agent run failed"
@@ -523,8 +776,15 @@ defmodule Cympho.OwnerAttention do
 
   defp budget_incident_title(_incident), do: "Company spending needs review"
 
+  defp budget_incident_summary(%BudgetIncident{
+         event_type: "budget_exceeded",
+         enforcement_status: "incomplete"
+       }) do
+    "Spending hit a hard stop. Raise the limit, then resume paused agents — dismissing cannot unstick runtime."
+  end
+
   defp budget_incident_summary(%BudgetIncident{event_type: "budget_exceeded"}) do
-    "Spending has reached a configured limit. Review costs and decide what work can continue."
+    "Spending has reached a configured limit. Raise the limit or review costs before more work continues."
   end
 
   defp budget_incident_summary(_incident) do
@@ -538,7 +798,8 @@ defmodule Cympho.OwnerAttention do
       threshold_diagnostic(incident, policy),
       scope_diagnostic(policy),
       "#{humanize(policy.period)} period",
-      "#{humanize(policy.action_on_exceed)} on exceed"
+      "#{humanize(policy.action_on_exceed)} on exceed",
+      enforcement_diagnostic(incident)
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join(" · ")
@@ -546,6 +807,66 @@ defmodule Cympho.OwnerAttention do
 
   defp budget_incident_severity("budget_exceeded"), do: :critical
   defp budget_incident_severity(_event_type), do: :high
+
+  # Incomplete hard-stop enforcement must not be dismiss-only: agents stay paused.
+  defp budget_incident_dismissable?(%BudgetIncident{enforcement_status: "incomplete"}), do: false
+  defp budget_incident_dismissable?(_incident), do: true
+
+  defp budget_raise_limit_path(%BudgetIncident{budget_policy: policy}) when not is_nil(policy) do
+    case matching_ui_budget(policy) do
+      %{id: id} -> "/budgets/#{id}/edit"
+      nil -> "/budgets"
+    end
+  end
+
+  defp budget_raise_limit_path(_incident), do: "/budgets"
+
+  defp budget_resume_path(%BudgetIncident{event_type: "budget_exceeded"}), do: "/agents"
+  defp budget_resume_path(%BudgetIncident{enforcement_status: "incomplete"}), do: "/agents"
+  defp budget_resume_path(_incident), do: nil
+
+  defp matching_ui_budget(%{company_id: company_id, scope: scope} = policy)
+       when is_binary(company_id) and scope in ~w(company agent project) do
+    scope_type = scope
+
+    Budgets.list_budgets(%{company_id: company_id, scope_type: scope_type, active: true})
+    |> Enum.find(fn budget -> budget_matches_policy?(budget, policy) end)
+  end
+
+  defp matching_ui_budget(_policy), do: nil
+
+  defp budget_matches_policy?(%{scope_type: "company"}, %{scope: "company"}), do: true
+
+  defp budget_matches_policy?(%{scope_type: scope, scope_id: scope_id}, %{
+         scope: scope,
+         scope_id: scope_id
+       })
+       when is_binary(scope_id),
+       do: true
+
+  defp budget_matches_policy?(%{scope_type: "agent", agent_id: agent_id}, %{
+         scope: "agent",
+         scope_id: agent_id
+       })
+       when is_binary(agent_id),
+       do: true
+
+  defp budget_matches_policy?(%{scope_type: "project", project_id: project_id}, %{
+         scope: "project",
+         scope_id: project_id
+       })
+       when is_binary(project_id),
+       do: true
+
+  defp budget_matches_policy?(_budget, _policy), do: false
+
+  defp enforcement_diagnostic(%BudgetIncident{enforcement_status: "incomplete"}),
+    do: "Hard-stop enforcement incomplete"
+
+  defp enforcement_diagnostic(%BudgetIncident{enforcement_status: "complete"}),
+    do: "Hard-stop enforcement complete"
+
+  defp enforcement_diagnostic(_incident), do: nil
 
   defp threshold_diagnostic(incident, policy) do
     observed = format_percent(incident.threshold_pct)
@@ -605,6 +926,21 @@ defmodule Cympho.OwnerAttention do
 
   defp normalize_limit(limit) when is_integer(limit), do: limit |> max(1) |> min(500)
   defp normalize_limit(_limit), do: @default_limit
+
+  # Audience fingerprint for human_action_query membership (company-wide).
+  # :none — not in any owner's Needs-you set
+  # :all — :blocked non-terminal (every owner sees it)
+  # {:user, id} — assigned to that human owner
+  defp human_action_audience(%Issue{status: status, assignee_user_id: assignee}) do
+    cond do
+      status in @terminal_issue_statuses -> :none
+      status == :blocked -> :all
+      is_binary(assignee) -> {:user, assignee}
+      true -> :none
+    end
+  end
+
+  defp human_action_audience(_), do: :none
 
   defp attention_topic(company_id), do: "company:#{company_id}:owner_attention"
 end

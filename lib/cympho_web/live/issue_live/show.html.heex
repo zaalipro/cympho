@@ -46,6 +46,151 @@
         delivery_brief_readiness={delivery_brief_readiness(@issue, issue_preflight)}
       />
 
+      <%!-- Simple mode: always-visible thread, interactions, and proof chips.
+           Advanced digest/review/brief/timeline stay ui-advanced-only below. --%>
+      <CymphoWeb.IssueLive.Show.SimpleThread.simple_thread
+        issue={@issue}
+        timeline={@timeline}
+        runs={@runs}
+        work_products={@work_products}
+        all_agents={@all_agents}
+        gate_actions={gate_resolution.actions}
+      />
+
+      <%!-- Simple-mode forms for attach-proof / set-PR (Advanced panels stay gated).
+           Uses distinct input ids so Simple + Advanced forms can coexist in the DOM. --%>
+      <section
+        :if={@show_work_product_form}
+        id="issue-simple-work-product-form"
+        data-testid="issue-simple-work-product-form"
+        class="ui-simple-only mx-4 mb-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.06] px-4 py-4 lg:mx-6"
+      >
+        <div class="mb-3">
+          <h3 class="font-serif text-sm font-510 tracking-[-0.01em] text-ink">Attach proof</h3>
+          <p class="mt-1 text-xs leading-5 text-ink-tertiary">
+            Add a deliverable, spec, or URL so reviewers can see what changed.
+          </p>
+        </div>
+        <form
+          id="simple-work-product-form"
+          phx-submit="attach_work_product"
+          class="grid gap-3 sm:grid-cols-[1fr_180px]"
+        >
+          <div>
+            <label
+              for="simple-work-product-title"
+              class="mb-1 block text-xs font-510 text-text-secondary"
+            >
+              Title
+            </label>
+            <input
+              id="simple-work-product-title"
+              type="text"
+              name="work_product[title]"
+              value={@work_product_form[:title].value || ""}
+              placeholder="Short evidence title"
+              required
+              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+            />
+          </div>
+          <div>
+            <label
+              for="simple-work-product-kind"
+              class="mb-1 block text-xs font-510 text-text-secondary"
+            >
+              Kind
+            </label>
+            <select
+              id="simple-work-product-kind"
+              name="work_product[kind]"
+              required
+              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+            >
+              <option
+                :for={{label, value} <- work_product_kind_options()}
+                value={value}
+                selected={to_string(@work_product_form[:kind].value || "document") == value}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="sm:col-span-2">
+            <label
+              for="simple-work-product-url"
+              class="mb-1 block text-xs font-510 text-text-secondary"
+            >
+              URL
+            </label>
+            <input
+              id="simple-work-product-url"
+              type="url"
+              name="work_product[url]"
+              value={@work_product_form[:url].value || ""}
+              placeholder="https://github.com/org/repo/pull/123"
+              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+            />
+          </div>
+          <div class="sm:col-span-2">
+            <label
+              for="simple-work-product-description"
+              class="mb-1 block text-xs font-510 text-text-secondary"
+            >
+              Description
+            </label>
+            <textarea
+              id="simple-work-product-description"
+              name="work_product[description]"
+              rows="3"
+              placeholder="What this proves and what a reviewer should inspect."
+              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+            >{@work_product_form[:description].value || ""}</textarea>
+          </div>
+          <div class="sm:col-span-2 flex flex-wrap items-center gap-2">
+            <.button type="submit" size="sm">Attach proof</.button>
+            <.button type="button" variant="ghost" size="sm" phx-click="cancel_work_product">
+              Cancel
+            </.button>
+          </div>
+        </form>
+      </section>
+
+      <section
+        :if={@show_pr_form}
+        id="issue-simple-pr-form"
+        data-testid="issue-simple-pr-form"
+        class="ui-simple-only mx-4 mb-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.06] px-4 py-4 lg:mx-6"
+      >
+        <div class="mb-3">
+          <h3 class="font-serif text-sm font-510 tracking-[-0.01em] text-ink">Set PR</h3>
+          <p class="mt-1 text-xs leading-5 text-ink-tertiary">
+            Paste the pull request URL so proof links open the right change.
+          </p>
+        </div>
+        <form id="simple-pr-form" phx-submit="set_github_pr_url" class="space-y-3">
+          <div>
+            <label for="simple-pr-url" class="mb-1 block text-xs font-510 text-text-secondary">
+              PR URL
+            </label>
+            <input
+              id="simple-pr-url"
+              type="url"
+              name="url"
+              value={@issue.github_pr_url || ""}
+              placeholder="https://github.com/org/repo/pull/123"
+              required
+              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors placeholder:text-text-quaternary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+            />
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <.button type="submit" size="sm">Save PR</.button>
+            <.button type="button" variant="ghost" size="sm" phx-click="cancel_pr_form">
+              Cancel
+            </.button>
+          </div>
+        </form>
+      </section>
+
       <div class="ui-advanced-only">
         <.issue_digest_panel
           issue={@issue}

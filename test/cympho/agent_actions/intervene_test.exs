@@ -1,6 +1,8 @@
 defmodule Cympho.AgentActions.InterveneTest do
   use Cympho.DataCase, async: false
 
+  import Cympho.WaitHelpers
+
   alias Cympho.{AgentActions, Agents, Comments, Companies, Issues}
   alias Cympho.Repo
   alias Cympho.Wakes.AgentWake
@@ -75,9 +77,53 @@ defmodule Cympho.AgentActions.InterveneTest do
       assert reloaded.assignee_id == engineer_two.id
       assert reloaded.status == :todo
       assert reloaded.assigned_role == "engineer"
+      assert is_nil(reloaded.checkout_run_id)
+      assert is_nil(reloaded.checked_out_at)
 
       [wake] = pending_wakes(engineer_two.id, "manager_directive")
       assert wake.metadata["via"] == "intervene"
+    end
+
+    @tag :capture_log
+    test "stops live orchestrator before transferring ownership", %{
+      ceo: ceo,
+      engineer: engineer,
+      engineer_two: engineer_two,
+      issue: issue
+    } do
+      unless Process.whereis(Cympho.OrchestratorRegistry) do
+        start_supervised!({Registry, keys: :unique, name: Cympho.OrchestratorRegistry})
+      end
+
+      # Agent is a GenServer registered under the orchestrator via-tuple so
+      # Orchestrator.stop/2 can cleanly GenServer.stop it (plain spawn cannot).
+      {:ok, fake} =
+        Agent.start(fn -> :live end,
+          name: {:via, Registry, {Cympho.OrchestratorRegistry, issue.id}}
+        )
+
+      assert Cympho.Orchestrator.whereis(issue.id) == fake
+      assert Process.alive?(fake)
+
+      actions = [
+        %{
+          "type" => "intervene",
+          "mode" => "reassign",
+          "to_agent_id" => engineer_two.id,
+          "reason" => delivery_restart_reason()
+        }
+      ]
+
+      assert {:ok, %{results: [%{type: "intervene", mode: "reassign"}]}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      wait_until(fn -> is_nil(Cympho.Orchestrator.whereis(issue.id)) end)
+      refute Process.alive?(fake)
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.assignee_id == engineer_two.id
+      assert reloaded.status == :todo
+      refute reloaded.assignee_id == engineer.id
     end
 
     test "rejects thin repo-delivery reassignments before waking the target", %{

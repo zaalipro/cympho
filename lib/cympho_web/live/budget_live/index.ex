@@ -2,6 +2,7 @@ defmodule CymphoWeb.BudgetLive.Index do
   use CymphoWeb, :live_view
 
   alias Cympho.Budgets
+  alias Cympho.Finances
 
   @impl true
   def mount(_params, _session, socket) do
@@ -60,7 +61,7 @@ defmodule CymphoWeb.BudgetLive.Index do
   def handle_info({:budget_created, budget}, socket) do
     {:noreply,
      socket
-     |> stream_insert(:budget, budget, at: 0)
+     |> stream_insert(:budget, enrich_budget_spend(budget), at: 0)
      |> recalc_summary()}
   end
 
@@ -86,7 +87,7 @@ defmodule CymphoWeb.BudgetLive.Index do
 
   defp upsert_budget(socket, budget) do
     socket
-    |> stream_insert(:budget, budget)
+    |> stream_insert(:budget, enrich_budget_spend(budget))
     |> recalc_summary()
   end
 
@@ -99,6 +100,7 @@ defmodule CymphoWeb.BudgetLive.Index do
   def handle_event("delete_budget", %{"id" => id}, socket) do
     case Budgets.get_company_budget(socket.assigns.current_company.id, id) do
       {:ok, budget} ->
+        _ = Finances.deactivate_budget_policy_for_budget(budget)
         {:ok, _} = Budgets.delete_budget(budget)
 
         {:noreply, put_flash(socket, :info, "Budget deleted successfully")}
@@ -109,16 +111,31 @@ defmodule CymphoWeb.BudgetLive.Index do
   end
 
   defp fetch_budgets(socket, cursor) do
-    Budgets.list_budgets_page(company_id: socket.assigns.current_company.id, after: cursor)
+    page =
+      Budgets.list_budgets_page(company_id: socket.assigns.current_company.id, after: cursor)
+
+    %{page | entries: Enum.map(page.entries, &enrich_budget_spend/1)}
+  end
+
+  defp enrich_budget_spend(budget) do
+    %{budget | spent_amount: Finances.spend_for_budget(budget)}
   end
 
   defp recalc_summary(socket) do
-    budgets = Budgets.list_budgets(company_id: socket.assigns.current_company.id)
+    budgets =
+      socket.assigns.current_company.id
+      |> then(&Budgets.list_budgets(company_id: &1))
+      |> Enum.map(&enrich_budget_spend/1)
+
+    policies =
+      Finances.list_budget_policies(socket.assigns.current_company.id, is_active: true)
+
     summary = calculate_summary(budgets)
 
     socket
     |> assign(:summary, summary)
-    |> assign(:budget_command, build_budget_command(summary, budgets))
+    |> assign(:budget_policies, policies)
+    |> assign(:budget_command, build_budget_command(summary, budgets, policies))
   end
 
   defp calculate_summary(budgets) do
@@ -193,12 +210,13 @@ defmodule CymphoWeb.BudgetLive.Index do
   Plain-language health state for a single budget, so a glance reads as
   "Healthy — 40% used" rather than a bare percentage.
   """
-  def budget_state(budget) do
+  def budget_state(budget, policies \\ []) do
     used = utilization_percentage(budget)
+    enforcement = enforcement_mode(budget, policies)
 
     cond do
-      budget.status == "exhausted" ->
-        %{tone: :exhausted, word: "Exhausted", detail: exhausted_detail(budget)}
+      budget.status == "exhausted" or over_cap?(budget) ->
+        %{tone: :exhausted, word: "Exhausted", detail: exhausted_detail(enforcement)}
 
       budget.status == "cancelled" ->
         %{tone: :cancelled, word: "Cancelled", detail: "no longer enforced"}
@@ -211,18 +229,62 @@ defmodule CymphoWeb.BudgetLive.Index do
     end
   end
 
-  defp exhausted_detail(%{hard_stop: true}), do: "agents paused"
-  defp exhausted_detail(_budget), do: "over the cap"
+  defp over_cap?(budget) do
+    case {budget.spent_amount, budget.limit_amount} do
+      {%Decimal{} = spent, %Decimal{} = limit} ->
+        not Decimal.lt?(spent, limit)
+
+      _ ->
+        false
+    end
+  end
+
+  defp exhausted_detail(:block), do: "agents paused"
+  defp exhausted_detail(:warn), do: "over the cap — agents keep spending"
+  defp exhausted_detail(_), do: "over the cap — not runtime-enforced"
 
   @doc """
   One calm sentence describing what happens to autonomous runs when this
-  budget is spent, based on the guardrail's hard-stop setting.
+  budget is spent. Only claims a stop when an active block BudgetPolicy exists.
   """
-  def guardrail_note(%{hard_stop: true}),
-    do: "Hard stop — agents pause when this cap is reached."
+  def guardrail_note(budget, policies \\ []) do
+    case enforcement_mode(budget, policies) do
+      :block ->
+        "Hard stop — agents pause when this cap is reached."
 
-  def guardrail_note(_budget),
-    do: "Soft cap — spend is tracked but agents keep running."
+      :warn ->
+        "Warn only — agents keep spending after this cap."
+
+      :none ->
+        "Tracked only — runtime does not stop agents for this limit."
+    end
+  end
+
+  defp enforcement_mode(budget, policies) when is_list(policies) do
+    case find_policy_for_budget(budget, policies) do
+      %{action_on_exceed: "block", is_active: true} -> :block
+      %{action_on_exceed: "warn", is_active: true} -> :warn
+      %{action_on_exceed: "block"} -> :block
+      %{action_on_exceed: "warn"} -> :warn
+      _ -> :none
+    end
+  end
+
+  defp find_policy_for_budget(budget, policies) do
+    scope = budget.scope_type
+    company_id = budget.company_id
+
+    Enum.find(policies, fn policy ->
+      policy.scope == scope and
+        case scope do
+          "company" ->
+            is_nil(policy.scope_id) or policy.scope_id == company_id
+
+          _ ->
+            policy.scope_id == budget.scope_id
+        end
+    end)
+  end
 
   def budget_dot_class(:exhausted), do: "bg-brand"
   def budget_dot_class(:watch), do: "bg-amber-400"
@@ -238,7 +300,7 @@ defmodule CymphoWeb.BudgetLive.Index do
   def budget_card_accent(:watch), do: "hover:shadow-[inset_3px_0_0_rgb(251_191_36)]"
   def budget_card_accent(_tone), do: "hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
 
-  defp build_budget_command(%{total: 0}, _budgets) do
+  defp build_budget_command(%{total: 0}, _budgets, _policies) do
     %{
       tone: :setup,
       badge: "No spending limit",
@@ -250,23 +312,29 @@ defmodule CymphoWeb.BudgetLive.Index do
         %{label: "Budgets", value: "0"},
         %{label: "Active", value: "0"},
         %{label: "Limit", value: "N/A"},
-        %{label: "Spent", value: "N/A"}
+        %{label: "Used", value: "N/A"}
       ]
     }
   end
 
-  defp build_budget_command(summary, budgets) do
+  defp build_budget_command(summary, budgets, policies) do
     active = Enum.filter(budgets, &Budgets.Budget.active?/1)
-    exhausted = Enum.filter(active, &Budgets.Budget.exhausted?/1)
+    exhausted = Enum.filter(active, &(Budgets.Budget.exhausted?(&1) or over_cap?(&1)))
     near_limit = Enum.filter(active, &Budgets.Budget.at_threshold?/1)
     company_budget? = Enum.any?(active, &(&1.scope_type == "company"))
+    blocking? = Enum.any?(policies, &(&1.action_on_exceed == "block" and &1.is_active))
 
     {tone, badge, title, summary_text, action_label, action_path} =
       cond do
-        exhausted != [] ->
+        exhausted != [] and blocking? ->
           {:critical, "Hard stop risk", "Freeze runtime until exhausted budgets are resolved",
            "#{length(exhausted)} active budget #{plural(length(exhausted), "guardrail")} are exhausted.",
            "Open exhausted budget", "/budgets/#{hd(exhausted).id}"}
+
+        exhausted != [] ->
+          {:warning, "Over cap", "Spend is over a limit without a blocking policy",
+           "#{length(exhausted)} budget #{plural(length(exhausted), "limit")} are over cap; agents keep spending until a block policy is set.",
+           "Review budget", "/budgets/#{hd(exhausted).id}"}
 
         near_limit != [] ->
           {:warning, "Spend watch", "Review budgets before approving more runtime",
@@ -278,10 +346,15 @@ defmodule CymphoWeb.BudgetLive.Index do
            "Scoped budgets exist, but company-wide preflight checks need a company guardrail.",
            "Create company budget", "/budgets/new"}
 
-        true ->
+        blocking? ->
           {:ready, "Guarded", "Runtime spend has active budget protection",
            "#{summary.active} active budget #{plural(summary.active, "guardrail")} protect autonomous execution.",
            "Open costs", "/costs"}
+
+        true ->
+          {:attention, "Warn only", "Budgets track spend but do not stop agents",
+           "Active limits are warn-only. Enable hard stop (block) so runtime pauses when a cap is hit.",
+           "Review budget", "/budgets/#{hd(active).id}"}
       end
 
     %{
@@ -295,7 +368,7 @@ defmodule CymphoWeb.BudgetLive.Index do
         %{label: "Budgets", value: to_string(summary.total)},
         %{label: "Active", value: to_string(summary.active)},
         %{label: "Limit", value: format_currency(summary.total_limit)},
-        %{label: "Spent", value: format_currency(summary.total_spent)}
+        %{label: "Used", value: format_currency(summary.total_spent)}
       ]
     }
   end

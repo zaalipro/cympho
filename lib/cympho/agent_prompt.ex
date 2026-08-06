@@ -1733,6 +1733,8 @@ defmodule Cympho.AgentPrompt do
 
     Blocked work uses `[blocked] Cause: ...\nAttempted fix: ...\nNeeds: ...\nCurrent state: ...\nNext decision: ...\nRestart packet: ...`. Thin `block_issue` reasons are rejected, and `escalate.reason` is validated against the same labels. If you emit `block_issue`, its JSON `reason` must be the full tagged blocker note with escaped newlines between labels: `"[blocked] Cause: ...\\nAttempted fix: ...\\nNeeds: ...\\nCurrent state: ...\\nNext decision: ...\\nRestart packet: ..."` — the server validates `block_issue.reason` directly; a prose summary or separate `comment` action does not satisfy it.
 
+    Optional `blocker_kind` on `block_issue` must be one of: `external_dep`, `ci_failure`, `env_unavailable`, `owner_input_needed`, `conflicting_change`, `other`. Common near-miss aliases are accepted and remapped (`owner_clarification`, `missing_requirements`, `needs_info`, `thin_brief`, `ci_failed`, `credentials`, `merge_conflict`, …). Unknown kinds reject the action with an allowed-kind list — that is a retriable contract failure (assignment kept) so you can fix the kind and retry, not a force-park.
+
     Treat your final response summary as run memory. Include objective, actions taken, files changed or artifacts, validation, risks/gaps, current state, next decision, and restart packet. Avoid vague endings like "done", "fixed", or "tests passed" without the decision context; Cympho folds your summary and tagged comment into the issue memory panel.
 
     `attach_work_product` has a strict schema: use `title` for the artifact name, optional `description` for artifact contents/summary, optional `kind`, `payload`, `metadata`, and `url`. Valid `kind` values are `code_change`, `document`, `url`, `artifact`, or `other`; for strategy plans/specs, use `document`. If you include `payload`, it must be a JSON object; put long artifact text in `description` or in `payload.text`. Do not use `name` or `content` keys for work products.
@@ -1824,7 +1826,7 @@ defmodule Cympho.AgentPrompt do
       - `risks`: constraints or edge cases the engineer must preserve.
       - `depends_on`: list of sibling titles or issue ids that must finish first. Use it whenever ordering matters (e.g. database schema before API).
       - `estimated_minutes`: rough size in minutes. The dispatcher load-balances by sum-of-estimates per agent — without it, a 30-min ticket and a 3-day ticket look identical to the router.
-    When you block after decomposition, the `block_issue.reason` itself must include the exact fields `Cause`, `Attempted fix`, `Needs`, `Current state`, `Next decision`, and `Restart packet`; otherwise the whole action batch rolls back, including child issue creation and spawned agents. Use `cancel_issue` (with `reason`) for strategic cancels; use `intervene cancel` only when recovering a stalled issue.
+    When you block after decomposition, the `block_issue.reason` itself must include the exact fields `Cause`, `Attempted fix`, `Needs`, `Current state`, `Next decision`, and `Restart packet`; otherwise the whole action batch rolls back, including child issue creation and spawned agents. Prefer `blocker_kind` `external_dep` when waiting on child work, or `owner_input_needed` (aliases: `owner_clarification`, `thin_brief`, `missing_requirements`) when the owner must clarify. Use `cancel_issue` (with `reason`) for strategic cancels; use `intervene cancel` only when recovering a stalled issue.
     """
     |> String.trim()
   end

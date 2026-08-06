@@ -146,17 +146,16 @@ defmodule Cympho.Decisions do
             actor_id
           )
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{decision.company_id}:decisions",
+        Cympho.PubSubGuard.company_broadcast(
+          decision.company_id,
+          "decisions",
           {:decision_created, decision}
         )
 
         # Global topic for Cympho.Decisions.Executor — subscribes once and
         # acts on every company's decisions instead of one subscription
         # per company.
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
+        Cympho.PubSubGuard.broadcast(
           "system:decisions",
           {:decision_created, decision}
         )
@@ -354,9 +353,11 @@ defmodule Cympho.Decisions do
   @doc """
   Subscribes to decision events for a specific company.
   """
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:decisions")
   end
+
+  def subscribe(_company_id), do: :ok
 
   @nil_uuid "00000000-0000-0000-0000-000000000000"
 
@@ -378,9 +379,9 @@ defmodule Cympho.Decisions do
       from(d in Decision, where: d.id == ^parent_id)
       |> Repo.update_all(set: [status: "superseded"])
 
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "company:#{decision.company_id}:decisions",
+      Cympho.PubSubGuard.company_broadcast(
+        decision.company_id,
+        "decisions",
         {:decision_superseded, parent_id}
       )
     end

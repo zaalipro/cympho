@@ -70,25 +70,6 @@ defmodule CymphoWeb.DevSessionController do
   end
 
   defp ensure_membership!(%User{id: user_id}, %Company{id: company_id}) do
-    case Companies.get_membership(user_id, company_id) do
-      nil ->
-        Companies.create_membership!(%{
-          user_id: user_id,
-          company_id: company_id,
-          role: "owner",
-          is_board_member: true
-        })
-
-      membership ->
-        membership
-        |> Companies.update_membership(%{role: "owner", is_board_member: true})
-        |> case do
-          {:ok, _membership} ->
-            :ok
-
-          {:error, changeset} ->
-            raise Ecto.InvalidChangesetError, action: :update, changeset: changeset
-        end
-    end
+    Companies.ensure_owner_membership!(user_id, company_id)
   end
 end

@@ -17,7 +17,7 @@ defmodule Cympho.HeartbeatEngine do
   alias Cympho.Adapters.Error, as: AdapterError
   alias Cympho.Budgets.Budget
   alias Cympho.HeartbeatEngine.Run
-  alias Cympho.{Agents, Finances, Issues, Workspace}
+  alias Cympho.{Agents, Finances, Issues, Workspace, Workspaces}
   alias Cympho.Issues.Issue
   require Logger
 
@@ -98,9 +98,10 @@ defmodule Cympho.HeartbeatEngine do
   @spec fail_run(Run.t(), term(), map()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
   def fail_run(run, error_reason, usage_attrs \\ %{})
 
-  def fail_run(%Run{status: "running"} = run, error_reason, usage_attrs) do
+  def fail_run(%Run{status: status} = run, error_reason, usage_attrs)
+      when status in @active_run_statuses do
     run
-    |> finalize_run(["running"], fn current ->
+    |> finalize_run(@active_run_statuses, fn current ->
       attrs =
         AdapterError.run_attrs(error_reason, current.run_metadata || %{},
           adapter: current.adapter,
@@ -436,9 +437,16 @@ defmodule Cympho.HeartbeatEngine do
     end
   end
 
-  defp release_terminal_run_checkout(%Run{issue_id: nil}), do: :ok
+  defp release_terminal_run_checkout(%Run{issue_id: nil} = run) do
+    _ = release_run_environment(run)
+    :ok
+  end
 
   defp release_terminal_run_checkout(%Run{} = run) do
+    # Always release remote env (if provider_ref present) on terminal run paths so
+    # cancel/orphan recovery cannot leak sandbox spend once a real provider lands.
+    _ = release_run_environment(run)
+
     with {:ok, %Issue{} = issue} <- Issues.get_issue(run.issue_id) do
       target_status = if issue.status == :in_progress, do: :todo, else: issue.status
 
@@ -462,6 +470,42 @@ defmodule Cympho.HeartbeatEngine do
     else
       _ -> :ok
     end
+  end
+
+  defp release_run_environment(%Run{} = run) do
+    opts = %{
+      reason: "run_terminal_#{run.status || "unknown"}",
+      run_id: run.id,
+      company_id: run.company_id
+    }
+
+    case Workspaces.cancel_and_release_for_issue(run.issue_id, opts) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "HeartbeatEngine: environment cancel/release failed for terminal run",
+          component: "heartbeat_engine",
+          run_id: run.id,
+          issue_id: run.issue_id,
+          company_id: run.company_id,
+          error: inspect(reason)
+        )
+
+        {:error, reason}
+    end
+  rescue
+    error ->
+      Logger.warning(
+        "HeartbeatEngine: environment cancel/release raised for terminal run",
+        component: "heartbeat_engine",
+        run_id: run.id,
+        issue_id: run.issue_id,
+        error: Exception.message(error)
+      )
+
+      :ok
   end
 
   @doc """

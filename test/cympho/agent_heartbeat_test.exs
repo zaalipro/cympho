@@ -308,7 +308,9 @@ defmodule Cympho.AgentHeartbeatTest do
       # :sys.get_state blocks until the :heartbeat message has been handled
       :sys.get_state(pid)
 
-      assert Repo.get!(Agents.Agent, agent.id).status == :idle
+      reloaded = Repo.get!(Agents.Agent, agent.id)
+      assert reloaded.status == :idle
+      assert reloaded.last_heartbeat_at != nil
 
       AgentHeartbeat.stop_for_agent(agent.id)
     end
@@ -342,6 +344,205 @@ defmodule Cympho.AgentHeartbeatTest do
 
       AgentHeartbeat.stop_for_agent(agent.id)
     end
+
+    test "idle no-work ticks stamp last_heartbeat_at" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Idle Stamp",
+          slug: "idle-stamp-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Idle Stamp Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      assert is_nil(agent.last_heartbeat_at)
+
+      {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+
+      send(pid, :heartbeat)
+      :sys.get_state(pid)
+
+      reloaded = Repo.get!(Agents.Agent, agent.id)
+      assert reloaded.status == :idle
+      assert reloaded.last_heartbeat_at != nil
+
+      AgentHeartbeat.stop_for_agent(agent.id)
+    end
+  end
+
+  describe "dispatcher delegation still heals and stamps" do
+    setup do
+      # Default production path: delegate_to_dispatcher true. Previously this
+      # skipped do_heartbeat entirely so :error stuck and last_heartbeat_at
+      # never advanced.
+      original = Application.get_env(:cympho, :agent_heartbeat, [])
+
+      Application.put_env(
+        :cympho,
+        :agent_heartbeat,
+        Keyword.put(original, :delegate_to_dispatcher, true)
+      )
+
+      on_exit(fn -> Application.put_env(:cympho, :agent_heartbeat, original) end)
+      :ok
+    end
+
+    test "delegated idle tick recovers :error and stamps last_heartbeat_at" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Delegated Recovery",
+          slug: "delegated-recovery-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Delegated Errored",
+          role: :engineer,
+          status: :error,
+          company_id: company.id
+        })
+
+      assert is_nil(agent.last_heartbeat_at)
+
+      # Ensure a Dispatcher process exists so the delegate branch is taken.
+      dispatcher_pid =
+        case Process.whereis(Cympho.Orchestrator.Dispatcher) do
+          nil ->
+            {:ok, pid} = start_supervised({Cympho.Orchestrator.Dispatcher, []})
+            pid
+
+          pid ->
+            pid
+        end
+
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, dispatcher_pid, self())
+
+      {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+
+      send(pid, {:heartbeat, :timer})
+      :sys.get_state(pid)
+
+      reloaded = Repo.get!(Agents.Agent, agent.id)
+      assert reloaded.status == :idle
+      assert reloaded.last_heartbeat_at != nil
+
+      AgentHeartbeat.stop_for_agent(agent.id)
+    end
+
+    test "delegated idle tick stamps last_heartbeat_at for already-idle agents" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Delegated Idle Stamp",
+          slug: "delegated-idle-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Delegated Idle",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      dispatcher_pid =
+        case Process.whereis(Cympho.Orchestrator.Dispatcher) do
+          nil ->
+            {:ok, pid} = start_supervised({Cympho.Orchestrator.Dispatcher, []})
+            pid
+
+          pid ->
+            pid
+        end
+
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, dispatcher_pid, self())
+
+      {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+
+      send(pid, {:heartbeat, :timer})
+      :sys.get_state(pid)
+
+      reloaded = Repo.get!(Agents.Agent, agent.id)
+      assert reloaded.status == :idle
+      assert reloaded.last_heartbeat_at != nil
+
+      AgentHeartbeat.stop_for_agent(agent.id)
+    end
+  end
+
+  describe "Agents.touch_heartbeat/1" do
+    test "stamps last_heartbeat_at without changing status" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Touch Heartbeat",
+          slug: "touch-hb-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Touch Agent",
+          role: :engineer,
+          status: :running,
+          company_id: company.id
+        })
+
+      assert is_nil(agent.last_heartbeat_at)
+
+      assert {:ok, updated} = Agents.touch_heartbeat(agent)
+      assert updated.status == :running
+      assert updated.last_heartbeat_at != nil
+
+      assert {:ok, by_id} = Agents.touch_heartbeat(agent.id)
+      assert by_id.status == :running
+      assert DateTime.compare(by_id.last_heartbeat_at, updated.last_heartbeat_at) in [:gt, :eq]
+    end
+
+    test "recover_error_status heals :error to :idle and stamps" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Recover Error",
+          slug: "recover-err-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Recover Agent",
+          role: :engineer,
+          status: :error,
+          company_id: company.id
+        })
+
+      assert {:ok, recovered} = Agents.recover_error_status(agent)
+      assert recovered.status == :idle
+      assert recovered.last_heartbeat_at != nil
+    end
+
+    test "list_eligible_agents recovers :error agents into the pool" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Eligible Recover",
+          slug: "eligible-recover-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Eligible Error Agent",
+          role: :engineer,
+          status: :error,
+          company_id: company.id
+        })
+
+      eligible = Agents.list_eligible_agents(:engineer, company.id)
+      assert Enum.any?(eligible, &(&1.id == agent.id))
+      assert Repo.get!(Agents.Agent, agent.id).status == :idle
+    end
   end
 
   describe "lifecycle" do
@@ -355,6 +556,127 @@ defmodule Cympho.AgentHeartbeatTest do
 
       :ok = AgentHeartbeat.stop_for_agent(agent_id)
       refute Process.alive?(pid)
+    end
+  end
+
+  describe "start_and_run failure releases unbound checkout" do
+    import Mock
+
+    setup do
+      original = Application.get_env(:cympho, :agent_heartbeat, [])
+
+      Application.put_env(
+        :cympho,
+        :agent_heartbeat,
+        Keyword.put(original, :delegate_to_dispatcher, false)
+      )
+
+      on_exit(fn ->
+        Application.put_env(:cympho, :agent_heartbeat, original)
+      end)
+
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "HB Start Release",
+          slug: "hb-start-rel-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "HB Release Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id,
+          adapter: :claude_code
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Checkout then fail start",
+          description: "Test",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      %{company: company, agent: agent, issue: issue}
+    end
+
+    @tag :capture_log
+    test "orchestrator start failure returns issue to :todo and clears unbound checkout", %{
+      agent: agent,
+      issue: issue
+    } do
+      with_mocks([
+        {Cympho.Orchestrator, [],
+         [
+           start_and_run: fn _issue, _agent_id, _opts -> {:error, :boom} end
+         ]}
+      ]) do
+        {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+
+        send(pid, :heartbeat)
+        :sys.get_state(pid)
+
+        reloaded = Issues.get_issue!(issue.id)
+        assert reloaded.status == :todo
+        assert reloaded.assignee_id == nil
+        assert reloaded.checkout_run_id == nil
+        assert reloaded.checked_out_at == nil
+
+        # Heartbeat GenServer frees capacity; agent may be :error after start fail.
+        assert {:ok, :idle} = AgentHeartbeat.status(agent.id)
+        refute Agents.is_agent_at_capacity?(agent.id)
+
+        AgentHeartbeat.stop_for_agent(agent.id)
+      end
+    end
+
+    @tag :capture_log
+    test "orchestrator ownership conflict preserves a successor run checkout", %{
+      agent: agent,
+      issue: issue
+    } do
+      test_pid = self()
+
+      with_mocks([
+        {Cympho.Orchestrator, [],
+         [
+           start_and_run: fn checked_out, agent_id, _opts ->
+             assert {:ok, successor_run} =
+                      HeartbeatEngine.create_run(%{
+                        company_id: checked_out.company_id,
+                        agent_id: agent_id,
+                        issue_id: checked_out.id,
+                        adapter: "claude_code",
+                        bind_checkout: true
+                      })
+
+             send(test_pid, {:successor_run, successor_run.id})
+             {:error, {:checkout_run_bind_failed, :checkout_run_conflict}}
+           end
+         ]}
+      ]) do
+        {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+
+        send(pid, :heartbeat)
+        :sys.get_state(pid)
+
+        assert_received {:successor_run, successor_run_id}
+
+        reloaded = Issues.get_issue!(issue.id)
+        assert reloaded.status == :in_progress
+        assert reloaded.assignee_id == agent.id
+        assert reloaded.checkout_run_id == successor_run_id
+        assert reloaded.checked_out_at
+
+        assert {:ok, %{status: "pending"}} = HeartbeatEngine.get_run(successor_run_id)
+        assert {:ok, :idle} = AgentHeartbeat.status(agent.id)
+
+        AgentHeartbeat.stop_for_agent(agent.id)
+      end
     end
   end
 end

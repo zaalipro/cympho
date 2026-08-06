@@ -237,15 +237,28 @@ defmodule Cympho.RoutineTriggersTest do
 
   describe "fire_trigger/1" do
     setup do
+      u = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Fire Co #{u}",
+          slug: "fire-co-#{u}"
+        })
+
       {:ok, agent} =
         Cympho.Agents.create_agent(%{
           name: "Test Agent",
           role: :engineer,
-          url_key: "test-agent-#{:rand.uniform(100_000)}"
+          url_key: "test-agent-#{u}",
+          company_id: company.id
         })
 
       {:ok, routine} =
-        Routines.create_routine(%{name: "Fire Test", agent_id: agent.id})
+        Routines.create_routine(%{
+          name: "Fire Test",
+          agent_id: agent.id,
+          company_id: company.id
+        })
 
       {:ok, trigger} =
         RoutineTriggers.create_schedule_trigger(%{
@@ -253,10 +266,10 @@ defmodule Cympho.RoutineTriggersTest do
           "cron_expression" => "0 9 * * *"
         })
 
-      %{trigger: trigger, routine: routine, agent: agent}
+      %{trigger: trigger, routine: routine, agent: agent, company: company}
     end
 
-    test "creates a run and an issue when fired", %{trigger: trigger} do
+    test "creates a run and an issue when fired", %{trigger: trigger, company: company} do
       assert {:ok, %{run: run, issue: issue}} = RoutineTriggers.fire_trigger(trigger)
 
       assert run.status == "running"
@@ -265,11 +278,60 @@ defmodule Cympho.RoutineTriggersTest do
       assert run.issue_id == issue.id
       assert issue.status == :todo
       assert issue.title =~ "Fire Test"
+      assert issue.company_id == company.id
     end
 
     test "creates issue assigned to routine's agent", %{trigger: trigger, agent: agent} do
       assert {:ok, %{issue: issue}} = RoutineTriggers.fire_trigger(trigger)
       assert issue.assignee_id == agent.id
+      assert issue.company_id == agent.company_id
+    end
+
+    test "inherits company_id from agent when routine has no company_id" do
+      u = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Cympho.Companies.create_company(%{name: "Agent Co #{u}", slug: "agent-co-#{u}"})
+
+      {:ok, agent} =
+        Cympho.Agents.create_agent(%{
+          name: "Scoped Agent",
+          role: :engineer,
+          url_key: "scoped-agent-#{u}",
+          company_id: company.id
+        })
+
+      {:ok, routine} =
+        Routines.create_routine(%{name: "Agent Fallback", agent_id: agent.id})
+
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
+      assert {:ok, %{issue: issue}} = RoutineTriggers.fire_trigger(trigger)
+      assert issue.company_id == company.id
+    end
+
+    test "rejects fire when no company_id can be resolved" do
+      {:ok, agent} =
+        Cympho.Agents.create_agent(%{
+          name: "Unscoped Agent",
+          role: :engineer,
+          url_key: "unscoped-agent-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, routine} =
+        Routines.create_routine(%{name: "No Company", agent_id: agent.id})
+
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
+      assert {:error, :missing_company_id} = RoutineTriggers.fire_trigger(trigger)
     end
 
     test "returns error when routine is paused", %{trigger: trigger, routine: routine} do
@@ -294,28 +356,42 @@ defmodule Cympho.RoutineTriggersTest do
 
   describe "fire_trigger_by_public_id/2" do
     setup do
+      u = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Webhook Co #{u}",
+          slug: "webhook-co-#{u}"
+        })
+
       {:ok, agent} =
         Cympho.Agents.create_agent(%{
           name: "Webhook Agent",
           role: :engineer,
-          url_key: "webhook-agent-#{:rand.uniform(100_000)}"
+          url_key: "webhook-agent-#{u}",
+          company_id: company.id
         })
 
       {:ok, routine} =
-        Routines.create_routine(%{name: "Webhook Test", agent_id: agent.id})
+        Routines.create_routine(%{
+          name: "Webhook Test",
+          agent_id: agent.id,
+          company_id: company.id
+        })
 
       {:ok, trigger, secret} =
         RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
 
-      %{trigger: trigger, routine: routine, agent: agent, secret: secret}
+      %{trigger: trigger, routine: routine, agent: agent, secret: secret, company: company}
     end
 
-    test "fires with correct secret", %{trigger: trigger, secret: secret} do
+    test "fires with correct secret", %{trigger: trigger, secret: secret, company: company} do
       assert {:ok, %{run: run, issue: issue}} =
                RoutineTriggers.fire_trigger_by_public_id(trigger.public_id, secret)
 
       assert run.trigger_type == "webhook"
       assert issue.title =~ "Webhook Test"
+      assert issue.company_id == company.id
     end
 
     test "rejects invalid secret", %{trigger: trigger} do
@@ -400,17 +476,27 @@ defmodule Cympho.RoutineTriggersTest do
 
   describe "list_runs/1" do
     setup do
+      u = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Run Co #{u}",
+          slug: "run-co-#{u}"
+        })
+
       {:ok, agent} =
         Cympho.Agents.create_agent(%{
           name: "Run Agent",
           role: :engineer,
-          url_key: "run-agent-#{:rand.uniform(100_000)}"
+          url_key: "run-agent-#{u}",
+          company_id: company.id
         })
 
       {:ok, routine} =
         Routines.create_routine(%{
           name: "Run Test",
           agent_id: agent.id,
+          company_id: company.id,
           concurrency_policy: :always_enqueue
         })
 
@@ -448,14 +534,28 @@ defmodule Cympho.RoutineTriggersTest do
 
   describe "complete_run/1 and fail_run/1" do
     setup do
+      u = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Status Co #{u}",
+          slug: "status-co-#{u}"
+        })
+
       {:ok, agent} =
         Cympho.Agents.create_agent(%{
           name: "Status Agent",
           role: :engineer,
-          url_key: "status-agent-#{:rand.uniform(100_000)}"
+          url_key: "status-agent-#{u}",
+          company_id: company.id
         })
 
-      {:ok, routine} = Routines.create_routine(%{name: "Status Test", agent_id: agent.id})
+      {:ok, routine} =
+        Routines.create_routine(%{
+          name: "Status Test",
+          agent_id: agent.id,
+          company_id: company.id
+        })
 
       {:ok, trigger} =
         RoutineTriggers.create_schedule_trigger(%{

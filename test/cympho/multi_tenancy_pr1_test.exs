@@ -78,6 +78,102 @@ defmodule Cympho.MultiTenancyPr1Test do
       refute Enum.any?(HostServices.list_issues(b.id, %{}, ["read:issues"]), &(&1.id == issue.id))
     end
 
+    test "update_issue loads via company scope and updates own-company issues", %{a: a, u: u} do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "update-me-#{u}",
+          company_id: a.id,
+          status: :todo,
+          skip_auto_assign: true
+        })
+
+      assert {:ok, updated} =
+               HostServices.update_issue(
+                 a.id,
+                 issue.id,
+                 %{title: "updated-#{u}"},
+                 ["write:issues"]
+               )
+
+      assert updated.id == issue.id
+      assert updated.company_id == a.id
+      assert updated.title == "updated-#{u}"
+    end
+
+    test "update_issue is not-found for foreign company issues", %{a: a, b: b, u: u} do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "b-secret-#{u}",
+          company_id: b.id,
+          status: :todo,
+          skip_auto_assign: true
+        })
+
+      assert {:error, :not_found} =
+               HostServices.update_issue(
+                 a.id,
+                 issue.id,
+                 %{title: "stolen-#{u}"},
+                 ["write:issues"]
+               )
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.title == "b-secret-#{u}"
+      assert reloaded.company_id == b.id
+    end
+
+    test "update_issue strips forged company_id from attrs (atom and string keys)", %{
+      a: a,
+      b: b,
+      u: u
+    } do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "keep-tenant-#{u}",
+          company_id: a.id,
+          status: :todo,
+          skip_auto_assign: true
+        })
+
+      assert {:ok, updated} =
+               HostServices.update_issue(
+                 a.id,
+                 issue.id,
+                 %{title: "atom-forged-#{u}", company_id: b.id},
+                 ["write:issues"]
+               )
+
+      assert updated.company_id == a.id
+      assert updated.title == "atom-forged-#{u}"
+
+      assert {:ok, updated2} =
+               HostServices.update_issue(
+                 a.id,
+                 issue.id,
+                 %{"title" => "string-forged-#{u}", "company_id" => b.id},
+                 ["write:issues"]
+               )
+
+      assert updated2.company_id == a.id
+      assert updated2.title == "string-forged-#{u}"
+    end
+
+    test "update_issue requires write:issues and a binary company scope", %{a: a, u: u} do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "caps-#{u}",
+          company_id: a.id,
+          status: :todo,
+          skip_auto_assign: true
+        })
+
+      assert {:error, :unauthorized} =
+               HostServices.update_issue(a.id, issue.id, %{title: "nope"}, [])
+
+      assert {:error, :invalid_company_scope} =
+               HostServices.update_issue(nil, issue.id, %{title: "nope"}, ["write:issues"])
+    end
+
     test "get_agent returns own-company agents and not-found for foreign ones", %{a: a, b: b} do
       {:ok, agent} = Agents.create_agent(%{name: "ag", role: :engineer, company_id: a.id})
 
@@ -147,6 +243,96 @@ defmodule Cympho.MultiTenancyPr1Test do
       assert {:ok, %{id: id}} = Goals.get_company_goal(a.id, goal.id)
       assert id == goal.id
       assert {:error, :not_found} = Goals.get_company_goal(b.id, goal.id)
+    end
+  end
+
+  describe "fail-closed company_id on checkout / runtime / actions (ot-tenancy-fail-closed)" do
+    test "checkout rejects when issue company_id is nil", %{a: a} do
+      {:ok, agent} =
+        Agents.create_agent(%{name: "scoped", role: :engineer, company_id: a.id})
+
+      {:ok, issue} = Issues.create_issue(%{title: "unscoped issue", status: :todo})
+
+      assert is_nil(issue.company_id)
+      assert {:error, :company_mismatch} = Issues.checkout_issue(issue, agent)
+    end
+
+    test "checkout rejects when agent company_id is nil", %{a: a} do
+      {:ok, agent} = Agents.create_agent(%{name: "unscoped", role: :engineer})
+
+      {:ok, issue} =
+        Issues.create_issue(%{title: "scoped issue", status: :todo, company_id: a.id})
+
+      assert is_nil(agent.company_id)
+      assert {:error, :company_mismatch} = Issues.checkout_issue(issue, agent)
+    end
+
+    test "checkout rejects unequal company_ids", %{a: a, b: b} do
+      {:ok, agent} =
+        Agents.create_agent(%{name: "a-agent", role: :engineer, company_id: a.id})
+
+      {:ok, issue} =
+        Issues.create_issue(%{title: "b-issue", status: :todo, company_id: b.id})
+
+      assert {:error, :company_mismatch} = Issues.checkout_issue(issue, agent)
+    end
+
+    test "checkout allows matching company_ids", %{a: a} do
+      {:ok, agent} =
+        Agents.create_agent(%{name: "match", role: :engineer, company_id: a.id})
+
+      {:ok, issue} =
+        Issues.create_issue(%{title: "match issue", status: :todo, company_id: a.id})
+
+      assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      assert checked_out.assignee_id == agent.id
+      assert checked_out.company_id == a.id
+    end
+
+    test "Runtime.preflight rejects nil or mismatched company_id", %{a: a, b: b} do
+      {:ok, agent_a} =
+        Agents.create_agent(%{
+          name: "rt-a",
+          role: :engineer,
+          status: :idle,
+          company_id: a.id,
+          adapter: :process,
+          config: %{"command" => "echo", "repo_capable" => true}
+        })
+
+      {:ok, issue_nil} = Issues.create_issue(%{title: "rt-nil", status: :todo})
+
+      {:ok, issue_b} =
+        Issues.create_issue(%{title: "rt-b", status: :todo, company_id: b.id})
+
+      {:ok, issue_a} =
+        Issues.create_issue(%{title: "rt-a", status: :todo, company_id: a.id})
+
+      assert {:error, :company_mismatch} = Cympho.Runtime.preflight(issue_nil, agent_a)
+      assert {:error, :company_mismatch} = Cympho.Runtime.preflight(issue_b, agent_a)
+      # Matching company_id is not a mismatch; other preflight gates may still apply.
+      refute match?(
+               {:error, :company_mismatch},
+               Cympho.Runtime.preflight(issue_a, agent_a)
+             )
+    end
+
+    test "AgentActions.execute rejects nil or mismatched company_id", %{a: a, b: b} do
+      {:ok, agent_a} =
+        Agents.create_agent(%{name: "act-a", role: :engineer, company_id: a.id})
+
+      {:ok, issue_nil} = Issues.create_issue(%{title: "act-nil", status: :todo})
+
+      {:ok, issue_b} =
+        Issues.create_issue(%{title: "act-b", status: :todo, company_id: b.id})
+
+      actions = [%{"type" => "comment", "body" => "nope"}]
+
+      assert {:error, :cross_company} =
+               Cympho.AgentActions.execute(issue_nil, agent_a, actions)
+
+      assert {:error, :cross_company} =
+               Cympho.AgentActions.execute(issue_b, agent_a, actions)
     end
   end
 end

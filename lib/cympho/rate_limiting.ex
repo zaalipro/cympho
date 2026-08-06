@@ -12,6 +12,8 @@ defmodule Cympho.RateLimiting do
   is applied transparently through `dedup_broadcast/3` in context modules.
   """
 
+  require Logger
+
   @message_rate 10
   @message_rate_period_ms 1_000
   @heartbeat_min_interval_ms 1_000
@@ -47,17 +49,29 @@ defmodule Cympho.RateLimiting do
     end
   end
 
-  def dedup_broadcast(topic, event, payload) do
-    if Cympho.RateLimiting.BroadcastDedup.should_broadcast?(topic, event, payload) do
-      CymphoWeb.Endpoint.broadcast(topic, event, payload)
+  def dedup_broadcast(topic, event, payload) when is_binary(topic) do
+    # Fail-closed: never publish Endpoint events on company:: (nil company_id).
+    if String.contains?(topic, "::") do
+      Logger.warning(
+        "[RateLimiting] refusing Endpoint broadcast on malformed topic #{inspect(topic)} — likely nil company_id"
+      )
+
+      {:error, :malformed_topic}
     else
-      {:ok, :deduplicated}
+      if Cympho.RateLimiting.BroadcastDedup.should_broadcast?(topic, event, payload) do
+        CymphoWeb.Endpoint.broadcast(topic, event, payload)
+      else
+        {:ok, :deduplicated}
+      end
     end
   end
 
+  def dedup_broadcast(_topic, _event, _payload), do: {:error, :malformed_topic}
+
   def dedup_pubsub(pubsub, topic, message) do
     if Cympho.RateLimiting.BroadcastDedup.should_broadcast_pubsub?(topic, message) do
-      Phoenix.PubSub.broadcast(pubsub, topic, message)
+      # Route through PubSubGuard so nil company_id never publishes company:: topics.
+      Cympho.PubSubGuard.broadcast(pubsub, topic, message)
     else
       {:ok, :deduplicated}
     end

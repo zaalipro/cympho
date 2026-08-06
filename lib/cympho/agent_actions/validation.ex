@@ -452,9 +452,10 @@ defmodule Cympho.AgentActions.Validation do
   @block_reason_kinds ~w(external_dep ci_failure env_unavailable owner_input_needed conflicting_change other)
 
   # Models routinely invent near-miss blocker kinds ("missing_requirements",
-  # "needs_info", "thin_brief"). Map the common ones to the canonical set so a
-  # naming near-miss doesn't reject the whole action and strand the issue with
-  # a generic failure. Unknown kinds still fall through to a real error.
+  # "needs_info", "thin_brief", "owner_clarification"). Map the common ones to
+  # the canonical set so a naming near-miss doesn't reject the whole action and
+  # strand the issue with a generic failure. Unknown kinds still fall through
+  # to a real error with an allowed-kind rejection comment.
   @blocker_kind_aliases %{
     "missing_requirements" => "owner_input_needed",
     "missing_info" => "owner_input_needed",
@@ -465,6 +466,9 @@ defmodule Cympho.AgentActions.Validation do
     "owner_input" => "owner_input_needed",
     "owner_decision" => "owner_input_needed",
     "owner_verification" => "owner_input_needed",
+    "owner_clarification" => "owner_input_needed",
+    "owner_clarify" => "owner_input_needed",
+    "clarification" => "owner_input_needed",
     "thin_brief" => "owner_input_needed",
     "insufficient_brief" => "owner_input_needed",
     "clarification_needed" => "owner_input_needed",
@@ -483,6 +487,11 @@ defmodule Cympho.AgentActions.Validation do
     "conflict" => "conflicting_change",
     "merge_conflict" => "conflicting_change"
   }
+
+  @doc """
+  Canonical `blocker_kind` values accepted by `block_issue`.
+  """
+  def block_reason_kinds, do: @block_reason_kinds
 
   @doc """
   Returns `action` with `blocker_kind` resolved to its canonical form when it

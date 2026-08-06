@@ -216,6 +216,8 @@ defmodule CymphoWeb.IssueLive.Show.Header do
   defp simple_action_label("Focus queued"), do: "Starting next"
   defp simple_action_label("Review evidence"), do: "See the work"
   defp simple_action_label("Accept owner verification"), do: "Looks good"
+  defp simple_action_label("Attach work product"), do: "Attach proof"
+  defp simple_action_label("Set PR link"), do: "Set PR"
   defp simple_action_label(label), do: label
 
   defp last_event_line([]), do: nil

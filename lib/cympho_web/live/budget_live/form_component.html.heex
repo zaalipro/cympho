@@ -23,6 +23,7 @@
     class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
   >
     <% scope_type = selected_scope_type(@form, @budget) %>
+    <% hard_stop? = hard_stop_enabled?(@form, @budget) %>
 
     <.panel class="overflow-hidden">
       <div class="border-b border-border px-5 py-4 sm:px-6">
@@ -195,7 +196,11 @@
         class="flex flex-col gap-3 border-t border-border bg-surface/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
       >
         <p class="max-w-2xl text-xs leading-5 text-text-tertiary">
-          Saved budgets are enforced by runtime preflight before agent execution begins.
+          <%= if hard_stop? do %>
+            Saving creates a runtime BudgetPolicy that blocks new agent work when spend hits this cap.
+          <% else %>
+            Saving creates a warn-only BudgetPolicy — agents keep spending after this cap.
+          <% end %>
         </p>
         <.button type="submit" variant="primary" class="min-h-[40px] w-full shrink-0 sm:w-auto">
           Save Budget
@@ -230,7 +235,7 @@
             <div>
               <p class="text-sm font-590 text-text-primary">Set the spend cap</p>
               <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Keep the limit tight enough for provider-cost surprises to stop early.
+                Keep the limit tight enough to catch provider-cost surprises early.
               </p>
             </div>
           </div>
@@ -241,21 +246,44 @@
             <div>
               <p class="text-sm font-590 text-text-primary">Save before launch</p>
               <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Runtime preflight enforces saved guardrails before agents execute.
+                <%= if hard_stop? do %>
+                  Runtime preflight blocks new runs once this BudgetPolicy is exhausted.
+                <% else %>
+                  Runtime tracks spend and warns — it will not stop agents without hard stop.
+                <% end %>
               </p>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
-        <p class="ember-eyebrow text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
+      <section
+        data-testid="budget-preflight-behavior"
+        class={[
+          "rounded-xl border p-4",
+          if(hard_stop?,
+            do: "border-brand/25 bg-brand/10",
+            else: "border-amber-500/25 bg-amber-500/10"
+          )
+        ]}
+      >
+        <p class={[
+          "ember-eyebrow text-[11px] font-590 uppercase tracking-[0.14em]",
+          if(hard_stop?, do: "text-brand", else: "text-amber-200")
+        ]}>
           Preflight behavior
         </p>
-        <p class="mt-2 text-sm font-590 text-text-primary">Hard stop by default</p>
-        <p class="mt-1 text-xs leading-5 text-text-tertiary">
-          Once the limit is hit, agents stop starting new work.
-        </p>
+        <%= if hard_stop? do %>
+          <p class="mt-2 text-sm font-590 text-text-primary">Hard stop (block) by default</p>
+          <p class="mt-1 text-xs leading-5 text-text-tertiary">
+            Once the limit is hit, agents stop starting new work.
+          </p>
+        <% else %>
+          <p class="mt-2 text-sm font-590 text-text-primary">Warn only — agents keep spending</p>
+          <p class="mt-1 text-xs leading-5 text-text-tertiary">
+            Spend is tracked and alerts fire, but runtime will not pause agents at this cap.
+          </p>
+        <% end %>
       </section>
     </aside>
   </.form>

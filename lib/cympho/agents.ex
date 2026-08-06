@@ -195,9 +195,9 @@ defmodule Cympho.Agents do
     |> Repo.insert()
     |> case do
       {:ok, agent} ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{agent.company_id}:agents",
+        Cympho.PubSubGuard.company_broadcast(
+          agent.company_id,
+          "agents",
           {:agent_created, agent}
         )
 
@@ -243,9 +243,9 @@ defmodule Cympho.Agents do
           end)
 
         Enum.each(updated_agents, fn updated ->
-          Phoenix.PubSub.broadcast(
-            Cympho.PubSub,
-            "company:#{updated.company_id}:agents",
+          Cympho.PubSubGuard.company_broadcast(
+            updated.company_id,
+            "agents",
             {:agent_updated, updated}
           )
         end)
@@ -273,9 +273,9 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.company_id}:agents",
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "agents",
           {:agent_updated, updated}
         )
 
@@ -304,9 +304,9 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.company_id}:agents",
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "agents",
           {:agent_updated, updated}
         )
 
@@ -337,9 +337,9 @@ defmodule Cympho.Agents do
         # stale state pointing at a now-missing DB row.
         _ = Cympho.AgentHeartbeat.stop_for_agent(agent.id)
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{agent.company_id}:agents",
+        Cympho.PubSubGuard.company_broadcast(
+          agent.company_id,
+          "agents",
           {:agent_deleted, agent.id}
         )
 
@@ -360,9 +360,11 @@ defmodule Cympho.Agents do
   @doc """
   Subscribes to agent updates.
   """
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:agents")
   end
+
+  def subscribe(_company_id), do: :ok
 
   @doc """
   Gets an idle agent by role, or nil if none available.
@@ -387,26 +389,40 @@ defmodule Cympho.Agents do
   end
 
   @doc """
-  Returns agents eligible for dispatch: matching role, not in :error status,
-  and not at max_concurrent_jobs capacity.
+  Returns agents eligible for dispatch: matching role, idle (or recovered from
+  transient `:error`), and not at max_concurrent_jobs capacity.
+
+  Transient `:error` agents are self-healed to `:idle` here so they remain
+  eligible under the dispatcher path (AgentHeartbeat skips recovery when
+  `delegate_to_dispatcher` is true).
   """
   @spec list_eligible_agents(:ceo | :cto | :engineer) :: [Agent.t()]
   def list_eligible_agents(role) when is_atom(role) do
     Agent
-    |> where(role: ^role, status: :idle)
+    |> where([a], a.role == ^role and a.status in [:idle, :error])
     |> where_active_governance()
     |> exclude_temporary()
     |> Repo.all()
-    |> Enum.reject(&is_agent_at_capacity?/1)
+    |> Enum.flat_map(&eligible_after_error_recovery/1)
   end
 
   def list_eligible_agents(role, company_id) when is_atom(role) do
     Agent
-    |> where(role: ^role, status: :idle, company_id: ^company_id)
+    |> where([a], a.role == ^role and a.company_id == ^company_id and a.status in [:idle, :error])
     |> where_active_governance()
     |> exclude_temporary()
     |> Repo.all()
-    |> Enum.reject(&is_agent_at_capacity?/1)
+    |> Enum.flat_map(&eligible_after_error_recovery/1)
+  end
+
+  defp eligible_after_error_recovery(%Agent{} = agent) do
+    case recover_error_status(agent) do
+      {:ok, %{status: :idle} = recovered} ->
+        if is_agent_at_capacity?(recovered), do: [], else: [recovered]
+
+      _ ->
+        []
+    end
   end
 
   defp where_active_governance(query) do
@@ -761,18 +777,75 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Stamps `last_heartbeat_at` to now without changing status.
+
+  Used by heartbeat ticks, orchestrator session end, and dispatcher bind so the
+  agent roster reflects real runs — not only PATCH `/api/agents/:id/status`.
+  """
+  @spec touch_heartbeat(Agent.t() | String.t()) :: {:ok, Agent.t()} | {:error, term()}
+  def touch_heartbeat(%Agent{} = agent) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    agent
+    |> Ecto.Changeset.change(%{last_heartbeat_at: now})
+    |> Repo.update()
+    |> case do
+      {:ok, updated} ->
+        broadcast_agent_updated(updated)
+        {:ok, updated}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  def touch_heartbeat(agent_id) when is_binary(agent_id) do
+    case get_agent(agent_id) do
+      {:ok, agent} -> touch_heartbeat(agent)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Recovers a transient `:error` agent to `:idle` and stamps `last_heartbeat_at`.
+
+  Operators/circuit breakers park agents as `:paused` or `:terminated` — those
+  are deliberately not auto-recovered. Used by AgentHeartbeat and Dispatcher
+  so `:error` does not stick forever under the dispatcher-delegation path.
+  """
+  @spec recover_error_status(Agent.t()) :: {:ok, Agent.t()} | {:error, term()}
+  def recover_error_status(%Agent{status: :error} = agent) do
+    update_agent_status(agent, %{status: :idle})
+  end
+
+  def recover_error_status(%Agent{} = agent), do: {:ok, agent}
+
+  @doc """
   Updates an agent's own status and last_heartbeat_at.
   Uses the restricted status_changeset that only allows status and last_heartbeat_at.
   """
   def update_agent_status(%Agent{} = agent, attrs) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    # Normalize to string keys so atom-keyed callers (`%{status: :idle}`) do
+    # not mix with the stamped last_heartbeat_at and trip Ecto.CastError.
+    normalized =
+      attrs
+      |> Map.new(fn
+        {key, value} when is_atom(key) -> {Atom.to_string(key), value}
+        {key, value} when is_binary(key) -> {key, value}
+      end)
+      |> Map.put("last_heartbeat_at", now)
+
     agent
-    |> Agent.status_changeset(Map.put(attrs, "last_heartbeat_at", DateTime.utc_now()))
+    |> Agent.status_changeset(normalized)
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.company_id}:agents",
+        # Fail-closed tenant PubSub (never company::agents).
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "agents",
           {:agent_updated, updated}
         )
 
@@ -781,6 +854,11 @@ defmodule Cympho.Agents do
       {:error, changeset} ->
         {:error, changeset}
     end
+  end
+
+  # Fail-closed: never form company::agents topics from a nil/blank company_id.
+  defp broadcast_agent_updated(%Agent{company_id: company_id} = agent) do
+    Cympho.PubSubGuard.company_broadcast(company_id, "agents", {:agent_updated, agent})
   end
 
   @doc """
@@ -1071,9 +1149,9 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.company_id}:agents",
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "agents",
           {:agent_paused, updated}
         )
 
@@ -1107,9 +1185,9 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.company_id}:agents",
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "agents",
           {:agent_updated, updated}
         )
 

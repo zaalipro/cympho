@@ -35,7 +35,7 @@ defmodule Cympho.Issues.SwarmEvents do
     "parent_blocked" => 330
   }
 
-  def subscribe(company_id) when is_binary(company_id) do
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, topic(company_id))
   end
 
@@ -123,7 +123,14 @@ defmodule Cympho.Issues.SwarmEvents do
   defp safe_insert(attrs) do
     case %SwarmEvent{} |> SwarmEvent.changeset(attrs) |> Repo.insert() do
       {:ok, event} ->
-        _ = PubSubGuard.broadcast(topic(event.company_id), {:swarm_event_created, event})
+        # Fail-closed: never company::swarm_events from a nil company_id.
+        _ =
+          PubSubGuard.company_broadcast(
+            event.company_id,
+            "swarm_events",
+            {:swarm_event_created, event}
+          )
+
         :ok
 
       {:error, changeset} ->
@@ -161,7 +168,7 @@ defmodule Cympho.Issues.SwarmEvents do
   defp event_rank(type) when is_binary(type), do: Map.get(@event_order, type, 1_000)
   defp event_rank(_type), do: 1_000
 
-  defp topic(company_id), do: "company:#{company_id}:swarm_events"
+  defp topic(company_id) when is_binary(company_id), do: "company:#{company_id}:swarm_events"
 
   defp swarm_state(%{monitor_state: monitor_state}) when is_map(monitor_state) do
     case Map.get(monitor_state, "swarm") || Map.get(monitor_state, :swarm) do

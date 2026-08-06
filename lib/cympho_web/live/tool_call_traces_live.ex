@@ -17,7 +17,8 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
         tool_name: "",
         status: "",
         agent_id: "",
-        issue_id: ""
+        issue_id: "",
+        run_id: ""
       })
       |> assign(:agents, list_agents_scoped(company_id))
       |> assign(:integrity_status, :unknown)
@@ -35,7 +36,8 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
       tool_name: Map.get(filter_params, "tool_name", ""),
       status: Map.get(filter_params, "status", ""),
       agent_id: Map.get(filter_params, "agent_id", ""),
-      issue_id: Map.get(filter_params, "issue_id", "")
+      issue_id: Map.get(filter_params, "issue_id", ""),
+      run_id: Map.get(filter_params, "run_id", "")
     }
 
     socket =
@@ -53,7 +55,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   def handle_event("clear_filters", _params, socket) do
     socket =
       socket
-      |> assign(:filters, %{tool_name: "", status: "", agent_id: "", issue_id: ""})
+      |> assign(:filters, %{tool_name: "", status: "", agent_id: "", issue_id: "", run_id: ""})
       |> assign(:selected_trace, nil)
       |> assign(:export_data_json, nil)
       |> assign(:export_data_csv, nil)
@@ -130,7 +132,8 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
           prev_hash: trace.prev_hash,
           chain_hash: trace.chain_hash,
           agent_id: trace.agent_id,
-          issue_id: trace.issue_id
+          issue_id: trace.issue_id,
+          run_id: trace.run_id
         }
       end)
       |> Jason.encode!(pretty: true)
@@ -199,6 +202,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
     |> maybe_put(:status, f.status)
     |> maybe_put(:agent_id, f.agent_id)
     |> maybe_put(:issue_id, f.issue_id)
+    |> maybe_put(:run_id, Map.get(f, :run_id, ""))
   end
 
   defp maybe_put(opts, _key, ""), do: opts
@@ -593,7 +597,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
           phx-submit="filter"
           class="mb-6 scroll-mt-6 bg-surface border border-border rounded-xl p-4"
         >
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
             <div>
               <label class="block text-xs font-510 text-text-secondary mb-1.5">Tool Name</label>
               <input
@@ -638,6 +642,17 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                 name="filter[issue_id]"
                 value={@filters.issue_id}
                 placeholder="Filter by issue ID..."
+                class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-510 text-text-secondary mb-1.5">Run ID</label>
+              <input
+                type="text"
+                name="filter[run_id]"
+                value={Map.get(@filters, :run_id, "")}
+                placeholder="Filter by run ID..."
                 class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
               />
             </div>
@@ -954,6 +969,15 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                       <div class="text-xs text-text-secondary mb-1">Issue ID</div>
                       <div class="text-sm font-mono text-text-primary">
                         {@selected_trace.issue_id}
+                      </div>
+                    </div>
+                  <% end %>
+
+                  <%= if @selected_trace.run_id do %>
+                    <div>
+                      <div class="text-xs text-text-secondary mb-1">Run ID</div>
+                      <div class="text-sm font-mono text-text-primary">
+                        {@selected_trace.run_id}
                       </div>
                     </div>
                   <% end %>

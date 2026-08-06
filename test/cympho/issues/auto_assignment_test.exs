@@ -5,6 +5,7 @@ defmodule Cympho.Issues.AutoAssignmentTest do
   alias Cympho.Issues.Issue
   alias Cympho.Agents
   alias Cympho.Repo
+  alias Cympho.Wakes
 
   defp ensure_test_company do
     case Repo.get_by(Cympho.Companies.Company, slug: "auto-assignment-test") do
@@ -143,7 +144,9 @@ defmodule Cympho.Issues.AutoAssignmentTest do
     end
 
     test "does not checkout repo delivery work to fallback CTO", %{agent: agent} do
-      {:ok, _agent} = Agents.update_agent(agent, %{status: :error})
+      # Transient `:error` is self-healed by list_eligible_agents; use a
+      # non-recoverable status so only the no-fallback-to-CTO contract is tested.
+      {:ok, _agent} = Agents.update_agent(agent, %{status: :paused})
 
       {:ok, _cto} =
         Agents.create_agent(%{
@@ -357,9 +360,39 @@ defmodule Cympho.Issues.AutoAssignmentTest do
     end
   end
 
+  describe "assign_and_promote_for_dispatch/1" do
+    test "assigns owner and promotes backlog to :todo without checkout" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Promote Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          max_concurrent_jobs: 3,
+          company_id: test_company_id()
+        })
+
+      issue =
+        create_issue_direct(%{
+          title: "Implement login feature",
+          description: "Build the login flow"
+        })
+
+      assert issue.status == :backlog
+      assert is_nil(issue.assignee_id)
+
+      {:ok, prepared} = AutoAssignment.assign_and_promote_for_dispatch(issue)
+
+      assert prepared.assignee_id == agent.id
+      assert prepared.status == :todo
+      refute prepared.status == :in_progress
+      assert is_nil(prepared.checked_out_at)
+    end
+  end
+
   describe "reassign_backlog/0" do
-    test "assigns backlog issues with no assignee" do
-      {:ok, _agent} =
+    test "assigns backlog issues with no assignee as dispatchable :todo + wake" do
+      {:ok, agent} =
         Agents.create_agent(%{
           name: "Backlog Agent",
           role: :engineer,
@@ -369,31 +402,49 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           company_id: test_company_id()
         })
 
-      create_issue_direct(%{
-        title: "Backlog Issue 1",
-        description: "Should be assigned"
-      })
+      issue1 =
+        create_issue_direct(%{
+          title: "Backlog Issue 1",
+          description: "Should be assigned"
+        })
 
-      create_issue_direct(%{
-        title: "Backlog Issue 2",
-        description: "Should also be assigned"
-      })
+      issue2 =
+        create_issue_direct(%{
+          title: "Backlog Issue 2",
+          description: "Should also be assigned"
+        })
 
       {:ok, assigned_count, queued_count} = AutoAssignment.reassign_backlog(test_company_id())
       assert assigned_count == 2
       assert queued_count == 0
+
+      for id <- [issue1.id, issue2.id] do
+        reloaded = Repo.get!(Issue, id)
+        assert reloaded.assignee_id == agent.id
+        assert reloaded.status == :todo
+        refute reloaded.status == :in_progress
+        assert is_nil(reloaded.checked_out_at)
+
+        wakes = Wakes.list_issue_wakes(id)
+        assert Enum.any?(wakes, &(&1.reason == "manual_dispatch"))
+      end
     end
 
     test "leaves issues in backlog when no agents available" do
       # No agents at all
-      create_issue_direct(%{
-        title: "Backlog Issue No Agent",
-        description: "No agent to assign"
-      })
+      issue =
+        create_issue_direct(%{
+          title: "Backlog Issue No Agent",
+          description: "No agent to assign"
+        })
 
       {:ok, assigned_count, queued_count} = AutoAssignment.reassign_backlog(test_company_id())
       assert assigned_count == 0
       assert queued_count == 1
+
+      reloaded = Repo.get!(Issue, issue.id)
+      assert reloaded.status == :backlog
+      assert is_nil(reloaded.assignee_id)
     end
   end
 

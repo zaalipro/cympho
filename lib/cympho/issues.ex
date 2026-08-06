@@ -15,6 +15,7 @@ defmodule Cympho.Issues do
   alias Cympho.Approvals
   alias Cympho.Comments
   alias Cympho.HeartbeatEngine
+  alias Cympho.HeartbeatEngine.Run
   alias Cympho.IssueDigest
   alias Cympho.PullRequestContract
   alias Cympho.Activities
@@ -26,6 +27,7 @@ defmodule Cympho.Issues do
   alias Cympho.Labels.Label
   alias Cympho.Goals
   alias Cympho.WorkProducts
+  alias Cympho.Workspaces
 
   # Hard upper bound for unbounded issue listings. The kanban/search callers
   # pass a company filter but otherwise have no `LIMIT`; without a safety cap
@@ -545,6 +547,12 @@ defmodule Cympho.Issues do
   Issues with `monitor_state["patrol"]["excluded"] == true` are also
   excluded. Use this for intentionally long-running work that should not be
   escalated by the stale-work patrol loop.
+
+  Live-run awareness: issues with a non-terminal heartbeat run
+  (`pending`/`queued`/`running`) are never stuck — a long productive
+  checkout must not thrash supervisors. Fresh progress (any run with
+  `last_heartbeat_at` within the in-progress threshold window) also skips
+  the in-progress stuck bucket.
   """
   @spec list_stuck_issues(binary(), keyword()) :: [Issue.t()]
   def list_stuck_issues(company_id, opts \\ []) when is_binary(company_id) do
@@ -575,13 +583,22 @@ defmodule Cympho.Issues do
         []
 
       stuck_clause ->
+        active_statuses = @active_run_statuses
+
         from(i in Issue,
+          as: :issue,
           where: i.company_id == ^company_id,
           where: is_nil(i.origin_type) or i.origin_type != "backlog_planner",
           where:
             fragment(
               "COALESCE((? -> 'patrol' ->> 'excluded')::boolean, false) = false",
               i.monitor_state
+            ),
+          # Live non-terminal runs are never "stuck" for patrol purposes.
+          where:
+            not exists(
+              from r in Run,
+                where: r.issue_id == parent_as(:issue).id and r.status in ^active_statuses
             ),
           where: ^stuck_clause,
           order_by: [asc: i.updated_at]
@@ -612,10 +629,19 @@ defmodule Cympho.Issues do
 
   defp in_progress_dynamic(nil), do: nil
 
+  # Stuck when checkout is old AND there is no fresh run progress
+  # (last_heartbeat_at within the threshold). Terminal runs with a recent
+  # heartbeat still count as progress so patrol does not thrash mid-session.
   defp in_progress_dynamic(cutoff) do
     dynamic(
       [i],
-      i.status == :in_progress and not is_nil(i.checked_out_at) and i.checked_out_at < ^cutoff
+      i.status == :in_progress and not is_nil(i.checked_out_at) and i.checked_out_at < ^cutoff and
+        not exists(
+          from r in Run,
+            where:
+              r.issue_id == parent_as(:issue).id and not is_nil(r.last_heartbeat_at) and
+                r.last_heartbeat_at >= ^cutoff
+        )
     )
   end
 
@@ -924,7 +950,19 @@ defmodule Cympho.Issues do
       |> normalize_monitor_state()
       |> Map.put("issue_runtime", runtime_state)
 
-    update_issue(issue, %{monitor_state: monitor_state})
+    case update_issue(issue, %{monitor_state: monitor_state}) do
+      {:ok, paused} = ok ->
+        _ =
+          Workspaces.cancel_and_release_for_issue(paused, %{
+            reason: "issue_runtime_paused",
+            company_id: paused.company_id
+          })
+
+        ok
+
+      other ->
+        other
+    end
   end
 
   def pause_issue_runtime(_issue, _opts), do: {:error, :invalid_issue}
@@ -1207,13 +1245,15 @@ defmodule Cympho.Issues do
           metadata: %{title: issue.title}
         })
 
-        Cympho.RateLimiting.dedup_pubsub(
-          Cympho.PubSub,
-          "company:#{issue.company_id}:issues",
+        # Fail-closed: company_broadcast no-ops when company_id is nil/blank.
+        Cympho.PubSubGuard.company_broadcast(
+          issue.company_id,
+          "issues",
           {:issue_created, issue}
         )
 
         CymphoWeb.Events.broadcast_issue_update(issue, :issue_created)
+        _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(nil, issue)
         Cympho.Telemetry.issue_created(issue)
         issue = maybe_classify_role(issue, attrs)
         issue = maybe_launch_swarm(issue, attrs)
@@ -1244,17 +1284,20 @@ defmodule Cympho.Issues do
   # agent-idle events — so a strategic issue created while all eligible
   # agents are busy is stranded indefinitely.
   #
-  # We fan out the assign + wake under `Task.Supervisor` so the caller's
-  # transaction-and-broadcast path stays snappy. If no agent is eligible we
-  # leave the issue in `:backlog` and the existing reassigner picks it up.
+  # We assign an owner and promote backlog → `:todo` (never checkout to
+  # `:in_progress` alone), then enqueue an `issue_created` wake so the
+  # dispatcher / heartbeat can claim the issue with a live orchestrator.
+  # Fan-out under `Task.Supervisor` keeps the caller's transaction-and-
+  # broadcast path snappy. If no agent is eligible we leave the issue in
+  # `:backlog` and the existing reassigner picks it up.
   defp maybe_auto_ignite(%Issue{} = issue, attrs) do
     if auto_ignite?(issue, attrs) do
       run_ignition = fn ->
-        case Cympho.Issues.AutoAssignment.assign_issue(issue) do
-          {:ok, assigned} ->
+        case Cympho.Issues.AutoAssignment.assign_and_promote_for_dispatch(issue) do
+          {:ok, prepared} ->
             _ =
               Cympho.Orchestrator.Dispatcher.enqueue_wake(
-                assigned.id,
+                prepared.id,
                 "issue_created",
                 %{}
               )
@@ -1570,9 +1613,9 @@ defmodule Cympho.Issues do
 
       Activities.log_issue_changes(old_issue, updated, attrs)
 
-      Cympho.RateLimiting.dedup_pubsub(
-        Cympho.PubSub,
-        "company:#{updated.company_id}:issues",
+      Cympho.PubSubGuard.company_broadcast(
+        updated.company_id,
+        "issues",
         {:issue_updated, updated}
       )
 
@@ -1583,6 +1626,8 @@ defmodule Cympho.Issues do
         event_type,
         build_update_metadata(old_issue, updated, attrs)
       )
+
+      _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(old_issue, updated)
 
       _ = Cympho.ReviewNudges.reconcile_issue(updated)
 
@@ -1642,6 +1687,14 @@ defmodule Cympho.Issues do
 
       with {:ok, wake_count} <- Wakes.cancel_issue_wakes(updated.id, reason),
            {:ok, run_count} <- HeartbeatEngine.cancel_active_runs_for_issue(updated.id, reason) do
+        # Cancel/release remote env even when no active runs remained (orphan
+        # provider_ref). cancel_run paths also release; double-release is safe.
+        _ =
+          Workspaces.cancel_and_release_for_issue(updated, %{
+            reason: "issue_terminal_#{updated.status}",
+            company_id: updated.company_id
+          })
+
         Activities.log_activity(%{
           issue_id: updated.id,
           company_id: updated.company_id,
@@ -1951,8 +2004,33 @@ defmodule Cympho.Issues do
       end
 
     case attrs do
-      {:error, _} = error -> error
-      attrs -> do_transition_update(issue, attrs)
+      {:error, _} = error ->
+        error
+
+      attrs ->
+        do_transition_update(issue, maybe_clear_checkout_on_leave_in_progress(issue, attrs))
+    end
+  end
+
+  # Board demotions (and any leave of :in_progress) must drop the runtime
+  # checkout lock so the dispatcher does not treat the issue as still owned by
+  # a run. Intentional assignee is preserved — reclaim is lock-only.
+  defp maybe_clear_checkout_on_leave_in_progress(%Issue{} = issue, attrs) when is_map(attrs) do
+    new_status = extract_status(attrs)
+
+    leaving_in_progress? =
+      issue.status == :in_progress and new_status not in [nil, :in_progress]
+
+    has_checkout? = not is_nil(issue.checkout_run_id) or not is_nil(issue.checked_out_at)
+
+    if (leaving_in_progress? or (has_checkout? and new_status not in [nil, :in_progress])) and
+         not Map.has_key?(attrs, :checkout_run_id) and
+         not Map.has_key?(attrs, "checkout_run_id") do
+      attrs
+      |> Map.put(:checkout_run_id, nil)
+      |> Map.put(:checked_out_at, nil)
+    else
+      attrs
     end
   end
 
@@ -2181,8 +2259,9 @@ defmodule Cympho.Issues do
 
   @doc """
   For each issue that this issue blocks, check if ALL of its blockers are now done.
-  If so, transition it to :todo (unblocked) and wake its assignee via AgentHeartbeat.
-  Adds a system comment to each unblocked issue.
+  If so, transition it to :todo (unblocked), add a system comment, and enqueue a
+  durable `issue_blockers_resolved` wake via `Wakes.notify_blockers_resolved/1`
+  (assignee wake or unassigned `poll_now` resume).
   """
   def unblock_dependents(blocker_issue_id) do
     # Find all issues where this issue is a blocker
@@ -2201,44 +2280,53 @@ defmodule Cympho.Issues do
       |> Repo.all()
       |> Repo.preload([:blocked_by])
 
-    Enum.each(dependents, fn dependent ->
-      if all_blockers_done?(dependent) do
-        {:ok, updated} = update_issue(dependent, %{status: :todo})
-        wake_assignee(updated)
-        add_system_comment(updated, "Auto-unblocked")
+    {unblocked_ids, company_ids} =
+      Enum.reduce(dependents, {[], MapSet.new()}, fn dependent, {ids, companies} ->
+        if all_blockers_done?(dependent) do
+          {:ok, updated} = update_issue(dependent, %{status: :todo})
+          add_system_comment(updated, "Auto-unblocked")
+
+          companies =
+            if is_binary(updated.company_id),
+              do: MapSet.put(companies, updated.company_id),
+              else: companies
+
+          {[updated.id | ids], companies}
+        else
+          {ids, companies}
+        end
+      end)
+
+    # Durable wakes after dependents are :todo so unassigned work can resume
+    # via Dispatcher.poll_now (blocked candidates are not auto-dispatched).
+    if unblocked_ids != [] do
+      case Repo.get(Issue, blocker_issue_id) do
+        %Issue{} = blocker ->
+          _ = Wakes.notify_blockers_resolved(blocker)
+
+          # Status broadcasts race ahead of wake enqueue. Tell board/inbox
+          # surfaces to reload pending wake badges after durable wakes land.
+          Enum.each(company_ids, &broadcast_pending_wakes_changed/1)
+
+        _ ->
+          :ok
       end
-    end)
+    end
+
+    :ok
+  end
+
+  defp broadcast_pending_wakes_changed(company_id) do
+    Cympho.PubSubGuard.company_broadcast(
+      company_id,
+      "issues",
+      {:pending_wakes_changed, company_id}
+    )
   end
 
   defp all_blockers_done?(%Issue{} = issue) do
     blockers = issue.blocked_by || []
     Enum.all?(blockers, fn blocker -> blocker.status in [:done, :cancelled] end)
-  end
-
-  defp wake_assignee(%Issue{} = issue) do
-    if issue.assignee_id do
-      try do
-        case Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id) do
-          :ok ->
-            :ok
-
-          {:error, reason} ->
-            Logger.debug("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
-              error: inspect(reason)
-            )
-
-            :ok
-        end
-      rescue
-        e ->
-          _ =
-            Logger.debug("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
-              error: inspect(e)
-            )
-
-          :ok
-      end
-    end
   end
 
   defp add_system_comment(%Issue{} = issue, body) do
@@ -2421,11 +2509,11 @@ defmodule Cympho.Issues do
   def clear_checkout_lock_for_run(_issue_id, _agent_id, _run_id, _target_status),
     do: {:error, :checkout_not_owned}
 
-  defp same_company?(%Issue{company_id: nil}, _agent), do: true
-  defp same_company?(_issue, %Agent{company_id: nil}), do: true
-
-  defp same_company?(%Issue{company_id: issue_company_id}, %Agent{company_id: agent_company_id}),
-    do: issue_company_id == agent_company_id
+  # Fail-closed: both sides must have a non-nil company_id and they must match.
+  # A nil on either side used to treat cross-tenant pairs as same-company.
+  defp same_company?(%Issue{company_id: issue_company_id}, %Agent{company_id: agent_company_id})
+       when is_binary(issue_company_id) and is_binary(agent_company_id),
+       do: issue_company_id == agent_company_id
 
   defp same_company?(_issue, _agent), do: false
 
@@ -2639,13 +2727,33 @@ defmodule Cympho.Issues do
     end
   end
 
+  # Compare-and-set on the caller's ownership snapshot. A successor that bound a
+  # new `checkout_run_id` (or re-checked out with a newer timestamp / lock)
+  # must not be cleared by a stale reclaim. Assignee is intentionally preserved.
   defp atomic_clear_checkout_lock(%Issue{} = issue, target_status) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    {count, _} =
+    query =
       from(i in Issue,
-        where: i.id == ^issue.id
+        where: i.id == ^issue.id and i.lock_version == ^issue.lock_version
       )
+
+    query =
+      case {issue.checkout_run_id, issue.checked_out_at} do
+        {run_id, _} when is_binary(run_id) ->
+          from(i in query, where: i.checkout_run_id == ^run_id)
+
+        {nil, %DateTime{} = checked_out_at} ->
+          from(i in query,
+            where: is_nil(i.checkout_run_id) and i.checked_out_at == ^checked_out_at
+          )
+
+        {nil, nil} ->
+          from(i in query, where: is_nil(i.checkout_run_id) and is_nil(i.checked_out_at))
+      end
+
+    {count, _} =
+      query
       |> Repo.update_all(
         set: [
           checkout_run_id: nil,
@@ -2684,9 +2792,9 @@ defmodule Cympho.Issues do
   end
 
   defp broadcast_issue_update(%Issue{} = issue, event_type, metadata) do
-    Cympho.RateLimiting.dedup_pubsub(
-      Cympho.PubSub,
-      "company:#{issue.company_id}:issues",
+    Cympho.PubSubGuard.company_broadcast(
+      issue.company_id,
+      "issues",
       {:issue_updated, issue}
     )
 
@@ -2728,9 +2836,9 @@ defmodule Cympho.Issues do
               metadata: %{blocker_id: blocker_issue.id}
             })
 
-            Cympho.RateLimiting.dedup_pubsub(
-              Cympho.PubSub,
-              "company:#{issue.company_id}:issues",
+            Cympho.PubSubGuard.company_broadcast(
+              issue.company_id,
+              "issues",
               {:issue_updated, issue}
             )
 
@@ -2794,9 +2902,9 @@ defmodule Cympho.Issues do
         metadata: %{blocker_id: blocker_issue.id}
       })
 
-      Cympho.RateLimiting.dedup_pubsub(
-        Cympho.PubSub,
-        "company:#{issue.company_id}:issues",
+      Cympho.PubSubGuard.company_broadcast(
+        issue.company_id,
+        "issues",
         {:issue_updated, issue}
       )
 
@@ -2816,9 +2924,9 @@ defmodule Cympho.Issues do
 
         Approvals.cancel_pending_for_issue(issue.id)
 
-        Cympho.RateLimiting.dedup_pubsub(
-          Cympho.PubSub,
-          "company:#{issue.company_id}:issues",
+        Cympho.PubSubGuard.company_broadcast(
+          issue.company_id,
+          "issues",
           {:issue_deleted, issue.id}
         )
 
@@ -3024,16 +3132,13 @@ defmodule Cympho.Issues do
       transition: transition
     }
 
-    if updated.company_id do
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "company:#{updated.company_id}:execution_policies",
-        {:stage_completed, payload}
-      )
-    end
+    Cympho.PubSubGuard.company_broadcast(
+      updated.company_id,
+      "execution_policies",
+      {:stage_completed, payload}
+    )
 
-    Phoenix.PubSub.broadcast(
-      Cympho.PubSub,
+    Cympho.PubSubGuard.broadcast(
       "system:execution_policies",
       {:stage_completed, payload}
     )

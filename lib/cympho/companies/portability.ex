@@ -16,6 +16,7 @@ defmodule Cympho.Companies.Portability do
   @supported_versions [1]
   @collection_fields ~w(users memberships projects agents issues goals labels secret_manifest)a
   @identified_collections ~w(users projects agents issues goals labels)a
+  @include_fields [:company | @collection_fields]
   @secret_fields ~w(
     value password_hash key_hash encrypted_value webhook_secret github_webhook_secret
     api_key password secret token authorization cookie database_url key credential credentials
@@ -30,18 +31,102 @@ defmodule Cympho.Companies.Portability do
   def supported_versions, do: @supported_versions
 
   @doc """
+  Collection keys that selective package includes may name.
+
+  `:all` remains the V1 default and preserves whole-package behavior.
+  """
+  def supported_includes, do: @include_fields
+
+  @doc """
+  Normalizes an `:includes` option to `:all` or a list of known atoms.
+
+  Unknown keys are rejected so selective callers fail closed instead of silently
+  dropping data.
+  """
+  def normalize_includes(:all), do: :all
+  def normalize_includes(nil), do: :all
+
+  def normalize_includes(includes) when is_list(includes) do
+    allowed = MapSet.new(@include_fields)
+
+    normalized =
+      Enum.map(includes, fn
+        key when is_atom(key) -> key
+        key when is_binary(key) -> String.to_existing_atom(key)
+      end)
+
+    unknown = Enum.reject(normalized, &MapSet.member?(allowed, &1))
+
+    if unknown == [] do
+      Enum.uniq(normalized)
+    else
+      {:error, unknown}
+    end
+  rescue
+    ArgumentError ->
+      {:error, includes}
+  end
+
+  def normalize_includes(_includes), do: {:error, :invalid_includes}
+
+  @doc """
+  Filters a package map to the requested includes.
+
+  `:all` returns the package unchanged (V1 whole-package default).
+  """
+  def apply_includes(package, :all) when is_map(package), do: package
+
+  def apply_includes(package, includes) when is_map(package) and is_list(includes) do
+    keep =
+      includes
+      |> Enum.flat_map(fn key -> [key, Atom.to_string(key)] end)
+      |> MapSet.new()
+
+    # Always retain package metadata so version/export stamps survive filtering.
+    metadata_keys =
+      MapSet.new([:version, "version", :exported_at, "exported_at", :format, "format"])
+
+    package
+    |> Enum.filter(fn {key, _value} ->
+      MapSet.member?(keep, key) or MapSet.member?(metadata_keys, key)
+    end)
+    |> Map.new()
+  end
+
+  def apply_includes(package, _includes), do: package
+
+  @doc """
   Validates and previews a V1 company import without writing any records.
   """
   def preview_import(data, opts \\ [])
 
   def preview_import(data, opts) when is_map(data) do
     strategy = Keyword.get(opts, :slug_strategy, :suffix)
-    errors = validation_errors(data, strategy)
+    includes = normalize_includes(Keyword.get(opts, :includes, :all))
 
-    if errors == [] do
-      {:ok, build_plan(data, strategy)}
-    else
-      {:error, %{errors: errors, supported_versions: @supported_versions}}
+    case includes do
+      {:error, _reason} ->
+        {:error,
+         %{
+           errors: [
+             error(
+               :includes,
+               :unsupported_includes,
+               "Includes must be :all or a list of supported package collections."
+             )
+           ],
+           supported_versions: @supported_versions,
+           supported_includes: @include_fields
+         }}
+
+      normalized_includes ->
+        errors = validation_errors(data, strategy)
+
+        if errors == [] do
+          {:ok, build_plan(data, strategy, normalized_includes)}
+        else
+          {:error, %{errors: errors, supported_versions: @supported_versions}}
+        end
     end
   end
 
@@ -498,7 +583,7 @@ defmodule Cympho.Companies.Portability do
     end
   end
 
-  defp build_plan(data, strategy) do
+  defp build_plan(data, strategy, includes) do
     company = field(data, :company, %{})
     source_slug = field(company, :slug)
     target = slug_plan(source_slug, strategy)
@@ -513,6 +598,7 @@ defmodule Cympho.Companies.Portability do
       company: %{name: field(company, :name), source_slug: source_slug},
       target: target,
       inventory: inventory,
+      includes: includes,
       warnings: warnings(target, inventory, requirements),
       secret_restore_requirements: requirements
     }
@@ -610,7 +696,7 @@ defmodule Cympho.Companies.Portability do
   end
 
   defp company_slug_exists?(slug) when is_binary(slug),
-    do: Repo.exists?(from company in Company, where: company.slug == ^slug)
+    do: Repo.exists?(from(company in Company, where: company.slug == ^slug))
 
   defp company_slug_exists?(_slug), do: false
 

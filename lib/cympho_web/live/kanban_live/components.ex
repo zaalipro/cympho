@@ -29,6 +29,10 @@ defmodule CymphoWeb.KanbanLive.Components do
       class="kanban-card-enter group min-h-[72px] cursor-grab rounded-xl border border-hairline bg-surface-2 p-3 shadow-card transition-all hover:border-border-hover hover:bg-surface-hover hover:shadow-raised active:cursor-grabbing"
       data-issue-id={@issue.id}
       data-kanban-card
+      data-status={@issue.status}
+      data-allowed-statuses={
+        Enum.map_join(Index.valid_next_statuses(@issue.status), ",", &to_string/1)
+      }
     >
       <.pending_wake_badge :if={@pending_wake} wake={@pending_wake} class="mb-2" />
 

@@ -237,7 +237,8 @@ defmodule Cympho.Adapters.Error do
 
   defp classify({:config_invalid, reason}, raw, adapter), do: classify(reason, raw, adapter)
 
-  defp classify(reason, _raw, adapter) when reason in [:timeout, :stall_timeout, :timed_out] do
+  defp classify(reason, _raw, adapter)
+       when reason in [:timeout, :stall_timeout, :max_run_timeout, :timed_out] do
     category_tuple(:timeout, timeout_message(reason, adapter), nil)
   end
 
@@ -510,6 +511,9 @@ defmodule Cympho.Adapters.Error do
 
   defp timeout_message(:stall_timeout, adapter),
     do: "#{adapter_label(adapter)} stopped producing output before the stall timeout."
+
+  defp timeout_message(:max_run_timeout, adapter),
+    do: "#{adapter_label(adapter)} exceeded the absolute max run wall clock."
 
   defp timeout_message(_reason, adapter), do: category_message(:timeout, adapter)
 

@@ -340,6 +340,7 @@ defmodule CymphoWeb.DashboardLive.Index do
     blocked = status_count(summary.issue_status_counts, :blocked)
     agents = summary.total_agents
     alignment = summary.goal_alignment
+    patrol = summary.patrol_summary || %{}
 
     [
       owner_signoff_action(operations.owner_signoffs),
@@ -349,6 +350,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       goal_alignment_action(alignment),
       cost_control_action(summary.cost_summary),
       paperclip_readiness_action(summary.autonomy_readiness),
+      stuck_work_action(patrol),
       if(length(operations.recent_failures) > 0,
         do: %{
           label: "Some runs failed",
@@ -465,6 +467,68 @@ defmodule CymphoWeb.DashboardLive.Index do
         actions
     end
   end
+
+  # Patrol stuck_count covers in_progress / in_review / blocked past thresholds.
+  # Without this, Needs you can show all-clear while the patrol panel reports stalls.
+  defp stuck_work_action(%{stuck_count: stuck_count} = patrol)
+       when is_integer(stuck_count) and stuck_count > 0 do
+    issues = List.wrap(Map.get(patrol, :issues))
+    first = List.first(issues)
+    titles = issues |> Enum.map(&Map.get(&1, :title)) |> Enum.reject(&(&1 in [nil, ""]))
+    named = titles |> Enum.take(2) |> Enum.join(", ")
+    more = max(stuck_count - min(length(titles), 2), 0)
+
+    detail =
+      cond do
+        named != "" and more > 0 ->
+          "#{named} and #{more} more #{pluralize(more, "task")} stalled past patrol thresholds."
+
+        named != "" ->
+          "#{named} #{if length(titles) == 1, do: "has", else: "have"} stalled past patrol thresholds."
+
+        true ->
+          "#{stuck_count} #{pluralize(stuck_count, "task")} stalled past patrol thresholds."
+      end
+
+    # Simple mode must not reuse "patrol thresholds" — that is operator jargon.
+    simple_detail =
+      cond do
+        named != "" and more > 0 ->
+          "#{named} and #{more} more have been sitting too long."
+
+        named != "" ->
+          "#{named} #{if length(titles) == 1, do: "has", else: "have"} been sitting too long."
+
+        true ->
+          "#{stuck_count} #{pluralize(stuck_count, "task")} have been sitting too long."
+      end
+
+    path =
+      case first do
+        %{id: id} when is_binary(id) -> "/issues/#{id}"
+        _ -> "/inbox?status=action"
+      end
+
+    %{
+      label: "#{stuck_count} stuck #{pluralize(stuck_count, "task")}",
+      detail: detail,
+      action: if(stuck_count == 1, do: "Open stuck task", else: "Review stuck work"),
+      path: path,
+      tone: :danger,
+      simple: %{
+        icon: "hero-exclamation-circle-mini",
+        label:
+          if(stuck_count == 1 and named != "",
+            do: "Stuck: #{named}",
+            else: "#{stuck_count} stuck #{pluralize(stuck_count, "task")}"
+          ),
+        detail: simple_detail,
+        action: if(stuck_count == 1, do: "Open it", else: "See stuck work")
+      }
+    }
+  end
+
+  defp stuck_work_action(_patrol), do: nil
 
   # Pending board approvals surface here (and on the simple-mode home) so the
   # owner never loses sight of them once the Approvals nav item is tucked into

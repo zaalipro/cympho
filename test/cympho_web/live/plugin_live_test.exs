@@ -58,6 +58,50 @@ defmodule CymphoWeb.PluginLiveTest do
       assert html =~ plugin.identifier
     end
 
+    test "defaults to current company and never lists foreign-tenant plugins", %{
+      conn: conn,
+      current_company: company
+    } do
+      own = insert_plugin(company.id, %{name: "Own Company Plugin"})
+
+      {:ok, foreign_company} =
+        Companies.create_company(%{
+          name: "Foreign Plugin Co",
+          slug: "foreign-plugin-#{System.unique_integer([:positive])}"
+        })
+
+      foreign = insert_plugin(foreign_company.id, %{name: "Foreign Tenant Plugin"})
+
+      {:ok, view, html} = live(conn, "/plugins")
+
+      assert html =~ own.name
+      refute html =~ foreign.name
+      # Company filter is membership-only (no global "All companies" unscoped option).
+      refute html =~ "All companies"
+      refute html =~ foreign_company.name
+      assert has_element?(view, "option[value='#{company.id}']")
+    end
+
+    test "company filter only accepts membership companies; unknown falls back to current", %{
+      conn: conn,
+      current_company: company
+    } do
+      own = insert_plugin(company.id, %{name: "Current Scoped Plugin"})
+
+      {:ok, foreign_company} =
+        Companies.create_company(%{
+          name: "Unrelated Plugin Co",
+          slug: "unrelated-plugin-#{System.unique_integer([:positive])}"
+        })
+
+      foreign = insert_plugin(foreign_company.id, %{name: "Unrelated Tenant Plugin"})
+
+      {:ok, _view, html} = live(conn, "/plugins?company_id=#{foreign_company.id}")
+
+      assert html =~ own.name
+      refute html =~ foreign.name
+    end
+
     test "hides mutation controls for a plugin outside the current company", %{conn: conn} do
       user_id = Plug.Conn.get_session(conn, :user_id)
 

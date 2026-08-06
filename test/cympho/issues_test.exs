@@ -17,15 +17,24 @@ defmodule Cympho.IssuesTest do
   alias Cympho.Wakes
 
   setup do
+    u = System.unique_integer([:positive])
+
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Issues Test Co #{u}",
+        slug: "issues-test-#{u}"
+      })
+
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Test Issue",
         description: "Test description",
         status: :backlog,
-        priority: :high
+        priority: :high,
+        company_id: company.id
       })
 
-    %{issue: issue}
+    %{issue: issue, company: company}
   end
 
   describe "list_issues/0" do
@@ -152,12 +161,16 @@ defmodule Cympho.IssuesTest do
   end
 
   describe "list_child_issues/1" do
-    test "returns ordered child issues without preloading unused comments", %{issue: parent} do
+    test "returns ordered child issues without preloading unused comments", %{
+      issue: parent,
+      company: company
+    } do
       {:ok, assignee} =
         Agents.create_agent(%{
           name: "Child Owner",
           role: :engineer,
-          status: :idle
+          status: :idle,
+          company_id: company.id
         })
 
       {:ok, low} =
@@ -166,7 +179,8 @@ defmodule Cympho.IssuesTest do
           description: "d",
           priority: :low,
           parent_id: parent.id,
-          assignee_id: assignee.id
+          assignee_id: assignee.id,
+          company_id: company.id
         })
 
       {:ok, critical} =
@@ -175,7 +189,8 @@ defmodule Cympho.IssuesTest do
           description: "d",
           priority: :critical,
           parent_id: parent.id,
-          assignee_id: assignee.id
+          assignee_id: assignee.id,
+          company_id: company.id
         })
 
       children = Issues.list_child_issues(parent.id)
@@ -324,12 +339,16 @@ defmodule Cympho.IssuesTest do
       assert resumed.monitor_state["issue_runtime"]["resumed_by_user_id"] == actor_id
     end
 
-    test "prevents checkout and wake dispatch while the issue is paused", %{issue: issue} do
+    test "prevents checkout and wake dispatch while the issue is paused", %{
+      issue: issue,
+      company: company
+    } do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Pause Guard Agent",
           role: :engineer,
-          status: :idle
+          status: :idle,
+          company_id: company.id
         })
 
       {:ok, issue} =
@@ -349,14 +368,15 @@ defmodule Cympho.IssuesTest do
   end
 
   describe "recheck_pr_quality/2" do
-    test "stores rich PR quality state and clears a satisfied PR nudge" do
+    test "stores rich PR quality state and clears a satisfied PR nudge", %{company: company} do
       {:ok, engineer} =
         Agents.create_agent(%{
           name: "PR Repair Engineer",
           role: :engineer,
           status: :idle,
           adapter: :process,
-          config: %{"command" => "echo"}
+          config: %{"command" => "echo"},
+          company_id: company.id
         })
 
       {:ok, issue} =
@@ -365,6 +385,7 @@ defmodule Cympho.IssuesTest do
           identifier: "CYM-7",
           status: :in_progress,
           assignee_id: engineer.id,
+          company_id: company.id,
           github_pr_url: "https://github.com/acme/app/pull/7",
           monitor_state: %{
             "pr_quality" => %{
@@ -1021,25 +1042,28 @@ defmodule Cympho.IssuesTest do
   end
 
   describe "checkout_issue/2 capacity enforcement" do
-    test "returns error when agent is at capacity" do
+    test "returns error when agent is at capacity", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Capacity Test Agent",
           role: :engineer,
-          max_concurrent_jobs: 2
+          max_concurrent_jobs: 2,
+          company_id: company.id
         })
 
       # Create and checkout 2 issues to fill capacity
       {:ok, issue1} =
         Issues.create_issue(%{
           title: "Issue 1",
-          description: "Fills capacity"
+          description: "Fills capacity",
+          company_id: company.id
         })
 
       {:ok, issue2} =
         Issues.create_issue(%{
           title: "Issue 2",
-          description: "Fills capacity"
+          description: "Fills capacity",
+          company_id: company.id
         })
 
       {:ok, _} = Issues.checkout_issue(issue1, agent)
@@ -1049,24 +1073,27 @@ defmodule Cympho.IssuesTest do
       {:ok, issue3} =
         Issues.create_issue(%{
           title: "Issue 3",
-          description: "Should fail"
+          description: "Should fail",
+          company_id: company.id
         })
 
       assert {:error, :agent_at_capacity} = Issues.checkout_issue(issue3, agent)
     end
 
-    test "agent at capacity can still re-checkout their own issue" do
+    test "agent at capacity can still re-checkout their own issue", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Capacity Test Agent",
           role: :engineer,
-          max_concurrent_jobs: 1
+          max_concurrent_jobs: 1,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "My Issue",
-          description: "Already checked out"
+          description: "Already checked out",
+          company_id: company.id
         })
 
       {:ok, _} = Issues.checkout_issue(issue, agent)
@@ -1077,11 +1104,12 @@ defmodule Cympho.IssuesTest do
   end
 
   describe "checkout_issue/2 edge cases" do
-    test "checkout by same agent is idempotent", %{issue: issue} do
+    test "checkout by same agent is idempotent", %{issue: issue, company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Test Agent",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       assert {:ok, checked_out1} = Issues.checkout_issue(issue, agent)
@@ -1090,6 +1118,46 @@ defmodule Cympho.IssuesTest do
 
       assert {:ok, checked_out2} = Issues.checkout_issue(issue, agent)
       assert checked_out2.assignee_id == agent.id
+    end
+
+    test "rejects when either side company_id is nil or unequal", %{company: company} do
+      {:ok, other} =
+        Companies.create_company(%{
+          name: "Other Checkout Co",
+          slug: "other-checkout-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, scoped_agent} =
+        Agents.create_agent(%{
+          name: "Scoped Checkout Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, unscoped_agent} =
+        Agents.create_agent(%{name: "Unscoped Checkout Agent", role: :engineer})
+
+      {:ok, unscoped_issue} =
+        Issues.create_issue(%{title: "Unscoped checkout", status: :todo})
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Other company issue",
+          status: :todo,
+          company_id: other.id
+        })
+
+      assert {:error, :company_mismatch} = Issues.checkout_issue(unscoped_issue, scoped_agent)
+      assert {:error, :company_mismatch} = Issues.checkout_issue(other_issue, scoped_agent)
+
+      {:ok, scoped_issue} =
+        Issues.create_issue(%{
+          title: "Scoped checkout",
+          status: :todo,
+          company_id: company.id
+        })
+
+      assert {:error, :company_mismatch} = Issues.checkout_issue(scoped_issue, unscoped_agent)
     end
   end
 
@@ -1132,17 +1200,19 @@ defmodule Cympho.IssuesTest do
   end
 
   describe "checkout_issue/2" do
-    test "successfully checks out an unassigned issue" do
+    test "successfully checks out an unassigned issue", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Test Agent",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Checkout Test",
-          description: "Test checkout"
+          description: "Test checkout",
+          company_id: company.id
         })
 
       assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
@@ -1150,23 +1220,26 @@ defmodule Cympho.IssuesTest do
       assert checked_out.status == :in_progress
     end
 
-    test "returns error when issue already assigned" do
+    test "returns error when issue already assigned", %{company: company} do
       {:ok, agent1} =
         Agents.create_agent(%{
           name: "Agent 1",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, agent2} =
         Agents.create_agent(%{
           name: "Agent 2",
-          role: :cto
+          role: :cto,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Already Assigned",
-          description: "Test"
+          description: "Test",
+          company_id: company.id
         })
 
       {:ok, _} = Issues.checkout_issue(issue, agent1)
@@ -1175,17 +1248,19 @@ defmodule Cympho.IssuesTest do
   end
 
   describe "checkout_issue/3 chain-of-command enforcement" do
-    test "engineer can checkout issue with engineer role" do
+    test "engineer can checkout issue with engineer role", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Engineer",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Engineering Task",
-          description: "Build something"
+          description: "Build something",
+          company_id: company.id
         })
 
       assert {:ok, checked_out} = Issues.checkout_issue(issue, agent, :engineer)
@@ -1193,66 +1268,74 @@ defmodule Cympho.IssuesTest do
       assert checked_out.assigned_role == "engineer"
     end
 
-    test "engineer can checkout issue with no required role" do
+    test "engineer can checkout issue with no required role", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Engineer",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Any Task",
-          description: "Any role"
+          description: "Any role",
+          company_id: company.id
         })
 
       assert {:ok, checked_out} = Issues.checkout_issue(issue, agent, nil)
       assert checked_out.assignee_id == agent.id
     end
 
-    test "engineer cannot checkout issue requiring cto role" do
+    test "engineer cannot checkout issue requiring cto role", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Engineer",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "CTO Task",
-          description: "Architectural decision"
+          description: "Architectural decision",
+          company_id: company.id
         })
 
       assert {:error, :chain_of_command_violation} = Issues.checkout_issue(issue, agent, :cto)
     end
 
-    test "engineer cannot checkout issue requiring ceo role" do
+    test "engineer cannot checkout issue requiring ceo role", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Engineer",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Strategic Task",
-          description: "Funding round"
+          description: "Funding round",
+          company_id: company.id
         })
 
       assert {:error, :chain_of_command_violation} = Issues.checkout_issue(issue, agent, :ceo)
     end
 
-    test "cto can checkout issue requiring engineer role" do
+    test "cto can checkout issue requiring engineer role", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "CTO",
-          role: :cto
+          role: :cto,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Engineering Task",
-          description: "Build something"
+          description: "Build something",
+          company_id: company.id
         })
 
       assert {:ok, checked_out} = Issues.checkout_issue(issue, agent, :engineer)
@@ -1260,45 +1343,51 @@ defmodule Cympho.IssuesTest do
       assert checked_out.assigned_role == "engineer"
     end
 
-    test "cto cannot checkout issue requiring ceo role" do
+    test "cto cannot checkout issue requiring ceo role", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "CTO",
-          role: :cto
+          role: :cto,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Strategic Task",
-          description: "Funding round"
+          description: "Funding round",
+          company_id: company.id
         })
 
       assert {:error, :chain_of_command_violation} = Issues.checkout_issue(issue, agent, :ceo)
     end
 
-    test "ceo can checkout issue requiring any role" do
+    test "ceo can checkout issue requiring any role", %{company: company} do
       {:ok, ceo} =
         Agents.create_agent(%{
           name: "CEO",
-          role: :ceo
+          role: :ceo,
+          company_id: company.id
         })
 
       {:ok, engineer_issue} =
         Issues.create_issue(%{
           title: "Engineering Task",
-          description: "Build something"
+          description: "Build something",
+          company_id: company.id
         })
 
       {:ok, cto_issue} =
         Issues.create_issue(%{
           title: "CTO Task",
-          description: "Architectural decision"
+          description: "Architectural decision",
+          company_id: company.id
         })
 
       {:ok, ceo_issue} =
         Issues.create_issue(%{
           title: "Strategic Task",
-          description: "Funding round"
+          description: "Funding round",
+          company_id: company.id
         })
 
       assert {:ok, _} = Issues.checkout_issue(engineer_issue, ceo, :engineer)
@@ -1353,17 +1442,19 @@ defmodule Cympho.IssuesTest do
   end
 
   describe "release_issue/1" do
-    test "releases an issue and sets status to todo" do
+    test "releases an issue and sets status to todo", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Test Agent",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Release Test",
-          description: "Test release"
+          description: "Test release",
+          company_id: company.id
         })
 
       {:ok, checked_out} = Issues.checkout_issue(issue, agent)
@@ -1372,18 +1463,20 @@ defmodule Cympho.IssuesTest do
       assert released.status == :todo
     end
 
-    test "releases with custom status" do
+    test "releases with custom status", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Test Agent",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Release Test",
           description: "Test release",
-          status: :in_review
+          status: :in_review,
+          company_id: company.id
         })
 
       {:ok, checked_out} = Issues.checkout_issue(issue, agent)
@@ -1393,17 +1486,19 @@ defmodule Cympho.IssuesTest do
   end
 
   describe "clear_checkout_lock/2" do
-    test "clears checkout metadata while preserving the assignee" do
+    test "clears checkout metadata while preserving the assignee", %{company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Lock Owner",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Clear Checkout Lock",
-          description: "Recover stale runtime ownership"
+          description: "Recover stale runtime ownership",
+          company_id: company.id
         })
 
       {:ok, checked_out} = Issues.checkout_issue(issue, agent)
@@ -1415,6 +1510,166 @@ defmodule Cympho.IssuesTest do
       assert recovered.assignee_id == agent.id
       assert is_nil(recovered.checkout_run_id)
       assert is_nil(recovered.checked_out_at)
+    end
+
+    test "CAS loses when a successor owns the checkout", %{company: company} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "CAS Owner",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "CAS Clear Checkout",
+          description: "Stale reclaim must not clobber successor",
+          company_id: company.id,
+          status: :todo,
+          assignee_id: agent.id
+        })
+
+      assert {:ok, run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 adapter: "claude_code"
+               })
+
+      assert {:ok, bound} = Issues.bind_checkout_run(issue.id, agent.id, run.id)
+      stale_snapshot = bound
+
+      assert {:ok, successor_run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 adapter: "claude_code"
+               })
+
+      # Successor takes ownership (new run id + bumped lock_version).
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {1, _} =
+        from(i in Issue, where: i.id == ^issue.id)
+        |> Repo.update_all(
+          set: [checkout_run_id: successor_run.id, checked_out_at: now, updated_at: now],
+          inc: [lock_version: 1]
+        )
+
+      assert {:error, :checkout_conflict} = Issues.clear_checkout_lock(stale_snapshot, :todo)
+
+      still_owned = Issues.get_issue!(issue.id)
+      assert still_owned.checkout_run_id == successor_run.id
+      assert still_owned.status == :in_progress
+      assert still_owned.assignee_id == agent.id
+      assert still_owned.checked_out_at
+    end
+  end
+
+  describe "bind_checkout_run/3 and clear_checkout_lock_for_run/4" do
+    test "binds a run then compare-clears only that run's ownership", %{company: company} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Checkout Run Owner",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Bind checkout run",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      assert {:ok, run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 adapter: "claude_code"
+               })
+
+      assert {:ok, other_run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 adapter: "claude_code"
+               })
+
+      assert {:ok, bound} = Issues.bind_checkout_run(issue.id, agent.id, run.id)
+      assert bound.status == :in_progress
+      assert bound.checkout_run_id == run.id
+      assert bound.assignee_id == agent.id
+      assert bound.checked_out_at
+
+      assert {:error, :checkout_run_conflict} =
+               Issues.bind_checkout_run(issue.id, agent.id, other_run.id)
+
+      assert {:error, :checkout_not_owned} =
+               Issues.clear_checkout_lock_for_run(issue.id, agent.id, other_run.id, :todo)
+
+      assert {:ok, cleared} =
+               Issues.clear_checkout_lock_for_run(issue.id, agent.id, run.id, :todo)
+
+      assert cleared.status == :todo
+      assert cleared.assignee_id == agent.id
+      assert is_nil(cleared.checkout_run_id)
+      assert is_nil(cleared.checked_out_at)
+    end
+  end
+
+  describe "release_unbound_checkout/2" do
+    test "releases an unbound checkout snapshot and loses to a bound successor", %{
+      company: company
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Unbound Checkout Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Unbound release",
+          status: :todo,
+          company_id: company.id
+        })
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      assert is_nil(checked_out.checkout_run_id)
+
+      assert {:ok, released} = Issues.release_unbound_checkout(checked_out, :todo)
+      assert released.status == :todo
+      assert is_nil(released.assignee_id)
+      assert is_nil(released.checkout_run_id)
+      assert is_nil(released.checked_out_at)
+
+      {:ok, rechecked} = Issues.checkout_issue(Issues.get_issue!(issue.id), agent)
+
+      assert {:ok, run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: rechecked.id,
+                 adapter: "claude_code"
+               })
+
+      assert {:ok, bound} = Issues.bind_checkout_run(rechecked.id, agent.id, run.id)
+
+      # Stale snapshot from before bind must not clear the successor.
+      assert {:error, :checkout_conflict} =
+               Issues.release_unbound_checkout(rechecked, :todo)
+
+      still_bound = Issues.get_issue!(issue.id)
+      assert still_bound.checkout_run_id == bound.checkout_run_id
+      assert still_bound.status == :in_progress
+      assert still_bound.assignee_id == agent.id
     end
   end
 
@@ -1452,6 +1707,54 @@ defmodule Cympho.IssuesTest do
 
       # backlog -> done is invalid
       assert {:error, :invalid_transition} = Issues.transition_issue(issue, :done)
+    end
+
+    test "in_progress -> todo clears checkout lock and keeps intentional assignee", %{
+      company: company
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Demote Owner",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Board demote reclaim",
+          description: "Demotion must release runtime checkout",
+          company_id: company.id,
+          status: :todo,
+          assignee_id: agent.id
+        })
+
+      assert {:ok, run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 adapter: "claude_code"
+               })
+
+      assert {:ok, checked_out} = Issues.bind_checkout_run(issue.id, agent.id, run.id)
+      assert checked_out.status == :in_progress
+      assert checked_out.checkout_run_id == run.id
+      assert checked_out.checked_out_at
+      assert checked_out.assignee_id == agent.id
+
+      assert {:ok, demoted} = Issues.transition_issue(checked_out, :todo)
+      assert demoted.status == :todo
+      assert demoted.assignee_id == agent.id
+      assert is_nil(demoted.checkout_run_id)
+      assert is_nil(demoted.checked_out_at)
+
+      # Poll/reload must observe the demoted state — autonomy must not leave a
+      # stale checkout that would force the board back to in_progress.
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :todo
+      assert reloaded.assignee_id == agent.id
+      assert is_nil(reloaded.checkout_run_id)
+      assert is_nil(reloaded.checked_out_at)
     end
 
     test "backlog -> todo is valid", %{issue: issue} do
@@ -1638,6 +1941,92 @@ defmodule Cympho.IssuesTest do
       auto_comments = Enum.filter(comments, fn c -> c.author_type == "system" end)
       assert length(auto_comments) >= 1
       assert Enum.any?(auto_comments, fn c -> c.body =~ "Auto-unblocked" end)
+    end
+
+    test "enqueues durable issue_blockers_resolved wake for assigned dependent", %{
+      company: company
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Unblock Wake Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, blocker} =
+        Issues.create_issue(%{
+          title: "Blocker for durable wake",
+          description: "Done",
+          status: :in_review,
+          company_id: company.id
+        })
+
+      {:ok, dependent} =
+        Issues.create_issue(%{
+          title: "Dependent for durable wake",
+          description: "Blocked",
+          status: :blocked,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, _} = Issues.add_blocker(dependent, blocker)
+      reloaded_blocker = Issues.get_issue!(blocker.id)
+      {:ok, done_blocker} = Issues.transition_issue(reloaded_blocker, :done)
+
+      Issues.unblock_dependents(done_blocker.id)
+
+      reloaded_dependent = Issues.get_issue!(dependent.id)
+      assert reloaded_dependent.status == :todo
+
+      wakes =
+        from(w in Cympho.Wakes.AgentWake,
+          where:
+            w.issue_id == ^dependent.id and w.reason == "issue_blockers_resolved" and
+              w.status == "pending"
+        )
+        |> Repo.all()
+
+      assert length(wakes) == 1
+      assert hd(wakes).agent_id == agent.id
+
+      assert hd(wakes).metadata["blocker_id"] == done_blocker.id or
+               hd(wakes).metadata[:blocker_id] == done_blocker.id
+    end
+
+    test "unassigned dependent becomes todo and remains dispatchable after unblock", %{
+      company: company
+    } do
+      {:ok, blocker} =
+        Issues.create_issue(%{
+          title: "Unassigned unblock blocker",
+          description: "Done",
+          status: :in_review,
+          company_id: company.id
+        })
+
+      {:ok, dependent} =
+        Issues.create_issue(%{
+          title: "Unassigned dependent",
+          description: "Blocked",
+          status: :blocked,
+          company_id: company.id
+        })
+
+      {:ok, _} = Issues.add_blocker(dependent, blocker)
+      reloaded_blocker = Issues.get_issue!(blocker.id)
+      {:ok, done_blocker} = Issues.transition_issue(reloaded_blocker, :done)
+
+      Issues.unblock_dependents(done_blocker.id)
+
+      reloaded_dependent = Issues.get_issue!(dependent.id)
+      assert reloaded_dependent.status == :todo
+      assert is_nil(reloaded_dependent.assignee_id)
+
+      # Production path returns :queued_for_dispatch via Dispatcher.enqueue_wake
+      # when unassigned; durable resume is poll_now (no AgentWake row required).
+      results = Wakes.notify_blockers_resolved(done_blocker)
+      assert Enum.any?(results, &match?({:ok, :queued_for_dispatch}, &1))
     end
   end
 
@@ -1844,8 +2233,8 @@ defmodule Cympho.IssuesTest do
 
   describe "terminal issue runtime cleanup" do
     test "transitioning to done cancels pending wakes and active runs" do
-      agent = insert_agent()
       issue = insert_issue()
+      agent = insert_agent(issue.company_id)
 
       {:ok, todo} = Issues.transition_issue(issue, :todo)
       {:ok, in_progress} = Issues.transition_issue(todo, :in_progress)
@@ -1866,8 +2255,8 @@ defmodule Cympho.IssuesTest do
     end
 
     test "direct cancellation update cancels pending wakes and queued runs" do
-      agent = insert_agent()
       issue = insert_issue()
+      agent = insert_agent(issue.company_id)
 
       {:ok, todo} = Issues.transition_issue(issue, :todo)
       {:ok, in_progress} = Issues.transition_issue(todo, :in_progress)
@@ -1885,36 +2274,48 @@ defmodule Cympho.IssuesTest do
     end
   end
 
-  defp insert_agent do
+  defp insert_agent(company_id \\ nil) do
+    company_id =
+      company_id ||
+        Companies.create_company(%{
+          name: "Insert Agent Co",
+          slug: "insert-agent-#{System.unique_integer([:positive])}"
+        })
+        |> then(fn {:ok, company} -> company.id end)
+
     %{id: id} =
       Cympho.Repo.insert!(%Cympho.Agents.Agent{
         name: "Test Agent #{System.unique_integer()}",
         role: :engineer,
-        status: :idle
+        status: :idle,
+        company_id: company_id
       })
 
     Cympho.Repo.get!(Cympho.Agents.Agent, id)
   end
 
-  defp insert_issue do
-    {:ok, company} =
-      Companies.create_company(%{
-        name: "Insert Issue Co",
-        slug: "insert-issue-#{System.unique_integer([:positive])}"
-      })
+  defp insert_issue(company_id \\ nil) do
+    company_id =
+      company_id ||
+        Companies.create_company(%{
+          name: "Insert Issue Co",
+          slug: "insert-issue-#{System.unique_integer([:positive])}"
+        })
+        |> then(fn {:ok, company} -> company.id end)
 
     project =
       Cympho.Repo.insert!(%Cympho.Projects.Project{
         name: "Test Project #{System.unique_integer()}",
         prefix: "TST",
-        company_id: company.id
+        company_id: company_id
       })
 
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Test Issue",
         description: "Test description",
-        project_id: project.id
+        project_id: project.id,
+        company_id: company_id
       })
 
     issue

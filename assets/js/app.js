@@ -337,6 +337,22 @@ const KanbanSortable = {
           animation: 150,
           filter: "button, input, textarea, select, details, [data-no-drag]",
           preventOnFilter: false,
+          // Refuse invalid columns client-side using the SM-backed allow-list
+          // rendered on each card. Server still validates; this avoids the
+          // flash/rollback dance for known-invalid drops.
+          onMove(evt) {
+            const toStatus = evt.to && evt.to.dataset && evt.to.dataset.kanbanColumn;
+            const fromStatus = evt.from && evt.from.dataset && evt.from.dataset.kanbanColumn;
+            if (!toStatus || !fromStatus || fromStatus === toStatus) return true;
+            const allowed = (evt.dragged.dataset.allowedStatuses || "")
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            // Empty allow-list (terminal with no reopen encoding) refuses all
+            // cross-column moves; non-empty must include the target.
+            if (allowed.length === 0) return false;
+            return allowed.includes(toStatus);
+          },
           onStart(evt) {
             evt.item.classList.add("kanban-card-dragging");
           },
@@ -346,6 +362,15 @@ const KanbanSortable = {
             const toStatus = evt.to.dataset.kanbanColumn;
             const fromStatus = evt.from.dataset.kanbanColumn;
             if (fromStatus === toStatus) return;
+            const allowed = (evt.item.dataset.allowedStatuses || "")
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            if (allowed.length > 0 && !allowed.includes(toStatus)) {
+              // Safety net if onMove was bypassed; put the card back.
+              if (evt.from) evt.from.appendChild(evt.item);
+              return;
+            }
             // Mark the card pending so any incoming LiveView render knows
             // we're awaiting confirmation.
             evt.item.setAttribute("data-pending", "true");

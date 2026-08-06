@@ -292,28 +292,10 @@ defmodule CymphoWeb.UserAuth do
       Cympho.BoardApprovals.count_pending_for_company(company_id)
   end
 
+  # Nav badge = Simple "Needs you" membership (OwnerAttention), not agent unreads.
+  # Cheap unresolved_count keeps parity with list_items after issue-level dedup.
   defp owner_inbox_badge_count(company_id, user) do
-    cap = 99
-    attention_items = Cympho.OwnerAttention.list_items(company_id, user, limit: cap)
-    attention_count = length(attention_items)
-
-    if attention_count >= cap do
-      cap
-    else
-      attention_issue_ids =
-        attention_items
-        |> Enum.map(& &1.issue_id)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.uniq()
-
-      unread_count =
-        Cympho.Inbox.unread_count_for_company_excluding_issues(
-          company_id,
-          attention_issue_ids
-        )
-
-      min(cap, attention_count + unread_count)
-    end
+    min(99, Cympho.OwnerAttention.unresolved_count(company_id, user))
   end
 
   defp approval_badge_event?({event, _payload})

@@ -49,6 +49,50 @@ defmodule Cympho.Finances.BudgetIncidentTest do
 
       refute changeset.valid?
     end
+
+    test "defaults enforcement_status to not_applicable and accepts incomplete/complete" do
+      policy_id = Ecto.UUID.generate()
+      company_id = Ecto.UUID.generate()
+
+      base = %{
+        budget_policy_id: policy_id,
+        company_id: company_id,
+        event_type: "budget_exceeded",
+        spend_usd: Decimal.new("100.00"),
+        budget_limit_usd: Decimal.new("100.00")
+      }
+
+      default_cs = BudgetIncident.changeset(%BudgetIncident{}, base)
+      assert default_cs.valid?
+      assert Ecto.Changeset.get_field(default_cs, :enforcement_status) == "not_applicable"
+
+      for status <- ~w(not_applicable incomplete complete) do
+        cs =
+          BudgetIncident.changeset(%BudgetIncident{}, Map.put(base, :enforcement_status, status))
+
+        assert cs.valid?, "expected #{status} to be valid"
+      end
+
+      bad =
+        BudgetIncident.changeset(
+          %BudgetIncident{},
+          Map.put(base, :enforcement_status, "bogus")
+        )
+
+      refute bad.valid?
+    end
+  end
+
+  describe "enforcement_changeset/2" do
+    test "marks complete enforcement" do
+      incident = %BudgetIncident{enforcement_status: "incomplete"}
+
+      changeset =
+        BudgetIncident.enforcement_changeset(incident, %{enforcement_status: "complete"})
+
+      assert changeset.valid?
+      assert Ecto.Changeset.get_change(changeset, :enforcement_status) == "complete"
+    end
   end
 
   describe "resolve_changeset/2" do

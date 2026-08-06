@@ -257,7 +257,8 @@ defmodule Mix.Tasks.Cympho.Compare do
       slug: "server_inbox_badge_counts",
       paperclip:
         "Public issues report stale or client-drifted inbox/sidebar badge counts after read, resolve, or dismiss actions",
-      cympho: "Server-owned company unread counts with PubSub sidebar refresh",
+      cympho:
+        "Server-owned Needs-you badge counts from OwnerAttention with PubSub sidebar refresh",
       check: &__MODULE__.check_server_inbox_badge_counts/0
     },
     %{
@@ -265,7 +266,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       paperclip:
         "Public issues request a dedicated board-user queue for work assigned to humans instead of noisy notification inboxes",
       cympho:
-        "Inbox has a Needs my action lane backed by open issues assigned to the current user",
+        "Inbox has a Needs my action lane backed by company-scoped OwnerAttention for the current human user",
       check: &__MODULE__.check_human_action_inbox/0
     },
     %{
@@ -401,15 +402,15 @@ defmodule Mix.Tasks.Cympho.Compare do
       slug: "remote_sandbox_execution",
       paperclip:
         "Environment-driver plugins provision and operate remote sandboxes across multiple providers",
-      cympho:
-        "Workspace provider records exist, but no remote environment driver executes their lifecycle",
+      cympho: "EnvironmentDriver + Fake lifecycle exist; no real remote provider is registered",
       check: &__MODULE__.check_remote_sandbox_execution/0
     },
     %{
       slug: "governed_dynamic_mcp",
       paperclip:
         "Governed MCP tool access covers allow, deny, approval, revocation, and rate-limit paths",
-      cympho: "The MCP server exposes a static built-in tool list",
+      cympho:
+        "Dynamic MCP tools register under fail-closed per-agent grants with authorization, revocation, and MCP mutation rate limits",
       check: &__MODULE__.check_governed_dynamic_mcp/0
     },
     %{
@@ -417,7 +418,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       paperclip:
         "Saved skill test runs and persisted feedback exports connect outcomes to agent context",
       cympho:
-        "Deterministic prompt fixtures and revisioned tuning guardrails exist, but evaluation outcomes and feedback are not durable product records",
+        "Company-scoped evaluation suites, immutable runs with provenance, redacted results, comparisons, and owner feedback",
       check: &__MODULE__.check_durable_eval_feedback/0
     },
     %{
@@ -441,7 +442,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       paperclip:
         "Portable company packages support selective content and standard local or repository-backed sources",
       cympho:
-        "V1 whole-company JSON import has a dry-run plan but not a selective standard package workflow",
+        "Selective export includes and local JSON/path sources exist; GitHub/ref sources and full merge collision writers remain open",
       check: &__MODULE__.check_selective_standard_portability/0
     },
     %{
@@ -1127,16 +1128,20 @@ defmodule Mix.Tasks.Cympho.Compare do
     user_auth_source = source_for(CymphoWeb.UserAuth)
 
     checks = [
-      module_with_fun?(Cympho.Inbox, :unread_count_for_company, 1),
-      module_with_fun?(Cympho.Inbox, :subscribe_company_badges, 1),
-      String.contains?(source_for(Cympho.Inbox), "company_inbox_count_changed"),
-      String.contains?(user_auth_source, "subscribe_inbox_badge_updates"),
-      String.contains?(user_auth_source, "nav_inbox_count")
+      module_with_fun?(Cympho.OwnerAttention, :unresolved_count, 2),
+      module_with_fun?(Cympho.OwnerAttention, :subscribe, 1),
+      String.contains?(user_auth_source, "owner_inbox_badge_count"),
+      String.contains?(user_auth_source, "OwnerAttention.unresolved_count"),
+      String.contains?(user_auth_source, "OwnerAttention.subscribe") or
+        String.contains?(user_auth_source, "subscribe_owner_attention_updates"),
+      String.contains?(user_auth_source, "nav_inbox_count"),
+      # Legacy agent-unread PubSub still feeds some shell refreshes; keep both live.
+      module_with_fun?(Cympho.Inbox, :subscribe_company_badges, 1)
     ]
 
     if Enum.all?(checks) do
       {:exceeds,
-       "Sidebar badges use Cympho.Inbox.unread_count_for_company/1 as the source of truth and receive company PubSub updates after create/read/dismiss/archive/restore/bulk-read actions"}
+       "Sidebar badges use OwnerAttention.unresolved_count/2 as the company-scoped Needs-you source of truth and refresh via OwnerAttention/Inbox/Approvals company PubSub updates"}
     else
       {:gap, "server-owned inbox badge count path is incomplete"}
     end
@@ -1153,6 +1158,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(inbox_live_source, "owner_attention_items"),
       String.contains?(inbox_live_source, "build_inbox_action_queue"),
       String.contains?(inbox_live_source, ":human_action"),
+      String.contains?(inbox_live_source, "Needs my action"),
       String.contains?(inbox_template_source, "inbox-action-queue")
     ]
 
@@ -1168,15 +1174,17 @@ defmodule Mix.Tasks.Cympho.Compare do
   def check_owner_decisions_queue do
     inbox_source = source_for(CymphoWeb.InboxLive.Index)
     auth_source = source_for(CymphoWeb.UserAuth)
+    owner_source = source_for(Cympho.OwnerAttention)
 
     checks = [
       module_with_fun?(Cympho.OwnerAttention, :list_items, 3),
       module_with_fun?(Cympho.OwnerAttention, :unresolved_count, 2),
       String.contains?(inbox_source, "OwnerAttention.list_items"),
       String.contains?(inbox_source, "approve_approval"),
-      String.contains?(source_for(Cympho.OwnerAttention), "budget_incident_items"),
-      String.contains?(source_for(Cympho.OwnerAttention), "interaction_items"),
-      String.contains?(auth_source, "OwnerAttention.list_items")
+      String.contains?(owner_source, "budget_incident_items"),
+      String.contains?(owner_source, "interaction_items"),
+      # Nav badge shares unresolved_count membership with list_items after issue-level dedup.
+      String.contains?(auth_source, "OwnerAttention.unresolved_count")
     ]
 
     if Enum.all?(checks) do
@@ -1628,6 +1636,7 @@ defmodule Mix.Tasks.Cympho.Compare do
   def check_remote_sandbox_execution do
     driver = Cympho.Workspaces.EnvironmentDriver
     registry = Cympho.Workspaces.EnvironmentDrivers
+    fake = Cympho.Workspaces.Drivers.Fake
 
     provider_drivers = [
       Cympho.Workspaces.Drivers.E2B,
@@ -1640,6 +1649,11 @@ defmodule Mix.Tasks.Cympho.Compare do
     has_driver_contract = module_with_fun?(driver, :behaviour_info, 1)
     has_registry = module_with_fun?(registry, :resolve, 1)
 
+    has_fake =
+      module_with_fun?(fake, :acquire, 2) and
+        module_with_fun?(fake, :execute, 3) and
+        module_with_fun?(fake, :release, 2)
+
     has_real_provider =
       Enum.any?(provider_drivers, fn provider ->
         module_with_fun?(provider, :acquire, 2) and
@@ -1647,33 +1661,45 @@ defmodule Mix.Tasks.Cympho.Compare do
           module_with_fun?(provider, :release, 2)
       end)
 
-    if has_driver_contract and has_registry and has_real_provider do
-      {:parity,
-       "A registered remote provider implements acquire/execute/release through the environment-driver lifecycle"}
-    else
-      {:gap,
-       "local workspace records, leases, probes, and previews do not provision or execute a real remote provider; a behavior alone would not close this gap"}
+    cond do
+      has_driver_contract and has_registry and has_real_provider ->
+        {:parity,
+         "A registered remote provider implements acquire/execute/release through the environment-driver lifecycle"}
+
+      has_driver_contract and has_registry and has_fake ->
+        {:gap,
+         "EnvironmentDriver contract, registry, and Fake acquire/execute/release exist, but no real remote provider is registered; a fake alone does not close this gap"}
+
+      true ->
+        {:gap,
+         "local workspace records, leases, probes, and previews do not provision or execute a real remote provider; a behavior alone would not close this gap"}
     end
   end
 
   def check_governed_dynamic_mcp do
-    has_registry = module_with_fun?(Cympho.Mcp.ToolRegistry, :__info__, 1)
-    has_grants = module_with_fun?(Cympho.Mcp.ToolGrants, :__info__, 1)
-    has_registration = module_with_fun?(Cympho.Mcp.ToolRegistry, :register, 2)
-    has_unregistration = module_with_fun?(Cympho.Mcp.ToolRegistry, :unregister, 1)
-    has_authorization = module_with_fun?(Cympho.Mcp.ToolGrants, :authorize_call, 3)
-    has_revocation = module_with_fun?(Cympho.Mcp.ToolGrants, :revoke, 2)
+    server_source = source_for(Cympho.Mcp.Server)
+    grants_source = source_for(Cympho.Mcp.ToolGrants)
 
-    if Enum.all?([
-         has_registry,
-         has_grants,
-         has_registration,
-         has_unregistration,
-         has_authorization,
-         has_revocation
-       ]) do
+    checks = [
+      module_with_fun?(Cympho.Mcp.ToolRegistry, :register, 2),
+      module_with_fun?(Cympho.Mcp.ToolRegistry, :unregister, 1),
+      module_with_fun?(Cympho.Mcp.ToolRegistry, :list_allowed_for_agent, 2),
+      module_with_fun?(Cympho.Mcp.ToolGrants, :authorize_call, 3),
+      module_with_fun?(Cympho.Mcp.ToolGrants, :revoke, 2),
+      module_with_fun?(Cympho.Mcp.Server, :tools_for, 1),
+      String.contains?(server_source, "do_dynamic_call"),
+      String.contains?(server_source, "ToolGrants.authorize_call"),
+      String.contains?(server_source, "list_allowed_for_agent"),
+      String.contains?(grants_source, "pending"),
+      String.contains?(grants_source, "revoked"),
+      String.contains?(grants_source, "audit_grant"),
+      String.contains?(server_source, "AgentActionLimiter") or
+        String.contains?(server_source, "rate_limited")
+    ]
+
+    if Enum.all?(checks) do
       {:parity,
-       "Dynamic MCP tools register and unregister through explicit call authorization and revocation"}
+       "Dynamic MCP tools register/unregister with fail-closed per-agent authorization and revocation, list only when authorize_call allows, and MCP mutations share AgentActionLimiter rate-limit/audit paths"}
     else
       {:gap,
        "the source-backed local plugin lifecycle does not yet provide dynamic MCP registration, per-agent authorization, approval, revocation, and rate limiting"}
@@ -1681,14 +1707,26 @@ defmodule Mix.Tasks.Cympho.Compare do
   end
 
   def check_durable_eval_feedback do
-    has_evaluations = module_with_fun?(Cympho.Evaluations, :__info__, 1)
-    has_feedback = module_with_fun?(Cympho.Evaluations, :record_feedback, 2)
-    has_reruns = module_with_fun?(Cympho.Evaluations, :rerun_suite, 2)
-    has_comparison = module_with_fun?(Cympho.Evaluations, :compare_runs, 2)
+    suite = Cympho.Evaluations.EvaluationSuite
+    run = Cympho.Evaluations.EvaluationRun
+    result = Cympho.Evaluations.EvaluationResult
+    feedback = Cympho.Evaluations.EvaluationFeedback
 
-    if has_evaluations and has_feedback and has_reruns and has_comparison do
+    checks = [
+      module_with_fun?(Cympho.Evaluations, :create_suite, 1),
+      module_with_fun?(Cympho.Evaluations, :run_suite, 2),
+      module_with_fun?(Cympho.Evaluations, :record_feedback, 2),
+      module_with_fun?(Cympho.Evaluations, :rerun_suite, 2),
+      module_with_fun?(Cympho.Evaluations, :compare_runs, 2),
+      Code.ensure_loaded?(suite) and :company_id in suite.__schema__(:fields),
+      Code.ensure_loaded?(run) and :provenance in run.__schema__(:fields),
+      Code.ensure_loaded?(result) and :redacted_trace in result.__schema__(:fields),
+      Code.ensure_loaded?(feedback) and :vote in feedback.__schema__(:fields)
+    ]
+
+    if Enum.all?(checks) do
       {:parity,
-       "Saved evaluation runs, provenance, deterministic reruns, comparisons, and owner feedback are durable company-scoped records"}
+       "Saved evaluation runs, provenance, deterministic reruns, comparisons, and owner feedback are durable company-scoped records with redacted traces"}
     else
       {:gap,
        "deterministic fixtures, exact tuning previews, durable config revisions, rollback, and a latest-run canary exist, but saved evaluation runs, immutable outcome provenance, comparisons, and owner feedback do not"}
@@ -1767,21 +1805,62 @@ defmodule Mix.Tasks.Cympho.Compare do
 
   def check_selective_standard_portability do
     package = Cympho.Companies.PortablePackage
+    package_source = source_for(package)
+    portability_source = source_for(Cympho.Companies.Portability)
 
-    checks = [
-      module_with_fun?(package, :export, 2),
-      module_with_fun?(package, :preview, 2),
-      module_with_fun?(package, :import, 2),
-      module_with_fun?(package, :load_source, 2),
-      module_with_fun?(package, :collision_modes, 0)
-    ]
+    has_facade =
+      module_with_fun?(package, :export, 2) and
+        module_with_fun?(package, :preview, 2) and
+        module_with_fun?(package, :import, 2) and
+        module_with_fun?(package, :load_source, 2)
 
-    if Enum.all?(checks) do
-      {:parity,
-       "Selective packages support dry-run merge, explicit collision modes, and pinned local/repository sources"}
-    else
-      {:gap,
-       "the read-only V1 import preview is whole-company JSON only; selective includes, merge/skip/replace, a documented directory format, and local/GitHub/ref sources remain open"}
+    has_selective_includes =
+      module_with_fun?(Cympho.Companies.Portability, :apply_includes, 2) and
+        module_with_fun?(Cympho.Companies.Portability, :supported_includes, 0) and
+        String.contains?(package_source, "apply_includes")
+
+    has_local_sources =
+      String.contains?(package_source, "load_source(:json") and
+        String.contains?(package_source, "load_source(:path")
+
+    # Repository-backed sources must be real loaders, not reserved comments.
+    has_repo_sources =
+      String.contains?(package_source, "load_source(:github") or
+        String.contains?(package_source, "load_source(:ref")
+
+    # V1 writers implement :suffix/:fail; :skip/:replace/:rename must be more than a list.
+    collision_modes =
+      if module_with_fun?(package, :collision_modes, 0),
+        do: package.collision_modes(),
+        else: []
+
+    listed_shell_modes? =
+      Enum.all?([:skip, :replace, :rename], &(&1 in collision_modes))
+
+    implemented_shell_modes? =
+      listed_shell_modes? and
+        Enum.all?(
+          ["slug_strategy: :skip", "slug_strategy: :replace", "slug_strategy: :rename"],
+          fn
+            needle ->
+              String.contains?(portability_source, needle) or
+                String.contains?(package_source, needle)
+          end
+        )
+
+    cond do
+      has_facade and has_selective_includes and has_local_sources and has_repo_sources and
+          implemented_shell_modes? ->
+        {:parity,
+         "Selective packages support dry-run merge, explicit collision modes, and pinned local/repository sources"}
+
+      has_facade and has_selective_includes and has_local_sources ->
+        {:gap,
+         "selective export includes and local JSON/path sources exist, but GitHub/ref package sources and full merge collision writers (skip/replace/rename) remain open"}
+
+      true ->
+        {:gap,
+         "the read-only V1 import preview is whole-company JSON only; selective includes, merge/skip/replace, a documented directory format, and local/GitHub/ref sources remain open"}
     end
   end
 

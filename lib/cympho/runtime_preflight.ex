@@ -162,7 +162,16 @@ defmodule Cympho.RuntimePreflight do
     end
   end
 
-  defp company_runtime_preflight_blocker(%Issue{company_id: nil}), do: :ok
+  # Fail-closed: unscoped issues are not dispatch-ready (matches Runtime.preflight).
+  defp company_runtime_preflight_blocker(%Issue{company_id: nil}) do
+    {:error,
+     blocked_preflight(
+       "Unscoped",
+       "This issue has no company_id and cannot be dispatched.",
+       "Missing company scope",
+       "Assign the issue to a company before dispatch."
+     )}
+  end
 
   defp company_runtime_preflight_blocker(%Issue{company_id: company_id}) do
     case Cympho.Repo.get(Company, company_id) do
@@ -170,7 +179,13 @@ defmodule Cympho.RuntimePreflight do
         if Companies.active?(company), do: :ok, else: {:error, paused_company_preflight(company)}
 
       nil ->
-        :ok
+        {:error,
+         blocked_preflight(
+           "Unscoped",
+           "The issue company no longer exists.",
+           "Company not found",
+           "Re-scope the issue to an active company before dispatch."
+         )}
     end
   end
 
@@ -184,17 +199,30 @@ defmodule Cympho.RuntimePreflight do
           "Company runtime is paused. Resume runtime before starting agents or harnesses."
       end
 
+    blocked_preflight(
+      "Paused",
+      "Company runtime is paused. Agents and harnesses will not start.",
+      "Runtime paused",
+      detail,
+      target_label: "Open runtime controls"
+    )
+  end
+
+  defp blocked_preflight(label, summary, item_label, detail, opts \\ []) do
+    target_path = Keyword.get(opts, :target_path, "/dashboard")
+    target_label = Keyword.get(opts, :target_label, "Open dashboard")
+
     items = [
-      item(:blocked, "Runtime paused", detail,
-        target_path: "/dashboard",
-        target_label: "Open runtime controls"
+      item(:blocked, item_label, detail,
+        target_path: target_path,
+        target_label: target_label
       )
     ]
 
     %{
       status: :blocked,
-      label: "Paused",
-      summary: "Company runtime is paused. Agents and harnesses will not start.",
+      label: label,
+      summary: summary,
       adapter: nil,
       command: nil,
       model: nil,
@@ -995,11 +1023,11 @@ defmodule Cympho.RuntimePreflight do
 
   defp idle_agent?(agent), do: map_value(agent, :status) in [:idle, "idle"]
 
-  defp same_company?(%Issue{company_id: nil}, _agent), do: true
-  defp same_company?(_issue, %{company_id: nil}), do: true
-
-  defp same_company?(%Issue{company_id: company_id}, %{company_id: company_id}),
-    do: true
+  # Fail-closed: both sides must share a non-nil company_id (matches Runtime /
+  # Issues.checkout / Dispatcher after ot-tenancy-fail-closed).
+  defp same_company?(%Issue{company_id: company_id}, %{company_id: company_id})
+       when is_binary(company_id),
+       do: true
 
   defp same_company?(_issue, _agent), do: false
 

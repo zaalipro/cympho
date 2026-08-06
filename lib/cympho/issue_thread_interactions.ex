@@ -163,9 +163,9 @@ defmodule Cympho.IssueThreadInteractions do
   defp maybe_broadcast_resumed_issue(nil), do: :ok
 
   defp maybe_broadcast_resumed_issue(%Issue{} = issue) do
-    Cympho.RateLimiting.dedup_pubsub(
-      Cympho.PubSub,
-      "company:#{issue.company_id}:issues",
+    Cympho.PubSubGuard.company_broadcast(
+      issue.company_id,
+      "issues",
       {:issue_updated, issue}
     )
 
@@ -458,7 +458,7 @@ defmodule Cympho.IssueThreadInteractions do
         {:error, :no_company}
 
       company_id ->
-        result = Cympho.PubSubGuard.broadcast("company:#{company_id}:issues", message)
+        result = Cympho.PubSubGuard.company_broadcast(company_id, "issues", message)
         Cympho.OwnerAttention.notify_changed(company_id)
         result
     end

@@ -1,5 +1,6 @@
 defmodule CymphoWeb.KanbanLiveTest do
   use CymphoWeb.LiveCase, async: true
+  import Ecto.Query
   import Phoenix.LiveViewTest
   alias Cympho.Agents
   alias Cympho.Comments
@@ -358,6 +359,124 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert render(view) =~ "Invalid status transition"
     end
 
+    test "card menus and DnD allow-list match StateMachine transitions" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "SM Menu Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, in_progress} =
+        create_issue(%{
+          title: "In flight card",
+          description: "menus track SM",
+          status: :in_progress,
+          priority: :medium,
+          assignee_id: agent.id
+        })
+
+      {:ok, done} =
+        create_issue(%{
+          title: "Done card",
+          description: "reopen menus",
+          status: :done,
+          priority: :low
+        })
+
+      {:ok, _view, html} = live(conn(), "/kanban")
+      doc = Floki.parse_document!(html)
+
+      in_progress_card =
+        doc
+        |> Floki.find("[data-issue-id='#{in_progress.id}']")
+        |> List.first()
+
+      assert in_progress_card
+      allowed = Floki.attribute(in_progress_card, "data-allowed-statuses") |> List.first()
+      assert is_binary(allowed)
+
+      expected =
+        Cympho.Issues.StateMachine.valid_transitions(:in_progress)
+        |> Enum.map(&to_string/1)
+        |> MapSet.new()
+
+      actual = allowed |> String.split(",", trim: true) |> MapSet.new()
+      assert actual == expected
+      # Board demotion must be offered (historical lag omitted :todo).
+      assert "todo" in MapSet.to_list(actual)
+      assert "backlog" in MapSet.to_list(actual)
+
+      menu_text =
+        in_progress_card
+        |> Floki.find("button[data-kanban-action]")
+        |> Enum.map(&Floki.text/1)
+        |> Enum.join(" ")
+
+      assert menu_text =~ "To Do"
+      assert menu_text =~ "Backlog"
+
+      done_card =
+        doc
+        |> Floki.find("[data-issue-id='#{done.id}']")
+        |> List.first()
+
+      done_allowed = Floki.attribute(done_card, "data-allowed-statuses") |> List.first()
+
+      done_expected =
+        Cympho.Issues.StateMachine.valid_transitions(:done)
+        |> Enum.map(&to_string/1)
+        |> MapSet.new()
+
+      assert done_allowed |> String.split(",", trim: true) |> MapSet.new() == done_expected
+    end
+
+    test "demoting in_progress to todo via board clears checkout and keeps assignee" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Board Demote Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Demote via board",
+          description: "clear checkout on demotion",
+          status: :todo,
+          priority: :medium,
+          assignee_id: agent.id
+        })
+
+      assert {:ok, run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: issue.company_id,
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 adapter: "claude_code"
+               })
+
+      assert {:ok, checked_out} = Issues.bind_checkout_run(issue.id, agent.id, run.id)
+      assert checked_out.status == :in_progress
+      assert checked_out.checkout_run_id == run.id
+
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      view
+      |> element("#kanban-board")
+      |> render_hook("transition_issue", %{"id" => issue.id, "to_status" => "todo"})
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :todo
+      assert reloaded.assignee_id == agent.id
+      assert is_nil(reloaded.checkout_run_id)
+      assert is_nil(reloaded.checked_out_at)
+    end
+
     test "blocked issue cannot move to done" do
       {:ok, blocking} =
         create_issue(%{title: "Blocker", description: "blocks", status: :in_progress})
@@ -373,6 +492,118 @@ defmodule CymphoWeb.KanbanLiveTest do
       |> render_hook("transition_issue", %{"id" => blocked.id, "to_status" => "done"})
 
       assert render(view) =~ "issue is blocked"
+    end
+
+    test "cancelling a blocker via board unblocks dependent and enqueues durable wake" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Blocker Wake Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, blocker} =
+        create_issue(%{
+          title: "Board blocker",
+          description: "will cancel",
+          status: :in_progress,
+          priority: :medium
+        })
+
+      {:ok, dependent} =
+        create_issue(%{
+          title: "Board dependent",
+          description: "waiting on blocker",
+          status: :blocked,
+          priority: :high,
+          assignee_id: agent.id
+        })
+
+      assert {:ok, _} = Issues.add_blocker(dependent, blocker)
+
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      view
+      |> element("#kanban-board")
+      |> render_hook("transition_issue", %{"id" => blocker.id, "to_status" => "cancelled"})
+
+      # Flush PubSub (status + pending_wakes_changed) into the LiveView.
+      html = render(view)
+
+      reloaded_blocker = Issues.get_issue!(blocker.id)
+      reloaded_dependent = Issues.get_issue!(dependent.id)
+      assert reloaded_blocker.status == :cancelled
+      assert reloaded_dependent.status == :todo
+
+      wakes =
+        from(w in Cympho.Wakes.AgentWake,
+          where:
+            w.issue_id == ^dependent.id and w.reason == "issue_blockers_resolved" and
+              w.status == "pending"
+        )
+        |> Repo.all()
+
+      assert length(wakes) == 1
+      assert hd(wakes).agent_id == agent.id
+
+      # Board should surface the pending wake badge on the unblocked card.
+      assert html =~ "Board dependent"
+      assert html =~ "⏱" or html =~ "Waiting"
+    end
+
+    test "completing a blocker via board reopens dependent for dispatch" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Done Blocker Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, blocker} =
+        create_issue(%{
+          title: "Done-path blocker",
+          description: "will complete",
+          status: :in_review,
+          priority: :medium
+        })
+
+      {:ok, dependent} =
+        create_issue(%{
+          title: "Done-path dependent",
+          description: "waiting",
+          status: :blocked,
+          priority: :high,
+          assignee_id: agent.id
+        })
+
+      assert {:ok, _} = Issues.add_blocker(dependent, blocker)
+
+      # Bypass review gates for the blocker itself — board uses review gates,
+      # so seed a completed runtime evidence path is heavier; use transition_issue
+      # for the terminal step while the board is mounted to still exercise wakes
+      # + LiveView pending_wakes_changed.
+      {:ok, view, _html} = live(conn(), "/kanban")
+      assert {:ok, _} = Issues.transition_issue(Issues.get_issue!(blocker.id), :done)
+
+      html = render(view)
+      reloaded_dependent = Issues.get_issue!(dependent.id)
+      assert reloaded_dependent.status == :todo
+      refute Issues.is_blocked?(reloaded_dependent)
+
+      wakes =
+        from(w in Cympho.Wakes.AgentWake,
+          where:
+            w.issue_id == ^dependent.id and w.reason == "issue_blockers_resolved" and
+              w.status == "pending"
+        )
+        |> Repo.all()
+
+      assert length(wakes) == 1
+      assert html =~ "Done-path dependent"
     end
 
     test "todo review gate blocker points to runtime launch before evidence actions", %{

@@ -1,4 +1,9 @@
 defmodule CymphoWeb.BudgetController do
+  @moduledoc """
+  JSON API for UI budgets. Create/update/delete go through `Cympho.Budgets`,
+  which syncs/deactivates runtime `Finances.BudgetPolicy` so hard-stop is not
+  LiveView-only.
+  """
   use CymphoWeb, :controller
 
   alias Cympho.Budgets

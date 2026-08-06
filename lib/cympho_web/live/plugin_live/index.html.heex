@@ -139,8 +139,8 @@
         type="select"
         name="company_id"
         label="Company"
-        value={@selected_company_id || ""}
-        options={[{"All companies", ""} | Enum.map(@companies, &{&1.name, &1.id})]}
+        value={@selected_company_id || (@current_company && @current_company.id) || ""}
+        options={Enum.map(@companies, &{&1.name, &1.id})}
       />
       <.input
         type="select"
@@ -173,19 +173,39 @@
         >
           <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-subtle text-text-tertiary">
             <.icon
-              name={plugin_empty_icon(@selected_company_id, @selected_status)}
+              name={
+                plugin_empty_icon(
+                  @selected_company_id,
+                  @selected_status,
+                  @current_company && @current_company.id
+                )
+              }
               class="h-5 w-5"
             />
           </div>
           <h2 class="text-sm font-590 text-text-primary">
-            {plugin_empty_title(@selected_company_id, @selected_status)}
+            {plugin_empty_title(
+              @selected_company_id,
+              @selected_status,
+              @current_company && @current_company.id
+            )}
           </h2>
           <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
-            {plugin_empty_detail(@selected_company_id, @selected_status)}
+            {plugin_empty_detail(
+              @selected_company_id,
+              @selected_status,
+              @current_company && @current_company.id
+            )}
           </p>
           <div class="mt-5 flex flex-wrap justify-center gap-2">
             <.app_link
-              :if={plugin_filters_active?(@selected_company_id, @selected_status)}
+              :if={
+                plugin_filters_active?(
+                  @selected_company_id,
+                  @selected_status,
+                  @current_company && @current_company.id
+                )
+              }
               navigate={~p"/plugins"}
               class={plugin_empty_action_class(:primary)}
             >

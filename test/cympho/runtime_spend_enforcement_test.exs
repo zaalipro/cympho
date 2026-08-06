@@ -1,7 +1,7 @@
 defmodule Cympho.RuntimeSpendEnforcementTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.{Agents, Companies, Finances, HeartbeatEngine, Issues, Wakes}
+  alias Cympho.{Agents, Budgets, Companies, Finances, HeartbeatEngine, Issues, Wakes}
   alias Cympho.Finances.BudgetIncident
   alias Cympho.Finances.TokenUsage
   alias Cympho.HeartbeatEngine.Run
@@ -9,6 +9,45 @@ defmodule Cympho.RuntimeSpendEnforcementTest do
   alias Cympho.Wakes.AgentWake
 
   import Ecto.Query
+
+  test "domain budget create syncs hard-stop policy that blocks Runtime budget gate after spend" do
+    %{company: company, agent: agent, issue: issue} = runtime_fixture("domain-policy-sync")
+
+    # No direct Finances.create_budget_policy — only domain Budgets.create_budget.
+    assert {:ok, budget} =
+             Budgets.create_budget(%{
+               company_id: company.id,
+               name: "Domain-synced agent hard stop",
+               scope_type: "agent",
+               scope_id: agent.id,
+               agent_id: agent.id,
+               limit_amount: Decimal.new("1.00"),
+               hard_stop: true,
+               status: "active"
+             })
+
+    policy = Finances.matching_budget_policy(budget)
+    assert policy.action_on_exceed == "block"
+    assert policy.scope_id == agent.id
+
+    # Seed over-limit spend (TokenUsage is what runtime policy spend reads).
+    Repo.insert!(%TokenUsage{
+      company_id: company.id,
+      agent_id: agent.id,
+      issue_id: issue.id,
+      provider: "llmotions",
+      model: "gpt-5.6-terra",
+      input_tokens: 100,
+      output_tokens: 25,
+      total_tokens: 125,
+      cost_usd: Decimal.new("1.25")
+    })
+
+    # Runtime.preflight delegates here — assert the BudgetPolicy gate itself.
+    assert {:error, {:budget_blocked, info}} = Finances.check_runtime_budget(issue, agent)
+    assert info.policy_id == policy.id
+    assert info.scope == "agent"
+  end
 
   test "terminal spend commits usage and incident, pauses the agent, and blocks the next run" do
     %{company: company, agent: agent, issue: issue} = runtime_fixture("hard-stop")

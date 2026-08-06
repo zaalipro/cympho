@@ -26,6 +26,7 @@ defmodule Cympho.ToolCallTraces.ToolCallTrace do
     belongs_to :agent, Cympho.Agents.Agent
     belongs_to :issue, Cympho.Issues.Issue
     belongs_to :company, Cympho.Companies.Company
+    belongs_to :run, Cympho.HeartbeatEngine.Run, foreign_key: :run_id
 
     timestamps(type: :utc_datetime)
   end
@@ -47,6 +48,7 @@ defmodule Cympho.ToolCallTraces.ToolCallTrace do
       :agent_id,
       :issue_id,
       :company_id,
+      :run_id,
       :actor_type,
       :actor_id
     ])
@@ -70,6 +72,7 @@ defmodule Cympho.ToolCallTraces.ToolCallTrace do
     |> assoc_constraint(:agent)
     |> assoc_constraint(:issue)
     |> assoc_constraint(:company)
+    |> assoc_constraint(:run)
     |> unique_constraint([:company_id, :sequence_number])
     |> unique_constraint(:content_hash)
   end

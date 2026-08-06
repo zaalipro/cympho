@@ -8,6 +8,7 @@ defmodule Cympho.Companies do
   alias Cympho.Companies.JoinRequest
   alias Cympho.Agents.{Agent, RolePlaybook}
   alias Cympho.BoardApprovals
+  alias Cympho.Finances
   alias Cympho.GovernanceAuditLogs
   alias Cympho.Goals.Goal
   alias Cympho.Issues.Issue
@@ -16,6 +17,9 @@ defmodule Cympho.Companies do
 
   @runtime_mode_key "runtime_mode"
   @low_power_mode "low_power"
+  # Safe default when callers omit budget_monthly_cents: $100/mo hard-stop.
+  # Explicit 0/negative is rejected so autonomy cannot launch unbounded.
+  @default_autonomous_budget_monthly_cents 10_000
 
   # CEO/CTO always hold these authorities via AgentActions' @governance_roles;
   # the flags exist so the agent permissions UI reflects that instead of
@@ -157,9 +161,9 @@ defmodule Cympho.Companies do
       })
 
     with {:ok, updated} <- execute_company_update(company, %{governance_config: config}) do
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "company:#{updated.id}:company",
+      Cympho.PubSubGuard.company_broadcast(
+        updated.id,
+        "company",
         {:company_runtime_low_power, updated}
       )
 
@@ -178,15 +182,15 @@ defmodule Cympho.Companies do
       runtime_stop = maybe_cancel_company_wakes(company.id, runtime_stop, reason, opts)
       pause_company_agents(company.id, reason)
 
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "company:#{updated.id}:company",
+      Cympho.PubSubGuard.company_broadcast(
+        updated.id,
+        "company",
         {:company_paused, updated}
       )
 
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "company:#{updated.id}:company",
+      Cympho.PubSubGuard.company_broadcast(
+        updated.id,
+        "company",
         {:company_runtime_stopped, updated, runtime_stop}
       )
 
@@ -213,9 +217,9 @@ defmodule Cympho.Companies do
            }) do
       resume_company_agents(company.id)
 
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "company:#{updated.id}:company",
+      Cympho.PubSubGuard.company_broadcast(
+        updated.id,
+        "company",
         {:company_resumed, updated}
       )
 
@@ -427,9 +431,9 @@ defmodule Cympho.Companies do
           metadata: %{changes: Map.keys(attrs)}
         )
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.id}:company",
+        Cympho.PubSubGuard.company_broadcast(
+          updated.id,
+          "company",
           {:company_updated, updated}
         )
 
@@ -1967,8 +1971,20 @@ defmodule Cympho.Companies do
   The template creates a company, one project, one top-level company goal, a CEO,
   CTO, role-specific agents, then queues the blueprint's first strategy issues.
   It is intentionally local-trusted: no user account is required.
+
+  Always inserts a company-scoped `Finances.BudgetPolicy` with
+  `action_on_exceed: "block"` so runtime hard-stop (`check_runtime_budget/2`)
+  cannot be skipped. `budget_monthly_cents` must be positive when provided;
+  when omitted, a safe default (`#{@default_autonomous_budget_monthly_cents}`
+  cents) is applied. Explicit `0` fails closed with `{:error, :budget_required}`.
   """
   def create_autonomous_company(attrs \\ %{}) do
+    with {:ok, budget_monthly_cents} <- resolve_autonomous_budget_monthly_cents(attrs) do
+      do_create_autonomous_company(attrs, budget_monthly_cents)
+    end
+  end
+
+  defp do_create_autonomous_company(attrs, budget_monthly_cents) do
     blueprint =
       attrs
       |> blueprint_key_from_attrs()
@@ -2025,8 +2041,7 @@ defmodule Cympho.Companies do
           # Pre-aligned with the seed issues created below; otherwise the
           # next Issues.create_issue/1 call would collide on issue_number.
           issue_counter: seed_issue_count,
-          budget_monthly_cents:
-            attrs[:budget_monthly_cents] || attrs["budget_monthly_cents"] || 0,
+          budget_monthly_cents: budget_monthly_cents,
           require_board_approval_for_new_agents: false,
           governance_config: %{
             "autonomy_mode" => "autonomous_default",
@@ -2037,6 +2052,10 @@ defmodule Cympho.Companies do
           brand_color: blueprint.brand_color
         })
         |> Repo.insert!()
+
+      # Runtime hard-stop only reads Finances.BudgetPolicy — company.budget_monthly_cents
+      # alone would leave first-run autonomy unbounded.
+      budget_policy = insert_autonomous_block_budget_policy!(company.id, budget_monthly_cents)
 
       # Resolve the owner before inserting the membership: the membership
       # changeset carries assoc_constraint(:user), so inserting first would
@@ -2251,9 +2270,78 @@ defmodule Cympho.Companies do
         goal: goal,
         blueprint: public_blueprint(blueprint),
         agents: [ceo, cto | engineers] ++ [product_lead, design_lead] ++ extra_agents,
-        seed_issues: seed_issues
+        seed_issues: seed_issues,
+        budget_policy: budget_policy
       }
     end)
+  end
+
+  # Positive monthly limit required for autonomy. Missing → safe default; 0 → fail closed.
+  defp resolve_autonomous_budget_monthly_cents(attrs) when is_map(attrs) do
+    raw =
+      cond do
+        Map.has_key?(attrs, :budget_monthly_cents) -> Map.get(attrs, :budget_monthly_cents)
+        Map.has_key?(attrs, "budget_monthly_cents") -> Map.get(attrs, "budget_monthly_cents")
+        true -> :missing
+      end
+
+    case normalize_budget_monthly_cents(raw) do
+      :missing ->
+        {:ok, @default_autonomous_budget_monthly_cents}
+
+      cents when is_integer(cents) and cents > 0 ->
+        {:ok, cents}
+
+      _ ->
+        {:error, :budget_required}
+    end
+  end
+
+  defp normalize_budget_monthly_cents(:missing), do: :missing
+  defp normalize_budget_monthly_cents(nil), do: :missing
+  defp normalize_budget_monthly_cents(""), do: :missing
+  defp normalize_budget_monthly_cents(cents) when is_integer(cents), do: cents
+
+  defp normalize_budget_monthly_cents(%Decimal{} = cents) do
+    cents |> Decimal.round(0) |> Decimal.to_integer()
+  end
+
+  defp normalize_budget_monthly_cents(cents) when is_float(cents), do: trunc(cents)
+
+  defp normalize_budget_monthly_cents(cents) when is_binary(cents) do
+    trimmed = String.trim(cents)
+
+    case Integer.parse(trimmed) do
+      {n, ""} -> n
+      _ -> :invalid
+    end
+  end
+
+  defp normalize_budget_monthly_cents(_), do: :invalid
+
+  defp insert_autonomous_block_budget_policy!(company_id, budget_monthly_cents) do
+    case Finances.create_budget_policy(%{
+           company_id: company_id,
+           scope: "company",
+           period: "monthly",
+           budget_limit_usd: budget_cents_to_usd(budget_monthly_cents),
+           warning_threshold_pct: Decimal.new("80.0"),
+           action_on_exceed: "block",
+           is_active: true
+         }) do
+      {:ok, policy} ->
+        policy
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        Repo.rollback({:budget_policy, changeset})
+    end
+  end
+
+  defp budget_cents_to_usd(cents) when is_integer(cents) and cents > 0 do
+    cents
+    |> Decimal.new()
+    |> Decimal.div(Decimal.new(100))
+    |> Decimal.round(2)
   end
 
   defp create_blueprint_extra_agents!(agent_specs, initial_refs, base_attrs) do
@@ -2697,6 +2785,35 @@ defmodule Cympho.Companies do
 
   def delete_membership(%CompanyMembership{} = membership) do
     Repo.delete(membership)
+  end
+
+  @doc """
+  Ensures the user is an owner and board member of the company.
+
+  `UserAuth` resolves `current_company` only from memberships, not from
+  `users.company_id` alone. Install seed and dev-session bootstrap use this
+  so the admin/owner is not bounced to `/onboarding` after login.
+  """
+  def ensure_owner_membership!(user_id, company_id)
+      when is_binary(user_id) and is_binary(company_id) do
+    case get_membership(user_id, company_id) do
+      nil ->
+        create_membership!(%{
+          user_id: user_id,
+          company_id: company_id,
+          role: "owner",
+          is_board_member: true
+        })
+
+      %CompanyMembership{} = membership ->
+        case update_membership(membership, %{role: "owner", is_board_member: true}) do
+          {:ok, membership} ->
+            membership
+
+          {:error, changeset} ->
+            raise Ecto.InvalidChangesetError, action: :update, changeset: changeset
+        end
+    end
   end
 
   def has_access?(user_id, company_id) do
@@ -3518,15 +3635,51 @@ defmodule Cympho.Companies do
         _ -> "#{original_url_key}-#{:rand.uniform(9999)}"
       end
 
+    runtime_config =
+      agent_data
+      |> get_export_field(:runtime_config, %{})
+      |> import_scrubbed_map()
+
+    heartbeat_config =
+      agent_data
+      |> get_export_field(:heartbeat_config, %{})
+      |> import_scrubbed_map()
+      |> disable_imported_heartbeat()
+
     attrs = %{
       name: get_export_field(agent_data, :name),
       url_key: url_key,
+      title: get_export_field(agent_data, :title),
       role: get_export_field(agent_data, :role, :engineer),
+      adapter: get_export_field(agent_data, :adapter),
       config:
         agent_data
         |> get_export_field(:config, %{})
-        |> drop_redacted_secret_placeholders(),
+        |> import_scrubbed_map(),
+      runtime_config: runtime_config,
+      heartbeat_config: heartbeat_config,
+      capabilities:
+        agent_data
+        |> get_export_field(:capabilities, %{})
+        |> import_scrubbed_map(),
+      permissions:
+        agent_data
+        |> get_export_field(:permissions, %{})
+        |> import_scrubbed_map(),
+      budget:
+        agent_data
+        |> get_export_field(:budget, %{})
+        |> import_scrubbed_map(),
+      icon: get_export_field(agent_data, :icon),
       instructions: get_export_field(agent_data, :instructions),
+      instructions_path: get_export_field(agent_data, :instructions_path),
+      context_mode: get_export_field(agent_data, :context_mode, "company"),
+      max_concurrent_jobs: get_export_field(agent_data, :max_concurrent_jobs, 3),
+      budget_monthly_cents: get_export_field(agent_data, :budget_monthly_cents, 0),
+      # Imported agents must not auto-wake: timers off until an operator resumes.
+      status: :paused,
+      pause_reason: "Imported via company portability; heartbeat timers disabled.",
+      paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
       project_id:
         remap_optional_id!(
           project_id_map,
@@ -3556,6 +3709,21 @@ defmodule Cympho.Companies do
         error
     end
   end
+
+  defp import_scrubbed_map(value) when is_map(value),
+    do: drop_redacted_secret_placeholders(value)
+
+  defp import_scrubbed_map(_value), do: %{}
+
+  # Heartbeat timers stay off after import so restored adapters do not wake on
+  # the destination instance until secrets/runtime are revalidated.
+  defp disable_imported_heartbeat(config) when is_map(config) do
+    config
+    |> Map.put("enabled", false)
+    |> Map.delete(:enabled)
+  end
+
+  defp disable_imported_heartbeat(_config), do: %{"enabled" => false}
 
   defp drop_redacted_secret_placeholders(value) when is_map(value) do
     Enum.reduce(value, %{}, fn {key, nested_value}, acc ->

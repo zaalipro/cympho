@@ -138,9 +138,9 @@ defmodule Cympho.BoardApprovals do
           }
         )
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{approval.company_id}:approvals",
+        Cympho.PubSubGuard.company_broadcast(
+          approval.company_id,
+          "approvals",
           {:board_approval_created, approval}
         )
 
@@ -190,9 +190,9 @@ defmodule Cympho.BoardApprovals do
             user_id
           )
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{board_approval.company_id}:approvals",
+        Cympho.PubSubGuard.company_broadcast(
+          board_approval.company_id,
+          "approvals",
           {:board_vote_cast, vote_record}
         )
 
@@ -232,14 +232,13 @@ defmodule Cympho.BoardApprovals do
 
         Decisions.record_board_decision(updated, actor)
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.company_id}:approvals",
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "approvals",
           {:board_approval_resolved, updated}
         )
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
+        Cympho.PubSubGuard.broadcast(
           "system:board_approvals",
           {:board_approval_resolved, updated}
         )
@@ -273,14 +272,13 @@ defmodule Cympho.BoardApprovals do
             resource: updated
           )
 
-          Phoenix.PubSub.broadcast(
-            Cympho.PubSub,
-            "company:#{updated.company_id}:approvals",
+          Cympho.PubSubGuard.company_broadcast(
+            updated.company_id,
+            "approvals",
             {:board_approval_cancelled, updated}
           )
 
-          Phoenix.PubSub.broadcast(
-            Cympho.PubSub,
+          Cympho.PubSubGuard.broadcast(
             "system:board_approvals",
             {:board_approval_cancelled, updated}
           )
@@ -308,9 +306,11 @@ defmodule Cympho.BoardApprovals do
   @doc """
   Subscribes to board approval events.
   """
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:approvals")
   end
+
+  def subscribe(_company_id), do: :ok
 
   @doc """
   Checks whether a given governance category requires board approval
@@ -642,9 +642,9 @@ defmodule Cympho.BoardApprovals do
           metadata: %{board_approval_id: board_approval.id, agent_id: agent.id}
         )
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{board_approval.company_id}:governance",
+        Cympho.PubSubGuard.company_broadcast(
+          board_approval.company_id,
+          "governance",
           {:agent_hire_approved, board_approval.id, agent}
         )
 
@@ -678,9 +678,9 @@ defmodule Cympho.BoardApprovals do
             metadata: %{board_approval_id: board_approval.id, agent_id: agent_id}
           )
 
-          Phoenix.PubSub.broadcast(
-            Cympho.PubSub,
-            "company:#{board_approval.company_id}:governance",
+          Cympho.PubSubGuard.company_broadcast(
+            board_approval.company_id,
+            "governance",
             {:agent_termination_approved, board_approval.id, agent_id}
           )
 
@@ -713,9 +713,9 @@ defmodule Cympho.BoardApprovals do
                 }
               )
 
-              Phoenix.PubSub.broadcast(
-                Cympho.PubSub,
-                "company:#{board_approval.company_id}:governance",
+              Cympho.PubSubGuard.company_broadcast(
+                board_approval.company_id,
+                "governance",
                 {:agent_promotion_approved, board_approval.id, agent_id, new_role}
               )
 
@@ -731,6 +731,8 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
+  # Budget create/update go through Cympho.Budgets, which syncs Finances.BudgetPolicy
+  # so board-approved hard_stop is enforced by Runtime.preflight (not LiveView-only).
   defp trigger_budget_increase(board_approval) do
     action = get_in(board_approval.proposal_data, ["action"])
     actor = nil
@@ -750,9 +752,9 @@ defmodule Cympho.BoardApprovals do
               metadata: Map.put(meta, :budget_id, budget.id)
             )
 
-            Phoenix.PubSub.broadcast(
-              Cympho.PubSub,
-              "company:#{board_approval.company_id}:governance",
+            Cympho.PubSubGuard.company_broadcast(
+              board_approval.company_id,
+              "governance",
               {:budget_creation_approved, board_approval.id, budget}
             )
 
@@ -789,9 +791,9 @@ defmodule Cympho.BoardApprovals do
                     metadata: Map.put(meta, :budget_id, budget_id)
                   )
 
-                  Phoenix.PubSub.broadcast(
-                    Cympho.PubSub,
-                    "company:#{board_approval.company_id}:governance",
+                  Cympho.PubSubGuard.company_broadcast(
+                    board_approval.company_id,
+                    "governance",
                     {:budget_increase_approved, board_approval.id, budget_id,
                      updated.limit_amount}
                   )
@@ -832,9 +834,9 @@ defmodule Cympho.BoardApprovals do
         new_limit = get_in(board_approval.proposal_data, ["new_limit"])
 
         if budget_id != nil and new_limit != nil do
-          Phoenix.PubSub.broadcast(
-            Cympho.PubSub,
-            "company:#{board_approval.company_id}:governance",
+          Cympho.PubSubGuard.company_broadcast(
+            board_approval.company_id,
+            "governance",
             {:budget_increase_approved, board_approval.id, budget_id, new_limit}
           )
         end
@@ -873,9 +875,9 @@ defmodule Cympho.BoardApprovals do
                   metadata: meta
                 )
 
-                Phoenix.PubSub.broadcast(
-                  Cympho.PubSub,
-                  "company:#{board_approval.company_id}:governance",
+                Cympho.PubSubGuard.company_broadcast(
+                  board_approval.company_id,
+                  "governance",
                   {:policy_change_approved, board_approval.id, updated}
                 )
 
@@ -906,9 +908,9 @@ defmodule Cympho.BoardApprovals do
     permission = get_in(board_approval.proposal_data, ["permission"])
 
     if principal_id != nil and permission != nil do
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "company:#{board_approval.company_id}:governance",
+      Cympho.PubSubGuard.company_broadcast(
+        board_approval.company_id,
+        "governance",
         {:permission_grant_approved, board_approval.id, principal_id, permission}
       )
     end
@@ -927,9 +929,9 @@ defmodule Cympho.BoardApprovals do
       }
     )
 
-    Phoenix.PubSub.broadcast(
-      Cympho.PubSub,
-      "company:#{board_approval.company_id}:governance",
+    Cympho.PubSubGuard.company_broadcast(
+      board_approval.company_id,
+      "governance",
       {:strategic_initiative_approved, board_approval.id, board_approval.proposal_data}
     )
 

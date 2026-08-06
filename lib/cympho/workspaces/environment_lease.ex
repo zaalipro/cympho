@@ -55,6 +55,9 @@ defmodule Cympho.Workspaces.EnvironmentLease do
   @doc false
   def revoke_changeset(environment_lease) do
     environment_lease
-    |> change(%{status: "released", released_at: DateTime.utc_now()})
+    |> change(%{
+      status: "released",
+      released_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
   end
 end
