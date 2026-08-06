@@ -98,6 +98,82 @@ defmodule Cympho.AgentsTest do
       assert resumed.paused_at == nil
       assert resumed.pause_reason == nil
     end
+
+    test "rehomes non-terminal assigned work and cancels agent wakes", %{
+      company: company,
+      agent: agent
+    } do
+      alias Cympho.Issues
+      alias Cympho.Wakes
+      alias Cympho.Wakes.AgentWake
+
+      {:ok, manager} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Manager",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, agent} = Agents.update_agent(agent, %{parent_id: manager.id})
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {:ok, todo} =
+        Issues.create_issue(%{
+          title: "Todo work",
+          company_id: company.id,
+          status: :todo,
+          assignee_id: agent.id
+        })
+
+      {:ok, active} =
+        Issues.create_issue(%{
+          title: "Active work",
+          company_id: company.id,
+          status: :in_progress,
+          assignee_id: agent.id,
+          checked_out_at: now
+        })
+
+      {:ok, done} =
+        Issues.create_issue(%{
+          title: "Done work",
+          company_id: company.id,
+          status: :done,
+          assignee_id: agent.id
+        })
+
+      {:ok, wake} =
+        Wakes.do_wake_agent(agent.id, todo.id, "manual_dispatch", "system", nil, %{
+          "source" => "test"
+        })
+
+      assert {:ok, _paused} = Agents.pause_agent(agent, "operator pause")
+
+      assert Issues.get_issue!(todo.id).assignee_id == nil
+      assert Issues.get_issue!(active.id).assignee_id == nil
+      assert Issues.get_issue!(active.id).status == :todo
+      assert Issues.get_issue!(active.id).checked_out_at == nil
+      # Terminal work stays on the agent.
+      assert Issues.get_issue!(done.id).assignee_id == agent.id
+
+      assert Repo.get!(AgentWake, wake.id).status == "cancelled"
+
+      manager_wakes =
+        Repo.all(
+          from w in AgentWake,
+            where:
+              w.agent_id == ^manager.id and w.reason == "escalation_from_subordinate" and
+                w.status == "pending"
+        )
+
+      assert length(manager_wakes) >= 1
+      assert Enum.any?(manager_wakes, &(&1.issue_id == todo.id))
+      assert Enum.any?(manager_wakes, &(&1.issue_id == active.id))
+    end
   end
 
   describe "dispatch eligibility" do

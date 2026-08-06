@@ -176,10 +176,7 @@ defmodule CymphoWeb.UserAuth do
           when changed_company_id == company_id ->
             count = owner_inbox_badge_count(company_id, socket.assigns[:current_user])
 
-            {:halt,
-             socket
-             |> assign(:nav_inbox_count, count)
-             |> assign(:inbox_badge_count, count)}
+            {:halt, put_inbox_badge_counts(socket, count)}
 
           _message, socket ->
             {:cont, socket}
@@ -208,7 +205,8 @@ defmodule CymphoWeb.UserAuth do
              |> assign(:nav_approval_count, count)
              |> assign(:approval_badge_count, count)
              |> assign(:nav_inbox_count, inbox_count)
-             |> assign(:inbox_badge_count, inbox_count)}
+             |> assign(:inbox_badge_count, inbox_count)
+             |> push_nav_badges()}
           else
             {:cont, socket}
           end
@@ -230,11 +228,7 @@ defmodule CymphoWeb.UserAuth do
           {:owner_attention_changed, changed_company_id}, socket
           when changed_company_id == company_id ->
             count = owner_inbox_badge_count(company_id, socket.assigns[:current_user])
-
-            socket =
-              socket
-              |> assign(:nav_inbox_count, count)
-              |> assign(:inbox_badge_count, count)
+            socket = put_inbox_badge_counts(socket, count)
 
             if socket.view == CymphoWeb.InboxLive.Index,
               do: {:cont, socket},
@@ -247,6 +241,26 @@ defmodule CymphoWeb.UserAuth do
       _ ->
         socket
     end
+  end
+
+  # Root layout chrome is outside LiveView inner_content and does not re-render
+  # on assign changes. Keep socket assigns for first paint / LV consumers, and
+  # push a client event so desktop + mobile badge DOM update without full nav.
+  defp put_inbox_badge_counts(socket, count) when is_integer(count) do
+    socket
+    |> assign(:nav_inbox_count, count)
+    |> assign(:inbox_badge_count, count)
+    |> push_nav_badges()
+  end
+
+  defp push_nav_badges(socket) do
+    inbox = socket.assigns[:inbox_badge_count] || socket.assigns[:nav_inbox_count] || 0
+    approval = socket.assigns[:approval_badge_count] || socket.assigns[:nav_approval_count] || 0
+
+    Phoenix.LiveView.push_event(socket, "nav_badges", %{
+      inbox: inbox,
+      approval: approval
+    })
   end
 
   defp assign_browser_company_context(conn, user) do

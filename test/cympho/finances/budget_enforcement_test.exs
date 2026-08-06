@@ -1,8 +1,8 @@
 defmodule Cympho.Finances.BudgetEnforcementTest do
   use Cympho.DataCase
 
-  alias Cympho.Finances
-  alias Cympho.Finances.BudgetIncident
+  alias Cympho.{Agents, Budgets, Finances, Issues}
+  alias Cympho.Finances.{BudgetIncident, BudgetPolicy, TokenUsage}
   alias Cympho.Repo
 
   defp company_fixture do
@@ -332,6 +332,68 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
 
       usages = Finances.list_token_usages(company_id)
       assert length(usages) == 3
+    end
+  end
+
+  describe "exhausted UI budget still hard-stops runtime (P0-1)" do
+    test "check_runtime_budget blocks after exhausted sync with over-limit TokenUsage" do
+      company = company_fixture()
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Exhaust Agent #{System.unique_integer([:positive])}",
+          role: :engineer,
+          status: :idle,
+          adapter: :process
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          company_id: company.id,
+          title: "Exhaust issue",
+          status: :todo,
+          assignee_id: agent.id
+        })
+
+      assert {:ok, budget} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "Hard stop exhausted",
+                 scope_type: "agent",
+                 scope_id: agent.id,
+                 agent_id: agent.id,
+                 limit_amount: Decimal.new("1.00"),
+                 hard_stop: true,
+                 status: "active"
+               })
+
+      policy = Finances.matching_budget_policy(budget)
+      assert policy.is_active
+      assert policy.budget_id == budget.id
+
+      Repo.insert!(%TokenUsage{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        provider: "test",
+        model: "test",
+        input_tokens: 10,
+        output_tokens: 10,
+        total_tokens: 20,
+        cost_usd: Decimal.new("1.25")
+      })
+
+      assert {:ok, exhausted} = Budgets.update_budget(budget, %{status: "exhausted"})
+
+      assert {:ok, %BudgetPolicy{is_active: true, id: policy_id}} =
+               Finances.sync_budget_policy(exhausted)
+
+      assert policy_id == policy.id
+
+      assert {:error, {:budget_blocked, info}} = Finances.check_runtime_budget(issue, agent)
+      assert info.policy_id == policy.id
+      assert info.scope == "agent"
     end
   end
 end

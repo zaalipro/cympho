@@ -5,6 +5,7 @@ defmodule Cympho.Costs do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Budgets.Budget
+  alias Cympho.Finances
   alias Cympho.Finances.{BudgetIncident, BudgetPolicy, TokenUsage}
 
   @default_budget_warning_pct Decimal.new("80.0")
@@ -40,11 +41,12 @@ defmodule Cympho.Costs do
       |> Repo.aggregate(:sum, :limit_amount)
       |> decimal_or_zero()
 
+    # Prefer TokenUsage-backed spend (same source as BudgetLive / runtime checks).
+    # The static budgets.spent_amount column is display-only legacy.
     budget_spent =
-      budget_query(company_id)
-      |> where([b], b.status == "active")
-      |> Repo.aggregate(:sum, :spent_amount)
-      |> decimal_or_zero()
+      company_id
+      |> active_budgets()
+      |> decimal_sum(& &1.spent_amount)
 
     %{
       total_cost: total_cost,
@@ -271,21 +273,45 @@ defmodule Cympho.Costs do
     |> where([b], b.status == "active")
     |> order_by([b], desc: b.limit_amount)
     |> Repo.all()
+    |> Enum.map(&with_live_spend/1)
   end
 
+  @doc """
+  Active budgets whose live TokenUsage spend is at or past the alert threshold
+  but not yet exhausted. Driven by `Finances.spend_for_budget/1`, not the
+  legacy `spent_amount` column.
+  """
   def approaching_threshold_budgets(company_id) do
     budget_query(company_id)
     |> where([b], b.status == "active")
     |> Repo.all()
-    |> Enum.filter(&Budget.at_threshold?/1)
+    |> Enum.map(&with_live_spend/1)
+    |> Enum.filter(fn budget ->
+      Budget.at_threshold?(budget) and not Budget.exhausted?(budget)
+    end)
   end
 
+  @doc """
+  Budgets that have hit their limit based on live TokenUsage spend (or an
+  exhausted DB status). Does not rely solely on `status == "exhausted"`.
+  """
   def exceeded_budgets(company_id) do
     budget_query(company_id)
-    |> where([b], b.status == "exhausted")
+    |> where([b], b.status in ["active", "exhausted"])
     |> order_by([b], desc: b.updated_at)
-    |> limit(10)
     |> Repo.all()
+    |> Enum.map(&with_live_spend/1)
+    |> Enum.filter(fn budget ->
+      budget.status == "exhausted" or Budget.exhausted?(budget)
+    end)
+    |> Enum.take(10)
+  end
+
+  # Overlay TokenUsage spend onto the legacy spent_amount field so existing
+  # Budget.utilization_percentage/at_threshold?/exhausted? helpers stay honest
+  # without editing finances.ex (owned by the budget hard-stop package).
+  defp with_live_spend(%Budget{} = budget) do
+    %{budget | spent_amount: Finances.spend_for_budget(budget)}
   end
 
   defp preload_agents(results) when is_list(results) do
@@ -379,14 +405,16 @@ defmodule Cympho.Costs do
         scoped_budget_control(company_id)
 
       budgets ->
+        live = Enum.map(budgets, &with_live_spend/1)
+
         %{
           source: :legacy_budget,
           comparable: true,
-          control_count: length(budgets),
+          control_count: length(live),
           period: "monthly",
-          limit: decimal_sum(budgets, & &1.limit_amount),
-          spend_floor: decimal_sum(budgets, & &1.spent_amount),
-          warning_threshold_pct: min_budget_threshold(budgets)
+          limit: decimal_sum(live, & &1.limit_amount),
+          spend_floor: decimal_sum(live, & &1.spent_amount),
+          warning_threshold_pct: min_budget_threshold(live)
         }
     end
   end

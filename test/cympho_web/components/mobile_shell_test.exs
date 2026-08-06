@@ -5,6 +5,7 @@ defmodule CymphoWeb.MobileShellTest do
   @app_css "assets/css/app.css"
   @kanban_board "lib/cympho_web/live/kanban_live/index.html.heex"
   @issue_new "lib/cympho_web/live/issue_live/new.html.heex"
+  @agent_new "lib/cympho_web/live/agent_live/new.html.heex"
 
   test "application shell uses dynamic viewport units instead of fixed screen height" do
     layout = File.read!(@root_layout)
@@ -53,11 +54,17 @@ defmodule CymphoWeb.MobileShellTest do
 
   test "sticky CTAs clear fixed mobile bottom nav via nav+safe-area offset" do
     issue_new = File.read!(@issue_new)
+    agent_new = File.read!(@agent_new)
     css = File.read!(@app_css)
 
     assert issue_new =~ "sticky-above-mobile-nav"
     assert issue_new =~ "sticky"
     refute issue_new =~ "sticky bottom-0"
+
+    assert agent_new =~ "sticky-above-mobile-nav"
+    assert agent_new =~ ~s(data-testid="new-agent-form-actions")
+    assert agent_new =~ "sticky"
+    refute agent_new =~ "sticky bottom-0"
 
     assert css =~ ".sticky-above-mobile-nav"
     assert css =~ "bottom: var(--mobile-nav-offset)"

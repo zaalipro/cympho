@@ -240,6 +240,103 @@ defmodule Cympho.CostsTest do
     end
   end
 
+  describe "active_budgets/1" do
+    test "enriches spent_amount from TokenUsage not static column" do
+      company = insert_company()
+
+      budget =
+        insert_budget(company,
+          name: "Runtime cap",
+          limit_amount: Decimal.new("100.00"),
+          spent_amount: Decimal.new("0.00")
+        )
+
+      insert_token_usage(%{
+        company_id: company.id,
+        cost_usd: Decimal.new("33.25")
+      })
+
+      [row] = Costs.active_budgets(company.id)
+
+      assert row.id == budget.id
+      assert Decimal.eq?(row.spent_amount, Decimal.new("33.25"))
+      refute Decimal.eq?(row.spent_amount, Decimal.new("0.00"))
+    end
+  end
+
+  describe "approaching_threshold_budgets/1" do
+    test "flags budgets when live TokenUsage crosses threshold even if spent_amount is zero" do
+      company = insert_company()
+
+      insert_budget(company,
+        name: "Near limit",
+        limit_amount: Decimal.new("100.00"),
+        spent_amount: Decimal.new("0.00"),
+        threshold_alert_percentage: 80
+      )
+
+      insert_token_usage(%{company_id: company.id, cost_usd: Decimal.new("85.00")})
+
+      [row] = Costs.approaching_threshold_budgets(company.id)
+
+      assert row.name == "Near limit"
+      assert Decimal.eq?(row.spent_amount, Decimal.new("85.00"))
+    end
+
+    test "does not flag budgets under the live threshold" do
+      company = insert_company()
+
+      insert_budget(company,
+        name: "Healthy",
+        limit_amount: Decimal.new("100.00"),
+        spent_amount: Decimal.new("90.00"),
+        threshold_alert_percentage: 80
+      )
+
+      insert_token_usage(%{company_id: company.id, cost_usd: Decimal.new("10.00")})
+
+      assert Costs.approaching_threshold_budgets(company.id) == []
+    end
+  end
+
+  describe "exceeded_budgets/1" do
+    test "includes active budgets whose TokenUsage spend meets or exceeds the limit" do
+      company = insert_company()
+
+      insert_budget(company,
+        name: "Still active row",
+        limit_amount: Decimal.new("50.00"),
+        spent_amount: Decimal.new("0.00"),
+        status: "active"
+      )
+
+      insert_token_usage(%{company_id: company.id, cost_usd: Decimal.new("55.00")})
+
+      [row] = Costs.exceeded_budgets(company.id)
+
+      assert row.name == "Still active row"
+      assert Decimal.eq?(row.spent_amount, Decimal.new("55.00"))
+    end
+
+    test "still returns status-exhausted budgets with live spend enriched" do
+      company = insert_company()
+
+      insert_budget(company,
+        name: "Exhausted row",
+        limit_amount: Decimal.new("40.00"),
+        spent_amount: Decimal.new("40.00"),
+        status: "exhausted"
+      )
+
+      insert_token_usage(%{company_id: company.id, cost_usd: Decimal.new("42.00")})
+
+      [row] = Costs.exceeded_budgets(company.id)
+
+      assert row.name == "Exhausted row"
+      assert Decimal.eq?(row.spent_amount, Decimal.new("42.00"))
+    end
+  end
+
   describe "spend_posture/2" do
     test "reports on-track company policy spend" do
       company = insert_company()
@@ -359,6 +456,28 @@ defmodule Cympho.CostsTest do
       name: "Test Company #{System.unique_integer()}",
       slug: "test-company-#{System.unique_integer()}"
     })
+  end
+
+  defp insert_budget(company, attrs) do
+    attrs =
+      [
+        company_id: company.id,
+        name: "Budget",
+        scope_type: "company",
+        scope_id: company.id,
+        limit_amount: Decimal.new("100.00"),
+        spent_amount: Decimal.new("0.00"),
+        currency: "USD",
+        threshold_alert_percentage: 80,
+        hard_stop: true,
+        status: "active"
+      ]
+      |> Keyword.merge(attrs)
+      |> Map.new()
+
+    %Cympho.Budgets.Budget{}
+    |> Cympho.Budgets.Budget.changeset(attrs)
+    |> Repo.insert!()
   end
 
   defp insert_token_usage(attrs) do

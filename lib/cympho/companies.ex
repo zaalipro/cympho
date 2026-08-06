@@ -2319,6 +2319,9 @@ defmodule Cympho.Companies do
 
   defp normalize_budget_monthly_cents(_), do: :invalid
 
+  # Intentionally omits budget_id: this is the unowned onboarding company
+  # hard-stop. UI Budgets create/sync/delete match by budget_id ownership and
+  # must not claim or deactivate this policy via company-scope collision.
   defp insert_autonomous_block_budget_policy!(company_id, budget_monthly_cents) do
     case Finances.create_budget_policy(%{
            company_id: company_id,

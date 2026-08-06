@@ -19,12 +19,10 @@ defmodule Cympho.OwnerAttention do
   alias Cympho.Issues.IssueThreadInteraction
   alias Cympho.Repo
   alias Cympho.Wakes
-  alias Cympho.Wakes.AgentWake
 
   @failed_run_statuses ~w(failed timed_out)
   @budget_incident_event_types ~w(warning threshold_exceeded budget_exceeded)
   @terminal_issue_statuses [:done, :cancelled]
-  @review_queue_reasons ~w(final_review_required child_status_changed issue_children_completed)
   @interaction_kinds [:suggest_tasks, :ask_user_questions, :request_confirmation]
   @default_limit 200
   @pubsub Cympho.PubSub
@@ -85,8 +83,7 @@ defmodule Cympho.OwnerAttention do
     limit = opts |> Keyword.get(:limit, @default_limit) |> normalize_limit()
 
     company_id
-    |> source_items(user, agent_id)
-    |> sort_and_deduplicate()
+    |> membership_items(user, agent_id)
     |> Enum.take(limit)
   end
 
@@ -111,23 +108,16 @@ defmodule Cympho.OwnerAttention do
   end
 
   @doc """
-  Counts unresolved owner decisions without loading the full Inbox rows.
+  Counts unresolved owner decisions from the same membership set as `list_items/3`.
 
-  Membership matches `list_items/3` after issue-level dedup (reviews included).
-  Prefer this for nav badges so Simple Needs you and the badge stay in lockstep.
+  Derived after category merge and issue-level dedup (reviews included), so nav
+  badges, Simple Needs you, and Inbox cannot drift from hand-rolled category sums.
+  Prefer this for badge counts.
   """
   def unresolved_count(company_id, user) when is_binary(company_id) do
-    user_id = user_id(user)
-
-    human_action_count(company_id, user_id) +
-      review_count(company_id) +
-      Approvals.count_pending_for_company(company_id) +
-      BoardApprovals.count_pending_for_company(company_id) +
-      unresolved_interaction_count(company_id) +
-      unresolved_failure_count(company_id) +
-      unresolved_budget_incident_count(company_id) +
-      unresolved_stuck_only_count(company_id, user_id) -
-      unresolved_interaction_human_overlap_count(company_id, user_id)
+    company_id
+    |> membership_items(user, nil)
+    |> length()
   end
 
   def unresolved_count(_company_id, _user), do: 0
@@ -143,6 +133,13 @@ defmodule Cympho.OwnerAttention do
       }
     end)
     |> Enum.uniq_by(&Map.get(&1, :dedup_key, Map.get(&1, :id)))
+  end
+
+  # Single membership path for list_items and unresolved_count.
+  defp membership_items(company_id, user, agent_id) do
+    company_id
+    |> source_items(user, agent_id)
+    |> sort_and_deduplicate()
   end
 
   defp source_items(company_id, user, agent_id) do
@@ -434,37 +431,6 @@ defmodule Cympho.OwnerAttention do
     )
   end
 
-  defp unresolved_interaction_count(company_id) do
-    company_id
-    |> unresolved_interaction_query()
-    |> exclude(:order_by)
-    |> select([interaction, _issue], count(interaction.issue_id, :distinct))
-    |> Repo.one()
-    |> Kernel.||(0)
-  end
-
-  defp unresolved_interaction_human_overlap_count(_company_id, nil), do: 0
-
-  defp unresolved_interaction_human_overlap_count(company_id, user_id) do
-    company_id
-    |> unresolved_interaction_query()
-    |> exclude(:order_by)
-    |> where(
-      [_interaction, issue],
-      issue.assignee_user_id == ^user_id or issue.status == :blocked
-    )
-    |> select([interaction, _issue], count(interaction.issue_id, :distinct))
-    |> Repo.one()
-    |> Kernel.||(0)
-  end
-
-  defp unresolved_failure_count(company_id) do
-    company_id
-    |> unresolved_failure_query()
-    |> exclude(:order_by)
-    |> Repo.aggregate(:count)
-  end
-
   defp unresolved_budget_incident_query(company_id) do
     from(i in BudgetIncident,
       join: policy in assoc(i, :budget_policy),
@@ -475,62 +441,6 @@ defmodule Cympho.OwnerAttention do
       order_by: [desc: i.inserted_at, desc: i.id]
     )
   end
-
-  defp unresolved_budget_incident_count(company_id) do
-    company_id
-    |> unresolved_budget_incident_query()
-    |> exclude(:order_by)
-    |> exclude(:preload)
-    |> select([i, _policy], count(i.budget_policy_id, :distinct))
-    |> Repo.one()
-    |> Kernel.||(0)
-  end
-
-  defp review_count(company_id) do
-    from(w in AgentWake,
-      join: issue in Issue,
-      on: issue.id == w.issue_id,
-      where:
-        issue.company_id == ^company_id and w.status in ["pending", "running"] and
-          w.reason in ^@review_queue_reasons,
-      select: count(w.issue_id, :distinct)
-    )
-    |> Repo.one()
-    |> Kernel.||(0)
-  end
-
-  defp human_action_count(_company_id, nil), do: 0
-  defp human_action_count(company_id, user_id), do: Issues.human_action_count(company_id, user_id)
-
-  # Stuck issues that are not already counted as human_action or pending interaction
-  # (those share issue: dedup keys in list_items).
-  defp unresolved_stuck_only_count(company_id, user_id) do
-    interaction_issue_ids = pending_interaction_issue_ids(company_id)
-
-    company_id
-    |> Issues.list_stuck_issues()
-    |> Enum.count(fn issue ->
-      not human_action_issue?(issue, user_id) and
-        not MapSet.member?(interaction_issue_ids, issue.id)
-    end)
-  end
-
-  defp pending_interaction_issue_ids(company_id) do
-    company_id
-    |> unresolved_interaction_query()
-    |> exclude(:order_by)
-    |> select([interaction, _issue], interaction.issue_id)
-    |> Repo.all()
-    |> MapSet.new()
-  end
-
-  defp human_action_issue?(_issue, nil), do: false
-
-  defp human_action_issue?(%Issue{} = issue, user_id) do
-    issue.assignee_user_id == user_id or issue.status == :blocked
-  end
-
-  defp human_action_issue?(_issue, _user_id), do: false
 
   defp stuck_issue_title(%Issue{title: title, status: status}) when is_binary(title) do
     "#{stuck_issue_status_label(status)} · #{title}"
@@ -825,35 +735,59 @@ defmodule Cympho.OwnerAttention do
   defp budget_resume_path(%BudgetIncident{enforcement_status: "incomplete"}), do: "/agents"
   defp budget_resume_path(_incident), do: nil
 
+  # Prefer budget_id ownership so OA deep-links the owning UI budget, not a
+  # same-scope neighbor (and never invents a link for unowned onboarding policies).
+  defp matching_ui_budget(%{budget_id: budget_id, company_id: company_id} = policy)
+       when is_binary(budget_id) and is_binary(company_id) do
+    case Budgets.get_company_budget(company_id, budget_id) do
+      {:ok, budget} -> budget
+      {:error, _} -> matching_ui_budget_by_scope(policy)
+    end
+  end
+
   defp matching_ui_budget(%{company_id: company_id, scope: scope} = policy)
        when is_binary(company_id) and scope in ~w(company agent project) do
-    scope_type = scope
-
-    Budgets.list_budgets(%{company_id: company_id, scope_type: scope_type, active: true})
-    |> Enum.find(fn budget -> budget_matches_policy?(budget, policy) end)
+    matching_ui_budget_by_scope(policy)
   end
 
   defp matching_ui_budget(_policy), do: nil
 
-  defp budget_matches_policy?(%{scope_type: "company"}, %{scope: "company"}), do: true
+  defp matching_ui_budget_by_scope(%{company_id: company_id, scope: scope} = policy)
+       when is_binary(company_id) and scope in ~w(company agent project) do
+    Budgets.list_budgets(%{company_id: company_id, scope_type: scope, active: true})
+    |> Enum.find(fn budget -> budget_matches_policy?(budget, policy) end)
+  end
+
+  defp matching_ui_budget_by_scope(_policy), do: nil
+
+  defp budget_matches_policy?(%{id: budget_id}, %{budget_id: budget_id})
+       when is_binary(budget_id),
+       do: true
+
+  # Unowned (onboarding / legacy) policies may still match by scope for raise-path UX.
+  defp budget_matches_policy?(%{scope_type: "company"}, %{scope: "company", budget_id: nil}),
+    do: true
 
   defp budget_matches_policy?(%{scope_type: scope, scope_id: scope_id}, %{
          scope: scope,
-         scope_id: scope_id
+         scope_id: scope_id,
+         budget_id: nil
        })
        when is_binary(scope_id),
        do: true
 
   defp budget_matches_policy?(%{scope_type: "agent", agent_id: agent_id}, %{
          scope: "agent",
-         scope_id: agent_id
+         scope_id: agent_id,
+         budget_id: nil
        })
        when is_binary(agent_id),
        do: true
 
   defp budget_matches_policy?(%{scope_type: "project", project_id: project_id}, %{
          scope: "project",
-         scope_id: project_id
+         scope_id: project_id,
+         budget_id: nil
        })
        when is_binary(project_id),
        do: true

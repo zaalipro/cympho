@@ -340,6 +340,214 @@ defmodule Cympho.Oversight.PatrolTest do
       counters = Patrol.patrol_company(company.id, in_progress_minutes: 60, cooldown_seconds: 0)
       assert Map.get(counters, :skipped_no_supervisor, 0) >= 1
     end
+
+    test "skips paused supervisor and escalates to CEO", %{
+      company: company,
+      ceo: ceo,
+      cto: cto,
+      engineer: engineer,
+      issue: issue
+    } do
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+
+      {:ok, _} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: engineer.id,
+          checked_out_at: stale_at,
+          updated_at: stale_at
+        })
+
+      # Pause CTO without rehoming so the supervisor chain still points at them.
+      {:ok, _} =
+        cto
+        |> Ecto.Changeset.change(%{
+          status: :paused,
+          governance_status: "paused",
+          pause_reason: "manual"
+        })
+        |> Repo.update()
+
+      counters =
+        Patrol.patrol_company(company.id,
+          in_progress_minutes: 60,
+          cooldown_seconds: 0
+        )
+
+      assert Map.get(counters, :waked, 0) >= 1
+      assert pending_wakes(cto.id, "issue_stalled_in_progress") == []
+
+      assert Enum.any?(
+               pending_wakes(ceo.id, "issue_stalled_in_progress"),
+               &(&1.issue_id == issue.id)
+             )
+    end
+
+    test "skips terminated supervisor entirely when CEO is also dead", %{
+      company: company,
+      ceo: ceo,
+      cto: cto,
+      engineer: engineer,
+      issue: issue
+    } do
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+
+      {:ok, _} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: engineer.id,
+          checked_out_at: stale_at,
+          updated_at: stale_at
+        })
+
+      {:ok, _} =
+        cto
+        |> Ecto.Changeset.change(%{governance_status: "terminated", status: :terminated})
+        |> Repo.update()
+
+      {:ok, _} =
+        ceo
+        |> Ecto.Changeset.change(%{governance_status: "terminated", status: :terminated})
+        |> Repo.update()
+
+      counters =
+        Patrol.patrol_company(company.id, in_progress_minutes: 60, cooldown_seconds: 0)
+
+      assert Map.get(counters, :skipped_no_supervisor, 0) >= 1
+      assert Map.get(counters, :waked, 0) == 0
+      assert pending_wakes(cto.id, "issue_stalled_in_progress") == []
+      assert pending_wakes(ceo.id, "issue_stalled_in_progress") == []
+    end
+
+    test "paused assignee is immediately stuck without staleness wait", %{
+      company: company,
+      cto: cto,
+      engineer: engineer,
+      issue: issue
+    } do
+      # Fresh checkout — would NOT be stuck under the normal 60m threshold.
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {:ok, _} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: engineer.id,
+          checked_out_at: now,
+          updated_at: now
+        })
+
+      # Pause engineer without rehoming (direct status flip) so patrol sees a
+      # dead assignee still holding the issue.
+      {:ok, _} =
+        engineer
+        |> Ecto.Changeset.change(%{
+          status: :paused,
+          governance_status: "paused",
+          pause_reason: "stuck residual"
+        })
+        |> Repo.update()
+
+      refute Enum.any?(
+               Issues.list_stuck_issues(company.id, in_progress_minutes: 60),
+               &(&1.id == issue.id)
+             )
+
+      preview =
+        Patrol.preview_company(company.id, in_progress_minutes: 60)
+
+      assert Enum.any?(preview, &(&1.issue.id == issue.id))
+
+      counters =
+        Patrol.patrol_company(company.id,
+          in_progress_minutes: 60,
+          cooldown_seconds: 0
+        )
+
+      assert Map.get(counters, :stuck_found, 0) >= 1
+      assert Map.get(counters, :waked, 0) >= 1
+
+      wake =
+        pending_wakes(cto.id, "issue_stalled_in_progress")
+        |> Enum.find(&(&1.issue_id == issue.id))
+
+      assert wake
+      assert wake.metadata["dead_assignee"] == true
+    end
+
+    test "terminated assignee is immediately stuck", %{
+      company: company,
+      cto: cto,
+      engineer: engineer,
+      issue: issue
+    } do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {:ok, _} =
+        Issues.update_issue(issue, %{
+          status: :todo,
+          assignee_id: engineer.id,
+          updated_at: now
+        })
+
+      {:ok, _} =
+        engineer
+        |> Ecto.Changeset.change(%{governance_status: "terminated", status: :terminated})
+        |> Repo.update()
+
+      counters =
+        Patrol.patrol_company(company.id,
+          in_progress_minutes: 120,
+          in_review_minutes: 60,
+          blocked_minutes: 30,
+          cooldown_seconds: 0
+        )
+
+      assert Map.get(counters, :stuck_found, 0) >= 1
+      assert Map.get(counters, :waked, 0) >= 1
+
+      assert Enum.any?(
+               pending_wakes(cto.id, "issue_stalled_in_progress"),
+               &(&1.issue_id == issue.id)
+             )
+    end
+
+    test "in_review with paused reviewer escalates to parent instead of waking reviewer", %{
+      company: company,
+      cto: cto,
+      engineer: engineer,
+      issue: issue
+    } do
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+
+      {:ok, _} =
+        Issues.update_issue(issue, %{status: :in_review, assignee_id: engineer.id})
+
+      from(i in Cympho.Issues.Issue, where: i.id == ^issue.id)
+      |> Repo.update_all(set: [updated_at: stale_at])
+
+      {:ok, _} =
+        engineer
+        |> Ecto.Changeset.change(%{
+          status: :paused,
+          governance_status: "paused",
+          pause_reason: "reviewer offline"
+        })
+        |> Repo.update()
+
+      counters =
+        Patrol.patrol_company(company.id, in_review_minutes: 30, cooldown_seconds: 0)
+
+      assert Map.get(counters, :waked, 0) >= 1
+      assert pending_wakes(engineer.id, "issue_stalled_in_progress") == []
+
+      assert Enum.any?(
+               pending_wakes(cto.id, "issue_stalled_in_progress"),
+               &(&1.issue_id == issue.id)
+             )
+    end
   end
 
   ## helpers

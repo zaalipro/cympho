@@ -26,6 +26,7 @@ The test used a 390x844 Ego Lite viewport.
 - `document.documentElement.scrollWidth == document.documentElement.clientWidth`; the bottom navigation also had `scrollWidth == clientWidth`.
 - **Board geometry (G11 residual):** `/kanban` uses `.mobile-board-height` → `calc(100dvh - var(--mobile-header-height) - var(--mobile-shell-bottom))` so the board ends above `#mobile-nav`. At 390x844 with zero emulated safe-area, that is `844 - 64 - 64 = 716px` of board height; column cards scroll inside that box so the last card’s bottom edge stays above the nav top (y≈787).
 - **New Issue sticky CTA:** `/issues/new` submit bar uses `.sticky-above-mobile-nav` → `bottom: var(--mobile-nav-offset)` (`3.5rem` + safe-area). At 390x844 the sticky bar clears the fixed nav instead of sitting under it (`bottom-0`).
+- **New Agent sticky Hire CTA:** `/agents/new` form actions (`[data-testid="new-agent-form-actions"]`) use `.sticky-above-mobile-nav` so Hire/Cancel stay above fixed `#mobile-nav`.
 
 ### keyboard resize
 
@@ -56,6 +57,7 @@ The landscape check used an 844x390 Ego Lite viewport, which remains on the mobi
 5. Switch to landscape at 844x390 and repeat the overflow and action-versus-navigation geometry checks.
 6. Open `/kanban` at 390x844. Confirm `#kanban-board` uses `.mobile-board-height` (not `100vh-64px`), scroll the last column card into view, and verify its bottom edge is above `#mobile-nav`'s top edge.
 7. Open `/issues/new` at 390x844. Confirm the sticky submit bar uses `.sticky-above-mobile-nav` and its bottom edge sits above `#mobile-nav` (not under it).
+8. Open `/agents/new` at 390x844. Confirm `[data-testid="new-agent-form-actions"]` uses `.sticky-above-mobile-nav` and Hire stays above `#mobile-nav` when the form is long.
 
 ## Limits
 

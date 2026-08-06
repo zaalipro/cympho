@@ -360,7 +360,7 @@ defmodule Cympho.Agents do
   @doc """
   Subscribes to agent updates.
   """
-  def subscribe(company_id) when is_binary(company_id) do
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:agents")
   end
 
@@ -1149,6 +1149,8 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
+        _ = Cympho.Issues.RehomePaused.rehome_for_paused_agent(updated, reason: reason)
+
         Cympho.PubSubGuard.company_broadcast(
           updated.company_id,
           "agents",

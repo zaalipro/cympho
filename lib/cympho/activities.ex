@@ -148,7 +148,7 @@ defmodule Cympho.Activities do
     %{page | entries: Repo.preload(page.entries, [:issue])}
   end
 
-  def subscribe(company_id) when is_binary(company_id) do
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:activities")
   end
 

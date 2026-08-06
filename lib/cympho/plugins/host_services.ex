@@ -142,14 +142,21 @@ defmodule Cympho.Plugins.HostServices do
   Exposes a tool that agents can use via the governed MCP tool registry.
 
   Requires `"expose:tools"` capability. Registration is company-scoped and
-  fail-closed: `company_id` must be supplied as the second argument (preferred)
-  or present on the tool definition. Dynamic tools remain hidden from MCP
-  until an explicit `Cympho.Mcp.ToolGrants` allow grant is issued.
+  fail-closed: company is always resolved from the installed plugin row.
+  A 4-arity `company_id` must match the plugin's company (or is rejected);
+  any `company_id` on the tool definition is ignored. Dynamic tools remain
+  hidden from MCP until an explicit `Cympho.Mcp.ToolGrants` allow grant is issued.
   """
   def expose_tool(plugin_id, company_id, tool_definition, capabilities)
       when is_binary(company_id) and is_map(tool_definition) and is_list(capabilities) do
     if "expose:tools" in capabilities do
-      do_expose_tool(plugin_id, company_id, tool_definition)
+      with {:ok, plugin_company_id} <- resolve_plugin_company(plugin_id) do
+        if company_id == plugin_company_id do
+          do_expose_tool(plugin_id, plugin_company_id, tool_definition)
+        else
+          {:error, :invalid_company_scope}
+        end
+      end
     else
       {:error, :unauthorized}
     end
@@ -157,25 +164,16 @@ defmodule Cympho.Plugins.HostServices do
 
   def expose_tool(plugin_id, tool_definition, capabilities)
       when is_map(tool_definition) and is_list(capabilities) do
-    company_id =
-      Map.get(tool_definition, "company_id") || Map.get(tool_definition, :company_id)
+    if "expose:tools" in capabilities do
+      case resolve_plugin_company(plugin_id) do
+        {:ok, plugin_company_id} ->
+          do_expose_tool(plugin_id, plugin_company_id, tool_definition)
 
-    cond do
-      "expose:tools" not in capabilities ->
-        {:error, :unauthorized}
-
-      not is_binary(company_id) or company_id == "" ->
-        # Resolve company from the installed plugin when definition omits it.
-        case resolve_plugin_company(plugin_id) do
-          {:ok, resolved_company_id} ->
-            do_expose_tool(plugin_id, resolved_company_id, tool_definition)
-
-          {:error, _} = err ->
-            err
-        end
-
-      true ->
-        do_expose_tool(plugin_id, company_id, tool_definition)
+        {:error, _} = err ->
+          err
+      end
+    else
+      {:error, :unauthorized}
     end
   end
 

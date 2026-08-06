@@ -494,18 +494,20 @@ defmodule Cympho.AgentActions.Validation do
   def block_reason_kinds, do: @block_reason_kinds
 
   @doc """
-  Returns `action` with `blocker_kind` resolved to its canonical form when it
-  is a known synonym; leaves it untouched otherwise (so genuinely invalid
-  kinds still surface via `ensure_governance_quality/2`).
+  Returns `action` with `blocker_kind` resolved to its canonical form.
+
+  Trims, downcases, and maps hyphens/spaces to underscores, then remaps known
+  synonyms via `@blocker_kind_aliases`. Already-canonical kinds that only differ
+  by casing or hyphenation (`Other`, `EXTERNAL_DEP`, `ci-failure`) also resolve
+  to the membership form in `@block_reason_kinds`. Unknown kinds keep their
+  normalized spelling so validation errors surface a stable value.
   """
   def canonicalize_blocker_kind(%{"blocker_kind" => kind} = action) when is_binary(kind) do
     normalized =
       kind |> String.trim() |> String.downcase() |> String.replace(~r/[\s-]+/, "_")
 
-    case Map.get(@blocker_kind_aliases, normalized) do
-      nil -> action
-      canonical -> Map.put(action, "blocker_kind", canonical)
-    end
+    canonical = Map.get(@blocker_kind_aliases, normalized, normalized)
+    Map.put(action, "blocker_kind", canonical)
   end
 
   def canonicalize_blocker_kind(action), do: action
@@ -522,7 +524,7 @@ defmodule Cympho.AgentActions.Validation do
       key: :attempted_fix,
       label: "Attempted fix",
       detail: "State what was already tried or inspected before blocking.",
-      pattern: ~r/(^|\n)\s*(?:\[blocked\]\s*)?attempted fix\s*:/i
+      pattern: ~r/(^|\n)\s*(?:(?:[-*•]|\d+[.)])\s*)?(?:\[blocked\]\s*)?attempted fix\s*:/i
     },
     %{
       key: :needs,
@@ -674,8 +676,14 @@ defmodule Cympho.AgentActions.Validation do
     Regex.match?(block_reason_label_regex(label), reason)
   end
 
+  # Optional markdown list marker (-, *, •, 1., 1)) before a blocker label.
+  @blocker_label_list_prefix "(?:(?:[-*•]|\\d+[.)])\\s*)?"
+
   defp block_reason_label_regex(label) do
-    Regex.compile!("(?:^|\\n)\\s*(?:\\[blocked\\]\\s*)?#{Regex.escape(label)}\\s*:", "i")
+    Regex.compile!(
+      "(?:^|\\n)\\s*#{@blocker_label_list_prefix}(?:\\[blocked\\]\\s*)?#{Regex.escape(label)}\\s*:",
+      "i"
+    )
   end
 
   defp block_issue_reason_scaffold(reason, missing) do
@@ -855,7 +863,7 @@ defmodule Cympho.AgentActions.Validation do
   defp block_reason_label_value(reason, label) do
     pattern =
       Regex.compile!(
-        "(?:^|\\n)\\s*(?:\\[blocked\\]\\s*)?#{Regex.escape(label)}\\s*:\\s*(.*?)(?=\\n\\s*(?:#{@blocker_packet_label_pattern})\\s*:|\\z)",
+        "(?:^|\\n)\\s*#{@blocker_label_list_prefix}(?:\\[blocked\\]\\s*)?#{Regex.escape(label)}\\s*:\\s*(.*?)(?=\\n\\s*#{@blocker_label_list_prefix}(?:#{@blocker_packet_label_pattern})\\s*:|\\z)",
         "is"
       )
 

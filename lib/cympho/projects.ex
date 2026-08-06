@@ -222,9 +222,12 @@ defmodule Cympho.Projects do
   @doc """
   Subscribes to project updates.
   """
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:projects")
   end
+
+  # Fail-closed: never subscribe to company::projects from a nil/blank company_id.
+  def subscribe(_company_id), do: :ok
 
   @doc """
   Returns a changeset for creating a new project.

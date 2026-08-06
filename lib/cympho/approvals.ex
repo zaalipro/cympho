@@ -239,7 +239,7 @@ defmodule Cympho.Approvals do
     |> Repo.preload([:requested_by, :resolved_by, :issues])
   end
 
-  def subscribe(company_id) when is_binary(company_id) do
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:approvals")
   end
 

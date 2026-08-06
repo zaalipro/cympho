@@ -289,6 +289,47 @@ defmodule Cympho.MultiTenancyPr1Test do
       assert checked_out.company_id == a.id
     end
 
+    test "Runtime/AgentActions reject blank company_id pairs (empty string is not a tenant)", %{
+      a: a
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "blank-rt",
+          role: :engineer,
+          status: :idle,
+          company_id: a.id,
+          adapter: :process,
+          config: %{"command" => "echo", "repo_capable" => true}
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{title: "blank-rt-issue", status: :todo, company_id: a.id})
+
+      # binary_id columns reject "" at dump time; exercise the in-memory guards
+      # used by preflight / action execution.
+      blank_agent = %{agent | company_id: ""}
+      blank_issue = %{issue | company_id: ""}
+      actions = [%{"type" => "comment", "body" => "nope"}]
+
+      assert {:error, :company_mismatch} = Cympho.Runtime.preflight(blank_issue, blank_agent)
+      assert {:error, :company_mismatch} = Cympho.Runtime.preflight(blank_issue, agent)
+      assert {:error, :company_mismatch} = Cympho.Runtime.preflight(issue, blank_agent)
+
+      assert {:error, :cross_company} =
+               Cympho.AgentActions.execute(blank_issue, blank_agent, actions)
+
+      assert {:error, :cross_company} =
+               Cympho.AgentActions.execute(blank_issue, agent, actions)
+
+      assert {:error, :cross_company} =
+               Cympho.AgentActions.execute(issue, blank_agent, actions)
+    end
+
+    test "Issues.subscribe/1 is a no-op for nil or blank company_id" do
+      assert :ok = Issues.subscribe(nil)
+      assert :ok = Issues.subscribe("")
+    end
+
     test "Runtime.preflight rejects nil or mismatched company_id", %{a: a, b: b} do
       {:ok, agent_a} =
         Agents.create_agent(%{

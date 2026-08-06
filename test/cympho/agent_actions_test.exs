@@ -1913,6 +1913,82 @@ defmodule Cympho.AgentActionsTest do
       assert updated.monitor_state["blocker_packet"]["kind"] == "owner_input_needed"
     end
 
+    test "canonicalize_blocker_kind normalizes casing and hyphens of already-canonical kinds" do
+      assert %{"blocker_kind" => "other"} =
+               Cympho.AgentActions.Validation.canonicalize_blocker_kind(%{
+                 "blocker_kind" => "Other"
+               })
+
+      assert %{"blocker_kind" => "external_dep"} =
+               Cympho.AgentActions.Validation.canonicalize_blocker_kind(%{
+                 "blocker_kind" => "EXTERNAL_DEP"
+               })
+
+      assert %{"blocker_kind" => "ci_failure"} =
+               Cympho.AgentActions.Validation.canonicalize_blocker_kind(%{
+                 "blocker_kind" => "ci-failure"
+               })
+    end
+
+    test "block_issue accepts cased/hyphenated canonical blocker_kind variants", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      actions = [
+        %{
+          "type" => "block_issue",
+          "reason" => block_issue_reason(),
+          "blocker_kind" => "EXTERNAL_DEP"
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, ceo, actions)
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :blocked
+      assert updated.monitor_state["block_reason_kind"] == "external_dep"
+      assert updated.monitor_state["blocker_packet"]["kind"] == "external_dep"
+    end
+
+    test "block_issue accepts fully bulleted blocker packet labels", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      reason =
+        """
+        - Cause: missing API key blocks runtime verification.
+        - Attempted fix: checked company secrets and runtime preflight.
+        - Needs: owner or operator adds the missing API key.
+        - Current state: work is paused until credentials are available.
+        - Next decision: resume once the secret is configured.
+        - Restart packet: rerun runtime preflight, then continue the current issue.
+        """
+        |> String.trim()
+
+      actions = [
+        %{
+          "type" => "block_issue",
+          "reason" => reason,
+          "blocker_kind" => "other"
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, ceo, actions)
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :blocked
+      packet = updated.monitor_state["blocker_packet"]
+
+      assert packet["cause"] == "missing API key blocks runtime verification."
+      assert packet["attempted_fix"] == "checked company secrets and runtime preflight."
+      assert packet["needs"] == "owner or operator adds the missing API key."
+      assert packet["current_state"] == "work is paused until credentials are available."
+      assert packet["next_decision"] == "resume once the secret is configured."
+
+      assert packet["restart_packet"] ==
+               "rerun runtime preflight, then continue the current issue."
+    end
+
     test "block_issue records a Decision and stamps blocker_kind on monitor_state", %{
       issue: issue,
       ceo: ceo,

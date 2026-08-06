@@ -7,6 +7,7 @@ defmodule Cympho.OwnerAttentionTest do
   alias Cympho.Approvals
   alias Cympho.BoardApprovals
   alias Cympho.Companies
+  alias Cympho.Finances
   alias Cympho.Finances.{BudgetIncident, BudgetPolicy}
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues
@@ -443,6 +444,38 @@ defmodule Cympho.OwnerAttentionTest do
     assert item.summary =~ "Raise the limit"
   end
 
+  test "budget incident raise path prefers policy budget_id ownership", context do
+    assert {:ok, budget} =
+             Cympho.Budgets.create_budget(%{
+               company_id: context.company.id,
+               name: "OA owned budget",
+               scope_type: "company",
+               scope_id: context.company.id,
+               limit_amount: Decimal.new("50.00"),
+               hard_stop: true
+             })
+
+    # Neighbor same-scope budget must not steal the deep-link.
+    assert {:ok, _other} =
+             Cympho.Budgets.create_budget(%{
+               company_id: context.company.id,
+               name: "OA other budget",
+               scope_type: "company",
+               scope_id: context.company.id,
+               limit_amount: Decimal.new("10.00"),
+               hard_stop: true
+             })
+
+    policy = Finances.matching_budget_policy(budget)
+    assert policy.budget_id == budget.id
+
+    incident = insert_budget_incident!(policy, "budget_exceeded", %{spend_usd: "60"})
+
+    assert [item] = OwnerAttention.list_action_items(context.company.id, context.user)
+    assert item.source_id == incident.id
+    assert item.raise_limit_path == "/budgets/#{budget.id}/edit"
+  end
+
   test "deduplicates budget incidents by policy and keeps the most severe event", context do
     exceeded_policy = insert_budget_policy!(context.company, %{action_on_exceed: "block"})
     _warning = insert_budget_incident!(exceeded_policy, "warning")
@@ -529,6 +562,108 @@ defmodule Cympho.OwnerAttentionTest do
     # human_action and stuck share issue: dedup — one row after merge.
     assert length(matching) == 1
     assert OwnerAttention.unresolved_count(context.company.id, context.user) == length(items)
+  end
+
+  test "unresolved_count equals list membership across multi-category OA with overlaps",
+       context do
+    # human_action + pending interaction share issue: dedup → one membership row
+    human_with_interaction =
+      issue!(context.company.id, "Owner + question", assignee_user_id: context.user.id)
+
+    {:ok, _interaction} =
+      IssueThreadInteractions.create_interaction(%{
+        issue_id: human_with_interaction.id,
+        kind: :ask_user_questions,
+        payload: %{"message" => "Need a decision.", "questions" => [%{"question" => "Which?"}]},
+        created_by_agent_id: context.agent.id
+      })
+
+    # stuck blocked + human_action share issue: dedup → one row
+    stale_at =
+      DateTime.utc_now() |> DateTime.add(-2 * 3600, :second) |> DateTime.truncate(:second)
+
+    blocked = issue!(context.company.id, "Blocked stalled", assignee_user_id: context.user.id)
+    {:ok, blocked} = Issues.update_issue(blocked, %{status: :blocked})
+
+    Repo.update_all(from(i in Issues.Issue, where: i.id == ^blocked.id),
+      set: [updated_at: stale_at]
+    )
+
+    # stuck-only in_progress (no human assignee / interaction)
+    _stuck =
+      stuck_in_progress!(context.company.id, "Swarm stalled", assignee_id: context.agent.id)
+
+    # failed run on a separate issue (failed-run: key, independent of issue:)
+    failed_issue = issue!(context.company.id, "Provider died")
+    insert_run!(context.company, context.agent, failed_issue, "failed")
+
+    # human-assigned issue that also failed — two membership keys (issue: + failed-run:)
+    human_failed =
+      issue!(context.company.id, "Human + failure", assignee_user_id: context.user.id)
+
+    insert_run!(context.company, context.agent, human_failed, "timed_out")
+
+    # two review wakes on one issue → one review_queue row after dedup
+    review_issue = issue!(context.company.id, "Needs final review")
+    insert_wake!(context.agent, review_issue, "final_review_required")
+    insert_wake!(context.agent, review_issue, "child_status_changed")
+
+    {:ok, _approval} =
+      Approvals.create_approval(%{
+        type: "deploy_release",
+        requested_by_agent_id: context.agent.id,
+        issue_ids: [failed_issue.id],
+        payload: %{"title" => "Approve multi-cat release"}
+      })
+
+    {:ok, _board} =
+      BoardApprovals.create_board_approval(%{
+        title: "Approve multi-cat hire",
+        category: "agent_hire",
+        company_id: context.company.id
+      })
+
+    # two incidents same policy + one other → two budget rows after policy dedup
+    policy_a = insert_budget_policy!(context.company)
+    _warning = insert_budget_incident!(policy_a, "warning")
+    _exceeded = insert_budget_incident!(policy_a, "budget_exceeded", %{spend_usd: "120"})
+    policy_b = insert_budget_policy!(context.company)
+    _threshold = insert_budget_incident!(policy_b, "threshold_exceeded", %{spend_usd: "90"})
+
+    items = OwnerAttention.list_items(context.company.id, context.user)
+    count = OwnerAttention.unresolved_count(context.company.id, context.user)
+    action_items = OwnerAttention.list_action_items(context.company.id, context.user)
+
+    # Durable parity: badge count must equal full list membership (under default limit).
+    assert count == length(items)
+    assert count == length(action_items)
+    assert count >= 10
+
+    kinds = items |> Enum.map(& &1.kind) |> Enum.frequencies()
+
+    assert kinds[:human_action] >= 1 or kinds[:interaction] >= 1
+    assert kinds[:stuck_issue] >= 1
+    assert kinds[:failed_run] == 2
+    assert kinds[:review_queue] == 1
+    assert kinds[:approval] == 1
+    assert kinds[:board_approval] == 1
+    assert kinds[:budget_incident] == 2
+
+    # Overlap: human + interaction on same issue is one membership row.
+    human_interaction_rows =
+      Enum.filter(items, &(&1.issue_id == human_with_interaction.id))
+
+    assert length(human_interaction_rows) == 1
+
+    # Overlap: blocked human + stuck is one membership row.
+    blocked_rows = Enum.filter(items, &(&1.issue_id == blocked.id))
+    assert length(blocked_rows) == 1
+
+    # human + failed_run keeps both keys.
+    human_failed_rows = Enum.filter(items, &(&1.issue_id == human_failed.id))
+    assert length(human_failed_rows) == 2
+    assert Enum.any?(human_failed_rows, &(&1.kind == :human_action))
+    assert Enum.any?(human_failed_rows, &(&1.kind == :failed_run))
   end
 
   defp issue!(company_id, title, opts \\ []) do

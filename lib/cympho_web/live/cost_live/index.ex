@@ -202,7 +202,7 @@ defmodule CymphoWeb.CostLive.Index do
 
   def budget_status_badge(budget) do
     cond do
-      budget.status == "exhausted" ->
+      budget.status == "exhausted" or Budget.exhausted?(budget) ->
         {"bg-brand/10 text-brand border-brand/20", "Exhausted"}
 
       budget.status == "cancelled" ->

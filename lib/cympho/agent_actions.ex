@@ -750,10 +750,10 @@ defmodule Cympho.AgentActions do
   defp mutates_issue?(%{"type" => type}) when type in @mutating_action_types, do: true
   defp mutates_issue?(_), do: false
 
-  # Fail-closed: either side missing company_id, or unequal company_ids, is
-  # cross-tenant. Matches Issues.checkout_issue/3 and Runtime.preflight/3.
+  # Fail-closed: either side missing/blank company_id, or unequal company_ids,
+  # is cross-tenant. Matches Issues.checkout_issue/3 and Runtime.preflight/3.
   defp cross_company?(%Issue{company_id: a}, %Agent{company_id: b})
-       when is_binary(a) and is_binary(b),
+       when is_binary(a) and a != "" and is_binary(b) and b != "",
        do: a != b
 
   defp cross_company?(_issue, _agent), do: true

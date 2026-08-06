@@ -317,6 +317,9 @@ defmodule CymphoWeb.UserAuthTest do
         assert live_assigns(view).nav_inbox_count == 0
         assert live_assigns(view).inbox_badge_count == 0
       end)
+
+      # Root chrome is outside LV inner_content; live updates go via nav_badges.
+      assert_push_event(view, "nav_badges", %{inbox: 0, approval: 0})
     end
 
     test "Inbox badges count deduplicated current-company budget incidents", %{
@@ -425,6 +428,8 @@ defmodule CymphoWeb.UserAuthTest do
         assert live_assigns(view).inbox_badge_count == 1
       end)
 
+      # Live chrome update (desktop + mobile badge DOM) without full navigation.
+      assert_push_event(view, "nav_badges", %{inbox: 1, approval: 0})
       assert Cympho.OwnerAttention.unresolved_count(company.id, user) == 1
     end
 

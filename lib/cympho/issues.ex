@@ -2483,6 +2483,7 @@ defmodule Cympho.Issues do
   def clear_checkout_lock_for_run(issue_id, agent_id, run_id, target_status)
       when is_binary(issue_id) and is_binary(agent_id) and is_binary(run_id) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
+    previous = Repo.get(Issue, issue_id)
 
     {count, _} =
       from(i in Issue,
@@ -2501,8 +2502,14 @@ defmodule Cympho.Issues do
       )
 
     case count do
-      1 -> get_issue(issue_id)
-      _ -> checkout_run_clear_error(issue_id)
+      1 ->
+        with {:ok, cleared} <- get_issue(issue_id) do
+          _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(previous, cleared)
+          {:ok, cleared}
+        end
+
+      _ ->
+        checkout_run_clear_error(issue_id)
     end
   end
 
@@ -2511,8 +2518,11 @@ defmodule Cympho.Issues do
 
   # Fail-closed: both sides must have a non-nil company_id and they must match.
   # A nil on either side used to treat cross-tenant pairs as same-company.
+  # Fail-closed: both sides must share a non-blank company_id. Empty strings
+  # previously compared equal and could pass checkout.
   defp same_company?(%Issue{company_id: issue_company_id}, %Agent{company_id: agent_company_id})
-       when is_binary(issue_company_id) and is_binary(agent_company_id),
+       when is_binary(issue_company_id) and issue_company_id != "" and
+              is_binary(agent_company_id) and agent_company_id != "",
        do: issue_company_id == agent_company_id
 
   defp same_company?(_issue, _agent), do: false
@@ -2583,6 +2593,8 @@ defmodule Cympho.Issues do
             checkout_agent_id: agent_id,
             status: :in_progress
           })
+
+          _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(issue, checked_out)
 
           {:ok, checked_out}
         end
@@ -2719,6 +2731,7 @@ defmodule Cympho.Issues do
           })
 
           broadcast_issue_update(released, :issue_updated, %{status: target_status})
+          _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(issue, released)
           {:ok, released}
         end
 
@@ -2779,6 +2792,7 @@ defmodule Cympho.Issues do
           })
 
           broadcast_issue_update(recovered, :issue_updated, %{status: target_status})
+          _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(issue, recovered)
           {:ok, recovered}
         end
 
@@ -3229,9 +3243,12 @@ defmodule Cympho.Issues do
     base
   end
 
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:issues")
   end
+
+  # Fail-closed: never subscribe to company::issues from a nil/blank company_id.
+  def subscribe(_company_id), do: :ok
 
   def change_issue(%Issue{} = issue, attrs \\ %{}) do
     Issue.changeset(issue, attrs)

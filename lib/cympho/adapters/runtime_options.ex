@@ -268,6 +268,32 @@ defmodule Cympho.Adapters.RuntimeOptions do
 
   def process_defaults(_), do: %{}
 
+  @doc """
+  Provider secret/env keys required before hire or run for a process preset.
+
+  Returns an ordered preference list (any one present is enough). Empty list
+  means no provider-key gate (custom commands, local CLI accounts, wrappers).
+  """
+  def process_preset_required_keys(preset, command \\ nil)
+
+  def process_preset_required_keys(preset, command) when is_atom(preset) do
+    process_preset_required_keys(to_string(preset), command)
+  end
+
+  def process_preset_required_keys("codex", _command),
+    do: ["OPENAI_API_KEY", "CODEX_API_KEY"]
+
+  def process_preset_required_keys("claude_code", command) do
+    # Wrapper commands (cz/cm) can source provider credentials outside Secrets.
+    if command in [nil, "", "claude"] do
+      ["ANTHROPIC_API_KEY"]
+    else
+      []
+    end
+  end
+
+  def process_preset_required_keys(_preset, _command), do: []
+
   defp blank_default(value, fallback) when value in [nil, ""], do: fallback
   defp blank_default(value, _fallback), do: value
 

@@ -12,7 +12,10 @@ defmodule CymphoWeb.IssueLive.Show.Comments do
 
   def comments(assigns) do
     ~H"""
-    <div id="issue-comments" class="border-t border-border bg-surface/50 p-4 lg:p-6">
+    <div
+      id="issue-comments"
+      class="sticky-above-mobile-nav sticky z-20 border-t border-border bg-surface/95 p-4 backdrop-blur lg:p-6"
+    >
       <form id="comment-form" phx-submit="add_comment" class="space-y-3">
         <div class="flex gap-2">
           <div class="flex-1 rounded-xl transition-shadow focus-within:shadow-[0_0_0_3px_rgb(217_119_87_/_0.14)]">

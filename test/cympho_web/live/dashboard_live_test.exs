@@ -78,6 +78,110 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ "Agents"
     end
 
+    test "home Waiting count matches OwnerAttention.unresolved_count (nav parity)", %{
+      conn: conn
+    } do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      conn = live_session_conn(conn, user, company)
+
+      # Blocked work is human-action membership for every owner — creates OA
+      # items without forcing a next_actions card collapse edge case alone.
+      {:ok, _blocked} =
+        create_issue(%{
+          title: "Owner must decide",
+          status: :blocked,
+          company_id: company.id,
+          assignee_user_id: user.id
+        })
+
+      {:ok, _approval} =
+        Cympho.BoardApprovals.create_board_approval(%{
+          title: "Approve hire for count parity",
+          category: "agent_hire",
+          company_id: company.id
+        })
+
+      oa_count = Cympho.OwnerAttention.unresolved_count(company.id, user)
+      assert oa_count >= 2
+
+      expected = min(99, oa_count)
+
+      {:ok, view, html} = live(conn, "/dashboard")
+
+      # Home inbox/Waiting shortcut must mirror the nav badge formula, not
+      # length(next_actions) — OA multi-item sets collapse to fewer cards.
+      assigns = :sys.get_state(view.pid).socket.assigns
+      assert assigns.needs_you_count == expected
+
+      # Prefer the simple home glance tile (navigate=/inbox Waiting count).
+      waiting_nums =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find("section[aria-label='Home'] a[href='/inbox'] .tabular-nums")
+        |> Floki.text()
+        |> String.trim()
+
+      assert waiting_nums == Integer.to_string(expected)
+    end
+
+    test "simple Needs-you destinations never deep-link advanced-only /operations#*", %{
+      conn: conn
+    } do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      conn = live_session_conn(conn, user, company)
+
+      {:ok, agent} =
+        create_agent(%{
+          name: "Fail Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Failed run issue",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "codex",
+        error_reason: "OPENAI_API_KEY not set"
+      })
+
+      {:ok, _view, html} = live(conn, "/dashboard")
+
+      # Advanced still deep-links the ops console.
+      assert html =~ ~s(href="/operations#runtime-failures")
+
+      # Simple mode CTAs must land on owner-visible routes (inbox, approvals,
+      # issues, budgets, settings, …) — never /operations#* which is advanced-only.
+      simple_hrefs =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find("a.ui-simple-only")
+        |> Enum.map(fn {_tag, attrs, _} ->
+          attrs |> Map.new() |> Map.get("href")
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      assert simple_hrefs != []
+
+      for href <- simple_hrefs do
+        refute String.starts_with?(href, "/operations#"),
+               "simple Needs-you CTA must not target advanced-only ops anchor: #{href}"
+      end
+
+      assert Enum.any?(simple_hrefs, &(&1 == "/inbox" or String.starts_with?(&1, "/inbox?")))
+    end
+
     test "Needs you surfaces stuck in_progress work even with zero blocked or failures", %{
       conn: conn,
       current_company: company

@@ -422,6 +422,71 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       assert still.assignee_id == agent.id
       assert still.status == :in_progress
     end
+
+    test "does not cancel a successor-bound run on crash reclaim", %{
+      agent: agent,
+      company: company,
+      issue: issue
+    } do
+      ensure_dispatcher_for_db_tests()
+      dispatcher = Process.whereis(Dispatcher)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), dispatcher)
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+      # Dead-session leftover run (not bound) must be safe to recover later;
+      # the successor run must never be cancelled by crash reclaim.
+      assert {:ok, _dead_run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: checked_out.id,
+                 adapter: "claude_code"
+               })
+
+      assert {:ok, successor_run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: checked_out.id,
+                 adapter: "claude_code",
+                 bind_checkout: true
+               })
+
+      bound = Issues.get_issue!(issue.id)
+      assert bound.checkout_run_id == successor_run.id
+      assert bound.status == :in_progress
+
+      fake_orchestrator = spawn(fn -> Process.sleep(:infinity) end)
+
+      :sys.replace_state(dispatcher, fn %State{} = state ->
+        ref = Process.monitor(fake_orchestrator)
+
+        %{
+          state
+          | running_issue_ids: MapSet.put(state.running_issue_ids, checked_out.id),
+            monitors: Map.put(state.monitors, ref, checked_out.id)
+        }
+      end)
+
+      Process.exit(fake_orchestrator, :kill)
+
+      wait_until(fn ->
+        state = Dispatcher.state()
+        refute MapSet.member?(state.running_issue_ids, checked_out.id)
+      end)
+
+      # Give the DOWN handler time to finish reclaim after slot free.
+      wait_until(fn ->
+        still = Issues.get_issue!(issue.id)
+        assert still.status == :in_progress
+        assert still.checkout_run_id == successor_run.id
+        assert still.assignee_id == agent.id
+
+        assert {:ok, %{status: "pending"}} =
+                 Cympho.HeartbeatEngine.get_run(successor_run.id)
+      end)
+    end
   end
 
   describe "recover_orphaned_in_progress/0" do
@@ -464,6 +529,49 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       assert reloaded.assignee_id == agent.id
     end
 
+    test "re-checks live orchestrator inside reclaim before cancel_and_release", %{
+      agent: agent,
+      issue: issue
+    } do
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      assert checked_out.status == :in_progress
+      assert is_nil(Orchestrator.whereis(checked_out.id))
+
+      # Outer recover_orphaned_in_progress sees no orch (first whereis), then a
+      # successor registers before reclaim_orphaned_issue mutates — second live
+      # check must skip cancel_and_release / clear_checkout_lock.
+      call_count = :atomics.new(1, signed: false)
+
+      with_mocks([
+        {Orchestrator, [],
+         [
+           whereis: fn issue_id ->
+             if issue_id == checked_out.id do
+               n = :atomics.add_get(call_count, 1, 1)
+
+               if n == 1 do
+                 nil
+               else
+                 # Live pid for subsequent checks inside reclaim_orphaned_issue.
+                 self()
+               end
+             else
+               nil
+             end
+           end
+         ]}
+      ]) do
+        result = Dispatcher.recover_orphaned_in_progress()
+
+        assert result.skipped >= 1
+
+        reloaded = Issues.get_issue!(issue.id)
+        assert reloaded.status == :in_progress
+        assert reloaded.assignee_id == agent.id
+        assert reloaded.checked_out_at
+      end
+    end
+
     test "does not release when a non-terminal run exists", %{
       agent: agent,
       company: company,
@@ -488,6 +596,72 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       reloaded = Issues.get_issue!(issue.id)
       assert reloaded.status == :in_progress
       assert reloaded.assignee_id == agent.id
+    end
+  end
+
+  describe "poll recovers orphaned runs (zombie runs)" do
+    test "do_poll terminalizes orphaned runs so they cannot pin reclaim", %{
+      agent: agent,
+      company: company,
+      issue: issue
+    } do
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+      assert {:ok, zombie_run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: checked_out.id,
+                 adapter: "claude_code"
+               })
+
+      assert zombie_run.status == "pending"
+      assert is_nil(Orchestrator.whereis(checked_out.id))
+
+      # Inline poll (same path as handle_info :poll / :poll_company) must run
+      # recover_orphaned_runs — previously only handle_continue(:recover_orphans)
+      # did, leaving zombies until restart.
+      with_mocks([
+        {Runtime, [], [dispatchable?: fn _issue, _agent -> :ok end]},
+        {Orchestrator, [],
+         [
+           start_and_run: fn _issue, _agent_id -> {:error, :boom} end,
+           whereis: fn _issue_id -> nil end,
+           stop: fn _issue_id, _reason -> :ok end
+         ]}
+      ]) do
+        assert {:noreply, %State{}} =
+                 Dispatcher.handle_info({:poll_company, company.id}, State.new())
+      end
+
+      assert {:ok, recovered} = Cympho.HeartbeatEngine.get_run(zombie_run.id)
+      assert recovered.status == "cancelled"
+
+      reloaded = Issues.get_issue!(issue.id)
+      # Orphan issue reclaim can proceed once the zombie run is terminal.
+      assert reloaded.status in [:todo, :in_progress]
+    end
+
+    test "handle_continue(:recover_orphans) still recovers orphaned runs", %{
+      agent: agent,
+      company: company,
+      issue: issue
+    } do
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+      assert {:ok, zombie_run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: checked_out.id,
+                 adapter: "claude_code"
+               })
+
+      assert {:noreply, %State{}} =
+               Dispatcher.handle_continue(:recover_orphans, State.new())
+
+      assert {:ok, recovered} = Cympho.HeartbeatEngine.get_run(zombie_run.id)
+      assert recovered.status == "cancelled"
     end
   end
 

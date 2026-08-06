@@ -298,7 +298,8 @@ defmodule CymphoWeb.Components.NavRail do
   attr :label, :string, required: true
   attr :icon, :string, required: true
   attr :current_path, :string, required: true
-  attr :badge, :integer, default: 0
+  # nil = no live badge chrome; integer (incl. 0) = always-present node for JS live updates.
+  attr :badge, :integer, default: nil
   # Optional path used for the active-highlight test instead of `to`, so a link
   # can navigate to one route (e.g. /settings/profile) yet stay highlighted
   # across a whole section (e.g. any /settings/*).
@@ -308,7 +309,15 @@ defmodule CymphoWeb.Components.NavRail do
 
   defp nav_link(assigns) do
     active? = active?(assigns.match || assigns.to, assigns.current_path)
-    assigns = assign(assigns, :active?, active?)
+    badge_key = badge_key(assigns.label)
+    badge_count = assigns.badge || 0
+
+    assigns =
+      assigns
+      |> assign(:active?, active?)
+      |> assign(:badge_key, badge_key)
+      |> assign(:badge_count, badge_count)
+      |> assign(:badge_visible?, is_integer(assigns.badge) and badge_count > 0)
 
     ~H"""
     <.link
@@ -325,11 +334,17 @@ defmodule CymphoWeb.Components.NavRail do
       <span class={[@icon, "w-4 h-4 shrink-0"]}></span>
       <span class="flex-1 truncate">{@label}</span>
       <span
-        :if={@badge && @badge > 0}
-        class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-brand text-on-primary text-[10px] font-590"
-        data-testid={"nav-badge-#{badge_key(@label)}"}
+        :if={is_integer(@badge)}
+        class={[
+          "inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-brand text-on-primary text-[10px] font-590",
+          not @badge_visible? && "hidden"
+        ]}
+        data-nav-badge={@badge_key}
+        data-count={@badge_count}
+        data-testid={if(@badge_visible?, do: "nav-badge-#{@badge_key}")}
+        aria-hidden={if(@badge_visible?, do: "false", else: "true")}
       >
-        {@badge}
+        {if @badge_visible?, do: @badge_count, else: ""}
       </span>
     </.link>
     """

@@ -400,6 +400,55 @@ defmodule Cympho.Finances.BudgetScopeHardStopTest do
     assert_receive {:owner_attention_changed, ^company_id}, 1_000
   end
 
+  test "UI company budget create/delete does not disarm unowned onboarding-style hard-stop" do
+    company = company_fixture("unowned-hardstop")
+    agent = agent_fixture(company, "unowned-hardstop")
+    issue = issue_fixture(company, agent, "unowned-hardstop", status: :todo)
+
+    # Mimic onboarding: active company block policy with no budget_id.
+    onboarding_policy = blocking_policy(company, "company", nil)
+    assert is_nil(onboarding_policy.budget_id)
+
+    assert {:ok, ui_budget} =
+             Cympho.Budgets.create_budget(%{
+               company_id: company.id,
+               name: "UI company budget",
+               scope_type: "company",
+               scope_id: company.id,
+               limit_amount: Decimal.new("500.00"),
+               hard_stop: false,
+               status: "active"
+             })
+
+    ui_policy = Finances.matching_budget_policy(ui_budget)
+    assert ui_policy.budget_id == ui_budget.id
+    assert ui_policy.id != onboarding_policy.id
+    assert ui_policy.action_on_exceed == "warn"
+
+    reloaded_onboarding = Repo.get!(Cympho.Finances.BudgetPolicy, onboarding_policy.id)
+    assert reloaded_onboarding.is_active
+    assert is_nil(reloaded_onboarding.budget_id)
+    assert reloaded_onboarding.action_on_exceed == "block"
+
+    seed_company_spend(company, Decimal.new("1.00"))
+
+    assert {:error, {:budget_blocked, info}} =
+             Finances.check_runtime_budget(Issues.get_issue!(issue.id), agent)
+
+    assert info.policy_id == onboarding_policy.id
+
+    assert {:ok, _} = Cympho.Budgets.delete_budget(ui_budget)
+    refute Repo.get!(Cympho.Finances.BudgetPolicy, ui_policy.id).is_active
+
+    still_onboarding = Repo.get!(Cympho.Finances.BudgetPolicy, onboarding_policy.id)
+    assert still_onboarding.is_active
+
+    assert {:error, {:budget_blocked, %{policy_id: still_id}}} =
+             Finances.check_runtime_budget(Issues.get_issue!(issue.id), agent)
+
+    assert still_id == onboarding_policy.id
+  end
+
   test "heartbeat usage rejects project and goal IDs that do not belong to the run issue" do
     company = company_fixture("usage-scope")
     other_company = company_fixture("usage-scope-other")
@@ -600,6 +649,18 @@ defmodule Cympho.Finances.BudgetScopeHardStopTest do
         scope_attrs
       )
     )
+  end
+
+  defp seed_company_spend(company, cost_usd) do
+    Repo.insert!(%TokenUsage{
+      company_id: company.id,
+      provider: "scope-test",
+      model: "scope-test",
+      input_tokens: 10,
+      output_tokens: 10,
+      total_tokens: 20,
+      cost_usd: cost_usd
+    })
   end
 
   defp assert_durable_crossing(company, policy) do

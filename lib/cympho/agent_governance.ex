@@ -105,9 +105,12 @@ defmodule Cympho.AgentGovernance do
   @doc """
   Subscribes to agent governance events.
   """
-  def subscribe(company_id) do
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:agents")
   end
+
+  # Fail-closed: never subscribe to company::agents from a nil/blank company_id.
+  def subscribe(_company_id), do: :ok
 
   defp request_board_approval_for_pause(agent, opts, actor) do
     board_approval_attrs = %{
@@ -177,22 +180,31 @@ defmodule Cympho.AgentGovernance do
   end
 
   defp do_pause_agent(agent, opts, actor) do
+    reason = Keyword.get(opts, :reason)
+
     agent
     |> Ecto.Changeset.change(%{
+      status: :paused,
       governance_status: "paused",
-      governance_reasoning: Keyword.get(opts, :reason),
+      governance_reasoning: reason,
+      pause_reason: reason,
       paused_at: DateTime.utc_now(),
       paused_by_user_id: extract_user_id(actor)
     })
     |> Repo.update()
     |> case do
       {:ok, updated} ->
+        _ =
+          Cympho.Issues.RehomePaused.rehome_for_paused_agent(updated,
+            reason: reason || "Agent paused"
+          )
+
         GovernanceAuditLogs.log_action(
           "agent_paused",
           actor,
           "Agent paused: #{updated.name}",
           resource: updated,
-          reasoning: Keyword.get(opts, :reason)
+          reasoning: reason
         )
 
         Decisions.record_governance_decision(updated, "pause", "approved", actor)

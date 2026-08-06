@@ -262,6 +262,86 @@ defmodule Cympho.RuntimePreflightTest do
            )
   end
 
+  test "process Codex preset flags missing OpenAI/Codex keys with setup path" do
+    without_process_provider_env(fn ->
+      agent = %{
+        adapter: :process,
+        config: %{
+          "command" => "echo",
+          "process_preset" => "codex",
+          "model" => "gpt-5.5"
+        },
+        runtime_config: %{}
+      }
+
+      preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
+      item = Enum.find(preflight.items, &(&1.label == "OpenAI/Codex key"))
+      uri = URI.parse(item.target_path)
+      query = URI.decode_query(uri.query)
+
+      assert preflight.status == :attention
+      assert item.status == :attention
+      assert item.detail =~ "Add OPENAI_API_KEY or CODEX_API_KEY"
+      assert uri.path == "/settings/secrets"
+      assert query["key"] == "OPENAI_API_KEY"
+      assert query["scope"] == "company"
+      assert query["description"] == "OpenAI/Codex key for agent runtime"
+    end)
+  end
+
+  test "process Claude preset flags missing Anthropic key with setup path" do
+    without_process_provider_env(fn ->
+      agent = %{
+        adapter: :process,
+        config: %{
+          "command" => "claude",
+          "process_preset" => "claude_code",
+          "model" => "sonnet"
+        },
+        runtime_config: %{}
+      }
+
+      preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
+      item = Enum.find(preflight.items, &(&1.label == "Anthropic key"))
+      uri = URI.parse(item.target_path)
+      query = URI.decode_query(uri.query)
+
+      assert item.status == :attention
+      assert item.detail =~ "Add ANTHROPIC_API_KEY"
+      assert uri.path == "/settings/secrets"
+      assert query["key"] == "ANTHROPIC_API_KEY"
+      assert query["scope"] == "company"
+      # Command may be blocked if claude is not on PATH; credentials attention still required.
+      assert preflight.status in [:attention, :blocked]
+    end)
+  end
+
+  test "process Codex preset is ready when OpenAI key is present in secrets" do
+    without_process_provider_env(fn ->
+      agent = %{
+        adapter: :process,
+        config: %{
+          "command" => "echo",
+          "process_preset" => "codex",
+          "model" => "gpt-5.5"
+        },
+        runtime_config: %{}
+      }
+
+      preflight =
+        RuntimePreflight.for_agent(agent,
+          autonomy_enabled?: true,
+          secret_keys: ["OPENAI_API_KEY"]
+        )
+
+      item = Enum.find(preflight.items, &(&1.label == "OpenAI/Codex key"))
+
+      assert item.status == :ok
+      assert item.detail =~ "Credential source is configured"
+      assert preflight.status == :ready
+    end)
+  end
+
   test "links missing provider credentials to company secrets" do
     without_agrenting_env(fn ->
       agent = %{
@@ -845,6 +925,11 @@ defmodule Cympho.RuntimePreflightTest do
 
   defp without_chat_provider_env(fun) do
     keys = ~w(DASHSCOPE_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY LLMOTIONS_API_KEY)
+    without_env(keys, fun)
+  end
+
+  defp without_process_provider_env(fun) do
+    keys = ~w(OPENAI_API_KEY CODEX_API_KEY ANTHROPIC_API_KEY)
     without_env(keys, fun)
   end
 

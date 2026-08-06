@@ -170,8 +170,8 @@
         <ul class="mt-1.5 space-y-1">
           <li :for={{action, idx} <- Enum.with_index(@later_actions, 1)} class="group/row min-w-0">
             <a
-              href={Map.get(action, :path, "/operations")}
-              class="flex items-start gap-3 rounded-md border-l-2 border-transparent py-1 pl-3 pr-2 transition hover:border-brand hover:bg-surface/40"
+              href={advanced_action_path(action)}
+              class="ui-advanced-only flex items-start gap-3 rounded-md border-l-2 border-transparent py-1 pl-3 pr-2 transition hover:border-brand hover:bg-surface/40"
               title={Map.get(action, :detail)}
             >
               <span class="mt-0.5 w-5 shrink-0 font-mono text-[11px] tabular-nums text-text-quaternary">
@@ -179,22 +179,31 @@
               </span>
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-sm font-510 text-text-primary">
-                  <span class="ui-advanced-only">{action.label}</span>
-                  <span class="ui-simple-only">
-                    {simple_field(action, :label, action.label)}
-                  </span>
+                  {action.label}
                 </span>
                 <span class="block truncate text-[11px] text-text-quaternary">
-                  <span class="ui-advanced-only">
-                    {Map.get(action, :action)} · {Map.get(action, :detail)}
-                  </span>
-                  <span class="ui-simple-only">
-                    {simple_field(action, :action, Map.get(action, :action))} · {simple_field(
-                      action,
-                      :detail,
-                      Map.get(action, :detail)
-                    )}
-                  </span>
+                  {Map.get(action, :action)} · {Map.get(action, :detail)}
+                </span>
+              </span>
+            </a>
+            <a
+              href={simple_action_path(action)}
+              class="ui-simple-only flex items-start gap-3 rounded-md border-l-2 border-transparent py-1 pl-3 pr-2 transition hover:border-brand hover:bg-surface/40"
+              title={simple_field(action, :detail, Map.get(action, :detail))}
+            >
+              <span class="mt-0.5 w-5 shrink-0 font-mono text-[11px] tabular-nums text-text-quaternary">
+                {String.pad_leading(Integer.to_string(idx), 2, "0")}
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-510 text-text-primary">
+                  {simple_field(action, :label, action.label)}
+                </span>
+                <span class="block truncate text-[11px] text-text-quaternary">
+                  {simple_field(action, :action, Map.get(action, :action))} · {simple_field(
+                    action,
+                    :detail,
+                    Map.get(action, :detail)
+                  )}
                 </span>
               </span>
             </a>

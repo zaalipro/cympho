@@ -450,35 +450,16 @@
                             {assignee_name}
                           </div>
                           <%= for issue <- group_issues do %>
-                            <% launch_readiness = Map.get(@launch_readiness_by_issue, issue.id) %>
-                            <div
-                              class="group bg-surface-2 border border-hairline rounded-lg p-2.5 space-y-1.5 hover:bg-surface-3 transition-colors duration-100 cursor-grab active:cursor-grabbing mb-2 min-h-[64px]"
-                              data-issue-id={issue.id}
-                              data-kanban-card
-                            >
-                              <div class="text-sm font-590 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">
-                                {issue.title}
-                              </div>
-                              <.card_meta issue={issue} show_assignee={false} class="mt-1.5" />
-                              <.issue_digest_card
-                                issue={issue}
-                                density={@digest_density}
-                                cause_hoisted={shared_digest != nil}
-                                class="mt-2"
-                              />
-                              <.link
-                                :if={launch_readiness}
-                                navigate={launch_readiness.path}
-                                data-no-drag
-                                title={launch_readiness.summary}
-                                class={"inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-510 #{launch_readiness.class}"}
-                              >
-                                <span class="shrink-0">{launch_readiness.label}</span>
-                                <span class="min-w-0 truncate opacity-80">
-                                  {launch_readiness.target}
-                                </span>
-                              </.link>
-                            </div>
+                            <.issue_card
+                              issue={issue}
+                              status={status}
+                              digest_density={@digest_density}
+                              agent_heartbeat_states={@agent_heartbeat_states}
+                              pending_wake={Map.get(@pending_wakes, issue.id)}
+                              launch_readiness={Map.get(@launch_readiness_by_issue, issue.id)}
+                              digest_cause_hoisted={shared_digest != nil}
+                              show_assignee={false}
+                            />
                           <% end %>
                         </div>
                       <% end %>

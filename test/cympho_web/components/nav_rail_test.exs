@@ -97,15 +97,20 @@ defmodule CymphoWeb.Components.NavRailTest do
     refute html =~ "/runtime-control/"
   end
 
-  test "does not render the inbox badge when the unread count is zero" do
+  test "keeps a hidden live inbox badge node when the unread count is zero" do
     html = render_rail(inbox_count: 0)
 
     refute html =~ ~s(data-testid="nav-badge-inbox")
+    assert html =~ ~s(data-nav-badge="inbox")
+    assert html =~ ~s(data-count="0")
+    assert html =~ "hidden"
   end
 
-  test "does not render the approvals badge when no decisions are pending" do
+  test "keeps a hidden live approvals badge node when no decisions are pending" do
     html = render_rail(approval_count: 0)
 
     refute html =~ ~s(data-testid="nav-badge-approvals")
+    assert html =~ ~s(data-nav-badge="approvals")
+    assert html =~ ~s(data-count="0")
   end
 end

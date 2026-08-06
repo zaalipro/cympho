@@ -124,10 +124,10 @@ defmodule Cympho.Runtime do
     end
   end
 
-  # Fail-closed: both issue and agent must share a non-nil company_id.
-  # A nil on either side previously allowed cross-tenant pairs through preflight.
+  # Fail-closed: both issue and agent must share a non-blank company_id.
+  # A nil/empty on either side must not pass preflight.
   defp verify_company(%Issue{company_id: company_id}, %Agent{company_id: company_id})
-       when is_binary(company_id) do
+       when is_binary(company_id) and company_id != "" do
     verify_company_active(company_id)
   end
 

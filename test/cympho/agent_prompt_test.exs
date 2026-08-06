@@ -788,8 +788,8 @@ defmodule Cympho.AgentPromptTest do
 
       assert prompt =~ "Wake reason: `runtime_retry`"
       assert prompt =~ "bounded same-runtime retry"
-      assert prompt =~ "no-output or malformed-output"
-      assert prompt =~ "avoid repeating the empty/malformed response pattern"
+      assert prompt =~ "no-output, malformed-output, or zero-progress timeout"
+      assert prompt =~ "avoid repeating the empty/malformed/no-progress pattern"
       assert prompt =~ "exact restart packet needed"
     end
 

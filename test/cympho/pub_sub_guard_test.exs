@@ -88,6 +88,20 @@ defmodule Cympho.PubSubGuardTest do
     end
   end
 
+  describe "domain subscribe fail-closed" do
+    test "Issues/Events/Agents subscribe refuse blank company_id" do
+      assert :ok = Cympho.Issues.subscribe(nil)
+      assert :ok = Cympho.Issues.subscribe("")
+      assert :ok = CymphoWeb.Events.subscribe_to_issues(nil)
+      assert :ok = CymphoWeb.Events.subscribe_to_issues("")
+      assert :ok = CymphoWeb.Events.subscribe_to_runs(nil)
+      assert :ok = Cympho.Agents.subscribe(nil)
+      assert :ok = Cympho.Agents.subscribe("")
+      assert :ok = Cympho.Projects.subscribe(nil)
+      assert :ok = Cympho.Projects.subscribe("")
+    end
+  end
+
   describe "RateLimiting.dedup_pubsub/3" do
     test "refuses company:: topics via PubSubGuard" do
       assert {:error, :malformed_topic} =

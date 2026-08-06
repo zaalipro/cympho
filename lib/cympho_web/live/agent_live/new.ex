@@ -966,6 +966,22 @@ defmodule CymphoWeb.AgentLive.New do
     )
   end
 
+  defp runtime_profile_secret_setup_path(%{adapter: "process"} = profile, return_to) do
+    keys =
+      RuntimeOptions.process_preset_required_keys(
+        profile_config(profile, "process_preset"),
+        profile_config(profile, "command")
+      )
+
+    case keys do
+      [primary | _] ->
+        secret_setup_path(primary, "#{primary} runtime credential", return_to)
+
+      _ ->
+        nil
+    end
+  end
+
   defp runtime_profile_secret_setup_path(_profile, _return_to), do: nil
 
   defp secret_setup_path(key, description, return_to) do
@@ -1118,12 +1134,23 @@ defmodule CymphoWeb.AgentLive.New do
         "claude"
       ])
 
-    # Wrapper commands (cz/cm) can source provider credentials outside Secrets.
-    if command in [nil, "", "claude"] do
-      ["ANTHROPIC_API_KEY"]
-    else
-      []
-    end
+    RuntimeOptions.process_preset_required_keys("claude_code", command)
+  end
+
+  defp required_provider_keys("process", profile, runtime) do
+    preset =
+      first_present([
+        runtime_value(runtime, :process_preset),
+        profile_config(profile, "process_preset")
+      ])
+
+    command =
+      first_present([
+        runtime_value(runtime, :command),
+        profile_config(profile, "command")
+      ])
+
+    RuntimeOptions.process_preset_required_keys(preset, command)
   end
 
   defp required_provider_keys("agrenting", _profile, _runtime), do: ["AGRENTING_API_KEY"]

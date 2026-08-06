@@ -2024,6 +2024,151 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ ~r/<option[^>]+value="process"[^>]+selected/
     end
 
+    test "process Codex hire soft-fails without OpenAI/Codex key and exposes setup_path", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, view, html} =
+        live(
+          conn,
+          "/agents/new?role=engineer&name=Process%20Codex%20Hire&runtime_profile_id=process-codex"
+        )
+
+      assert html =~ "Needs a key"
+      assert html =~ "OPENAI_API_KEY"
+      refute html =~ "Friendly defaults are ready"
+      assert has_element?(view, "[data-hire-readiness='needs_key']")
+      assert has_element?(view, "[data-testid='new-agent-hire-gate']")
+      assert has_element?(view, "[data-testid='new-agent-hire-button'][disabled]")
+      assert has_element?(view, "[data-testid='new-agent-add-key']")
+      assert html =~ "return_to="
+      assert html =~ "/settings/secrets"
+      assert html =~ "key=OPENAI_API_KEY"
+
+      html =
+        view
+        |> form("form", %{
+          "agent" => %{
+            "name" => "Process Codex Hire",
+            "role" => "engineer",
+            "parent_id" => "",
+            "runtime_profile_id" => "process-codex",
+            "adapter" => "process",
+            "instructions" => "Should not hire without provider key."
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "Add OPENAI_API_KEY before hiring"
+      assert html =~ "Needs a key"
+
+      refute company.id
+             |> Agents.list_agents_by_company()
+             |> Enum.any?(&(&1.name == "Process Codex Hire"))
+    end
+
+    test "process Claude preset hire soft-fails without Anthropic key", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, view, _html} = live(conn, "/agents/new?role=engineer&name=Process%20Claude%20Hire")
+
+      html =
+        view
+        |> form("form", %{
+          "agent" => %{
+            "name" => "Process Claude Hire",
+            "role" => "engineer",
+            "parent_id" => "",
+            "runtime_profile_id" => "custom",
+            "adapter" => "process",
+            "process_preset" => "claude_code",
+            "runtime_command" => "claude",
+            "instructions" => "Should not hire without Anthropic key."
+          }
+        })
+        |> render_change()
+
+      assert html =~ "Needs a key"
+      assert html =~ "ANTHROPIC_API_KEY"
+      assert has_element?(view, "[data-hire-readiness='needs_key']")
+      assert has_element?(view, "[data-testid='new-agent-hire-button'][disabled]")
+      assert html =~ "key=ANTHROPIC_API_KEY"
+
+      html =
+        view
+        |> form("form", %{
+          "agent" => %{
+            "name" => "Process Claude Hire",
+            "role" => "engineer",
+            "parent_id" => "",
+            "runtime_profile_id" => "custom",
+            "adapter" => "process",
+            "process_preset" => "claude_code",
+            "runtime_command" => "claude",
+            "instructions" => "Should not hire without Anthropic key."
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "Add ANTHROPIC_API_KEY before hiring"
+
+      refute company.id
+             |> Agents.list_agents_by_company()
+             |> Enum.any?(&(&1.name == "Process Claude Hire"))
+    end
+
+    test "process Codex hire is ready when OpenAI key secret is present", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "OPENAI_API_KEY",
+          value: "ready-process-codex-key",
+          description: "OpenAI for process Codex hire readiness"
+        })
+
+      {:ok, view, html} =
+        live(
+          conn,
+          "/agents/new?role=engineer&name=Ready%20Process%20Codex&runtime_profile_id=process-codex"
+        )
+
+      assert html =~ "Friendly defaults are ready"
+      assert html =~ "OPENAI_API_KEY"
+      refute html =~ "Needs a key"
+      assert has_element?(view, "[data-hire-readiness='ready']")
+      refute has_element?(view, "[data-testid='new-agent-hire-button'][disabled]")
+
+      result =
+        view
+        |> form("form", %{
+          "agent" => %{
+            "name" => "Ready Process Codex",
+            "role" => "engineer",
+            "parent_id" => "",
+            "runtime_profile_id" => "process-codex",
+            "adapter" => "process",
+            "instructions" => "Ship with process Codex credentials."
+          }
+        })
+        |> render_submit()
+
+      assert {:error, {:live_redirect, %{to: "/agents"}}} = result
+
+      created =
+        company.id
+        |> Agents.list_agents_by_company()
+        |> Enum.find(&(&1.name == "Ready Process Codex"))
+
+      assert created
+      assert created.adapter == :process
+      assert created.config["process_preset"] == "codex"
+    end
+
     test "new agent form keeps default concurrency for custom runtime profile", %{
       conn: conn,
       current_company: company

@@ -3,6 +3,7 @@ defmodule Cympho.Finances.BudgetPolicy do
   import Ecto.Changeset
 
   alias Cympho.Companies.Company
+  alias Cympho.Budgets.Budget
 
   @scopes ~w(company agent project goal issue)
   @periods ~w(daily weekly monthly)
@@ -13,6 +14,10 @@ defmodule Cympho.Finances.BudgetPolicy do
 
   schema "budget_policies" do
     belongs_to :company, Company
+    # Optional ownership link to a UI `Budgets.Budget`. Onboarding company
+    # hard-stop policies intentionally leave this nil so UI create/delete
+    # cannot claim or disarm them (match/sync/deactivate prefer budget_id).
+    belongs_to :budget, Budget
 
     field :scope, :string
     field :scope_id, :binary_id
@@ -34,6 +39,7 @@ defmodule Cympho.Finances.BudgetPolicy do
     budget_policy
     |> cast(attrs, [
       :company_id,
+      :budget_id,
       :scope,
       :scope_id,
       :period,
@@ -49,6 +55,8 @@ defmodule Cympho.Finances.BudgetPolicy do
     |> validate_number(:budget_limit_usd, greater_than: 0)
     |> validate_number(:warning_threshold_pct, greater_than: 0, less_than_or_equal_to: 100)
     |> foreign_key_constraint(:company_id)
+    |> foreign_key_constraint(:budget_id)
+    |> unique_constraint(:budget_id)
     |> maybe_require_scope_id()
   end
 

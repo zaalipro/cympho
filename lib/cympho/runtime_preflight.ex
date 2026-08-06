@@ -11,6 +11,7 @@ defmodule Cympho.RuntimePreflight do
   alias Cympho.Agents.Agent
   alias Cympho.Agents.RuntimeEnv
   alias Cympho.Adapters.ModelCompatibility
+  alias Cympho.Adapters.RuntimeOptions
   alias Cympho.Companies
   alias Cympho.Companies.Company
   alias Cympho.DeliveryBriefReadiness
@@ -445,8 +446,10 @@ defmodule Cympho.RuntimePreflight do
         :ok,
         "Preset",
         "Preset #{runtime.process_preset || "custom"} controls args and model forwarding."
-      )
+      ),
+      process_credentials_item(runtime)
     ]
+    |> Enum.reject(&is_nil/1)
   end
 
   defp readiness_items("openclaw", runtime) do
@@ -547,6 +550,23 @@ defmodule Cympho.RuntimePreflight do
         )
     end
   end
+
+  defp process_credentials_item(runtime) do
+    keys =
+      RuntimeOptions.process_preset_required_keys(runtime.process_preset, runtime.command)
+
+    case keys do
+      [] ->
+        nil
+
+      keys ->
+        credentials_item(runtime, keys, process_credentials_label(runtime.process_preset))
+    end
+  end
+
+  defp process_credentials_label("codex"), do: "OpenAI/Codex key"
+  defp process_credentials_label("claude_code"), do: "Anthropic key"
+  defp process_credentials_label(_preset), do: "Provider key"
 
   defp credentials_item(runtime, keys, label) do
     if credentials_present?(runtime, keys) do
@@ -1026,7 +1046,7 @@ defmodule Cympho.RuntimePreflight do
   # Fail-closed: both sides must share a non-nil company_id (matches Runtime /
   # Issues.checkout / Dispatcher after ot-tenancy-fail-closed).
   defp same_company?(%Issue{company_id: company_id}, %{company_id: company_id})
-       when is_binary(company_id),
+       when is_binary(company_id) and company_id != "",
        do: true
 
   defp same_company?(_issue, _agent), do: false

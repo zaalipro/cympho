@@ -232,19 +232,105 @@ defmodule Cympho.Finances do
   def spend_for_budget(_budget), do: Decimal.new("0")
 
   @doc """
-  Finds the active runtime `BudgetPolicy` that matches a UI budget's scope.
+  Finds the active runtime `BudgetPolicy` owned by a UI budget.
 
-  Runtime only enforces `BudgetPolicy` — matching lets the UI report block/warn
-  honestly instead of trusting the inert `budgets.hard_stop` flag alone.
+  Prefers `budget_id` ownership. Falls back only to unowned (`budget_id` nil)
+  same-scope policies for pre-ownership legacy rows — never matches a policy
+  owned by a different budget (protects onboarding company hard-stop).
   """
+  def matching_budget_policy(%{id: budget_id, company_id: company_id} = budget)
+      when is_binary(budget_id) and is_binary(company_id) do
+    case policy_owned_by_budget(budget_id, company_id, active_only: true) do
+      %BudgetPolicy{} = policy -> policy
+      nil -> matching_unowned_budget_policy_by_scope(budget)
+    end
+  end
+
   def matching_budget_policy(%{company_id: company_id, scope_type: scope} = budget)
       when is_binary(company_id) and scope in ~w(company agent project goal issue) do
+    matching_unowned_budget_policy_by_scope(budget)
+  end
+
+  def matching_budget_policy(_budget), do: nil
+
+  @doc """
+  Inserts or updates the runtime `BudgetPolicy` for a UI budget.
+
+  Ownership is by `budget_id`: sync never claims another budget's policy or an
+  unowned onboarding hard-stop. Defaults `action_on_exceed` to `"block"`
+  (hard stop). Unchecking hard stop on the form maps to `"warn"`.
+
+  `is_active` stays true for budget status `active` and `exhausted` so runtime
+  hard-stop survives spend exhaustion; only cancelled (or delete) deactivates.
+
+  Canonical callers: `Cympho.Budgets` create/update (domain, API controller,
+  board-approval executor, LiveView).
+  """
+  def sync_budget_policy(%{id: budget_id, company_id: company_id, scope_type: scope} = budget)
+      when is_binary(budget_id) and is_binary(company_id) and
+             scope in ~w(company agent project goal issue) do
+    attrs = policy_attrs_from_budget(budget)
+
+    case policy_owned_by_budget(budget_id, company_id, active_only: false) do
+      nil ->
+        create_budget_policy(attrs)
+
+      %BudgetPolicy{} = policy ->
+        update_budget_policy(policy, attrs)
+    end
+  end
+
+  def sync_budget_policy(_budget), do: {:ok, :skipped}
+
+  @doc """
+  Deactivates the runtime policy owned by a deleted UI budget, if any.
+
+  Matches by `budget_id` only — never deactivates unowned onboarding company
+  hard-stop policies or a different budget's policy via scope collision.
+  """
+  def deactivate_budget_policy_for_budget(%{id: budget_id, company_id: company_id})
+      when is_binary(budget_id) and is_binary(company_id) do
+    case policy_owned_by_budget(budget_id, company_id, active_only: true) do
+      nil ->
+        {:ok, :skipped}
+
+      %BudgetPolicy{} = policy ->
+        update_budget_policy(policy, %{is_active: false})
+    end
+  end
+
+  def deactivate_budget_policy_for_budget(_budget), do: {:ok, :skipped}
+
+  defp policy_owned_by_budget(budget_id, company_id, opts) do
+    query =
+      BudgetPolicy
+      |> where(budget_id: ^budget_id)
+      |> where(company_id: ^company_id)
+
+    query =
+      if Keyword.get(opts, :active_only, true) do
+        where(query, is_active: true)
+      else
+        query
+      end
+
+    query
+    |> order_by([p], desc: p.updated_at, desc: p.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  defp matching_unowned_budget_policy_by_scope(
+         %{company_id: company_id, scope_type: scope} = budget
+       )
+       when is_binary(company_id) and scope in ~w(company agent project goal issue) do
     scope_id = budget_policy_scope_id(scope, budget)
 
     BudgetPolicy
     |> where(company_id: ^company_id)
     |> where(scope: ^scope)
     |> where(is_active: true)
+    |> where([p], is_nil(p.budget_id))
     |> then(fn query ->
       cond do
         scope == "company" ->
@@ -263,53 +349,14 @@ defmodule Cympho.Finances do
     |> Repo.one()
   end
 
-  def matching_budget_policy(_budget), do: nil
-
-  @doc """
-  Inserts or updates the runtime `BudgetPolicy` for a UI budget.
-
-  Defaults `action_on_exceed` to `"block"` (hard stop). Unchecking hard stop on
-  the form maps to `"warn"` so agents keep spending after the cap.
-
-  Canonical callers: `Cympho.Budgets` create/update (domain, API controller,
-  board-approval executor, LiveView). Callers outside the domain may also sync
-  for idempotent repair; LiveView is one path, not the only path.
-  """
-  def sync_budget_policy(%{company_id: company_id, scope_type: scope} = budget)
-      when is_binary(company_id) and scope in ~w(company agent project goal issue) do
-    attrs = policy_attrs_from_budget(budget)
-
-    case matching_budget_policy(budget) do
-      nil ->
-        create_budget_policy(attrs)
-
-      %BudgetPolicy{} = policy ->
-        update_budget_policy(policy, attrs)
-    end
-  end
-
-  def sync_budget_policy(_budget), do: {:ok, :skipped}
-
-  @doc """
-  Deactivates the runtime policy that matched a deleted UI budget, if any.
-
-  Called from `Cympho.Budgets.delete_budget/2` so API/board/domain deletes
-  cannot leave an active hard-stop policy after the UI budget is gone.
-  """
-  def deactivate_budget_policy_for_budget(budget) do
-    case matching_budget_policy(budget) do
-      nil ->
-        {:ok, :skipped}
-
-      %BudgetPolicy{} = policy ->
-        update_budget_policy(policy, %{is_active: false})
-    end
-  end
+  defp matching_unowned_budget_policy_by_scope(_budget), do: nil
 
   defp policy_attrs_from_budget(budget) do
     scope = budget.scope_type
     hard_stop? = Map.get(budget, :hard_stop) != false
-    active? = Map.get(budget, :status, "active") == "active"
+    # Keep hard-stop armed while exhausted: only cancelled/delete deactivate.
+    status = Map.get(budget, :status, "active")
+    active? = status in ~w(active exhausted)
 
     warning_pct =
       case Map.get(budget, :threshold_alert_percentage) do
@@ -323,6 +370,7 @@ defmodule Cympho.Finances do
 
     %{
       company_id: budget.company_id,
+      budget_id: Map.get(budget, :id),
       scope: scope,
       scope_id: budget_policy_scope_id(scope, budget),
       period: period_for_budget(budget),

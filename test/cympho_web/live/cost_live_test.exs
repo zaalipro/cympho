@@ -97,8 +97,10 @@ defmodule CymphoWeb.CostLiveTest do
       insert_runtime_budget(company,
         name: "Monthly runtime cap",
         limit_amount: Decimal.new("100.00"),
-        spent_amount: Decimal.new("25.50")
+        spent_amount: Decimal.new("0.00")
       )
+
+      insert_token_usage(company, cost_usd: Decimal.new("25.50"))
 
       {:ok, _view, html} = live(conn, "/costs")
 
@@ -106,17 +108,79 @@ defmodule CymphoWeb.CostLiveTest do
       assert html =~ "25.5%"
       refute html =~ "25.500%"
     end
+
+    test "active budget bars use TokenUsage spend not static spent_amount", %{
+      conn: conn,
+      current_company: company
+    } do
+      insert_runtime_budget(company,
+        name: "Provider spend cap",
+        limit_amount: Decimal.new("100.00"),
+        spent_amount: Decimal.new("0.00")
+      )
+
+      insert_token_usage(company, cost_usd: Decimal.new("33.25"))
+
+      {:ok, _view, html} = live(conn, "/costs")
+
+      assert html =~ "Provider spend cap"
+      assert html =~ "$33.25 of $100.00"
+      assert html =~ "33.3%"
+      # Static spent_amount stayed 0 — must not render as the Used figure.
+      refute html =~ "$0.00 of $100.00"
+    end
+
+    test "approaching alert uses live TokenUsage threshold not spent_amount", %{
+      conn: conn,
+      current_company: company
+    } do
+      insert_runtime_budget(company,
+        name: "Near limit cap",
+        limit_amount: Decimal.new("100.00"),
+        spent_amount: Decimal.new("0.00"),
+        threshold_alert_percentage: 80
+      )
+
+      insert_token_usage(company, cost_usd: Decimal.new("85.00"))
+
+      {:ok, _view, html} = live(conn, "/costs")
+
+      assert html =~ "Approaching Budget Limits"
+      assert html =~ "Near limit cap"
+      assert html =~ "85%"
+    end
+
+    test "exceeded alert fires from live spend when status is still active", %{
+      conn: conn,
+      current_company: company
+    } do
+      insert_runtime_budget(company,
+        name: "Hard stop cap",
+        limit_amount: Decimal.new("50.00"),
+        spent_amount: Decimal.new("0.00"),
+        status: "active"
+      )
+
+      insert_token_usage(company, cost_usd: Decimal.new("55.00"))
+
+      {:ok, _view, html} = live(conn, "/costs")
+
+      assert html =~ "Exceeded Budgets"
+      assert html =~ "Hard stop cap"
+      assert html =~ "110%"
+    end
   end
 
   defp insert_token_usage(company, attrs) do
     attrs =
-      attrs
-      |> Keyword.merge(
+      [
         company_id: company.id,
-        model: Keyword.get(attrs, :model, "qwen3.7-plus"),
-        input_tokens: Keyword.get(attrs, :input_tokens, 100),
-        output_tokens: Keyword.get(attrs, :output_tokens, 50)
-      )
+        provider: "test",
+        model: "qwen3.7-plus",
+        input_tokens: 100,
+        output_tokens: 50
+      ]
+      |> Keyword.merge(attrs)
       |> Map.new()
 
     %TokenUsage{}

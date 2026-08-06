@@ -486,19 +486,11 @@ defmodule Cympho.AgentHeartbeat do
         payload = {:agent_heartbeat_updated, agent_id, %{status: :idle, company_id: company_id}}
 
         # Per-company topic for LiveView consumers (kanban, dashboards).
-        # Not company:#{id}:… form, but still fail-closed on blank tenant ids.
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "agent_heartbeats:#{company_id}",
-          payload
-        )
+        # Not company:#{id}:… form, but still routed through PubSubGuard.
+        _ = Cympho.PubSubGuard.broadcast("agent_heartbeats:#{company_id}", payload)
 
         # System topic for app-wide consumers (AutoAssignmentReassigner).
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "system:agent_heartbeats",
-          payload
-        )
+        _ = Cympho.PubSubGuard.broadcast("system:agent_heartbeats", payload)
 
       _ ->
         # Fail-closed: never publish tenant heartbeats without a company_id.

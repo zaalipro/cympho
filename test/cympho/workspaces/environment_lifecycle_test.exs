@@ -307,6 +307,57 @@ defmodule Cympho.Workspaces.EnvironmentLifecycleTest do
       # double revoke remains safe
       assert {:ok, _} = Workspaces.revoke_lease(revoked)
     end
+
+    test "expire_stale_leases releases Fake provider and marks expired", %{
+      company: company,
+      project: project
+    } do
+      {:ok, environment} =
+        Workspaces.create_environment(%{
+          name: "Expire Env",
+          status: "active",
+          company_id: company.id,
+          project_id: project.id,
+          provider: "fake"
+        })
+
+      past =
+        DateTime.utc_now()
+        |> DateTime.add(-60, :second)
+        |> DateTime.truncate(:second)
+
+      assert {:ok, lease} =
+               Workspaces.create_lease(%{
+                 status: "active",
+                 company_id: company.id,
+                 environment_id: environment.id,
+                 provider: "fake",
+                 expires_at: past
+               })
+
+      ref = lease.provider_lease_id
+      assert is_binary(ref)
+      assert {:ok, _} = Fake.execute(ref, "echo before", %{})
+
+      {count, _} = Workspaces.expire_stale_leases()
+      assert count >= 1
+
+      reloaded = Repo.get!(Workspaces.EnvironmentLease, lease.id)
+      assert reloaded.status == "expired"
+      assert {:error, :released} = Fake.execute(ref, "echo after", %{})
+
+      # second expire is a no-op for already-expired leases
+      {0, _} = Workspaces.expire_stale_leases()
+    end
+
+    test "Quantum schedules expire_stale_leases" do
+      jobs = Application.get_env(:cympho, Cympho.Scheduler)[:jobs] || []
+      job = jobs[:expire_stale_leases] || Keyword.get(jobs, :expire_stale_leases)
+
+      assert is_list(job)
+      assert job[:task] == {Cympho.Workspaces, :expire_stale_leases, []}
+      assert is_binary(job[:schedule])
+    end
   end
 
   describe "EnvironmentDrivers" do

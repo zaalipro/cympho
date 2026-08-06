@@ -67,6 +67,14 @@ config :cympho, Cympho.Scheduler,
       schedule: "*/5 * * * *",
       task: {Cympho.ReviewNudges.StaleScanner, :sweep, [[]]},
       overlap: false
+    ],
+    # Expire active environment leases past expires_at and best-effort
+    # release their provider refs (Fake/etc.). Overlap-guarded so a slow
+    # provider release cannot stack concurrent sweeps.
+    expire_stale_leases: [
+      schedule: "*/5 * * * *",
+      task: {Cympho.Workspaces, :expire_stale_leases, []},
+      overlap: false
     ]
   ],
   timezone: "Etc/UTC"

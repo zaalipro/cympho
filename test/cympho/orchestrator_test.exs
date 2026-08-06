@@ -1177,6 +1177,183 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
+    test "retries zero-progress stall_timeout once with the same runtime", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      test_pid = self()
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      retry_result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            Retry after stall completed.
+
+            ```cympho-actions
+            {"actions":[{"type":"handoff","role":"cto","reason":"Retry produced useful work that now needs CTO review."}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: :stall_timeout},
+        %{result: retry_result}
+      ])
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{adapter: adapter, config: config} ->
+             send(test_pid, {:resolved_runtime, adapter, config})
+             {:ok, MockAdapter, config}
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
+        assert :ok = wait_until_stopped(pid)
+
+        assert_received {:resolved_runtime, :claude_code, _primary_config}
+        assert_received {:resolved_runtime, :claude_code, _retry_config}
+
+        comments = Comments.list_comments(issue.id)
+
+        assert Enum.any?(comments, &(&1.body =~ "No usable adapter output"))
+        assert Enum.any?(comments, &(&1.body =~ "retrying once with the same runtime"))
+        assert Enum.any?(comments, &(&1.body =~ "stall timeout"))
+        assert Enum.any?(comments, &(&1.body =~ "Retry after stall completed."))
+
+        refute Enum.any?(
+                 comments,
+                 &(&1.body =~ "stopped producing output before the stall timeout")
+               )
+
+        runs = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
+        assert length(runs) == 2
+        assert Enum.count(runs, &(&1.status == "failed")) == 1
+        assert Enum.count(runs, &(&1.status == "completed")) == 1
+      end
+    end
+
+    test "retries zero-progress max_run_timeout once then blocks when retry also fails", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      test_pid = self()
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: :max_run_timeout},
+        %{error: :max_run_timeout}
+      ])
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{adapter: adapter, config: config} ->
+             send(test_pid, {:resolved_runtime, adapter, config})
+             {:ok, MockAdapter, config}
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
+        assert :ok = wait_until_stopped(pid)
+
+        assert_received {:resolved_runtime, :claude_code, _primary_config}
+        assert_received {:resolved_runtime, :claude_code, _retry_config}
+        refute_received {:resolved_runtime, :claude_code, _third_config}
+
+        comments = Comments.list_comments(issue.id)
+
+        assert Enum.any?(comments, &(&1.body =~ "No usable adapter output"))
+        assert Enum.any?(comments, &(&1.body =~ "max run timeout"))
+        assert Enum.any?(comments, &(&1.body =~ "exceeded the absolute max run wall clock"))
+
+        runs = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
+        assert length(runs) == 2
+        assert Enum.all?(runs, &(&1.status == "failed"))
+        assert Issues.get_issue!(issue.id).status == :blocked
+      end
+    end
+
+    test "does not same-runtime-retry stall_timeout after tool progress", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      test_pid = self()
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      # Stay silent so we can inject a tool call (progress) then stall.
+      MockAdapter.script(agent_id, issue.id, [:silent])
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{adapter: adapter, config: config} ->
+             send(test_pid, {:resolved_runtime, adapter})
+             {:ok, MockAdapter, config}
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
+
+        session_id =
+          Enum.reduce_while(1..50, nil, fn _, _ ->
+            case :sys.get_state(pid) do
+              %{session_id: sid} when not is_nil(sid) ->
+                {:halt, sid}
+
+              _ ->
+                Process.sleep(20)
+                {:cont, nil}
+            end
+          end)
+
+        assert is_reference(session_id) or is_binary(session_id)
+
+        send(
+          pid,
+          {:tool_call_detected, session_id,
+           %{"id" => "toolu_progress", "name" => "Read", "input" => %{"path" => "lib/foo.ex"}}}
+        )
+
+        state = :sys.get_state(pid)
+        assert map_size(state.tool_traces) > 0
+
+        send(pid, {:turn_ended_with_error, session_id, :stall_timeout})
+        assert :ok = wait_until_stopped(pid)
+
+        assert_received {:resolved_runtime, :claude_code}
+        refute_received {:resolved_runtime, _}
+
+        comments = Comments.list_comments(issue.id)
+        refute Enum.any?(comments, &(&1.body =~ "retrying once with the same runtime"))
+
+        assert Enum.any?(
+                 comments,
+                 &(&1.body =~ "stopped producing output before the stall timeout")
+               )
+
+        assert Issues.get_issue!(issue.id).status == :blocked
+
+        runs = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
+        assert length(runs) == 1
+        assert Enum.all?(runs, &(&1.status == "failed"))
+      end
+    end
+
     test "blocks runtime failures after the issue row changes concurrently", %{
       agent_id: agent_id,
       issue: issue

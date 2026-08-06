@@ -122,30 +122,38 @@ defmodule CymphoWeb.Events do
   @doc """
   Subscribe to issue events for a company via PubSub (for LiveView).
   """
-  def subscribe_to_issues(company_id) do
+  def subscribe_to_issues(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:issues")
   end
+
+  def subscribe_to_issues(_company_id), do: :ok
 
   @doc """
   Subscribe to comment events for a project via PubSub (for LiveView).
   """
-  def subscribe_to_comments(company_id) do
+  def subscribe_to_comments(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:comments")
   end
+
+  def subscribe_to_comments(_company_id), do: :ok
 
   @doc """
   Subscribe to run status events for a company via PubSub (for LiveView).
   """
-  def subscribe_to_runs(company_id) do
+  def subscribe_to_runs(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:runs")
   end
+
+  def subscribe_to_runs(_company_id), do: :ok
 
   @doc """
   Subscribe to heartbeat events for a specific issue via PubSub (for LiveView).
   """
-  def subscribe_to_heartbeats(issue_id) do
+  def subscribe_to_heartbeats(issue_id) when is_binary(issue_id) and issue_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "issue:#{issue_id}:heartbeats")
   end
+
+  def subscribe_to_heartbeats(_issue_id), do: :ok
 
   # Private helpers
 

@@ -768,6 +768,80 @@ defmodule CymphoWeb.KanbanLiveTest do
       view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
       assert render(view) =~ "Unassigned"
     end
+
+    test "swimlane cards emit data-status and data-allowed-statuses matching StateMachine" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Swimlane DnD Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, in_progress} =
+        create_issue(%{
+          title: "Swimlane in flight",
+          description: "allow-list for DnD",
+          status: :in_progress,
+          priority: :medium,
+          assignee_id: agent.id
+        })
+
+      {:ok, done} =
+        create_issue(%{
+          title: "Swimlane done",
+          description: "terminal allow-list",
+          status: :done,
+          priority: :low,
+          assignee_id: agent.id
+        })
+
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
+      html = render(view)
+      doc = Floki.parse_document!(html)
+
+      in_progress_card =
+        doc
+        |> Floki.find("[data-kanban-card][data-issue-id='#{in_progress.id}']")
+        |> List.first()
+
+      assert in_progress_card
+
+      assert Floki.attribute(in_progress_card, "data-status") |> List.first() == "in_progress"
+
+      allowed = Floki.attribute(in_progress_card, "data-allowed-statuses") |> List.first()
+      assert is_binary(allowed)
+      refute allowed == ""
+
+      expected =
+        Cympho.Issues.StateMachine.valid_transitions(:in_progress)
+        |> Enum.map(&to_string/1)
+        |> MapSet.new()
+
+      actual = allowed |> String.split(",", trim: true) |> MapSet.new()
+      assert actual == expected
+      assert "todo" in MapSet.to_list(actual)
+      assert "backlog" in MapSet.to_list(actual)
+
+      done_card =
+        doc
+        |> Floki.find("[data-kanban-card][data-issue-id='#{done.id}']")
+        |> List.first()
+
+      assert done_card
+      assert Floki.attribute(done_card, "data-status") |> List.first() == "done"
+
+      done_allowed = Floki.attribute(done_card, "data-allowed-statuses") |> List.first()
+
+      done_expected =
+        Cympho.Issues.StateMachine.valid_transitions(:done)
+        |> Enum.map(&to_string/1)
+        |> MapSet.new()
+
+      assert done_allowed |> String.split(",", trim: true) |> MapSet.new() == done_expected
+    end
   end
 
   describe "Collapsible columns" do

@@ -353,11 +353,12 @@ defmodule Cympho.Budgets do
   @doc """
   Deletes a budget.
 
-  Deactivates any matching runtime `BudgetPolicy` so hard-stop cannot linger
-  after the UI budget is gone (API, board executor, and LiveView all use this).
+  Deactivates the runtime `BudgetPolicy` owned by this budget (`budget_id`)
+  so hard-stop cannot linger after the UI budget is gone. Does not touch
+  unowned onboarding company hard-stop policies or other budgets' policies.
   """
   def delete_budget(%Budget{} = budget, actor \\ nil) do
-    # Deactivate before delete so matching still sees company/scope fields.
+    # Deactivate by budget_id ownership before delete (FK nilifies budget_id).
     _ = deactivate_runtime_budget_policy(budget)
 
     Repo.delete(budget)
@@ -424,7 +425,7 @@ defmodule Cympho.Budgets do
   @doc """
   Subscribes to budget events.
   """
-  def subscribe(company_id) when is_binary(company_id) do
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:budgets")
   end
 

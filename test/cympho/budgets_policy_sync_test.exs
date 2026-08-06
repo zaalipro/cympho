@@ -233,6 +233,155 @@ defmodule Cympho.BudgetsPolicySyncTest do
     end
   end
 
+  describe "exhausted status keeps BudgetPolicy active (P0-1)" do
+    test "sync after status exhausted leaves is_active true and still hard-stops runtime" do
+      company = company_fixture()
+      agent = agent_fixture(company)
+      issue = issue_fixture(company, agent)
+
+      assert {:ok, budget} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "Exhaust keep active",
+                 scope_type: "agent",
+                 scope_id: agent.id,
+                 agent_id: agent.id,
+                 limit_amount: Decimal.new("1.00"),
+                 hard_stop: true,
+                 status: "active"
+               })
+
+      policy_before = Finances.matching_budget_policy(budget)
+      assert policy_before.is_active
+      assert policy_before.budget_id == budget.id
+
+      seed_agent_spend(company, agent, issue, Decimal.new("1.50"))
+
+      assert {:ok, exhausted} = Budgets.update_budget(budget, %{status: "exhausted"})
+      assert exhausted.status == "exhausted"
+
+      policy_after = Finances.matching_budget_policy(exhausted)
+      assert policy_after.id == policy_before.id
+      assert policy_after.is_active
+      assert policy_after.budget_id == budget.id
+      assert policy_after.action_on_exceed == "block"
+
+      # Direct sync path (create/update callers and repair) must not disarm.
+      assert {:ok, %BudgetPolicy{is_active: true}} = Finances.sync_budget_policy(exhausted)
+
+      assert {:error, {:budget_blocked, info}} = Finances.check_runtime_budget(issue, agent)
+      assert info.policy_id == policy_before.id
+    end
+
+    test "cancelled status deactivates policy; active|exhausted do not" do
+      company = company_fixture()
+
+      assert {:ok, budget} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "Cancel deactivates",
+                 scope_type: "company",
+                 scope_id: company.id,
+                 limit_amount: Decimal.new("10.00"),
+                 hard_stop: true
+               })
+
+      assert Finances.matching_budget_policy(budget).is_active
+
+      assert {:ok, cancelled} = Budgets.update_budget(budget, %{status: "cancelled"})
+      assert is_nil(Finances.matching_budget_policy(cancelled))
+      reloaded = Repo.get_by!(BudgetPolicy, budget_id: budget.id)
+      refute reloaded.is_active
+    end
+  end
+
+  describe "budget_id ownership (P0-2)" do
+    test "create_budget stamps budget_id on the synced policy" do
+      company = company_fixture()
+
+      assert {:ok, budget} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "Owned policy",
+                 scope_type: "company",
+                 scope_id: company.id,
+                 limit_amount: Decimal.new("12.00"),
+                 hard_stop: true
+               })
+
+      policy = Finances.matching_budget_policy(budget)
+      assert policy.budget_id == budget.id
+    end
+
+    test "two company-scope budgets each own a distinct policy" do
+      company = company_fixture()
+
+      assert {:ok, first} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "First company cap",
+                 scope_type: "company",
+                 scope_id: company.id,
+                 limit_amount: Decimal.new("5.00"),
+                 hard_stop: true
+               })
+
+      assert {:ok, second} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "Second company cap",
+                 scope_type: "company",
+                 scope_id: company.id,
+                 limit_amount: Decimal.new("99.00"),
+                 hard_stop: false
+               })
+
+      first_policy = Finances.matching_budget_policy(first)
+      second_policy = Finances.matching_budget_policy(second)
+
+      assert first_policy.id != second_policy.id
+      assert first_policy.budget_id == first.id
+      assert second_policy.budget_id == second.id
+      assert first_policy.action_on_exceed == "block"
+      assert second_policy.action_on_exceed == "warn"
+      assert Decimal.eq?(first_policy.budget_limit_usd, Decimal.new("5.00"))
+      assert Decimal.eq?(second_policy.budget_limit_usd, Decimal.new("99.00"))
+    end
+
+    test "deleting one company-scope budget does not deactivate another" do
+      company = company_fixture()
+
+      assert {:ok, keep} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "Keep",
+                 scope_type: "company",
+                 scope_id: company.id,
+                 limit_amount: Decimal.new("8.00"),
+                 hard_stop: true
+               })
+
+      assert {:ok, drop} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "Drop",
+                 scope_type: "company",
+                 scope_id: company.id,
+                 limit_amount: Decimal.new("3.00"),
+                 hard_stop: true
+               })
+
+      keep_policy = Finances.matching_budget_policy(keep)
+      drop_policy = Finances.matching_budget_policy(drop)
+
+      assert {:ok, _} = Budgets.delete_budget(drop)
+
+      assert Finances.matching_budget_policy(keep).id == keep_policy.id
+      assert Finances.matching_budget_policy(keep).is_active
+      refute Repo.get!(BudgetPolicy, drop_policy.id).is_active
+    end
+  end
+
   defp company_fixture do
     unique = System.unique_integer([:positive])
 

@@ -1239,6 +1239,39 @@ window.addEventListener('phx:set-theme', (e) => {
   document.cookie = `theme=${theme}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
 });
 
+// Nav chrome (desktop nav_rail + mobile bottom nav) lives in the root layout
+// outside LiveView inner_content, so assign-only badge updates never patch the
+// DOM. UserAuth pushes `nav_badges` after OwnerAttention/Inbox/approval
+// refreshes; mirror counts into always-present [data-nav-badge] nodes.
+window.addEventListener('phx:nav_badges', (e) => {
+  const inbox = Number(e.detail?.inbox ?? 0);
+  const approval = Number(e.detail?.approval ?? 0);
+  updateNavBadgeNodes('inbox', inbox);
+  updateNavBadgeNodes('approvals', approval);
+});
+
+function updateNavBadgeNodes(key, rawCount) {
+  const count = Math.min(99, Math.max(0, Number.isFinite(rawCount) ? rawCount : 0));
+  const visible = count > 0;
+
+  document.querySelectorAll(`[data-nav-badge="${key}"]`).forEach((el) => {
+    el.dataset.count = String(count);
+    el.textContent = visible ? String(count) : '';
+    el.classList.toggle('hidden', !visible);
+    el.setAttribute('aria-hidden', visible ? 'false' : 'true');
+
+    if (visible) {
+      const mobile = Boolean(el.closest('#mobile-nav'));
+      el.setAttribute(
+        'data-testid',
+        mobile ? `mobile-nav-badge-${key}` : `nav-badge-${key}`
+      );
+    } else {
+      el.removeAttribute('data-testid');
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // SelectMenu — styled, theme-matched replacement for native <select>.
 //

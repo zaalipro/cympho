@@ -22,6 +22,8 @@ defmodule CymphoWeb.KanbanLive.Components do
   attr :card_action_open, :any, default: nil
   attr :launch_readiness, :map, default: nil
   attr :digest_cause_hoisted, :boolean, default: false
+  # Swimlanes group by assignee — hide the avatar there to avoid redundancy.
+  attr :show_assignee, :boolean, default: true
 
   def issue_card(assigns) do
     ~H"""
@@ -53,7 +55,12 @@ defmodule CymphoWeb.KanbanLive.Components do
         </.link>
       </div>
 
-      <.card_meta issue={@issue} agent_heartbeat_states={@agent_heartbeat_states} class="mt-2" />
+      <.card_meta
+        issue={@issue}
+        agent_heartbeat_states={@agent_heartbeat_states}
+        show_assignee={@show_assignee}
+        class="mt-2"
+      />
 
       <.issue_digest_card
         issue={@issue}

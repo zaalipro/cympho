@@ -85,9 +85,16 @@ defmodule Cympho.Issues.AutoAssignment do
 
     case find_agent_for_roles(assignment_roles(primary_role), issue.company_id) do
       {:ok, agent} ->
-        required_role = primary_role
-        {:ok, assigned} = Cympho.Issues.checkout_issue(issue, agent.id, required_role)
-        {:ok, assigned}
+        # Fail-closed: checkout can return tenancy/capacity/pause/CoC errors.
+        # Never hard-match only :ok — those paths raised MatchError and crashed
+        # reassignment/create flows instead of soft-failing to the next agent.
+        case Cympho.Issues.checkout_issue(issue, agent.id, primary_role) do
+          {:ok, assigned} ->
+            {:ok, assigned}
+
+          {:error, _reason} ->
+            {:error, :no_eligible_agent, issue}
+        end
 
       {:error, :no_agent_available} ->
         {:error, :no_eligible_agent, issue}
@@ -138,7 +145,8 @@ defmodule Cympho.Issues.AutoAssignment do
       Issue
       |> where(
         [i],
-        i.status == :backlog and is_nil(i.assignee_id) and i.company_id == ^company_id
+        i.status == :backlog and is_nil(i.assignee_id) and is_nil(i.hidden_at) and
+          i.company_id == ^company_id
       )
       |> Repo.all()
 

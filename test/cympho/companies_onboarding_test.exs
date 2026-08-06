@@ -1,7 +1,9 @@
 defmodule Cympho.CompaniesOnboardingTest do
   use Cympho.DataCase, async: true
 
-  alias Cympho.Companies
+  alias Cympho.{Agents, Budgets, Companies, Finances, Issues}
+  alias Cympho.Finances.{BudgetPolicy, TokenUsage}
+  alias Cympho.Repo
 
   defp create_user! do
     {:ok, user} =
@@ -170,6 +172,77 @@ defmodule Cympho.CompaniesOnboardingTest do
         refute Map.has_key?(agent.runtime_config, "env")
         assert agent.runtime_config["autonomous"] == true
       end
+    end
+  end
+
+  describe "create_autonomous_company/1 budget hard-stop ownership" do
+    test "onboarding policy has no budget_id and survives UI company budget create/delete" do
+      assert {:ok, result} =
+               Companies.create_autonomous_company(%{
+                 name: "Hardstop Protect Co",
+                 budget_monthly_cents: 100,
+                 engineer_count: 1
+               })
+
+      company = result.company
+      onboarding = result.budget_policy
+      assert %BudgetPolicy{} = onboarding
+      assert is_nil(onboarding.budget_id)
+      assert onboarding.scope == "company"
+      assert onboarding.action_on_exceed == "block"
+      assert onboarding.is_active
+      assert Decimal.eq?(onboarding.budget_limit_usd, Decimal.new("1.00"))
+
+      agent = hd(result.agents)
+      issue = hd(result.seed_issues)
+
+      assert {:ok, ui_budget} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "Owner UI budget",
+                 scope_type: "company",
+                 scope_id: company.id,
+                 limit_amount: Decimal.new("999.00"),
+                 hard_stop: false
+               })
+
+      ui_policy = Finances.matching_budget_policy(ui_budget)
+      assert ui_policy.budget_id == ui_budget.id
+      assert ui_policy.id != onboarding.id
+      assert ui_policy.action_on_exceed == "warn"
+
+      still = Repo.get!(BudgetPolicy, onboarding.id)
+      assert still.is_active
+      assert is_nil(still.budget_id)
+      assert still.action_on_exceed == "block"
+      assert Decimal.eq?(still.budget_limit_usd, Decimal.new("1.00"))
+
+      Repo.insert!(%TokenUsage{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        provider: "test",
+        model: "test",
+        input_tokens: 1,
+        output_tokens: 1,
+        total_tokens: 2,
+        cost_usd: Decimal.new("1.50")
+      })
+
+      assert {:error, {:budget_blocked, info}} = Finances.check_runtime_budget(issue, agent)
+      assert info.policy_id == onboarding.id
+
+      assert {:ok, _} = Budgets.delete_budget(ui_budget)
+      refute Repo.get!(BudgetPolicy, ui_policy.id).is_active
+      assert Repo.get!(BudgetPolicy, onboarding.id).is_active
+
+      assert {:error, {:budget_blocked, %{policy_id: policy_id}}} =
+               Finances.check_runtime_budget(
+                 Issues.get_issue!(issue.id),
+                 Agents.get_agent!(agent.id)
+               )
+
+      assert policy_id == onboarding.id
     end
   end
 end

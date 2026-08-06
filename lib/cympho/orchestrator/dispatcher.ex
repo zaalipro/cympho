@@ -304,28 +304,41 @@ defmodule Cympho.Orchestrator.Dispatcher do
   defp reclaim_orphaned_issue(issue_id, assignee_id) do
     case Issues.get_issue(issue_id) do
       {:ok, %Issue{status: :in_progress} = issue} ->
-        # Release any remote env first so orphan recovery cannot leak sandbox spend.
-        _ =
-          Workspaces.cancel_and_release_for_issue(issue, %{
-            reason: "orphan_issue_reclaim",
-            company_id: issue.company_id
-          })
+        # Re-check immediately before destructive work. A successor orchestrator
+        # can register after the outer recover_orphaned_in_progress cond and
+        # before cancel_and_release / clear_checkout_lock.
+        if live_orchestrator?(issue_id) do
+          :skipped
+        else
+          # Release any remote env first so orphan recovery cannot leak sandbox spend.
+          _ =
+            Workspaces.cancel_and_release_for_issue(issue, %{
+              reason: "orphan_issue_reclaim",
+              company_id: issue.company_id
+            })
 
-        # Prefer clear_checkout_lock so ownership routing survives recovery.
-        case Issues.clear_checkout_lock(issue, :todo) do
-          {:ok, _} ->
-            Logger.warning(
-              "[Dispatcher] recovered orphaned issue #{issue_id} (assignee=#{assignee_id || "none"}) → :todo"
-            )
-
-            :recovered
-
-          {:error, reason} ->
-            Logger.error(
-              "[Dispatcher] failed to release orphaned issue #{issue_id}: #{inspect(reason)}"
-            )
-
+          # Final live check before checkout clear — env cancel is best-effort
+          # and must not unlock under a session that became live mid-reclaim.
+          if live_orchestrator?(issue_id) do
             :skipped
+          else
+            # Prefer clear_checkout_lock so ownership routing survives recovery.
+            case Issues.clear_checkout_lock(issue, :todo) do
+              {:ok, _} ->
+                Logger.warning(
+                  "[Dispatcher] recovered orphaned issue #{issue_id} (assignee=#{assignee_id || "none"}) → :todo"
+                )
+
+                :recovered
+
+              {:error, reason} ->
+                Logger.error(
+                  "[Dispatcher] failed to release orphaned issue #{issue_id}: #{inspect(reason)}"
+                )
+
+                :skipped
+            end
+          end
         end
 
       _ ->
@@ -509,42 +522,56 @@ defmodule Cympho.Orchestrator.Dispatcher do
     # a replacement orchestrator means someone else owns it now. Registry
     # cleanup is async relative to our DOWN message, so a still-listed-but-
     # dead pid counts as "no orchestrator".
-    live_orchestrator? =
-      case Orchestrator.whereis(issue_id) do
-        nil -> false
-        pid -> Process.alive?(pid)
+    if live_orchestrator?(issue_id) do
+      :ok
+    else
+      # Snapshot active runs once. Never call cancel_active_runs_for_issue —
+      # that terminalizes *every* active run for the issue (including a
+      # successor that raced in after the first live check) and can unlock a
+      # successor-bound checkout via clear_checkout_lock_for_run.
+      pre_crash_runs = active_runs_for_issue(issue_id)
+
+      # Unbound stranded checkout only. A bound checkout_run_id may be a
+      # successor that claimed ownership before this DOWN handler ran — a
+      # fresh clear_checkout_lock would load that bind and wipe it. Bound
+      # dead-session runs are terminalized by recover_orphaned_runs (poll/boot)
+      # which clears via clear_checkout_lock_for_run.
+      unless live_orchestrator?(issue_id) do
+        case Issues.get_issue(issue_id) do
+          {:ok, %Issue{status: :in_progress, checkout_run_id: nil} = issue} ->
+            case Issues.clear_checkout_lock(issue, :todo) do
+              {:ok, _released} ->
+                Logger.warning(
+                  "[Dispatcher] released issue #{issue_id} after orchestrator crash (assignee preserved)"
+                )
+
+              {:error, :checkout_conflict} ->
+                Logger.info(
+                  "[Dispatcher] skipped crash release for issue #{issue_id}: checkout already claimed by successor"
+                )
+
+              {:error, release_reason} ->
+                Logger.error(
+                  "[Dispatcher] failed to release issue #{issue_id} after orchestrator crash: #{inspect(release_reason)}"
+                )
+            end
+
+          {:ok, %Issue{status: :in_progress, checkout_run_id: bound}} when is_binary(bound) ->
+            Logger.info(
+              "[Dispatcher] skipped crash checkout clear for issue #{issue_id}: run #{bound} still bound (successor or in-flight session)"
+            )
+
+          _ ->
+            :ok
+        end
       end
 
-    unless live_orchestrator? do
-      # Finalize the dead session's runs first (clear_checkout_lock_for_run CAS
-      # on each terminal run). Then reclaim any remaining stranded :in_progress
-      # checkout while preserving assignee — same ownership contract as orphan
-      # reclaim (Paperclip #1033: recovery must not silently unassign).
-      _ = HeartbeatEngine.cancel_active_runs_for_issue(issue_id, "Orchestrator crashed")
-
-      case Issues.get_issue(issue_id) do
-        {:ok, %Issue{status: :in_progress} = issue} ->
-          case Issues.clear_checkout_lock(issue, :todo) do
-            {:ok, _released} ->
-              Logger.warning(
-                "[Dispatcher] released issue #{issue_id} after orchestrator crash (assignee preserved)"
-              )
-
-            {:error, :checkout_conflict} ->
-              # Successor bound a new run (or bumped lock_version) — leave ownership alone.
-              Logger.info(
-                "[Dispatcher] skipped crash release for issue #{issue_id}: checkout already claimed by successor"
-              )
-
-            {:error, release_reason} ->
-              Logger.error(
-                "[Dispatcher] failed to release issue #{issue_id} after orchestrator crash: #{inspect(release_reason)}"
-              )
-          end
-
-        _ ->
-          :ok
-      end
+      # Recover only runs that cannot belong to a successor: re-check live orch
+      # before each cancel, and never terminalize the currently-bound checkout
+      # run (cancel_run → clear_checkout_lock_for_run would unlock it).
+      Enum.each(pre_crash_runs, fn run ->
+        recover_crashed_session_run(issue_id, run)
+      end)
     end
   rescue
     error ->
@@ -552,6 +579,49 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
       :ok
   end
+
+  defp recover_crashed_session_run(issue_id, run) do
+    cond do
+      live_orchestrator?(issue_id) ->
+        :ok
+
+      current_checkout_run?(issue_id, run) ->
+        :ok
+
+      true ->
+        case HeartbeatEngine.recover_orphaned_run(run) do
+          {:ok, recovered} ->
+            Logger.warning(
+              "[Dispatcher] recovered crashed-session run #{run.id} (issue=#{issue_id}) → #{recovered.status}"
+            )
+
+          {:error, recover_reason} ->
+            Logger.error(
+              "[Dispatcher] failed to recover crashed-session run #{run.id}: #{inspect(recover_reason)}"
+            )
+        end
+    end
+  end
+
+  defp current_checkout_run?(issue_id, run) do
+    case Issues.get_issue(issue_id) do
+      {:ok, %Issue{checkout_run_id: bound}} when is_binary(bound) and bound == run.id ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  defp active_runs_for_issue(issue_id) when is_binary(issue_id) do
+    from(r in Run,
+      where: r.issue_id == ^issue_id and r.status in ["pending", "queued", "running"],
+      order_by: [asc: r.inserted_at]
+    )
+    |> Cympho.Repo.all()
+  end
+
+  defp active_runs_for_issue(_issue_id), do: []
 
   defp stop_company_runtime(company_id, reason, running_issue_ids) do
     company_runtime_issues(company_id, running_issue_ids)
@@ -746,7 +816,10 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp do_poll(%State{} = state, company_id \\ nil) do
     # Periodic reclaim: boot-only recovery left live-node strands until restart.
-    # Same helpers the watchdog tick uses so either cadence covers the other.
+    # Same helpers the watchdog tick / handle_continue(:recover_orphans) use so
+    # either cadence covers the other — including zombie runs that pin issues
+    # out of reclaim when recover_orphaned_runs is skipped.
+    recover_orphaned_runs()
     _ = recover_orphaned_in_progress()
     _ = recover_stale_checkouts()
 
@@ -1255,7 +1328,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
          %Cympho.Issues.Issue{company_id: company_id},
          %Agent{company_id: company_id}
        )
-       when is_binary(company_id),
+       when is_binary(company_id) and company_id != "",
        do: true
 
   defp same_company?(_issue, _agent), do: false

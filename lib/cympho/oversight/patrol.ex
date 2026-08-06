@@ -14,8 +14,16 @@ defmodule Cympho.Oversight.Patrol do
       agent (typically CTO for engineers, CEO for CTO), or fallback to
       the company CEO when no parent exists.
     - in_review stalled work → wake the issue's current assignee (the
-      reviewer who hasn't picked it up).
+      reviewer who hasn't picked it up), unless that assignee is
+      paused/terminated — then escalate to parent/CEO.
     - root issue with no parent_id → wake the company CEO.
+    - paused/terminated supervisors are never waked; resolution walks
+      the parent chain then CEO, skipping dead agents.
+
+  Dead-assignee fast path: non-terminal issues whose assignee is paused
+  or terminated are treated as stuck immediately (no 30–120m wall-clock
+  wait). Pause rehome usually clears the assignee, so this covers the
+  residual window and any terminate path that did not rehome.
 
   Cooldown prevents the same supervisor from being re-poked every sweep
   for the same issue. The wake queue dedups on
@@ -39,6 +47,8 @@ defmodule Cympho.Oversight.Patrol do
   require Logger
 
   @default_check_interval :timer.minutes(5)
+  @non_terminal_statuses [:todo, :in_progress, :in_review, :blocked]
+  @dead_governance_statuses ["paused", "terminated"]
 
   ## Client API
 
@@ -96,7 +106,7 @@ defmodule Cympho.Oversight.Patrol do
   """
   @spec patrol_company(binary(), keyword()) :: map()
   def patrol_company(company_id, opts \\ []) when is_binary(company_id) do
-    stuck = Issues.list_stuck_issues(company_id, opts)
+    stuck = list_patrol_stuck_issues(company_id, opts)
 
     Enum.reduce(stuck, %{stuck_found: length(stuck)}, fn issue, acc ->
       case wake_supervisor_for(issue, opts) do
@@ -117,7 +127,7 @@ defmodule Cympho.Oversight.Patrol do
         ]
   def preview_company(company_id, opts \\ []) when is_binary(company_id) do
     company_id
-    |> Issues.list_stuck_issues(opts)
+    |> list_patrol_stuck_issues(opts)
     |> Enum.map(fn issue ->
       %{
         issue: issue,
@@ -145,6 +155,9 @@ defmodule Cympho.Oversight.Patrol do
 
       %Agent{id: supervisor_id} = supervisor ->
         cond do
+          not agent_awakeable?(supervisor) ->
+            :no_supervisor
+
           recent_stall_wake?(supervisor_id, issue.id, cooldown_seconds) ->
             :cooldown
 
@@ -154,7 +167,8 @@ defmodule Cympho.Oversight.Patrol do
               "stuck_status" => to_string(issue.status),
               "assignee_id" => issue.assignee_id,
               "stale_minutes" => stale_minutes(issue),
-              "supervisor_role" => to_string(supervisor.role)
+              "supervisor_role" => to_string(supervisor.role),
+              "dead_assignee" => dead_assignee?(issue)
             }
 
             case Wakes.wake_for_stalled_issue(supervisor_id, issue.id, metadata) do
@@ -187,13 +201,54 @@ defmodule Cympho.Oversight.Patrol do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
+  ## Internal — stuck candidate discovery
+
+  # Union of time-threshold stuck issues and immediate dead-assignee issues.
+  # Deduped by issue id so a dead assignee who is also past the staleness
+  # window is only handled once.
+  defp list_patrol_stuck_issues(company_id, opts) do
+    timed = Issues.list_stuck_issues(company_id, opts)
+    dead = list_dead_assignee_issues(company_id)
+
+    timed
+    |> Enum.concat(dead)
+    |> Enum.uniq_by(& &1.id)
+  end
+
+  # Non-terminal issues whose assignee is paused or terminated are stuck
+  # *now* — no wall-clock wait. Live runs are ignored: a paused agent cannot
+  # make progress even if a zombie run row is still "running".
+  defp list_dead_assignee_issues(company_id) do
+    from(i in Issue,
+      as: :issue,
+      join: a in Agent,
+      on: a.id == i.assignee_id,
+      where: i.company_id == ^company_id,
+      where: i.status in ^@non_terminal_statuses,
+      where: is_nil(i.hidden_at),
+      where: is_nil(i.origin_type) or i.origin_type != "backlog_planner",
+      where:
+        fragment(
+          "COALESCE((? -> 'patrol' ->> 'excluded')::boolean, false) = false",
+          i.monitor_state
+        ),
+      where:
+        a.status in ^[:paused, :terminated] or
+          a.governance_status in ^@dead_governance_statuses,
+      order_by: [asc: i.updated_at]
+    )
+    |> Repo.all()
+  end
+
   ## Internal — supervisor resolution
 
   # Pick the right agent to wake for a stuck issue. The rules are:
-  #   :in_review   → wake the current assignee (the reviewer)
+  #   :in_review   → wake the current assignee (the reviewer) if awakeable;
+  #                  otherwise escalate to parent / CEO
   #   :in_progress → walk the parent chain from the assignee
   #   :blocked     → walk the parent chain from the assignee
-  # In every case, fall back to the company CEO if the chain breaks.
+  # In every case, fall back to an awakeable company CEO if the chain breaks.
+  # Paused / terminated agents are never returned as the supervisor.
   defp resolve_supervisor(%Issue{
          status: :in_review,
          assignee_id: assignee_id,
@@ -201,19 +256,23 @@ defmodule Cympho.Oversight.Patrol do
        })
        when is_binary(assignee_id) do
     case Agents.get_agent(assignee_id) do
-      {:ok, %Agent{} = agent} -> agent
-      _ -> ceo_or_nil(company_id)
+      {:ok, %Agent{} = agent} ->
+        if agent_awakeable?(agent) do
+          agent
+        else
+          parent_or_ceo(agent, company_id)
+        end
+
+      _ ->
+        ceo_or_nil(company_id)
     end
   end
 
   defp resolve_supervisor(%Issue{assignee_id: assignee_id, company_id: company_id})
        when is_binary(assignee_id) do
     case Agents.get_agent(assignee_id) do
-      {:ok, %Agent{parent_id: parent_id}} when is_binary(parent_id) ->
-        case Agents.get_agent(parent_id) do
-          {:ok, %Agent{} = parent} -> parent
-          _ -> ceo_or_nil(company_id)
-        end
+      {:ok, %Agent{} = agent} ->
+        parent_or_ceo(agent, company_id)
 
       _ ->
         ceo_or_nil(company_id)
@@ -222,12 +281,50 @@ defmodule Cympho.Oversight.Patrol do
 
   defp resolve_supervisor(%Issue{company_id: company_id}), do: ceo_or_nil(company_id)
 
+  defp parent_or_ceo(%Agent{parent_id: parent_id} = agent, company_id)
+       when is_binary(parent_id) do
+    case Agents.get_agent(parent_id) do
+      {:ok, %Agent{} = parent} ->
+        if agent_awakeable?(parent) do
+          parent
+        else
+          # Parent is dead — try their parent, else company CEO.
+          parent_or_ceo(parent, company_id || agent.company_id)
+        end
+
+      _ ->
+        ceo_or_nil(company_id || agent.company_id)
+    end
+  end
+
+  defp parent_or_ceo(%Agent{company_id: company_id}, _company_id), do: ceo_or_nil(company_id)
+
   defp ceo_or_nil(nil), do: nil
 
   defp ceo_or_nil(company_id) when is_binary(company_id) do
     case Agents.get_company_ceo(company_id) do
-      {:ok, %Agent{} = ceo} -> ceo
-      _ -> nil
+      {:ok, %Agent{} = ceo} ->
+        if agent_awakeable?(ceo), do: ceo, else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp agent_awakeable?(%Agent{status: status}) when status in [:paused, :terminated], do: false
+
+  defp agent_awakeable?(%Agent{governance_status: status})
+       when status in ["paused", "terminated", "pending_approval"],
+       do: false
+
+  defp agent_awakeable?(%Agent{}), do: true
+
+  defp dead_assignee?(%Issue{assignee_id: nil}), do: false
+
+  defp dead_assignee?(%Issue{assignee_id: assignee_id}) when is_binary(assignee_id) do
+    case Agents.get_agent(assignee_id) do
+      {:ok, %Agent{} = agent} -> not agent_awakeable?(agent)
+      _ -> false
     end
   end
 

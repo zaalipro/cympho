@@ -249,6 +249,41 @@ defmodule Cympho.Issues.AutoAssignmentTest do
       assert is_list(eligible)
       assert Enum.all?(eligible, fn a -> a.status == :idle end)
     end
+
+    test "soft-fails on checkout errors instead of MatchError", %{agent: agent} do
+      # Agent is eligible, but issue runtime is paused → checkout returns
+      # {:error, :issue_runtime_paused}. Previously do_assign_issue hard-matched
+      # only {:ok, _} and crashed with MatchError.
+      issue =
+        create_issue_direct(%{
+          title: "Implement login feature",
+          description: "Build the login flow",
+          monitor_state: %{"issue_runtime" => %{"paused" => true}}
+        })
+
+      assert is_nil(issue.assignee_id)
+
+      assert Agents.list_eligible_agents(:engineer, test_company_id())
+             |> Enum.any?(&(&1.id == agent.id))
+
+      assert {:error, :no_eligible_agent, returned} = AutoAssignment.assign_issue(issue)
+      assert returned.id == issue.id
+      assert is_nil(Repo.get!(Issue, issue.id).assignee_id)
+    end
+
+    test "soft-fails when checkout rejects terminal issue", %{agent: _agent} do
+      # Terminal status still finds an agent, then checkout returns :terminal_issue.
+      issue =
+        create_issue_direct(%{
+          title: "Implement login feature",
+          description: "Build the login flow",
+          status: :done
+        })
+
+      assert {:error, :no_eligible_agent, returned} = AutoAssignment.assign_issue(issue)
+      assert returned.id == issue.id
+      assert is_nil(Repo.get!(Issue, issue.id).assignee_id)
+    end
   end
 
   describe "assign_owner_for_dispatch/1" do
@@ -445,6 +480,44 @@ defmodule Cympho.Issues.AutoAssignmentTest do
       reloaded = Repo.get!(Issue, issue.id)
       assert reloaded.status == :backlog
       assert is_nil(reloaded.assignee_id)
+    end
+
+    test "does not reassign hidden backlog issues" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Hidden Backlog Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          max_concurrent_jobs: 3,
+          company_id: test_company_id()
+        })
+
+      visible =
+        create_issue_direct(%{
+          title: "Visible Backlog Issue",
+          description: "Should be assigned"
+        })
+
+      hidden =
+        create_issue_direct(%{
+          title: "Hidden Backlog Issue",
+          description: "Must stay unassigned",
+          hidden_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+
+      {:ok, assigned_count, queued_count} = AutoAssignment.reassign_backlog(test_company_id())
+      assert assigned_count == 1
+      assert queued_count == 0
+
+      reloaded_visible = Repo.get!(Issue, visible.id)
+      assert reloaded_visible.assignee_id == agent.id
+      assert reloaded_visible.status == :todo
+
+      reloaded_hidden = Repo.get!(Issue, hidden.id)
+      assert is_nil(reloaded_hidden.assignee_id)
+      assert reloaded_hidden.status == :backlog
+      assert reloaded_hidden.hidden_at
     end
   end
 

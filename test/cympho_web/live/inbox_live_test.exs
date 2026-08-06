@@ -153,11 +153,13 @@ defmodule CymphoWeb.InboxLiveTest do
       wait_until(fn ->
         rendered = render(view)
         assert rendered =~ "Live review delivery"
-        # Root layout badge DOM is first-paint; live parity is the socket assign
-        # (same source as UserAuth's nav badge hook).
         assert :sys.get_state(view.pid).socket.assigns.inbox_badge_count == 1
         assert :sys.get_state(view.pid).socket.assigns.nav_inbox_count == 1
       end)
+
+      # Root layout chrome is outside inner_content; live badge DOM is driven by
+      # the nav_badges push event (not root-only assigns).
+      assert_push_event(view, "nav_badges", %{inbox: 1, approval: 0})
     end
 
     test "approve_review clears Needs you and drops the nav badge", %{conn: conn} do
@@ -245,6 +247,9 @@ defmodule CymphoWeb.InboxLiveTest do
         assert :sys.get_state(view.pid).socket.assigns.inbox_badge_count == 0
         assert :sys.get_state(view.pid).socket.assigns.nav_inbox_count == 0
       end)
+
+      # Desktop + mobile badge DOM clear without a full page navigation.
+      assert_push_event(view, "nav_badges", %{inbox: 0, approval: 0})
 
       assert {:ok, closed} = Issues.get_company_issue(company.id, issue.id)
       assert closed.status == :done

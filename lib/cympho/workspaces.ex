@@ -718,12 +718,30 @@ defmodule Cympho.Workspaces do
   end
 
   def expire_stale_leases do
-    now = DateTime.utc_now()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    from(el in EnvironmentLease,
-      where: el.status == "active" and el.expires_at < ^now
-    )
-    |> Repo.update_all(set: [status: "expired", updated_at: now])
+    leases =
+      from(el in EnvironmentLease,
+        where: el.status == "active" and not is_nil(el.expires_at) and el.expires_at < ^now
+      )
+      |> Repo.all()
+
+    # Best-effort driver release per lease (mirrors revoke_lease). DB expire
+    # always proceeds so active leases cannot strand after provider failures.
+    Enum.each(leases, fn lease ->
+      _ = EnvironmentLifecycle.release_for_lease(lease)
+    end)
+
+    case leases do
+      [] ->
+        {0, nil}
+
+      _ ->
+        ids = Enum.map(leases, & &1.id)
+
+        from(el in EnvironmentLease, where: el.id in ^ids and el.status == "active")
+        |> Repo.update_all(set: [status: "expired", updated_at: now])
+    end
   end
 
   def cleanup_expired_workspaces do

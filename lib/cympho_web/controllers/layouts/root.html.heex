@@ -372,12 +372,18 @@
             />
           </svg>
           <span class="text-[10px] font-510">Inbox</span>
+          <% mobile_inbox_count = min(assigns[:inbox_badge_count] || 0, 99) %>
           <span
-            :if={(assigns[:inbox_badge_count] || 0) > 0}
-            class="absolute top-1 right-2 min-w-[14px] rounded-full bg-brand px-1 text-[9px] font-590 leading-[14px] text-on-primary text-center"
-            data-testid="mobile-nav-badge-inbox"
+            class={[
+              "absolute top-1 right-2 min-w-[14px] rounded-full bg-brand px-1 text-[9px] font-590 leading-[14px] text-on-primary text-center",
+              mobile_inbox_count > 0 || "hidden"
+            ]}
+            data-nav-badge="inbox"
+            data-count={mobile_inbox_count}
+            data-testid={if(mobile_inbox_count > 0, do: "mobile-nav-badge-inbox")}
+            aria-hidden={if(mobile_inbox_count > 0, do: "false", else: "true")}
           >
-            {min(assigns[:inbox_badge_count] || 0, 99)}
+            {if mobile_inbox_count > 0, do: mobile_inbox_count, else: ""}
           </span>
         </a>
         <a

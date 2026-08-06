@@ -418,6 +418,28 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
       assert exposed.company_id == plugin.company_id
     end
 
+    test "3-arity ignores forged company_id and binds plugin company only", %{
+      plugin: plugin,
+      company_a: company_a,
+      company_b: company_b
+    } do
+      assert {:ok, exposed} =
+               HostServices.expose_tool(
+                 plugin.id,
+                 %{
+                   "name" => "forged_3arity",
+                   "company_id" => company_b.id,
+                   "description" => "must not land on B"
+                 },
+                 ["expose:tools"]
+               )
+
+      assert exposed.company_id == company_a.id
+      assert exposed.company_id == plugin.company_id
+      assert ToolRegistry.get_active(company_b.id, "forged_3arity") == {:error, :not_found}
+      assert {:ok, _} = ToolRegistry.get_active(company_a.id, "forged_3arity")
+    end
+
     test "unauthorized without capability", %{plugin: plugin, company_a: company_a} do
       assert {:error, :unauthorized} =
                HostServices.expose_tool(
@@ -433,7 +455,7 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
       company_a: company_a,
       company_b: company_b
     } do
-      # 4-arity trusts the host-supplied company_id (plugin runtime), not the definition.
+      # 4-arity binds plugin company only; definition company_id is ignored.
       assert {:ok, exposed} =
                HostServices.expose_tool(
                  plugin.id,
@@ -449,6 +471,21 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
       assert exposed.company_id == company_a.id
       assert ToolRegistry.get_active(company_b.id, "scoped_tool") == {:error, :not_found}
       assert {:ok, _} = ToolRegistry.get_active(company_a.id, "scoped_tool")
+    end
+
+    test "4-arity rejects foreign company_id arg", %{
+      plugin: plugin,
+      company_b: company_b
+    } do
+      assert {:error, :invalid_company_scope} =
+               HostServices.expose_tool(
+                 plugin.id,
+                 company_b.id,
+                 %{"name" => "foreign_arg_tool", "description" => "must reject"},
+                 ["expose:tools"]
+               )
+
+      assert ToolRegistry.get_active(company_b.id, "foreign_arg_tool") == {:error, :not_found}
     end
   end
 end

@@ -219,17 +219,98 @@ defmodule CymphoWeb.SimpleModeCopyTest do
   end
 
   describe "simple-mode home destinations stay reachable" do
-    test "runtime failures section is not advanced-only", %{conn: conn} do
-      {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
+    test "Needs-you simple CTAs land on owner-visible routes, not /operations#*", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
 
-      {:ok, _view, html} = live(conn, "/operations")
+      {:ok, agent} =
+        Cympho.Agents.create_agent(%{
+          name: "Simple Dest Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          company_id: company.id
+        })
 
-      # Home's "Something went wrong" card deep-links to #runtime-failures in
-      # simple mode. If this section becomes advanced-only that flow dead-ends.
-      assert html =~ ~s(id="runtime-failures")
-      refute html =~ ~r/id="runtime-failures"\s+class="ui-advanced-only/s
-      assert html =~ "What went wrong"
-      assert html =~ "Recent Runtime Failures"
+      {:ok, issue} =
+        Cympho.Issues.create_issue(%{
+          title: "Failed for simple destinations",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      Cympho.Repo.insert!(%Cympho.HeartbeatEngine.Run{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "codex",
+        error_reason: "missing key"
+      })
+
+      # Review mode card also appears when dispatcher is off in test env —
+      # advanced keeps ops anchors; simple must not.
+      {:ok, _view, html} = live(conn, "/dashboard")
+
+      assert html =~ "Something went wrong" or html =~ "Nothing is running" or
+               html =~ "Some runs failed" or html =~ "Review mode is on"
+
+      # Dual-render: advanced may keep /operations#*; simple anchors never do.
+      simple_hrefs =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find("section[aria-label='Needs you'] a.ui-simple-only")
+        |> Enum.map(fn {_tag, attrs, _} ->
+          attrs |> Map.new() |> Map.get("href")
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      # Also check Later list simple rows if any.
+      later_hrefs =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find("section[aria-label='Needs you'] details a.ui-simple-only")
+        |> Enum.map(fn {_tag, attrs, _} ->
+          attrs |> Map.new() |> Map.get("href")
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      all_simple = simple_hrefs ++ later_hrefs
+
+      assert all_simple != [],
+             "expected dual simple anchors for Needs-you CTAs so simple mode can navigate"
+
+      for href <- all_simple do
+        refute String.starts_with?(href, "/operations"),
+               "simple home CTA must not target advanced-only Operations: #{href}"
+      end
+
+      # Owner-facing destinations only.
+      assert Enum.all?(all_simple, fn href ->
+               href in [
+                 "/inbox",
+                 "/kanban",
+                 "/goals",
+                 "/budgets",
+                 "/budgets/new",
+                 "/settings",
+                 "/onboarding",
+                 "/agents",
+                 "/agents/new",
+                 "/approvals",
+                 "/approvals?status=pending",
+                 "/costs"
+               ] or
+                 String.starts_with?(href, "/inbox") or
+                 String.starts_with?(href, "/issues/") or
+                 String.starts_with?(href, "/approvals") or
+                 String.starts_with?(href, "/budgets") or
+                 String.starts_with?(href, "/agents") or
+                 String.starts_with?(href, "/settings")
+             end)
+
+      _ = user
+      _ = company
     end
   end
 

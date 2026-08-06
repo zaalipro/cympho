@@ -1071,7 +1071,7 @@ defmodule Cympho.Orchestrator do
   defp pluralize(_count, noun), do: noun <> "s"
 
   defp maybe_start_no_work_retry(%__MODULE__{} = session, reason) do
-    if no_work_failure?(reason) and session.no_work_retry_count < @max_no_work_retries do
+    if no_work_failure?(reason, session) and session.no_work_retry_count < @max_no_work_retries do
       attempt_base =
         session
         |> Map.put(:no_work_retry_count, session.no_work_retry_count + 1)
@@ -1125,9 +1125,18 @@ defmodule Cympho.Orchestrator do
     {:stop, :normal, session}
   end
 
-  defp no_work_failure?(:no_output), do: true
-  defp no_work_failure?({:parse_error, _detail}), do: true
-  defp no_work_failure?(_reason), do: false
+  # Single same-runtime retry for failures that produced no usable work.
+  # Zero-progress stall/max-run timeouts (empty tool_traces) burn a human-
+  # visible block without tool evidence — reuse the no_output/parse_error path.
+  defp no_work_failure?(:no_output, _session), do: true
+  defp no_work_failure?({:parse_error, _detail}, _session), do: true
+
+  defp no_work_failure?(reason, %__MODULE__{tool_traces: tool_traces})
+       when reason in [:stall_timeout, :max_run_timeout] and map_size(tool_traces) == 0 do
+    true
+  end
+
+  defp no_work_failure?(_reason, _session), do: false
 
   defp prepare_retry_runtime(%__MODULE__{} = attempt_session, %__MODULE__{} = previous_session) do
     case previous_runtime_profile_id(previous_session) do
@@ -1155,6 +1164,12 @@ defmodule Cympho.Orchestrator do
 
   defp format_no_work_reason({:parse_error, detail}),
     do: "malformed adapter output (#{inspect(detail)})"
+
+  defp format_no_work_reason(:stall_timeout),
+    do: "stall timeout with no tool progress"
+
+  defp format_no_work_reason(:max_run_timeout),
+    do: "max run timeout with no tool progress"
 
   defp format_no_work_reason(reason), do: inspect(reason)
 

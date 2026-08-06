@@ -2301,6 +2301,17 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Blocked"
     end
 
+    test "comment composer sticks above fixed mobile nav", %{issue: issue} do
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      attrs = element_attrs(html, "#issue-comments")
+      class = Map.get(attrs, "class", "")
+
+      assert class =~ "sticky-above-mobile-nav"
+      assert class =~ "sticky"
+      refute class =~ "bottom-0"
+    end
+
     test "shows existing comments", %{issue: issue} do
       {:ok, _comment} =
         Comments.create_comment(%{

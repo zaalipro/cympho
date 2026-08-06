@@ -568,6 +568,28 @@ defmodule Cympho.Wakes do
   end
 
   @doc """
+  Wakes a manager because an assignee was paused and their non-terminal work
+  was rehomed. Distinct from stall wakes — the assignee is known-dead, so the
+  manager should reassign or intervene immediately rather than wait for a
+  staleness threshold.
+
+  Uses the escalation reason channel (manager already handles
+  `escalation_from_subordinate`) with `paused_agent_id` metadata so prompts
+  can distinguish pause-rehome from a voluntary subordinate escalate.
+  """
+  @spec wake_for_assignee_paused(String.t(), String.t(), map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_assignee_paused(manager_agent_id, issue_id, metadata \\ %{})
+      when is_binary(manager_agent_id) and is_binary(issue_id) do
+    metadata =
+      metadata
+      |> Map.put("from_agent_id", metadata["paused_agent_id"] || metadata[:paused_agent_id])
+      |> Map.put("rehome", true)
+
+    wake_for_escalation(manager_agent_id, issue_id, metadata)
+  end
+
+  @doc """
   Wakes the CEO when the dispatcher's fallback chain has exhausted itself
   with no eligible agent. This is the dispatcher giving up and asking the
   CEO to either spawn a new agent or cancel the work.

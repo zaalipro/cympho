@@ -437,7 +437,7 @@ defmodule Cympho.AgentPrompt do
     attempts = Map.get(metadata, "attempts") || "one or more"
 
     """
-    This is a bounded same-runtime retry after #{attempts} no-output or malformed-output adapter failure(s). Re-read the issue, avoid repeating the empty/malformed response pattern, and produce a concrete lifecycle action with useful evidence. If you still cannot make progress, emit `block_issue` with the runtime limitation and the exact restart packet needed.
+    This is a bounded same-runtime retry after #{attempts} no-output, malformed-output, or zero-progress timeout adapter failure(s). Re-read the issue, avoid repeating the empty/malformed/no-progress pattern, and produce a concrete lifecycle action with useful evidence. If you still cannot make progress, emit `block_issue` with the runtime limitation and the exact restart packet needed.
     """
     |> String.trim()
   end
