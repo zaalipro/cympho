@@ -2040,10 +2040,8 @@ defmodule Cympho.Issues do
         updated.status in [:done, :cancelled] ->
           unblock_dependents(issue.id)
 
-          if updated.status == :done do
-            _ = Wakes.notify_children_completed(updated)
-            maybe_complete_parent(updated)
-          end
+          maybe_complete_parent(updated)
+          _ = Wakes.notify_children_completed(updated)
 
         updated.status == :in_review ->
           _ = Wakes.notify_child_in_review(updated)
@@ -2094,13 +2092,53 @@ defmodule Cympho.Issues do
               Repo.rollback(reason)
           end
         else
-          case do_transition(parent, :done) do
-            {:ok, _} ->
-              add_system_comment(parent, "Auto-completed: all sub-issues are done")
-              :ok
+          if parent.status in [:blocked, "blocked"] do
+            restored =
+              case get_in(parent.monitor_state || %{}, ["decomposition_owner_id"]) do
+                owner_id when is_binary(owner_id) ->
+                  case Agents.get_agent(owner_id) do
+                    {:ok, agent} ->
+                      if agent.governance_status != "terminated",
+                        do: owner_id,
+                        else: parent.assignee_id
 
-            {:error, reason} ->
-              Repo.rollback(reason)
+                    _ ->
+                      parent.assignee_id
+                  end
+
+                _ ->
+                  parent.assignee_id
+              end
+
+            monitor =
+              Map.drop(parent.monitor_state || %{}, [
+                "decomposition_parked",
+                "decomposition_owner_id"
+              ])
+
+            case update_issue(parent, %{
+                   status: :todo,
+                   assignee_id: restored,
+                   checkout_run_id: nil,
+                   checked_out_at: nil,
+                   monitor_state: monitor
+                 }) do
+              {:ok, _} ->
+                add_system_comment(parent, "Reopened after child completion")
+                :ok
+
+              {:error, reason} ->
+                Repo.rollback(reason)
+            end
+          else
+            case do_transition(parent, :done) do
+              {:ok, _} ->
+                add_system_comment(parent, "Auto-completed: all sub-issues are done")
+                :ok
+
+              {:error, reason} ->
+                Repo.rollback(reason)
+            end
           end
         end
       else

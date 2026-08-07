@@ -40,6 +40,7 @@ defmodule Cympho.Wakes.AgentWake do
     child_created
     child_status_changed
     final_review_required
+    spec_review_required
     review_nudge_re_emit
     review_nudge_escalated
     mission_idle

@@ -1957,7 +1957,12 @@ defmodule Cympho.AgentActions do
                status: :blocked,
                assignee_id: nil,
                checkout_run_id: nil,
-               checked_out_at: nil
+               checked_out_at: nil,
+               monitor_state:
+                 Map.merge(issue.monitor_state || %{}, %{
+                   "decomposition_parked" => true,
+                   "decomposition_owner_id" => agent.id
+                 })
              }),
            {:ok, _comment} <- maybe_agent_comment(issue, agent, note) do
         updated
@@ -2403,6 +2408,17 @@ defmodule Cympho.AgentActions do
     end)
   end
 
+  defp pick_cto_agent(company_id) when is_binary(company_id) do
+    Agents.list_agents_by_role(:cto, company_id)
+    |> Enum.reject(&(&1.governance_status == "terminated"))
+    |> Enum.sort_by(fn agent ->
+      {agent.status != :idle, agent.inserted_at || ~U[1970-01-01 00:00:00Z], agent.id}
+    end)
+    |> List.first()
+  end
+
+  defp pick_cto_agent(_), do: nil
+
   defp seed_one_initiative(issue, agent, goal, item, base_depth) do
     case find_recent_duplicate(issue.company_id, item["title"], goal.id) do
       %Issue{} = existing ->
@@ -2417,16 +2433,18 @@ defmodule Cympho.AgentActions do
       nil ->
         proposed_role = item["role"]
 
-        # CEO-seeded initiatives are held in :backlog assigned to CTO for spec
-        # review before the engineer pool sees them. The CTO refines acceptance
+        # CEO-seeded initiatives land in :todo assigned to CTO for spec review
+        # before the engineer pool sees them. The CTO refines acceptance
         # criteria (request_changes back to CEO, create_issue to split, or
         # approve_issue to release into the proposed role's pool). See
         # `approve_issue` branching for the spec-approval path.
+        cto = pick_cto_agent(issue.company_id)
+
         attrs = %{
           title: item["title"],
           description: item["description"] || "",
           priority: item["priority"] || "high",
-          status: :backlog,
+          status: :todo,
           company_id: issue.company_id,
           project_id: issue.project_id,
           goal_id: goal.id,
@@ -2435,6 +2453,7 @@ defmodule Cympho.AgentActions do
           # from pulling the planning issue into a premature done state.
           parent_id: nil,
           assigned_role: "cto",
+          assignee_id: if(cto, do: cto.id, else: nil),
           monitor_state: %{
             "proposed_role" => proposed_role,
             "spec_review_required" => true,
@@ -2460,16 +2479,29 @@ defmodule Cympho.AgentActions do
                   "`create_issue` to split into smaller tickets."
               )
 
-            _ =
-              Cympho.Orchestrator.Dispatcher.enqueue_wake(
-                created.id,
-                "spec_review_required",
-                %{
-                  goal_id: goal.id,
-                  seeded_by_agent: agent.id,
-                  proposed_role: proposed_role
-                }
-              )
+            wake_meta = %{
+              goal_id: goal.id,
+              seeded_by_agent: agent.id,
+              proposed_role: proposed_role
+            }
+
+            case Cympho.Orchestrator.Dispatcher.enqueue_wake(
+                   created.id,
+                   "spec_review_required",
+                   wake_meta
+                 ) do
+              {:ok, _} ->
+                :ok
+
+              {:error, reason} ->
+                if created.assignee_id do
+                  Logger.warning(
+                    "seed_one_initiative enqueue_wake failed",
+                    issue_id: created.id,
+                    reason: inspect(reason)
+                  )
+                end
+            end
 
             {:ok,
              %{

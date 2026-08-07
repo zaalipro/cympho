@@ -1133,7 +1133,7 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
-    test "blocks after one malformed-output retry is exhausted", %{
+    test "releases for redispatch after one malformed-output retry is exhausted", %{
       agent_id: agent_id,
       issue: issue
     } do
@@ -1173,7 +1173,18 @@ defmodule Cympho.OrchestratorTest do
         runs = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
         assert length(runs) == 2
         assert Enum.all?(runs, &(&1.status == "failed"))
-        assert Issues.get_issue!(issue.id).status == :blocked
+
+        reloaded = Issues.get_issue!(issue.id)
+        assert reloaded.status == :todo
+        assert reloaded.assignee_id == agent_id
+        assert Enum.any?(comments, &(&1.body =~ "released for redispatch"))
+
+        wakes = Cympho.Wakes.list_issue_wakes(issue.id)
+
+        assert Enum.any?(wakes, fn w ->
+                 w.reason == "runtime_retry" and w.status == "pending" and
+                   w.agent_id == agent_id
+               end)
       end
     end
 
@@ -1241,7 +1252,7 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
-    test "retries zero-progress max_run_timeout once then blocks when retry also fails", %{
+    test "retries zero-progress max_run_timeout once then releases for redispatch when retry also fails", %{
       agent_id: agent_id,
       issue: issue
     } do
@@ -1281,7 +1292,18 @@ defmodule Cympho.OrchestratorTest do
         runs = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
         assert length(runs) == 2
         assert Enum.all?(runs, &(&1.status == "failed"))
-        assert Issues.get_issue!(issue.id).status == :blocked
+
+        reloaded = Issues.get_issue!(issue.id)
+        assert reloaded.status == :todo
+        assert reloaded.assignee_id == agent_id
+        assert Enum.any?(comments, &(&1.body =~ "released for redispatch"))
+
+        wakes = Cympho.Wakes.list_issue_wakes(issue.id)
+
+        assert Enum.any?(wakes, fn w ->
+                 w.reason == "runtime_retry" and w.status == "pending" and
+                   w.agent_id == agent_id
+               end)
       end
     end
 

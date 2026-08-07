@@ -272,6 +272,60 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
     %{company: company, agent: agent, issue: issue}
   end
 
+  test "admits blocked issue with pending issue_children_completed wake", %{
+    company: company,
+    agent: agent
+  } do
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Soft parked parent",
+        status: :blocked,
+        company_id: company.id,
+        assignee_id: agent.id,
+        assigned_role: "engineer"
+      })
+
+    {:ok, _wake} =
+      Cympho.Wakes.do_wake_agent(
+        agent.id,
+        issue.id,
+        "issue_children_completed",
+        "system",
+        nil,
+        %{}
+      )
+
+    preloaded = Issues.get_issue!(issue.id) |> Cympho.Repo.preload([:blocked_by, :company])
+    assert Dispatcher.runnable_candidate?(preloaded)
+  end
+
+  test "admits blocked issue with pending escalation_from_subordinate wake", %{
+    company: company,
+    agent: agent
+  } do
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Escalated blocked",
+        status: :blocked,
+        company_id: company.id,
+        assignee_id: agent.id,
+        assigned_role: "engineer"
+      })
+
+    {:ok, _wake} =
+      Cympho.Wakes.do_wake_agent(
+        agent.id,
+        issue.id,
+        "escalation_from_subordinate",
+        "system",
+        nil,
+        %{}
+      )
+
+    preloaded = Issues.get_issue!(issue.id) |> Cympho.Repo.preload([:blocked_by, :company])
+    assert Dispatcher.runnable_candidate?(preloaded)
+  end
+
   test "orchestrator start failure releases the checkout so the retry can run", %{
     company: company,
     issue: issue

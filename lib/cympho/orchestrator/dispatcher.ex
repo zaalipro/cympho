@@ -102,7 +102,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     not Issues.issue_runtime_paused?(issue) and
       not Issues.is_blocked?(issue) and
       runtime_mode_allows_issue?(issue) and
-      pending_escalation_wake?(issue.id)
+      pending_blocked_resume_wake?(issue.id)
   end
 
   def runnable_candidate?(%Issue{} = issue) do
@@ -970,7 +970,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
                    where:
                      w.issue_id == parent_as(:issue).id and
                        w.status == "pending" and
-                       w.reason == "escalation_from_subordinate"
+                       w.reason in ^["escalation_from_subordinate", "issue_children_completed"]
                )),
         where: not is_nil(i.company_id) and c.status == "active"
 
@@ -1010,17 +1010,20 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp runtime_mode_allows_issue?(_issue), do: false
 
-  defp pending_escalation_wake?(issue_id) when is_binary(issue_id) do
+  # Blocked issues are only dispatcher-eligible when a resume wake is pending
+  # (escalation to a manager, or children-completed after soft-park).
+  # Do not include runtime_retry here — those issues are released to :todo.
+  defp pending_blocked_resume_wake?(issue_id) when is_binary(issue_id) do
     Cympho.Repo.exists?(
       from w in AgentWake,
         where:
           w.issue_id == ^issue_id and
             w.status == "pending" and
-            w.reason == "escalation_from_subordinate"
+            w.reason in ^["escalation_from_subordinate", "issue_children_completed"]
     )
   end
 
-  defp pending_escalation_wake?(_issue_id), do: false
+  defp pending_blocked_resume_wake?(_issue_id), do: false
 
   defp dispatch_only_issue_id do
     :cympho

@@ -53,6 +53,8 @@ defmodule Cympho.AgentActions.DecompositionDepsTest do
       reloaded = Issues.get_issue!(cto_issue.id)
       assert reloaded.status == :blocked
       assert reloaded.assignee_id == nil
+      assert get_in(reloaded.monitor_state, ["decomposition_parked"]) == true
+      assert get_in(reloaded.monitor_state, ["decomposition_owner_id"]) == cto.id
 
       assert Enum.any?(Cympho.Comments.list_comments(cto_issue.id), fn comment ->
                comment.author_type == "agent" and
@@ -165,6 +167,8 @@ defmodule Cympho.AgentActions.DecompositionDepsTest do
       reloaded = Issues.get_issue!(eng_issue.id)
       assert reloaded.status == :blocked
       assert reloaded.assignee_id == nil
+      assert get_in(reloaded.monitor_state, ["decomposition_parked"]) == true
+      assert get_in(reloaded.monitor_state, ["decomposition_owner_id"]) == engineer.id
 
       assert Enum.any?(Cympho.Comments.list_comments(eng_issue.id), fn comment ->
                comment.author_type == "agent" and

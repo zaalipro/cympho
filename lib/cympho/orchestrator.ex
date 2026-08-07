@@ -362,7 +362,11 @@ defmodule Cympho.Orchestrator do
             stop_before_adapter_dispatch(session, start_error)
 
           :none ->
-            finish_failed_session(session, reason)
+            if no_work_failure?(reason, session) do
+              finish_retriable_no_work_session(session, reason)
+            else
+              finish_failed_session(session, reason)
+            end
         end
     end
   rescue
@@ -471,6 +475,73 @@ defmodule Cympho.Orchestrator do
     _ -> false
   catch
     :exit, _ -> false
+  end
+
+  defp finish_retriable_no_work_session(%__MODULE__{} = session, reason) do
+    issue = session.issue
+    agent_id = session.agent_id
+
+    error_body = Error.comment(reason, adapter: session_adapter_name(session))
+    create_agent_comment(issue, agent_id, error_body)
+
+    case Issues.get_issue(issue.id) do
+      {:ok, latest} ->
+        if session_still_owns_failure_path?(latest, session) do
+          release_result =
+            case Issues.clear_checkout_lock(latest, :todo) do
+              {:ok, _} = ok ->
+                ok
+
+              {:error, _} ->
+                Issues.update_issue(latest, %{
+                  status: :todo,
+                  checkout_run_id: nil,
+                  checked_out_at: nil
+                })
+            end
+
+          case release_result do
+            {:ok, released} ->
+              create_agent_comment(
+                released,
+                agent_id,
+                "No usable adapter output released for redispatch. Reason: #{format_no_work_reason(reason)}."
+              )
+
+              _ =
+                Cympho.Orchestrator.Dispatcher.enqueue_wake(
+                  released.id,
+                  "runtime_retry",
+                  %{"attempts" => max(session.no_work_retry_count, 1)}
+                )
+
+            {:error, _} ->
+              :ok
+          end
+        else
+          _ = maybe_clear_session_owned_checkout(session, latest)
+
+          Logger.info(
+            "[Orchestrator] finish_retriable_no_work_session skipped release — ownership already moved",
+            issue_id: issue.id,
+            agent_id: agent_id,
+            current_assignee_id: latest.assignee_id,
+            current_status: latest.status,
+            checkout_run_id: latest.checkout_run_id
+          )
+        end
+
+      {:error, _} ->
+        :ok
+    end
+
+    if provider_limit_failure?(reason) do
+      pause_agent_for_provider_limit(agent_id, issue, reason)
+    else
+      set_agent_idle(agent_id)
+    end
+
+    {:stop, :normal, session}
   end
 
   defp finish_failed_session(%__MODULE__{} = session, reason) do

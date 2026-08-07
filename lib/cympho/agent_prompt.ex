@@ -491,7 +491,7 @@ defmodule Cympho.AgentPrompt do
 
   defp wake_preamble("issue_children_completed", _metadata, _role) do
     """
-    Every child issue under this one is `:done`. Roll up the children's outcomes into a single `[review]` or `[owner_update]` comment, then `submit_review` (engineer/PM/CTO) or `approve_issue` (CEO) so the parent issue can close.
+    Every child issue under this one is terminal (:done or :cancelled). Roll up the children's outcomes into a single `[review]` or `[owner_update]` comment, then `submit_review` (engineer/PM/CTO) or `approve_issue` (CEO) so the parent issue can close.
     """
     |> String.trim()
   end

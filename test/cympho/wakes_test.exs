@@ -629,6 +629,122 @@ defmodule Cympho.WakesTest do
 
       assert {:error, :children_not_all_done} = Wakes.notify_children_completed(child2)
     end
+    test "wakes parent when children are mix of done and cancelled", %{
+      agent: agent,
+      project: project,
+      company: company
+    } do
+      {:ok, parent} =
+        Issues.create_issue(%{
+          title: "Parent Issue",
+          project_id: project.id,
+          company_id: company.id,
+          assignee_id: agent.id,
+          status: :in_progress
+        })
+
+      {:ok, _child1} =
+        Issues.create_issue(%{
+          title: "Child 1 cancelled",
+          project_id: project.id,
+          company_id: company.id,
+          parent_id: parent.id,
+          status: :cancelled
+        })
+
+      {:ok, child2} =
+        Issues.create_issue(%{
+          title: "Child 2 done",
+          project_id: project.id,
+          company_id: company.id,
+          parent_id: parent.id,
+          status: :done
+        })
+
+      result = Wakes.notify_children_completed(child2)
+
+      assert {:ok, agent_wake} = result
+      assert agent_wake.reason == "issue_children_completed"
+    end
+
+    test "reopens soft-blocked parent when all children terminal", %{
+      agent: agent,
+      project: project,
+      company: company
+    } do
+      {:ok, parent} =
+        Issues.create_issue(%{
+          title: "Soft blocked parent",
+          project_id: project.id,
+          company_id: company.id,
+          assignee_id: nil,
+          assigned_role: "engineer",
+          status: :blocked,
+          monitor_state: %{
+            "decomposition_parked" => true,
+            "decomposition_owner_id" => agent.id
+          }
+        })
+
+      {:ok, child} =
+        Issues.create_issue(%{
+          title: "Only child",
+          project_id: project.id,
+          company_id: company.id,
+          parent_id: parent.id,
+          status: :done
+        })
+
+      assert {:ok, _wake} = Wakes.notify_children_completed(child)
+
+      reloaded = Issues.get_issue!(parent.id)
+      assert reloaded.status == :todo
+      assert reloaded.assignee_id == agent.id
+      refute Map.has_key?(reloaded.monitor_state || %{}, "decomposition_parked")
+    end
+
+    test "does not reopen soft-blocked parent while a sibling is still open", %{
+      agent: agent,
+      project: project,
+      company: company
+    } do
+      {:ok, parent} =
+        Issues.create_issue(%{
+          title: "Still open children",
+          project_id: project.id,
+          company_id: company.id,
+          assignee_id: nil,
+          assigned_role: "engineer",
+          status: :blocked,
+          monitor_state: %{
+            "decomposition_parked" => true,
+            "decomposition_owner_id" => agent.id
+          }
+        })
+
+      {:ok, _} =
+        Issues.create_issue(%{
+          title: "Open child",
+          project_id: project.id,
+          company_id: company.id,
+          parent_id: parent.id,
+          status: :todo
+        })
+
+      {:ok, child2} =
+        Issues.create_issue(%{
+          title: "Done child",
+          project_id: project.id,
+          company_id: company.id,
+          parent_id: parent.id,
+          status: :done
+        })
+
+      assert {:error, :children_not_all_done} = Wakes.notify_children_completed(child2)
+      reloaded = Issues.get_issue!(parent.id)
+      assert reloaded.status == :blocked
+    end
+
   end
 
   describe "notify_blockers_resolved/1" do

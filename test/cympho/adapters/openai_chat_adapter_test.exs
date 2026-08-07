@@ -99,6 +99,108 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
       body = Jason.encode!(%{"choices" => [%{"message" => %{"content" => ""}}]})
       assert {:error, :no_output} = OpenAIChatAdapter.parse_chat_response(body)
     end
+
+    test "falls back to reasoning_content when content is null" do
+      body =
+        Jason.encode!(%{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => nil,
+                "reasoning_content" => " [owner_update] GLM reasoned the plan. "
+              }
+            }
+          ]
+        })
+
+      assert {:ok, %{"content" => [%{"type" => "text", "text" => text}]}} =
+               OpenAIChatAdapter.parse_chat_response(body)
+
+      assert text == "[owner_update] GLM reasoned the plan."
+    end
+
+    test "falls back to reasoning_content when content is blank" do
+      body =
+        Jason.encode!(%{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => "",
+                "reasoning_content" => "  usable reasoning  "
+              }
+            }
+          ]
+        })
+
+      assert {:ok, %{"content" => [%{"type" => "text", "text" => "usable reasoning"}]}} =
+               OpenAIChatAdapter.parse_chat_response(body)
+    end
+
+    test "falls back to reasoning_content when content key is missing" do
+      body =
+        Jason.encode!(%{
+          "choices" => [
+            %{
+              "message" => %{
+                "reasoning_content" => "reasoning only turn"
+              }
+            }
+          ]
+        })
+
+      assert {:ok, %{"content" => [%{"type" => "text", "text" => "reasoning only turn"}]}} =
+               OpenAIChatAdapter.parse_chat_response(body)
+    end
+
+    test "prefers non-empty content over reasoning_content" do
+      body =
+        Jason.encode!(%{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => "primary content",
+                "reasoning_content" => "secondary reasoning"
+              }
+            }
+          ]
+        })
+
+      assert {:ok, %{"content" => [%{"type" => "text", "text" => "primary content"}]}} =
+               OpenAIChatAdapter.parse_chat_response(body)
+    end
+
+    test "accepts thinking alias when content is empty" do
+      body =
+        Jason.encode!(%{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => "",
+                "thinking" => "thought text"
+              }
+            }
+          ]
+        })
+
+      assert {:ok, %{"content" => [%{"type" => "text", "text" => "thought text"}]}} =
+               OpenAIChatAdapter.parse_chat_response(body)
+    end
+
+    test "returns no_output when content is null and reasoning aliases are empty" do
+      body =
+        Jason.encode!(%{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => nil,
+                "reasoning_content" => "   "
+              }
+            }
+          ]
+        })
+
+      assert {:error, :no_output} = OpenAIChatAdapter.parse_chat_response(body)
+    end
   end
 
   describe "validate_config/1" do

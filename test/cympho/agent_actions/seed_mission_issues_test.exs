@@ -75,10 +75,10 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
       assert Enum.all?(created, &(&1.goal_id == goal.id))
       assert Enum.all?(created, &is_nil(&1.parent_id))
 
-      # CEO-seeded children land in :backlog assigned to CTO for spec review,
+      # CEO-seeded children land in :todo assigned to CTO for spec review,
       # NOT directly into the proposed role pool. The proposed role survives
       # in monitor_state for the CTO to honor on approval.
-      assert Enum.all?(created, &(&1.status == :backlog))
+      assert Enum.all?(created, &(&1.status == :todo))
       assert Enum.all?(created, &(&1.assigned_role == "cto"))
 
       assert Enum.map(created, &get_in(&1.monitor_state, ["proposed_role"])) |> Enum.sort() ==
@@ -88,6 +88,19 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
                created,
                &(get_in(&1.monitor_state, ["spec_review_required"]) == true)
              )
+
+      cto = Cympho.Agents.list_agents_by_role(:cto) |> List.first()
+      assert cto != nil
+      assert Enum.all?(created, &(&1.assignee_id == cto.id))
+
+      Enum.each(created, fn issue ->
+        wakes = Cympho.Wakes.list_issue_wakes(issue.id)
+
+        assert Enum.any?(wakes, fn w ->
+                 w.reason == "spec_review_required" and w.status == "pending" and
+                   w.agent_id == cto.id
+               end)
+      end)
     end
 
     test "CTO approving a spec-review child releases it into the proposed role pool",
@@ -114,7 +127,7 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
         ])
 
       child = Issues.get_issue!(child_id)
-      assert child.status == :backlog
+      assert child.status == :todo
       assert child.assigned_role == "cto"
 
       # CTO approves the spec.
@@ -187,7 +200,7 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
       assert scaffold =~ "Delivery goal: Build checkout telemetry"
 
       reloaded = Issues.get_issue!(child_id)
-      assert reloaded.status == :backlog
+      assert reloaded.status == :todo
       assert reloaded.assigned_role == "cto"
       assert get_in(reloaded.monitor_state, ["spec_review_required"]) == true
 

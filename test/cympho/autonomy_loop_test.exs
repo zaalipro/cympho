@@ -118,7 +118,7 @@ defmodule Cympho.AutonomyLoopTest do
 
     assert length(created) == 2
 
-    # The two newly-seeded initiatives are held in :backlog assigned to CTO
+    # The two newly-seeded initiatives are held in :todo assigned to CTO
     # for spec review — engineers can't pick them up until CTO approves.
     initiatives =
       goal.id
@@ -127,7 +127,7 @@ defmodule Cympho.AutonomyLoopTest do
 
     assert length(initiatives) == 2
     assert Enum.all?(initiatives, &(&1.assigned_role == "cto"))
-    assert Enum.all?(initiatives, &(&1.status == :backlog))
+    assert Enum.all?(initiatives, &(&1.status == :todo))
 
     assert Enum.any?(
              initiatives,

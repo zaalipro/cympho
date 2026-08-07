@@ -187,15 +187,54 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
     end
   end
 
-  defp extract_content(%{"choices" => [%{"message" => %{"content" => content}} | _]}) do
-    normalize_content(content)
+  defp extract_content(%{"choices" => [%{"message" => msg} | _]}) when is_map(msg) do
+    text_from_chat_message(msg)
   end
 
-  defp extract_content(%{"choices" => [%{"delta" => %{"content" => content}} | _]}) do
-    normalize_content(content)
+  defp extract_content(%{"choices" => [%{"delta" => msg} | _]}) when is_map(msg) do
+    text_from_chat_message(msg)
   end
 
   defp extract_content(_), do: {:error, {:parse_error, "missing choices[0].message.content"}}
+
+  defp text_from_chat_message(msg) when is_map(msg) do
+    raw = Map.get(msg, "content")
+
+    cond do
+      is_nil(raw) ->
+        case reasoning_text_from_message(msg) do
+          {:ok, text} -> {:ok, text}
+          :none -> {:error, :no_output}
+        end
+
+      true ->
+        case normalize_content(raw) do
+          {:ok, text} ->
+            {:ok, text}
+
+          {:error, :no_output} ->
+            case reasoning_text_from_message(msg) do
+              {:ok, text} -> {:ok, text}
+              :none -> {:error, :no_output}
+            end
+
+          {:error, other} ->
+            {:error, other}
+        end
+    end
+  end
+
+  defp reasoning_text_from_message(msg) when is_map(msg) do
+    Enum.find_value(["reasoning_content", "reasoning", "thinking"], :none, fn key ->
+      case Map.get(msg, key) do
+        value when is_binary(value) ->
+          if String.trim(value) != "", do: {:ok, value}, else: nil
+
+        _ ->
+          nil
+      end
+    end)
+  end
 
   defp normalize_content(content) when is_binary(content) do
     if String.trim(content) == "" do

@@ -284,26 +284,31 @@ defmodule Cympho.Wakes do
     if is_nil(child_issue.parent_id) do
       {:error, :no_parent}
     else
-      parent = Repo.get!(Issue, child_issue.parent_id) |> Repo.preload([:assignee, :children])
+      parent =
+        Repo.get!(Issue, child_issue.parent_id)
+        |> Repo.preload([:assignee, :children, :blocked_by])
 
-      with {:ok, target_agent_id} <- parent_wake_target(parent) do
-        cond do
-          not all_children_done?(parent) ->
-            {:error, :children_not_all_done}
+      cond do
+        not all_children_done?(parent) ->
+          {:error, :children_not_all_done}
 
-          parent.status not in [:in_progress, :blocked, :todo] ->
-            {:error, :parent_not_active}
+        true ->
+          parent = maybe_reopen_decomposition_parked_parent(parent)
 
-          true ->
-            do_wake_agent(
-              target_agent_id,
-              parent.id,
-              "issue_children_completed",
-              "system",
-              child_issue.id,
-              %{child_id: child_issue.id}
-            )
-        end
+          with {:ok, target_agent_id} <- parent_wake_target(parent) do
+            if parent.status in [:in_progress, :blocked, :todo] do
+              do_wake_agent(
+                target_agent_id,
+                parent.id,
+                "issue_children_completed",
+                "system",
+                child_issue.id,
+                %{child_id: child_issue.id}
+              )
+            else
+              {:error, :parent_not_active}
+            end
+          end
       end
     end
   end
@@ -1115,7 +1120,78 @@ defmodule Cympho.Wakes do
       Logger.warning("all_children_done?: children not preloaded for issue #{issue.id}")
     end
 
-    Enum.all?(children, fn child -> child.status == :done end)
+    Enum.all?(children, fn child -> child.status in [:done, :cancelled] end)
+  end
+
+  defp maybe_reopen_decomposition_parked_parent(%Issue{} = parent) do
+    parent =
+      if Ecto.assoc_loaded?(parent.blocked_by) do
+        parent
+      else
+        Repo.preload(parent, :blocked_by)
+      end
+
+    status = parent.status
+
+    cond do
+      status not in [:blocked, "blocked"] ->
+        parent
+
+      Issues.is_blocked?(parent) ->
+        parent
+
+      true ->
+        owner_id =
+          case get_in(parent.monitor_state || %{}, ["decomposition_owner_id"]) do
+            id when is_binary(id) ->
+              case Agents.get_agent(id) do
+                {:ok, agent} ->
+                  if agent.governance_status != "terminated", do: id, else: nil
+
+                _ ->
+                  nil
+              end
+
+            _ ->
+              nil
+          end
+
+        owner_id =
+          if is_nil(owner_id) do
+            case parent_wake_target(parent) do
+              {:ok, id} -> id
+              _ -> nil
+            end
+          else
+            owner_id
+          end
+
+        monitor =
+          Map.drop(parent.monitor_state || %{}, [
+            "decomposition_parked",
+            "decomposition_owner_id"
+          ])
+
+        case Issues.update_issue(parent, %{
+               status: :todo,
+               assignee_id: owner_id,
+               checkout_run_id: nil,
+               checked_out_at: nil,
+               monitor_state: monitor
+             }) do
+          {:ok, updated} ->
+            updated
+
+          {:error, reason} ->
+            Logger.warning(
+              "maybe_reopen_decomposition_parked_parent failed",
+              issue_id: parent.id,
+              reason: inspect(reason)
+            )
+
+            parent
+        end
+    end
   end
 
   defp load_uuid(id) do
