@@ -21,19 +21,27 @@ defmodule CymphoWeb.PreviewController do
     end
   end
 
+  @dropped_req_headers ~w(cookie authorization host connection keep-alive transfer-encoding)
+
   defp proxy_to_service(conn, %RuntimeService{} = service) do
-    if service.status == "running" && service.port do
-      target_url = PreviewUrl.get_target_url(service)
-      proxy_request(conn, target_url)
-    else
-      conn
-      |> put_status(:service_unavailable)
-      |> json(%{error: "Service is not running", status: service.status})
+    case PreviewUrl.get_target_url(service) do
+      nil ->
+        conn
+        |> put_status(:forbidden)
+        |> json(%{error: "Proxy target address is not allowed"})
+
+      _target_url when service.status != "running" ->
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{error: "Service is not running", status: service.status})
+
+      target_url ->
+        proxy_request(conn, target_url)
     end
   end
 
   defp proxy_request(conn, target_url) do
-    path = Enum.join(conn.path_info -- ["preview", hd(conn.path_info)], "/")
+    path = proxy_path(conn)
     query_string = conn.query_string
 
     full_url =
@@ -44,9 +52,9 @@ defmodule CymphoWeb.PreviewController do
         {_, _} -> "#{target_url}/#{path}?#{query_string}"
       end
 
-    headers = Enum.map(conn.req_headers, fn {k, v} -> {k, v} end)
+    headers = filter_req_headers(conn.req_headers)
 
-    case Finch.build(conn.method, full_url, headers, conn.body)
+    case Finch.build(conn.method, full_url, headers, "")
          |> Finch.request(Cympho.Finch, []) do
       {:ok, response} ->
         filtered_headers =
@@ -64,6 +72,26 @@ defmodule CymphoWeb.PreviewController do
         |> put_status(:bad_gateway)
         |> json(%{error: "Failed to proxy request", reason: inspect(reason)})
     end
+  end
+
+  defp proxy_path(conn) do
+    case conn.params["path"] do
+      path when is_list(path) ->
+        Enum.join(path, "/")
+
+      path when is_binary(path) and path != "" ->
+        path
+
+      _ ->
+        case conn.path_info do
+          ["api", "preview", _id, "proxy" | rest] -> Enum.join(rest, "/")
+          _ -> ""
+        end
+    end
+  end
+
+  defp filter_req_headers(headers) do
+    Enum.reject(headers, fn {name, _} -> String.downcase(name) in @dropped_req_headers end)
   end
 
   @doc """

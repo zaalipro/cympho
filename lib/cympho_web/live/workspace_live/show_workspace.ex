@@ -469,10 +469,8 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
   defp service_port(%{port: nil}), do: nil
   defp service_port(%{port: port}), do: ":#{port}"
 
-  defp preview_href(%{url: url}) when is_binary(url) and url != "", do: url
-
   defp preview_href(%{status: "running", port: port, id: id}) when is_integer(port),
-    do: "/preview/#{id}"
+    do: "/api/preview/#{id}/proxy"
 
   defp preview_href(_service), do: nil
 

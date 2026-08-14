@@ -95,9 +95,9 @@ defmodule CymphoWeb.WorkspaceController do
   def list_exec_workspaces(conn, %{"id" => pw_id} = params) do
     with {:ok, project_workspace} <-
            Workspaces.get_company_project_workspace(company_id(conn), pw_id) do
-      opts = Keyword.take(params, [:status])
+      opts = if status = params["status"], do: [status: status], else: []
       workspaces = Workspaces.list_execution_workspaces(project_workspace.id, opts)
-      json(conn, %{data: workspaces})
+      json(conn, %{data: encode_records(workspaces)})
     end
   end
 
@@ -163,7 +163,7 @@ defmodule CymphoWeb.WorkspaceController do
       {:ok, workspace} ->
         case Workspaces.destroy_execution_workspace(workspace) do
           {:ok, updated} ->
-            json(conn, %{data: updated})
+            json(conn, %{data: encode_records(updated)})
 
           {:error, changeset} ->
             conn
@@ -178,6 +178,8 @@ defmodule CymphoWeb.WorkspaceController do
         |> render(:"404")
     end
   end
+
+  def destroy_exec_workspace(conn, params), do: destroy_execution_workspace(conn, params)
 
   # --- Worktree Helpers ---
 
@@ -379,9 +381,18 @@ defmodule CymphoWeb.WorkspaceController do
   def list_operations(conn, %{"id" => ew_id} = params) do
     with {:ok, execution_workspace} <-
            Workspaces.get_company_execution_workspace(company_id(conn), ew_id) do
-      opts = Keyword.take(params, [:limit])
+      opts =
+        if limit = params["limit"] do
+          case Integer.parse(to_string(limit)) do
+            {int, _} -> [limit: int]
+            :error -> []
+          end
+        else
+          []
+        end
+
       operations = Workspaces.list_operations(execution_workspace.id, opts)
-      json(conn, %{data: operations})
+      json(conn, %{data: encode_records(operations)})
     end
   end
 
@@ -474,6 +485,19 @@ defmodule CymphoWeb.WorkspaceController do
       {:ok, _execution_workspace} -> :ok
       {:error, _} -> {:error, :not_found}
     end
+  end
+
+  defp encode_records(records) when is_list(records), do: Enum.map(records, &encode_records/1)
+
+  defp encode_records(%{__struct__: _} = record) do
+    record
+    |> Map.from_struct()
+    |> Enum.reject(fn
+      {:__meta__, _} -> true
+      {_, %Ecto.Association.NotLoaded{}} -> true
+      _ -> false
+    end)
+    |> Map.new()
   end
 
   defp translate_errors(changeset) do

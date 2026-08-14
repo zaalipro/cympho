@@ -32,21 +32,24 @@ defmodule Cympho.Workspaces.PreviewUrl do
   """
   def generate_preview_url(%RuntimeService{} = service, base_url) do
     if service.port && service.status == "running" do
-      "#{base_url}/preview/#{service.id}"
+      "#{base_url}/api/preview/#{service.id}/proxy"
     else
       nil
     end
   end
 
   @doc """
-  Get the target URL for a runtime service (the actual dev server URL).
+  Get the Finch target for a runtime service.
+
+  Always loopback. `service.url` is a display field and is ignored.
   """
   def get_target_url(%RuntimeService{} = service) do
-    if service.url do
-      service.url
-    else
-      host = service.cwd |> parse_cwd_for_host() |> default_host()
-      "http://#{host}:#{service.port}"
+    case service.port do
+      port when is_integer(port) and port in 1..65535 ->
+        "http://127.0.0.1:" <> Integer.to_string(port)
+
+      _ ->
+        nil
     end
   end
 
@@ -107,16 +110,6 @@ defmodule Cympho.Workspaces.PreviewUrl do
   Returns the list of common dev server ports with metadata.
   """
   def common_ports, do: @common_dev_ports
-
-  defp parse_cwd_for_host(cwd) do
-    case cwd do
-      nil -> nil
-      _ -> "localhost"
-    end
-  end
-
-  defp default_host(nil), do: "localhost"
-  defp default_host(host) when is_binary(host), do: host
 
   defp discover_from_lsof_output(output) do
     output
