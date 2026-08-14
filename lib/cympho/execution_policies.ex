@@ -6,18 +6,24 @@ defmodule Cympho.ExecutionPolicies do
   alias Cympho.Repo
   alias Cympho.ExecutionPolicies.ExecutionPolicy
 
-  def list_execution_policies do
-    Repo.all(from p in ExecutionPolicy, order_by: [desc: p.inserted_at])
+  def list_execution_policies(company_id) do
+    Repo.all(
+      from p in ExecutionPolicy,
+        where: p.company_id == ^company_id,
+        order_by: [desc: p.inserted_at]
+    )
   end
 
-  def list_execution_policies_page(opts \\ []) do
-    Cympho.Pagination.page(ExecutionPolicy,
+  def list_execution_policies_page(company_id, opts \\ []) do
+    ExecutionPolicy
+    |> where([p], p.company_id == ^company_id)
+    |> Cympho.Pagination.page(
       limit: Keyword.get(opts, :limit, 50),
       after: Keyword.get(opts, :after)
     )
   end
 
-  def policy_posture(policies \\ list_execution_policies()) do
+  def policy_posture(policies) do
     policies = Enum.to_list(policies)
     policy_summaries = Enum.map(policies, &policy_summary/1)
 
@@ -70,6 +76,16 @@ defmodule Cympho.ExecutionPolicies do
 
   def get_execution_policy(id) do
     case Repo.get(ExecutionPolicy, id) do
+      nil -> {:error, :not_found}
+      policy -> {:ok, policy}
+    end
+  end
+
+  def get_company_execution_policy(company_id, id) do
+    case Repo.one(
+           from p in ExecutionPolicy,
+             where: p.id == ^id and p.company_id == ^company_id
+         ) do
       nil -> {:error, :not_found}
       policy -> {:ok, policy}
     end

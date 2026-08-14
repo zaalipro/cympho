@@ -9,7 +9,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.Index do
      socket
      |> assign(:infinite_scroll, %{})
      |> assign_policy_command()
-     |> init_stream(:execution_policies, &fetch_execution_policies/1)}
+     |> init_stream(:execution_policies, &fetch_execution_policies(socket, &1))}
   end
 
   @impl true
@@ -32,32 +32,56 @@ defmodule CymphoWeb.ExecutionPolicyLive.Index do
   end
 
   defp apply_action(socket, :edit, %{"id" => id}) do
-    socket
-    |> assign(:page_title, "Edit Execution Policy")
-    |> assign(:execution_policy, ExecutionPolicies.get_execution_policy!(id))
+    case ExecutionPolicies.get_company_execution_policy(socket.assigns.current_company.id, id) do
+      {:ok, policy} ->
+        socket
+        |> assign(:page_title, "Edit Execution Policy")
+        |> assign(:execution_policy, policy)
+
+      {:error, :not_found} ->
+        socket
+        |> put_flash(:error, "Policy not found")
+        |> push_navigate(to: ~p"/settings/policies")
+    end
   end
 
   @impl true
   def handle_event("delete_execution_policy", %{"id" => id}, socket) do
-    policy = ExecutionPolicies.get_execution_policy!(id)
-    {:ok, _} = ExecutionPolicies.delete_execution_policy(policy)
+    case ExecutionPolicies.get_company_execution_policy(socket.assigns.current_company.id, id) do
+      {:ok, policy} ->
+        {:ok, _} = ExecutionPolicies.delete_execution_policy(policy)
 
-    {:noreply,
-     socket
-     |> assign_policy_command()
-     |> reset_stream(:execution_policies, &fetch_execution_policies/1)}
+        {:noreply,
+         socket
+         |> assign_policy_command()
+         |> reset_stream(:execution_policies, &fetch_execution_policies(socket, &1))}
+
+      {:error, :not_found} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Policy not found")
+         |> push_navigate(to: ~p"/settings/policies")}
+    end
   end
 
   def handle_event("next-page", _params, socket) do
-    {:reply, %{}, load_next(socket, :execution_policies, &fetch_execution_policies/1)}
+    {:reply, %{}, load_next(socket, :execution_policies, &fetch_execution_policies(socket, &1))}
   end
 
-  defp fetch_execution_policies(cursor) do
-    ExecutionPolicies.list_execution_policies_page(after: cursor)
+  defp fetch_execution_policies(socket, cursor) do
+    ExecutionPolicies.list_execution_policies_page(socket.assigns.current_company.id,
+      after: cursor
+    )
   end
 
   defp assign_policy_command(socket) do
-    assign(socket, :policy_command, build_policy_command(ExecutionPolicies.policy_posture()))
+    policies = ExecutionPolicies.list_execution_policies(socket.assigns.current_company.id)
+
+    assign(
+      socket,
+      :policy_command,
+      build_policy_command(ExecutionPolicies.policy_posture(policies))
+    )
   end
 
   defp build_policy_command(%{total: 0} = posture) do

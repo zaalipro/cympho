@@ -31,6 +31,9 @@ defmodule CymphoWeb.ExecutionPolicyLive.New do
   def handle_event("save", %{"execution_policy" => policy_params}, socket) do
     case FormHelpers.normalize_policy_params(policy_params) do
       {:ok, normalized_params} ->
+        normalized_params =
+          Map.put(normalized_params, "company_id", socket.assigns.current_company.id)
+
         case ExecutionPolicies.create_execution_policy(normalized_params) do
           {:ok, policy} ->
             {:noreply, push_navigate(socket, to: ~p"/settings/policies/#{policy.id}")}
@@ -65,6 +68,9 @@ defmodule CymphoWeb.ExecutionPolicyLive.New do
   def handle_event("validate", %{"execution_policy" => policy_params}, socket) do
     case FormHelpers.normalize_policy_params(policy_params) do
       {:ok, normalized_params} ->
+        normalized_params =
+          Map.put(normalized_params, "company_id", socket.assigns.current_company.id)
+
         changeset =
           %ExecutionPolicy{}
           |> ExecutionPolicies.change_execution_policy(normalized_params)

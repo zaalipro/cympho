@@ -4,18 +4,21 @@ defmodule CymphoWeb.ExecutionPolicyLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case ExecutionPolicies.get_execution_policy(id) do
+    case ExecutionPolicies.get_company_execution_policy(socket.assigns.current_company.id, id) do
       {:ok, policy} ->
         {:ok, assign(socket, execution_policy: policy)}
 
       {:error, :not_found} ->
-        {:ok, push_navigate(socket, to: ~p"/settings/policies")}
+        {:ok,
+         socket
+         |> put_flash(:error, "Policy not found")
+         |> push_navigate(to: ~p"/settings/policies")}
     end
   end
 
   @impl true
   def handle_params(%{"id" => id}, _url, socket) do
-    case ExecutionPolicies.get_execution_policy(id) do
+    case ExecutionPolicies.get_company_execution_policy(socket.assigns.current_company.id, id) do
       {:ok, policy} ->
         {:noreply,
          socket
@@ -25,7 +28,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.Show do
       {:error, :not_found} ->
         {:noreply,
          socket
-         |> put_flash(:error, "Execution policy not found")
+         |> put_flash(:error, "Policy not found")
          |> push_navigate(to: ~p"/settings/policies")}
     end
   end
