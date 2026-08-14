@@ -1,6 +1,6 @@
 defmodule CymphoWeb.BoardApprovalLive.Show do
   use CymphoWeb, :live_view
-  alias Cympho.{BoardApprovals, GovernanceRisk}
+  alias Cympho.{BoardApprovals, Companies, GovernanceRisk}
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -21,6 +21,26 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
     case socket.assigns[:current_company] do
       %{id: company_id} -> BoardApprovals.get_company_board_approval(company_id, id)
       _ -> {:error, :not_found}
+    end
+  end
+
+  @impl true
+  def handle_event("cast_vote", %{"vote" => vote}, socket)
+      when vote in ["approve", "deny", "abstain"] do
+    user = socket.assigns.current_user
+    company = socket.assigns.current_company
+    approval = socket.assigns.approval
+
+    if user && company && Companies.is_board_member?(user.id, company.id) do
+      case BoardApprovals.cast_vote(approval.id, user.id, vote) do
+        {:ok, _vote} ->
+          {:noreply, socket}
+
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "Could not cast vote")}
+      end
+    else
+      {:noreply, socket}
     end
   end
 
@@ -47,10 +67,18 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   defp assign_approval(socket, approval) do
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+    user_id = socket.assigns[:current_user] && socket.assigns.current_user.id
+
+    board_member? =
+      is_binary(user_id) and is_binary(company_id) and
+        Companies.is_board_member?(user_id, company_id)
+
     assign(socket,
       approval: approval,
       governance_risk: GovernanceRisk.approval_brief(approval),
-      page_title: approval.title
+      page_title: approval.title,
+      board_member?: board_member?
     )
   end
 

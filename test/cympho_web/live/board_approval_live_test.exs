@@ -36,6 +36,42 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
     assert html =~ "Audit trail"
     assert html =~ "PENDING"
     refute html =~ "String.upcase"
+    refute html =~ "phx-click=\"cast_vote\""
+    assert html =~ "Back to Inbox"
+    refute html =~ "Back to Agents"
+  end
+
+  test "pending page has Approve and click persists a vote", %{
+    conn: conn,
+    current_company: company
+  } do
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    membership = Companies.get_membership(user_id, company.id)
+    {:ok, _membership} = Companies.update_board_membership(membership, %{is_board_member: true})
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a designer",
+        description: "Need a vote before hiring.",
+        category: "agent_hire",
+        company_id: company.id,
+        review_deadline: DateTime.utc_now() |> DateTime.add(2 * 60 * 60, :second)
+      })
+
+    {:ok, view, html} = live(conn, "/board-approvals/#{approval.id}")
+
+    assert html =~ "Approve"
+    assert html =~ "Deny"
+    assert html =~ "Abstain"
+    assert html =~ "Back to Inbox"
+    assert has_element?(view, "button[phx-click='cast_vote'][phx-value-vote='approve']")
+
+    view
+    |> element("button[phx-click='cast_vote'][phx-value-vote='approve']")
+    |> render_click()
+
+    {:ok, updated} = BoardApprovals.get_board_approval(approval.id)
+    assert Enum.any?(updated.votes, &(&1.vote == "approve"))
   end
 
   defp create_board_user(company, label) do

@@ -43,6 +43,24 @@ defmodule CymphoWeb.RoutineLive.Show do
   end
 
   @impl true
+  def handle_event("create_schedule_trigger", %{"cron_expression" => cron}, socket) do
+    routine = socket.assigns.routine
+
+    case RoutineTriggers.create_schedule_trigger(%{
+           "routine_id" => routine.id,
+           "cron_expression" => cron
+         }) do
+      {:ok, _trigger} ->
+        {:noreply,
+         socket
+         |> assign(:triggers, RoutineTriggers.list_triggers(routine.id))
+         |> put_flash(:info, "Trigger created")}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Invalid cron expression")}
+    end
+  end
+
   def handle_event("manual_run", _, socket) do
     routine = socket.assigns.routine
 

@@ -17,10 +17,10 @@
           {String.upcase(@approval.status)}
         </span>
         <.app_link
-          navigate={~p"/agents"}
+          navigate={~p"/inbox"}
           class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
         >
-          Back to Agents
+          Back to Inbox
         </.app_link>
       </:actions>
     </.header>
@@ -147,6 +147,40 @@
           </div>
         <% end %>
       </div>
+
+      <%= if @approval.status == "pending" && @board_member? do %>
+        <div class="card-lift rounded-xl border border-border bg-panel p-6 shadow-card">
+          <h3 class="mb-4 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Cast your vote
+          </h3>
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              phx-click="cast_vote"
+              phx-value-vote="approve"
+              class="btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-590 text-white transition-colors hover:bg-emerald-700"
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              phx-click="cast_vote"
+              phx-value-vote="deny"
+              class="btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 text-sm font-590 text-red-300 transition-colors hover:bg-red-500/20"
+            >
+              Deny
+            </button>
+            <button
+              type="button"
+              phx-click="cast_vote"
+              phx-value-vote="abstain"
+              class="btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 text-sm font-590 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            >
+              Abstain
+            </button>
+          </div>
+        </div>
+      <% end %>
 
       <%= if @approval.status != "pending" && length(@approval.votes) > 0 do %>
         <div class="card-lift rounded-xl border border-border bg-panel p-6 shadow-card">

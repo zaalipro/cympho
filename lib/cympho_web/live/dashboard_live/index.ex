@@ -389,8 +389,7 @@ defmodule CymphoWeb.DashboardLive.Index do
             label: "Nothing is running",
             detail: "Safe to look around. Nothing costs money yet.",
             action: "Turn on",
-            # Settings is simple-visible; launch checklist lives on advanced Ops.
-            path: "/settings"
+            path: "/inbox"
           }
         }
       ),
@@ -553,13 +552,14 @@ defmodule CymphoWeb.DashboardLive.Index do
         label: "#{count} #{pluralize(count, "approval")} waiting",
         detail: "Agent actions need your sign-off before they can run.",
         action: "Review approvals",
-        path: "/approvals?status=pending",
+        path: "/inbox?status=action",
         tone: :attention,
         simple: %{
           icon: "hero-hand-thumb-up-mini",
           label: "#{count} #{pluralize(count, "thing")} to approve",
           detail: "The team is waiting on your OK.",
-          action: "Approve"
+          action: "Approve",
+          path: "/inbox?status=action"
         }
       }
     else
