@@ -790,18 +790,80 @@ defmodule Cympho.RuntimePreflight do
     end
   end
 
+  # `for_issue/2` is mapped over every card the kanban board and issues index
+  # render, so this probe used to fork one login shell per card, serially,
+  # inside the LiveView process — and `bash -lc` sources the user's profile,
+  # which can be arbitrarily slow. Whether a command exists changes on the scale
+  # of a deploy, not a render, so the answer is cached and the fork is bounded.
+  @shell_probe_ttl_ms :timer.seconds(60)
+  @shell_probe_timeout_ms 2_000
+  @shell_probe_table :cympho_shell_command_probe
+
   defp shell_command_available?(command) do
-    command = shell_quote(command)
+    now = System.monotonic_time(:millisecond)
+
+    case cached_shell_probe(command, now) do
+      {:ok, available?} ->
+        available?
+
+      :miss ->
+        available? = run_shell_probe(command)
+        cache_shell_probe(command, available?, now)
+        available?
+    end
+  end
+
+  defp run_shell_probe(command) do
+    quoted = shell_quote(command)
 
     script =
-      "shopt -s expand_aliases 2>/dev/null || true; source \"$HOME/.cld\" 2>/dev/null || true; command -v #{command} >/dev/null 2>&1"
+      "shopt -s expand_aliases 2>/dev/null || true; source \"$HOME/.cld\" 2>/dev/null || true; command -v #{quoted} >/dev/null 2>&1"
 
-    case System.cmd("bash", ["-lc", script], stderr_to_stdout: true) do
-      {_, 0} -> true
+    task =
+      Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
+        System.cmd("bash", ["-lc", script], stderr_to_stdout: true)
+      end)
+
+    case Task.yield(task, @shell_probe_timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {_output, 0}} -> true
       _ -> false
     end
   rescue
     _ -> false
+  catch
+    :exit, _ -> false
+  end
+
+  defp cached_shell_probe(command, now) do
+    ensure_shell_probe_table()
+
+    case :ets.lookup(@shell_probe_table, command) do
+      [{^command, available?, expires_at}] when expires_at > now -> {:ok, available?}
+      _ -> :miss
+    end
+  rescue
+    _ -> :miss
+  end
+
+  defp cache_shell_probe(command, available?, now) do
+    ensure_shell_probe_table()
+    :ets.insert(@shell_probe_table, {command, available?, now + @shell_probe_ttl_ms})
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp ensure_shell_probe_table do
+    case :ets.whereis(@shell_probe_table) do
+      :undefined ->
+        :ets.new(@shell_probe_table, [:named_table, :public, :set, read_concurrency: true])
+
+      _tid ->
+        :ok
+    end
+  rescue
+    # Race: another process created the table between whereis and new.
+    ArgumentError -> :ok
   end
 
   defp command_for_agent(agent, "claude_code") do

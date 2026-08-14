@@ -27,6 +27,14 @@ defmodule Cympho.Telemetry.Metrics do
 
   @poll_period :timer.seconds(10)
 
+  # DynamicSupervisors with a hard ceiling. Hitting one turns
+  # `start_for_agent/1` or a plugin start into a silent `:max_children` error,
+  # and nothing surfaced how close an install was to that wall.
+  @bounded_supervisors [
+    {Cympho.AgentHeartbeat.Supervisor, :agent_heartbeats, 500},
+    {Cympho.Plugins.Supervisor, :plugins, 100}
+  ]
+
   # Processes every dispatch or realtime broadcast has to pass through. A
   # growing mailbox here means the whole install is falling behind.
   @singletons [
@@ -99,6 +107,18 @@ defmodule Cympho.Telemetry.Metrics do
       last_value("cympho.runtime.singleton.alive",
         tags: [:process],
         description: "1 when the singleton is running, 0 when it is down"
+      ),
+      last_value("cympho.runtime.supervisor.children",
+        tags: [:supervisor],
+        description: "Live children under a DynamicSupervisor with a hard ceiling"
+      ),
+      last_value("cympho.runtime.supervisor.max_children",
+        tags: [:supervisor],
+        description: "The ceiling that turns further starts into :max_children errors"
+      ),
+      last_value("cympho.runtime.supervisor.saturation_pct",
+        tags: [:supervisor],
+        description: "How close this supervisor is to refusing new children"
       )
     ]
   end
@@ -148,8 +168,39 @@ defmodule Cympho.Telemetry.Metrics do
   def periodic_measurements do
     [
       {__MODULE__, :dispatch_runtime_measurements, []},
-      {__MODULE__, :dispatch_singleton_measurements, []}
+      {__MODULE__, :dispatch_singleton_measurements, []},
+      {__MODULE__, :dispatch_supervisor_measurements, []}
     ]
+  end
+
+  @doc """
+  Emits how close each bounded DynamicSupervisor is to its ceiling.
+  """
+  def dispatch_supervisor_measurements do
+    Enum.each(@bounded_supervisors, fn {module, tag, ceiling} ->
+      children = dynamic_supervisor_children(module)
+
+      :telemetry.execute(
+        [:cympho, :runtime, :supervisor],
+        %{
+          children: children,
+          max_children: ceiling,
+          saturation_pct: round(children * 100 / ceiling)
+        },
+        %{supervisor: tag}
+      )
+    end)
+  end
+
+  defp dynamic_supervisor_children(module) do
+    case Process.whereis(module) do
+      nil -> 0
+      pid -> pid |> DynamicSupervisor.count_children() |> Map.get(:active, 0)
+    end
+  rescue
+    _ -> 0
+  catch
+    :exit, _ -> 0
   end
 
   @doc """

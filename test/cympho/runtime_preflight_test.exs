@@ -9,6 +9,35 @@ defmodule Cympho.RuntimePreflightTest do
   alias Cympho.Secrets
   alias Cympho.Workspaces
 
+  test "the shell probe for an off-PATH command is cached and bounded" do
+    # for_agent/for_issue is mapped over every card the kanban board and issues
+    # index render. When the configured command is not on the BEAM's PATH —
+    # which is the documented ~/.cld wrapper setup — this falls back to a
+    # `bash -lc` login shell. Uncached, that forked one login shell per card,
+    # serially, inside the LiveView process.
+    # Unique per run, so no prior entry exists whether or not the table does.
+    command = "cympho-not-a-real-command-#{System.unique_integer([:positive])}"
+
+    agent = %{
+      adapter: :claude_code,
+      config: %{"command" => command},
+      runtime_config: %{"env" => %{"ANTHROPIC_API_KEY" => "test-key"}}
+    }
+
+    assert %{} = RuntimePreflight.for_agent(agent, autonomy_enabled?: false)
+
+    assert [{^command, available?, expires_at}] =
+             :ets.lookup(:cympho_shell_command_probe, command)
+
+    refute available?
+
+    # A second render inside the TTL must reuse the answer rather than fork again.
+    assert %{} = RuntimePreflight.for_agent(agent, autonomy_enabled?: false)
+
+    assert [{^command, ^available?, ^expires_at}] =
+             :ets.lookup(:cympho_shell_command_probe, command)
+  end
+
   test "treats a found Claude wrapper command as review-mode ready without exposing secrets" do
     agent = %{
       adapter: :claude_code,

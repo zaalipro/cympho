@@ -120,6 +120,7 @@ defmodule CymphoWeb.BeamDashboardTest do
           [:cympho, :runtime, :heartbeats],
           [:cympho, :runtime, :tasks],
           [:cympho, :runtime, :singleton],
+          [:cympho, :runtime, :supervisor],
           [:phoenix, :endpoint, :stop],
           [:phoenix, :router_dispatch, :stop],
           [:phoenix, :live_view, :mount, :stop],
@@ -181,11 +182,31 @@ defmodule CymphoWeb.BeamDashboardTest do
       assert is_integer(count) and count >= 0
     end
 
+    test "bounded supervisors report how close they are to refusing children" do
+      events = attach_probe([:cympho, :runtime, :supervisor])
+
+      Metrics.dispatch_supervisor_measurements()
+
+      captured = collect(events)
+      assert captured != []
+
+      supervisors = Enum.map(captured, fn {_m, meta} -> meta.supervisor end)
+      assert :agent_heartbeats in supervisors
+      assert :plugins in supervisors
+
+      for {measurements, _metadata} <- captured do
+        assert measurements.max_children > 0
+        assert measurements.children >= 0
+        assert measurements.saturation_pct >= 0
+      end
+    end
+
     test "measurements do not raise when a supervised process is absent" do
       # Nothing here depends on the app being fully booted; the helpers must
       # degrade to zero rather than crash the poller and trip its restart budget.
       assert :ok = Metrics.dispatch_runtime_measurements()
       assert :ok = Metrics.dispatch_singleton_measurements()
+      assert :ok = Metrics.dispatch_supervisor_measurements()
     end
   end
 
