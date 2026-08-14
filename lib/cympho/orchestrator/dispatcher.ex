@@ -211,15 +211,24 @@ defmodule Cympho.Orchestrator.Dispatcher do
     # disabled — so live-node strands and non-dispatcher checkouts do not
     # wait for a manual Ops pass or a full restart. Polling only runs when
     # dispatch is enabled.
-    if enabled?() do
-      schedule_poll()
-    end
+    state = if enabled?(), do: schedule_poll(State.new()), else: State.new()
 
     # Hand recovery off to handle_continue so init/1 returns fast even if
     # the recovery scan hits a slow DB. Without this, a stuck Repo blocks
     # the whole supervisor boot.
-    {:ok, State.new(), {:continue, :recover_orphans}}
+    #
+    # In test env there is no Ecto sandbox connection for this process, so the
+    # scan would fail on every boot and log an ownership error that buries real
+    # failures. Recovery tests call handle_continue/2 and the recover_* helpers
+    # directly, which is the same code path.
+    if recover_on_boot?() do
+      {:ok, state, {:continue, :recover_orphans}}
+    else
+      {:ok, state}
+    end
   end
+
+  defp recover_on_boot?, do: Application.get_env(:cympho, :dispatcher_recover_on_boot?, true)
 
   @impl true
   def handle_continue(:recover_orphans, %State{} = state) do
@@ -411,8 +420,12 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @impl true
   def handle_info(:poll, %State{} = state) do
     if enabled?() do
-      state = do_poll(state)
-      schedule_poll()
+      # `poll_now/0` delivers `:poll` too. Rescheduling unconditionally would
+      # start a second self-perpetuating timer chain for every on-demand poll,
+      # and `poll_now/0` runs on issue launch, dashboard actions, and event
+      # heartbeats — so the poll rate grew without bound over a node's life.
+      # schedule_poll/1 cancels the pending timer, leaving exactly one.
+      state = state |> do_poll() |> schedule_poll()
       {:noreply, state}
     else
       {:noreply, state}
@@ -496,8 +509,12 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   # Internal
 
-  defp schedule_poll do
-    Process.send_after(self(), :poll, @poll_interval)
+  # Keeps exactly one pending periodic poll, cancelling any timer already
+  # armed. Stale `:poll` messages already in the mailbox are harmless: each one
+  # just polls and re-arms this same single timer.
+  defp schedule_poll(%State{} = state) do
+    if is_reference(state.poll_timer), do: Process.cancel_timer(state.poll_timer)
+    %{state | poll_timer: Process.send_after(self(), :poll, @poll_interval)}
   end
 
   # Reasons where terminate/2 ran (or nothing abnormal happened), so the

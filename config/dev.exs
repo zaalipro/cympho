@@ -28,7 +28,8 @@ config :cympho,
        :encryption_key,
        System.get_env("CYMPHO_ENCRYPTION_KEY") || String.duplicate("d", 32)
 
-config :logger, :console, format: "[$level] $message\n"
+# Formatter and metadata allowlist come from config/config.exs so dev, test,
+# and prod render the same structured fields.
 
 config :cympho, :skill_manifest_dir, "priv/skill_manifests"
 

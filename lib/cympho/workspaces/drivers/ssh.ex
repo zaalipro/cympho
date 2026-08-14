@@ -96,12 +96,13 @@ defmodule Cympho.Workspaces.Drivers.Ssh do
              metadata: handle_metadata(settings, opts)
            }}
 
-        {:ok, %{exit_status: status, stderr: stderr}} ->
+        {:ok, %{exit_status: status}} ->
+          # Remote stderr is the operator's own host output and can contain
+          # anything, so only the exit status is logged.
           Logger.warning("ssh environment acquire failed",
             component: "Drivers.Ssh",
             company_id: company_id,
-            exit_status: status,
-            stderr: String.slice(stderr, 0, 200)
+            exit_status: status
           )
 
           {:error, {:acquire_failed, status}}

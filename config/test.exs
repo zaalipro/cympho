@@ -52,6 +52,12 @@ config :cympho, :start_oversight_patrol?, false
 config :cympho, :start_decisions_executor?, false
 config :cympho, :start_execution_policy_advancer?, false
 
+# The Dispatcher itself stays started (tests reach it by name), but its
+# boot-time orphan/checkout recovery scan runs DB queries without a sandbox
+# connection. Recovery tests drive handle_continue/2 and the recover_* helpers
+# directly instead.
+config :cympho, :dispatcher_recover_on_boot?, false
+
 # Spec 01: keep the LLM router disabled in tests by default so the keyword
 # router runs deterministically and no Finch calls are made. Tests that
 # exercise the classifier opt back in via Application.put_env.

@@ -746,6 +746,39 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
     end
   end
 
+  describe "poll scheduling" do
+    # `poll_now/0` sends the same `:poll` message the periodic timer uses, and
+    # it runs on issue launch, dashboard actions, and event heartbeats. If the
+    # handler re-armed unconditionally, each on-demand poll would leave behind
+    # an extra self-perpetuating timer chain and the poll rate would grow
+    # without bound for the life of the node.
+    test "handling :poll leaves exactly one armed timer" do
+      {:noreply, first} = Dispatcher.handle_info(:poll, State.new())
+
+      assert is_reference(first.poll_timer)
+      assert is_integer(Process.read_timer(first.poll_timer))
+
+      {:noreply, second} = Dispatcher.handle_info(:poll, first)
+
+      refute second.poll_timer == first.poll_timer
+      assert Process.read_timer(first.poll_timer) == false
+      assert is_integer(Process.read_timer(second.poll_timer))
+    end
+
+    test "repeated on-demand polls never accumulate timers" do
+      state =
+        Enum.reduce(1..5, State.new(), fn _, acc ->
+          {:noreply, next} = Dispatcher.handle_info(:poll, acc)
+          next
+        end)
+
+      assert is_integer(Process.read_timer(state.poll_timer))
+
+      # Nothing else is armed: draining the mailbox finds no stray :poll.
+      refute_received :poll
+    end
+  end
+
   defp ensure_dispatcher_for_db_tests do
     unless Process.whereis(Dispatcher) do
       {:ok, _} = Dispatcher.start_link([])

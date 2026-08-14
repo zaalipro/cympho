@@ -39,7 +39,40 @@ config :tailwind,
     cd: Path.expand("../assets", __DIR__)
   ]
 
-config :logger, :console, format: "[$level] $message\n"
+# Cympho attaches structured metadata to log entries (see CLAUDE.md), but
+# Logger only renders keys that are both in the format string and allowlisted
+# here — everything else is dropped. This list is an allowlist on purpose:
+# correlation identifiers and classified diagnostics only, never free-form
+# payloads like stderr or request bodies that could carry tenant data.
+config :logger, :default_formatter,
+  format: "[$level] $message $metadata\n",
+  metadata: [
+    # correlation
+    :component,
+    :company_id,
+    :issue_id,
+    :agent_id,
+    :run_id,
+    :project_id,
+    :goal_id,
+    :user_id,
+    :plugin_id,
+    :policy_id,
+    :wake_id,
+    :lease_id,
+    :decision_id,
+    :request_id,
+    :trace_id,
+    :span_id,
+    # classified diagnostics
+    :reason,
+    :provider,
+    :adapter,
+    :status,
+    :exit_status,
+    :host,
+    :port
+  ]
 
 config :phoenix, :json_library, Jason
 
