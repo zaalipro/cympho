@@ -27,22 +27,39 @@ defmodule CymphoWeb.Plugs.UserAuth do
          {:ok, user} <- Users.get_user(user_id) do
       companies = list_user_companies(user.id)
 
-      case resolve_company(conn, user, claims, companies) do
-        {:ok, company} ->
+      cond do
+        companies == [] and accept_invite_action?(conn) ->
           conn
           |> assign(:current_user, user)
-          |> assign(:user_companies, companies)
-          |> assign(:current_company, company)
+          |> assign(:user_companies, [])
+          |> assign(:current_company, nil)
 
-        {:error, :no_companies} ->
-          unauthorized(conn, "User has no company memberships")
+        true ->
+          case resolve_company(conn, user, claims, companies) do
+            {:ok, company} ->
+              conn
+              |> assign(:current_user, user)
+              |> assign(:user_companies, companies)
+              |> assign(:current_company, company)
 
-        {:error, :not_a_member} ->
-          forbidden(conn, "Not a member of the requested company")
+            {:error, :no_companies} ->
+              unauthorized(conn, "User has no company memberships")
+
+            {:error, :not_a_member} ->
+              forbidden(conn, "Not a member of the requested company")
+          end
       end
     else
       _ -> unauthorized(conn, "Authentication required")
     end
+  end
+
+  defp accept_invite_action?(conn) do
+    conn.private[:phoenix_action] == :accept_invite or
+      match?(
+        %{plug_opts: :accept_invite},
+        Phoenix.Router.route_info(CymphoWeb.Router, conn.method, conn.request_path, conn.host)
+      )
   end
 
   defp bearer_token(conn) do

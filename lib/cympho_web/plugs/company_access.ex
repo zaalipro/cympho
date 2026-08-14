@@ -22,7 +22,7 @@ defmodule CymphoWeb.Plugs.CompanyAccess do
   def call(conn, opts) do
     require_admin? = Keyword.get(opts, :require_admin, false)
     user = conn.assigns[:current_user]
-    company_id = conn.params["company_id"] || conn.params["id"]
+    company_id = conn.path_params["company_id"] || conn.path_params["id"]
 
     cond do
       is_nil(user) or is_nil(company_id) ->

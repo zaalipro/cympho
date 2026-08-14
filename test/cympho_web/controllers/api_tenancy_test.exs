@@ -95,6 +95,77 @@ defmodule CymphoWeb.ApiTenancyTest do
     assert %{"errors" => [%{"detail" => "Authentication required"}]} = json_response(conn, 401)
   end
 
+  test "accepting an invite works for a JWT user with no company memberships", %{
+    user: inviter,
+    company: company,
+    unique: unique
+  } do
+    email = "invitee-#{unique}@example.com"
+
+    {:ok, invitee} =
+      Cympho.Authentication.register_user(%{
+        email: email,
+        name: "Invitee #{unique}",
+        password: "password1234"
+      })
+
+    {:ok, invite} =
+      Companies.create_invite(%{
+        "company_id" => company.id,
+        "inviter_id" => inviter.id,
+        "email" => email,
+        "role" => "member"
+      })
+
+    {:ok, token} = Cympho.UserAuthJWT.generate_token(invitee, nil)
+
+    conn =
+      build_conn()
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> post(~p"/api/invites/#{invite.token}/accept")
+
+    assert %{"data" => %{"accepted" => true}} = json_response(conn, 200)
+    assert Companies.has_access?(invitee.id, company.id)
+  end
+
+  test "other API actions reject JWT users with no company memberships" do
+    unique = System.unique_integer([:positive])
+
+    {:ok, orphan} =
+      Cympho.Authentication.register_user(%{
+        email: "orphan-#{unique}@example.com",
+        name: "Orphan #{unique}",
+        password: "password1234"
+      })
+
+    {:ok, token} = Cympho.UserAuthJWT.generate_token(orphan, nil)
+
+    conn =
+      build_conn()
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> get(~p"/api/companies")
+
+    assert %{"errors" => [%{"detail" => "User has no company memberships"}]} =
+             json_response(conn, 401)
+  end
+
+  test "stale session company_id is deleted rather than only ignored in assigns", %{
+    conn: conn,
+    other_company: other_company,
+    unique: unique
+  } do
+    title = "Stale session issue #{unique}"
+
+    conn =
+      conn
+      |> put_session(:company_id, other_company.id)
+      |> post(~p"/issues/quick-create", %{"title" => title})
+
+    assert redirected_to(conn) == ~p"/issues"
+    refute get_session(conn, :company_id) == other_company.id
+    refute Repo.exists?(from i in Issue, where: i.title == ^title)
+  end
+
   test "issue create rejects cross-company project and assignee references", %{
     conn: conn,
     other_project: other_project,

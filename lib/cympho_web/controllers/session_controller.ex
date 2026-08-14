@@ -4,6 +4,7 @@ defmodule CymphoWeb.SessionController do
   import Ecto.Query
 
   alias Cympho.Authentication
+  alias Cympho.Companies
   alias Cympho.Companies.CompanyMembership
   alias Cympho.Repo
   alias Cympho.Users.User
@@ -72,18 +73,19 @@ defmodule CymphoWeb.SessionController do
     )
   end
 
-  defp default_company_id(%User{company_id: company_id}) when is_binary(company_id),
-    do: company_id
-
-  defp default_company_id(%User{id: user_id}) do
-    Repo.one(
-      from(m in CompanyMembership,
-        where: m.user_id == ^user_id,
-        order_by: [asc: m.inserted_at, asc: m.id],
-        select: m.company_id,
-        limit: 1
+  defp default_company_id(%User{} = user) do
+    if is_binary(user.company_id) and Companies.has_access?(user.id, user.company_id) do
+      user.company_id
+    else
+      Repo.one(
+        from(m in CompanyMembership,
+          where: m.user_id == ^user.id,
+          order_by: [asc: m.inserted_at, asc: m.id],
+          select: m.company_id,
+          limit: 1
+        )
       )
-    )
+    end
   end
 
   defp sign_in_page(params, error) do

@@ -127,7 +127,17 @@ defmodule Cympho.Companies do
   Used by the approval executor to enact board-approved changes.
   """
   def execute_company_update(%Company{} = company, attrs) do
-    do_update_company(company, attrs)
+    persist_company_update(Company.changeset(company, attrs), attrs)
+  end
+
+  def update_governance_config(%Company{} = company, config) do
+    attrs = %{governance_config: config}
+
+    if policy_change_needs_approval?(company, attrs) do
+      create_pending_policy_approval(company, attrs)
+    else
+      execute_company_update(company, attrs)
+    end
   end
 
   def pause_company(%Company{} = company, reason \\ "Paused from dashboard") do
@@ -418,8 +428,11 @@ defmodule Cympho.Companies do
   defp previous_agent_status(_marker), do: :idle
 
   defp do_update_company(%Company{} = company, attrs) do
-    company
-    |> Company.changeset(attrs)
+    persist_company_update(Company.update_changeset(company, attrs), attrs)
+  end
+
+  defp persist_company_update(changeset, attrs) do
+    changeset
     |> Repo.update()
     |> case do
       {:ok, updated} ->

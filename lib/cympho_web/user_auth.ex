@@ -266,7 +266,7 @@ defmodule CymphoWeb.UserAuth do
   defp assign_browser_company_context(conn, user) do
     memberships = Companies.list_memberships_for_user(user.id)
     companies = Enum.map(memberships, &company_map(&1.company))
-    company = resolve_company_for_conn(conn, user, companies)
+    {conn, company} = resolve_company_for_conn(conn, user, companies)
 
     conn
     |> Plug.Conn.assign(:user_companies, companies)
@@ -410,17 +410,21 @@ defmodule CymphoWeb.UserAuth do
   end
 
   defp resolve_company_for_conn(conn, user, companies) do
-    requested = Plug.Conn.get_session(conn, :company_id) || user.company_id
+    session_company_id = Plug.Conn.get_session(conn, :company_id)
 
     cond do
-      is_nil(requested) ->
-        List.first(companies)
+      is_binary(session_company_id) ->
+        case Enum.find(companies, &(&1.id == session_company_id)) do
+          nil ->
+            conn = Plug.Conn.delete_session(conn, :company_id)
+            {conn, fallback_company(user, companies)}
 
-      company = Enum.find(companies, &(&1.id == requested)) ->
-        company
+          company ->
+            {conn, company}
+        end
 
       true ->
-        List.first(companies)
+        {conn, fallback_company(user, companies)}
     end
   end
 

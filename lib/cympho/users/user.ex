@@ -46,7 +46,7 @@ defmodule Cympho.Users.User do
   """
   def registration_changeset(user, attrs) do
     user
-    |> cast(attrs, [:email, :name, :password, :company_id])
+    |> cast(attrs, [:email, :name, :password])
     |> validate_required([:email, :name, :password])
     |> validate_email()
     |> validate_password()

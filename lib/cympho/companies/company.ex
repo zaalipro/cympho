@@ -72,6 +72,35 @@ defmodule Cympho.Companies.Company do
     |> validate_governance_config()
   end
 
+  def update_changeset(company, attrs) do
+    company
+    |> cast(attrs, [
+      :name,
+      :slug,
+      :description,
+      :issue_prefix,
+      :attachment_max_bytes,
+      :require_board_approval_for_new_agents,
+      :brand_color,
+      :logo_url
+    ])
+    |> validate_required([:name, :slug])
+    |> validate_format(:slug, ~r/^[a-z0-9-]+$/,
+      message: "must contain only lowercase letters, numbers, and hyphens"
+    )
+    |> validate_length(:slug, min: 3, max: 50)
+    |> validate_length(:issue_prefix, min: 2, max: 10)
+    |> validate_format(:issue_prefix, ~r/^[A-Z][A-Z0-9]*$/,
+      message: "must be uppercase letters or numbers"
+    )
+    |> validate_number(:attachment_max_bytes, greater_than: 0)
+    |> validate_format(:brand_color, ~r/^#[0-9a-fA-F]{6}$/,
+      message: "must be a six digit hex color"
+    )
+    |> unique_constraint(:slug)
+    |> validate_logo_url()
+  end
+
   defp validate_logo_url(changeset) do
     case get_change(changeset, :logo_url) do
       nil ->
