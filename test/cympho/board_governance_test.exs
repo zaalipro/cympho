@@ -346,7 +346,11 @@ defmodule Cympho.BoardGovernanceTest do
       BoardApprovals.cast_vote(approval.id, user.id, "approve")
 
       approval = BoardApprovals.get_board_approval!(approval.id)
-      assert BoardApproval.approval_threshold_met?(approval, threshold_type: "any")
+
+      assert BoardApproval.approval_threshold_met?(approval,
+               threshold_type: "any",
+               min_quorum: 1
+             )
     end
 
     test "any: no votes means not met" do
@@ -394,12 +398,14 @@ defmodule Cympho.BoardGovernanceTest do
 
       assert BoardApproval.approval_threshold_met?(approval,
                threshold_type: "percentage",
-               threshold_value: 0.5
+               threshold_value: 0.5,
+               min_quorum: 1
              )
 
       refute BoardApproval.approval_threshold_met?(approval,
                threshold_type: "percentage",
-               threshold_value: 0.6
+               threshold_value: 0.6,
+               min_quorum: 1
              )
     end
 
@@ -452,7 +458,7 @@ defmodule Cympho.BoardGovernanceTest do
       BoardApprovals.cast_vote(approval.id, user2.id, "approve")
 
       approval = BoardApprovals.get_board_approval!(approval.id)
-      assert BoardApproval.approval_threshold_met?(approval, threshold_type: "all")
+      assert BoardApproval.approval_threshold_met?(approval, threshold_type: "all", min_quorum: 1)
     end
 
     test "count: requires N approve votes" do
@@ -480,12 +486,14 @@ defmodule Cympho.BoardGovernanceTest do
 
       refute BoardApproval.approval_threshold_met?(approval,
                threshold_type: "count",
-               threshold_value: 2
+               threshold_value: 2,
+               min_quorum: 1
              )
 
       assert BoardApproval.approval_threshold_met?(approval,
                threshold_type: "count",
-               threshold_value: 1
+               threshold_value: 1,
+               min_quorum: 1
              )
     end
   end

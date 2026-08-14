@@ -141,8 +141,15 @@ defmodule Cympho.Orchestrator do
   @spec stop(String.t(), term()) :: :ok
   def stop(issue_id, reason \\ :normal) do
     case whereis(issue_id) do
-      nil -> :ok
-      pid -> GenServer.stop(pid, reason)
+      nil ->
+        :ok
+
+      pid when pid == self() ->
+        send(self(), {:stop_orchestrator, reason})
+        :ok
+
+      pid ->
+        GenServer.stop(pid, reason)
     end
   end
 
@@ -415,6 +422,10 @@ defmodule Cympho.Orchestrator do
 
   def handle_info(:heartbeat_tick, session) do
     {:noreply, session}
+  end
+
+  def handle_info({:stop_orchestrator, reason}, session) do
+    {:stop, reason, session}
   end
 
   def handle_info(msg, state) do

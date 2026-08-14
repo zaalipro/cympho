@@ -165,9 +165,14 @@ defmodule Cympho.Agents do
   Gets a single agent by id, returns {:ok, agent} or {:error, :not_found}.
   """
   def get_company_agent(company_id, id) do
-    case Repo.one(from a in Agent, where: a.id == ^id and a.company_id == ^company_id) do
-      nil -> {:error, :not_found}
-      agent -> if temporary?(agent), do: {:error, :not_found}, else: {:ok, agent}
+    with {:ok, company_id} <- Ecto.UUID.cast(company_id),
+         {:ok, id} <- Ecto.UUID.cast(id) do
+      case Repo.one(from a in Agent, where: a.id == ^id and a.company_id == ^company_id) do
+        nil -> {:error, :not_found}
+        agent -> if temporary?(agent), do: {:error, :not_found}, else: {:ok, agent}
+      end
+    else
+      :error -> {:error, :not_found}
     end
   end
 

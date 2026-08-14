@@ -11,6 +11,17 @@ defmodule Cympho.Issues.ExecutionState do
   @type stage_type :: :executor | :reviewer | :approver
   @type decision :: :approved | :changes_requested | :escalated
 
+  # Literal map keeps these atoms in the beam. Catch-all target_status/2 clauses
+  # are compiled away, so String.to_existing_atom/1 would miss :reviewer/:executor.
+  @enum_atoms %{
+    "executor" => :executor,
+    "reviewer" => :reviewer,
+    "approver" => :approver,
+    "approved" => :approved,
+    "changes_requested" => :changes_requested,
+    "escalated" => :escalated
+  }
+
   @type t :: %{
           current_stage_index: non_neg_integer(),
           current_stage_type: stage_type(),
@@ -138,7 +149,11 @@ defmodule Cympho.Issues.ExecutionState do
   @spec stage_type(map()) :: stage_type()
   def stage_type(config) when is_map(config) do
     type = Map.get(config, "type") || Map.get(config, :type)
-    if is_binary(type), do: String.to_existing_atom(type), else: type
+
+    cond do
+      is_binary(type) -> Map.get(@enum_atoms, type) || String.to_existing_atom(type)
+      true -> type
+    end
   end
 
   @doc """
@@ -221,7 +236,10 @@ defmodule Cympho.Issues.ExecutionState do
       |> Enum.map(&coerce_history_decision/1)
 
     state
-    |> Map.put(:last_decision_outcome, coerce_existing_atom(Map.get(state, :last_decision_outcome)))
+    |> Map.put(
+      :last_decision_outcome,
+      coerce_existing_atom(Map.get(state, :last_decision_outcome))
+    )
     |> Map.put(:current_stage_type, coerce_existing_atom(Map.get(state, :current_stage_type)))
     |> Map.put(:history, history)
   end
@@ -235,10 +253,16 @@ defmodule Cympho.Issues.ExecutionState do
   defp coerce_existing_atom(value) when is_atom(value), do: value
 
   defp coerce_existing_atom(value) when is_binary(value) do
-    try do
-      String.to_existing_atom(value)
-    rescue
-      ArgumentError -> nil
+    case Map.fetch(@enum_atoms, value) do
+      {:ok, atom} ->
+        atom
+
+      :error ->
+        try do
+          String.to_existing_atom(value)
+        rescue
+          ArgumentError -> nil
+        end
     end
   end
 

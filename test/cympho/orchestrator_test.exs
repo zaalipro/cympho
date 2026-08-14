@@ -1252,10 +1252,11 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
-    test "retries zero-progress max_run_timeout once then releases for redispatch when retry also fails", %{
-      agent_id: agent_id,
-      issue: issue
-    } do
+    test "retries zero-progress max_run_timeout once then releases for redispatch when retry also fails",
+         %{
+           agent_id: agent_id,
+           issue: issue
+         } do
       test_pid = self()
       MockAdapter.clear()
       on_exit(fn -> MockAdapter.clear() end)
@@ -2214,7 +2215,7 @@ defmodule Cympho.OrchestratorTest do
         assert wait_for_session_id(pid, session_id)
         assert eventually_adapter_session_registered?(session_id)
 
-        {:ok, _paused} = Companies.update_company(company, %{status: "paused"})
+        {:ok, _paused} = Companies.execute_company_update(company, %{status: "paused"})
 
         monitor_ref = Process.monitor(pid)
         send(pid, :heartbeat_tick)

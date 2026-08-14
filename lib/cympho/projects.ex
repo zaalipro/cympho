@@ -169,9 +169,14 @@ defmodule Cympho.Projects do
   end
 
   def get_company_project(company_id, id) do
-    case Repo.one(from p in Project, where: p.id == ^id and p.company_id == ^company_id) do
-      nil -> {:error, :not_found}
-      project -> {:ok, project}
+    with {:ok, company_id} <- Ecto.UUID.cast(company_id),
+         {:ok, id} <- Ecto.UUID.cast(id) do
+      case Repo.one(from p in Project, where: p.id == ^id and p.company_id == ^company_id) do
+        nil -> {:error, :not_found}
+        project -> {:ok, project}
+      end
+    else
+      :error -> {:error, :not_found}
     end
   end
 

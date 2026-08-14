@@ -23,6 +23,7 @@ defmodule CymphoWeb.GithubPrLifecycleTest do
         name: "PRL Project",
         prefix: "PRLX",
         company_id: company.id,
+        repo_url: "https://github.com/owner/repo",
         github_webhook_secret: "lifecycle-test-secret"
       })
 
@@ -199,7 +200,11 @@ defmodule CymphoWeb.GithubPrLifecycleTest do
       "pull_request" => %{
         "html_url" => pr_url,
         "title" => "PR title",
-        "head" => %{"ref" => "feature"}
+        "head" => %{
+          "ref" => "feature",
+          "repo" => %{"html_url" => "https://github.com/owner/repo"}
+        },
+        "base" => %{"repo" => %{"html_url" => "https://github.com/owner/repo"}}
       },
       "repository" => %{"full_name" => "owner/repo"}
     }
@@ -215,9 +220,13 @@ defmodule CymphoWeb.GithubPrLifecycleTest do
         "mergeable" => Keyword.get(opts, :mergeable, true),
         "head" => %{
           "ref" => "feature",
-          "sha" => Keyword.get(opts, :head_sha, "deadbeef")
+          "sha" => Keyword.get(opts, :head_sha, "deadbeef"),
+          "repo" => %{"html_url" => "https://github.com/owner/repo"}
         },
-        "base" => %{"ref" => Keyword.get(opts, :base_ref, "main")}
+        "base" => %{
+          "ref" => Keyword.get(opts, :base_ref, "main"),
+          "repo" => %{"html_url" => "https://github.com/owner/repo"}
+        }
       },
       "repository" => %{"full_name" => "owner/repo"}
     }

@@ -20,7 +20,7 @@ defmodule Cympho.IssuesPaginatedFilterTest do
       Agents.create_agent(%{name: "Test Agent", role: :engineer, status: :idle})
 
     {:ok, label} =
-      Labels.create_label(%{name: "feature", color: "#00ff00"})
+      Labels.create_label(%{name: "feature", color: "#00ff00", company_id: company.id})
 
     {:ok, issue_high_backlog} =
       Issues.create_issue(%{

@@ -25,7 +25,7 @@ defmodule Cympho.Workspaces.EnvironmentLifecycleTest do
       })
 
     cwd =
-      Path.join(System.tmp_dir!(), "cympho-lifecycle-#{unique}")
+      Path.join("/tmp", "cympho-lifecycle-#{unique}")
       |> tap(&File.mkdir_p!/1)
 
     on_exit(fn -> File.rm_rf(cwd) end)

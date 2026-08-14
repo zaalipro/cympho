@@ -310,14 +310,17 @@
               </div>
             </section>
 
-            <section data-testid="new-agent-adapter-section" class="ui-advanced-only space-y-4">
+            <section data-testid="new-agent-adapter-section" class="space-y-4">
               <% adapter_help =
-                "The profile above fills this in. Change it only when you need something else." %>
+                "Pick Claude Code for a local CLI, or OpenAI-compatible for an HTTP chat provider such as LLMotions." %>
               <p
                 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
                 title={adapter_help}
               >
-                3 · Adapter configuration<span class="sr-only"> — {adapter_help}</span>
+                Provider<span class="sr-only"> — {adapter_help}</span>
+              </p>
+              <p class="text-sm leading-5 text-text-tertiary">
+                Claude Code needs a local CLI. OpenAI-compatible needs an endpoint, model, and key.
               </p>
 
               <div class="max-w-md">
@@ -529,7 +532,7 @@
                     id="new-agent-openai-chat-model"
                     name="agent[model]"
                     value={@runtime_model}
-                    placeholder="qwen3.7-plus"
+                    placeholder="gemini-3.7-flash"
                     class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                   />
                 </div>
@@ -544,7 +547,7 @@
                     id="new-agent-openai-chat-endpoint"
                     name="agent[openai_chat_endpoint]"
                     value={@openai_chat_endpoint}
-                    placeholder="https://example.com/v1/chat/completions"
+                    placeholder="https://api.llmotions.com/v1"
                     class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                   />
                 </div>

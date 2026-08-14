@@ -521,6 +521,7 @@ defmodule Cympho.AgentActionsTest do
 
       {:ok, _grant} =
         PrincipalPermissions.create_permission_grant(%{
+          company_id: company.id,
           principal_id: product.id,
           principal_type: "agent",
           permission: "tasks:assign",

@@ -186,7 +186,6 @@ defmodule CymphoWeb.SettingsHubTest do
         |> form("#secret-form", %{
           "secret" => %{
             "scope" => "company",
-            "value" => "unauthorized-replacement",
             "description" => "Unauthorized description"
           }
         })

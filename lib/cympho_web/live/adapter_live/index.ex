@@ -3,11 +3,11 @@ defmodule CymphoWeb.AdapterLive.Index do
 
   alias Cympho.Adapters
   alias Cympho.Agents
+  alias Cympho.Secrets
 
   @impl true
   def mount(_params, _session, socket) do
     adapters = Adapters.list_adapters()
-    health = Adapters.check_all_health()
 
     agents_by_adapter =
       case socket.assigns[:current_company] do
@@ -20,6 +20,14 @@ defmodule CymphoWeb.AdapterLive.Index do
         _ ->
           %{}
       end
+
+    company_id =
+      case socket.assigns[:current_company] do
+        %{id: id} -> id
+        _ -> nil
+      end
+
+    health = overlay_company_health(Adapters.check_all_health(), company_id)
 
     socket =
       socket
@@ -40,7 +48,13 @@ defmodule CymphoWeb.AdapterLive.Index do
 
   @impl true
   def handle_event("refresh_health", _params, socket) do
-    health = Adapters.check_all_health()
+    company_id =
+      case socket.assigns[:current_company] do
+        %{id: id} -> id
+        _ -> nil
+      end
+
+    health = overlay_company_health(Adapters.check_all_health(), company_id)
 
     {:noreply,
      socket
@@ -56,7 +70,12 @@ defmodule CymphoWeb.AdapterLive.Index do
   def handle_event("test_adapter", %{"key" => key}, socket) do
     case parse_adapter_key(socket, key) do
       {:ok, key_atom} ->
-        result = Adapters.check_health(key_atom, %{})
+        result =
+          Adapters.check_health(
+            key_atom,
+            company_adapter_health_config(key_atom, socket.assigns[:current_company])
+          )
+
         health = Map.put(socket.assigns.health, key_atom, result)
 
         message =
@@ -86,6 +105,42 @@ defmodule CymphoWeb.AdapterLive.Index do
     end
   end
 
+  defp overlay_company_health(health, company_id) when is_binary(company_id) do
+    Map.put(
+      health,
+      :openai_chat,
+      Adapters.check_health(
+        :openai_chat,
+        company_adapter_health_config(:openai_chat, %{id: company_id})
+      )
+    )
+  end
+
+  defp overlay_company_health(health, _company_id), do: health
+
+  defp company_adapter_health_config(:openai_chat, %{id: company_id}) do
+    %{
+      endpoint: company_setting_value(company_id, "OPENAI_CHAT_ENDPOINT"),
+      model: company_setting_value(company_id, "OPENAI_CHAT_MODEL"),
+      api_key: company_setting_value(company_id, "LLMOTIONS_API_KEY")
+    }
+  end
+
+  defp company_adapter_health_config(_key, _company), do: %{}
+
+  defp company_setting_value(company_id, key) do
+    case Secrets.get_secret_by_key(company_id, key, scope: "company") do
+      {:ok, secret} ->
+        case Secrets.get_secret_value(secret.id) do
+          {:ok, value} -> value
+          _ -> nil
+        end
+
+      {:error, :not_found} ->
+        nil
+    end
+  end
+
   defp parse_adapter_key(socket, key) do
     key = to_string(key)
 
@@ -99,7 +154,7 @@ defmodule CymphoWeb.AdapterLive.Index do
 
   defp build_runtime_readiness(adapters, health, agents_by_adapter) do
     counts = adapter_counts(adapters, health, agents_by_adapter)
-    attention_adapter = first_attention_adapter(adapters, health)
+    attention_adapter = first_attention_adapter(adapters, health, agents_by_adapter)
 
     %{
       summary: runtime_summary(counts, attention_adapter),
@@ -133,8 +188,14 @@ defmodule CymphoWeb.AdapterLive.Index do
 
   defp health_status(health, key), do: Map.get(Map.get(health, key, %{}), :status, :unknown)
 
-  defp first_attention_adapter(adapters, health) do
-    Enum.find(adapters, &adapter_attention?(&1, health))
+  defp first_attention_adapter(adapters, health, agents_by_adapter) do
+    adapters
+    |> Enum.filter(&adapter_attention?(&1, health))
+    |> Enum.sort_by(fn adapter ->
+      assigned = length(Map.get(agents_by_adapter, adapter.key, []))
+      {-assigned, adapter.name}
+    end)
+    |> List.first()
   end
 
   defp adapter_attention?(adapter, health) do

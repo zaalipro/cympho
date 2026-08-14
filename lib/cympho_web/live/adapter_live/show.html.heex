@@ -49,7 +49,7 @@
           <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Health Status
           </h2>
-          <div class="ui-advanced-only flex items-center gap-2">
+          <div class="flex items-center gap-2">
             <%= if @can_manage_adapter_settings do %>
               <button
                 type="button"
@@ -130,18 +130,21 @@
 <!-- Center + Right columns: Config & Agents -->
     <div class="lg:col-span-2 space-y-6">
       <!-- Configuration -->
-      <div class="ui-advanced-only card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
+      <div
+        data-testid="adapter-config-card"
+        class="card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card"
+      >
         <div class="flex items-center justify-between">
           <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Configuration
+            Connect this provider
           </h2>
-          <span class="text-xs text-text-tertiary">
+          <span class="ui-advanced-only text-xs text-text-tertiary">
             {length(visible_config_schema(@config_schema))} fields
           </span>
         </div>
 
         <p class="text-xs leading-5 text-text-quaternary">
-          Saved values are copied to every assigned agent. API keys entered here are stored in
+          Endpoint, model, and API key are enough to run. Keys are stored in
           <.app_link navigate={~p"/settings/secrets"} class="text-brand hover:underline">
             encrypted company Secrets
           </.app_link>
@@ -159,12 +162,15 @@
 
         <%= if @can_manage_adapter_settings do %>
           <form phx-change="validate_config" phx-submit="save_config" class="space-y-4">
-            <div :for={field <- visible_config_schema(@config_schema)} class="space-y-1">
+            <div
+              :for={field <- visible_config_schema(@config_schema)}
+              class={["space-y-1", field.required != true && "ui-advanced-only"]}
+            >
               <label
                 for={"adapter-config-#{field.key}"}
                 class="block text-xs font-510 text-text-secondary"
               >
-                {field.description || Atom.to_string(field.key)}
+                {simple_field_label(field)}
                 <%= if field.required do %>
                   <span class="text-red-400">*</span>
                 <% end %>

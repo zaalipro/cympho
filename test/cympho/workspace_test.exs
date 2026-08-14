@@ -163,7 +163,6 @@ defmodule Cympho.WorkspaceTest do
       assert {"is not a safe workspace path", _} = Keyword.get(ew.errors, :cwd)
     end
   end
-
 end
 
 defmodule Cympho.Workspace.RepoUrlTest do

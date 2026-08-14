@@ -138,60 +138,50 @@ defmodule CymphoWeb.AdapterLive.Show do
       :ok ->
         agents = socket.assigns.agents
 
-        if agents == [] do
-          message = "No agents use this adapter, so nothing was saved. Configure an agent first."
+        updates = adapter_config_updates(agents, submitted_config, socket.assigns.config_schema)
 
-          {:noreply,
-           socket
-           |> assign(:config, config)
-           |> assign(:validation_error, message)
-           |> put_flash(:error, message)}
-        else
-          updates = adapter_config_updates(agents, submitted_config, socket.assigns.config_schema)
+        case persist_adapter_config(socket, submitted_config, updates) do
+          {:ok, updated_agents, credential_saved?} ->
+            saved_config =
+              config_for_agents(
+                socket.assigns.config_schema,
+                updated_agents,
+                socket.assigns.adapter_key,
+                socket.assigns.current_company.id
+              )
 
-          case persist_adapter_config(socket, submitted_config, updates) do
-            {:ok, updated_agents, credential_saved?} ->
-              saved_config =
-                config_for_agents(
-                  socket.assigns.config_schema,
-                  updated_agents,
-                  socket.assigns.adapter_key,
-                  socket.assigns.current_company.id
-                )
+            health = Adapters.check_health(socket.assigns.adapter_key, saved_config)
 
-              health = Adapters.check_health(socket.assigns.adapter_key, saved_config)
+            {:noreply,
+             socket
+             |> assign(:agents, updated_agents)
+             |> assign(:config, saved_config)
+             |> assign(:pending_sensitive_config, %{})
+             |> assign(:health, health)
+             |> assign(:validation_error, nil)
+             |> put_flash(
+               :info,
+               adapter_save_message(length(updated_agents), credential_saved?)
+             )}
 
-              {:noreply,
-               socket
-               |> assign(:agents, updated_agents)
-               |> assign(:config, saved_config)
-               |> assign(:pending_sensitive_config, %{})
-               |> assign(:health, health)
-               |> assign(:validation_error, nil)
-               |> put_flash(
-                 :info,
-                 adapter_save_message(length(updated_agents), credential_saved?)
-               )}
+          {:error, :agent_config, agent_id, _reason} ->
+            message = adapter_save_error(agents, agent_id)
 
-            {:error, :agent_config, agent_id, _reason} ->
-              message = adapter_save_error(agents, agent_id)
+            {:noreply,
+             socket
+             |> assign(:config, config)
+             |> assign(:validation_error, message)
+             |> put_flash(:error, message)}
 
-              {:noreply,
-               socket
-               |> assign(:config, config)
-               |> assign(:validation_error, message)
-               |> put_flash(:error, message)}
+          {:error, :secret, _reason} ->
+            message =
+              "Configuration was not saved because the API key could not be stored in encrypted company Secrets."
 
-            {:error, :secret, _reason} ->
-              message =
-                "Configuration was not saved because the API key could not be stored in encrypted company Secrets."
-
-              {:noreply,
-               socket
-               |> assign(:config, config)
-               |> assign(:validation_error, message)
-               |> put_flash(:error, message)}
-          end
+            {:noreply,
+             socket
+             |> assign(:config, config)
+             |> assign(:validation_error, message)
+             |> put_flash(:error, message)}
         end
 
       {:error, reason} ->
@@ -244,8 +234,90 @@ defmodule CymphoWeb.AdapterLive.Show do
 
     schema
     |> default_config()
+    |> Map.merge(company_adapter_settings(adapter_key, company_id))
     |> Map.merge(saved)
     |> mark_encrypted_api_key(adapter_key, company_id)
+  end
+
+  defp company_adapter_settings(_adapter_key, company_id) when not is_binary(company_id), do: %{}
+
+  defp company_adapter_settings(adapter_key, company_id) do
+    [:endpoint, :model]
+    |> Enum.reduce(%{}, fn field, acc ->
+      case Secrets.get_secret_by_key(company_id, adapter_setting_secret_key(adapter_key, field),
+             scope: "company"
+           ) do
+        {:ok, secret} ->
+          case Secrets.get_secret_value(secret.id) do
+            {:ok, value} when is_binary(value) and value != "" -> Map.put(acc, field, value)
+            _ -> acc
+          end
+
+        {:error, :not_found} ->
+          acc
+      end
+    end)
+  end
+
+  defp persist_company_adapter_settings(socket, submitted_config) do
+    company_id = socket.assigns.current_company.id
+    adapter_key = socket.assigns.adapter_key
+
+    Enum.reduce_while([:endpoint, :model], :ok, fn field, :ok ->
+      case Map.get(submitted_config, field) do
+        value when is_binary(value) ->
+          trimmed = String.trim(value)
+
+          if trimmed == "" do
+            {:cont, :ok}
+          else
+            case upsert_company_setting_secret(
+                   company_id,
+                   adapter_setting_secret_key(adapter_key, field),
+                   trimmed,
+                   "#{socket.assigns.adapter.name} #{field} from Adapter Settings"
+                 ) do
+              :ok -> {:cont, :ok}
+              {:error, reason} -> {:halt, {:error, reason}}
+            end
+          end
+
+        _ ->
+          {:cont, :ok}
+      end
+    end)
+  end
+
+  defp upsert_company_setting_secret(company_id, key, value, description) do
+    case Secrets.get_secret_by_key(company_id, key, scope: "company") do
+      {:ok, secret} ->
+        case Secrets.rotate_secret(secret, value) do
+          {:ok, _changes} -> :ok
+          {:error, _operation, reason, _changes} -> {:error, reason}
+        end
+
+      {:error, :not_found} ->
+        case Secrets.create_secret(%{
+               company_id: company_id,
+               scope: "company",
+               key: key,
+               value: value,
+               description: description
+             }) do
+          {:ok, _secret} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp adapter_setting_secret_key(:openai_chat, :endpoint), do: "OPENAI_CHAT_ENDPOINT"
+  defp adapter_setting_secret_key(:openai_chat, :model), do: "OPENAI_CHAT_MODEL"
+
+  defp adapter_setting_secret_key(adapter_key, field) do
+    adapter_key
+    |> Atom.to_string()
+    |> String.upcase()
+    |> Kernel.<>("_" <> String.upcase(to_string(field)))
   end
 
   defp normalized_form_config(config_params, socket) do
@@ -361,6 +433,7 @@ defmodule CymphoWeb.AdapterLive.Show do
     result =
       Repo.transaction(fn ->
         with {:ok, credential_saved?} <- persist_submitted_api_key(socket, submitted_config),
+             :ok <- persist_company_adapter_settings(socket, submitted_config),
              {:ok, updated_agents} <- Agents.update_adapter_configs(updates) do
           {updated_agents, credential_saved?}
         else
@@ -437,6 +510,14 @@ defmodule CymphoWeb.AdapterLive.Show do
     Map.get(config, key) || Map.get(config, to_string(key))
   end
 
+  defp adapter_save_message(0, true) do
+    "Provider saved. New agents can use this connection. API key stored in encrypted company Secrets."
+  end
+
+  defp adapter_save_message(0, false) do
+    "Provider saved. New agents can use this connection."
+  end
+
   defp adapter_save_message(agent_count, true) do
     "Configuration saved for #{agent_count} agent(s). API key stored in encrypted company Secrets."
   end
@@ -506,6 +587,14 @@ defmodule CymphoWeb.AdapterLive.Show do
   end
 
   defp parse_config_value(value, _type), do: value
+
+  defp simple_field_label(%{key: :endpoint}), do: "Endpoint"
+  defp simple_field_label(%{key: :api_key}), do: "API key"
+  defp simple_field_label(%{key: :model}), do: "Model"
+  defp simple_field_label(%{key: :timeout_sec}), do: "Timeout (seconds)"
+  defp simple_field_label(%{key: :max_tokens}), do: "Max tokens"
+  defp simple_field_label(%{key: :temperature}), do: "Temperature"
+  defp simple_field_label(field), do: field.description || Atom.to_string(field.key)
 
   defp visible_config_schema(schema) do
     keys = MapSet.new(schema, & &1.key)

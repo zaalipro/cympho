@@ -1338,10 +1338,10 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp simple_operations_title(title), do: title
 
   defp simple_operations_body("Enable autonomous dispatch", _body),
-    do: "Needs a restart with the launch settings."
+    do: "Finish the setup items below, then start the team."
 
   defp simple_operations_body("Restart with runtime enabled", _body),
-    do: "Needs a restart with the launch settings."
+    do: "Finish the setup items below, then start the team."
 
   defp simple_operations_body(_title, body), do: body
 

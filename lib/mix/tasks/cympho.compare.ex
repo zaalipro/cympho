@@ -1919,10 +1919,8 @@ defmodule Mix.Tasks.Cympho.Compare do
       CymphoWeb.ActivityChannel,
       CymphoWeb.CommentsChannel,
       CymphoWeb.CompanyChannel,
-      CymphoWeb.HeartbeatsChannel,
       CymphoWeb.IssueChannel,
-      CymphoWeb.IssuesChannel,
-      CymphoWeb.RunsChannel
+      CymphoWeb.IssuesChannel
     ]
 
     loaded = Enum.count(channels, &Code.ensure_loaded?/1)

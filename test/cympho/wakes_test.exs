@@ -629,6 +629,7 @@ defmodule Cympho.WakesTest do
 
       assert {:error, :children_not_all_done} = Wakes.notify_children_completed(child2)
     end
+
     test "wakes parent when children are mix of done and cancelled", %{
       agent: agent,
       project: project,
@@ -744,7 +745,6 @@ defmodule Cympho.WakesTest do
       reloaded = Issues.get_issue!(parent.id)
       assert reloaded.status == :blocked
     end
-
   end
 
   describe "notify_blockers_resolved/1" do

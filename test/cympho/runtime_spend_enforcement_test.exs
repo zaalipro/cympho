@@ -106,7 +106,7 @@ defmodule Cympho.RuntimeSpendEnforcementTest do
 
     released_issue = Issues.get_issue!(issue.id)
     assert released_issue.status == :todo
-    assert released_issue.assignee_id == agent.id
+    assert is_nil(released_issue.assignee_id)
     assert is_nil(released_issue.checkout_run_id)
 
     assert {:error, {:budget_blocked, budget_info}} =

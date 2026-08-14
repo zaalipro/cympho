@@ -123,9 +123,9 @@ defmodule Cympho.InstallOwnerMembershipTest do
         |> User.registration_changeset(%{
           email: "company-id-only-#{System.unique_integer([:positive])}@example.com",
           name: "Company ID Only",
-          password: "password1234",
-          company_id: company.id
+          password: "password1234"
         })
+        |> Ecto.Changeset.put_change(:company_id, company.id)
         |> Repo.insert()
 
       assert user.company_id == company.id

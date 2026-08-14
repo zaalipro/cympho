@@ -17,8 +17,11 @@ defmodule Cympho.IssuesLabelsTest do
     {:ok, issue} =
       Issues.create_issue(%{title: "Test", description: "Desc", project_id: project.id})
 
-    {:ok, label} = Labels.create_label(%{name: "Bug", color: "#FF0000"})
-    {:ok, label2} = Labels.create_label(%{name: "Feature", color: "#00FF00"})
+    {:ok, label} = Labels.create_label(%{name: "Bug", color: "#FF0000", company_id: company.id})
+
+    {:ok, label2} =
+      Labels.create_label(%{name: "Feature", color: "#00FF00", company_id: company.id})
+
     %{issue: issue, label: label, label2: label2, project: project}
   end
 

@@ -5,7 +5,7 @@ defmodule Cympho.Skills.ResolverTest do
 
   describe "resolve/1" do
     setup do
-      start_supervised!(Resolver)
+      ensure_resolver_started()
 
       {:ok, company} =
         Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
@@ -161,7 +161,7 @@ defmodule Cympho.Skills.ResolverTest do
 
   describe "invalidate/1" do
     setup do
-      start_supervised!(Resolver)
+      ensure_resolver_started()
 
       {:ok, company} =
         Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
@@ -208,7 +208,7 @@ defmodule Cympho.Skills.ResolverTest do
 
   describe "clear_cache/0" do
     setup do
-      start_supervised!(Resolver)
+      ensure_resolver_started()
 
       {:ok, company} =
         Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
@@ -250,7 +250,7 @@ defmodule Cympho.Skills.ResolverTest do
 
   describe "semver compatibility" do
     setup do
-      start_supervised!(Resolver)
+      ensure_resolver_started()
 
       {:ok, company} =
         Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
@@ -379,6 +379,13 @@ defmodule Cympho.Skills.ResolverTest do
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: dep.id})
 
       assert {:ok, [^dep, ^plugin]} = Resolver.resolve(agent.id, company.id)
+    end
+  end
+
+  defp ensure_resolver_started do
+    case Process.whereis(Resolver) do
+      nil -> start_supervised!(Resolver)
+      pid when is_pid(pid) -> pid
     end
   end
 end

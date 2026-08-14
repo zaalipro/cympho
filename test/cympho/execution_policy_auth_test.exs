@@ -7,13 +7,25 @@ defmodule Cympho.ExecutionPolicyAuthTest do
 
   describe "executor submit authorization" do
     setup do
-      {:ok, executor} = Agents.create_agent(%{name: "Executor", role: :engineer})
-      {:ok, impostor} = Agents.create_agent(%{name: "Impostor", role: :engineer})
-      {:ok, reviewer} = Agents.create_agent(%{name: "Reviewer", role: :cto})
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Auth Co #{System.unique_integer([:positive])}",
+          slug: "auth-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Executor", role: :engineer, company_id: company.id})
+
+      {:ok, impostor} =
+        Agents.create_agent(%{name: "Impostor", role: :engineer, company_id: company.id})
+
+      {:ok, reviewer} =
+        Agents.create_agent(%{name: "Reviewer", role: :cto, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Auth Test Policy",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "reviewer", "participant_id" => reviewer.id}
@@ -23,7 +35,8 @@ defmodule Cympho.ExecutionPolicyAuthTest do
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Auth Test Issue",
-          description: "Testing executor auth"
+          description: "Testing executor auth",
+          company_id: company.id
         })
 
       {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
@@ -53,13 +66,25 @@ defmodule Cympho.ExecutionPolicyAuthTest do
 
   describe "execution policy decision authorization" do
     setup do
-      {:ok, executor} = Agents.create_agent(%{name: "Executor", role: :engineer})
-      {:ok, reviewer} = Agents.create_agent(%{name: "Reviewer", role: :cto})
-      {:ok, impostor} = Agents.create_agent(%{name: "Impostor", role: :cto})
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Decision Auth Co #{System.unique_integer([:positive])}",
+          slug: "decision-auth-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Executor", role: :engineer, company_id: company.id})
+
+      {:ok, reviewer} =
+        Agents.create_agent(%{name: "Reviewer", role: :cto, company_id: company.id})
+
+      {:ok, impostor} =
+        Agents.create_agent(%{name: "Impostor", role: :cto, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Decision Auth Policy",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "reviewer", "participant_id" => reviewer.id}
@@ -69,7 +94,8 @@ defmodule Cympho.ExecutionPolicyAuthTest do
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Decision Auth Test",
-          description: "Testing decision auth"
+          description: "Testing decision auth",
+          company_id: company.id
         })
 
       {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
@@ -109,14 +135,28 @@ defmodule Cympho.ExecutionPolicyAuthTest do
 
   describe "full pipeline with authorization" do
     test "only correct participants can act at each stage" do
-      {:ok, executor} = Agents.create_agent(%{name: "Exec", role: :engineer})
-      {:ok, reviewer} = Agents.create_agent(%{name: "Rev", role: :cto})
-      {:ok, approver} = Agents.create_agent(%{name: "Appr", role: :ceo})
-      {:ok, outsider} = Agents.create_agent(%{name: "Out", role: :engineer})
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Pipeline Auth Co #{System.unique_integer([:positive])}",
+          slug: "pipeline-auth-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Exec", role: :engineer, company_id: company.id})
+
+      {:ok, reviewer} =
+        Agents.create_agent(%{name: "Rev", role: :cto, company_id: company.id})
+
+      {:ok, approver} =
+        Agents.create_agent(%{name: "Appr", role: :ceo, company_id: company.id})
+
+      {:ok, outsider} =
+        Agents.create_agent(%{name: "Out", role: :engineer, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Full Pipeline Auth",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "reviewer", "participant_id" => reviewer.id},
@@ -124,7 +164,13 @@ defmodule Cympho.ExecutionPolicyAuthTest do
           ]
         })
 
-      {:ok, issue} = Issues.create_issue(%{title: "Full Auth Pipeline", description: "Test"})
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Full Auth Pipeline",
+          description: "Test",
+          company_id: company.id
+        })
+
       {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
 
       # Outsider cannot submit

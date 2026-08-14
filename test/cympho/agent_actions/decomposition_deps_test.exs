@@ -136,6 +136,7 @@ defmodule Cympho.AgentActions.DecompositionDepsTest do
     } do
       {:ok, _grant} =
         PrincipalPermissions.create_permission_grant(%{
+          company_id: project.company_id,
           principal_id: engineer.id,
           principal_type: "agent",
           permission: "tasks:assign",

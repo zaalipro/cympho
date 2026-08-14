@@ -1833,7 +1833,8 @@ defmodule CymphoWeb.AgentLiveTest do
       assert has_element?(view, "form[data-ui-simple-single-column]")
       assert has_element?(view, "[data-testid='new-agent-defaults-summary'].ui-simple-only")
       assert has_element?(view, "[data-testid='new-agent-runtime-section'].ui-advanced-only")
-      assert has_element?(view, "[data-testid='new-agent-adapter-section'].ui-advanced-only")
+      assert has_element?(view, "[data-testid='new-agent-adapter-section']")
+      refute has_element?(view, "[data-testid='new-agent-adapter-section'].ui-advanced-only")
       assert has_element?(view, "[data-testid='new-agent-guide-section'].ui-advanced-only")
     end
 

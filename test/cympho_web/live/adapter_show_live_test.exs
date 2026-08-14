@@ -30,7 +30,7 @@ defmodule CymphoWeb.AdapterShowLiveTest do
       assert has_element?(view, "#adapter-config-endpoint[required]")
       assert has_element?(view, "label[for='adapter-config-api_key']")
       assert has_element?(view, "#adapter-config-api_key[required]")
-      assert html =~ "API keys entered here are stored in"
+      assert html =~ "encrypted company Secrets"
       assert html =~ "and are not copied into agent configs"
     end
 
@@ -53,7 +53,7 @@ defmodule CymphoWeb.AdapterShowLiveTest do
              )
     end
 
-    test "does not claim to save a global config when no agents use the adapter", %{
+    test "saves company provider settings when no agents use the adapter yet", %{
       conn: conn,
       current_company: company
     } do
@@ -64,18 +64,25 @@ defmodule CymphoWeb.AdapterShowLiveTest do
         |> form("form[phx-submit='save_config']", %{
           "config" => %{
             "endpoint" => "https://cli.llmotions.com/v1",
-            "api_key" => "not-persisted",
-            "model" => "gpt-5.6-terra"
+            "api_key" => "llmotions-from-settings",
+            "model" => "gemini-3.7-flash"
           }
         })
         |> render_submit()
 
-      assert html =~ "No agents use this adapter"
-      assert html =~ "nothing was saved"
-      assert has_element?(view, "[role='alert']", "No agents use this adapter")
+      refute html =~ "nothing was saved"
+      refute html =~ "Validation failed"
+      refute html =~ "could not be stored"
 
-      assert {:error, :not_found} =
+      assert {:ok, secret} =
                Secrets.get_secret_by_key(company.id, "LLMOTIONS_API_KEY", scope: "company")
+
+      assert {:ok, "llmotions-from-settings"} = Secrets.get_secret_value(secret.id)
+
+      assert {:ok, endpoint_secret} =
+               Secrets.get_secret_by_key(company.id, "OPENAI_CHAT_ENDPOINT", scope: "company")
+
+      assert {:ok, "https://cli.llmotions.com/v1"} = Secrets.get_secret_value(endpoint_secret.id)
     end
 
     @tag regular_member: true
@@ -144,12 +151,18 @@ defmodule CymphoWeb.AdapterShowLiveTest do
       assert {:ok, "original-encrypted-key"} = Secrets.get_secret_value(active_secret.id)
     end
 
-    test "keeps adapter configuration and probe controls in Advanced mode", %{conn: conn} do
+    test "shows connect form in Simple mode so owners can add an endpoint", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/settings/adapters/openai_chat")
 
-      assert has_element?(view, ".ui-advanced-only button[phx-click='test_health']")
-      assert has_element?(view, ".ui-advanced-only button[phx-click='send_test_heartbeat']")
-      assert has_element?(view, ".ui-advanced-only form[phx-submit='save_config']")
+      assert has_element?(view, "button[phx-click='test_health']")
+      assert has_element?(view, "button[phx-click='send_test_heartbeat']")
+
+      assert has_element?(
+               view,
+               "[data-testid='adapter-config-card'] form[phx-submit='save_config']"
+             )
+
+      assert has_element?(view, "[data-testid='adapter-config-card']", "Connect this provider")
       assert has_element?(view, ".ui-advanced-only", "Module")
     end
 

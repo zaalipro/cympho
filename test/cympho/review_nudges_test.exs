@@ -40,13 +40,16 @@ defmodule Cympho.ReviewNudgesTest do
   end
 
   test "reconcile_issue is idempotent after consuming a satisfied wake" do
+    company = nudge_company()
+
     {:ok, engineer} =
       Agents.create_agent(%{
         name: "Delivery Agent",
         role: :engineer,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo"},
+        company_id: company.id
       })
 
     {:ok, issue} =
@@ -55,7 +58,8 @@ defmodule Cympho.ReviewNudgesTest do
         description: "Owner request is clear.",
         status: :in_progress,
         assignee_id: engineer.id,
-        assigned_role: "engineer"
+        assigned_role: "engineer",
+        company_id: company.id
       })
 
     {:ok, wake} =
@@ -138,20 +142,24 @@ defmodule Cympho.ReviewNudgesTest do
   end
 
   test "queueing a nudge assigns, creates inbox, wake, and audit comment" do
+    company = nudge_company()
+
     {:ok, engineer} =
       Agents.create_agent(%{
         name: "Delivery Agent",
         role: :engineer,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo"},
+        company_id: company.id
       })
 
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Needs delivery evidence",
         status: :in_progress,
-        assigned_role: "engineer"
+        assigned_role: "engineer",
+        company_id: company.id
       })
 
     blocker = %{key: :delivery_comment, label: "Delivery comment", prompt: "Missing delivery"}
@@ -188,20 +196,24 @@ defmodule Cympho.ReviewNudgesTest do
   end
 
   test "queueing an already pending nudge does not duplicate comments" do
+    company = nudge_company()
+
     {:ok, engineer} =
       Agents.create_agent(%{
         name: "Delivery Agent",
         role: :engineer,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo"},
+        company_id: company.id
       })
 
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Needs one wake",
         status: :in_progress,
-        assigned_role: "engineer"
+        assigned_role: "engineer",
+        company_id: company.id
       })
 
     blocker = %{key: :delivery_comment, label: "Delivery comment", prompt: "Missing delivery"}
@@ -226,13 +238,16 @@ defmodule Cympho.ReviewNudgesTest do
   end
 
   test "queues a targeted PR quality nudge from the contract gap planner" do
+    company = nudge_company()
+
     {:ok, engineer} =
       Agents.create_agent(%{
         name: "PR Fixer",
         role: :engineer,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo"},
+        company_id: company.id
       })
 
     {:ok, issue} =
@@ -241,6 +256,7 @@ defmodule Cympho.ReviewNudgesTest do
         identifier: "CYM-7",
         status: :in_progress,
         assignee_id: engineer.id,
+        company_id: company.id,
         github_pr_url: "https://github.com/acme/app/pull/7",
         monitor_state: %{
           "pr_quality" => %{
@@ -287,13 +303,16 @@ defmodule Cympho.ReviewNudgesTest do
   end
 
   test "queues and clears a memory summary nudge" do
+    company = nudge_company()
+
     {:ok, engineer} =
       Agents.create_agent(%{
         name: "Memory Owner",
         role: :engineer,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo"},
+        company_id: company.id
       })
 
     {:ok, issue} =
@@ -301,7 +320,8 @@ defmodule Cympho.ReviewNudgesTest do
         title: "Noisy issue memory",
         description: "Owner request is clear.",
         status: :in_progress,
-        assignee_id: engineer.id
+        assignee_id: engineer.id,
+        company_id: company.id
       })
 
     {:ok, _work_product} =
@@ -360,20 +380,24 @@ defmodule Cympho.ReviewNudgesTest do
   end
 
   test "planned nudge shows queued lifecycle when a matching wake is pending" do
+    company = nudge_company()
+
     {:ok, engineer} =
       Agents.create_agent(%{
         name: "Delivery Agent",
         role: :engineer,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo"},
+        company_id: company.id
       })
 
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Needs visible lifecycle",
         status: :in_progress,
-        assigned_role: "engineer"
+        assigned_role: "engineer",
+        company_id: company.id
       })
 
     blocker = %{key: :delivery_comment, label: "Delivery comment", prompt: "Missing delivery"}
@@ -391,13 +415,16 @@ defmodule Cympho.ReviewNudgesTest do
   end
 
   test "tagged delivery comment clears the matching review nudge" do
+    company = nudge_company()
+
     {:ok, engineer} =
       Agents.create_agent(%{
         name: "Delivery Agent",
         role: :engineer,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo"},
+        company_id: company.id
       })
 
     {:ok, issue} =
@@ -405,7 +432,8 @@ defmodule Cympho.ReviewNudgesTest do
         title: "Needs delivery comment",
         description: "Owner request is clear.",
         status: :in_progress,
-        assigned_role: "engineer"
+        assigned_role: "engineer",
+        company_id: company.id
       })
 
     blocker = %{key: :delivery_comment, label: "Delivery comment", prompt: "Missing delivery"}
@@ -441,13 +469,16 @@ defmodule Cympho.ReviewNudgesTest do
   end
 
   test "work product clears a queued work-product nudge" do
+    company = nudge_company()
+
     {:ok, engineer} =
       Agents.create_agent(%{
         name: "Artifact Agent",
         role: :engineer,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo"},
+        company_id: company.id
       })
 
     {:ok, issue} =
@@ -455,7 +486,8 @@ defmodule Cympho.ReviewNudgesTest do
         title: "Needs artifact",
         description: "Owner request is clear.",
         status: :in_progress,
-        assigned_role: "engineer"
+        assigned_role: "engineer",
+        company_id: company.id
       })
 
     blocker = %{key: :work_product, label: "Work product", prompt: "Missing artifact"}
@@ -480,13 +512,16 @@ defmodule Cympho.ReviewNudgesTest do
   end
 
   test "successful run clears a runtime-verification nudge" do
+    company = nudge_company()
+
     {:ok, engineer} =
       Agents.create_agent(%{
         name: "Runtime Agent",
         role: :engineer,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo"},
+        company_id: company.id
       })
 
     {:ok, issue} =
@@ -494,7 +529,8 @@ defmodule Cympho.ReviewNudgesTest do
         title: "Needs verification",
         description: "Owner request is clear.",
         status: :in_progress,
-        assigned_role: "engineer"
+        assigned_role: "engineer",
+        company_id: company.id
       })
 
     run =
@@ -554,20 +590,24 @@ defmodule Cympho.ReviewNudgesTest do
   end
 
   test "tagged review comment clears a queued CTO review nudge" do
+    company = nudge_company()
+
     {:ok, cto} =
       Agents.create_agent(%{
         name: "CTO",
         role: :cto,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo"},
+        company_id: company.id
       })
 
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Needs CTO review",
         description: "Owner request is clear.",
-        status: :in_review
+        status: :in_review,
+        company_id: company.id
       })
 
     blocker = %{key: :review_decision, label: "CTO/CEO review decision", prompt: "Review"}
@@ -589,5 +629,15 @@ defmodule Cympho.ReviewNudgesTest do
 
     assert [] = Wakes.list_review_nudges([issue.id])
     assert [_cleared] = Wakes.list_review_nudges([issue.id], statuses: ["consumed"])
+  end
+
+  defp nudge_company do
+    {:ok, company} =
+      Cympho.Companies.create_company(%{
+        name: "Nudge Co #{System.unique_integer([:positive])}",
+        slug: "nudge-#{System.unique_integer([:positive])}"
+      })
+
+    company
   end
 end

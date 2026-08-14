@@ -169,9 +169,10 @@
             navigate={~p"/settings/adapters/#{adapter.key}"}
             title="Configure"
             aria-label={"Configure #{adapter.name}"}
-            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-2 min-h-[44px] min-w-[44px] rounded-lg transition-colors inline-flex items-center justify-center"
+            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center justify-center gap-1.5"
           >
             <.icon name="hero-cog-6-tooth-mini" class="h-4 w-4" />
+            <span>Configure</span>
           </.app_link>
           <button
             type="button"

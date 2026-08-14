@@ -376,7 +376,7 @@ defmodule Cympho.Runtime do
   end
 
   @openai_company_key_hosts ["api.openai.com", "api.anthropic.com"]
-  @recorded_provider_hosts ["cli.llmotions.com"]
+  @recorded_provider_hosts ["cli.llmotions.com", "api.llmotions.com"]
 
   defp openai_company_key_host_allowed?(host, env) when is_binary(host) do
     host in @openai_company_key_hosts or

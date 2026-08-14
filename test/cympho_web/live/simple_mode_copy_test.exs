@@ -121,7 +121,8 @@ defmodule CymphoWeb.SimpleModeCopyTest do
 
       assert has_element?(view, "[data-testid='new-agent-defaults-summary'].ui-simple-only")
       assert has_element?(view, "[data-testid='new-agent-runtime-section'].ui-advanced-only")
-      assert has_element?(view, "[data-testid='new-agent-adapter-section'].ui-advanced-only")
+      assert has_element?(view, "[data-testid='new-agent-adapter-section']")
+      refute has_element?(view, "[data-testid='new-agent-adapter-section'].ui-advanced-only")
       assert html =~ "Friendly defaults are ready"
       assert html =~ "company defaults"
       assert html =~ "change how it runs"

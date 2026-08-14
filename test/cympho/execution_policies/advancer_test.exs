@@ -50,6 +50,7 @@ defmodule Cympho.ExecutionPolicies.AdvancerTest do
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Auto Pipeline",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id, "auto_advance" => true},
             %{"type" => "approver", "participant_id" => approver.id, "auto_advance" => true}
@@ -94,6 +95,7 @@ defmodule Cympho.ExecutionPolicies.AdvancerTest do
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Manual Pipeline",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "approver", "participant_id" => approver.id}
@@ -132,6 +134,7 @@ defmodule Cympho.ExecutionPolicies.AdvancerTest do
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Single Stage",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id}
           ]
@@ -175,6 +178,7 @@ defmodule Cympho.ExecutionPolicies.AdvancerTest do
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Done",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id, "auto_advance" => true}
           ]
