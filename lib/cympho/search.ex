@@ -14,7 +14,7 @@ defmodule Cympho.Search do
 
     issues_q =
       from(i in Issue,
-        where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
+        where: ^issue_match_dynamic(query),
         order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
         limit: ^limit,
         preload: [:comments, :blocked_by, :blocks, :assignee]
@@ -58,7 +58,7 @@ defmodule Cympho.Search do
     company_id = Keyword.get(opts, :company_id)
 
     from(i in Issue,
-      where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
+      where: ^issue_match_dynamic(query),
       order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
       preload: [:comments, :blocked_by, :blocks, :assignee]
     )
@@ -92,7 +92,7 @@ defmodule Cympho.Search do
 
     base_query =
       from(i in Issue,
-        where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
+        where: ^issue_match_dynamic(query),
         order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
         preload: [:assignee, :project, :goal, :labels]
       )
@@ -181,6 +181,28 @@ defmodule Cympho.Search do
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
+  end
+
+  # Identifier tickets like CYM-9 are not in the title/description tsvector,
+  # and english `plainto_tsquery` drops the hyphenated key. Always also match
+  # identifier and title as ordinary text.
+  defp issue_match_dynamic(query) do
+    trimmed = query |> to_string() |> String.trim()
+    like = "%" <> escape_like(trimmed) <> "%"
+
+    dynamic(
+      [i],
+      fragment("search_vector @@ plainto_tsquery('english', ?)", ^trimmed) or
+        ilike(i.identifier, ^like) or
+        ilike(i.title, ^like)
+    )
+  end
+
+  defp escape_like(value) do
+    value
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
   end
 
   # Filter functions

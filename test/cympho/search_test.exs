@@ -110,6 +110,35 @@ defmodule Cympho.SearchTest do
       issue = hd(issues)
       assert is_list(issue.comments)
     end
+
+    test "finds issues by identifier even when it is not in the title" do
+      unique = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Ident Search #{unique}",
+          slug: "ident-search-#{unique}"
+        })
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Search Ident Project",
+          prefix: "SID",
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Identifier only hit",
+          description: "No ticket token in this prose.",
+          project_id: project.id,
+          company_id: company.id
+        })
+
+      assert issue.identifier
+      found = Search.search_issues(issue.identifier, company_id: company.id)
+      assert Enum.any?(found, &(&1.id == issue.id))
+    end
   end
 
   describe "search_all/3" do

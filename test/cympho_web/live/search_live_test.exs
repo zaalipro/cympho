@@ -104,6 +104,29 @@ defmodule CymphoWeb.SearchLiveTest do
       assert issue_tab_html =~ "1 issue match for &quot;#{needle}&quot;"
     end
 
+    test "finds an issue by ticket identifier", %{conn: conn, current_company: company} do
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Ident Live Project",
+          prefix: "ILP",
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "No ticket token in this title",
+          description: "Owner should still find this by identifier.",
+          company_id: company.id,
+          project_id: project.id,
+          status: :todo
+        })
+
+      {:ok, _view, html} = live(conn, "/search?q=#{issue.identifier}")
+
+      assert html =~ issue.identifier
+      assert html =~ "No ticket token in this title"
+    end
+
     test "renders an actionable empty state when filters remove every match", %{
       conn: conn,
       current_company: company

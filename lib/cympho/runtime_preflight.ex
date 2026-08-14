@@ -205,7 +205,8 @@ defmodule Cympho.RuntimePreflight do
       "Company runtime is paused. Agents and harnesses will not start.",
       "Runtime paused",
       detail,
-      target_label: "Open runtime controls"
+      target_path: "/operations",
+      target_label: "Resume the team"
     )
   end
 

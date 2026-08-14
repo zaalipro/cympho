@@ -282,8 +282,8 @@ defmodule CymphoWeb.SimpleModeCopyTest do
              "expected dual simple anchors for Needs-you CTAs so simple mode can navigate"
 
       for href <- all_simple do
-        refute String.starts_with?(href, "/operations"),
-               "simple home CTA must not target advanced-only Operations: #{href}"
+        refute String.contains?(href, "#"),
+               "simple home CTA must not target advanced-only Operations hashes: #{href}"
       end
 
       # Owner-facing destinations only.
@@ -296,6 +296,7 @@ defmodule CymphoWeb.SimpleModeCopyTest do
                  "/budgets/new",
                  "/settings",
                  "/onboarding",
+                 "/operations",
                  "/agents",
                  "/agents/new",
                  "/approvals",

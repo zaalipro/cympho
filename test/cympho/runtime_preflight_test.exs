@@ -428,8 +428,8 @@ defmodule Cympho.RuntimePreflightTest do
     assert preflight.summary =~ "Company runtime is paused"
     assert preflight.first_action.label == "Runtime paused"
     assert preflight.first_action.detail =~ "operator hold"
-    assert preflight.first_action.target_path == "/dashboard"
-    assert preflight.first_action.target_label == "Open runtime controls"
+    assert preflight.first_action.target_path == "/operations"
+    assert preflight.first_action.target_label == "Resume the team"
   end
 
   test "for_issue counts scoped secrets for assigned agent credentials" do

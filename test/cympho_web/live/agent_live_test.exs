@@ -1810,6 +1810,44 @@ defmodule CymphoWeb.AgentLiveTest do
   end
 
   describe "Adapter Selection" do
+    test "defaults to OpenAI Chat when the company already has that provider", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, _} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "OPENAI_CHAT_ENDPOINT",
+          value: "https://cli.llmotions.com/v1",
+          description: "Company chat endpoint"
+        })
+
+      {:ok, _} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "OPENAI_CHAT_MODEL",
+          value: "gemini-3.7-flash",
+          description: "Company chat model"
+        })
+
+      {:ok, _} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "LLMOTIONS_API_KEY",
+          value: "sk-test",
+          description: "Company chat key"
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/new")
+
+      assert html =~ ~s(value="openai_chat" selected)
+      assert html =~ "Friendly defaults are ready"
+      refute html =~ "Add ANTHROPIC_API_KEY before hiring"
+    end
+
     test "shows adapter dropdown on new agent form", %{conn: conn} do
       {:ok, view, html} = live(conn, "/agents/new")
 

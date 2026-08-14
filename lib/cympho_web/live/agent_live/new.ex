@@ -33,7 +33,12 @@ defmodule CymphoWeb.AgentLive.New do
     selected_profile_id = selected_profile_from_params(params)
     attrs = initial_attrs(params, company, selected_profile_id)
     selected_adapter = selected_adapter_from_params(attrs, selected_profile_id)
-    runtime = runtime_form_from_params(attrs, selected_adapter, selected_profile_id)
+
+    runtime =
+      attrs
+      |> runtime_form_from_params(selected_adapter, selected_profile_id)
+      |> maybe_overlay_company_openai_chat(company, selected_adapter)
+
     changeset = Agents.change_agent(%Agent{}, attrs)
 
     env_text = env_text_from_profile(selected_profile_id)
@@ -64,7 +69,12 @@ defmodule CymphoWeb.AgentLive.New do
     env_text = env_text_from_params(agent_params, selected_profile_id)
     agent_params = Map.put(agent_params, "env_text", env_text)
     selected_adapter = selected_adapter_from_params(agent_params, selected_profile_id)
-    runtime = runtime_form_from_params(agent_params, selected_adapter, selected_profile_id)
+
+    runtime =
+      agent_params
+      |> runtime_form_from_params(selected_adapter, selected_profile_id)
+      |> maybe_overlay_company_openai_chat(company, selected_adapter)
+
     profile = RuntimeProfiles.get!(selected_profile_id)
 
     changeset =
@@ -96,7 +106,12 @@ defmodule CymphoWeb.AgentLive.New do
     env_text = env_text_from_params(agent_params, selected_profile_id)
     agent_params = Map.put(agent_params, "env_text", env_text)
     selected_adapter = selected_adapter_from_params(agent_params, selected_profile_id)
-    runtime = runtime_form_from_params(agent_params, selected_adapter, selected_profile_id)
+
+    runtime =
+      agent_params
+      |> runtime_form_from_params(selected_adapter, selected_profile_id)
+      |> maybe_overlay_company_openai_chat(company, selected_adapter)
+
     profile = RuntimeProfiles.get!(selected_profile_id)
 
     readiness =
@@ -234,6 +249,7 @@ defmodule CymphoWeb.AgentLive.New do
 
     @default_attrs
     |> Map.put("role", to_string(role))
+    |> Map.put("adapter", default_adapter(company))
     |> Map.put("instructions", RolePlaybook.default_overrides_template(role))
     |> maybe_put_prefill_name(params, role)
     |> maybe_put_prefill_parent(params, company)
@@ -844,6 +860,50 @@ defmodule CymphoWeb.AgentLive.New do
   end
 
   defp reports_to_options(_, _), do: [{"— No manager —", ""}]
+
+  defp default_adapter(company) do
+    if company_openai_chat_ready?(company), do: "openai_chat", else: "claude_code"
+  end
+
+  defp company_openai_chat_ready?(%{id: company_id}) do
+    present?(company_secret(company_id, "OPENAI_CHAT_ENDPOINT")) and
+      present?(company_secret(company_id, "LLMOTIONS_API_KEY"))
+  end
+
+  defp company_openai_chat_ready?(_), do: false
+
+  defp maybe_overlay_company_openai_chat(runtime, %{id: company_id}, "openai_chat") do
+    endpoint = company_secret(company_id, "OPENAI_CHAT_ENDPOINT")
+    model = company_secret(company_id, "OPENAI_CHAT_MODEL")
+
+    runtime
+    |> Map.update(:openai_chat_endpoint, "", fn current ->
+      if present?(current), do: current, else: endpoint || ""
+    end)
+    |> Map.update(:model, "", fn current ->
+      if present?(current) and current != default_model("openai_chat", nil, nil),
+        do: current,
+        else: model || current
+    end)
+  end
+
+  defp maybe_overlay_company_openai_chat(runtime, _company, _adapter), do: runtime
+
+  defp company_secret(company_id, key) do
+    case Secrets.get_secret_by_key(company_id, key, scope: "company") do
+      {:ok, secret} ->
+        case Secrets.get_secret_value(secret.id) do
+          {:ok, value} -> value
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp present?(value) when value in [nil, ""], do: false
+  defp present?(_value), do: true
 
   defp normalize_adapter(nil), do: "claude_code"
   defp normalize_adapter(""), do: "claude_code"
