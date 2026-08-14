@@ -171,6 +171,33 @@ defmodule Cympho.RuntimeTest do
              Runtime.dispatchable?(issue, chat_engineer)
   end
 
+  test "dispatchable? does no filesystem work", %{agent: agent, issue: issue} do
+    # This runs inside the single global Dispatcher GenServer. It used to call
+    # the full preflight, so a `git clone` for one issue stalled dispatch for
+    # every tenant — and the orchestrator runs that same preflight in its own
+    # process when it starts the session, so the work was pure blocking cost.
+    path = Workspace.workspace_path(issue.id)
+    File.rm_rf(path)
+
+    assert :ok = Runtime.dispatchable?(issue, agent)
+    refute File.exists?(path), "dispatchable? created a workspace on the dispatcher's process"
+
+    # The real preflight still does.
+    assert {:ok, context} = Runtime.preflight(issue, agent)
+    assert File.dir?(context.cwd)
+  end
+
+  test "dispatchable? still rejects work that cannot run", %{
+    company: company,
+    agent: agent,
+    issue: issue
+  } do
+    assert :ok = Runtime.dispatchable?(issue, agent)
+
+    assert {:ok, _company} = Companies.pause_company(company, "operator pause")
+    assert {:error, :company_paused} = Runtime.dispatchable?(issue, agent)
+  end
+
   test "preflight blocks paused companies", %{company: company, agent: agent, issue: issue} do
     assert {:ok, _company} = Companies.pause_company(company, "operator pause")
 

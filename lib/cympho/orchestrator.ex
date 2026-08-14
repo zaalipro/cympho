@@ -67,6 +67,10 @@ defmodule Cympho.Orchestrator do
   # the worker as dead. Two ticks tolerates a race with late registration
   # or a brief re-register between retries.
   @adapter_session_liveness_misses 2
+  # How long a caller waits for an orchestrator to shut down before killing it.
+  # Short enough that a company stop with several wedged sessions still fits
+  # inside the Dispatcher's own 15s call budget.
+  @stop_timeout 5_000
   @adapter_failure_circuit_breaker_threshold 3
   @no_progress_circuit_breaker_threshold 3
   @completion_contract_blocker_keys MapSet.new([
@@ -149,8 +153,26 @@ defmodule Cympho.Orchestrator do
         :ok
 
       pid ->
-        GenServer.stop(pid, reason)
+        stop_with_deadline(pid, reason)
     end
+  end
+
+  # `GenServer.stop/2` waits `:infinity`. This is called from the single global
+  # Dispatcher during a company stop, so one orchestrator wedged in
+  # `terminate/2` — an adapter that will not cancel, a slow provider release —
+  # blocked all dispatch permanently. Bound the wait, then take the slot back
+  # by force: an operator asking a company to stop has to get it.
+  defp stop_with_deadline(pid, reason) do
+    GenServer.stop(pid, reason, @stop_timeout)
+  catch
+    :exit, _ ->
+      Logger.warning("orchestrator did not stop within its deadline; killing it",
+        component: "orchestrator",
+        reason: inspect(reason)
+      )
+
+      Process.exit(pid, :kill)
+      :ok
   end
 
   @doc """

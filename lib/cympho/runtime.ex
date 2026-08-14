@@ -55,13 +55,8 @@ defmodule Cympho.Runtime do
   def preflight(issue, agent_or_id, opts \\ [])
 
   def preflight(%Issue{} = issue, %Agent{} = agent, opts) do
-    with :ok <- verify_company(issue, agent),
-         :ok <- verify_agent(agent, issue, opts),
-         :ok <- verify_repo_delivery_runtime(issue, agent),
-         :ok <- verify_stage_gate(issue, agent),
-         {:ok, env} <- resolve_env(agent, opts),
-         {:ok, adapter, adapter_config} <- resolve_adapter(agent, env, opts),
-         {:ok, budget} <- verify_budget(issue, agent),
+    with {:ok, %{env: env, adapter: adapter, adapter_config: adapter_config, budget: budget}} <-
+           verify_eligibility(issue, agent, opts),
          {:ok, workspace} <- resolve_workspace(issue, opts),
          {:ok, workspace} <- ensure_provider_environment(workspace) do
       runtime_env = Map.merge(env, runtime_identity_env(issue, agent, workspace, opts))
@@ -94,12 +89,34 @@ defmodule Cympho.Runtime do
   end
 
   @doc """
-  Lightweight alias used by the dispatcher before checkout.
+  Lightweight eligibility check used by the dispatcher before checkout.
+
+  This deliberately stops short of `resolve_workspace/2` and
+  `ensure_provider_environment/1`. Those are the expensive parts — a blocking
+  `git clone` and a remote environment acquisition — and they run inside the
+  single global Dispatcher GenServer, where one large repository or one hung
+  provider stalls dispatch for every tenant. The orchestrator runs the full
+  `preflight/3` in its own process when it starts the session, so doing that
+  work here bought nothing and blocked everyone.
   """
   def dispatchable?(%Issue{} = issue, %Agent{} = agent, opts \\ []) do
-    case preflight(issue, agent, Keyword.put(opts, :phase, :dispatch)) do
-      {:ok, _context} -> :ok
+    case verify_eligibility(issue, agent, opts) do
+      {:ok, _resolved} -> :ok
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # The checks that decide whether an issue *may* run, with no side effects on
+  # the filesystem or a remote provider.
+  defp verify_eligibility(%Issue{} = issue, %Agent{} = agent, opts) do
+    with :ok <- verify_company(issue, agent),
+         :ok <- verify_agent(agent, issue, opts),
+         :ok <- verify_repo_delivery_runtime(issue, agent),
+         :ok <- verify_stage_gate(issue, agent),
+         {:ok, env} <- resolve_env(agent, opts),
+         {:ok, adapter, adapter_config} <- resolve_adapter(agent, env, opts),
+         {:ok, budget} <- verify_budget(issue, agent) do
+      {:ok, %{env: env, adapter: adapter, adapter_config: adapter_config, budget: budget}}
     end
   end
 
