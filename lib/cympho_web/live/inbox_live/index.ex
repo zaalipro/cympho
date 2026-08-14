@@ -1298,7 +1298,10 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp target_agent_name(%{issue: %{assigned_role: role}}, _selected_agent)
        when not is_nil(role) do
-    role |> to_string() |> String.replace("_", " ") |> String.capitalize()
+    role
+    |> Cympho.Agents.Agent.normalize_role()
+    |> Kernel.||(role)
+    |> Cympho.Agents.Agent.role_label()
   end
 
   defp target_agent_name(_item, _selected_agent), do: "the team"

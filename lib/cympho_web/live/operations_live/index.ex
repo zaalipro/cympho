@@ -1211,7 +1211,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       count_label: "#{count} blocked",
       action_label: "Fix setup",
       action_event: nil,
-      action_path: "#runtime-launch-checklist"
+      action_path: simple_visible_ops_path("#runtime-launch-checklist")
     }
   end
 
@@ -1226,7 +1226,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       count_label: "#{count} open",
       action_label: "Open queue",
       action_event: nil,
-      action_path: "#delegated-work-queue"
+      action_path: simple_visible_ops_path("#delegated-work-queue")
     }
   end
 
@@ -1252,7 +1252,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       count_label: "#{count} waiting",
       action_label: "Review",
       action_event: nil,
-      action_path: "#owner-signoff-queue"
+      action_path: simple_visible_ops_path("#owner-signoff-queue")
     }
   end
 
@@ -1269,7 +1269,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       count_label: "#{count} gaps",
       action_label: "Inspect",
       action_event: nil,
-      action_path: "#ceo-outcome-monitor"
+      action_path: simple_visible_ops_path("#ceo-outcome-monitor")
     }
   end
 
@@ -1294,7 +1294,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       count_label: nil,
       action_label: "Open",
       action_event: nil,
-      action_path: target_path || "#runtime-launch-checklist"
+      action_path: simple_visible_ops_path(target_path || "#runtime-launch-checklist")
     }
   end
 
@@ -1311,7 +1311,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       count_label: nil,
       action_label: "Details",
       action_event: nil,
-      action_path: "#runtime-launch-checklist"
+      action_path: simple_visible_ops_path("#runtime-launch-checklist")
     }
   end
 
@@ -1348,6 +1348,16 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp simple_operations_target_label("Review service gates"), do: "See what's missing"
   defp simple_operations_target_label("Open launch checklist"), do: "See the steps"
   defp simple_operations_target_label(label), do: label
+
+  # Simple mode hides advanced-only Operations anchors. Send the owner to a
+  # page they can actually see.
+  defp simple_visible_ops_path("#runtime-launch-checklist"), do: "/settings/adapters"
+  defp simple_visible_ops_path("#delegated-work-queue"), do: "/kanban"
+  defp simple_visible_ops_path("#owner-signoff-queue"), do: "/inbox"
+  defp simple_visible_ops_path("#ceo-outcome-monitor"), do: "/inbox"
+  defp simple_visible_ops_path("#" <> _), do: "/operations"
+  defp simple_visible_ops_path(path) when is_binary(path), do: path
+  defp simple_visible_ops_path(_), do: "/operations"
 
   defp simple_action_row_class(:danger), do: "border-brand/25 bg-brand/[0.07]"
   defp simple_action_row_class(:attention), do: "border-amber-500/25 bg-amber-500/[0.06]"

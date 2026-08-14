@@ -705,7 +705,7 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "Fix setup"
 
       attrs = element_attrs(html, "[data-testid='operations-simple-action-link-delegated']")
-      assert attrs["href"] == "#runtime-launch-checklist"
+      assert attrs["href"] == "/settings/adapters"
     end
 
     test "renders swarm parent worker and CTO queue when filtered from an issue", %{conn: conn} do

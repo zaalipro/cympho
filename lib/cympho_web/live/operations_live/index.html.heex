@@ -79,6 +79,7 @@
     class="ui-simple-only mb-4 rounded-lg border border-border bg-panel px-4 py-4"
   >
     <% action = List.first(@next_actions) %>
+    <% next_path = simple_visible_ops_path(Map.get(action, :target_path)) %>
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
@@ -94,16 +95,16 @@
         </p>
       </div>
       <a
-        :if={Map.get(action, :target_path) && anchor_path?(action.target_path)}
-        href={action.target_path}
+        :if={next_path && anchor_path?(next_path)}
+        href={next_path}
         class="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
       >
         <span class="hero-arrow-down-mini h-3.5 w-3.5"></span>
         {simple_operations_target_label(action.target_label)}
       </a>
       <.app_link
-        :if={Map.get(action, :target_path) && not anchor_path?(action.target_path)}
-        navigate={action.target_path}
+        :if={next_path && not anchor_path?(next_path)}
+        navigate={next_path}
         class="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
       >
         <span class="hero-wrench-screwdriver-mini h-3.5 w-3.5"></span>
