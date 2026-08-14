@@ -28,6 +28,19 @@ defmodule CymphoWeb.IssuesChannelTest do
     end
   end
 
+  test "survives unmatched LiveView PubSub tuples" do
+    company_id = Ecto.UUID.generate()
+    {:ok, socket} = connect_jwt(company_id, Ecto.UUID.generate())
+
+    {:ok, _, socket} =
+      subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}:issues")
+
+    pid = socket.channel_pid
+    Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{company_id}:issues", {:issue_created, %{}})
+    _ = :sys.get_state(pid)
+    assert Process.alive?(pid)
+  end
+
   describe "handle_in ping" do
     test "replies with pong" do
       company_id = Ecto.UUID.generate()

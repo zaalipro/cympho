@@ -59,7 +59,12 @@ defmodule Cympho.RateLimiting do
       {:error, :malformed_topic}
     else
       if Cympho.RateLimiting.BroadcastDedup.should_broadcast?(topic, event, payload) do
-        CymphoWeb.Endpoint.broadcast(topic, event, payload)
+        event_id = Cympho.EventStore.append(topic, %{event: event, payload: payload})
+
+        broadcast_payload =
+          if is_map(payload), do: Map.put(payload, :event_id, event_id), else: payload
+
+        CymphoWeb.Endpoint.broadcast(topic, event, broadcast_payload)
       else
         {:ok, :deduplicated}
       end

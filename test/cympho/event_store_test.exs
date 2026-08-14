@@ -74,6 +74,26 @@ defmodule Cympho.EventStoreTest do
     end
   end
 
+  describe "dedup_broadcast/3 populates EventStore" do
+    test "appends on a real broadcast without a manual append" do
+      topic = "company:#{Ecto.UUID.generate()}:issues"
+      payload = %{action: "create"}
+
+      Cympho.RateLimiting.BroadcastDedup.reset()
+      assert :ok = Cympho.RateLimiting.dedup_broadcast(topic, "issue_update", payload)
+
+      {:ok, events} = Cympho.EventStore.fetch_since(topic, nil)
+      assert length(events) == 1
+      assert hd(events).payload == %{event: "issue_update", payload: payload}
+
+      assert {:ok, :deduplicated} =
+               Cympho.RateLimiting.dedup_broadcast(topic, "issue_update", payload)
+
+      {:ok, events_after} = Cympho.EventStore.fetch_since(topic, nil)
+      assert length(events_after) == 1
+    end
+  end
+
   describe "purge_topics_with_prefix/1" do
     test "drops every topic that starts with the given prefix and leaves others alone" do
       Cympho.EventStore.append("company:abc:issues", %{n: 1})

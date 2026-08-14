@@ -34,7 +34,7 @@ defmodule Cympho.Skills.LoaderTest do
 
   describe "load/1" do
     setup do
-      start_supervised!(Loader)
+      ensure_loader_started()
 
       {:ok, company} =
         Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
@@ -112,7 +112,7 @@ defmodule Cympho.Skills.LoaderTest do
 
   describe "unload/1" do
     setup do
-      start_supervised!(Loader)
+      ensure_loader_started()
 
       {:ok, company} =
         Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
@@ -155,7 +155,7 @@ defmodule Cympho.Skills.LoaderTest do
 
   describe "loaded?/1" do
     setup do
-      start_supervised!(Loader)
+      ensure_loader_started()
 
       {:ok, company} =
         Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
@@ -191,7 +191,7 @@ defmodule Cympho.Skills.LoaderTest do
 
   describe "get_manifest/1" do
     setup do
-      start_supervised!(Loader)
+      ensure_loader_started()
 
       {:ok, company} =
         Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
@@ -225,6 +225,13 @@ defmodule Cympho.Skills.LoaderTest do
 
     test "returns error for non-loaded skill", %{} do
       assert {:error, :not_loaded} = Loader.get_manifest(Ecto.UUID.generate())
+    end
+  end
+
+  defp ensure_loader_started do
+    case Process.whereis(Loader) do
+      nil -> start_supervised!(Loader)
+      pid when is_pid(pid) -> pid
     end
   end
 end

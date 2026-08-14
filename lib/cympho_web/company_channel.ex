@@ -67,6 +67,8 @@ defmodule CymphoWeb.CompanyChannel do
     {:noreply, socket}
   end
 
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   @impl true
   def handle_in("ping", _payload, socket) do
     case RateLimiting.check_message_rate(socket) do
