@@ -261,6 +261,55 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
     )
   end
 
+  test "a subprocess does not outlive the orchestrator that owns it" do
+    sleep = System.find_executable("sleep")
+
+    pid_file =
+      Path.join(System.tmp_dir!(), "cympho-owned-pid-#{System.unique_integer([:positive])}")
+
+    on_exit(fn -> File.rm(pid_file) end)
+
+    # A brutally killed orchestrator never runs its cancel path, and every
+    # recovery step from there is a database write. Nothing signalled the
+    # worker, so the CLI kept running in a workspace the next dispatch reuses.
+    owner = spawn(fn -> Process.sleep(:infinity) end)
+
+    with_fake_command(
+      "owned-agent",
+      """
+      echo $$ > '#{pid_file}'
+      #{sleep} 30
+      """,
+      fn ->
+        _session_id =
+          ProcessAdapter.run(@issue, "agent-1", owner,
+            config: %{
+              "command" => "owned-agent",
+              "timeout" => 30_000,
+              "prompt_stdin" => false
+            }
+          )
+
+        assert wait_until(fn -> File.exists?(pid_file) end)
+        os_pid = pid_file |> File.read!() |> String.trim()
+        assert os_process_alive?(os_pid)
+
+        Process.exit(owner, :kill)
+
+        assert wait_until_gone(os_pid),
+               "the subprocess (#{os_pid}) outlived the orchestrator that owned it"
+      end
+    )
+  end
+
+  defp wait_until(fun, attempts \\ 40) do
+    cond do
+      fun.() -> true
+      attempts <= 1 -> false
+      true -> Process.sleep(50) && wait_until(fun, attempts - 1)
+    end
+  end
+
   defp wait_until_gone(os_pid, attempts \\ 40) do
     cond do
       not os_process_alive?(os_pid) -> true

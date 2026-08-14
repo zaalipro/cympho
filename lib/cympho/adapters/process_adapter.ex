@@ -21,6 +21,10 @@ defmodule Cympho.Adapters.ProcessAdapter do
     worker =
       spawn(fn ->
         Process.flag(:trap_exit, true)
+        # See Cympho.AgentRunner: a brutally killed orchestrator never runs its
+        # cancel path, and every recovery step from there is a database write.
+        # Without this the subprocess outlives its owner.
+        Process.monitor(recipient_pid)
 
         try do
           do_run(session_id, issue, agent_id, recipient_pid, opts)
@@ -316,6 +320,11 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
       {:cancel_session, ^session_id, reason} ->
         send(recipient_pid, {:turn_ended_with_error, session_id, {:cancelled, reason}})
+        close_port(port)
+
+      {:DOWN, _ref, :process, ^recipient_pid, _reason} ->
+        # Owner is gone; nobody to report to and no reason to keep the
+        # subprocess writing into a workspace that is about to be re-dispatched.
         close_port(port)
     after
       RunDeadline.wait_ms(deadline) ->

@@ -42,6 +42,15 @@ defmodule Cympho.AgentRunner do
 
     worker =
       spawn(fn ->
+        # Watch the orchestrator that owns this run. The graceful stop path goes
+        # through Orchestrator.terminate/2 → AdapterSessions.cancel/2, but a
+        # brutal kill (Process.exit/2, OOM, node shutdown) never runs it, and
+        # every recovery path from there is a database write — nothing signals
+        # this worker or its CLI child. Since the workspace path is derived from
+        # the issue id, the next dispatch would then start a second CLI in the
+        # same git checkout as the survivor.
+        Process.monitor(recipient_pid)
+
         try do
           do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, max_run_ms, env)
         after
@@ -375,6 +384,12 @@ defmodule Cympho.AgentRunner do
       {:cancel_session, ^session_id, reason} ->
         close_port(port)
         send(recipient_pid, {:turn_ended_with_error, session_id, {:cancelled, reason}})
+
+      {:DOWN, _ref, :process, ^recipient_pid, _reason} ->
+        # The orchestrator died without stopping us. There is nobody left to
+        # report to, and leaving the CLI running would put a second writer in
+        # this issue's workspace as soon as the run is re-dispatched.
+        close_port(port)
     after
       wait_ms ->
         now = System.system_time(:millisecond)

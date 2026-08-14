@@ -55,6 +55,9 @@ defmodule Cympho.Adapters.CodexAdapter do
     worker =
       spawn(fn ->
         Process.flag(:trap_exit, true)
+        # See Cympho.AgentRunner: a brutally killed orchestrator never runs its
+        # cancel path, so without this the CLI outlives its owner.
+        Process.monitor(recipient_pid)
 
         try do
           do_run(session_id, issue, agent_id, recipient_pid, config, opts)
@@ -93,7 +96,7 @@ defmodule Cympho.Adapters.CodexAdapter do
 
     Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "codex"})
 
-    case run_codex(session_id, issue, prompt, config, opts) do
+    case run_codex(session_id, issue, prompt, config, opts, recipient_pid) do
       {:ok, output} ->
         send(recipient_pid, {:turn_completed, session_id, output})
 
@@ -114,7 +117,7 @@ defmodule Cympho.Adapters.CodexAdapter do
 
   defp prompt_runtime_context(context), do: context
 
-  defp run_codex(session_id, issue, prompt, config, opts) do
+  defp run_codex(session_id, issue, prompt, config, opts, recipient_pid) do
     try do
       codex_bin = find_codex_binary()
       bwrap_bin = find_bwrap_binary()
@@ -179,7 +182,7 @@ defmodule Cympho.Adapters.CodexAdapter do
             ] ++ cwd_opt(config, opts)
 
           with_port({:spawn_executable, String.to_charlist(shell)}, port_opts, fn port ->
-            case collect_output(port, "", timeout, session_id) do
+            case collect_output(port, "", timeout, session_id, recipient_pid) do
               {:ok, raw} ->
                 case ProviderFailure.detect(raw) do
                   :ok -> parse_codex_output(raw)
@@ -235,17 +238,17 @@ defmodule Cympho.Adapters.CodexAdapter do
 
   defp close_port(_port), do: :ok
 
-  defp collect_output(port, acc, timeout, session_id) when is_integer(timeout) do
-    collect_output(port, acc, RunDeadline.new(timeout), session_id)
+  defp collect_output(port, acc, timeout, session_id, recipient_pid) when is_integer(timeout) do
+    collect_output(port, acc, RunDeadline.new(timeout), session_id, recipient_pid)
   end
 
-  defp collect_output(port, acc, %RunDeadline{} = deadline, session_id) do
+  defp collect_output(port, acc, %RunDeadline{} = deadline, session_id, recipient_pid) do
     receive do
       {^port, {:data, data}} ->
-        collect_output(port, acc <> data, RunDeadline.touch(deadline), session_id)
+        collect_output(port, acc <> data, RunDeadline.touch(deadline), session_id, recipient_pid)
 
       {:EXIT, ^port, _reason} ->
-        collect_output(port, acc, deadline, session_id)
+        collect_output(port, acc, deadline, session_id, recipient_pid)
 
       {^port, {:exit_status, 0}} ->
         {:ok, acc}
@@ -257,13 +260,18 @@ defmodule Cympho.Adapters.CodexAdapter do
         result = {:error, {:cancelled, reason}}
         close_port(port)
         result
+
+      {:DOWN, _ref, :process, ^recipient_pid, _reason} ->
+        # Owner orchestrator died without cancelling us. See Cympho.AgentRunner.
+        close_port(port)
+        {:error, :owner_down}
     after
       RunDeadline.wait_ms(deadline) ->
         # `codex exec --json` prints an event per step, so the stall timer alone
         # resets forever. The absolute deadline is what actually ends the run.
         case RunDeadline.expired(deadline) do
           nil ->
-            collect_output(port, acc, deadline, session_id)
+            collect_output(port, acc, deadline, session_id, recipient_pid)
 
           :max_run ->
             close_port(port)

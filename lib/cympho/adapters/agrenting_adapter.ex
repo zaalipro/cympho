@@ -19,9 +19,23 @@ defmodule Cympho.Adapters.AgrentingAdapter do
     session_id = make_ref()
     config = opts[:config] || %{}
 
-    spawn(fn ->
-      do_run(session_id, issue, agent_id, recipient_pid, config, opts)
-    end)
+    worker =
+      spawn(fn ->
+        # A hiring is a *paid* remote job that polls for up to 30 minutes. The
+        # worker was never registered, so operator stop, company pause, and
+        # budget hard-stop had no way to reach it — a cancelled run kept billing
+        # to completion. Registration makes those paths work; the monitor covers
+        # an orchestrator that dies without cancelling.
+        Process.monitor(recipient_pid)
+
+        try do
+          do_run(session_id, issue, agent_id, recipient_pid, config, opts)
+        after
+          Cympho.AdapterSessions.unregister(session_id)
+        end
+      end)
+
+    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end
@@ -36,7 +50,7 @@ defmodule Cympho.Adapters.AgrentingAdapter do
         wake_context: Keyword.get(opts, :wake_context)
       )
 
-    case dispatch_and_wait(issue, agent_id, prompt, config, opts) do
+    case dispatch_and_wait(issue, agent_id, prompt, config, opts, session_id, recipient_pid) do
       {:ok, result} ->
         send(recipient_pid, {:turn_completed, session_id, result})
 
@@ -45,7 +59,7 @@ defmodule Cympho.Adapters.AgrentingAdapter do
     end
   end
 
-  defp dispatch_and_wait(issue, agent_id, prompt, config, opts) do
+  defp dispatch_and_wait(issue, agent_id, prompt, config, opts, session_id, recipient_pid) do
     with {:ok, agent_did} <- required_config(config, "agent_did"),
          {:ok, capability} <- required_config(config, "capability"),
          {:ok, max_price} <- required_config(config, "max_price"),
@@ -57,7 +71,15 @@ defmodule Cympho.Adapters.AgrentingAdapter do
              hiring_attrs(issue, agent_id, prompt, config, opts, capability, max_price)
            ),
          {:ok, hiring_id} <- hiring_id(create_response),
-         {:ok, hiring} <- poll_hiring(config, hiring_id, timeout(config), poll_interval(config)) do
+         {:ok, hiring} <-
+           poll_hiring(
+             config,
+             hiring_id,
+             timeout(config),
+             poll_interval(config),
+             session_id,
+             recipient_pid
+           ) do
       case hiring["status"] do
         "completed" ->
           _ = attach_remote_artifacts(issue, agent_id, config, hiring)
@@ -146,12 +168,12 @@ defmodule Cympho.Adapters.AgrentingAdapter do
     end
   end
 
-  defp poll_hiring(config, hiring_id, timeout_ms, poll_interval_ms) do
+  defp poll_hiring(config, hiring_id, timeout_ms, poll_interval_ms, session_id, recipient_pid) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_poll_hiring(config, hiring_id, deadline, poll_interval_ms)
+    do_poll_hiring(config, hiring_id, deadline, poll_interval_ms, session_id, recipient_pid)
   end
 
-  defp do_poll_hiring(config, hiring_id, deadline, poll_interval_ms) do
+  defp do_poll_hiring(config, hiring_id, deadline, poll_interval_ms, session_id, recipient_pid) do
     with {:ok, hiring} <- Client.get_hiring(config, hiring_id) do
       status = hiring["status"]
 
@@ -163,9 +185,35 @@ defmodule Cympho.Adapters.AgrentingAdapter do
           {:error, {:agrenting_timeout, hiring_id, status}}
 
         true ->
-          Process.sleep(poll_interval_ms)
-          do_poll_hiring(config, hiring_id, deadline, poll_interval_ms)
+          case wait_between_polls(poll_interval_ms, session_id, recipient_pid) do
+            :continue ->
+              do_poll_hiring(
+                config,
+                hiring_id,
+                deadline,
+                poll_interval_ms,
+                session_id,
+                recipient_pid
+              )
+
+            {:stop, reason} ->
+              # Stopping locally is not enough: the hiring bills until the
+              # remote side is told to stop too.
+              _ = Client.cancel_hiring(config, hiring_id)
+              {:error, reason}
+          end
       end
+    end
+  end
+
+  # `Process.sleep/1` between polls made the worker deaf to cancellation for the
+  # whole interval. Waiting in a receive keeps the interval and stays reachable.
+  defp wait_between_polls(interval_ms, session_id, recipient_pid) do
+    receive do
+      {:cancel_session, ^session_id, reason} -> {:stop, {:cancelled, reason}}
+      {:DOWN, _ref, :process, ^recipient_pid, _reason} -> {:stop, :owner_down}
+    after
+      interval_ms -> :continue
     end
   end
 

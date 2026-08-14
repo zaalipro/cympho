@@ -22,6 +22,10 @@ defmodule Cympho.Adapters.CursorAdapter do
 
     worker =
       spawn(fn ->
+        # See Cympho.AgentRunner: a brutally killed orchestrator never runs its
+        # cancel path, so without this the CLI outlives its owner.
+        Process.monitor(recipient_pid)
+
         try do
           do_run(session_id, issue, agent_id, recipient_pid, config, opts)
         after
@@ -40,7 +44,7 @@ defmodule Cympho.Adapters.CursorAdapter do
     prompt = build_prompt(issue, agent_id, opts)
     Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "cursor"})
 
-    case run_cursor(session_id, prompt, config) do
+    case run_cursor(session_id, prompt, config, recipient_pid) do
       {:ok, output} ->
         send(recipient_pid, {:turn_completed, session_id, output})
 
@@ -81,7 +85,7 @@ defmodule Cympho.Adapters.CursorAdapter do
     |> String.trim()
   end
 
-  defp run_cursor(session_id, prompt, config) do
+  defp run_cursor(session_id, prompt, config, recipient_pid) do
     try do
       cursor_bin = find_cursor_binary(config)
       timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
@@ -98,7 +102,7 @@ defmodule Cympho.Adapters.CursorAdapter do
           write_stdin(port, stdin)
         end
 
-        case collect_output(port, "", timeout, session_id) do
+        case collect_output(port, "", timeout, session_id, recipient_pid) do
           {:ok, raw} ->
             case Cympho.Adapters.ProviderFailure.detect(raw) do
               :ok -> parse_cursor_output(raw)
@@ -176,14 +180,14 @@ defmodule Cympho.Adapters.CursorAdapter do
     end
   end
 
-  defp collect_output(port, acc, timeout, session_id) when is_integer(timeout) do
-    collect_output(port, acc, RunDeadline.new(timeout), session_id)
+  defp collect_output(port, acc, timeout, session_id, recipient_pid) when is_integer(timeout) do
+    collect_output(port, acc, RunDeadline.new(timeout), session_id, recipient_pid)
   end
 
-  defp collect_output(port, acc, %RunDeadline{} = deadline, session_id) do
+  defp collect_output(port, acc, %RunDeadline{} = deadline, session_id, recipient_pid) do
     receive do
       {^port, {:data, data}} ->
-        collect_output(port, acc <> data, RunDeadline.touch(deadline), session_id)
+        collect_output(port, acc <> data, RunDeadline.touch(deadline), session_id, recipient_pid)
 
       {^port, {:exit_status, 0}} ->
         {:ok, acc}
@@ -194,13 +198,18 @@ defmodule Cympho.Adapters.CursorAdapter do
       {:cancel_session, ^session_id, reason} ->
         close_port(port)
         {:error, {:cancelled, reason}}
+
+      {:DOWN, _ref, :process, ^recipient_pid, _reason} ->
+        # Owner orchestrator died without cancelling us. See Cympho.AgentRunner.
+        close_port(port)
+        {:error, :owner_down}
     after
       RunDeadline.wait_ms(deadline) ->
         # The stall timer resets on every chunk; only the absolute deadline can
         # end a CLI that keeps talking.
         case RunDeadline.expired(deadline) do
           nil ->
-            collect_output(port, acc, deadline, session_id)
+            collect_output(port, acc, deadline, session_id, recipient_pid)
 
           :max_run ->
             close_port(port)
