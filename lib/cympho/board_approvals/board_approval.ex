@@ -23,6 +23,10 @@ defmodule Cympho.BoardApprovals.BoardApproval do
 
     field :executed_at, :utc_datetime
     field :executor_node, :string
+    # "claimed" while an executor owns it, "executed" once it succeeded,
+    # "failed" once retries were exhausted. `executed_at` alone could not tell
+    # a claimed-then-failed approval from one that actually ran.
+    field :execution_state, :string
 
     belongs_to :requested_by, Agent, foreign_key: :requested_by_agent_id
     belongs_to :company, Company

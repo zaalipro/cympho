@@ -12,6 +12,8 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
   """
   use GenServer
 
+  require Logger
+
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.BoardApprovals
@@ -40,6 +42,20 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
   @impl true
   def handle_info(:recover_pending_approvals, state) do
+    # Claims this node abandoned (crash or redeploy during retry backoff) are
+    # released first — retry state lives only in this process's mailbox, so a
+    # claim we still hold at startup can never be finished by anyone.
+    case BoardApprovals.reclaim_abandoned_claims() do
+      0 ->
+        :ok
+
+      released ->
+        Logger.warning("released abandoned board approval claims",
+          component: "board_approval_executor",
+          count: released
+        )
+    end
+
     # Replay any approved but not-yet-executed actions in capped batches so a
     # large backlog after downtime can't monopolize this GenServer for minutes.
     case replay_pending_approvals(@replay_batch_size) do
@@ -119,6 +135,11 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
   # Execute with retry logic
   defp execute_with_retry(approval, attempt) when attempt >= @max_retries do
+    # Mark it failed rather than leaving it indistinguishable from a successful
+    # execution. The claim stays so it is not silently retried on every boot;
+    # an operator can put it back with BoardApprovals.release_claim/1.
+    BoardApprovals.mark_execution_failed(approval.id)
+
     GovernanceAuditLogs.log_action(
       "board_decision",
       {"system", approval.company_id},
@@ -135,9 +156,11 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
   defp execute_with_retry(approval, attempt) do
     case execute_approved_action(approval) do
       :ok ->
+        BoardApprovals.mark_executed(approval.id)
         :ok
 
       {:ok, _result} ->
+        BoardApprovals.mark_executed(approval.id)
         :ok
 
       {:error, _reason} ->

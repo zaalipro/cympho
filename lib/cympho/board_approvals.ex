@@ -29,7 +29,9 @@ defmodule Cympho.BoardApprovals do
       from ba in BoardApproval,
         where: ba.id == ^approval_id and is_nil(ba.executed_at) and ba.status == "approved"
 
-    case Repo.update_all(query, set: [executed_at: now, executor_node: node_name]) do
+    updates = [executed_at: now, executor_node: node_name, execution_state: "claimed"]
+
+    case Repo.update_all(query, set: updates) do
       {1, _} ->
         case Repo.get(BoardApproval, approval_id) do
           nil -> {:error, :not_found}
@@ -41,12 +43,65 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
-  @doc "Reverts a claim — clears `executed_at` so a future retry can proceed."
+  @doc """
+  Records that a claimed approval actually executed.
+
+  Until this exists, `executed_at` is only a claim: it says an executor started,
+  not that the action happened.
+  """
+  def mark_executed(approval_id) when is_binary(approval_id) do
+    query = from ba in BoardApproval, where: ba.id == ^approval_id
+    Repo.update_all(query, set: [execution_state: "executed"])
+    :ok
+  end
+
+  @doc """
+  Records that a claimed approval gave up after exhausting its retries.
+
+  The claim is deliberately kept: an approval that failed five times should be
+  visible to an operator rather than silently retried on every boot. Use
+  `reclaim_for_retry/1` to put it back in the queue.
+  """
+  def mark_execution_failed(approval_id) when is_binary(approval_id) do
+    query = from ba in BoardApproval, where: ba.id == ^approval_id
+    Repo.update_all(query, set: [execution_state: "failed"])
+    :ok
+  end
+
+  @doc """
+  Reverts a claim — clears `executed_at` so a future retry can proceed.
+  """
   def release_claim(approval_id) when is_binary(approval_id) do
     query = from ba in BoardApproval, where: ba.id == ^approval_id
 
-    Repo.update_all(query, set: [executed_at: nil, executor_node: nil])
+    Repo.update_all(query, set: [executed_at: nil, executor_node: nil, execution_state: nil])
     :ok
+  end
+
+  @doc """
+  Releases claims this node abandoned, so boot recovery can execute them.
+
+  Retry state lives in the executor's mailbox as a `Process.send_after/3` timer.
+  A crash or a redeploy during backoff discards it, and the claim alone made the
+  approval invisible to replay forever. Any approval still `"claimed"` by *this*
+  node when the executor starts is by definition abandoned — the process that
+  owned it no longer exists. Claims held by other nodes are left alone.
+
+  Returns the number of approvals released.
+  """
+  def reclaim_abandoned_claims do
+    node_name = to_string(node())
+
+    query =
+      from ba in BoardApproval,
+        where:
+          ba.status == "approved" and ba.execution_state == "claimed" and
+            ba.executor_node == ^node_name
+
+    {released, _} =
+      Repo.update_all(query, set: [executed_at: nil, executor_node: nil, execution_state: nil])
+
+    released
   end
 
   @doc """
