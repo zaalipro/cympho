@@ -80,6 +80,31 @@
           >
             {show_alert_note(show_alert(@routine, @triggers, @runs))}
           </p>
+
+          <form
+            :if={Enum.all?(@triggers, &(&1.type != "schedule"))}
+            id="schedule-trigger"
+            phx-submit="create_schedule_trigger"
+            class="mt-4 flex min-w-0 flex-wrap items-end gap-2"
+          >
+            <label class="min-w-[12rem] flex-1">
+              <span class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                Cron
+              </span>
+              <input
+                type="text"
+                name="cron_expression"
+                placeholder="0 9 * * *"
+                class="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary"
+              />
+            </label>
+            <button
+              type="submit"
+              class="rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-sm font-590 text-brand transition-colors hover:bg-brand/15"
+            >
+              Add trigger
+            </button>
+          </form>
         </div>
 
         <div class="ui-advanced-only grid grid-cols-2 gap-3">
@@ -165,12 +190,20 @@
         </table>
       </div>
 
-      <div :if={@runs == []} class="px-6 py-16 text-center">
-        <p class="text-sm text-text-primary">No runs yet</p>
-        <p class="mt-1 text-sm text-text-tertiary">
-          Run this routine manually or wait for a trigger.
-        </p>
-      </div>
+      <.empty_state
+        :if={@runs == []}
+        title="No runs yet"
+        message="Run this routine manually or wait for a trigger."
+      >
+        <:actions>
+          <a
+            href="#schedule-trigger"
+            class="rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-sm font-590 text-brand transition-colors hover:bg-brand/15"
+          >
+            Add trigger
+          </a>
+        </:actions>
+      </.empty_state>
     </section>
   </div>
 </div>

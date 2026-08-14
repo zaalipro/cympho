@@ -98,28 +98,33 @@ defmodule Cympho.BoardApprovals.BoardApproval do
     deny_count = Map.get(summary, "deny", 0)
     total_votes = approve_count + deny_count + Map.get(summary, "abstain", 0)
 
-    if total_votes == 0 do
-      false
-    else
-      threshold_type = Keyword.get(opts, :threshold_type, "percentage")
-      threshold_value = Keyword.get(opts, :threshold_value, 0.6)
+    cond do
+      total_votes == 0 ->
+        false
 
-      case threshold_type do
-        "any" ->
-          approve_count >= 1
+      total_votes < Keyword.get(opts, :min_quorum, 3) ->
+        false
 
-        "percentage" ->
-          approve_count / total_votes >= threshold_value
+      true ->
+        threshold_type = Keyword.get(opts, :threshold_type, "percentage")
+        threshold_value = Keyword.get(opts, :threshold_value, 0.6)
 
-        "all" ->
-          deny_count == 0 and approve_count > 0
+        case threshold_type do
+          "any" ->
+            approve_count >= 1
 
-        "count" ->
-          approve_count >= (threshold_value || 1)
+          "percentage" ->
+            approve_count / total_votes >= threshold_value
 
-        _ ->
-          approve_count / total_votes >= 0.6
-      end
+          "all" ->
+            deny_count == 0 and approve_count > 0
+
+          "count" ->
+            approve_count >= (threshold_value || 1)
+
+          _ ->
+            approve_count / total_votes >= 0.6
+        end
     end
   end
 

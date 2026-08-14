@@ -584,10 +584,12 @@ defmodule Cympho.BoardApprovals do
   defp load_threshold_opts(company_id) do
     company = Cympho.Repo.get(Cympho.Companies.Company, company_id)
     config = (company && company.governance_config) || %{}
+    board_size = length(Cympho.Companies.list_board_members(company_id))
 
     [
       threshold_type: Map.get(config, "threshold_type", "percentage"),
-      threshold_value: Map.get(config, "threshold_value", 0.6)
+      threshold_value: Map.get(config, "threshold_value", 0.6),
+      min_quorum: min(3, max(1, board_size))
     ]
   end
 

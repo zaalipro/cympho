@@ -25,7 +25,14 @@
           </h1>
         </div>
         <:actions>
-          <.overflow_menu label="Company controls" class="ui-advanced-only">
+          <.overflow_menu
+            label="Company controls"
+            class={
+              if @autonomy_status == :paused or @operating_mode == :review,
+                do: nil,
+                else: "ui-advanced-only"
+            }
+          >
             <.menu_item
               :if={@company && @autonomy_status == :active && @operating_mode != :low_power}
               phx-click="low_power_company"

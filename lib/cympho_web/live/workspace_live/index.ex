@@ -225,6 +225,14 @@ defmodule CymphoWeb.WorkspaceLive.Index do
             <:icon_slot>
               <.icon name="hero-folder-mini" class="h-5 w-5" />
             </:icon_slot>
+            <:actions>
+              <.app_link
+                navigate={~p"/projects/new"}
+                class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
+              >
+                New workspace
+              </.app_link>
+            </:actions>
           </.empty_state>
         </section>
       </div>

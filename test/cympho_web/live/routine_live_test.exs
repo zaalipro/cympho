@@ -2,7 +2,7 @@ defmodule CymphoWeb.RoutineLiveTest do
   use CymphoWeb.LiveCase, async: true
 
   import Phoenix.LiveViewTest
-  alias Cympho.{Agents, Projects, Routines}
+  alias Cympho.{Agents, Projects, RoutineTriggers, Routines}
 
   defp create_routine(attrs) do
     attrs
@@ -58,7 +58,7 @@ defmodule CymphoWeb.RoutineLiveTest do
     end
 
     test "shows routine health diagnostics", %{conn: conn} do
-      {:ok, _routine} = create_routine(%{name: "Triggerless Routine"})
+      {:ok, routine} = create_routine(%{name: "Triggerless Routine"})
 
       {:ok, view, html} = live(conn, "/routines?density=detailed")
       assert has_element?(view, "[data-testid='routine-command']")
@@ -72,6 +72,11 @@ defmodule CymphoWeb.RoutineLiveTest do
       assert html =~ "Add triggers"
       assert html =~ "Do this next"
       assert html =~ "Open trigger gaps"
+
+      assert has_element?(
+               view,
+               "[data-testid='routine-next-action'] a[href='/routines/#{routine.id}']"
+             )
     end
 
     test "lists routines with status badges", %{conn: conn} do
@@ -195,6 +200,39 @@ defmodule CymphoWeb.RoutineLiveTest do
 
       {:ok, _view, html} = live(conn, "/routines/#{routine.id}")
       assert html =~ "No runs yet"
+      assert html =~ "Add trigger"
+    end
+
+    test "renders a cron field and creates a schedule trigger", %{conn: conn} do
+      {:ok, routine} = create_routine(%{name: "Needs a Cron"})
+
+      {:ok, view, html} = live(conn, "/routines/#{routine.id}")
+      assert html =~ "name=\"cron_expression\""
+      assert has_element?(view, "form[phx-submit='create_schedule_trigger']")
+
+      view
+      |> form("form[phx-submit='create_schedule_trigger']", %{cron_expression: "0 9 * * *"})
+      |> render_submit()
+
+      flash = :sys.get_state(view.pid).socket.assigns.flash
+      assert Phoenix.Flash.get(flash, :info) == "Trigger created"
+
+      triggers = RoutineTriggers.list_triggers(routine.id)
+      assert Enum.any?(triggers, &(&1.type == "schedule" and &1.cron_expression == "0 9 * * *"))
+    end
+
+    test "invalid cron flashes an error", %{conn: conn} do
+      {:ok, routine} = create_routine(%{name: "Bad Cron"})
+
+      {:ok, view, _html} = live(conn, "/routines/#{routine.id}")
+
+      view
+      |> form("form[phx-submit='create_schedule_trigger']", %{cron_expression: "not-a-cron"})
+      |> render_submit()
+
+      flash = :sys.get_state(view.pid).socket.assigns.flash
+      assert Phoenix.Flash.get(flash, :error) == "Invalid cron expression"
+      assert RoutineTriggers.list_triggers(routine.id) == []
     end
 
     test "redirects to root for non-existent routine", %{conn: conn} do

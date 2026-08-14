@@ -195,6 +195,14 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
             <:icon_slot>
               <.icon name="hero-bolt-mini" class="h-5 w-5" />
             </:icon_slot>
+            <:actions>
+              <.app_link
+                navigate="/operations#runtime-launch-checklist"
+                class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
+              >
+                Start service
+              </.app_link>
+            </:actions>
           </.empty_state>
         </section>
 

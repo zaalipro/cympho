@@ -113,11 +113,31 @@ defmodule CymphoWeb.RoutineLive.Index do
     company_id = current_company_id(socket)
     health = Routines.health_summary(company_id)
     command_routines = command_routines(company_id)
+    health = put_next_action_routine_id(health, command_routines)
 
     socket
     |> assign(:routine_health, health)
     |> assign(:routine_command, build_routine_command(health, command_routines))
   end
+
+  defp put_next_action_routine_id(
+         %{next_action: %{key: :add_triggers} = action} = health,
+         routines
+       ) do
+    routine_id =
+      case Enum.find(routines, &(&1.status == :active and without_enabled_trigger?(&1))) do
+        %{id: id} -> id
+        _ -> nil
+      end
+
+    if is_binary(routine_id) do
+      %{health | next_action: Map.put(action, :routine_id, routine_id)}
+    else
+      health
+    end
+  end
+
+  defp put_next_action_routine_id(health, _routines), do: health
 
   defp command_routines(company_id) do
     Routines.list_routines(company_id: company_id)
@@ -568,6 +588,7 @@ defmodule CymphoWeb.RoutineLive.Index do
 
   def routine_next_action_class(_), do: "border-border bg-surface text-text-secondary"
 
+  def routine_next_action_path(%{key: :add_triggers, routine_id: id}), do: "/routines/" <> id
   def routine_next_action_path(%{key: :create_first_routine}), do: "/routines/new"
   def routine_next_action_path(_action), do: "/routines"
 end
