@@ -2,81 +2,61 @@ defmodule CymphoWeb.SettingsLiveTest do
   use CymphoWeb.LiveCase, async: true
 
   import Phoenix.LiveViewTest
+  import Mock
 
   alias Cympho.{Users, Repo}
-  alias Cympho.Notifications.{Dispatcher, NotificationPreference}
+  alias Cympho.Notifications.{Dispatcher, Message, NotificationPreference, WebhookChannel}
 
-  setup do
-    {:ok, user} =
-      Users.create_user(%{
-        email: "settings@example.com",
-        name: "Settings User",
-        email_enabled: true,
-        telegram_enabled: false,
-        webhook_enabled: false
-      })
-
+  setup %{conn: conn} do
+    {:ok, user} = Users.get_user(Plug.Conn.get_session(conn, :user_id))
     %{user: user}
   end
 
-  defp build_conn_(), do: CymphoWeb.LiveCase.authenticated_conn()
+  describe "self-only notification settings" do
+    test "renders the signed-in user's email and ignores another user_id", %{
+      conn: conn,
+      user: user
+    } do
+      unique = System.unique_integer([:positive])
 
-  defp conn_with_session(user_id) do
-    build_conn_()
-    |> Plug.Conn.put_session("settings_user_id", user_id)
-  end
+      {:ok, other} =
+        Users.create_user(%{
+          email: "other-idor-#{unique}@example.com",
+          name: "Other IDOR"
+        })
 
-  describe "Session-based access control" do
-    test "first visit with user_id binds session to that user", %{user: user} do
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, _view, html} = live(conn, "/settings/notifications?user_id=#{other.id}")
 
-      assert html =~ "Notifications"
-      assert html =~ "Email"
-    end
-
-    test "subsequent visit uses session binding, ignores different user_id param", %{user: user} do
-      Users.create_user(%{email: "other@example.com", name: "Other"})
-
-      conn = conn_with_session(user.id)
-      {:ok, _view, html} = live(conn, "/settings/notifications?user_id=fake-id")
-
-      # Should still show the session-bound user, not the param
       assert html =~ "Notifications"
       assert html =~ user.email
-    end
-
-    test "select_user event stores user in session", %{user: user} do
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
-
-      assert html =~ "Notifications"
-      # The select_user event should persist the session binding
-    end
-
-    test "without a user_id it shows the signed-in user's own settings" do
-      # These are your own notification settings, so the page no longer opens a
-      # picker asking which of the install's users you are.
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications")
-
-      assert html =~ "Notifications"
-      assert html =~ "Channels"
+      refute html =~ other.email
       refute html =~ "Choose a user"
       refute html =~ "No users found"
     end
 
-    test "an unknown user_id still falls back to the picker", %{user: user} do
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=fake-id")
+    test "unknown user_id still shows the signed-in user's settings", %{conn: conn, user: user} do
+      {:ok, _view, html} = live(conn, "/settings/notifications?user_id=fake-id")
 
-      # The picker used to render under a "No users found" heading. Whichever
-      # branch renders, exactly one of the two headings must be present.
-      assert html =~ "Choose a user" or html =~ "No users found"
-      refute html =~ "Choose a user" and html =~ "No users found"
+      assert html =~ "Notifications"
       assert html =~ user.email
+      refute html =~ "Choose a user"
+      refute html =~ "No users found"
+    end
+
+    test "without a user_id it shows the signed-in user's own settings", %{conn: conn, user: user} do
+      {:ok, _view, html} = live(conn, "/settings/notifications")
+
+      assert html =~ "Notifications"
+      assert html =~ "Channels"
+      assert html =~ user.email
+      refute html =~ "Choose a user"
+      refute html =~ "No users found"
     end
   end
 
   describe "Settings page mount" do
-    test "renders settings page with user", %{user: user} do
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+    test "renders settings page with user", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/settings/notifications")
 
       assert html =~ "Notifications"
       assert html =~ "Email"
@@ -84,9 +64,9 @@ defmodule CymphoWeb.SettingsLiveTest do
       assert html =~ "Webhook"
     end
 
-    test "shows enabled status for email channel", %{user: user} do
+    test "shows enabled status for email channel", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
 
       # The word beside the switch is screen-reader only now; the switch itself
       # carries the state.
@@ -98,28 +78,19 @@ defmodule CymphoWeb.SettingsLiveTest do
       assert has_element?(view, "#channel-email span.sr-only", "On")
     end
 
-    test "shows event notification section", %{user: user} do
+    test "shows event notification section", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, _view, html} = live(conn, "/settings/notifications")
 
       assert html =~ "Event Notifications"
       assert html =~ "Human Approval Required"
     end
-
-    test "shows the user picker when the requested user is not found" do
-      fake_id = "00000000-0000-0000-0000-000000000000"
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{fake_id}")
-
-      # Users exist, so the page offers a choice instead of claiming there are none.
-      assert html =~ "Choose a user"
-      refute html =~ "No users found"
-    end
   end
 
   describe "Channel toggles" do
-    test "toggle email channel off writes to notification_preferences", %{user: user} do
+    test "toggle email channel off writes to notification_preferences", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
 
       view
       |> element("#channel-email button[phx-click='toggle_channel']")
@@ -130,9 +101,12 @@ defmodule CymphoWeb.SettingsLiveTest do
       refute email_pref.enabled
     end
 
-    test "toggle telegram channel on writes to notification_preferences", %{user: user} do
+    test "toggle telegram channel on writes to notification_preferences", %{
+      conn: conn,
+      user: user
+    } do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
 
       view
       |> element("#channel-telegram button[phx-click='toggle_channel']")
@@ -144,9 +118,9 @@ defmodule CymphoWeb.SettingsLiveTest do
       assert telegram_pref.enabled
     end
 
-    test "toggle webhook channel on writes to notification_preferences", %{user: user} do
+    test "toggle webhook channel on writes to notification_preferences", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
 
       view
       |> element("#channel-webhook button[phx-click='toggle_channel']")
@@ -160,14 +134,14 @@ defmodule CymphoWeb.SettingsLiveTest do
   end
 
   describe "Cache invalidation" do
-    test "toggling a channel invalidates the dispatcher cache", %{user: user} do
+    test "toggling a channel invalidates the dispatcher cache", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
 
       # Warm the cache
       Dispatcher.warm_cache()
 
       # Toggle email off via the UI
-      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
       view |> element("#channel-email button[phx-click='toggle_channel']") |> render_click()
 
       # Cache should be invalidated - next lookup should reflect the change
@@ -177,9 +151,9 @@ defmodule CymphoWeb.SettingsLiveTest do
   end
 
   describe "Webhook URL configuration" do
-    test "save webhook URL writes to user record", %{user: user} do
+    test "save webhook URL writes to user record", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
 
       view
       |> element("form[phx-submit='update_webhook_url']")
@@ -194,20 +168,20 @@ defmodule CymphoWeb.SettingsLiveTest do
       assert webhook_pref.config["url"] == "https://example.com/hook"
     end
 
-    test "shows test ping button after URL is saved", %{user: user} do
+    test "shows test ping button after URL is saved", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
       Users.update_notification_prefs(user, %{webhook_url: "https://example.com/hook"})
 
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, _view, html} = live(conn, "/settings/notifications")
 
       assert html =~ "Test Ping"
     end
 
-    test "test ping shows result", %{user: user} do
+    test "test ping shows result", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
       Users.update_notification_prefs(user, %{webhook_url: "https://example.com/hook"})
 
-      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
 
       result =
         view
@@ -219,16 +193,16 @@ defmodule CymphoWeb.SettingsLiveTest do
   end
 
   describe "Telegram linking" do
-    test "shows link form when no chat ID set", %{user: user} do
+    test "shows link form when no chat ID set", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, _view, html} = live(conn, "/settings/notifications")
 
       assert html =~ "Telegram chat ID"
     end
 
-    test "link telegram chat ID writes to user record", %{user: user} do
+    test "link telegram chat ID writes to user record", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
 
       view
       |> element("form[phx-submit='link_telegram']")
@@ -239,7 +213,7 @@ defmodule CymphoWeb.SettingsLiveTest do
       assert reloaded.telegram_enabled
     end
 
-    test "shows verify button after linking", %{user: user} do
+    test "shows verify button after linking", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
 
       Users.update_notification_prefs(user, %{
@@ -247,7 +221,7 @@ defmodule CymphoWeb.SettingsLiveTest do
         telegram_enabled: true
       })
 
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, _view, html} = live(conn, "/settings/notifications")
 
       assert html =~ "Verify"
       assert html =~ "123456789"
@@ -255,20 +229,20 @@ defmodule CymphoWeb.SettingsLiveTest do
   end
 
   describe "Event type toggles" do
-    test "shows event toggles for each channel", %{user: user} do
+    test "shows event toggles for each channel", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
 
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, _view, html} = live(conn, "/settings/notifications")
 
       assert html =~ "events-email"
       assert html =~ "events-telegram"
       assert html =~ "events-webhook"
     end
 
-    test "toggle event type for a channel", %{user: user} do
+    test "toggle event type for a channel", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
 
-      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
 
       result =
         view
@@ -278,10 +252,10 @@ defmodule CymphoWeb.SettingsLiveTest do
       assert result =~ "On" or result =~ "Off" or result =~ "event"
     end
 
-    test "a channel has exactly one enable switch", %{user: user} do
+    test "a channel has exactly one enable switch", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
 
-      {:ok, view, _html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
 
       # The Event Notifications card used to carry a second, independent switch
       # for the same channel. Enabling now lives only in the Channels section.
@@ -297,7 +271,7 @@ defmodule CymphoWeb.SettingsLiveTest do
   end
 
   describe "Persistence" do
-    test "settings persist on reload", %{user: user} do
+    test "settings persist on reload", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
 
       Users.update_notification_prefs(user, %{
@@ -307,10 +281,40 @@ defmodule CymphoWeb.SettingsLiveTest do
         webhook_enabled: true
       })
 
-      {:ok, _view, html} = live(build_conn_(), "/settings/notifications?user_id=#{user.id}")
+      {:ok, _view, html} = live(conn, "/settings/notifications")
 
       assert html =~ "999888"
       assert html =~ "https://persist.example.com"
+    end
+  end
+
+  describe "WebhookChannel SSRF guard" do
+    test "rejects loopback, RFC1918, metadata, and userinfo URLs without calling Finch" do
+      message = Message.new("Subject", "Body", "user-123")
+
+      blocked_urls = [
+        "http://127.0.0.1/hook",
+        "http://localhost/hook",
+        "http://10.0.0.1/hook",
+        "http://192.168.1.1/hook",
+        "http://172.16.0.1/hook",
+        "http://169.254.169.254/latest/meta-data",
+        "http://metadata.google.internal/",
+        "https://user:pass@example.com/hook",
+        "http://[::1]/",
+        "http://[::ffff:127.0.0.1]/",
+        "http://[::ffff:10.0.0.1]/"
+      ]
+
+      with_mock Finch,
+        build: fn _, _, _, _ ->
+          flunk("Finch.build must not be called for blocked webhook URLs")
+        end,
+        request: fn _, _ -> flunk("Finch.request must not be called for blocked webhook URLs") end do
+        Enum.each(blocked_urls, fn url ->
+          assert WebhookChannel.deliver(message, %{url: url}) == {:error, :blocked_webhook_url}
+        end)
+      end
     end
   end
 end

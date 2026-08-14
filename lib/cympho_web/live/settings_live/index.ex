@@ -4,27 +4,28 @@ defmodule CymphoWeb.SettingsLive.Index do
   alias Cympho.Users
   alias Cympho.Notifications
 
-  @impl true
-  def mount(%{"user_id" => user_id}, _session, socket) do
-    case Users.get_user(user_id) do
-      {:ok, user} -> {:ok, mount_for_user(socket, user)}
-      {:error, :not_found} -> {:ok, mount_user_picker(socket)}
-    end
-  end
-
-  # These are the signed-in person's own notification settings, so arriving here
-  # without a user_id used to open a picker listing every user in the install and
-  # ask you which one you were. Default to the current user instead; the picker
-  # stays for the case where there genuinely isn't one.
-  #
   # `current_user` is a narrowed projection (id/name/email/theme/company_id), so
-  # the full record has to be reloaded for the channel fields.
+  # the full record has to be reloaded for the channel fields. `?user_id=` is
+  # ignored — these settings are always the signed-in user.
+  @impl true
   def mount(_params, _session, socket) do
-    with %{id: id} <- socket.assigns[:current_user],
-         {:ok, user} <- Users.get_user(id) do
-      {:ok, mount_for_user(socket, user)}
-    else
-      _ -> {:ok, mount_user_picker(socket)}
+    case Users.get_user(socket.assigns.current_user.id) do
+      {:ok, user} ->
+        {:ok, mount_for_user(socket, user)}
+
+      {:error, :not_found} ->
+        {:ok,
+         socket
+         |> assign(:page_title, "Notifications")
+         |> assign(:user, nil)
+         |> assign(:prefs, [])
+         |> assign(:user_id, nil)
+         |> assign(:webhook_test_result, nil)
+         |> assign(:webhook_url_input, "")
+         |> assign(:telegram_chat_id_input, "")
+         |> assign(:telegram_verify_status, nil)
+         |> put_flash(:error, "Could not load notification settings.")
+         |> push_navigate(to: ~p"/")}
     end
   end
 
@@ -183,35 +184,15 @@ defmodule CymphoWeb.SettingsLive.Index do
     end
   end
 
-  def handle_event("select_user", %{"user_id" => user_id}, socket) do
-    {:noreply, push_navigate(socket, to: ~p"/settings/notifications?user_id=#{user_id}")}
-  end
-
   defp mount_for_user(socket, user) do
     socket
     |> assign(:page_title, "Notifications")
     |> assign(:user, user)
     |> assign(:prefs, Users.ensure_default_prefs(user.id))
     |> assign(:user_id, user.id)
-    |> assign(:users, [])
     |> assign(:webhook_test_result, nil)
     |> assign(:webhook_url_input, user.webhook_url || "")
     |> assign(:telegram_chat_id_input, user.telegram_chat_id || "")
-    |> assign(:telegram_verify_status, nil)
-  end
-
-  defp mount_user_picker(socket) do
-    users = Users.list_users()
-
-    socket
-    |> assign(:page_title, "Notifications")
-    |> assign(:user, nil)
-    |> assign(:user_id, nil)
-    |> assign(:users, users)
-    |> assign(:prefs, [])
-    |> assign(:webhook_test_result, nil)
-    |> assign(:webhook_url_input, "")
-    |> assign(:telegram_chat_id_input, "")
     |> assign(:telegram_verify_status, nil)
   end
 

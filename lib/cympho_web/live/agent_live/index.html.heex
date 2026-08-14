@@ -477,7 +477,9 @@
               data-testid={"agent-manage-menu-#{agent.id}"}
             >
               <.menu_item navigate={~p"/agents/#{agent.id}"}>View profile</.menu_item>
-              <.menu_item navigate={~p"/agents/#{agent.id}/edit"}>Edit settings</.menu_item>
+              <.menu_item navigate={~p"/agents/#{agent.id}?tab=configuration"}>
+                Edit settings
+              </.menu_item>
               <.menu_item
                 :if={agent.status == :running}
                 phx-click="kill_session"
