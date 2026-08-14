@@ -51,6 +51,88 @@ defmodule CymphoWeb.SessionControllerTest do
       assert redirected_to(conn) == "/operations"
       assert get_session(conn, :user_id)
     end
+
+    test "session company_id is a membership, not a stale user.company_id" do
+      user = registered_user()
+      unique = System.unique_integer([:positive])
+
+      {:ok, member_company} =
+        Cympho.Companies.create_company(%{
+          name: "Member Co #{unique}",
+          slug: "member-co-#{unique}"
+        })
+
+      {:ok, stale_company} =
+        Cympho.Companies.create_company(%{
+          name: "Stale Co #{unique}",
+          slug: "stale-co-#{unique}"
+        })
+
+      {:ok, _} =
+        Cympho.Companies.create_membership(%{
+          user_id: user.id,
+          company_id: member_company.id,
+          role: "member"
+        })
+
+      {:ok, user} =
+        user
+        |> Ecto.Changeset.change(company_id: stale_company.id)
+        |> Cympho.Repo.update()
+
+      conn =
+        build_conn()
+        |> post("/login", %{
+          "user" => %{"email" => user.email, "password" => "password1234"}
+        })
+
+      assert redirected_to(conn) == "/"
+      assert get_session(conn, :company_id) == member_company.id
+    end
+
+    test "session company_id keeps user.company_id when it is a membership" do
+      user = registered_user()
+      unique = System.unique_integer([:positive])
+
+      {:ok, first_company} =
+        Cympho.Companies.create_company(%{
+          name: "First Co #{unique}",
+          slug: "first-co-#{unique}"
+        })
+
+      {:ok, default_company} =
+        Cympho.Companies.create_company(%{
+          name: "Default Co #{unique}",
+          slug: "default-co-#{unique}"
+        })
+
+      {:ok, _} =
+        Cympho.Companies.create_membership(%{
+          user_id: user.id,
+          company_id: first_company.id,
+          role: "member"
+        })
+
+      {:ok, _} =
+        Cympho.Companies.create_membership(%{
+          user_id: user.id,
+          company_id: default_company.id,
+          role: "member"
+        })
+
+      {:ok, user} =
+        user
+        |> Ecto.Changeset.change(company_id: default_company.id)
+        |> Cympho.Repo.update()
+
+      conn =
+        build_conn()
+        |> post("/login", %{
+          "user" => %{"email" => user.email, "password" => "password1234"}
+        })
+
+      assert get_session(conn, :company_id) == default_company.id
+    end
   end
 
   describe "logout" do

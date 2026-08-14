@@ -8,8 +8,6 @@ defmodule CymphoWeb.CompanyController do
   plug CymphoWeb.Plugs.CompanyAccess
        when action in [
               :show,
-              :update,
-              :delete,
               :update_governance_config,
               :list_members,
               :list_invites,
@@ -21,6 +19,8 @@ defmodule CymphoWeb.CompanyController do
   plug CymphoWeb.Plugs.CompanyAccess,
        [require_admin: true]
        when action in [
+              :update,
+              :delete,
               :add_member,
               :remove_member,
               :create_invite,
@@ -79,7 +79,7 @@ defmodule CymphoWeb.CompanyController do
   def update_governance_config(conn, %{"id" => id, "governance_config" => config_params}) do
     company = Companies.get_company!(id)
 
-    case Companies.update_company(company, %{governance_config: config_params}) do
+    case Companies.update_governance_config(company, config_params) do
       {:ok, company} -> json(conn, %{data: company})
       {:error, changeset} -> error_changeset(conn, changeset)
     end
