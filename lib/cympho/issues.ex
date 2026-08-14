@@ -2997,31 +2997,35 @@ defmodule Cympho.Issues do
           {:ok, Issue.t()}
           | {:error, :not_found | :invalid_policy_stages | :invalid_executor | Ecto.Changeset.t()}
   def assign_execution_policy(%Issue{} = issue, policy_id, executor_id) do
-    case ExecutionPolicies.get_execution_policy(policy_id) do
-      {:ok, %ExecutionPolicy{stage_configs: stage_configs} = policy} ->
-        if length(stage_configs) == 0 do
-          {:error, :invalid_policy_stages}
-        else
-          case Agents.get_agent(executor_id) do
-            {:ok, _agent} ->
-              state = ExecutionState.initialize(policy, executor_id)
+    if is_nil(issue.company_id) do
+      {:error, :not_found}
+    else
+      case ExecutionPolicies.get_company_execution_policy(issue.company_id, policy_id) do
+        {:ok, %ExecutionPolicy{stage_configs: stage_configs} = policy} ->
+          if length(stage_configs) == 0 do
+            {:error, :invalid_policy_stages}
+          else
+            case Agents.get_company_agent(issue.company_id, executor_id) do
+              {:ok, _agent} ->
+                state = ExecutionState.initialize(policy, executor_id)
 
-              attrs = %{
-                execution_policy_id: policy_id,
-                execution_state: state,
-                assignee_id: executor_id,
-                status: :in_progress
-              }
+                attrs = %{
+                  execution_policy_id: policy_id,
+                  execution_state: state,
+                  assignee_id: executor_id,
+                  status: :in_progress
+                }
 
-              update_issue(issue, attrs)
+                update_issue(issue, attrs)
 
-            {:error, _} ->
-              {:error, :invalid_executor}
+              {:error, _} ->
+                {:error, :invalid_executor}
+            end
           end
-        end
 
-      {:error, :not_found} ->
-        {:error, :not_found}
+        {:error, :not_found} ->
+          {:error, :not_found}
+      end
     end
   end
 

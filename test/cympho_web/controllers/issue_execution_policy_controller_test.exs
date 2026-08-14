@@ -18,6 +18,7 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Test Assign Policy",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "approver", "participant_id" => "someone"}
@@ -65,6 +66,7 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Decide Test",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "approver", "participant_id" => approver.id}
@@ -101,6 +103,7 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Changes Test",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "reviewer", "participant_id" => reviewer.id}

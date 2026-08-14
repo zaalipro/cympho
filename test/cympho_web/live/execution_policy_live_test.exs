@@ -136,10 +136,14 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
     assert html =~ "["
   end
 
-  test "edit policy form parses updated stage config JSON", %{conn: conn} do
+  test "edit policy form parses updated stage config JSON", %{
+    conn: conn,
+    current_company: company
+  } do
     {:ok, policy} =
       ExecutionPolicies.create_execution_policy(%{
         name: "Original policy",
+        company_id: company.id,
         stage_configs: [
           %{"type" => "executor", "participant_id" => "engineer"}
         ]
@@ -191,10 +195,14 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
            ]
   end
 
-  test "edit policy form saves guided stage builder changes", %{conn: conn} do
+  test "edit policy form saves guided stage builder changes", %{
+    conn: conn,
+    current_company: company
+  } do
     {:ok, policy} =
       ExecutionPolicies.create_execution_policy(%{
         name: "Guided edit policy",
+        company_id: company.id,
         stage_configs: [
           %{"type" => "executor", "participant_id" => "engineer"},
           %{"type" => "reviewer", "participant_id" => "cto"},
@@ -253,10 +261,14 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
     assert html =~ "New policy"
   end
 
-  test "policy command prioritizes missing participants", %{conn: conn} do
+  test "policy command prioritizes missing participants", %{
+    conn: conn,
+    current_company: company
+  } do
     {:ok, _policy} =
       ExecutionPolicies.create_execution_policy(%{
         name: "Broken handoff",
+        company_id: company.id,
         stage_configs: [
           %{"type" => "executor", "participant_id" => "executor"},
           %{"type" => "reviewer", "participant_id" => ""}
@@ -274,10 +286,14 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
              "Delete Broken handoff? New issues will no longer be able to use this staged execution guardrail."
   end
 
-  test "policy command recognizes governed policies", %{conn: conn} do
+  test "policy command recognizes governed policies", %{
+    conn: conn,
+    current_company: company
+  } do
     {:ok, _policy} =
       ExecutionPolicies.create_execution_policy(%{
         name: "Owner review pipeline",
+        company_id: company.id,
         stage_configs: [
           %{"type" => "executor", "participant_id" => "engineer"},
           %{
@@ -296,5 +312,121 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
     assert html =~ "Different actor"
     assert html =~ "Human required"
     assert html =~ "Ready"
+  end
+
+  test "new policy stamps current company and ignores client company_id", %{
+    conn: conn,
+    current_company: company
+  } do
+    unique = System.unique_integer([:positive])
+
+    {:ok, other_company} =
+      Cympho.Companies.create_company(%{
+        name: "Other Policy Co #{unique}",
+        slug: "other-policy-co-#{unique}"
+      })
+
+    {:ok, view, _html} = live(conn, "/settings/policies/new")
+
+    result =
+      render_submit(view, "save", %{
+        "execution_policy" => %{
+          "name" => "Stamped policy",
+          "company_id" => other_company.id,
+          "stage_input_mode" => "json",
+          "stage_configs" =>
+            Jason.encode!([%{"type" => "executor", "participant_id" => "engineer"}])
+        }
+      })
+
+    assert {:error, {:live_redirect, %{to: "/settings/policies/" <> id}}} = result
+    {:ok, policy} = ExecutionPolicies.get_execution_policy(id)
+    assert policy.company_id == company.id
+    refute policy.company_id == other_company.id
+  end
+
+  test "empty tenant does not inherit another tenant's governed posture", %{conn: conn} do
+    unique = System.unique_integer([:positive])
+
+    {:ok, other_company} =
+      Cympho.Companies.create_company(%{
+        name: "Foreign Policy Co #{unique}",
+        slug: "foreign-policy-co-#{unique}"
+      })
+
+    {:ok, _policy} =
+      ExecutionPolicies.create_execution_policy(%{
+        name: "Foreign governed pipeline",
+        company_id: other_company.id,
+        stage_configs: [
+          %{"type" => "executor", "participant_id" => "engineer"},
+          %{
+            "type" => "reviewer",
+            "participant_id" => "cto",
+            "require_different_actor" => true
+          },
+          %{"type" => "approver", "participant_id" => "ceo", "require_human" => true}
+        ]
+      })
+
+    {:ok, _view, html} = live(conn, "/settings/policies")
+
+    assert html =~ "Create a default execution policy before scaling autonomy"
+    refute html =~ "Foreign governed pipeline"
+    refute html =~ "Execution policies are ready for autonomous work"
+  end
+
+  test "show and edit of a foreign policy redirect with Policy not found", %{conn: conn} do
+    unique = System.unique_integer([:positive])
+
+    {:ok, other_company} =
+      Cympho.Companies.create_company(%{
+        name: "Foreign Show Co #{unique}",
+        slug: "foreign-show-co-#{unique}"
+      })
+
+    {:ok, policy} =
+      ExecutionPolicies.create_execution_policy(%{
+        name: "Foreign only",
+        company_id: other_company.id,
+        stage_configs: [%{"type" => "executor", "participant_id" => "engineer"}]
+      })
+
+    assert {:error, {:live_redirect, %{to: "/settings/policies"}}} =
+             live(conn, "/settings/policies/#{policy.id}")
+
+    assert {:error, {:live_redirect, %{to: "/settings/policies"}}} =
+             live(conn, "/settings/policies/#{policy.id}/edit")
+
+    assert {:ok, ^policy} =
+             ExecutionPolicies.get_company_execution_policy(other_company.id, policy.id)
+  end
+
+  test "delete of a foreign policy id does not remove the other tenant", %{conn: conn} do
+    unique = System.unique_integer([:positive])
+
+    {:ok, other_company} =
+      Cympho.Companies.create_company(%{
+        name: "Foreign Delete Co #{unique}",
+        slug: "foreign-delete-co-#{unique}"
+      })
+
+    {:ok, policy} =
+      ExecutionPolicies.create_execution_policy(%{
+        name: "Keep me",
+        company_id: other_company.id,
+        stage_configs: [%{"type" => "executor", "participant_id" => "engineer"}]
+      })
+
+    {:ok, view, _html} = live(conn, "/settings/policies")
+
+    result = render_click(view, "delete_execution_policy", %{"id" => policy.id})
+
+    assert {:error, {:live_redirect, %{to: "/settings/policies"}}} = result
+
+    assert {:ok, kept} =
+             ExecutionPolicies.get_company_execution_policy(other_company.id, policy.id)
+
+    assert kept.name == "Keep me"
   end
 end

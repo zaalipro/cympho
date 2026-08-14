@@ -20,6 +20,7 @@ defmodule Cympho.PrincipalPermissions.PrincipalPermissionGrant do
     field :status, :string, default: "active"
     field :metadata, :map, default: %{}
 
+    belongs_to :company, Cympho.Companies.Company
     belongs_to :board_approval, Cympho.BoardApprovals.BoardApproval
 
     timestamps(type: :utc_datetime)
@@ -38,9 +39,10 @@ defmodule Cympho.PrincipalPermissions.PrincipalPermissionGrant do
       :expires_at,
       :status,
       :metadata,
-      :board_approval_id
+      :board_approval_id,
+      :company_id
     ])
-    |> validate_required([:principal_id, :principal_type, :permission, :status])
+    |> validate_required([:principal_id, :principal_type, :permission, :status, :company_id])
     |> validate_inclusion(:status, ["active", "revoked", "expired"])
     |> validate_expiration()
     |> validate_permission_format()

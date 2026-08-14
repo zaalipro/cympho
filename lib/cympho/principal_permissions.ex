@@ -9,10 +9,14 @@ defmodule Cympho.PrincipalPermissions do
   alias Cympho.GovernanceAuditLogs
 
   @doc """
-  Returns the list of principal permission grants.
+  Returns the list of principal permission grants for a company.
   """
-  def list_principal_permission_grants(opts \\ %{}) do
-    query = from(p in PrincipalPermissionGrant, order_by: [desc: p.inserted_at])
+  def list_principal_permission_grants(company_id, opts \\ %{}) when is_binary(company_id) do
+    query =
+      from(p in PrincipalPermissionGrant,
+        where: p.company_id == ^company_id,
+        order_by: [desc: p.inserted_at]
+      )
 
     query =
       Enum.reduce(opts, query, fn
@@ -48,12 +52,13 @@ defmodule Cympho.PrincipalPermissions do
   end
 
   @doc """
-  Gets a single principal permission grant.
+  Gets a single principal permission grant in the given company.
   """
-  def get_principal_permission_grant!(id), do: Repo.get!(PrincipalPermissionGrant, id)
-
-  def get_principal_permission_grant(id) do
-    case Repo.get(PrincipalPermissionGrant, id) do
+  def get_company_principal_permission_grant(company_id, id) do
+    case Repo.one(
+           from p in PrincipalPermissionGrant,
+             where: p.id == ^id and p.company_id == ^company_id
+         ) do
       nil -> {:error, :not_found}
       grant -> {:ok, grant}
     end
@@ -107,6 +112,7 @@ defmodule Cympho.PrincipalPermissions do
     expires_at = get_in(board_approval.proposal_data, ["expires_at"])
 
     attrs = %{
+      company_id: board_approval.company_id,
       principal_id: principal_id,
       principal_type: principal_type,
       permission: permission,
@@ -162,14 +168,28 @@ defmodule Cympho.PrincipalPermissions do
   end
 
   @doc """
-  Checks if a principal has a specific active permission.
+  Checks if a principal has a specific active permission in a company.
+
+  `opts` must include `:company_id`. Blank-scope grants apply only inside
+  that company.
   """
   def has_permission?(principal_id, principal_type, permission, opts \\ %{}) do
+    case opts_get(opts, :company_id) do
+      company_id when is_binary(company_id) and company_id != "" ->
+        do_has_permission?(principal_id, principal_type, permission, company_id, opts)
+
+      _ ->
+        false
+    end
+  end
+
+  defp do_has_permission?(principal_id, principal_type, permission, company_id, opts) do
     base_query =
       from(p in PrincipalPermissionGrant,
         where:
-          p.principal_id == ^principal_id and p.principal_type == ^principal_type and
-            p.permission == ^permission and p.status == "active"
+          p.company_id == ^company_id and p.principal_id == ^principal_id and
+            p.principal_type == ^principal_type and p.permission == ^permission and
+            p.status == "active"
       )
 
     query =
@@ -193,30 +213,39 @@ defmodule Cympho.PrincipalPermissions do
   @doc """
   Checks if a principal has an active permission that applies to one of the given scopes.
 
-  Unscoped grants apply everywhere. Scoped grants must match one of the supplied
-  `{scope_type, scope_id}` pairs. Expired grants are ignored.
+  Blank-scope grants apply only to resources in that grant's `company_id`.
+  Scoped grants must match one of the supplied `{scope_type, scope_id}` pairs.
+  Expired grants are ignored. A `company` scope is required.
   """
   def has_permission_in_scope?(principal_id, principal_type, permission, scopes \\ []) do
     scopes = normalize_scopes(scopes)
 
-    list_principal_permission_grants(
-      principal_id: principal_id,
-      principal_type: principal_type,
-      permission: permission,
-      active: true,
-      not_expired: true
-    )
-    |> Enum.any?(&grant_applies_to_scope?(&1, scopes))
+    case company_id_from_scopes(scopes) do
+      nil ->
+        false
+
+      company_id ->
+        list_principal_permission_grants(company_id,
+          principal_id: principal_id,
+          principal_type: principal_type,
+          permission: permission,
+          active: true,
+          not_expired: true
+        )
+        |> Enum.any?(&grant_applies_to_scope?(&1, scopes))
+    end
   end
 
   @doc """
-  Gets all active permissions for a principal.
+  Gets all active permissions for a principal in a company.
   """
-  def get_principal_permissions(principal_id, principal_type) do
+  def get_principal_permissions(company_id, principal_id, principal_type)
+      when is_binary(company_id) do
     from(p in PrincipalPermissionGrant,
       where:
-        p.principal_id == ^principal_id and p.principal_type == ^principal_type and
-          p.status == "active" and (is_nil(p.expires_at) or p.expires_at > ^DateTime.utc_now()),
+        p.company_id == ^company_id and p.principal_id == ^principal_id and
+          p.principal_type == ^principal_type and p.status == "active" and
+          (is_nil(p.expires_at) or p.expires_at > ^DateTime.utc_now()),
       order_by: [desc: p.inserted_at]
     )
     |> Repo.all()
@@ -259,12 +288,32 @@ defmodule Cympho.PrincipalPermissions do
 
   defp grant_applies_to_scope?(%PrincipalPermissionGrant{} = grant, scopes) do
     PrincipalPermissionGrant.active?(grant) and
-      (unscoped_grant?(grant) or MapSet.member?(scopes, {grant.scope_type, grant.scope_id}))
+      (unscoped_in_company?(grant, scopes) or
+         MapSet.member?(scopes, {grant.scope_type, grant.scope_id}))
+  end
+
+  defp unscoped_in_company?(%PrincipalPermissionGrant{} = grant, scopes) do
+    unscoped_grant?(grant) and
+      MapSet.member?(scopes, {"company", to_string(grant.company_id)})
   end
 
   defp unscoped_grant?(%PrincipalPermissionGrant{scope_type: scope_type, scope_id: scope_id}) do
     blank?(scope_type) and blank?(scope_id)
   end
+
+  defp company_id_from_scopes(scopes) do
+    Enum.find_value(scopes, fn
+      {"company", id} -> id
+      _ -> nil
+    end)
+  end
+
+  defp opts_get(opts, key) when is_map(opts) do
+    Map.get(opts, key) || Map.get(opts, Atom.to_string(key))
+  end
+
+  defp opts_get(opts, key) when is_list(opts), do: Keyword.get(opts, key)
+  defp opts_get(_opts, _key), do: nil
 
   defp blank?(value), do: value in [nil, ""]
 
