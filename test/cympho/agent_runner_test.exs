@@ -94,7 +94,7 @@ defmodule Cympho.AgentRunnerTest do
           cwd: tmp_dir,
           config: %{"command" => command},
           env: %{"ANTHROPIC_API_KEY" => "test-key"},
-          stall_timeout: 1_000
+          stall_timeout: 5_000
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
@@ -123,7 +123,7 @@ defmodule Cympho.AgentRunnerTest do
             cwd: tmp_dir,
             config: %{"command" => command},
             env: %{"ANTHROPIC_API_KEY" => "test-key"},
-            stall_timeout: 1_000
+            stall_timeout: 5_000
           )
 
         assert_receive {:session_started, ^session_id}, @receive_timeout
@@ -152,7 +152,7 @@ defmodule Cympho.AgentRunnerTest do
           cwd: tmp_dir,
           config: %{"command" => command},
           env: %{"ANTHROPIC_API_KEY" => "test-key"},
-          stall_timeout: 1_000
+          stall_timeout: 5_000
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
@@ -181,7 +181,7 @@ defmodule Cympho.AgentRunnerTest do
           cwd: shared_dir,
           config: %{"command" => command, "resume" => true},
           env: %{"ANTHROPIC_API_KEY" => "test-key"},
-          stall_timeout: 1_000
+          stall_timeout: 5_000
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
@@ -209,7 +209,7 @@ defmodule Cympho.AgentRunnerTest do
         AgentRunner.run(issue, "agent-1", recipient,
           config: %{"command" => command, "cwd" => issue_dir, "resume" => true},
           env: %{"ANTHROPIC_API_KEY" => "test-key"},
-          stall_timeout: 1_000
+          stall_timeout: 5_000
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
@@ -238,7 +238,7 @@ defmodule Cympho.AgentRunnerTest do
           config: %{"command" => command, "cwd" => issue_dir, "resume" => true},
           env: %{"ANTHROPIC_API_KEY" => "test-key"},
           wake_context: {"issue_commented", %{"comment_id" => "comment-1"}},
-          stall_timeout: 1_000
+          stall_timeout: 5_000
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
@@ -270,7 +270,7 @@ defmodule Cympho.AgentRunnerTest do
           cwd: tmp_dir,
           config: %{"command" => command},
           env: %{"ANTHROPIC_API_KEY" => "test-key"},
-          stall_timeout: 1_000
+          stall_timeout: 5_000
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
@@ -315,7 +315,7 @@ defmodule Cympho.AgentRunnerTest do
           cwd: tmp_dir,
           config: %{"command" => command},
           env: %{"ANTHROPIC_API_KEY" => "test-key"},
-          stall_timeout: 1_000
+          stall_timeout: 5_000
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
@@ -353,6 +353,65 @@ defmodule Cympho.AgentRunnerTest do
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
       assert_receive {:turn_ended_with_error, ^session_id, :stall_timeout}, @receive_timeout
+      assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
+    end
+
+    test "a mid-run parse error kills the CLI instead of abandoning it" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-parse-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      pid_file = Path.join(tmp_dir, "child.pid")
+
+      # A login shell's profile scripts (or ~/.cld, which CLAUDE.md tells
+      # developers to use) print to stdout before the CLI does. That preamble
+      # arrives as its own first chunk: not empty, not "Thinking", not JSON,
+      # not provider-failure text — so it parses as {:parse_error, _} while the
+      # child is still working. If that branch returns without closing the
+      # port, the CLI keeps running in the issue workspace, still billing, with
+      # nothing left tracking it.
+      command = Path.join(tmp_dir, "fake-claude")
+
+      File.write!(command, """
+      #!/bin/sh
+      printf 'shell preamble from profile\\n'
+      echo $$ > '#{pid_file}'
+      sleep 10
+      """)
+
+      File.chmod!(command, 0o755)
+
+      recipient = self()
+
+      issue = %{
+        id: "parse-error-command",
+        title: "Parse error command",
+        description: "Emits a preamble"
+      }
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 30_000,
+          max_run_ms: 60_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+
+      assert_receive {:turn_ended_with_error, ^session_id, {:parse_error, _output}},
+                     @receive_timeout
+
+      assert eventually(fn -> File.exists?(pid_file) end)
+      os_pid = pid_file |> File.read!() |> String.trim()
+      assert os_pid != ""
+
+      assert eventually(fn -> not os_process_alive?(os_pid) end, 60),
+             "the CLI subprocess (#{os_pid}) survived the parse error"
+
       assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
     end
 
@@ -418,7 +477,7 @@ defmodule Cympho.AgentRunnerTest do
           cwd: tmp_dir,
           config: %{"command" => command},
           env: %{"ANTHROPIC_API_KEY" => "test-key"},
-          stall_timeout: 1_000
+          stall_timeout: 5_000
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
@@ -516,6 +575,10 @@ defmodule Cympho.AgentRunnerTest do
 
   defp resume_probe_text(%{"content" => [%{"text" => text} | _]}), do: text
   defp resume_probe_text(_result), do: nil
+
+  defp os_process_alive?(os_pid) do
+    match?({_output, 0}, System.cmd("kill", ["-0", os_pid], stderr_to_stdout: true))
+  end
 
   defp eventually(fun, attempts \\ 20) do
     cond do

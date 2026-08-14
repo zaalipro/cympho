@@ -405,8 +405,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   @impl true
-  def handle_call({:stop_company, company_id, reason}, _from, %State{} = state) do
-    result = stop_company_runtime(company_id, reason, state.running_issue_ids)
+  def handle_call({:stop_company, company_id, reason}, {requester, _tag}, %State{} = state) do
+    result = stop_company_runtime(company_id, reason, state.running_issue_ids, requester)
 
     new_state = %{
       state
@@ -640,15 +640,19 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp active_runs_for_issue(_issue_id), do: []
 
-  defp stop_company_runtime(company_id, reason, running_issue_ids) do
+  defp stop_company_runtime(company_id, reason, running_issue_ids, requester \\ self()) do
     company_runtime_issues(company_id, running_issue_ids)
-    |> Enum.reduce(empty_stop_result(reason), &stop_runtime_issue/2)
+    |> Enum.reduce(empty_stop_result(reason, requester), &stop_runtime_issue/2)
     |> Map.update!(:issue_ids, &Enum.reverse/1)
   end
 
-  defp empty_stop_result(reason) do
+  # `requester` is the process that asked for the stop. When it turns out to be
+  # one of the orchestrators being stopped, that orchestrator is blocked waiting
+  # on this very call and must be signalled asynchronously instead.
+  defp empty_stop_result(reason, requester \\ self()) do
     %{
       reason: to_string(reason),
+      requester: requester,
       issue_ids: [],
       orchestrators_stopped: 0,
       adapter_sessions_cancel_requested: 0,
@@ -725,6 +729,19 @@ defmodule Cympho.Orchestrator.Dispatcher do
     case Orchestrator.whereis(issue_id) do
       nil ->
         acc
+
+      pid when pid == acc.requester ->
+        # Re-entrant stop. A budget hard-stop is recorded at the end of an agent
+        # turn, inside the orchestrator process, and reaches
+        # `Companies.stop_company_runtime/2` → `Dispatcher.stop_company/2`. Stopping
+        # that orchestrator synchronously here would block the global Dispatcher
+        # against the very process waiting on it: `get_session_state/1` burns its
+        # 5s timeout, `GenServer.stop/2` waits `:infinity`, and every other tenant's
+        # dispatch stalls until the caller's own 15s timeout fires. The
+        # orchestrator handles `{:stop_orchestrator, reason}` as soon as its call
+        # returns, which is the same shutdown path with no mutual wait.
+        send(pid, {:stop_orchestrator, reason})
+        Map.update!(acc, :orchestrators_stopped, &(&1 + 1))
 
       _pid ->
         session_id = issue_id |> Orchestrator.get_session_state() |> adapter_session_id()

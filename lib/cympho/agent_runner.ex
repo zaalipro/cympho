@@ -341,6 +341,13 @@ defmodule Cympho.AgentRunner do
             loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, state)
 
           {:error, reason} ->
+            # This is the only terminal branch that used to return without
+            # closing the port. The child is still running here — a shell
+            # preamble on the first chunk lands in this branch milliseconds
+            # after spawn — and an implicitly closed port leaves `claude
+            # --dangerously-skip-permissions` alive in the issue workspace,
+            # still billing and no longer tracked by anything.
+            close_port(port)
             send(recipient_pid, {:turn_ended_with_error, session_id, reason})
         end
 
