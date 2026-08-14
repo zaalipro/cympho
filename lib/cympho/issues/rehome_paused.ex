@@ -111,6 +111,7 @@ defmodule Cympho.Issues.RehomePaused do
 
   defp rehome_issue(%Issue{} = issue, %Agent{} = agent, reason) do
     target = release_target_status(issue.status)
+    _ = Cympho.Orchestrator.stop(issue.id, {:runtime_stop, :agent_paused_rehome})
 
     case Issues.force_release_issue(issue, target) do
       {:ok, released} ->

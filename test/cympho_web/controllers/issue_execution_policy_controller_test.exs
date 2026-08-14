@@ -6,8 +6,8 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
   alias Cympho.Agents
 
   setup %{conn: conn} do
-    {conn, _user, company} = register_and_log_in_user(conn)
-    %{conn: conn, company: company}
+    {conn, user, company} = register_and_log_in_user(conn)
+    %{conn: conn, user: user, company: company}
   end
 
   describe "POST /api/issues/:issue_id/execution-policy/assign" do
@@ -56,12 +56,9 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
   end
 
   describe "POST /api/issues/:issue_id/execution-policy/decide" do
-    test "approves at current stage", %{conn: conn, company: company} do
+    test "approves at current stage", %{conn: conn, company: company, user: user} do
       {:ok, executor} =
         Agents.create_agent(%{name: "Exec", role: :engineer, company_id: company.id})
-
-      {:ok, approver} =
-        Agents.create_agent(%{name: "Approver", role: :ceo, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
@@ -69,7 +66,7 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
           "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
-            %{"type" => "approver", "participant_id" => approver.id}
+            %{"type" => "approver", "participant_id" => user.id}
           ]
         })
 
@@ -85,8 +82,7 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
 
       conn =
         post(conn, "/api/issues/#{issue.id}/execution-policy/decide", %{
-          "decision" => "approve",
-          "decided_by" => approver.id
+          "decision" => "approve"
         })
 
       assert json_response(conn, 200)
@@ -94,11 +90,9 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
       assert body["status"] == "done"
     end
 
-    test "requests changes at current stage", %{conn: conn, company: company} do
+    test "requests changes at current stage", %{conn: conn, company: company, user: user} do
       {:ok, executor} =
         Agents.create_agent(%{name: "Exec", role: :engineer, company_id: company.id})
-
-      {:ok, reviewer} = Agents.create_agent(%{name: "Rev", role: :cto, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
@@ -106,7 +100,7 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
           "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
-            %{"type" => "reviewer", "participant_id" => reviewer.id}
+            %{"type" => "reviewer", "participant_id" => user.id}
           ]
         })
 
@@ -122,13 +116,87 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
 
       conn =
         post(conn, "/api/issues/#{issue.id}/execution-policy/decide", %{
-          "decision" => "request_changes",
-          "decided_by" => reviewer.id
+          "decision" => "request_changes"
         })
 
       assert json_response(conn, 200)
       body = json_response(conn, 200)
       assert body["status"] == "in_progress"
+    end
+
+    test "ignores forged decided_by and uses current_user", %{
+      conn: conn,
+      company: company,
+      user: user
+    } do
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Exec", role: :engineer, company_id: company.id})
+
+      {:ok, policy} =
+        ExecutionPolicies.create_execution_policy(%{
+          "name" => "Forged Decide Test",
+          "company_id" => company.id,
+          "stage_configs" => [
+            %{"type" => "executor", "participant_id" => executor.id},
+            %{"type" => "approver", "participant_id" => user.id}
+          ]
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Forged Decide Test",
+          description: "Test",
+          company_id: company.id
+        })
+
+      {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
+      {:ok, _at_approver} = Issues.transition_issue(assigned, :in_review, executor.id)
+
+      conn =
+        post(conn, "/api/issues/#{issue.id}/execution-policy/decide", %{
+          "decision" => "approve",
+          "decided_by" => Ecto.UUID.generate()
+        })
+
+      assert json_response(conn, 200)
+      body = json_response(conn, 200)
+      assert body["status"] == "done"
+    end
+
+    test "returns 401 when current_user is not the current participant", %{
+      conn: conn,
+      company: company
+    } do
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Exec", role: :engineer, company_id: company.id})
+
+      {:ok, policy} =
+        ExecutionPolicies.create_execution_policy(%{
+          "name" => "Unauthorized Decide Test",
+          "company_id" => company.id,
+          "stage_configs" => [
+            %{"type" => "executor", "participant_id" => executor.id},
+            %{"type" => "approver", "participant_id" => Ecto.UUID.generate()}
+          ]
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Unauthorized Decide Test",
+          description: "Test",
+          company_id: company.id
+        })
+
+      {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
+      {:ok, _at_approver} = Issues.transition_issue(assigned, :in_review, executor.id)
+
+      conn =
+        post(conn, "/api/issues/#{issue.id}/execution-policy/decide", %{
+          "decision" => "approve",
+          "decided_by" => executor.id
+        })
+
+      assert json_response(conn, 401)["errors"]["detail"] == "Unauthorized"
     end
   end
 end

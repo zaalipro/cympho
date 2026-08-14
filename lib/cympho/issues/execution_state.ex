@@ -179,7 +179,9 @@ defmodule Cympho.Issues.ExecutionState do
   def normalize(nil), do: nil
 
   def normalize(%{current_stage_index: _} = state) do
-    %{state | history: normalize_history(state[:history])}
+    state
+    |> Map.put(:history, normalize_history(state[:history]))
+    |> coerce_enum_atoms()
   end
 
   def normalize(%{"current_stage_index" => _} = state) do
@@ -189,7 +191,9 @@ defmodule Cympho.Issues.ExecutionState do
         {k, v} -> {k, v}
       end)
 
-    %{normalized | history: normalize_history(normalized[:history])}
+    normalized
+    |> Map.put(:history, normalize_history(normalized[:history]))
+    |> coerce_enum_atoms()
   end
 
   def normalize(state) when is_map(state), do: state
@@ -208,6 +212,37 @@ defmodule Cympho.Issues.ExecutionState do
         end)
     end)
   end
+
+  defp coerce_enum_atoms(state) do
+    history =
+      state
+      |> Map.get(:history, [])
+      |> List.wrap()
+      |> Enum.map(&coerce_history_decision/1)
+
+    state
+    |> Map.put(:last_decision_outcome, coerce_existing_atom(Map.get(state, :last_decision_outcome)))
+    |> Map.put(:current_stage_type, coerce_existing_atom(Map.get(state, :current_stage_type)))
+    |> Map.put(:history, history)
+  end
+
+  defp coerce_history_decision(entry) when is_map(entry) do
+    Map.put(entry, :decision, coerce_existing_atom(Map.get(entry, :decision)))
+  end
+
+  defp coerce_history_decision(entry), do: entry
+
+  defp coerce_existing_atom(value) when is_atom(value), do: value
+
+  defp coerce_existing_atom(value) when is_binary(value) do
+    try do
+      String.to_existing_atom(value)
+    rescue
+      ArgumentError -> nil
+    end
+  end
+
+  defp coerce_existing_atom(_), do: nil
 
   @doc """
   Returns the stage config for the current stage from the policy.

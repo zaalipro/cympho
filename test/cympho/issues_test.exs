@@ -685,6 +685,15 @@ defmodule Cympho.IssuesTest do
       assert {:ok, updated} = Issues.update_issue(issue, attrs)
       assert updated.assignee_id == agent.id
     end
+
+    test "returns changeset error on stale lock_version", %{issue: issue} do
+      assert {:ok, _first} = Issues.update_issue(issue, %{title: "First update"})
+
+      assert {:error, changeset} = Issues.update_issue(issue, %{title: "Stale update"})
+
+      assert {"is stale (concurrent modification)", opts} = changeset.errors[:lock_version]
+      assert opts[:stale] == true
+    end
   end
 
   describe "delete_issue/1" do

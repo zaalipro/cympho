@@ -890,6 +890,51 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
   end
 
+  describe "submit_comment" do
+    test "creates a company-scoped comment authored by the current user", %{
+      issue_todo: issue
+    } do
+      {:ok, user} = Cympho.Users.get_user(Plug.Conn.get_session(conn(), :user_id))
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      render_submit(view, "submit_comment", %{
+        "issue-id" => issue.id,
+        "comment" => "Hello from board"
+      })
+
+      comments = Comments.list_comments(issue.id)
+      assert [%{body: "Hello from board", author_type: "user", author_id: author_id}] = comments
+      assert author_id == user.id
+    end
+
+    test "rejects comments on issues outside the current company" do
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign Kanban Co #{System.unique_integer([:positive])}",
+          slug: "foreign-kanban-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, foreign} =
+        Issues.create_issue(%{
+          title: "Foreign issue",
+          description: "other tenant",
+          company_id: other_company.id,
+          status: :todo
+        })
+
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      html =
+        render_submit(view, "submit_comment", %{
+          "issue-id" => foreign.id,
+          "comment" => "Should not persist"
+        })
+
+      assert html =~ "Issue not found or unauthorized"
+      assert Comments.list_comments(foreign.id) == []
+    end
+  end
+
   describe "Card animations" do
     test "renders card animation styles" do
       {:ok, _view, html} = live(conn(), "/kanban")

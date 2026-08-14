@@ -154,7 +154,7 @@ defmodule Cympho.Runtime do
     alias Cympho.Issues.ExecutionState
     alias Cympho.ExecutionPolicies
 
-    state = issue.execution_state
+    state = ExecutionState.normalize(issue.execution_state)
 
     if ExecutionState.active?(state) do
       case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
@@ -164,7 +164,7 @@ defmodule Cympho.Runtime do
               {:error, {:stage_gate_blocked, :require_human}}
 
             not ExecutionState.stage_complete?(state) and
-                state.current_participant != agent.id ->
+                Map.get(state, :current_participant) != agent.id ->
               {:error, {:stage_gate_blocked, :stage_incomplete}}
 
             true ->

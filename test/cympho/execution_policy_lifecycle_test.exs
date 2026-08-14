@@ -5,6 +5,17 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
   alias Cympho.Issues.ExecutionState
   alias Cympho.ExecutionPolicies
   alias Cympho.Agents
+  alias Cympho.Companies
+
+  setup do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Policy Co #{System.unique_integer([:positive])}",
+        slug: "policy-#{System.unique_integer([:positive])}"
+      })
+
+    %{company: company}
+  end
 
   describe "ExecutionState module" do
     test "initialize/2 sets up initial state from policy" do
@@ -139,15 +150,32 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
       assert ExecutionState.active?(%{}) == false
       assert ExecutionState.active?(%{current_stage_index: 0}) == true
     end
+
+    test "normalize/1 coerces JSONB string enums to atoms" do
+      state = %{
+        "current_stage_index" => 1,
+        "current_stage_type" => "reviewer",
+        "current_participant" => "user-1",
+        "last_decision_outcome" => "changes_requested",
+        "history" => [%{"stage_index" => 0, "decision" => "approved"}]
+      }
+
+      normalized = ExecutionState.normalize(state)
+      assert normalized.current_stage_type == :reviewer
+      assert normalized.last_decision_outcome == :changes_requested
+      assert hd(normalized.history).decision == :approved
+    end
   end
 
   describe "assign_execution_policy/3" do
-    test "assigns policy and initializes execution state" do
-      {:ok, executor} = Agents.create_agent(%{name: "Executor", role: :engineer})
+    test "assigns policy and initializes execution state", %{company: company} do
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Executor", role: :engineer, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Standard Review",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "reviewer", "participant_id" => "some-reviewer"},
@@ -158,7 +186,8 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Policy Issue",
-          description: "Test execution policy"
+          description: "Test execution policy",
+          company_id: company.id
         })
 
       assert {:ok, updated} = Issues.assign_execution_policy(issue, policy.id, executor.id)
@@ -167,25 +196,27 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
       assert updated.execution_state.current_participant == executor.id
     end
 
-    test "returns error for non-existent policy" do
+    test "returns error for non-existent policy", %{company: company} do
       {:ok, issue} =
-        Issues.create_issue(%{title: "Test", description: "Test"})
+        Issues.create_issue(%{title: "Test", description: "Test", company_id: company.id})
 
       assert {:error, :not_found} =
                Issues.assign_execution_policy(issue, Ecto.UUID.generate(), "executor-1")
     end
 
-    test "returns error for policy with no stages" do
-      {:ok, executor} = Agents.create_agent(%{name: "Executor", role: :engineer})
+    test "returns error for policy with no stages", %{company: company} do
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Executor", role: :engineer, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Empty",
+          "company_id" => company.id,
           "stage_configs" => []
         })
 
       {:ok, issue} =
-        Issues.create_issue(%{title: "Test", description: "Test"})
+        Issues.create_issue(%{title: "Test", description: "Test", company_id: company.id})
 
       assert {:error, :invalid_policy_stages} =
                Issues.assign_execution_policy(issue, policy.id, executor.id)
@@ -193,14 +224,20 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
   end
 
   describe "execution policy stage transitions" do
-    setup do
-      {:ok, executor} = Agents.create_agent(%{name: "Executor", role: :engineer})
-      {:ok, reviewer} = Agents.create_agent(%{name: "Reviewer", role: :cto})
-      {:ok, approver} = Agents.create_agent(%{name: "Approver", role: :ceo})
+    setup %{company: company} do
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Executor", role: :engineer, company_id: company.id})
+
+      {:ok, reviewer} =
+        Agents.create_agent(%{name: "Reviewer", role: :cto, company_id: company.id})
+
+      {:ok, approver} =
+        Agents.create_agent(%{name: "Approver", role: :ceo, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Full Pipeline",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "reviewer", "participant_id" => reviewer.id},
@@ -211,7 +248,8 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Pipeline Issue",
-          description: "Full pipeline test"
+          description: "Full pipeline test",
+          company_id: company.id
         })
 
       {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
@@ -235,6 +273,18 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
       assert advanced.execution_state.current_stage_type == :reviewer
       assert advanced.execution_state.current_participant == reviewer.id
       assert advanced.execution_state.current_stage_index == 1
+    end
+
+    test "Repo.get then transition_issue to in_review advances after JSONB reload", %{
+      executor: executor,
+      reviewer: reviewer,
+      issue: issue
+    } do
+      reloaded = Repo.get(Cympho.Issues.Issue, issue.id)
+      assert {:ok, advanced} = Issues.transition_issue(reloaded, :in_review, executor.id)
+      assert advanced.status == :in_review
+      assert advanced.execution_state.current_stage_type == :reviewer
+      assert advanced.execution_state.current_participant == reviewer.id
     end
 
     test "full approval flow: executor -> reviewer -> approver -> done", %{
@@ -324,13 +374,17 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
   end
 
   describe "execution policy with short pipeline" do
-    setup do
-      {:ok, executor} = Agents.create_agent(%{name: "Executor", role: :engineer})
-      {:ok, approver} = Agents.create_agent(%{name: "Approver", role: :ceo})
+    setup %{company: company} do
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Executor", role: :engineer, company_id: company.id})
+
+      {:ok, approver} =
+        Agents.create_agent(%{name: "Approver", role: :ceo, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Simple Approval",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "approver", "participant_id" => approver.id}
@@ -340,7 +394,8 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Simple Pipeline",
-          description: "Two-stage pipeline"
+          description: "Two-stage pipeline",
+          company_id: company.id
         })
 
       {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
@@ -362,17 +417,20 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
   end
 
   describe "issue without execution policy still works normally" do
-    test "regular transitions still function" do
+    test "regular transitions still function", %{company: company} do
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Regular Issue",
-          description: "No policy"
+          description: "No policy",
+          company_id: company.id
         })
 
       assert issue.execution_policy_id == nil
       assert issue.execution_state == %{}
 
-      {:ok, agent} = Agents.create_agent(%{name: "Worker", role: :engineer})
+      {:ok, agent} =
+        Agents.create_agent(%{name: "Worker", role: :engineer, company_id: company.id})
+
       {:ok, checked_out} = Issues.checkout_issue(agent, issue)
       assert checked_out.status == :in_progress
 
@@ -385,20 +443,25 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
   end
 
   describe "changes_requested flow" do
-    test "executor can resubmit after changes requested" do
-      {:ok, executor} = Agents.create_agent(%{name: "Exec", role: :engineer})
-      {:ok, reviewer} = Agents.create_agent(%{name: "Rev", role: :cto})
+    test "executor can resubmit after changes requested", %{company: company} do
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Exec", role: :engineer, company_id: company.id})
+
+      {:ok, reviewer} =
+        Agents.create_agent(%{name: "Rev", role: :cto, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           "name" => "Resubmit Flow",
+          "company_id" => company.id,
           "stage_configs" => [
             %{"type" => "executor", "participant_id" => executor.id},
             %{"type" => "reviewer", "participant_id" => reviewer.id}
           ]
         })
 
-      {:ok, issue} = Issues.create_issue(%{title: "Resubmit", description: "Test"})
+      {:ok, issue} =
+        Issues.create_issue(%{title: "Resubmit", description: "Test", company_id: company.id})
 
       {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
 

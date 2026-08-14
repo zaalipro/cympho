@@ -22,10 +22,10 @@ defmodule CymphoWeb.IssueExecutionPolicyController do
     end
   end
 
-  def decide(conn, %{"issue_id" => issue_id, "decision" => decision} = params)
+  def decide(conn, %{"issue_id" => issue_id, "decision" => decision})
       when decision in ["approve", "request_changes"] do
     atom_decision = String.to_existing_atom(decision)
-    decided_by = params["decided_by"] || conn.assigns.current_user.id
+    decided_by = conn.assigns.current_user.id
 
     with {:ok, issue} <- scoped_issue(conn, issue_id),
          {:ok, updated} <- Issues.execution_policy_decision(issue, atom_decision, decided_by) do

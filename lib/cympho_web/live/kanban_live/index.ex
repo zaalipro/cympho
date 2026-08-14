@@ -412,9 +412,22 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   def handle_event("submit_comment", %{"issue-id" => issue_id, "comment" => comment}, socket) do
-    case Cympho.Comments.create_comment(%{issue_id: issue_id, body: comment}) do
-      {:ok, _} -> {:noreply, assign(socket, :editing_card_id, nil)}
-      {:error, _} -> {:noreply, socket}
+    case Issues.get_company_issue(socket.assigns.current_company.id, issue_id) do
+      {:ok, issue} ->
+        attrs = %{
+          issue_id: issue.id,
+          body: comment,
+          author_id: socket.assigns.current_user.id,
+          author_type: "user"
+        }
+
+        case Cympho.Comments.create_comment(attrs) do
+          {:ok, _} -> {:noreply, assign(socket, :editing_card_id, nil)}
+          {:error, _} -> {:noreply, socket}
+        end
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Issue not found or unauthorized")}
     end
   end
 
