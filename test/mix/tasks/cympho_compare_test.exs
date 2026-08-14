@@ -394,23 +394,13 @@ defmodule Mix.Tasks.CymphoCompareTest do
 
     assert rate_limit_evidence =~ "different extension-call boundary"
 
-    expected_open_gaps = [
-      "remote_sandbox_execution",
-      "selective_standard_portability"
-    ]
+    # Both former G6/G13 gaps are closed. Parity here must name the capability
+    # that closed them, so a regression to a shell would fail this test.
+    assert %{"verdict" => "parity", "evidence" => sandbox_evidence} =
+             Enum.find(rows, &(&1["slug"] == "remote_sandbox_execution"))
 
-    for slug <- expected_open_gaps do
-      assert %{"verdict" => "gap", "evidence" => evidence} =
-               Enum.find(rows, &(&1["slug"] == slug))
-
-      assert is_binary(evidence) and evidence != ""
-    end
-
-    assert Enum.find(rows, &(&1["slug"] == "remote_sandbox_execution"))["evidence"] =~
-             "Fake"
-
-    assert Enum.find(rows, &(&1["slug"] == "remote_sandbox_execution"))["evidence"] =~
-             "real remote provider"
+    assert sandbox_evidence =~ "registered remote provider"
+    assert sandbox_evidence =~ "company-scoped connection settings"
 
     assert %{"verdict" => "parity", "evidence" => mcp_evidence} =
              Enum.find(rows, &(&1["slug"] == "governed_dynamic_mcp"))
@@ -431,8 +421,12 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert mobile_evidence =~ "keyboard-open"
     assert mobile_evidence =~ "landscape evidence"
 
-    assert Enum.find(rows, &(&1["slug"] == "selective_standard_portability"))["evidence"] =~
-             "GitHub/ref"
+    assert %{"verdict" => "parity", "evidence" => portability_evidence} =
+             Enum.find(rows, &(&1["slug"] == "selective_standard_portability"))
+
+    assert portability_evidence =~ "skip/replace/rename"
+    assert portability_evidence =~ "documented directory format"
+    assert portability_evidence =~ "ref-pinned"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "secrets"))

@@ -2,8 +2,11 @@ defmodule Cympho.Workspaces.EnvironmentDrivers do
   @moduledoc """
   Resolves environment-driver provider keys to implementing modules.
 
-  Only the Fake driver is registered. Real providers (E2B, Daytona, etc.)
-  remain intentionally unregistered — unknown keys fail closed.
+  `:fake` backs contract tests and local development. `:ssh` is the real
+  provider: it runs workspaces on any reachable host with sshd, using OTP's
+  `:ssh` application and credentials from the company secret store. Vendor
+  SaaS providers (E2B, Daytona, etc.) remain intentionally unregistered —
+  unknown keys fail closed.
   """
 
   alias Cympho.Workspaces.Drivers
@@ -11,7 +14,8 @@ defmodule Cympho.Workspaces.EnvironmentDrivers do
   @type provider_key :: atom() | String.t()
 
   @registered %{
-    fake: Drivers.Fake
+    fake: Drivers.Fake,
+    ssh: Drivers.Ssh
   }
 
   @doc """

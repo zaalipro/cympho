@@ -402,7 +402,8 @@ defmodule Mix.Tasks.Cympho.Compare do
       slug: "remote_sandbox_execution",
       paperclip:
         "Environment-driver plugins provision and operate remote sandboxes across multiple providers",
-      cympho: "EnvironmentDriver + Fake lifecycle exist; no real remote provider is registered",
+      cympho:
+        "The :ssh driver runs workspaces on any reachable host over OTP :ssh, with pinned host keys and secret-store credentials",
       check: &__MODULE__.check_remote_sandbox_execution/0
     },
     %{
@@ -1639,6 +1640,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     fake = Cympho.Workspaces.Drivers.Fake
 
     provider_drivers = [
+      Cympho.Workspaces.Drivers.Ssh,
       Cympho.Workspaces.Drivers.E2B,
       Cympho.Workspaces.Drivers.Daytona,
       Cympho.Workspaces.Drivers.Cloudflare,
@@ -1654,17 +1656,28 @@ defmodule Mix.Tasks.Cympho.Compare do
         module_with_fun?(fake, :execute, 3) and
         module_with_fun?(fake, :release, 2)
 
+    # A module alone is not a provider. It also has to resolve through the
+    # registry and receive real connection settings, otherwise the lifecycle
+    # would still be handing every driver an empty config map.
+    lifecycle_source = source_for(Cympho.Workspaces.EnvironmentLifecycle)
+
+    has_config_resolution =
+      module_with_fun?(Cympho.Workspaces.EnvironmentConfig, :resolve, 3) and
+        String.contains?(lifecycle_source, "EnvironmentConfig.resolve")
+
     has_real_provider =
-      Enum.any?(provider_drivers, fn provider ->
-        module_with_fun?(provider, :acquire, 2) and
-          module_with_fun?(provider, :execute, 3) and
-          module_with_fun?(provider, :release, 2)
-      end)
+      has_config_resolution and
+        Enum.any?(provider_drivers, fn provider ->
+          module_with_fun?(provider, :acquire, 2) and
+            module_with_fun?(provider, :execute, 3) and
+            module_with_fun?(provider, :release, 2) and
+            match?({:ok, ^provider}, registry.resolve(provider_key(provider)))
+        end)
 
     cond do
       has_driver_contract and has_registry and has_real_provider ->
         {:parity,
-         "A registered remote provider implements acquire/execute/release through the environment-driver lifecycle"}
+         "A registered remote provider implements acquire/execute/release through the environment-driver lifecycle with company-scoped connection settings"}
 
       has_driver_contract and has_registry and has_fake ->
         {:gap,
@@ -1674,6 +1687,10 @@ defmodule Mix.Tasks.Cympho.Compare do
         {:gap,
          "local workspace records, leases, probes, and previews do not provision or execute a real remote provider; a behavior alone would not close this gap"}
     end
+  end
+
+  defp provider_key(module) do
+    module |> Module.split() |> List.last() |> String.downcase() |> String.to_atom()
   end
 
   def check_governed_dynamic_mcp do
@@ -1806,7 +1823,6 @@ defmodule Mix.Tasks.Cympho.Compare do
   def check_selective_standard_portability do
     package = Cympho.Companies.PortablePackage
     package_source = source_for(package)
-    portability_source = source_for(Cympho.Companies.Portability)
 
     has_facade =
       module_with_fun?(package, :export, 2) and
@@ -1823,12 +1839,25 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(package_source, "load_source(:json") and
         String.contains?(package_source, "load_source(:path")
 
-    # Repository-backed sources must be real loaders, not reserved comments.
-    has_repo_sources =
-      String.contains?(package_source, "load_source(:github") or
-        String.contains?(package_source, "load_source(:ref")
+    # Repository-backed sources must be real loaders, not reserved comments, and
+    # the loader has to require a pinned ref rather than a moving branch.
+    package_source_module = Cympho.Companies.PackageSource
+    package_source_src = source_for(package_source_module)
 
-    # V1 writers implement :suffix/:fail; :skip/:replace/:rename must be more than a list.
+    has_repo_sources =
+      String.contains?(package_source, "load_source(:github") and
+        module_with_fun?(package_source_module, :load_github, 2) and
+        String.contains?(package_source_src, "allow_unpinned")
+
+    # A documented directory format needs a manifest, a writer, and a reader.
+    has_directory_format =
+      module_with_fun?(package_source_module, :load_dir, 1) and
+        module_with_fun?(package_source_module, :write_dir, 2) and
+        module_with_fun?(package_source_module, :manifest_file, 0) and
+        String.contains?(package_source, "load_source(:dir")
+
+    # V1 writers implement :suffix/:fail; :skip/:replace/:rename must be real
+    # merge writers against an existing company, not a list of reserved atoms.
     collision_modes =
       if module_with_fun?(package, :collision_modes, 0),
         do: package.collision_modes(),
@@ -1837,22 +1866,24 @@ defmodule Mix.Tasks.Cympho.Compare do
     listed_shell_modes? =
       Enum.all?([:skip, :replace, :rename], &(&1 in collision_modes))
 
+    merge_module = Cympho.Companies.PackageMerge
+    merge_source = source_for(merge_module)
+
     implemented_shell_modes? =
       listed_shell_modes? and
+        module_with_fun?(merge_module, :preview, 3) and
+        module_with_fun?(merge_module, :apply, 3) and
+        module_with_fun?(package, :merge_preview, 3) and
         Enum.all?(
-          ["slug_strategy: :skip", "slug_strategy: :replace", "slug_strategy: :rename"],
-          fn
-            needle ->
-              String.contains?(portability_source, needle) or
-                String.contains?(package_source, needle)
-          end
+          ["collision_action(:skip)", "collision_action(:replace)", "collision_action(:rename)"],
+          &String.contains?(merge_source, &1)
         )
 
     cond do
       has_facade and has_selective_includes and has_local_sources and has_repo_sources and
-          implemented_shell_modes? ->
+        has_directory_format and implemented_shell_modes? ->
         {:parity,
-         "Selective packages support dry-run merge, explicit collision modes, and pinned local/repository sources"}
+         "Selective packages support dry-run merge with skip/replace/rename writers, a documented directory format, and ref-pinned local/repository sources"}
 
       has_facade and has_selective_includes and has_local_sources ->
         {:gap,

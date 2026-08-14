@@ -11,6 +11,7 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
 
   alias Cympho.Repo
   alias Cympho.Workspaces.Environment
+  alias Cympho.Workspaces.EnvironmentConfig
   alias Cympho.Workspaces.EnvironmentDrivers
   alias Cympho.Workspaces.EnvironmentLease
   alias Cympho.Workspaces.ExecutionWorkspace
@@ -45,7 +46,9 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
           if present?(ew.provider_ref) do
             {:ok, ew}
           else
-            acquire_and_persist(ew, driver, company_id, opts)
+            with {:ok, config} <- EnvironmentConfig.resolve(provider, company_id, ew.metadata) do
+              acquire_and_persist(ew, driver, company_id, opts, config)
+            end
           end
         end
     end
@@ -72,7 +75,8 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
 
       provider ->
         with {:ok, driver} <- EnvironmentDrivers.resolve(provider),
-             :ok <- driver.release(ew.provider_ref, release_opts(ew, opts)) do
+             {:ok, config} <- EnvironmentConfig.resolve(provider, ew.company_id, ew.metadata),
+             :ok <- driver.release(ew.provider_ref, release_opts(ew, opts, config)) do
           persist_provider_ref(ew, nil)
         end
     end
@@ -95,12 +99,15 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
         {:ok, ew}
 
       provider ->
-        with {:ok, driver} <- EnvironmentDrivers.resolve(provider) do
+        with {:ok, driver} <- EnvironmentDrivers.resolve(provider),
+             {:ok, config} <- EnvironmentConfig.resolve(provider, ew.company_id, ew.metadata) do
+          driver_opts = release_opts(ew, opts, config)
+
           result =
             if function_exported?(driver, :cancel, 2) do
-              driver.cancel(ew.provider_ref, release_opts(ew, opts))
+              driver.cancel(ew.provider_ref, driver_opts)
             else
-              driver.release(ew.provider_ref, release_opts(ew, opts))
+              driver.release(ew.provider_ref, driver_opts)
             end
 
           case result do
@@ -134,12 +141,12 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
         normalized ->
           company_id = get_field(attrs, :company_id)
 
+          metadata = get_field(attrs, :metadata) || %{}
+
           with {:ok, company_id} <- require_company_id(company_id),
-               {:ok, driver} <- EnvironmentDrivers.resolve(normalized) do
-            case driver.acquire(
-                   %{company_id: company_id, metadata: get_field(attrs, :metadata) || %{}},
-                   %{}
-                 ) do
+               {:ok, driver} <- EnvironmentDrivers.resolve(normalized),
+               {:ok, config} <- EnvironmentConfig.resolve(normalized, company_id, metadata) do
+            case driver.acquire(%{company_id: company_id, metadata: metadata}, config) do
               {:ok, handle} ->
                 now = DateTime.utc_now() |> DateTime.truncate(:second)
 
@@ -174,7 +181,16 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
       provider ->
         case EnvironmentDrivers.resolve(provider) do
           {:ok, driver} ->
-            driver.release(lease.provider_lease_id, %{company_id: lease.company_id})
+            case EnvironmentConfig.resolve(provider, lease.company_id, lease.metadata) do
+              {:ok, config} ->
+                driver.release(
+                  lease.provider_lease_id,
+                  Map.put(config, :company_id, lease.company_id)
+                )
+
+              {:error, reason} ->
+                {:error, reason}
+            end
 
           {:error, :unknown_provider} ->
             # Acquire is fail-closed; release of a removed provider is best-effort.
@@ -194,13 +210,13 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
   # Internals
   # ---------------------------------------------------------------------------
 
-  defp acquire_and_persist(%ExecutionWorkspace{} = ew, driver, company_id, opts) do
+  defp acquire_and_persist(%ExecutionWorkspace{} = ew, driver, company_id, opts, config) do
     acquire_opts = %{
       company_id: company_id,
       metadata: Map.get(opts, :metadata) || Map.get(opts, "metadata") || %{}
     }
 
-    case driver.acquire(acquire_opts, %{}) do
+    case driver.acquire(acquire_opts, config) do
       {:ok, handle} ->
         persist_provider_ref(ew, handle.provider_ref)
 
@@ -269,8 +285,12 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
 
   defp require_company_id(_), do: {:error, :company_id_required}
 
-  defp release_opts(%ExecutionWorkspace{} = ew, opts) do
-    %{company_id: ew.company_id}
+  # Release and cancel have no separate config argument in the driver
+  # behaviour, so resolved connection settings ride along in the opts map.
+  # Caller-supplied opts still win.
+  defp release_opts(%ExecutionWorkspace{} = ew, opts, config) do
+    config
+    |> Map.put(:company_id, ew.company_id)
     |> Map.merge(opts)
   end
 

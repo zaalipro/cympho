@@ -2067,7 +2067,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Paused"
       assert html =~ "Runtime paused"
       assert html =~ "operator hold"
-      assert html =~ "Open runtime controls"
+      assert html =~ "Resume the team"
       assert html =~ "Turn the team back on to start."
 
       assert html =~

@@ -269,7 +269,11 @@ defmodule Cympho.CompaniesPortabilityTest do
       assert {:error, message} = PortablePackage.load_source(:path, System.tmp_dir!())
       assert message =~ "file"
 
+      # :github is a real loader now; an unpinned fetch fails on the ref, not the kind.
       assert {:error, message} = PortablePackage.load_source(:github, "org/repo")
+      assert message =~ "A ref is required"
+
+      assert {:error, message} = PortablePackage.load_source(:ftp, "org/repo")
       assert message =~ "Unsupported package source kind"
     end
 

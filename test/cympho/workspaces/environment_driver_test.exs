@@ -27,9 +27,12 @@ defmodule Cympho.Workspaces.EnvironmentDriverTest do
       assert {:error, :unknown_provider} = EnvironmentDrivers.resolve("")
     end
 
-    test "no E2B or paid provider modules are registered" do
+    test "no vendor SaaS provider modules are registered" do
       refute Code.ensure_loaded?(Cympho.Workspaces.Drivers.E2B)
-      assert EnvironmentDrivers.known_providers() == [:fake]
+      refute Code.ensure_loaded?(Cympho.Workspaces.Drivers.Daytona)
+      # :ssh is the real provider and needs no vendor account; see
+      # test/cympho/workspaces/drivers/ssh_test.exs for its live coverage.
+      assert Enum.sort(EnvironmentDrivers.known_providers()) == [:fake, :ssh]
     end
   end
 
