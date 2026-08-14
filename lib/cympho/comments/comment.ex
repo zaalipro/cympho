@@ -13,7 +13,12 @@ defmodule Cympho.Comments.Comment do
 
     belongs_to :issue, Issue
 
-    timestamps(type: :utc_datetime)
+    # Microseconds, unlike the :utc_datetime used elsewhere. Several comments
+    # are written inside a single action batch, and the receipt audit that gates
+    # delivery picks "the newest meaningful agent comment" — at second
+    # precision those comments tie and the gate's verdict depended on the order
+    # Postgres returned rows in.
+    timestamps(type: :utc_datetime_usec)
   end
 
   def changeset(comment, attrs) do

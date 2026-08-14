@@ -55,6 +55,44 @@ defmodule Cympho.CommentsTest do
     end
   end
 
+  describe "ordering" do
+    test "comments written in the same second are still strictly ordered", %{issue: issue} do
+      # Several comments are written inside a single action batch, and the
+      # receipt audit that gates delivery picks "the newest meaningful agent
+      # comment", breaking ties by list position. At second precision those
+      # comments tied, so the gate's verdict came down to whatever order
+      # Postgres returned rows in — an agent could be told its handoff was
+      # missing receipt fields because the audit read an earlier comment.
+      bodies = ["first note", "second note", "third note"]
+
+      created =
+        for body <- bodies do
+          {:ok, comment} =
+            Comments.create_comment(%{
+              body: body,
+              author_type: "agent",
+              author_id: "agent-1",
+              issue_id: issue.id
+            })
+
+          comment
+        end
+
+      stamps = Enum.map(created, & &1.inserted_at)
+
+      assert stamps == Enum.sort(stamps, DateTime),
+             "comment timestamps must increase with insertion order"
+
+      assert length(Enum.uniq(stamps)) == length(stamps),
+             "comment timestamps must not collide within one batch"
+
+      assert Enum.map(Comments.list_comments(issue.id), & &1.body) == bodies
+
+      preloaded = Cympho.Repo.preload(issue, [:comments], force: true)
+      assert Enum.map(preloaded.comments, & &1.body) == bodies
+    end
+  end
+
   describe "get_comment!/1" do
     test "returns comment with given id", %{issue: issue} do
       {:ok, comment} =

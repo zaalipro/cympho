@@ -80,7 +80,9 @@ defmodule Cympho.Issues.Issue do
     belongs_to :execution_workspace, Cympho.Workspaces.ExecutionWorkspace
     belongs_to :last_reviewer, Agent, foreign_key: :last_reviewer_id
 
-    has_many :comments, Comment, foreign_key: :issue_id
+    # Ordered so a preload cannot hand the receipt audit its comments in
+    # whatever order the planner produced.
+    has_many :comments, Comment, foreign_key: :issue_id, preload_order: [asc: :inserted_at]
     has_many :children, __MODULE__, foreign_key: :parent_id
     has_many :documents, IssueDocument, foreign_key: :issue_id
     has_many :work_products, IssueWorkProduct, foreign_key: :issue_id
