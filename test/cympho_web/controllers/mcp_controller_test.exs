@@ -158,9 +158,10 @@ defmodule CymphoWeb.McpControllerTest do
 
     assert %{
              "result" => %{
-               "success" => true,
+               "success" => false,
                "dynamic" => true,
-               "tool" => "http_dynamic_echo"
+               "tool" => "http_dynamic_echo",
+               "error" => ":plugin_not_found"
              }
            } = json_response(allow_conn, 200)
 

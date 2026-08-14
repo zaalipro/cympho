@@ -51,6 +51,10 @@ defmodule Cympho.Plugins.Worker do
 
       def handle_init(state), do: {:ok, state}
       def handle_message(message, state), do: {:noreply, state}
+
+      def handle_request({:execute_tool, _n, _a, _c}, _from, state),
+        do: {:reply, {:error, :unsupported_tool}, state}
+
       def handle_request(request, from, state), do: {:reply, :ok, state}
       def handle_cast_request(request, state), do: {:noreply, state}
       def handle_terminate(_reason, _state), do: :ok

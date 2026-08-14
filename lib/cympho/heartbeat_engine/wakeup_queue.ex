@@ -141,7 +141,8 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
         from w in AgentWake,
           where: w.agent_id == ^agent_id and w.status == "pending",
           order_by: [asc: w.inserted_at, asc: w.id],
-          limit: 1
+          limit: 1,
+          lock: "FOR UPDATE SKIP LOCKED"
       )
 
     case wake do
