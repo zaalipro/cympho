@@ -145,8 +145,6 @@ defmodule CymphoWeb.Router do
       live "/workspaces/:id", WorkspaceLive.ShowWorkspace
       live "/workspaces/:id/exec/:exec_id", WorkspaceLive.ExecWorkspace
       live "/tool-call-traces", ToolCallTracesLive.Index
-      live "/profile/:id", ProfileLive.Show
-      live "/profile/:id/edit", ProfileLive.Edit
 
       if Mix.env() == :dev do
         live "/dev/prompt-inspector", PromptInspectorLive
@@ -159,7 +157,6 @@ defmodule CymphoWeb.Router do
         {CymphoWeb.UserAuth, :require_company},
         {CymphoWeb.Live.BoardAuth, :default}
       ] do
-      live "/agents/:id/edit", AgentLive.Edit
       live "/budgets", BudgetLive.Index
       live "/budgets/new", BudgetLive.Index, :new
       live "/budgets/:id", BudgetLive.Show

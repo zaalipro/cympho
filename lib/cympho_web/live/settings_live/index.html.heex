@@ -1,46 +1,6 @@
 <.settings_layout active={:notifications}>
   <.header title={@page_title} />
 
-  <%!-- This card used to render for any nil user, so it announced "No users
-       found" directly above a picker listing real users. --%>
-  <div
-    :if={@user == nil and @users == []}
-    class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
-  >
-    <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-subtle text-text-tertiary">
-      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-        />
-      </svg>
-    </div>
-    <h2 class="text-sm font-590 text-text-primary">No users found</h2>
-    <p class="mt-1 text-sm text-text-tertiary">
-      Create a user first, then notification settings will appear here.
-    </p>
-  </div>
-
-  <div
-    :if={@user == nil and @users != []}
-    class="mt-4 rounded-xl border border-border bg-surface p-4"
-  >
-    <h2 class="mb-3 text-sm font-590 text-text-primary">Choose a user</h2>
-    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-      <button
-        :for={user <- @users}
-        type="button"
-        phx-click="select_user"
-        phx-value-user_id={user.id}
-        class="rounded-lg border border-border bg-button px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-      >
-        {user.email || user.name || user.id}
-      </button>
-    </div>
-  </div>
-
   <div :if={@user != nil} class="space-y-6">
     <section class="ember-glass p-5">
       <div class="mb-4">
