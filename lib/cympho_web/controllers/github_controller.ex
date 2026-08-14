@@ -27,14 +27,16 @@ defmodule CymphoWeb.GithubController do
     pr_url = pr["html_url"]
     delivery_id = get_req_header(conn, "x-github-delivery") |> List.first()
 
-    with {:ok, issue, project} <- find_issue_and_project(pr_url, pr),
+    with {:ok, project} <- find_project_by_pr(pr),
          :ok <- verify_signature(conn, project),
+         {:ok, issue, _project} <- find_issue_and_project(pr_url, pr),
          :fresh <- Cympho.WebhookDedup.check_and_mark(delivery_id) do
       Logger.info("GitHub review webhook: action=#{action}, pr_url=#{pr_url}")
       handle_review_action(issue, action, review, pr)
       send_resp(conn, :ok, "")
     else
       :duplicate -> send_resp(conn, :ok, "")
+      :error -> send_resp(conn, :unauthorized, "")
       {:error, :not_found} -> send_resp(conn, :ok, "")
       {:error, :no_project} -> send_resp(conn, :unauthorized, "")
       {:error, :no_secret} -> send_resp(conn, :unauthorized, "")
@@ -74,8 +76,9 @@ defmodule CymphoWeb.GithubController do
     pr_url = pr["html_url"]
     delivery_id = get_req_header(conn, "x-github-delivery") |> List.first()
 
-    with {:ok, issue, project} <- find_issue_and_project(pr_url, pr),
+    with {:ok, project} <- find_project_by_pr(pr),
          :ok <- verify_signature(conn, project),
+         {:ok, issue, _project} <- find_issue_and_project(pr_url, pr),
          :fresh <- Cympho.WebhookDedup.check_and_mark(delivery_id) do
       Logger.info("GitHub webhook received: action=#{action}, pr_url=#{pr_url}")
       issue = record_pr_quality_from_webhook(issue, action, pr)
@@ -85,6 +88,10 @@ defmodule CymphoWeb.GithubController do
       :duplicate ->
         Logger.info("GitHub webhook duplicate delivery: id=#{delivery_id}, pr_url=#{pr_url}")
         send_resp(conn, :ok, "")
+
+      :error ->
+        Logger.warning("No project matched PR repo URL; refusing: #{pr_url}")
+        send_resp(conn, :unauthorized, "")
 
       {:error, :not_found} ->
         Logger.info("No issue found linked to PR: #{pr_url}")
