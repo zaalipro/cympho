@@ -8,7 +8,7 @@ defmodule Cympho.Adapters.CodexAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
-  alias Cympho.Adapters.{ProviderFailure, ProviderProxy, RuntimeTimeout}
+  alias Cympho.Adapters.{ProviderFailure, ProviderProxy, RunDeadline, RuntimeTimeout}
 
   @default_model "o4-mini"
   @model_options [
@@ -235,13 +235,17 @@ defmodule Cympho.Adapters.CodexAdapter do
 
   defp close_port(_port), do: :ok
 
-  defp collect_output(port, acc, timeout, session_id) do
+  defp collect_output(port, acc, timeout, session_id) when is_integer(timeout) do
+    collect_output(port, acc, RunDeadline.new(timeout), session_id)
+  end
+
+  defp collect_output(port, acc, %RunDeadline{} = deadline, session_id) do
     receive do
       {^port, {:data, data}} ->
-        collect_output(port, acc <> data, timeout, session_id)
+        collect_output(port, acc <> data, RunDeadline.touch(deadline), session_id)
 
       {:EXIT, ^port, _reason} ->
-        collect_output(port, acc, timeout, session_id)
+        collect_output(port, acc, deadline, session_id)
 
       {^port, {:exit_status, 0}} ->
         {:ok, acc}
@@ -254,10 +258,21 @@ defmodule Cympho.Adapters.CodexAdapter do
         close_port(port)
         result
     after
-      timeout ->
-        result = {:error, :timeout}
-        close_port(port)
-        result
+      RunDeadline.wait_ms(deadline) ->
+        # `codex exec --json` prints an event per step, so the stall timer alone
+        # resets forever. The absolute deadline is what actually ends the run.
+        case RunDeadline.expired(deadline) do
+          nil ->
+            collect_output(port, acc, deadline, session_id)
+
+          :max_run ->
+            close_port(port)
+            {:error, :max_run_timeout}
+
+          :stall ->
+            close_port(port)
+            {:error, :timeout}
+        end
     end
   end
 

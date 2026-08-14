@@ -223,12 +223,18 @@ defmodule Cympho.AgentHeartbeat do
       Cympho.HeartbeatEngine.WakeupQueue.topic_for_agent(agent_id)
     )
 
+    # `available_skills` is part of @type state and the direct-dispatch fallback
+    # sets it with `%{state | ...}`, which raises KeyError on a missing key. It
+    # was absent here, so that branch crashed *after* checking the issue out and
+    # starting the orchestrator, leaving a live agent session behind a heartbeat
+    # process restarted as idle.
     state = %{
       agent_id: agent_id,
       status: :idle,
       current_issue_id: nil,
       started_at: nil,
       timer_ref: timer_ref,
+      available_skills: nil,
       wake_pending: false
     }
 

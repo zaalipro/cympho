@@ -9,6 +9,7 @@ defmodule Cympho.Adapters.CursorAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  alias Cympho.Adapters.RunDeadline
   alias Cympho.Adapters.RuntimeTimeout
 
   @default_timeout 300_000
@@ -175,10 +176,14 @@ defmodule Cympho.Adapters.CursorAdapter do
     end
   end
 
-  defp collect_output(port, acc, timeout, session_id) do
+  defp collect_output(port, acc, timeout, session_id) when is_integer(timeout) do
+    collect_output(port, acc, RunDeadline.new(timeout), session_id)
+  end
+
+  defp collect_output(port, acc, %RunDeadline{} = deadline, session_id) do
     receive do
       {^port, {:data, data}} ->
-        collect_output(port, acc <> data, timeout, session_id)
+        collect_output(port, acc <> data, RunDeadline.touch(deadline), session_id)
 
       {^port, {:exit_status, 0}} ->
         {:ok, acc}
@@ -190,9 +195,21 @@ defmodule Cympho.Adapters.CursorAdapter do
         close_port(port)
         {:error, {:cancelled, reason}}
     after
-      timeout ->
-        close_port(port)
-        {:error, :timeout}
+      RunDeadline.wait_ms(deadline) ->
+        # The stall timer resets on every chunk; only the absolute deadline can
+        # end a CLI that keeps talking.
+        case RunDeadline.expired(deadline) do
+          nil ->
+            collect_output(port, acc, deadline, session_id)
+
+          :max_run ->
+            close_port(port)
+            {:error, :max_run_timeout}
+
+          :stall ->
+            close_port(port)
+            {:error, :timeout}
+        end
     end
   end
 

@@ -7,6 +7,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  alias Cympho.Adapters.RunDeadline
   alias Cympho.Adapters.RuntimeTimeout
 
   @default_timeout 300_000
@@ -279,13 +280,23 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp wait_for_process(port, session_id, recipient_pid, timeout, acc) do
+  defp wait_for_process(port, session_id, recipient_pid, timeout, acc) when is_integer(timeout) do
+    wait_for_process(port, session_id, recipient_pid, RunDeadline.new(timeout), acc)
+  end
+
+  defp wait_for_process(port, session_id, recipient_pid, %RunDeadline{} = deadline, acc) do
     receive do
       {^port, {:data, data}} ->
-        wait_for_process(port, session_id, recipient_pid, timeout, acc <> data)
+        wait_for_process(
+          port,
+          session_id,
+          recipient_pid,
+          RunDeadline.touch(deadline),
+          acc <> data
+        )
 
       {:EXIT, ^port, _reason} ->
-        wait_for_process(port, session_id, recipient_pid, timeout, acc)
+        wait_for_process(port, session_id, recipient_pid, deadline, acc)
 
       {^port, {:exit_status, 0}} ->
         output = normalize_output_utf8(acc)
@@ -307,9 +318,21 @@ defmodule Cympho.Adapters.ProcessAdapter do
         send(recipient_pid, {:turn_ended_with_error, session_id, {:cancelled, reason}})
         close_port(port)
     after
-      timeout ->
-        send(recipient_pid, {:turn_ended_with_error, session_id, :timeout})
-        close_port(port)
+      RunDeadline.wait_ms(deadline) ->
+        # The stall timer resets on every chunk, so a chatty subprocess would
+        # otherwise hold its dispatch slot forever.
+        case RunDeadline.expired(deadline) do
+          nil ->
+            wait_for_process(port, session_id, recipient_pid, deadline, acc)
+
+          :max_run ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, :max_run_timeout})
+            close_port(port)
+
+          :stall ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, :timeout})
+            close_port(port)
+        end
     end
   end
 

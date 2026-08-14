@@ -32,7 +32,7 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
             }
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 5_000
         assert_receive {:turn_completed, ^session_id, result}, 6_000
 
         assert result.output =~ "ARG:-m"
@@ -56,7 +56,7 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
             config: %{"command" => "fake-jsonl-agent", "timeout" => 5_000}
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 5_000
         assert_receive {:turn_completed, ^session_id, result}, 6_000
 
         assert result.output == "first\nsecond"
@@ -85,7 +85,7 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
             }
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 5_000
         assert_receive {:turn_completed, ^session_id, result}, 6_000
 
         assert String.valid?(result.output)
@@ -113,7 +113,7 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
             }
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 5_000
         assert_receive {:turn_completed, ^session_id, result}, 6_000
 
         assert String.valid?(result.output)
@@ -136,7 +136,7 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
             config: %{"command" => "fake-rate-limited-agent", "timeout" => 5_000}
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 5_000
 
         assert_receive {:turn_ended_with_error, ^session_id,
                         {:provider_failure, :rate_limited, snippet}},
@@ -201,6 +201,100 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
         System.delete_env("CYMPHO_PARENT_ENV_TEST")
       end
     end
+  end
+
+  test "an absolute deadline kills a subprocess that keeps talking past its stall timeout" do
+    original = Application.get_env(:cympho, :adapter_max_run_ms)
+    Application.put_env(:cympho, :adapter_max_run_ms, 700)
+
+    on_exit(fn ->
+      if original do
+        Application.put_env(:cympho, :adapter_max_run_ms, original)
+      else
+        Application.delete_env(:cympho, :adapter_max_run_ms)
+      end
+    end)
+
+    # with_fake_command/3 replaces PATH with the temp dir, so the script needs
+    # an absolute sleep — and PortKiller must not depend on PATH either, or the
+    # subprocess this test kills would survive as a CPU-burning orphan.
+    sleep = System.find_executable("sleep")
+
+    pid_file =
+      Path.join(System.tmp_dir!(), "cympho-chatty-pid-#{System.unique_integer([:positive])}")
+
+    on_exit(fn -> File.rm(pid_file) end)
+
+    with_fake_command(
+      "chatty-agent",
+      """
+      echo $$ > '#{pid_file}'
+      while true; do
+        printf 'still working\\n'
+        #{sleep} 0.1
+      done
+      """,
+      fn ->
+        # The configured timeout is a *stall* timeout and this process never
+        # stalls, so before the absolute deadline existed this run could hold
+        # its dispatch slot and bill forever.
+        session_id =
+          ProcessAdapter.run(@issue, "agent-1", self(),
+            config: %{
+              "command" => "chatty-agent",
+              "timeout" => 60_000,
+              "prompt_stdin" => false
+            }
+          )
+
+        assert_receive {:session_started, ^session_id}, 5_000
+        assert_receive {:turn_ended_with_error, ^session_id, :max_run_timeout}, 6_000
+
+        # Deciding to end the run is not the same as ending it: the OS process
+        # has to actually be gone.
+        os_pid = pid_file |> File.read!() |> String.trim()
+        assert os_pid != ""
+
+        assert wait_until_gone(os_pid),
+               "the subprocess (#{os_pid}) outlived its absolute deadline"
+      end
+    )
+  end
+
+  defp wait_until_gone(os_pid, attempts \\ 40) do
+    cond do
+      not os_process_alive?(os_pid) -> true
+      attempts <= 1 -> false
+      true -> Process.sleep(50) && wait_until_gone(os_pid, attempts - 1)
+    end
+  end
+
+  defp os_process_alive?(os_pid) do
+    match?({_output, 0}, System.cmd("/bin/kill", ["-0", os_pid], stderr_to_stdout: true))
+  rescue
+    _ -> false
+  end
+
+  test "a silent subprocess still fails as a stall, not as a max run" do
+    sleep = System.find_executable("sleep")
+
+    with_fake_command(
+      "silent-agent",
+      "#{sleep} 30\n",
+      fn ->
+        session_id =
+          ProcessAdapter.run(@issue, "agent-1", self(),
+            config: %{
+              "command" => "silent-agent",
+              "timeout" => 500,
+              "prompt_stdin" => false
+            }
+          )
+
+        assert_receive {:session_started, ^session_id}, 5_000
+        assert_receive {:turn_ended_with_error, ^session_id, :timeout}, 6_000
+      end
+    )
   end
 
   defp with_fake_command(command, script, fun) do

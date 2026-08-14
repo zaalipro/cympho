@@ -26,8 +26,14 @@ defmodule Cympho.PortKiller do
   def close(port, opts) when is_port(port) do
     os_pid = os_pid(port)
 
+    # Snapshot the subtree *before* closing the port. Closing it can end the
+    # parent, and once that happens its children reparent to init and can no
+    # longer be discovered from it — which is the very thing kill_tree/2
+    # documents that it must avoid.
+    targets = if os_pid, do: process_tree(os_pid), else: []
+
     close_port(port)
-    kill_tree(os_pid, opts)
+    kill_targets(targets, opts)
   end
 
   def close(_port, _opts), do: :ok
@@ -47,14 +53,10 @@ defmodule Cympho.PortKiller do
     ArgumentError -> :ok
   end
 
-  defp kill_tree(nil, _opts), do: :ok
+  defp kill_targets([], _opts), do: :ok
 
-  defp kill_tree(pid, opts) do
+  defp kill_targets(targets, opts) do
     grace_ms = Keyword.get(opts, :grace_ms, @default_grace_ms)
-
-    # Snapshot the whole subtree before signalling — once the parent dies its
-    # children reparent to init and can no longer be discovered from it.
-    targets = process_tree(pid)
 
     Enum.each(targets, &signal(&1, "TERM"))
 
@@ -84,7 +86,7 @@ defmodule Cympho.PortKiller do
   end
 
   defp child_pids(pid) do
-    with executable when is_binary(executable) <- System.find_executable("pgrep"),
+    with executable when is_binary(executable) <- executable("pgrep"),
          {out, 0} <-
            System.cmd(executable, ["-P", Integer.to_string(pid)], stderr_to_stdout: true) do
       out
@@ -97,6 +99,22 @@ defmodule Cympho.PortKiller do
     _ -> []
   end
 
+  # Reaping a runaway agent process is a safety mechanism, so it must not depend
+  # on PATH. Releases, cron contexts, and sandboxed runs can all start with a
+  # PATH that omits these, and a silent no-op here leaves a CLI burning CPU and
+  # provider spend with nothing tracking it.
+  @fallback_paths %{
+    "kill" => ["/bin/kill", "/usr/bin/kill"],
+    "pgrep" => ["/usr/bin/pgrep", "/bin/pgrep"]
+  }
+
+  defp executable(name) do
+    case System.find_executable(name) do
+      path when is_binary(path) -> path
+      _ -> @fallback_paths |> Map.get(name, []) |> Enum.find(&File.exists?/1)
+    end
+  end
+
   defp parse_pid(str) do
     case Integer.parse(str) do
       {n, _rest} when n > 1 -> [n]
@@ -107,7 +125,7 @@ defmodule Cympho.PortKiller do
   # Positive PID only — never a negative (process-group) target, which could
   # reach the BEAM's own group and kill the node.
   defp signal(pid, signal) when is_integer(pid) and pid > 1 do
-    with executable when is_binary(executable) <- System.find_executable("kill") do
+    with executable when is_binary(executable) <- executable("kill") do
       _ = run_kill(executable, signal, Integer.to_string(pid))
       :ok
     else
@@ -126,7 +144,7 @@ defmodule Cympho.PortKiller do
   end
 
   defp alive?(pid) do
-    with executable when is_binary(executable) <- System.find_executable("kill"),
+    with executable when is_binary(executable) <- executable("kill"),
          {_output, 0} <-
            System.cmd(executable, ["-0", Integer.to_string(pid)], stderr_to_stdout: true) do
       true

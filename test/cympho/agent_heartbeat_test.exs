@@ -634,6 +634,40 @@ defmodule Cympho.AgentHeartbeatTest do
     end
 
     @tag :capture_log
+    test "a successful direct dispatch survives instead of crashing after checkout", %{
+      agent: agent,
+      issue: issue
+    } do
+      fake_orchestrator = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Process.exit(fake_orchestrator, :kill) end)
+
+      with_mocks([
+        {Cympho.Orchestrator, [],
+         [
+           start_and_run: fn _issue, _agent_id, _opts -> {:ok, fake_orchestrator} end
+         ]}
+      ]) do
+        {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+
+        send(pid, :heartbeat)
+        state = :sys.get_state(pid)
+
+        # This branch used to raise KeyError writing :available_skills into a
+        # state map that never had the key — *after* the issue was checked out
+        # and the orchestrator was already live. The transient restart then came
+        # back idle with no current issue, so the process and the database
+        # disagreed about work that was actually running.
+        assert Process.alive?(pid)
+        assert state.status == :running
+        assert state.current_issue_id == issue.id
+        assert Map.has_key?(state, :available_skills)
+
+        AgentHeartbeat.stop_for_agent(agent.id)
+      end
+    end
+
+    @tag :capture_log
     test "orchestrator ownership conflict preserves a successor run checkout", %{
       agent: agent,
       issue: issue
