@@ -53,6 +53,26 @@ defmodule Cympho.AgentRunner do
 
         try do
           do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, max_run_ms, env)
+        rescue
+          exception ->
+            # Every other adapter reports a crashing worker; this one did not.
+            # `do_run/7` writes a prompt file and opens a port before it sends
+            # anything, so an ENOSPC or EACCES there killed the worker silently.
+            # The orchestrator keeps stamping run heartbeats, which hides the run
+            # from the watchdog's stale scan, and its own dead-worker detector
+            # only arms after it has seen the session registered on a tick 30s
+            # later — so the issue sat :in_progress behind a live orchestrator
+            # indefinitely.
+            send(
+              recipient_pid,
+              {:turn_ended_with_error, session_id, {:adapter_crash, Exception.message(exception)}}
+            )
+        catch
+          kind, reason ->
+            send(
+              recipient_pid,
+              {:turn_ended_with_error, session_id, {:adapter_exit, kind, reason}}
+            )
         after
           Cympho.AdapterSessions.unregister(session_id)
         end

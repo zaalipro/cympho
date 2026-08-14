@@ -415,6 +415,41 @@ defmodule Cympho.AgentRunnerTest do
       assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
     end
 
+    test "a worker that crashes before starting still reports the failure" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-crash-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      command = Path.join(tmp_dir, "fake-claude")
+      File.write!(command, "#!/bin/sh\nprintf 'never runs'\n")
+      File.chmod!(command, 0o755)
+
+      recipient = self()
+      issue = %{id: "crash-command", title: "Crash command", description: "Dies during setup"}
+
+      # Every other adapter wraps its worker so a crash is reported; this one
+      # did not. Because the failure happens before any message is sent, the
+      # orchestrator kept stamping run heartbeats — which hides the run from the
+      # watchdog's stale scan — and its own dead-worker detector only arms once
+      # it has seen the session registered on a tick 30s later. The issue sat
+      # :in_progress behind a live orchestrator indefinitely.
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"CYMPHO_BAD_ENV" => %{definitely: "not a string"}},
+          stall_timeout: 5_000
+        )
+
+      assert_receive {:turn_ended_with_error, ^session_id, reason}, @receive_timeout
+      assert match?({:adapter_crash, _}, reason) or match?({:adapter_exit, _, _}, reason)
+
+      refute_received {:session_started, ^session_id}
+      assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
+    end
+
     test "max_run_ms kills a dripping process independent of stall resets" do
       tmp_dir =
         Path.join(System.tmp_dir!(), "cympho-agent-runner-drip-#{System.unique_integer()}")
