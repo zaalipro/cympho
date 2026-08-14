@@ -23,6 +23,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
   alias Cympho.Issues
   alias Cympho.PullRequestContract
   alias Cympho.ReviewNudges
+  alias Cympho.Users
   alias Cympho.WorkProducts
   alias Cympho.WorkProducts.IssueWorkProduct
 
@@ -1381,6 +1382,57 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
 
   def issue_assignee_name(%{assignee: %{name: name}}) when is_binary(name), do: name
   def issue_assignee_name(_), do: nil
+
+  def comment_author_names(comments, current_user \\ nil) do
+    names =
+      comments
+      |> List.wrap()
+      |> Enum.filter(&(to_string(Map.get(&1, :author_type)) == "user"))
+      |> Enum.map(&Map.get(&1, :author_id))
+      |> Users.names_by_ids()
+
+    case current_user do
+      %{id: id, name: name} when is_binary(id) and is_binary(name) and name != "" ->
+        Map.put_new(names, id, name)
+
+      _ ->
+        names
+    end
+  end
+
+  def comment_author_label(comment, agents, users \\ %{})
+
+  def comment_author_label(%{author_type: type, author_id: author_id}, agents, _users)
+      when type in ["agent", :agent] do
+    case Enum.find(List.wrap(agents), &(&1.id == author_id)) do
+      %{name: name} when is_binary(name) and name != "" -> name
+      _ -> "Agent"
+    end
+  end
+
+  def comment_author_label(%{author_type: type}, _agents, _users)
+      when type in ["system", :system],
+      do: "System"
+
+  def comment_author_label(%{author_type: type, author_id: author_id}, _agents, users)
+      when type in ["user", :user] do
+    cond do
+      is_binary(Map.get(users, author_id)) and Map.get(users, author_id) != "" ->
+        Map.get(users, author_id)
+
+      is_binary(author_id) and not uuid_string?(author_id) and author_id != "" ->
+        author_id
+
+      true ->
+        "Someone"
+    end
+  end
+
+  def comment_author_label(_comment, _agents, _users), do: "Someone"
+
+  defp uuid_string?(value) do
+    match?({:ok, _}, Ecto.UUID.cast(value))
+  end
 
   # ---------------------------------------------------------------------
   # Timeline filtering / classification

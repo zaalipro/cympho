@@ -14,6 +14,7 @@ defmodule CymphoWeb.IssueLive.Show.SimpleThread do
 
   import CymphoWeb.IssueLive.Show.Helpers,
     only: [
+      comment_author_label: 3,
       format_timeline_timestamp: 1,
       format_work_product_kind: 1,
       latest_run_brief: 1,
@@ -26,6 +27,7 @@ defmodule CymphoWeb.IssueLive.Show.SimpleThread do
   attr :runs, :list, default: []
   attr :work_products, :list, default: []
   attr :all_agents, :list, default: []
+  attr :comment_authors, :map, default: %{}
   attr :gate_actions, :list, default: []
 
   def simple_thread(assigns) do
@@ -167,6 +169,7 @@ defmodule CymphoWeb.IssueLive.Show.SimpleThread do
             :if={entry.type == :comment}
             comment={entry.data}
             all_agents={@all_agents}
+            comment_authors={@comment_authors}
             timestamp={entry.timestamp}
           />
           <.simple_interaction
@@ -182,6 +185,7 @@ defmodule CymphoWeb.IssueLive.Show.SimpleThread do
 
   attr :comment, :map, required: true
   attr :all_agents, :list, default: []
+  attr :comment_authors, :map, default: %{}
   attr :timestamp, :any, default: nil
 
   defp simple_comment(assigns) do
@@ -196,7 +200,7 @@ defmodule CymphoWeb.IssueLive.Show.SimpleThread do
       >
         <div class="flex min-w-0 items-center gap-2">
           <span class="truncate text-xs font-510 text-text-secondary">
-            {comment_author_label(@comment, @all_agents)}
+            {comment_author_label(@comment, @all_agents, @comment_authors)}
           </span>
           <span
             :if={@comment.author_type == "agent"}
@@ -380,20 +384,6 @@ defmodule CymphoWeb.IssueLive.Show.SimpleThread do
     |> List.wrap()
     |> Enum.filter(&(&1.type in [:comment, :interaction]))
   end
-
-  defp comment_author_label(%{author_type: "agent", author_id: author_id}, agents) do
-    case Enum.find(agents, &(&1.id == author_id)) do
-      %{name: name} when is_binary(name) and name != "" -> name
-      _ -> "Agent"
-    end
-  end
-
-  defp comment_author_label(%{author_type: "system"}, _agents), do: "System"
-
-  defp comment_author_label(%{author_id: author_id}, _agents) when is_binary(author_id),
-    do: author_id
-
-  defp comment_author_label(_, _), do: "User"
 
   defp interaction_kind_label(:suggest_tasks), do: "Suggested Tasks"
   defp interaction_kind_label(:ask_user_questions), do: "Questions"

@@ -356,6 +356,8 @@ defmodule Cympho.OwnerAttention do
         kind: :stuck_issue,
         issue: issue,
         issue_id: issue.id,
+        agent: issue.assignee,
+        agent_id: issue.assignee_id,
         title: stuck_issue_title(issue),
         summary: stuck_issue_summary(issue),
         target_path: "/issues/#{issue.id}",

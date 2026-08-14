@@ -109,6 +109,7 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
     # Comment bodies are readable outside the advanced timeline.
     assert has_element?(view, "[data-testid='simple-comment-body']")
     assert html =~ "Owner-visible note about the launch plan."
+    assert html =~ "Thread Agent"
 
     # Pending interaction resolve controls.
     assert has_element?(view, "#simple-interaction-#{confirmation.id}")
@@ -134,6 +135,26 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
 
     # Composer remains available below the thread.
     assert has_element?(view, "#issue-comments #comment-form")
+  end
+
+  test "user comments show the person's name, not their id", %{issue: issue} do
+    conn = conn()
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    {:ok, user} = Cympho.Users.get_user(user_id)
+
+    {:ok, _comment} =
+      Comments.create_comment(%{
+        issue_id: issue.id,
+        author_type: "user",
+        author_id: user.id,
+        body: "Owner follow-up from Simple mode."
+      })
+
+    {:ok, _view, html} = live(conn, "/issues/#{issue.id}")
+
+    assert html =~ "Owner follow-up from Simple mode."
+    assert html =~ user.name
+    refute html =~ user.id
   end
 
   test "advanced-only panels stay gated; simple thread is simple-only", %{issue: issue} do

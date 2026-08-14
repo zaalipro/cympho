@@ -795,6 +795,7 @@ defmodule CymphoWeb.DashboardLive.Index do
     ~H"""
     <a
       href={@advanced_path}
+      data-testid="needs-you-card-advanced"
       class={"ui-advanced-only card-lift group flex min-w-0 flex-col rounded-xl border p-4 transition hover:bg-surface-hover/40 #{next_action_card_class(Map.get(@action, :tone, :ok))}"}
     >
       <%!-- A single tone icon in both modes: three identical "NEEDS SETUP"
@@ -828,6 +829,7 @@ defmodule CymphoWeb.DashboardLive.Index do
     </a>
     <a
       href={@simple_path}
+      data-testid="needs-you-card-simple"
       class={"ui-simple-only card-lift group flex min-w-0 flex-col rounded-xl border p-4 transition hover:bg-surface-hover/40 #{next_action_card_class(Map.get(@action, :tone, :ok))}"}
     >
       <span
@@ -1139,7 +1141,10 @@ defmodule CymphoWeb.DashboardLive.Index do
           icon: "hero-exclamation-triangle-mini",
           label: simple_paperclip_label(Map.get(paperclip, :level)),
           detail: simple_paperclip_detail(paperclip),
-          action: "Check them"
+          action: "Check them",
+          # The card is about every blocked primitive, not the first one
+          # (which is often /org-chart). Operations is the setup hub.
+          path: "/operations"
         }
       }
     end

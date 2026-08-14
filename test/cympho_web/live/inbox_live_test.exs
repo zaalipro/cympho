@@ -34,6 +34,65 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ "Set aside"
     end
 
+    test "stuck assigned work names the agent instead of Unknown agent", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Stuck Engineer",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Stale blocked work",
+          description: "Needs a named owner, not a UUID or Unknown agent.",
+          status: :blocked,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      stale = DateTime.utc_now() |> DateTime.add(-40 * 60, :second) |> DateTime.truncate(:second)
+
+      from(i in Cympho.Issues.Issue, where: i.id == ^issue.id)
+      |> Repo.update_all(set: [updated_at: stale])
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, _view, html} = live(conn, "/inbox")
+
+      assert html =~ "Stale blocked work"
+      assert html =~ "To Stuck Engineer"
+      refute html =~ "Unknown agent"
+    end
+
+    test "stuck work without an assignee says the team", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Unowned blocked work",
+          description: "No agent left on this card.",
+          status: :blocked,
+          priority: :high,
+          company_id: company.id
+        })
+
+      stale = DateTime.utc_now() |> DateTime.add(-40 * 60, :second) |> DateTime.truncate(:second)
+
+      from(i in Cympho.Issues.Issue, where: i.id == ^issue.id)
+      |> Repo.update_all(set: [updated_at: stale])
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, _view, html} = live(conn, "/inbox")
+
+      assert html =~ "Unowned blocked work"
+      assert html =~ "To the team"
+      refute html =~ "Unknown agent"
+    end
+
     test "mount without status defaults to the Needs you action filter", %{conn: conn} do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
 

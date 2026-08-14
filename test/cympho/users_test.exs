@@ -70,6 +70,17 @@ defmodule Cympho.UsersTest do
     end
   end
 
+  describe "names_by_ids/1" do
+    test "returns id-to-name for known users and skips junk", %{user: user} do
+      assert Users.names_by_ids([user.id, "not-a-uuid", Ecto.UUID.generate()]) == %{
+               user.id => user.name
+             }
+
+      assert Users.names_by_ids([]) == %{}
+      assert Users.names_by_ids(nil) == %{}
+    end
+  end
+
   describe "create_user/1" do
     test "creates user with valid data" do
       attrs = %{email: "new@example.com", name: "New User"}

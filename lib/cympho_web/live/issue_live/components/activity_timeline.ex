@@ -15,6 +15,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
   attr :timeline, :list, required: true
   attr :timeline_filter, :string, required: true
   attr :all_agents, :list, default: []
+  attr :comment_authors, :map, default: %{}
 
   def activity_timeline(assigns) do
     assigns =
@@ -166,14 +167,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
             >
               <div class="flex items-center gap-2">
                 <span class="text-xs font-510 text-text-secondary">
-                  {case entry.data.author_type do
-                    "agent" ->
-                      agent = Enum.find(@all_agents, &(&1.id == entry.data.author_id))
-                      if agent, do: agent.name, else: "Agent"
-
-                    _ ->
-                      entry.data.author_id || "User"
-                  end}
+                  {comment_author_label(entry.data, @all_agents, @comment_authors)}
                 </span>
                 <span
                   :if={entry.data.author_type == "agent"}

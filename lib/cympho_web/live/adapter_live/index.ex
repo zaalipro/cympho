@@ -191,10 +191,10 @@ defmodule CymphoWeb.AdapterLive.Index do
   defp first_attention_adapter(adapters, health, agents_by_adapter) do
     adapters
     |> Enum.filter(&adapter_attention?(&1, health))
-    |> Enum.sort_by(fn adapter ->
-      assigned = length(Map.get(agents_by_adapter, adapter.key, []))
-      {-assigned, adapter.name}
+    |> Enum.filter(fn adapter ->
+      length(Map.get(agents_by_adapter, adapter.key, [])) > 0
     end)
+    |> Enum.sort_by(& &1.name)
     |> List.first()
   end
 
@@ -211,6 +211,10 @@ defmodule CymphoWeb.AdapterLive.Index do
 
   defp runtime_summary(%{attention: 0} = counts, _attention_adapter) do
     "#{counts.healthy} of #{counts.total} #{adapter_noun(counts.total)} healthy with #{counts.assigned_agents} assigned #{pluralize(counts.assigned_agents, "agent")}."
+  end
+
+  defp runtime_summary(%{assigned_agents: assigned} = counts, nil) when assigned > 0 do
+    "#{counts.healthy} of #{counts.total} #{adapter_noun(counts.total)} healthy; assigned runtimes are ready."
   end
 
   defp runtime_summary(counts, nil) do

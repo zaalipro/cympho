@@ -55,6 +55,32 @@ defmodule Cympho.Users do
   end
 
   @doc """
+  Returns a `%{id => name}` map for the given user ids.
+
+  Invalid and unknown ids are omitted. Used by issue threads so user
+  comments render a name instead of a raw UUID.
+  """
+  def names_by_ids(ids) when is_list(ids) do
+    ids =
+      ids
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+      |> Enum.filter(fn id -> match?({:ok, _}, Ecto.UUID.cast(id)) end)
+
+    case ids do
+      [] ->
+        %{}
+
+      ids ->
+        from(u in User, where: u.id in ^ids, select: {u.id, u.name})
+        |> Repo.all()
+        |> Map.new()
+    end
+  end
+
+  def names_by_ids(_ids), do: %{}
+
+  @doc """
   Creates a user.
   """
   def create_user(attrs \\ %{}) do

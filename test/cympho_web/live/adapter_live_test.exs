@@ -40,6 +40,7 @@ defmodule CymphoWeb.AdapterLiveTest do
       assert html =~ "Assigned agents"
       assert html =~ "1 adapter is in use"
       assert html =~ "Operations"
+      refute html =~ "check Agrenting"
     end
 
     test "invalid adapter health events do not crash the page", %{conn: conn} do

@@ -651,6 +651,63 @@ defmodule CymphoWeb.OperationsLiveTest do
       refute unrelated_child_issue.id |> Issues.get_issue!() |> Issues.dispatch_pinned?()
     end
 
+    test "setup-only delegated queue sends Fix setup to the launch checklist", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      conn = live_session_conn(conn, user, company)
+
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Setup Blocker CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      {:ok, blocked_owner} =
+        Agents.create_agent(%{
+          name: "Setup Blocked Lead",
+          role: :product_manager,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "__missing_cympho_test_command__", "model" => "custom"},
+          company_id: company.id
+        })
+
+      {:ok, parent_issue} =
+        Issues.create_issue(%{
+          title: "CEO parent with blocked child",
+          status: :blocked,
+          priority: :critical,
+          assigned_role: "ceo",
+          company_id: company.id,
+          assignee_id: ceo.id
+        })
+
+      {:ok, _child} =
+        Issues.create_issue(%{
+          title: "Blocked delegated child",
+          status: :todo,
+          priority: :high,
+          assigned_role: "product_manager",
+          company_id: company.id,
+          parent_id: parent_issue.id,
+          assignee_id: blocked_owner.id,
+          created_by_agent_id: ceo.id,
+          origin_type: "agent_action",
+          origin_id: parent_issue.id
+        })
+
+      {:ok, _view, html} = live(conn, "/operations")
+
+      assert html =~ "1 setup blocker"
+      assert html =~ "Fix setup"
+
+      attrs = element_attrs(html, "[data-testid='operations-simple-action-link-delegated']")
+      assert attrs["href"] == "#runtime-launch-checklist"
+    end
+
     test "renders swarm parent worker and CTO queue when filtered from an issue", %{conn: conn} do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
       conn = live_session_conn(conn, user, company)

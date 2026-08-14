@@ -1211,7 +1211,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       count_label: "#{count} blocked",
       action_label: "Fix setup",
       action_event: nil,
-      action_path: "#delegated-work-queue"
+      action_path: "#runtime-launch-checklist"
     }
   end
 

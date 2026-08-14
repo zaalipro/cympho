@@ -61,7 +61,8 @@ defmodule CymphoWeb.IssueLive.Show do
         documents = Documents.list_documents(issue.id)
 
         {:ok,
-         assign(socket,
+         socket
+         |> assign(
            page_title: issue.title,
            issue: issue,
            route_issue_id: issue.id,
@@ -100,7 +101,8 @@ defmodule CymphoWeb.IssueLive.Show do
            selected_revision_diff: nil,
            rollback_blocker: nil,
            gate_clean_url: nil
-         )}
+         )
+         |> assign_comment_authors()}
 
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/issues")}
@@ -1859,6 +1861,21 @@ defmodule CymphoWeb.IssueLive.Show do
     |> assign(:interactions, interactions)
     |> assign(:work_products, work_products)
     |> assign(:tool_call_traces, tool_call_traces)
+    |> assign_comment_authors()
+  end
+
+  defp assign_comment_authors(socket) do
+    comments =
+      case socket.assigns[:issue] do
+        %{comments: comments} when is_list(comments) -> comments
+        _ -> []
+      end
+
+    assign(
+      socket,
+      :comment_authors,
+      comment_author_names(comments, socket.assigns[:current_user])
+    )
   end
 
   # Check if there's a plan approval blocker for rollback

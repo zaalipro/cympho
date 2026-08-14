@@ -604,6 +604,7 @@ defmodule Cympho.Issues do
           order_by: [asc: i.updated_at]
         )
         |> Repo.all()
+        |> Repo.preload(:assignee)
     end
   end
 

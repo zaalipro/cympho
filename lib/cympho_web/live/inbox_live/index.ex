@@ -1280,17 +1280,28 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp issue_description(_), do: nil
 
-  defp target_agent_name(%{agent: %{name: name}}, _selected_agent) when is_binary(name), do: name
+  defp target_agent_name(%{agent: %{name: name}}, _selected_agent)
+       when is_binary(name) and name != "",
+       do: name
 
-  defp target_agent_name(%{target_user: %{name: name}}, _selected_agent) when is_binary(name),
-    do: name
+  defp target_agent_name(%{target_user: %{name: name}}, _selected_agent)
+       when is_binary(name) and name != "",
+       do: name
 
   defp target_agent_name(%{target_label_text: label}, _selected_agent)
        when is_binary(label) and label != "",
        do: label
 
-  defp target_agent_name(_item, %{name: name}) when is_binary(name), do: name
-  defp target_agent_name(_item, _selected_agent), do: "Unknown agent"
+  defp target_agent_name(%{issue: %{assignee: %{name: name}}}, _selected_agent)
+       when is_binary(name) and name != "",
+       do: name
+
+  defp target_agent_name(%{issue: %{assigned_role: role}}, _selected_agent)
+       when not is_nil(role) do
+    role |> to_string() |> String.replace("_", " ") |> String.capitalize()
+  end
+
+  defp target_agent_name(_item, _selected_agent), do: "the team"
 
   defp issue_link(issue) when is_nil(issue), do: "#"
   defp issue_link(issue), do: ~p"/issues/#{issue.id}"

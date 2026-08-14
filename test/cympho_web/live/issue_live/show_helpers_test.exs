@@ -50,4 +50,32 @@ defmodule CymphoWeb.IssueLive.Show.HelpersTest do
     assert card.prompt_contract_received? == true
     assert card.prompt_custom_overrides == "present"
   end
+
+  test "comment_author_label never renders a user UUID" do
+    user_id = Ecto.UUID.generate()
+
+    assert Helpers.comment_author_label(
+             %{author_type: "user", author_id: user_id},
+             [],
+             %{user_id => "Zaali"}
+           ) == "Zaali"
+
+    assert Helpers.comment_author_label(
+             %{author_type: "user", author_id: user_id},
+             [],
+             %{}
+           ) == "Someone"
+
+    assert Helpers.comment_author_label(
+             %{author_type: "user", author_id: "owner"},
+             [],
+             %{}
+           ) == "owner"
+
+    assert Helpers.comment_author_label(
+             %{author_type: "agent", author_id: "a1"},
+             [%{id: "a1", name: "CEO"}],
+             %{}
+           ) == "CEO"
+  end
 end

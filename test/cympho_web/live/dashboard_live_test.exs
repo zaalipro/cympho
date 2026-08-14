@@ -78,6 +78,23 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ "Agents"
     end
 
+    test "simple Can't-run card goes to Operations, not the first primitive", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/dashboard")
+
+      doc = Floki.parse_document!(html)
+
+      simple_cards = Floki.find(doc, "a[data-testid='needs-you-card-simple']")
+
+      paperclip =
+        Enum.find(simple_cards, fn el ->
+          text = Floki.text(el)
+          text =~ "Check them" or text =~ "Can't run yet" or text =~ "Needs setup first"
+        end)
+
+      assert paperclip, "expected a simple-mode readiness card"
+      assert Floki.attribute(paperclip, "href") == ["/operations"]
+    end
+
     test "home Waiting count matches OwnerAttention.unresolved_count (nav parity)", %{
       conn: conn
     } do
