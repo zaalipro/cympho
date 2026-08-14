@@ -93,8 +93,7 @@ defmodule Cympho.AgentRunner do
         base
       end
 
-    # Build the full bash command with piped input
-    bash_command(command, args, prompt)
+    {command, args, prompt}
   end
 
   # Plan and Ask runs may inspect the checkout but must not change it. Claude's
@@ -222,22 +221,6 @@ defmodule Cympho.AgentRunner do
     }
   end
 
-  defp bash_command(command, claude_args, prompt) do
-    claude_cmd = Enum.map_join([command | claude_args], " ", &shell_quote/1)
-    cld_source = ~s(source "$HOME/.cld" 2>/dev/null || true)
-
-    # Use heredoc to pass prompt safely without shell interpretation.
-    # The single-quoted 'EOF' delimiter prevents variable expansion,
-    # command substitution, and other shell interpretations.
-    ~s(bash -lc '#{cld_source}; exec #{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
-  end
-
-  defp shell_quote(value) do
-    value
-    |> to_string()
-    |> String.replace("'", "'\"'\"'")
-  end
-
   def build_prompt(issue, opts) when is_list(opts) do
     Cympho.AgentPrompt.build(issue, nil, opts)
   end
@@ -246,48 +229,72 @@ defmodule Cympho.AgentRunner do
     Cympho.AgentPrompt.build(issue, agent_id, opts)
   end
 
-  defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, max_run_ms, runtime_env) do
+  defp do_run(
+         session_id,
+         {command, args, prompt},
+         cwd,
+         recipient_pid,
+         stall_timeout,
+         max_run_ms,
+         runtime_env
+       ) do
+    quoted =
+      Enum.map([command | args], fn token ->
+        "'" <> String.replace(to_string(token), "'", "'\"'\"'") <> "'"
+      end)
+
     anthropic_api_key =
       runtime_env["ANTHROPIC_API_KEY"] || runtime_env[:ANTHROPIC_API_KEY] || api_key()
 
     env = [{"ANTHROPIC_API_KEY", anthropic_api_key} | runtime_env(runtime_env) ++ env_whitelist()]
 
-    port =
-      try do
-        Port.open({:spawn, cmd}, [
-          :binary,
-          :exit_status,
-          :use_stdio,
-          :stderr_to_stdout,
-          cd: cwd,
-          env: port_env(env)
-        ])
-      rescue
-        exception ->
-          # A spawn failure (missing binary, bad cwd) must surface as a
-          # failed run, not a silently dead worker the orchestrator waits on.
-          send(
-            recipient_pid,
-            {:turn_ended_with_error, session_id, {:spawn_failed, Exception.message(exception)}}
-          )
+    Cympho.Adapters.ProcessAdapter.with_prompt_file(prompt, fn path ->
+      port_opts_env = port_env([{"CYMPHO_PROMPT_FILE", path} | env])
 
-          exit(:normal)
-      end
+      port =
+        try do
+          bash = String.to_charlist(System.find_executable("bash") || "/bin/bash")
 
-    send(recipient_pid, {:session_started, session_id})
+          Port.open({:spawn_executable, bash}, [
+            :binary,
+            :exit_status,
+            :use_stdio,
+            :stderr_to_stdout,
+            cd: cwd,
+            args: [
+              "-lc",
+              "source \"$HOME/.cld\" 2>/dev/null || true; exec " <>
+                Enum.join(quoted, " ") <> " < \"$CYMPHO_PROMPT_FILE\""
+            ],
+            env: port_opts_env
+          ])
+        rescue
+          exception ->
+            # A spawn failure (missing binary, bad cwd) must surface as a
+            # failed run, not a silently dead worker the orchestrator waits on.
+            send(
+              recipient_pid,
+              {:turn_ended_with_error, session_id, {:spawn_failed, Exception.message(exception)}}
+            )
 
-    started_at = System.system_time(:millisecond)
+            exit(:normal)
+        end
 
-    # Wall-clock and stall deadlines use receive-after (not send_after) so a
-    # flood of port output cannot starve the timer message. max_run_ms is
-    # absolute from started_at and is NOT reset by drip output; stall only
-    # tracks silence since last_output_time.
-    loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, %{
-      started_at: started_at,
-      last_output_time: started_at,
-      turn_completed?: false,
-      buffer: ""
-    })
+      send(recipient_pid, {:session_started, session_id})
+
+      started_at = System.system_time(:millisecond)
+
+      # Wall-clock and stall deadlines use receive-after (not send_after) so a
+      # flood of port output cannot starve the timer message. max_run_ms is
+      # absolute from started_at and is NOT reset by drip output; stall only
+      # tracks silence since last_output_time.
+      loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, %{
+        started_at: started_at,
+        last_output_time: started_at,
+        turn_completed?: false,
+        buffer: ""
+      })
+    end)
   end
 
   defp loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, state) do
@@ -426,9 +433,7 @@ defmodule Cympho.AgentRunner do
   end
 
   defp api_key do
-    Application.get_env(:cympho, :anthropic_api_key) ||
-      System.get_env("ANTHROPIC_API_KEY") ||
-      ""
+    Application.get_env(:cympho, :anthropic_api_key) || ""
   end
 
   defp env_whitelist do
@@ -456,9 +461,11 @@ defmodule Cympho.AgentRunner do
   defp runtime_env(_env), do: []
 
   defp port_env(env) do
-    Enum.map(env, fn {key, value} ->
+    env
+    |> Enum.map(fn {key, value} ->
       {String.to_charlist(to_string(key)), String.to_charlist(to_string(value))}
     end)
+    |> Cympho.Adapters.CodexAdapter.clean_port_env()
   end
 
   defp extract_and_send_tool_calls(result, session_id, recipient_pid) when is_map(result) do

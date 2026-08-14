@@ -587,10 +587,7 @@ defmodule Cympho.RuntimePreflight do
   defp credentials_present?(runtime, keys) do
     Enum.any?(keys, &(&1 in runtime.secret_keys)) ||
       Enum.any?(keys, fn key ->
-        runtime_value? = runtime.env_vars |> Map.get(key) |> present?()
-        system_value? = key |> System.get_env() |> present?()
-
-        runtime_value? or system_value?
+        runtime.env_vars |> Map.get(key) |> present?()
       end)
   end
 

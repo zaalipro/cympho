@@ -916,7 +916,7 @@ defmodule Cympho.Adapters.CodexAdapter do
   defp runtime_context_env(%Cympho.RuntimeContext{env: env}) when is_map(env), do: env
   defp runtime_context_env(_), do: %{}
 
-  defp clean_port_env(env) do
+  def clean_port_env(env) do
     replacements = MapSet.new(env, fn {key, _value} -> env_string(key) end)
 
     removals =

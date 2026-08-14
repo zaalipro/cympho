@@ -64,6 +64,13 @@ defmodule Cympho.AgentRunnerTest do
     end
   end
 
+  describe "ClaudeCodeAdapter.validate_config/1" do
+    test "rejects a command that contains metacharacters" do
+      assert {:error, "command must be a single executable name without metacharacters"} =
+               Cympho.Adapters.ClaudeCodeAdapter.validate_config(%{"command" => "cz; id"})
+    end
+  end
+
   describe "run/4" do
     test "uses the command from resolved adapter config" do
       tmp_dir = Path.join(System.tmp_dir!(), "cympho-agent-runner-#{System.unique_integer()}")

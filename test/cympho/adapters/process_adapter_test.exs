@@ -175,7 +175,7 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
     )
   end
 
-  test "inherits parent environment while adding runtime issue variables" do
+  test "does not inherit parent environment while adding runtime issue variables" do
     original = System.get_env("CYMPHO_PARENT_ENV_TEST")
     System.put_env("CYMPHO_PARENT_ENV_TEST", "from-parent")
 
@@ -192,7 +192,8 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
 
       assert_receive {:session_started, ^session_id}, 1_000
       assert_receive {:turn_completed, ^session_id, result}, 1_000
-      assert result.output == "from-parent|#{@issue.id}"
+      refute result.output =~ "from-parent"
+      assert result.output == "|#{@issue.id}"
     after
       if original do
         System.put_env("CYMPHO_PARENT_ENV_TEST", original)
