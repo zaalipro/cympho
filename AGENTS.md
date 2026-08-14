@@ -103,7 +103,7 @@ Company-based. Most schemas have a `company_id` FK. `CymphoWeb.UserAuth` (LiveVi
 - **Users**: session cookies via `Cympho.Authentication` (Argon2 hashing).
 - **Agents** (three methods via `CymphoWeb.Plugs.AgentAuth`): JWT (Bearer), API key (`X-API-Key`), legacy `X-Agent-ID`.
 - **Board**: `CymphoWeb.Plugs.BoardAuth` verifies board membership for governance mutations.
-- **GitHub webhooks**: `CymphoWeb.Plugs.GithubWebhookVerification` validates webhook secrets.
+- **GitHub webhooks**: GitHub HMAC is verified in `GithubController.verify_signature/2` before any write.
 
 ### Web Layer
 

@@ -21,6 +21,7 @@ defmodule CymphoWeb.GithubControllerTest do
         name: "Test Project",
         prefix: "TEST",
         github_webhook_secret: "test-webhook-secret",
+        repo_url: "https://github.com/owner/repo",
         company_id: company.id
       })
 
@@ -29,7 +30,8 @@ defmodule CymphoWeb.GithubControllerTest do
       Agents.create_agent(%{
         name: "Test Agent",
         role: :engineer,
-        status: :idle
+        status: :idle,
+        company_id: company.id
       })
 
     # Create an issue with a GitHub PR URL linked
@@ -40,6 +42,7 @@ defmodule CymphoWeb.GithubControllerTest do
         status: :in_progress,
         priority: :high,
         project_id: project.id,
+        company_id: company.id,
         github_pr_url: "https://github.com/owner/repo/pull/123"
       })
 
@@ -67,6 +70,49 @@ defmodule CymphoWeb.GithubControllerTest do
         |> post("/api/github/webhook", payload)
 
       assert response(conn, :unauthorized) == ""
+    end
+
+    test "invalid signature does not create a comment or set github_pr_url", %{conn: conn} do
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "HMAC Guard Co",
+          slug: "hmac-guard-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "HMAC Guard Project",
+          prefix: "HG",
+          github_webhook_secret: "hmac-guard-secret",
+          repo_url: "https://github.com/hmac-guard/repo",
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Unsigned auto-link target",
+          description: "Must stay unlinked without HMAC",
+          status: :todo,
+          priority: :medium,
+          project_id: project.id
+        })
+
+      assert is_nil(issue.github_pr_url)
+
+      pr_url = "https://github.com/hmac-guard/repo/pull/88"
+      branch = "#{issue.identifier}/forged-slug"
+      payload = build_autolink_payload("opened", pr_url, branch, project.repo_url)
+
+      conn =
+        conn
+        |> put_req_header("x-hub-signature-256", "sha256=deadbeef")
+        |> post("/api/github/webhook", payload)
+
+      assert response(conn, :unauthorized) == ""
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert is_nil(reloaded.github_pr_url)
+      assert Cympho.Comments.list_comments(issue.id) == []
     end
   end
 
@@ -376,13 +422,16 @@ defmodule CymphoWeb.GithubControllerTest do
   # Helper functions
 
   defp build_pr_payload(action, pr_url, extra_pr_attrs \\ %{}) do
+    repo_url = "https://github.com/owner/repo"
+
     pr_attrs =
       Map.merge(
         %{
           "html_url" => pr_url,
           "title" => "Test PR",
           "merged" => false,
-          "head" => %{"ref" => "test-branch"}
+          "head" => %{"ref" => "test-branch", "repo" => %{"html_url" => repo_url}},
+          "base" => %{"repo" => %{"html_url" => repo_url}}
         },
         extra_pr_attrs
       )
