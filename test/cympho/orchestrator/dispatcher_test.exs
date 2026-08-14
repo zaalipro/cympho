@@ -170,6 +170,55 @@ defmodule Cympho.Orchestrator.DispatcherTest do
     end
   end
 
+  describe "max_concurrent/0" do
+    setup do
+      original = Application.get_env(:cympho, :orchestrator, [])
+      on_exit(fn -> Application.put_env(:cympho, :orchestrator, original) end)
+      %{original: original}
+    end
+
+    test "honours a runtime setting", %{original: original} do
+      Application.put_env(
+        :cympho,
+        :orchestrator,
+        Keyword.put(original, :max_concurrent_agents, 12)
+      )
+
+      assert Dispatcher.max_concurrent() == 12
+    end
+
+    test "falls back to the machine's schedulers instead of a compiled-in 3", %{
+      original: original
+    } do
+      # The ceiling used to be `Application.compile_env(..., 3)`: every install
+      # ran three concurrent agents across all tenants, and raising it required
+      # rebuilding the release.
+      Application.put_env(
+        :cympho,
+        :orchestrator,
+        Keyword.delete(original, :max_concurrent_agents)
+      )
+
+      derived = Dispatcher.max_concurrent()
+
+      assert derived >= 4
+      assert derived <= 32
+      assert derived >= :erlang.system_info(:schedulers_online)
+    end
+
+    test "ignores a nonsensical setting", %{original: original} do
+      for bad <- [0, -1, "many", nil] do
+        Application.put_env(
+          :cympho,
+          :orchestrator,
+          Keyword.put(original, :max_concurrent_agents, bad)
+        )
+
+        assert Dispatcher.max_concurrent() >= 4
+      end
+    end
+  end
+
   describe "runnable_candidate?/1" do
     @company_id Ecto.UUID.generate()
 
@@ -324,6 +373,87 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
 
     preloaded = Issues.get_issue!(issue.id) |> Cympho.Repo.preload([:blocked_by, :company])
     assert Dispatcher.runnable_candidate?(preloaded)
+  end
+
+  test "one tenant's backlog does not starve another tenant", %{
+    company: company,
+    agent: agent,
+    issue: issue
+  } do
+    # Candidates used to come from one globally priority-ordered window. A
+    # tenant holding the top rows of that window starved everyone else
+    # outright: nobody else's issues were even loaded, so rejecting the busy
+    # tenant's candidates admitted no one and the slots simply went unused.
+    for n <- 1..30 do
+      {:ok, _hog} =
+        Issues.create_issue(%{
+          title: "Loud tenant critical #{n}",
+          description: "Outranks everything the quiet tenant has",
+          status: :todo,
+          priority: :critical,
+          company_id: company.id,
+          assignee_id: agent.id,
+          assigned_role: "engineer"
+        })
+    end
+
+    unique = System.unique_integer([:positive])
+
+    {:ok, quiet_company} =
+      Companies.create_company(%{
+        name: "Quiet Co #{unique}",
+        slug: "quiet-co-#{unique}",
+        issue_prefix: "QC"
+      })
+
+    {:ok, quiet_agent} =
+      Agents.create_agent(%{
+        name: "Quiet Agent",
+        role: "engineer",
+        status: :idle,
+        company_id: quiet_company.id,
+        adapter: :claude_code
+      })
+
+    {:ok, quiet_issue} =
+      Issues.create_issue(%{
+        title: "Quiet tenant low priority",
+        description: "Ranks below every issue the loud tenant has",
+        status: :todo,
+        priority: :low,
+        company_id: quiet_company.id,
+        assignee_id: quiet_agent.id,
+        assigned_role: "engineer"
+      })
+
+    test_pid = self()
+
+    with_mocks([
+      {Runtime, [], [dispatchable?: fn _issue, _agent -> :ok end]},
+      {Orchestrator, [],
+       [
+         start_and_run: fn checked_out, _agent_id ->
+           send(test_pid, {:dispatched, checked_out.company_id})
+           {:ok, spawn(fn -> Process.sleep(200) end)}
+         end,
+         whereis: fn _issue_id -> nil end,
+         stop: fn _issue_id, _reason -> :ok end
+       ]}
+    ]) do
+      assert {:noreply, %State{}} = Dispatcher.handle_info(:poll, State.new())
+
+      dispatched = collect_dispatched([])
+
+      assert quiet_company.id in dispatched,
+             "the quiet tenant never got a slot: #{inspect(dispatched)}"
+
+      # The loud tenant is not shut out either — fair share, not round-robin
+      # starvation in the other direction.
+      assert company.id in dispatched
+
+      assert Issues.get_issue!(quiet_issue.id).status == :in_progress
+      assert Issues.get_issue!(issue.id).company_id == company.id
+    end
   end
 
   test "paused issues at the head of the queue do not starve dispatch", %{
@@ -823,6 +953,14 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
 
       # Nothing else is armed: draining the mailbox finds no stray :poll.
       refute_received :poll
+    end
+  end
+
+  defp collect_dispatched(acc) do
+    receive do
+      {:dispatched, company_id} -> collect_dispatched([company_id | acc])
+    after
+      0 -> Enum.reverse(acc)
     end
   end
 

@@ -34,7 +34,12 @@ config :sentry, dsn: nil
 
 config :cympho, :skill_manifest_dir, "test/support/skill_manifests"
 
-config :cympho, :orchestrator, enabled: false, only_issue_id: nil
+# max_concurrent_agents is pinned here so dispatch-window arithmetic in tests
+# does not move with the machine's scheduler count.
+config :cympho, :orchestrator,
+  enabled: false,
+  only_issue_id: nil,
+  max_concurrent_agents: 3
 
 # Tests that exercise the BoardApprovalActionExecutor / HeartbeatEngine.Watchdog
 # start them explicitly via `start_supervised` so they can grant Ecto sandbox

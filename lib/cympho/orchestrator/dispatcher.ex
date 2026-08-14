@@ -4,7 +4,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   Configuration (app env):
     - :poll_interval          — ms between polls (default 30_000)
-    - :max_concurrent_agents — max simultaneous dispatches (default 3)
+    - :max_concurrent_agents — max simultaneous dispatches (default: scales
+      with `:erlang.system_info(:schedulers_online)`, see `max_concurrent/0`)
     - :active_states         — issue states considered runnable (default [:todo, :in_review])
     - :terminal_states       — issue states that stop reconciliation (default [:done, :cancelled])
     - :only_issue_id          — optional issue UUID for focused dispatch
@@ -37,7 +38,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
   alias Cympho.Workspaces
 
   @poll_interval Application.compile_env(:cympho, [:orchestrator, :poll_interval], 30_000)
-  @max_concurrent Application.compile_env(:cympho, [:orchestrator, :max_concurrent_agents], 3)
   @active_states Application.compile_env(:cympho, [:orchestrator, :active_states], [
                    :todo,
                    :in_review
@@ -915,20 +915,20 @@ defmodule Cympho.Orchestrator.Dispatcher do
          %State{running_issue_ids: running, retry_attempts: retries} = state,
          company_id
        ) do
-    available_slots = @max_concurrent - MapSet.size(running)
+    available_slots = max_concurrent() - MapSet.size(running)
 
     if available_slots <= 0 do
       state
     else
-      candidates = fetch_candidate_issues(available_slots * 4, company_id)
+      candidates = fetch_candidate_issues(available_slots * 4, company_id, state.poll_cursor)
+      state = %{state | poll_cursor: state.poll_cursor + 1}
       now = :os.system_time(:millisecond)
 
       # Per-company cap: count how many running issues belong to each
       # company, then drop candidates whose company has hit its
-      # `max_concurrent_runs` limit. Companies without a configured limit
-      # use the global default (`@max_concurrent`). The count is updated as
-      # dispatches succeed within this poll so a single poll cannot burst a
-      # company past its cap.
+      # `max_concurrent_runs` limit. The count is updated as dispatches
+      # succeed within this poll so a single poll cannot burst a company past
+      # its cap.
       running_by_company = running_issues_by_company(running)
 
       ready_candidates =
@@ -984,8 +984,45 @@ defmodule Cympho.Orchestrator.Dispatcher do
   defp company_at_capacity?(%Cympho.Issues.Issue{company_id: nil}, _by_co), do: false
 
   defp company_at_capacity?(%Cympho.Issues.Issue{company_id: company_id}, by_co) do
-    cap = Cympho.Companies.runtime_limit(company_id, "max_concurrent_runs", @max_concurrent)
+    cap = Cympho.Companies.runtime_limit(company_id, "max_concurrent_runs", default_company_cap())
     Map.get(by_co, company_id, 0) >= cap
+  end
+
+  # The per-company default used to be the *global* cap, which made the check
+  # dead code: fetch_and_dispatch/2 returns early once no slots remain, so a
+  # company could never be seen holding all of them while candidates were still
+  # being considered. Half the global cap leaves room for a second tenant by
+  # default, and a company can still be given a different limit through its
+  # governance config.
+  defp default_company_cap do
+    max(1, div(max_concurrent(), 2))
+  end
+
+  # How many candidates one company may contribute to a poll's window.
+  defp per_company_window(limit), do: max(1, div(limit, 3))
+
+  @doc """
+  Maximum concurrent agent sessions this node will dispatch.
+
+  Reads `config :cympho, :orchestrator, max_concurrent_agents: n` at runtime.
+  With nothing configured it scales with the schedulers actually available
+  rather than sitting at a compiled-in 3 for every install: agent runs spend
+  their time waiting on an external CLI or API, not on CPU, so the useful
+  number is a small multiple of the scheduler count.
+  """
+  def max_concurrent do
+    :cympho
+    |> Application.get_env(:orchestrator, [])
+    |> Keyword.get(:max_concurrent_agents)
+    |> case do
+      value when is_integer(value) and value > 0 -> value
+      _ -> default_max_concurrent()
+    end
+  end
+
+  defp default_max_concurrent do
+    schedulers = :erlang.system_info(:schedulers_online)
+    min(max(schedulers * 2, 4), 32)
   end
 
   # Runnability — issue-level runtime pause, an unresolved blocker, low-power
@@ -998,9 +1035,37 @@ defmodule Cympho.Orchestrator.Dispatcher do
   # cost a few more rows instead of all dispatch.
   @candidate_pages 5
 
-  defp fetch_candidate_issues(limit, company_id) do
-    query = candidate_query(company_id)
+  # How many tenants one global poll will look at. Bounded so a large install
+  # does not run a query per company on every tick; the rotation cursor makes
+  # sure the ones skipped this poll lead the next one.
+  @companies_per_poll 25
 
+  # A company-scoped poll has one tenant by definition, so it keeps the plain
+  # globally-ordered scan.
+  defp fetch_candidate_issues(limit, company_id, _cursor) when is_binary(company_id) do
+    fetch_runnable(candidate_query(company_id), limit)
+  end
+
+  # Candidates were selected from one globally priority-ordered window. A tenant
+  # holding the top rows of that window starved every other tenant outright:
+  # nobody else's issues were even loaded, so rejecting the busy tenant's
+  # candidates admitted no one and the slots went unused. Companies are now
+  # discovered independently of that order and drawn from round-robin, so one
+  # backlog cannot consume the window. Priority order is preserved *within* a
+  # company; across companies the policy is fair share, which is the point.
+  defp fetch_candidate_issues(limit, nil, cursor) do
+    per_company = per_company_window(limit)
+
+    limit
+    |> candidate_company_ids(cursor)
+    |> Enum.map(fn company_id ->
+      fetch_runnable(candidate_query(company_id), per_company)
+    end)
+    |> interleave()
+    |> Enum.take(limit)
+  end
+
+  defp fetch_runnable(query, limit) do
     Enum.reduce_while(0..(@candidate_pages - 1), [], fn page, acc ->
       rows =
         query
@@ -1020,6 +1085,47 @@ defmodule Cympho.Orchestrator.Dispatcher do
         true -> {:cont, runnable}
       end
     end)
+  end
+
+  # Every company with work that could dispatch, found without consulting the
+  # global priority order. Ordered by id and rotated by a per-poll cursor so a
+  # bounded slice still gives every tenant a turn.
+  defp candidate_company_ids(limit, cursor) do
+    ids =
+      candidate_query(nil)
+      |> exclude(:preload)
+      |> exclude(:order_by)
+      |> distinct(true)
+      |> select([i], i.company_id)
+      |> order_by([i], asc: i.company_id)
+      |> Cympho.Repo.all()
+
+    ids
+    |> rotate(cursor)
+    |> Enum.take(max(@companies_per_poll, limit))
+  end
+
+  defp rotate([], _cursor), do: []
+
+  defp rotate(list, cursor) do
+    offset = rem(cursor, length(list))
+    Enum.drop(list, offset) ++ Enum.take(list, offset)
+  end
+
+  # Round-robin so the dispatch reduce alternates tenants instead of spending
+  # every slot on whichever company happened to sort first.
+  defp interleave(groups) do
+    groups = Enum.reject(groups, &(&1 == []))
+
+    case groups do
+      [] ->
+        []
+
+      _ ->
+        heads = Enum.map(groups, &hd/1)
+        tails = groups |> Enum.map(&tl/1) |> Enum.reject(&(&1 == []))
+        heads ++ interleave(tails)
+    end
   end
 
   defp candidate_query(company_id) do
