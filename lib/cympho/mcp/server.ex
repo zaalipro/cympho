@@ -16,9 +16,10 @@ defmodule Cympho.Mcp.Server do
   import Ecto.Query, only: [from: 2]
   require Logger
 
-  alias Cympho.{Agents, Comments, GovernanceAuditLogs, Issues, Repo, Search}
+  alias Cympho.{Agents, Comments, GovernanceAuditLogs, Issues, Repo, Search, Skills}
   alias Cympho.Agents.Agent
   alias Cympho.Mcp.{ToolGrants, ToolRegistry}
+  alias Cympho.Plugins.Runtime
   alias Cympho.RateLimiting.AgentActionLimiter
 
   # Stable error body returned to MCP clients when a mutation is throttled.
@@ -210,14 +211,7 @@ defmodule Cympho.Mcp.Server do
       :allow ->
         case ToolRegistry.get_active(agent.company_id, name) do
           {:ok, tool} ->
-            %{
-              success: true,
-              dynamic: true,
-              tool: tool.name,
-              plugin_id: tool.plugin_id,
-              args: args || %{},
-              message: "Dynamic tool call authorized"
-            }
+            invoke_dynamic_tool(tool, args, agent)
 
           {:error, :not_found} ->
             %{error: "Tool not authorized", decision: "deny"}
@@ -225,6 +219,56 @@ defmodule Cympho.Mcp.Server do
 
       other when other in [:deny, :pending, :revoked] ->
         %{error: "Tool not authorized", decision: Atom.to_string(other)}
+    end
+  end
+
+  defp invoke_dynamic_tool(tool, args, %Agent{} = agent) do
+    plugin_not_found = %{
+      success: false,
+      dynamic: true,
+      tool: tool.name,
+      error: ":plugin_not_found"
+    }
+
+    case tool.plugin_id do
+      plugin_id when is_binary(plugin_id) ->
+        case Skills.get_company_plugin(agent.company_id, plugin_id) do
+          {:ok, plugin} ->
+            case Runtime.whereis(plugin) do
+              nil ->
+                plugin_not_found
+
+              pid ->
+                case GenServer.call(
+                       pid,
+                       {:execute_tool, tool.name, args || %{},
+                        %{company_id: agent.company_id, agent_id: agent.id}}
+                     ) do
+                  {:ok, result} ->
+                    %{
+                      success: true,
+                      dynamic: true,
+                      tool: tool.name,
+                      plugin_id: plugin_id,
+                      result: result
+                    }
+
+                  {:error, reason} ->
+                    %{
+                      success: false,
+                      dynamic: true,
+                      tool: tool.name,
+                      error: inspect(reason)
+                    }
+                end
+            end
+
+          _ ->
+            plugin_not_found
+        end
+
+      _ ->
+        plugin_not_found
     end
   end
 

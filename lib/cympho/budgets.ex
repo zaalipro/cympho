@@ -275,10 +275,28 @@ defmodule Cympho.Budgets do
   Records spending against a budget.
   """
   def record_spend(%Budget{} = budget, amount, description, actor \\ nil) do
-    budget
-    |> Budget.spend_changeset(amount)
-    |> Repo.update()
-    |> case do
+    transaction_result =
+      Repo.transaction(fn ->
+        locked =
+          from(b in Budget, where: b.id == ^budget.id, lock: "FOR UPDATE")
+          |> Repo.one()
+
+        case locked do
+          nil ->
+            Repo.rollback(:not_found)
+
+          %Budget{} = locked_budget ->
+            locked_budget
+            |> Budget.spend_changeset(amount)
+            |> Repo.update()
+            |> case do
+              {:ok, updated} -> updated
+              {:error, changeset} -> Repo.rollback(changeset)
+            end
+        end
+      end)
+
+    case transaction_result do
       {:ok, updated} ->
         GovernanceAuditLogs.log_action(
           "budget_spent",

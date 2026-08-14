@@ -1,6 +1,18 @@
 defmodule Cympho.Mcp.ToolRegistryGrantsTest do
   use Cympho.DataCase, async: true
 
+  defmodule DefaultToolWorker do
+    use Cympho.Plugins.Worker
+  end
+
+  defmodule EchoToolWorker do
+    use Cympho.Plugins.Worker
+
+    def handle_request({:execute_tool, name, args, ctx}, _from, state) do
+      {:reply, {:ok, %{executed: name, args: args, ctx: ctx}}, state}
+    end
+  end
+
   alias Cympho.Agents
   alias Cympho.Companies
   alias Cympho.Mcp.Server
@@ -328,8 +340,13 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
         })
 
       result = Server.call_tool("deploy_preview", %{"env" => "staging"}, agent)
-      assert %{success: true, dynamic: true, tool: "deploy_preview"} = result
-      assert result.args["env"] == "staging"
+
+      assert result == %{
+               success: false,
+               dynamic: true,
+               tool: "deploy_preview",
+               error: ":plugin_not_found"
+             }
 
       {:ok, latest} =
         ToolGrants.create_grant(%{
@@ -380,6 +397,174 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
       assert Server.call_tool("tenant_secret", %{}, agent_b) == %{
                error: "Tool not authorized",
                decision: "deny"
+             }
+    end
+
+    test "authorized dynamic call with nil plugin_id returns plugin_not_found", %{
+      agent: agent,
+      company: company
+    } do
+      {:ok, _} =
+        ToolGrants.create_grant(%{
+          company_id: company.id,
+          tool_name: "deploy_preview",
+          agent_id: agent.id,
+          status: "allow"
+        })
+
+      assert Server.call_tool("deploy_preview", %{}, agent) == %{
+               success: false,
+               dynamic: true,
+               tool: "deploy_preview",
+               error: ":plugin_not_found"
+             }
+    end
+
+    test "authorized dynamic call with missing plugin process returns plugin_not_found", %{
+      agent: agent,
+      company: company,
+      plugin: plugin
+    } do
+      {:ok, _} =
+        ToolRegistry.register(company.id, %{
+          "name" => "missing_worker_tool",
+          "description" => "plugin row exists, worker does not",
+          "plugin_id" => plugin.id
+        })
+
+      {:ok, _} =
+        ToolGrants.create_grant(%{
+          company_id: company.id,
+          tool_name: "missing_worker_tool",
+          agent_id: agent.id,
+          status: "allow"
+        })
+
+      assert Server.call_tool("missing_worker_tool", %{}, agent) == %{
+               success: false,
+               dynamic: true,
+               tool: "missing_worker_tool",
+               error: ":plugin_not_found"
+             }
+    end
+
+    test "authorized dynamic call with unknown plugin_id returns plugin_not_found", %{
+      agent: agent,
+      company: company
+    } do
+      {:ok, _} =
+        ToolRegistry.register(company.id, %{
+          "name" => "ghost_plugin_tool",
+          "description" => "plugin id is not in this company",
+          "plugin_id" => Ecto.UUID.generate()
+        })
+
+      {:ok, _} =
+        ToolGrants.create_grant(%{
+          company_id: company.id,
+          tool_name: "ghost_plugin_tool",
+          agent_id: agent.id,
+          status: "allow"
+        })
+
+      assert Server.call_tool("ghost_plugin_tool", %{}, agent) == %{
+               success: false,
+               dynamic: true,
+               tool: "ghost_plugin_tool",
+               error: ":plugin_not_found"
+             }
+    end
+
+    test "authorized dynamic call invokes the plugin worker", %{
+      agent: agent,
+      company: company
+    } do
+      u = System.unique_integer([:positive])
+
+      {:ok, plugin} =
+        Skills.create_plugin(%{
+          company_id: company.id,
+          identifier: "echo-worker-#{u}",
+          version: "1.0.0",
+          name: "Echo Worker",
+          manifest: %{"name" => "echo-worker"},
+          capabilities: ["expose:tools"],
+          status: "active",
+          enabled: true
+        })
+
+      {:ok, pid} = EchoToolWorker.start_link(plugin: plugin, company_id: company.id)
+      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+
+      {:ok, _} =
+        ToolRegistry.register(company.id, %{
+          "name" => "echo_now",
+          "description" => "echo via worker",
+          "plugin_id" => plugin.id
+        })
+
+      {:ok, _} =
+        ToolGrants.create_grant(%{
+          company_id: company.id,
+          tool_name: "echo_now",
+          agent_id: agent.id,
+          status: "allow"
+        })
+
+      assert Server.call_tool("echo_now", %{"env" => "staging"}, agent) == %{
+               success: true,
+               dynamic: true,
+               tool: "echo_now",
+               plugin_id: plugin.id,
+               result: %{
+                 executed: "echo_now",
+                 args: %{"env" => "staging"},
+                 ctx: %{company_id: company.id, agent_id: agent.id}
+               }
+             }
+    end
+
+    test "worker default execute_tool is unsupported_tool", %{
+      agent: agent,
+      company: company
+    } do
+      u = System.unique_integer([:positive])
+
+      {:ok, plugin} =
+        Skills.create_plugin(%{
+          company_id: company.id,
+          identifier: "default-worker-#{u}",
+          version: "1.0.0",
+          name: "Default Worker",
+          manifest: %{"name" => "default-worker"},
+          capabilities: ["expose:tools"],
+          status: "active",
+          enabled: true
+        })
+
+      {:ok, pid} = DefaultToolWorker.start_link(plugin: plugin, company_id: company.id)
+      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+
+      {:ok, _} =
+        ToolRegistry.register(company.id, %{
+          "name" => "plain_tool",
+          "description" => "default worker",
+          "plugin_id" => plugin.id
+        })
+
+      {:ok, _} =
+        ToolGrants.create_grant(%{
+          company_id: company.id,
+          tool_name: "plain_tool",
+          agent_id: agent.id,
+          status: "allow"
+        })
+
+      assert Server.call_tool("plain_tool", %{}, agent) == %{
+               success: false,
+               dynamic: true,
+               tool: "plain_tool",
+               error: ":unsupported_tool"
              }
     end
   end

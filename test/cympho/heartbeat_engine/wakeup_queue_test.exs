@@ -249,6 +249,11 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
     test "returns error when no wakes exist" do
       assert {:error, :empty} = WakeupQueue.dequeue(Ecto.UUID.generate())
     end
+
+    test "selects the pending wake with FOR UPDATE SKIP LOCKED" do
+      source = File.read!("lib/cympho/heartbeat_engine/wakeup_queue.ex")
+      assert source =~ ~s(lock: "FOR UPDATE SKIP LOCKED")
+    end
   end
 
   describe "pending_count/1" do
