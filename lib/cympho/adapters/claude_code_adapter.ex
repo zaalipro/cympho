@@ -115,7 +115,8 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
   def validate_config(config) do
     with :ok <- validate_stall_timeout(config_value(config, :stall_timeout)),
          :ok <- validate_cwd(config_value(config, :cwd)),
-         :ok <- validate_resume(config_value(config, :resume)) do
+         :ok <- validate_resume(config_value(config, :resume)),
+         :ok <- validate_command(config_value(config, :command)) do
       :ok
     end
   end
@@ -131,8 +132,7 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
 
   defp get_api_key(config) do
     config[:api_key] || config["api_key"] ||
-      Application.get_env(:cympho, :anthropic_api_key) ||
-      System.get_env("ANTHROPIC_API_KEY")
+      Application.get_env(:cympho, :anthropic_api_key)
   end
 
   defp get_command(config) do
@@ -155,24 +155,21 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
   end
 
   defp command_available?(command) do
-    System.find_executable(command) != nil or shell_command_available?(command)
+    System.find_executable(command) != nil
   end
 
-  defp shell_command_available?(command) do
-    check =
-      "source \"$HOME/.cld\" 2>/dev/null || true; command -v #{shell_quote(command)} >/dev/null"
+  defp validate_command(nil), do: :ok
 
-    case System.cmd("bash", ["-lc", check], stderr_to_stdout: true) do
-      {_, 0} -> true
-      _ -> false
+  defp validate_command(command) when is_binary(command) do
+    if command =~ ~r/[\s;|&$`<>(){}\n]/ do
+      {:error, "command must be a single executable name without metacharacters"}
+    else
+      :ok
     end
   end
 
-  defp shell_quote(value) do
-    value
-    |> to_string()
-    |> String.replace("'", "'\"'\"'")
-  end
+  defp validate_command(_),
+    do: {:error, "command must be a single executable name without metacharacters"}
 
   defp validate_stall_timeout(nil), do: :ok
 

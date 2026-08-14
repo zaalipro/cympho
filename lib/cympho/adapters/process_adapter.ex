@@ -170,8 +170,13 @@ defmodule Cympho.Adapters.ProcessAdapter do
         {to_string(k), to_string(v)}
       end)
 
+    host_whitelist =
+      ["HOME", "PATH", "USER", "LOGNAME"]
+      |> Enum.map(fn key -> {key, System.get_env(key)} end)
+      |> Enum.reject(fn {_, val} -> is_nil(val) end)
+
     # Convert to charlist format for Port.open
-    (base_env ++ custom_env_list)
+    (host_whitelist ++ base_env ++ custom_env_list)
     |> Enum.map(fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
   end
 
@@ -248,7 +253,11 @@ defmodule Cympho.Adapters.ProcessAdapter do
         fun.(port)
       end)
     else
-      port_opts = put_port_args(opts, args)
+      port_opts =
+        opts
+        |> put_port_args(args)
+        |> put_port_env([])
+
       port = Port.open({:spawn_executable, String.to_charlist(command_path)}, port_opts)
       fun.(port)
     end
@@ -308,7 +317,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
     Cympho.PortKiller.close(port)
   end
 
-  defp with_prompt_file(prompt, fun) do
+  def with_prompt_file(prompt, fun) do
     path = Path.join(System.tmp_dir!(), "cympho-prompt-#{System.unique_integer([:positive])}.txt")
     File.write!(path, prompt <> "\n", [:binary])
     File.chmod!(path, 0o600)
@@ -325,7 +334,12 @@ defmodule Cympho.Adapters.ProcessAdapter do
   defp put_port_env(opts, additions) do
     existing = find_port_option(opts, :env, [])
     additions = Enum.map(additions, fn {key, value} -> {to_charlist(key), to_charlist(value)} end)
-    replace_port_option(opts, :env, existing ++ additions)
+
+    replace_port_option(
+      opts,
+      :env,
+      Cympho.Adapters.CodexAdapter.clean_port_env(existing ++ additions)
+    )
   end
 
   defp find_port_option(opts, key, default) do
