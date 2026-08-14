@@ -162,10 +162,14 @@ defmodule Cympho.Secrets do
   end
 
   def update_secret(%Secret{} = secret, attrs) do
+    value = normalize_secret_value(attrs[:value] || attrs["value"])
+
     attrs =
-      case attrs[:value] || attrs["value"] do
+      case value do
         nil ->
-          stringify_keys(attrs)
+          attrs
+          |> stringify_keys()
+          |> Map.drop(["value"])
 
         plaintext ->
           {:ok, encrypted} = encrypt_value(plaintext)
@@ -195,7 +199,7 @@ defmodule Cympho.Secrets do
   defp stringify_keys(other), do: other
 
   def rotate_secret(%Secret{} = secret, new_value) do
-    with {:ok, encrypted} <- encrypt_value(new_value) do
+    with {:ok, encrypted} <- encrypt_value(normalize_secret_value(new_value)) do
       new_version = secret.version + 1
 
       Multi.new()
@@ -253,6 +257,12 @@ defmodule Cympho.Secrets do
     EncryptedStorage.encrypt(plaintext)
   end
 
+  defp normalize_secret_value(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: value
+  end
+
+  defp normalize_secret_value(value), do: value
+
   defp secret_age_days(%Secret{inserted_at: nil}, _now), do: nil
 
   defp secret_age_days(%Secret{inserted_at: inserted_at}, now) do
@@ -287,7 +297,7 @@ defmodule Cympho.Secrets do
             [s],
             (s.scope == "company" and s.company_id == ^company_id) or
               (s.scope == "instance" and s.company_id == ^company_id) or
-              (s.scope == "agent" and s.scope_id == ^agent_id)
+              (s.scope == "agent" and s.scope_id == ^agent_id and s.company_id == ^company_id)
           )
           |> order_by([s], asc: s.key)
           |> Repo.all()
@@ -305,13 +315,21 @@ defmodule Cympho.Secrets do
   Returns a map of key -> decrypted value.
   """
   def resolve_env_for_agent(agent_id) do
-    list_secrets_for_agent(agent_id)
-    |> Enum.reduce(%{}, fn secret, acc ->
-      case EncryptedStorage.decrypt(secret.encrypted_value) do
-        {:ok, plaintext} -> Map.put(acc, secret.key, plaintext)
-        {:error, _} -> acc
-      end
-    end)
+    {agent_secrets, other_secrets} =
+      agent_id
+      |> list_secrets_for_agent()
+      |> Enum.split_with(&(&1.scope == "agent"))
+
+    other_secrets
+    |> Enum.reduce(%{}, &put_decrypted_secret/2)
+    |> then(fn env -> Enum.reduce(agent_secrets, env, &put_decrypted_secret/2) end)
+  end
+
+  defp put_decrypted_secret(secret, acc) do
+    case EncryptedStorage.decrypt(secret.encrypted_value) do
+      {:ok, plaintext} -> Map.put(acc, secret.key, plaintext)
+      {:error, _} -> acc
+    end
   end
 
   defp get_company_id_from_config(%{"company_id" => id}), do: id

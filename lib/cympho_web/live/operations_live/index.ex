@@ -767,8 +767,13 @@ defmodule CymphoWeb.OperationsLive.Index do
       {:ok, instructions, plan} ->
         release = prompt_tuning_release(agent, plan)
 
-        with {:ok, updated_agent} <- Agents.update_agent(agent, %{instructions: instructions}),
-             {:ok, revision} <-
+        with {:ok, baseline} <-
+               Agents.create_config_revision(agent, %{
+                 source: "prompt_tuning_baseline",
+                 created_by_user_id: current_user_id(socket)
+               }),
+             {:ok, updated_agent} <- Agents.update_agent(agent, %{instructions: instructions}),
+             {:ok, _revision} <-
                Agents.create_config_revision(updated_agent, %{
                  source: "prompt_tuning",
                  created_by_user_id: current_user_id(socket),
@@ -782,7 +787,7 @@ defmodule CymphoWeb.OperationsLive.Index do
              patch_titles: Enum.map(plan.patches, & &1.title),
              from_score: plan.current_score,
              to_score: plan.projected_score,
-             revision: revision.version,
+             revision: baseline.version,
              expected_effect: release["expected_effect"],
              validation_checks: release["validation_checks"],
              rollback: release["rollback"]

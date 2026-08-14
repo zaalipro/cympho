@@ -74,7 +74,7 @@ defmodule Cympho.Workspaces do
 
   def update_project_workspace(%ProjectWorkspace{} = pw, attrs) do
     pw
-    |> ProjectWorkspace.changeset(attrs)
+    |> ProjectWorkspace.update_changeset(attrs)
     |> Repo.update()
   end
 
@@ -126,7 +126,7 @@ defmodule Cympho.Workspaces do
 
   def update_execution_workspace(%ExecutionWorkspace{} = ew, attrs) do
     ew
-    |> ExecutionWorkspace.changeset(attrs)
+    |> ExecutionWorkspace.update_changeset(attrs)
     |> Repo.update()
   end
 

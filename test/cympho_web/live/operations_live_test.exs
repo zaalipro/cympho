@@ -1659,7 +1659,15 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert updated_agent.instructions =~ "## Owner-readable memory"
       assert updated_agent.instructions =~ "## Delivery evidence"
 
-      [revision] = Agents.list_config_revisions(agent.id)
+      revisions = Agents.list_config_revisions(agent.id)
+      baseline = Enum.find(revisions, &(&1.source == "prompt_tuning_baseline"))
+      revision = Enum.find(revisions, &(&1.source == "prompt_tuning"))
+
+      assert baseline
+      assert baseline.version == 1
+      assert baseline.instructions == "Do good work."
+      assert baseline.created_by_user_id == user.id
+      assert revision
       assert revision.created_by_user_id == user.id
       assert revision.source == "prompt_tuning"
       assert revision.studio_score > 50
@@ -1730,12 +1738,19 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       user_id = user.id
 
-      [first_revision] = Agents.list_config_revisions(first_agent.id)
+      first_revisions = Agents.list_config_revisions(first_agent.id)
+      first_baseline = Enum.find(first_revisions, &(&1.source == "prompt_tuning_baseline"))
+      first_revision = Enum.find(first_revisions, &(&1.source == "prompt_tuning"))
+      assert first_baseline.version == 1
+      assert first_baseline.instructions == "Do good work."
       assert first_revision.created_by_user_id == user_id
       assert first_revision.source == "prompt_tuning"
       assert first_revision.studio_audits["tuning_release"]["agent_name"] == "Bulk Prompt Agent A"
 
-      [second_revision] = Agents.list_config_revisions(second_agent.id)
+      second_revisions = Agents.list_config_revisions(second_agent.id)
+      second_baseline = Enum.find(second_revisions, &(&1.source == "prompt_tuning_baseline"))
+      second_revision = Enum.find(second_revisions, &(&1.source == "prompt_tuning"))
+      assert second_baseline.version == 1
       assert second_revision.created_by_user_id == user_id
       assert second_revision.source == "prompt_tuning"
 

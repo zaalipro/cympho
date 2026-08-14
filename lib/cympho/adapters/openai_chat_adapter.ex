@@ -10,6 +10,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  alias Cympho.Adapters.HttpAdapter
   alias Cympho.Adapters.RuntimeTimeout
   alias Cympho.Secrets.Redaction
 
@@ -103,16 +104,18 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
   end
 
   defp request(url, api_key, payload, config) do
-    timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
+    with :ok <- HttpAdapter.validate_public_url(url) do
+      timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
 
-    headers = [
-      {"authorization", "Bearer #{api_key}"},
-      {"content-type", "application/json"},
-      {"accept", "application/json"}
-    ]
+      headers = [
+        {"authorization", "Bearer #{api_key}"},
+        {"content-type", "application/json"},
+        {"accept", "application/json"}
+      ]
 
-    Finch.build(:post, url, headers, Jason.encode!(payload))
-    |> stream_to_acc(timeout, Enum.filter([api_key], &(is_binary(&1) and &1 != "")))
+      Finch.build(:post, url, headers, Jason.encode!(payload))
+      |> stream_to_acc(timeout, Enum.filter([api_key], &(is_binary(&1) and &1 != "")))
+    end
   end
 
   defp stream_to_acc(req, timeout, secrets) do
@@ -515,10 +518,12 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
 
     with false <- value == "",
          %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) <-
-           URI.parse(value) do
+           URI.parse(value),
+         :ok <- HttpAdapter.validate_public_url(value) do
       :ok
     else
       true -> {:error, "endpoint cannot be empty"}
+      {:error, "url host is not allowed"} = error -> error
       _ -> {:error, "endpoint must be a valid HTTP/HTTPS URL"}
     end
   end

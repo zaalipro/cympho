@@ -454,7 +454,7 @@ defmodule Cympho.RuntimeTest do
         prefix: "RTA"
       })
 
-    missing_cwd = Path.join(System.tmp_dir!(), "cympho-missing-#{System.unique_integer()}")
+    missing_cwd = Path.join("/tmp", "cympho-missing-#{System.unique_integer()}")
 
     {:ok, project_workspace} =
       Workspaces.create_project_workspace(%{
@@ -471,6 +471,71 @@ defmodule Cympho.RuntimeTest do
       })
 
     assert {:error, {:workspace_unavailable, ^missing_cwd}} = Runtime.preflight(issue, agent)
+  end
+
+  test "preflight rejects unsafe configured cwd", %{
+    company: company,
+    agent: agent,
+    issue: issue
+  } do
+    {:ok, project} =
+      Projects.create_project(%{
+        company_id: company.id,
+        name: "Unsafe Cwd Project",
+        prefix: "UCD"
+      })
+
+    {:ok, project_workspace} =
+      %Cympho.Workspaces.ProjectWorkspace{}
+      |> Ecto.Changeset.change(%{
+        company_id: company.id,
+        project_id: project.id,
+        name: "Unsafe workspace",
+        cwd: "/etc"
+      })
+      |> Cympho.Repo.insert()
+
+    {:ok, issue} =
+      Issues.update_issue(issue, %{
+        project_id: project.id,
+        project_workspace_id: project_workspace.id
+      })
+
+    assert {:error, {:workspace_unavailable, "/etc"}} = Runtime.preflight(issue, agent)
+  end
+
+  test "does not inject a company OpenAI key to a private endpoint", %{
+    company: company,
+    issue: issue
+  } do
+    {:ok, ceo} =
+      Agents.create_agent(%{
+        company_id: company.id,
+        name: "Private Endpoint CEO",
+        role: :ceo,
+        status: :idle,
+        adapter: :openai_chat,
+        config: %{
+          "endpoint" => "http://169.254.169.254/",
+          "model" => "gpt-4"
+        }
+      })
+
+    {:ok, _} =
+      Secrets.create_secret(%{
+        company_id: company.id,
+        scope: "company",
+        key: "OPENAI_API_KEY",
+        value: "company-openai-key"
+      })
+
+    {:ok, issue} =
+      Issues.update_issue(issue, %{
+        assigned_role: "ceo",
+        assignee_id: ceo.id
+      })
+
+    assert {:error, :missing_api_key} = Runtime.preflight(issue, ceo)
   end
 
   describe "stage gate verification" do
@@ -631,7 +696,7 @@ defmodule Cympho.RuntimeTest do
         })
 
       cwd =
-        Path.join(System.tmp_dir!(), "cympho-provider-#{unique}")
+        Path.join("/tmp", "cympho-provider-#{unique}")
         |> tap(&File.mkdir_p!/1)
 
       on_exit(fn -> File.rm_rf(cwd) end)

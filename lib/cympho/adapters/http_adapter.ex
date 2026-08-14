@@ -7,10 +7,14 @@ defmodule Cympho.Adapters.HttpAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  import Bitwise
+
   alias Cympho.Adapters.RuntimeTimeout
 
   @default_timeout 30_000
   @max_timeout 3_600_000
+  @blocked_url_message "url host is not allowed"
+  @metadata_hosts ~w(metadata.google.internal 169.254.169.254)
   @impl true
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
     session_id = make_ref()
@@ -141,12 +145,14 @@ defmodule Cympho.Adapters.HttpAdapter do
   @max_response_bytes 5 * 1024 * 1024
 
   defp make_http_request(method, url, headers, payload, timeout) do
-    method_atom = normalize_method(method)
-    headers_list = normalize_headers(headers)
+    with :ok <- validate_public_url(url) do
+      method_atom = normalize_method(method)
+      headers_list = normalize_headers(headers)
 
-    encoded_payload = Jason.encode!(payload)
-    req = Finch.build(method_atom, url, headers_list, encoded_payload)
-    stream_to_acc(req, timeout)
+      encoded_payload = Jason.encode!(payload)
+      req = Finch.build(method_atom, url, headers_list, encoded_payload)
+      stream_to_acc(req, timeout)
+    end
   end
 
   defp stream_to_acc(req, timeout) do
@@ -217,11 +223,44 @@ defmodule Cympho.Adapters.HttpAdapter do
 
       true ->
         check_url = if health_endpoint, do: health_endpoint, else: url
-        do_health_check(check_url, headers, timeout)
+        probe_headers = probe_headers(headers)
+
+        case validate_public_url(check_url) do
+          :ok ->
+            do_health_check(check_url, probe_headers, timeout)
+
+          {:error, reason} ->
+            %{
+              status: :unhealthy,
+              message: reason,
+              checked_at: DateTime.utc_now()
+            }
+        end
     end
   end
 
+  defp probe_headers(headers) do
+    headers
+    |> normalize_headers()
+    |> Enum.reject(fn {key, _value} ->
+      String.downcase(to_string(key)) in ["authorization", "auth_token"]
+    end)
+  end
+
   defp do_health_check(url, headers, timeout) do
+    with :ok <- validate_public_url(url) do
+      do_public_health_check(url, headers, timeout)
+    else
+      {:error, reason} ->
+        %{
+          status: :unhealthy,
+          message: reason,
+          checked_at: DateTime.utc_now()
+        }
+    end
+  end
+
+  defp do_public_health_check(url, headers, timeout) do
     # Try HEAD first, fall back to GET
     req = Finch.build(:head, url, headers)
 
@@ -257,6 +296,19 @@ defmodule Cympho.Adapters.HttpAdapter do
   end
 
   defp do_get_health_check(url, headers, timeout) do
+    with :ok <- validate_public_url(url) do
+      do_public_get_health_check(url, headers, timeout)
+    else
+      {:error, reason} ->
+        %{
+          status: :unhealthy,
+          message: reason,
+          checked_at: DateTime.utc_now()
+        }
+    end
+  end
+
+  defp do_public_get_health_check(url, headers, timeout) do
     req = Finch.build(:get, url, headers)
 
     case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
@@ -393,17 +445,85 @@ defmodule Cympho.Adapters.HttpAdapter do
          :ok <- validate_headers(config["headers"] || config[:headers]),
          :ok <- validate_timeout(config),
          :ok <- validate_auth_token(config["auth_token"] || config[:auth_token]),
-         :ok <- validate_callback_url(config["callback_url"] || config[:callback_url]) do
+         :ok <- validate_callback_url(config["callback_url"] || config[:callback_url]),
+         :ok <- validate_health_endpoint(config["health_endpoint"] || config[:health_endpoint]) do
       :ok
     end
   end
+
+  @doc """
+  Rejects URLs that are missing a host or target a private/metadata address.
+  """
+  @spec validate_public_url(term()) :: :ok | {:error, String.t()}
+  def validate_public_url(url) when is_binary(url) do
+    uri = URI.parse(url)
+
+    cond do
+      not public_http_host?(uri) ->
+        {:error, @blocked_url_message}
+
+      is_binary(uri.userinfo) and uri.userinfo != "" ->
+        {:error, @blocked_url_message}
+
+      blocked_host?(uri.host) ->
+        {:error, @blocked_url_message}
+
+      true ->
+        :ok
+    end
+  end
+
+  def validate_public_url(_url), do: {:error, @blocked_url_message}
+
+  defp public_http_host?(%URI{scheme: scheme, host: host})
+       when scheme in ["http", "https"] and is_binary(host) and host != "",
+       do: true
+
+  defp public_http_host?(_uri), do: false
+
+  defp blocked_host?(host) do
+    host =
+      host
+      |> String.trim()
+      |> String.downcase()
+      |> String.trim_leading("[")
+      |> String.trim_trailing("]")
+
+    host in ["localhost" | @metadata_hosts] or blocked_ip_host?(host)
+  end
+
+  defp blocked_ip_host?(host) do
+    case :inet.parse_strict_address(String.to_charlist(host)) do
+      {:ok, address} -> blocked_ip?(address)
+      {:error, _} -> false
+    end
+  end
+
+  defp blocked_ip?({a, b, c, d})
+       when a in 0..255 and b in 0..255 and c in 0..255 and d in 0..255 do
+    a == 127 or a == 10 or (a == 169 and b == 254) or (a == 192 and b == 168) or
+      (a == 172 and b >= 16 and b <= 31)
+  end
+
+  defp blocked_ip?({0, 0, 0, 0, 0, 65535, hi, lo}) do
+    blocked_ip?({hi >>> 8, hi &&& 0xFF, lo >>> 8, lo &&& 0xFF})
+  end
+
+  defp blocked_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+
+  defp blocked_ip?({hextet, _, _, _, _, _, _, _}) when hextet >= 0xFE80 and hextet <= 0xFEBF,
+    do: true
+
+  defp blocked_ip?({0xFD00, 0x0EC2, 0, 0, 0, 0, 0, 0x0254}), do: true
+
+  defp blocked_ip?(_address), do: false
 
   defp validate_url(nil), do: {:error, "url is required"}
   defp validate_url(""), do: {:error, "url cannot be empty"}
 
   defp validate_url(url) when is_binary(url) do
     case URI.parse(url) do
-      %URI{scheme: scheme} when scheme in ["http", "https"] -> :ok
+      %URI{scheme: scheme} when scheme in ["http", "https"] -> validate_public_url(url)
       _ -> {:error, "url must be a valid HTTP/HTTPS URL"}
     end
   end
@@ -459,8 +579,14 @@ defmodule Cympho.Adapters.HttpAdapter do
   defp validate_callback_url(url) when is_binary(url) do
     if String.trim(url) != "" do
       case URI.parse(url) do
-        %URI{scheme: scheme} when scheme in ["http", "https"] -> :ok
-        _ -> {:error, "callback_url must be a valid HTTP/HTTPS URL"}
+        %URI{scheme: scheme} when scheme in ["http", "https"] ->
+          case validate_public_url(url) do
+            :ok -> :ok
+            {:error, _} = error -> error
+          end
+
+        _ ->
+          {:error, "callback_url must be a valid HTTP/HTTPS URL"}
       end
     else
       {:error, "callback_url cannot be empty"}
@@ -468,4 +594,16 @@ defmodule Cympho.Adapters.HttpAdapter do
   end
 
   defp validate_callback_url(_), do: {:error, "callback_url must be a string"}
+
+  defp validate_health_endpoint(nil), do: :ok
+  defp validate_health_endpoint(""), do: :ok
+
+  defp validate_health_endpoint(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme} when scheme in ["http", "https"] -> validate_public_url(url)
+      _ -> {:error, "url must be a valid HTTP/HTTPS URL"}
+    end
+  end
+
+  defp validate_health_endpoint(_), do: {:error, "url must be a string"}
 end

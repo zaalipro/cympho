@@ -133,6 +133,31 @@ defmodule Cympho.Adapters.HttpAdapterTest do
       assert HttpAdapter.validate_config(config) ==
                {:error, "callback_url must be a valid HTTP/HTTPS URL"}
     end
+
+    test "rejects metadata, loopback, and private hosts" do
+      assert HttpAdapter.validate_public_url("http://169.254.169.254/") ==
+               {:error, "url host is not allowed"}
+
+      assert HttpAdapter.validate_config(%{"url" => "http://169.254.169.254/"}) ==
+               {:error, "url host is not allowed"}
+
+      assert HttpAdapter.validate_config(%{"url" => "http://127.0.0.1/webhook"}) ==
+               {:error, "url host is not allowed"}
+
+      assert HttpAdapter.validate_config(%{"url" => "http://localhost/webhook"}) ==
+               {:error, "url host is not allowed"}
+
+      assert HttpAdapter.validate_config(%{"url" => "http://192.168.1.10/webhook"}) ==
+               {:error, "url host is not allowed"}
+
+      assert HttpAdapter.validate_config(%{"url" => "https://user:pass@example.com"}) ==
+               {:error, "url host is not allowed"}
+
+      assert HttpAdapter.validate_config(%{
+               "url" => "https://example.com",
+               "callback_url" => "http://169.254.169.254/"
+             }) == {:error, "url host is not allowed"}
+    end
   end
 
   describe "available?/0" do
@@ -159,6 +184,18 @@ defmodule Cympho.Adapters.HttpAdapterTest do
       result = HttpAdapter.health_check(%{"url" => "https://example.com"})
 
       assert %DateTime{} = result.checked_at
+    end
+
+    test "does not probe private hosts or forward authorization" do
+      result =
+        HttpAdapter.health_check(%{
+          "url" => "http://169.254.169.254/",
+          "headers" => %{"authorization" => "Bearer company-secret", "auth_token" => "tok"},
+          "auth_token" => "company-secret"
+        })
+
+      assert result.status == :unhealthy
+      assert result.message == "url host is not allowed"
     end
   end
 
@@ -228,6 +265,29 @@ defmodule Cympho.Adapters.HttpAdapterTest do
         assert_receive {:session_started, ^session_id}, 500
         assert_receive {:receive_timeout, 900_000}, 1_000
         assert_receive {:turn_completed, ^session_id, %{status: 200, body: "{}"}}, 1_000
+      end
+    end
+
+    test "does not call Finch for a private url" do
+      issue = %{
+        id: "test-issue-ssrf",
+        title: "SSRF",
+        description: "Must not fetch metadata"
+      }
+
+      with_mock Finch,
+        build: fn _, _, _, _ -> flunk("Finch.build must not run for a private host") end,
+        stream: fn _, _, _, _, _ -> flunk("Finch.stream must not run for a private host") end do
+        session_id =
+          HttpAdapter.run(issue, "agent-1", self(),
+            config: %{"url" => "http://169.254.169.254/latest/meta-data"}
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:http_error, "url host is not allowed"}},
+                       1_000
       end
     end
 

@@ -100,7 +100,7 @@ defmodule Cympho.Notifications.Dispatcher do
 
         task =
           Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
-            {type, deliver_via(channel_module, message, pref.config)}
+            {type, deliver_via(channel_module, message, pref.config, user)}
           end)
 
         {type, task}
@@ -139,7 +139,20 @@ defmodule Cympho.Notifications.Dispatcher do
     |> Map.get(event, true)
   end
 
-  defp deliver_via(channel_module, message, config) do
+  defp deliver_via(EmailChannel, message, config, user) do
+    config =
+      (config || %{})
+      |> Map.put("email", user.email)
+      |> Map.put(:email, user.email)
+
+    do_deliver(EmailChannel, message, config)
+  end
+
+  defp deliver_via(channel_module, message, config, _user) do
+    do_deliver(channel_module, message, config)
+  end
+
+  defp do_deliver(channel_module, message, config) do
     if channel_module.available?(config) do
       channel_module.deliver(message, config)
     else
@@ -172,7 +185,7 @@ defmodule Cympho.Notifications.Dispatcher do
       |> List.wrap()
       |> Enum.flat_map(fn {_, ps} -> ps end)
 
-    new_prefs = Enum.reject(existing ++ [pref], fn p -> p.id == pref.id end)
+    new_prefs = Enum.reject(existing, &(&1.id == pref.id)) ++ [pref]
     :ets.insert(@cache_table, {pref.user_id, new_prefs})
   end
 end
