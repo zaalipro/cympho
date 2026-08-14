@@ -170,7 +170,7 @@ defmodule Cympho.Adapters.HealthCheckerTest do
         status: :idle,
         company_id: company.id,
         config: %{
-          "endpoint" => "https://dashscope.example.com/compatible-mode/v1/chat/completions",
+          "endpoint" => "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
           "model" => "qwen3.7-plus"
         }
       })
