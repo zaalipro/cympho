@@ -48,6 +48,7 @@ defmodule Cympho.Runtime do
           | {:environment_provider_error, term()}
           | {:repo_delivery_runtime_unavailable, atom()}
           | {:stage_gate_blocked, atom()}
+          | :missing_api_key
 
   @spec preflight(Issue.t(), Agent.t() | binary(), keyword()) ::
           {:ok, RuntimeContext.t()} | {:error, preflight_error()}
@@ -241,24 +242,29 @@ defmodule Cympho.Runtime do
       agent
       |> agent_config()
       |> Map.merge(Keyword.get(opts, :adapter_config, %{}) || %{})
-      |> with_secret_backed_api_key(adapter, env)
 
-    if Keyword.get(opts, :validate_config?, true) do
-      case Adapters.resolve(%{adapter: adapter, config: config}) do
-        {:ok, module, resolved_config} ->
-          case Adapters.ModelCompatibility.validate(module, resolved_config) do
-            :ok -> {:ok, module, resolved_config}
-            {:error, message} -> {:error, {:adapter_model_mismatch, message}}
+    case with_secret_backed_api_key(config, adapter, env) do
+      {:error, :missing_api_key} = error ->
+        error
+
+      config when is_map(config) ->
+        if Keyword.get(opts, :validate_config?, true) do
+          case Adapters.resolve(%{adapter: adapter, config: config}) do
+            {:ok, module, resolved_config} ->
+              case Adapters.ModelCompatibility.validate(module, resolved_config) do
+                :ok -> {:ok, module, resolved_config}
+                {:error, message} -> {:error, {:adapter_model_mismatch, message}}
+              end
+
+            {:error, reason} ->
+              {:error, reason}
           end
-
-        {:error, reason} ->
-          {:error, reason}
-      end
-    else
-      case Adapters.Registry.resolve_agent(%{adapter: adapter, config: config}) do
-        {:ok, module, resolved_config} -> {:ok, module, resolved_config}
-        {:error, :no_adapter} -> {:error, :no_adapter_available}
-      end
+        else
+          case Adapters.Registry.resolve_agent(%{adapter: adapter, config: config}) do
+            {:ok, module, resolved_config} -> {:ok, module, resolved_config}
+            {:error, :no_adapter} -> {:error, :no_adapter_available}
+          end
+        end
     end
   end
 
@@ -285,14 +291,24 @@ defmodule Cympho.Runtime do
   defp with_secret_backed_api_key(config, :openai_chat, env) do
     endpoint = openai_chat_endpoint(config, env)
     model = openai_chat_model(config, env)
+    existing_key = config_value(config, "api_key")
+    host = endpoint_host(endpoint)
 
-    config
-    |> put_config_new(
-      "api_key",
-      openai_chat_api_key(endpoint, model, env)
-    )
-    |> put_config_new("endpoint", endpoint)
-    |> put_config_new("model", model)
+    cond do
+      openai_company_key_host_allowed?(host, env) ->
+        config
+        |> put_config_new("api_key", openai_chat_api_key(endpoint, model, env))
+        |> put_config_new("endpoint", endpoint)
+        |> put_config_new("model", model)
+
+      present_api_key?(existing_key) ->
+        config
+        |> put_config_new("endpoint", endpoint)
+        |> put_config_new("model", model)
+
+      true ->
+        {:error, :missing_api_key}
+    end
   end
 
   defp with_secret_backed_api_key(config, :agrenting, env) do
@@ -358,6 +374,38 @@ defmodule Cympho.Runtime do
       if value in [nil, ""], do: nil, else: value
     end)
   end
+
+  @openai_company_key_hosts ["api.openai.com", "api.anthropic.com"]
+  @recorded_provider_hosts ["cli.llmotions.com"]
+
+  defp openai_company_key_host_allowed?(host, env) when is_binary(host) do
+    host in @openai_company_key_hosts or
+      String.ends_with?(host, ".aliyuncs.com") or
+      host in @recorded_provider_hosts or
+      host in recorded_secret_provider_hosts(env)
+  end
+
+  defp openai_company_key_host_allowed?(_host, _env), do: false
+
+  defp recorded_secret_provider_hosts(env) when is_map(env) do
+    ~w(OPENAI_BASE_URL DASHSCOPE_BASE_URL ANTHROPIC_BASE_URL LLMOTIONS_BASE_URL)
+    |> Enum.map(&endpoint_host(env[&1]))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp recorded_secret_provider_hosts(_env), do: []
+
+  defp endpoint_host(endpoint) when is_binary(endpoint) do
+    case URI.parse(String.trim(endpoint)) do
+      %URI{host: host} when is_binary(host) and host != "" -> String.downcase(host)
+      _ -> nil
+    end
+  end
+
+  defp endpoint_host(_endpoint), do: nil
+
+  defp present_api_key?(key) when is_binary(key), do: String.trim(key) != ""
+  defp present_api_key?(_key), do: false
 
   defp config_value(config, key) when is_map(config) do
     Map.get(config, key) || Map.get(config, String.to_atom(key))
@@ -457,10 +505,10 @@ defmodule Cympho.Runtime do
     do: {:error, {:workspace_unavailable, "missing cwd"}}
 
   defp ensure_configured_cwd(cwd, project_workspace, execution_workspace, source) do
-    if File.dir?(cwd) do
+    if Workspace.safe_host_cwd?(cwd) and File.dir?(Path.expand(cwd)) do
       {:ok,
        %{
-         cwd: cwd,
+         cwd: Path.expand(cwd),
          project_workspace: project_workspace,
          execution_workspace: execution_workspace,
          source: source

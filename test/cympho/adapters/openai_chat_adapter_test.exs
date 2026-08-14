@@ -204,6 +204,20 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
   end
 
   describe "validate_config/1" do
+    test "rejects metadata and loopback endpoints" do
+      assert OpenAIChatAdapter.validate_config(%{
+               "endpoint" => "http://169.254.169.254/",
+               "api_key" => "sk-test",
+               "model" => "gpt-4"
+             }) == {:error, "url host is not allowed"}
+
+      assert OpenAIChatAdapter.validate_config(%{
+               "endpoint" => "http://127.0.0.1/v1",
+               "api_key" => "sk-test",
+               "model" => "gpt-4"
+             }) == {:error, "url host is not allowed"}
+    end
+
     test "accepts valid chat completions config" do
       assert :ok =
                OpenAIChatAdapter.validate_config(%{

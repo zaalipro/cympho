@@ -94,6 +94,76 @@ defmodule Cympho.WorkspaceTest do
                Workspace.repository_fingerprint("https://github.com/example/project.git#branch")
     end
   end
+
+  describe "safe_host_cwd?/1" do
+    test "accepts expanded absolute workspace paths" do
+      assert Workspace.safe_host_cwd?("/tmp/cympho/workspaces")
+    end
+
+    test "rejects blank, relative, parent, and system paths" do
+      refute Workspace.safe_host_cwd?("")
+      refute Workspace.safe_host_cwd?("   ")
+      refute Workspace.safe_host_cwd?("relative/path")
+      refute Workspace.safe_host_cwd?("/tmp/foo/../etc")
+      refute Workspace.safe_host_cwd?("/")
+      refute Workspace.safe_host_cwd?("/etc")
+      refute Workspace.safe_host_cwd?("/usr/bin")
+      refute Workspace.safe_host_cwd?("/bin")
+      refute Workspace.safe_host_cwd?("/sbin")
+      refute Workspace.safe_host_cwd?("/var/tmp")
+      refute Workspace.safe_host_cwd?("/System/Library")
+      refute Workspace.safe_host_cwd?("/private/etc/passwd")
+    end
+  end
+
+  describe "workspace update tenancy" do
+    test "update changeset does not cast company_id or project_id" do
+      company_id = Ecto.UUID.generate()
+      project_id = Ecto.UUID.generate()
+
+      pw_changeset =
+        Cympho.Workspaces.ProjectWorkspace.update_changeset(
+          %Cympho.Workspaces.ProjectWorkspace{company_id: company_id, project_id: project_id},
+          %{company_id: Ecto.UUID.generate(), project_id: Ecto.UUID.generate(), name: "Renamed"}
+        )
+
+      ew_changeset =
+        Cympho.Workspaces.ExecutionWorkspace.update_changeset(
+          %Cympho.Workspaces.ExecutionWorkspace{company_id: company_id, project_id: project_id},
+          %{company_id: Ecto.UUID.generate(), project_id: Ecto.UUID.generate(), status: "closed"}
+        )
+
+      refute Ecto.Changeset.changed?(pw_changeset, :company_id)
+      refute Ecto.Changeset.changed?(pw_changeset, :project_id)
+      refute Ecto.Changeset.changed?(ew_changeset, :company_id)
+      refute Ecto.Changeset.changed?(ew_changeset, :project_id)
+    end
+
+    test "create and update reject unsafe cwd" do
+      attrs = %{
+        name: "Unsafe",
+        company_id: Ecto.UUID.generate(),
+        project_id: Ecto.UUID.generate(),
+        project_workspace_id: Ecto.UUID.generate(),
+        cwd: "/etc"
+      }
+
+      pw =
+        Cympho.Workspaces.ProjectWorkspace.changeset(%Cympho.Workspaces.ProjectWorkspace{}, attrs)
+
+      ew =
+        Cympho.Workspaces.ExecutionWorkspace.changeset(
+          %Cympho.Workspaces.ExecutionWorkspace{},
+          attrs
+        )
+
+      refute pw.valid?
+      refute ew.valid?
+      assert {"is not a safe workspace path", _} = Keyword.get(pw.errors, :cwd)
+      assert {"is not a safe workspace path", _} = Keyword.get(ew.errors, :cwd)
+    end
+  end
+
 end
 
 defmodule Cympho.Workspace.RepoUrlTest do

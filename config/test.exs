@@ -66,3 +66,5 @@ config :cympho, :auto_ignite_on_create, false
 config :phoenix, :plug_init_mode, :runtime
 
 config :swoosh, :api_client, Swoosh.ApiClient.Test
+
+config :cympho, Cympho.Mailer, adapter: Swoosh.Adapters.Test

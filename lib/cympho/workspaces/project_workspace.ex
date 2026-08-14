@@ -54,5 +54,42 @@ defmodule Cympho.Workspaces.ProjectWorkspace do
       :project_id
     ])
     |> validate_required([:name, :project_id, :company_id])
+    |> validate_safe_cwd()
+  end
+
+  def update_changeset(project_workspace, attrs) do
+    project_workspace
+    |> cast(attrs, [
+      :name,
+      :cwd,
+      :repo_url,
+      :repo_ref,
+      :default_ref,
+      :metadata,
+      :is_primary,
+      :source_type,
+      :visibility,
+      :setup_command,
+      :cleanup_command,
+      :remote_provider,
+      :remote_workspace_ref,
+      :shared_workspace_key
+    ])
+    |> validate_required([:name])
+    |> validate_safe_cwd()
+  end
+
+  defp validate_safe_cwd(changeset) do
+    case get_change(changeset, :cwd) do
+      nil ->
+        changeset
+
+      cwd ->
+        if Cympho.Workspace.safe_host_cwd?(cwd) do
+          put_change(changeset, :cwd, Path.expand(cwd))
+        else
+          add_error(changeset, :cwd, "is not a safe workspace path")
+        end
+    end
   end
 end

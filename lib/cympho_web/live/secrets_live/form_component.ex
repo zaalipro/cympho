@@ -69,7 +69,7 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
           Secrets.update_secret(socket.assigns.secret, secret_params)
 
         :rotate ->
-          case secret_params["value"] || secret_params[:value] do
+          case blank_to_nil(secret_params["value"] || secret_params[:value]) do
             nil ->
               {:error,
                Secret.changeset(socket.assigns.secret, %{})
@@ -94,10 +94,24 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
             {:noreply, socket}
         end
 
+      {:error, :value_required} ->
+        changeset =
+          socket.assigns.secret
+          |> Secret.changeset(%{})
+          |> Ecto.Changeset.add_error(:value, "can't be blank")
+
+        {:noreply, assign(socket, :form, to_form(changeset, as: :secret))}
+
       {:error, changeset} ->
         {:noreply, assign(socket, :form, to_form(changeset, as: :secret))}
     end
   end
+
+  defp blank_to_nil(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: value
+  end
+
+  defp blank_to_nil(value), do: value
 
   defp can_manage_secrets?(%{
          assigns: %{current_user_id: user_id, company_id: company_id}
@@ -251,6 +265,7 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
             </div>
 
             <.input
+              :if={@form_mode != :edit}
               field={@form[:value]}
               label={if @form_mode == :rotate, do: "New Value", else: "Value"}
               type="password"

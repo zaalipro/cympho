@@ -69,5 +69,47 @@ defmodule Cympho.Workspaces.ExecutionWorkspace do
       :source_issue_id
     ])
     |> validate_required([:name, :project_id, :company_id, :project_workspace_id])
+    |> validate_safe_cwd()
+  end
+
+  def update_changeset(execution_workspace, attrs) do
+    execution_workspace
+    |> cast(attrs, [
+      :mode,
+      :strategy_type,
+      :name,
+      :status,
+      :cwd,
+      :repo_url,
+      :base_ref,
+      :branch_name,
+      :provider_type,
+      :provider_ref,
+      :derived_from_execution_workspace_id,
+      :last_used_at,
+      :opened_at,
+      :closed_at,
+      :cleanup_eligible_at,
+      :cleanup_reason,
+      :metadata,
+      :project_workspace_id,
+      :source_issue_id
+    ])
+    |> validate_required([:name, :project_workspace_id])
+    |> validate_safe_cwd()
+  end
+
+  defp validate_safe_cwd(changeset) do
+    case get_change(changeset, :cwd) do
+      nil ->
+        changeset
+
+      cwd ->
+        if Cympho.Workspace.safe_host_cwd?(cwd) do
+          put_change(changeset, :cwd, Path.expand(cwd))
+        else
+          add_error(changeset, :cwd, "is not a safe workspace path")
+        end
+    end
   end
 end

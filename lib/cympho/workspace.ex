@@ -16,6 +16,40 @@ defmodule Cympho.Workspace do
   """
   def workspace_root, do: @workspace_root
 
+  @unsafe_cwd_prefixes ~w(/etc /usr /bin /sbin /var /System /private/etc)
+
+  @doc """
+  Returns true when `cwd` is an expanded absolute host path that is safe
+  to use as a project or execution workspace directory.
+  """
+  @spec safe_host_cwd?(term()) :: boolean()
+  def safe_host_cwd?(cwd) when is_binary(cwd) do
+    trimmed = String.trim(cwd)
+
+    cond do
+      trimmed == "" ->
+        false
+
+      not String.starts_with?(trimmed, "/") ->
+        false
+
+      Enum.any?(Path.split(trimmed), &(&1 == "..")) ->
+        false
+
+      true ->
+        expanded = Path.expand(trimmed)
+        expanded != "/" and not unsafe_cwd_prefix?(expanded)
+    end
+  end
+
+  def safe_host_cwd?(_cwd), do: false
+
+  defp unsafe_cwd_prefix?(path) do
+    Enum.any?(@unsafe_cwd_prefixes, fn prefix ->
+      path == prefix or String.starts_with?(path, prefix <> "/")
+    end)
+  end
+
   @doc """
   Returns the workspace path for a given issue.
   """
