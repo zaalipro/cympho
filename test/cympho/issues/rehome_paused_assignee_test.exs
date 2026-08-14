@@ -153,6 +153,36 @@ defmodule Cympho.Issues.RehomePausedAssigneeTest do
       assert summary.manager_wakes == 0
     end
 
+    test "stops the live orchestrator before releasing the issue", %{
+      company: company,
+      agent: agent
+    } do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Live orch",
+          company_id: company.id,
+          status: :in_progress,
+          assignee_id: agent.id
+        })
+
+      unless Process.whereis(Cympho.OrchestratorRegistry) do
+        start_supervised!({Registry, keys: :unique, name: Cympho.OrchestratorRegistry})
+      end
+
+      {:ok, fake} =
+        Agent.start(fn -> :live end,
+          name: {:via, Registry, {Cympho.OrchestratorRegistry, issue.id}}
+        )
+
+      assert Cympho.Orchestrator.whereis(issue.id) == fake
+
+      assert {:ok, _summary} = RehomePaused.rehome_for_paused_agent(agent, reason: "pause")
+
+      assert Cympho.Orchestrator.whereis(issue.id) == nil
+      refute Process.alive?(fake)
+      assert Issues.get_issue!(issue.id).assignee_id == nil
+    end
+
     test "skips waking a paused manager and still clears assignee", %{
       company: company,
       manager: manager,

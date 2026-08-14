@@ -9,13 +9,14 @@ defmodule Cympho.ExecutionPolicies.ExecutionPolicy do
   schema "execution_policies" do
     field :name, :string
     field :stage_configs, {:array, :map}, default: []
+    field :company_id, :binary_id
 
     timestamps()
   end
 
   def changeset(policy, attrs) do
     policy
-    |> cast(attrs, [:name, :stage_configs])
+    |> cast(attrs, [:name, :stage_configs, :company_id])
     |> validate_required([:name, :stage_configs])
   end
 end

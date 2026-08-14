@@ -1353,16 +1353,13 @@ defmodule Cympho.Issues do
         end
       end
 
-      cond do
-        Application.get_env(:cympho, :auto_ignite_sync, false) ->
-          case run_classify.() do
-            {:ok, updated} -> updated
-            _ -> issue
-          end
-
-        true ->
-          Task.Supervisor.start_child(Cympho.TaskSupervisor, run_classify)
-          issue
+      if Application.get_env(:cympho, :auto_ignite_sync, false) do
+        case run_classify.() do
+          {:ok, updated} -> updated
+          _ -> issue
+        end
+      else
+        issue
       end
     else
       issue
@@ -1727,22 +1724,26 @@ defmodule Cympho.Issues do
   defp llm_sourced_routing?(%Issue{monitor_state: %{"routing" => %{"source" => "llm"}}}), do: true
   defp llm_sourced_routing?(_), do: false
 
-  defp do_update_issue(%Issue{} = issue, %{status: _new_status} = attrs) do
-    attrs = with_status_side_effects(issue, attrs)
-
-    issue
-    |> Issue.changeset(attrs)
-    |> optimistic_lock(:lock_version)
-    |> Repo.update()
-  end
-
   defp do_update_issue(%Issue{} = issue, attrs) do
     attrs = with_status_side_effects(issue, attrs)
 
-    issue
-    |> Issue.changeset(attrs)
-    |> optimistic_lock(:lock_version)
-    |> Repo.update()
+    changeset =
+      issue
+      |> Issue.changeset(attrs)
+      |> optimistic_lock(:lock_version)
+
+    try do
+      Repo.update(changeset)
+    rescue
+      Ecto.StaleEntryError ->
+        {:error,
+         Ecto.Changeset.add_error(
+           changeset,
+           :lock_version,
+           "is stale (concurrent modification)",
+           stale: true
+         )}
+    end
   end
 
   defp with_status_side_effects(%Issue{} = issue, attrs) when is_map(attrs) do
@@ -1935,6 +1936,7 @@ defmodule Cympho.Issues do
   defp complete_acting_agent_runs(runs, _agent_id), do: runs
 
   defp do_transition(%Issue{} = issue, new_status) do
+    issue = %{issue | execution_state: ExecutionState.normalize(issue.execution_state)}
     attrs = %{status: new_status}
 
     attrs =
@@ -2321,15 +2323,20 @@ defmodule Cympho.Issues do
     {unblocked_ids, company_ids} =
       Enum.reduce(dependents, {[], MapSet.new()}, fn dependent, {ids, companies} ->
         if all_blockers_done?(dependent) do
-          {:ok, updated} = update_issue(dependent, %{status: :todo})
-          add_system_comment(updated, "Auto-unblocked")
+          case update_issue(dependent, %{status: :todo}) do
+            {:ok, updated} ->
+              add_system_comment(updated, "Auto-unblocked")
 
-          companies =
-            if is_binary(updated.company_id),
-              do: MapSet.put(companies, updated.company_id),
-              else: companies
+              companies =
+                if is_binary(updated.company_id),
+                  do: MapSet.put(companies, updated.company_id),
+                  else: companies
 
-          {[updated.id | ids], companies}
+              {[updated.id | ids], companies}
+
+            {:error, _} ->
+              {ids, companies}
+          end
         else
           {ids, companies}
         end
@@ -3097,11 +3104,16 @@ defmodule Cympho.Issues do
                 execution_state: final_state,
                 assignee_id: nil
               })
-              |> tap(fn {:ok, updated} ->
+
+            case result do
+              {:ok, updated} ->
                 unblock_dependents(issue.id)
                 _ = Wakes.notify_children_completed(issue)
                 maybe_trigger_verification(updated)
-              end)
+
+              {:error, _} ->
+                :ok
+            end
 
             broadcast_stage_completed(result, policy, completed_index, :final)
             result
@@ -3115,13 +3127,18 @@ defmodule Cympho.Issues do
                 assignee_id: next_assignee,
                 status: :in_review
               })
-              |> tap(fn {:ok, _} ->
+
+            case result do
+              {:ok, _} ->
                 if ExecutionState.require_human?(next_state, policy) do
                   notify_human_approval_needed(issue, next_state)
                 else
                   wake_next_participant(next_assignee, issue.id)
                 end
-              end)
+
+              {:error, _} ->
+                :ok
+            end
 
             broadcast_stage_completed(result, policy, completed_index, :advanced)
             result
@@ -3134,14 +3151,22 @@ defmodule Cympho.Issues do
           ExecutionState.original_executor(issue.execution_state) ||
             changes_state.current_participant
 
-        update_issue(issue, %{
-          execution_state: changes_state,
-          assignee_id: executor_id,
-          status: :in_progress
-        })
-        |> tap(fn {:ok, _} ->
-          wake_executor(executor_id, issue.id)
-        end)
+        result =
+          update_issue(issue, %{
+            execution_state: changes_state,
+            assignee_id: executor_id,
+            status: :in_progress
+          })
+
+        case result do
+          {:ok, _} ->
+            wake_executor(executor_id, issue.id)
+
+          {:error, _} ->
+            :ok
+        end
+
+        result
     end
   end
 

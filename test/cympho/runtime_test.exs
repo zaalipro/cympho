@@ -477,10 +477,11 @@ defmodule Cympho.RuntimeTest do
     alias Cympho.ExecutionPolicies
     alias Cympho.Issues.ExecutionState
 
-    setup %{company: _company, agent: _agent, issue: _issue} do
+    setup %{company: company, agent: _agent, issue: _issue} do
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           name: "Test Policy",
+          company_id: company.id,
           stage_configs: [
             %{
               "type" => "executor",
@@ -614,6 +615,38 @@ defmodule Cympho.RuntimeTest do
         })
 
       assert {:ok, _context} = Runtime.preflight(issue, agent)
+    end
+
+    test "preflight uses JSONB-normalized execution_state after reload", %{
+      company: company,
+      agent: agent,
+      issue: issue,
+      policy: policy
+    } do
+      {:ok, other_agent} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Other Gate Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      state =
+        ExecutionState.initialize(policy, agent.id)
+        |> Map.put(:current_participant, other_agent.id)
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          execution_policy_id: policy.id,
+          execution_state: state
+        })
+
+      reloaded = Repo.get(Cympho.Issues.Issue, issue.id)
+
+      assert {:error, {:stage_gate_blocked, :stage_incomplete}} =
+               Runtime.preflight(reloaded, agent)
     end
   end
 
