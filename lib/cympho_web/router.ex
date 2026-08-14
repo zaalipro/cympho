@@ -1,6 +1,8 @@
 defmodule CymphoWeb.Router do
   use CymphoWeb, :router
 
+  import Phoenix.LiveDashboard.Router
+
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -37,6 +39,10 @@ defmodule CymphoWeb.Router do
 
   pipeline :board do
     plug CymphoWeb.Plugs.BoardAuth
+  end
+
+  pipeline :beam_dashboard do
+    plug :require_dashboard_operator
   end
 
   scope "/", CymphoWeb do
@@ -364,4 +370,36 @@ defmodule CymphoWeb.Router do
     resources "/budgets", BudgetController, only: [:create, :update, :delete]
     patch "/companies/:id/governance-config", CompanyController, :update_governance_config
   end
+
+  # ── BEAM introspection (instance operator) ──
+  #
+  # Live process list, mailbox depths, memory, ETS, sockets, request logging,
+  # and the metrics defined in Cympho.Telemetry.Metrics. This is a node-wide
+  # view that crosses every tenant, so it is deliberately *not* gated by company
+  # role — a company owner is not an instance operator. It needs separately
+  # configured credentials and 404s when they are absent, so an install that
+  # never sets them does not advertise the route.
+  scope "/" do
+    pipe_through [:browser, :beam_dashboard]
+
+    live_dashboard "/beam",
+      metrics: Cympho.Telemetry.Metrics,
+      ecto_repos: [Cympho.Repo]
+  end
+
+  defp require_dashboard_operator(conn, _opts) do
+    config = Application.get_env(:cympho, :beam_dashboard, [])
+    username = config[:username]
+    password = config[:password]
+
+    if present?(username) and present?(password) do
+      Plug.BasicAuth.basic_auth(conn, username: username, password: password)
+    else
+      conn
+      |> send_resp(404, "Not Found")
+      |> halt()
+    end
+  end
+
+  defp present?(value), do: is_binary(value) and String.trim(value) != ""
 end

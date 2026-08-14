@@ -31,6 +31,11 @@ config :cympho,
 # Formatter and metadata allowlist come from config/config.exs so dev, test,
 # and prod render the same structured fields.
 
+# BEAM dashboard at /beam. Dev-only fixed credentials; production reads
+# CYMPHO_DASHBOARD_USER / CYMPHO_DASHBOARD_PASSWORD in runtime.exs and serves a
+# 404 when they are unset.
+config :cympho, :beam_dashboard, username: "cympho", password: "cympho"
+
 config :cympho, :skill_manifest_dir, "priv/skill_manifests"
 
 config :cympho, :claude_code_command, System.get_env("CYMPHO_CLAUDE_COMMAND") || "cz"

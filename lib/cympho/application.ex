@@ -53,6 +53,9 @@ defmodule Cympho.Application do
       Cympho.RateLimiting.AgentActionLimiter,
       Cympho.WebhookDedup,
       Cympho.EventStore,
+      # Poller-backed VM and runtime measurements. DB-free and defensive, so it
+      # runs in every environment.
+      Cympho.Telemetry.Metrics,
       Cympho.Orchestrator.Dispatcher,
       backlog_planner_child(),
       oversight_patrol_child(),

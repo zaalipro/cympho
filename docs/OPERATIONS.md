@@ -20,6 +20,32 @@ Development enables autonomous dispatch only when
 `CYMPHO_DISPATCH_ONLY_ISSUE_ID` for a one-issue smoke before opening the full
 queue.
 
+## BEAM dashboard
+
+`/beam` exposes live process, memory, ETS, socket, request-log, and metric
+views for the node itself: which orchestrators and agent heartbeats are alive,
+how deep the mailbox is on the singleton processes every dispatch and broadcast
+passes through, and where run-queue time is going.
+
+This is an **instance operator** surface, not a tenant one. It crosses every
+company on the node, so it is deliberately not reachable through company
+membership — being a company owner does not grant access. It requires its own
+credentials:
+
+```text
+CYMPHO_DASHBOARD_USER
+CYMPHO_DASHBOARD_PASSWORD
+```
+
+With either unset the route returns 404, so an install that has not opted in
+does not advertise that the dashboard exists. Development uses the fixed
+credentials `cympho` / `cympho`.
+
+Metrics come from `Cympho.Telemetry.Metrics`, which is reporter-agnostic: the
+same definitions feed StatsD, Prometheus, or an OTLP exporter without touching
+any emit site. Metric tags deliberately exclude per-tenant identifiers so a
+large install cannot grow an unbounded number of series.
+
 ## Production configuration
 
 Production requires:

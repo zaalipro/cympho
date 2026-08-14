@@ -146,6 +146,17 @@ end
 config :cympho, :agent_auth,
   secret_key_base: System.get_env("AGENT_AUTH_SECRET") || System.get_env("SECRET_KEY_BASE")
 
+# BEAM introspection dashboard at /beam. This is a node-wide operator surface
+# that crosses every tenant, so it is not gated by company role — it needs its
+# own credentials. Both must be set or the route returns 404, which is the
+# default for any install that does not opt in.
+dashboard_user = System.get_env("CYMPHO_DASHBOARD_USER")
+dashboard_password = System.get_env("CYMPHO_DASHBOARD_PASSWORD")
+
+if dashboard_user && dashboard_password do
+  config :cympho, :beam_dashboard, username: dashboard_user, password: dashboard_password
+end
+
 # Sentry crash reporting. When SENTRY_DSN is unset (typical dev/test), the
 # SDK silently no-ops — no network calls, no errors. Production sets the env.
 if sentry_dsn = System.get_env("SENTRY_DSN") do
