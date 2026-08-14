@@ -802,7 +802,9 @@ defmodule Mix.Tasks.Cympho.Compare do
     checks = [
       module_with_fun?(Cympho.Orchestrator.Dispatcher, :runnable_candidate?, 1),
       String.contains?(dispatcher_source, "status in [:blocked, \"blocked\"]"),
-      String.contains?(dispatcher_source, "Enum.filter(&runnable_candidate?/1)"),
+      # Shape-agnostic: what matters is that candidate selection is gated by
+      # runnable_candidate?/1, not how the filter call is spelled.
+      String.contains?(dispatcher_source, "&runnable_candidate?/1"),
       String.contains?(issues_source, "updated.status in [:done, :cancelled]"),
       String.contains?(issues_source, "unblock_dependents(issue.id)"),
       String.contains?(wakes_source, "blocker.status in [:done, :cancelled]")

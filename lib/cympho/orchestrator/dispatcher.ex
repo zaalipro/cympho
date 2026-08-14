@@ -988,7 +988,41 @@ defmodule Cympho.Orchestrator.Dispatcher do
     Map.get(by_co, company_id, 0) >= cap
   end
 
+  # Runnability — issue-level runtime pause, an unresolved blocker, low-power
+  # mode — cannot be expressed in the SQL where clause, so it is filtered in
+  # Elixir after the LIMIT. Fetching a single page therefore lets non-runnable
+  # issues at the head of the *global* priority order starve dispatch for every
+  # tenant, indefinitely: nothing clears a runtime pause on a timer, and a
+  # budget hard stop sets that flag automatically, so this is not only operator
+  # error. Walking a bounded number of pages makes a run of non-runnable issues
+  # cost a few more rows instead of all dispatch.
+  @candidate_pages 5
+
   defp fetch_candidate_issues(limit, company_id) do
+    query = candidate_query(company_id)
+
+    Enum.reduce_while(0..(@candidate_pages - 1), [], fn page, acc ->
+      rows =
+        query
+        |> limit(^limit)
+        |> offset(^(page * limit))
+        |> Cympho.Repo.all()
+
+      runnable =
+        (acc ++ Enum.filter(rows, &runnable_candidate?/1))
+        |> Enum.uniq_by(& &1.id)
+
+      cond do
+        # Enough to fill the slots this poll can use.
+        length(runnable) >= limit -> {:halt, Enum.take(runnable, limit)}
+        # Short page means the candidate set is exhausted.
+        length(rows) < limit -> {:halt, runnable}
+        true -> {:cont, runnable}
+      end
+    end)
+  end
+
+  defp candidate_query(company_id) do
     active_states = @active_states
 
     query =
@@ -1027,9 +1061,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
     query
     |> preload([:blocked_by, :assignee, :company])
     |> Issues.order_for_dispatch()
-    |> limit(^limit)
-    |> Cympho.Repo.all()
-    |> Enum.filter(&runnable_candidate?/1)
   end
 
   # Unscoped issues are never dispatchable (fail-closed tenancy).

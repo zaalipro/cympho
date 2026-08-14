@@ -326,6 +326,53 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
     assert Dispatcher.runnable_candidate?(preloaded)
   end
 
+  test "paused issues at the head of the queue do not starve dispatch", %{
+    company: company,
+    agent: agent,
+    issue: issue
+  } do
+    # Runnability is filtered in Elixir after the SQL LIMIT, so a full page of
+    # non-runnable issues used to leave nothing to dispatch — for every tenant,
+    # on every poll, indefinitely. Nothing clears a runtime pause on a timer,
+    # and a budget hard stop sets that flag automatically.
+    for n <- 1..14 do
+      {:ok, paused} =
+        Issues.create_issue(%{
+          title: "Paused critical #{n}",
+          description: "Ranks above the dispatchable issue",
+          status: :todo,
+          priority: :critical,
+          company_id: company.id,
+          assignee_id: agent.id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, _} = Issues.pause_issue_runtime(paused, reason: "budget hard stop")
+    end
+
+    test_pid = self()
+
+    with_mocks([
+      {Runtime, [], [dispatchable?: fn _issue, _agent -> :ok end]},
+      {Orchestrator, [],
+       [
+         start_and_run: fn checked_out, _agent_id ->
+           send(test_pid, {:dispatched, checked_out.id})
+           {:ok, spawn(fn -> Process.sleep(200) end)}
+         end,
+         whereis: fn _issue_id -> nil end,
+         stop: fn _issue_id, _reason -> :ok end
+       ]}
+    ]) do
+      assert {:noreply, %State{} = state} =
+               Dispatcher.handle_info({:poll_company, company.id}, State.new())
+
+      assert_received {:dispatched, dispatched_id}
+      assert dispatched_id == issue.id
+      assert MapSet.member?(state.running_issue_ids, issue.id)
+    end
+  end
+
   test "orchestrator start failure releases the checkout so the retry can run", %{
     company: company,
     issue: issue
