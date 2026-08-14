@@ -2,11 +2,9 @@ defmodule Cympho.Labels do
   @moduledoc """
   Labels context.
 
-  Labels are intentionally **global** (a shared taxonomy): the schema carries a
-  `company_id`, but listing is not scoped by it and the unique index is on `name`
-  alone. Making labels per-company would be a deliberate feature — scoped create,
-  a `(company_id, name)` unique constraint, and a backfill of existing rows — not
-  a bugfix. Don't silently scope `list_labels/0` or `list_labels_page/1`.
+  Request paths use `list_company_labels_page/2`, `list_labels_by_company/1`,
+  and `get_company_label/2`. `list_labels/0` and `list_labels_page/1` stay
+  unscoped. The unique index remains on `name` alone.
   """
 
   import Ecto.Query, warn: false
@@ -25,6 +23,19 @@ defmodule Cympho.Labels do
   """
   def list_labels_page(opts \\ []) do
     Label
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:name, :asc}, {:id, :asc}]
+    )
+  end
+
+  @doc """
+  Keyset (infinite-scroll) page of one company's labels, ordered by name ascending.
+  """
+  def list_company_labels_page(company_id, opts \\ []) do
+    Label
+    |> where(company_id: ^company_id)
     |> Cympho.Pagination.page(
       limit: Keyword.get(opts, :limit, 50),
       after: Keyword.get(opts, :after),

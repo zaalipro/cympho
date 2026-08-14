@@ -11,6 +11,20 @@
       </div>
     </.header>
 
+    <div
+      :if={@flash["info"]}
+      class="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
+    >
+      {@flash["info"]}
+    </div>
+
+    <div
+      :if={@flash["error"]}
+      class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
+    >
+      {@flash["error"]}
+    </div>
+
     <div class="grid gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] lg:items-start">
       <section class="ember-glass overflow-hidden">
         <div class="border-b border-white/10 px-5 py-4">
