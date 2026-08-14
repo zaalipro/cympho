@@ -617,4 +617,69 @@ defmodule Cympho.RoutineTriggersTest do
       assert %{status: ["is invalid"]} = errors_on(changeset)
     end
   end
+
+  describe "Quantum job naming" do
+    setup do
+      {:ok, routine} = Routines.create_routine(%{name: "Quantum Routine"})
+      %{routine: routine}
+    end
+
+    test "scheduling a trigger does not mint a permanent atom", %{routine: routine} do
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
+      # Job names used to be String.to_atom("routine_trigger_" <> uuid). Atoms
+      # are never garbage collected, so every trigger ever created on a node
+      # left one behind, and the VM aborts rather than raises at the limit.
+      assert_raise ArgumentError, fn ->
+        String.to_existing_atom("routine_trigger_" <> trigger.id)
+      end
+    end
+
+    test "schedule, reschedule and unschedule keep exactly one job", %{routine: routine} do
+      start_supervised!(Cympho.Scheduler)
+
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
+      assert jobs_for(trigger.id) == 1
+
+      # References cannot be recomputed from a trigger id, so rescheduling has
+      # to find and replace the existing job rather than overwrite it by name.
+      :ok = RoutineTriggers.maybe_schedule_quantum_job(trigger)
+      assert jobs_for(trigger.id) == 1
+
+      :ok = RoutineTriggers.unschedule_quantum_job(trigger)
+      assert jobs_for(trigger.id) == 0
+    end
+
+    test "a job still carries the trigger it fires", %{routine: routine} do
+      start_supervised!(Cympho.Scheduler)
+
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "*/5 * * * *"
+        })
+
+      assert Enum.any?(Cympho.Scheduler.jobs(), fn {name, job} ->
+               is_reference(name) and
+                 job.task ==
+                   {Cympho.RoutineTriggers, :execute_scheduled_trigger, [trigger.id]}
+             end)
+    end
+  end
+
+  defp jobs_for(trigger_id) do
+    Cympho.Scheduler.jobs()
+    |> Enum.count(fn {_name, job} ->
+      job.task == {Cympho.RoutineTriggers, :execute_scheduled_trigger, [trigger_id]}
+    end)
+  end
 end

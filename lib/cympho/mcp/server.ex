@@ -26,6 +26,11 @@ defmodule Cympho.Mcp.Server do
   # Shape is intentional and part of the external contract — do not rename keys.
   @rate_limited_error %{error: "rate_limited", success: false}
 
+  # Plugin tools reach third-party services; 5 seconds (the GenServer.call
+  # default) is not a realistic budget for one. Overridable at runtime via
+  # `config :cympho, :mcp_dynamic_tool_timeout_ms`.
+  @dynamic_tool_timeout_ms 30_000
+
   def tools do
     static_tools()
   end
@@ -239,11 +244,7 @@ defmodule Cympho.Mcp.Server do
                 plugin_not_found
 
               pid ->
-                case GenServer.call(
-                       pid,
-                       {:execute_tool, tool.name, args || %{},
-                        %{company_id: agent.company_id, agent_id: agent.id}}
-                     ) do
+                case execute_plugin_tool(pid, tool, args, agent) do
                   {:ok, result} ->
                     %{
                       success: true,
@@ -270,6 +271,31 @@ defmodule Cympho.Mcp.Server do
       _ ->
         plugin_not_found
     end
+  end
+
+  # Plugin workers run third-party code that typically makes network calls, so
+  # the 5s `GenServer.call/2` default was far too short. Worse, a call timeout
+  # is an *exit*, which `call_tool/3`'s `rescue` cannot catch — the MCP request
+  # 500'd instead of returning the structured error shape every other dynamic
+  # tool failure uses, and the caller learned nothing about which tool hung.
+  defp execute_plugin_tool(pid, tool, args, agent) do
+    request =
+      {:execute_tool, tool.name, args || %{}, %{company_id: agent.company_id, agent_id: agent.id}}
+
+    GenServer.call(pid, request, dynamic_tool_timeout())
+  catch
+    :exit, {:timeout, _call} ->
+      {:error, {:tool_timeout, tool.name, dynamic_tool_timeout()}}
+
+    :exit, {:noproc, _call} ->
+      {:error, {:plugin_unavailable, tool.name}}
+
+    :exit, reason ->
+      {:error, {:plugin_exit, tool.name, inspect(reason)}}
+  end
+
+  defp dynamic_tool_timeout do
+    Application.get_env(:cympho, :mcp_dynamic_tool_timeout_ms, @dynamic_tool_timeout_ms)
   end
 
   defp do_static_call("list_issues", args, agent) do

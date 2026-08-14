@@ -336,13 +336,20 @@ defmodule Cympho.RoutineTriggers do
   Schedules a single schedule trigger into Quantum.
   """
   def maybe_schedule_quantum_job(%RoutineTrigger{type: "schedule", enabled: true} = trigger) do
-    job_name = quantum_job_name(trigger)
     schedule = Crontab.CronExpression.Parser.parse!(trigger.cron_expression)
 
+    # Names used to be `String.to_atom("routine_trigger_" <> uuid)`. Atoms are
+    # never garbage collected, so every trigger ever created on a node minted a
+    # permanent one — a monotonically growing table that only a restart clears,
+    # and the VM aborts rather than raises at the atom limit. A reference costs
+    # nothing and is reclaimed, but it cannot be recomputed from the trigger id,
+    # so the job records its trigger as an MFA task and is found by that.
+    unschedule_quantum_job(trigger)
+
     Cympho.Scheduler.new_job()
-    |> Quantum.Job.set_name(job_name)
+    |> Quantum.Job.set_name(make_ref())
     |> Quantum.Job.set_schedule(schedule)
-    |> Quantum.Job.set_task(fn -> execute_scheduled_trigger(trigger.id) end)
+    |> Quantum.Job.set_task({__MODULE__, :execute_scheduled_trigger, [trigger.id]})
     |> Quantum.Job.set_state(:active)
     |> Cympho.Scheduler.add_job()
 
@@ -351,16 +358,38 @@ defmodule Cympho.RoutineTriggers do
 
   def maybe_schedule_quantum_job(_trigger), do: :ok
 
-  def unschedule_quantum_job(%RoutineTrigger{} = trigger) do
-    job_name = quantum_job_name(trigger)
-    Cympho.Scheduler.delete_job(job_name)
+  def unschedule_quantum_job(%RoutineTrigger{id: id}), do: unschedule_quantum_job_by_id(id)
+
+  def unschedule_quantum_job_by_id(trigger_id) when is_binary(trigger_id) do
+    case quantum_job_name_for(trigger_id) do
+      nil -> :ok
+      name -> Cympho.Scheduler.delete_job(name)
+    end
+
     :ok
   rescue
     _ -> :ok
+  catch
+    # The scheduler is not started in every environment; a missing one is not
+    # a scheduling failure.
+    :exit, _ -> :ok
   end
 
-  defp quantum_job_name(%RoutineTrigger{id: id}), do: quantum_job_name_from_id(id)
-  defp quantum_job_name_from_id(id), do: String.to_atom("routine_trigger_" <> id)
+  # Quantum job names must be atoms or references, so the trigger id lives in
+  # the task instead and the job is located by scanning for it.
+  defp quantum_job_name_for(trigger_id) do
+    Cympho.Scheduler.jobs()
+    |> Enum.find_value(fn {name, job} ->
+      case job.task do
+        {__MODULE__, :execute_scheduled_trigger, [^trigger_id]} -> name
+        _ -> nil
+      end
+    end)
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
+  end
 
   def execute_scheduled_trigger(trigger_id) do
     case get_trigger(trigger_id) do
@@ -368,8 +397,11 @@ defmodule Cympho.RoutineTriggers do
         fire_trigger(trigger, trigger_type: "schedule")
 
       {:error, :not_found} ->
-        Logger.warning("Scheduled trigger #{trigger_id} not found, removing from Quantum")
-        Cympho.Scheduler.delete_job(quantum_job_name_from_id(trigger_id))
+        Logger.warning("scheduled trigger not found, removing from Quantum",
+          component: "routine_triggers"
+        )
+
+        unschedule_quantum_job_by_id(trigger_id)
     end
   end
 

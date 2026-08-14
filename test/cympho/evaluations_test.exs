@@ -494,6 +494,11 @@ defmodule Cympho.EvaluationsTest do
 
   describe "public API surface for comparator" do
     test "exports required functions" do
+      # function_exported?/3 answers false for a module that simply has not been
+      # loaded yet, and an alias does not load one. Without this the assertion
+      # depends on whether some earlier test happened to call into Evaluations.
+      assert Code.ensure_loaded?(Evaluations)
+
       assert function_exported?(Evaluations, :record_feedback, 2)
       assert function_exported?(Evaluations, :rerun_suite, 2)
       assert function_exported?(Evaluations, :compare_runs, 2)

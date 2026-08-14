@@ -448,6 +448,81 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
              }
     end
 
+    test "a plugin tool that hangs returns a structured timeout, not an exit", %{
+      agent: agent,
+      company: company,
+      plugin: plugin
+    } do
+      # Plugin workers run third-party code that makes network calls. A call
+      # timeout is an *exit*, which call_tool/3's rescue cannot catch — the MCP
+      # request used to 500 instead of telling the caller which tool hung.
+      original = Application.get_env(:cympho, :mcp_dynamic_tool_timeout_ms)
+      Application.put_env(:cympho, :mcp_dynamic_tool_timeout_ms, 150)
+
+      on_exit(fn ->
+        if original do
+          Application.put_env(:cympho, :mcp_dynamic_tool_timeout_ms, original)
+        else
+          Application.delete_env(:cympho, :mcp_dynamic_tool_timeout_ms)
+        end
+      end)
+
+      register_stub_worker(plugin.id, fn -> Process.sleep(:infinity) end)
+
+      {:ok, _} =
+        ToolRegistry.register(company.id, %{
+          "name" => "hanging_tool",
+          "description" => "never replies",
+          "plugin_id" => plugin.id
+        })
+
+      {:ok, _} =
+        ToolGrants.create_grant(%{
+          company_id: company.id,
+          tool_name: "hanging_tool",
+          agent_id: agent.id,
+          status: "allow"
+        })
+
+      assert %{success: false, dynamic: true, tool: "hanging_tool", error: error} =
+               Server.call_tool("hanging_tool", %{}, agent)
+
+      assert error =~ "tool_timeout"
+      assert error =~ "hanging_tool"
+    end
+
+    test "a plugin worker that dies mid-call returns a structured error", %{
+      agent: agent,
+      company: company,
+      plugin: plugin
+    } do
+      register_stub_worker(plugin.id, fn ->
+        receive do
+          _ -> exit(:boom)
+        end
+      end)
+
+      {:ok, _} =
+        ToolRegistry.register(company.id, %{
+          "name" => "crashing_tool",
+          "description" => "exits on call",
+          "plugin_id" => plugin.id
+        })
+
+      {:ok, _} =
+        ToolGrants.create_grant(%{
+          company_id: company.id,
+          tool_name: "crashing_tool",
+          agent_id: agent.id,
+          status: "allow"
+        })
+
+      assert %{success: false, dynamic: true, tool: "crashing_tool", error: error} =
+               Server.call_tool("crashing_tool", %{}, agent)
+
+      assert error =~ "plugin_exit"
+    end
+
     test "authorized dynamic call with unknown plugin_id returns plugin_not_found", %{
       agent: agent,
       company: company
@@ -672,5 +747,23 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
 
       assert ToolRegistry.get_active(company_b.id, "foreign_arg_tool") == {:error, :not_found}
     end
+  end
+
+  # Stands in for a plugin worker so Plugins.Runtime.whereis/1 finds a process
+  # we control. The real worker machinery is not needed to exercise how the MCP
+  # server handles one that hangs or dies.
+  defp register_stub_worker(plugin_id, body) do
+    test_pid = self()
+
+    pid =
+      spawn(fn ->
+        {:ok, _} = Registry.register(Cympho.Plugins.ProcessRegistry, plugin_id, nil)
+        send(test_pid, :stub_registered)
+        body.()
+      end)
+
+    assert_receive :stub_registered, 2_000
+    on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
+    pid
   end
 end
