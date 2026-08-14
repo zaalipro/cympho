@@ -6,6 +6,7 @@ defmodule CymphoWeb.LabelLive.Index do
   @impl true
   def mount(_params, _session, socket) do
     changeset = Labels.change_label(%Label{})
+    company_id = socket.assigns.current_company.id
 
     {:ok,
      socket
@@ -13,7 +14,7 @@ defmodule CymphoWeb.LabelLive.Index do
      |> assign(:label_changeset, changeset)
      |> assign(:form, to_form(changeset))
      |> assign(:editing_label, nil)
-     |> init_stream(:labels, &fetch_labels(&1))}
+     |> init_stream(:labels, &fetch_labels(company_id, &1))}
   end
 
   @impl true
@@ -26,13 +27,16 @@ defmodule CymphoWeb.LabelLive.Index do
 
   @impl true
   def handle_event("create_label", %{"label" => label_params}, socket) do
-    case Labels.create_label(label_params) do
+    company_id = socket.assigns.current_company.id
+    params = Map.put(label_params, "company_id", company_id)
+
+    case Labels.create_label(params) do
       {:ok, _} ->
         changeset = Labels.change_label(%Label{})
 
         {:noreply,
          socket
-         |> reset_stream(:labels, &fetch_labels(&1))
+         |> reset_stream(:labels, &fetch_labels(company_id, &1))
          |> assign(:label_changeset, changeset)
          |> assign(:form, to_form(changeset))
          |> put_flash(:info, "Label created")}
@@ -43,24 +47,31 @@ defmodule CymphoWeb.LabelLive.Index do
   end
 
   def handle_event("edit_label", %{"id" => id}, socket) do
-    label = Labels.get_label!(id)
-    changeset = Labels.change_label(label)
+    case Labels.get_company_label(socket.assigns.current_company.id, id) do
+      {:ok, label} ->
+        changeset = Labels.change_label(label)
 
-    {:noreply,
-     socket
-     |> assign(:editing_label, label)
-     |> assign(:label_changeset, changeset)
-     |> assign(:form, to_form(changeset))}
+        {:noreply,
+         socket
+         |> assign(:editing_label, label)
+         |> assign(:label_changeset, changeset)
+         |> assign(:form, to_form(changeset))}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Label not found")}
+    end
   end
 
   def handle_event("update_label", %{"label" => params}, socket) do
+    company_id = socket.assigns.current_company.id
+
     case Labels.update_label(socket.assigns.editing_label, params) do
       {:ok, _} ->
         changeset = Labels.change_label(%Label{})
 
         {:noreply,
          socket
-         |> reset_stream(:labels, &fetch_labels(&1))
+         |> reset_stream(:labels, &fetch_labels(company_id, &1))
          |> assign(:editing_label, nil)
          |> assign(:label_changeset, changeset)
          |> assign(:form, to_form(changeset))
@@ -82,21 +93,29 @@ defmodule CymphoWeb.LabelLive.Index do
   end
 
   def handle_event("delete_label", %{"id" => id}, socket) do
-    label = Labels.get_label!(id)
-    {:ok, _} = Labels.delete_label(label)
+    company_id = socket.assigns.current_company.id
 
-    {:noreply,
-     socket
-     |> reset_stream(:labels, &fetch_labels(&1))
-     |> put_flash(:info, "Label deleted")}
+    case Labels.get_company_label(company_id, id) do
+      {:ok, label} ->
+        {:ok, _} = Labels.delete_label(label)
+
+        {:noreply,
+         socket
+         |> reset_stream(:labels, &fetch_labels(company_id, &1))
+         |> put_flash(:info, "Label deleted")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Label not found")}
+    end
   end
 
   def handle_event("next-page", _params, socket) do
-    {:reply, %{}, load_next(socket, :labels, &fetch_labels(&1))}
+    {:reply, %{},
+     load_next(socket, :labels, &fetch_labels(socket.assigns.current_company.id, &1))}
   end
 
-  defp fetch_labels(cursor) do
-    Labels.list_labels_page(after: cursor)
+  defp fetch_labels(company_id, cursor) do
+    Labels.list_company_labels_page(company_id, after: cursor)
   end
 
   defp text_color("#" <> hex) do

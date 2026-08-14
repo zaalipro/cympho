@@ -37,7 +37,8 @@ defmodule CymphoWeb.Components.SettingsLayout do
        {:integrations, "Integrations", "/settings/integrations", "hero-puzzle-piece-mini"},
        {:adapters, "Adapters", "/settings/adapters", "hero-cpu-chip-mini"},
        {:secrets, "Secrets", "/settings/secrets", "hero-key-mini"},
-       {:proxies, "Proxies", "/settings/proxies", "hero-globe-alt-mini"}
+       {:proxies, "Proxies", "/settings/proxies", "hero-globe-alt-mini"},
+       {:labels, "Labels", "/labels", "hero-tag-mini"}
      ]},
     {"Governance",
      [

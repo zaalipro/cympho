@@ -26,7 +26,7 @@ defmodule CymphoWeb.SearchLive.Index do
       |> assign(:projects, list_projects_scoped(company_id))
       |> assign(:goals, list_goals_scoped(company_id))
       |> assign(:role_options, role_options())
-      |> assign(:labels, Labels.list_labels())
+      |> assign(:labels, list_labels_scoped(company_id))
       |> assign(:filters, filters)
       |> assign(:active_tab, :all)
       |> assign(:total_count, 0)
@@ -533,6 +533,9 @@ defmodule CymphoWeb.SearchLive.Index do
 
   defp list_goals_scoped(nil), do: []
   defp list_goals_scoped(company_id), do: Goals.list_goals_by_company(company_id)
+
+  defp list_labels_scoped(nil), do: []
+  defp list_labels_scoped(company_id), do: Labels.list_labels_by_company(company_id)
 
   defp role_options do
     Agent.role_options()
