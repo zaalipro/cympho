@@ -4,7 +4,7 @@ defmodule Cympho.Skills.Sandbox do
   """
   alias Cympho.{Agents.Agent, Skills.Sandbox.Audit, Repo}
 
-  @role_hierarchy [cto: 5, ceo: 4, engineer: 3, product_manager: 2, designer: 1]
+  @role_hierarchy %{cto: 5, ceo: 4, engineer: 3, product_manager: 2, designer: 1}
 
   @capability_roles %{
     "system.admin" => {:cto, 5},

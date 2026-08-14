@@ -3,6 +3,20 @@ defmodule Cympho.Skills.Sandbox.AuditTest do
   alias Cympho.Skills.Sandbox.Audit
   alias Cympho.{Agents, Companies, Skills}
 
+  test "role hierarchy is a map of the five known roles" do
+    assert Cympho.Skills.Sandbox.role_hierarchy() == %{
+             cto: 5,
+             ceo: 4,
+             engineer: 3,
+             product_manager: 2,
+             designer: 1
+           }
+
+    assert Cympho.Skills.Sandbox.get_role_level(:cto) == 5
+    assert Cympho.Skills.Sandbox.get_role_level(:ceo) == 4
+    assert Cympho.Skills.Sandbox.get_role_level(:engineer) == 3
+  end
+
   test "logs successful authorization" do
     {:ok, company} =
       Companies.create_company(%{name: "Test Company", slug: "test-#{System.unique_integer()}"})

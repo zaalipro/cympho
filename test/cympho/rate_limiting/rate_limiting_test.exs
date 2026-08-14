@@ -48,6 +48,20 @@ defmodule Cympho.RateLimitingTest do
     end
   end
 
+  describe "dedup_broadcast/3" do
+    test "appends to EventStore when the event is broadcast" do
+      topic = "company:#{Ecto.UUID.generate()}:issues"
+      payload = %{n: 1}
+
+      Cympho.RateLimiting.BroadcastDedup.reset()
+      assert :ok = RateLimiting.dedup_broadcast(topic, "issue_update", payload)
+
+      {:ok, events} = Cympho.EventStore.fetch_since(topic, nil)
+      assert length(events) == 1
+      assert hd(events).payload == %{event: "issue_update", payload: payload}
+    end
+  end
+
   describe "check_heartbeat_throttle/1" do
     test "allows first heartbeat" do
       socket = %Phoenix.Socket{assigns: %{}}

@@ -99,6 +99,45 @@ defmodule Cympho.Adapters.HealthCheckerTest do
     end
   end
 
+  test "deleted agent keeps map state and get_health_status still works" do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Health Delete Corp",
+        slug: "health-delete-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, kept} =
+      Agents.create_agent(%{
+        name: "Kept Agent",
+        role: :engineer,
+        status: :idle,
+        company_id: company.id
+      })
+
+    {:ok, deleted} =
+      Agents.create_agent(%{
+        name: "Deleted Agent",
+        role: :engineer,
+        status: :idle,
+        company_id: company.id
+      })
+
+    pid = Process.whereis(HealthChecker)
+    send(pid, :check_all)
+    state = :sys.get_state(pid)
+    assert is_map(state)
+
+    {:ok, _} = Agents.delete_agent(deleted)
+
+    assert :ok = HealthChecker.check_agent_now(deleted.id)
+    state = :sys.get_state(pid)
+    assert is_map(state)
+    refute Map.has_key?(state.consecutive_failures, deleted.id)
+    refute Map.has_key?(state.last_health_status, deleted.id)
+    assert {:ok, _status} = HealthChecker.get_health_status(kept.id)
+    assert Process.alive?(pid)
+  end
+
   describe "check_all_now/0" do
     test "does not crash when called" do
       assert :ok = HealthChecker.check_all_now()

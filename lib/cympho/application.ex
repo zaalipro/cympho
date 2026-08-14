@@ -42,6 +42,8 @@ defmodule Cympho.Application do
       Cympho.Plugins.Registry,
       {Registry, keys: :unique, name: Cympho.Plugins.ProcessRegistry},
       {Cympho.Plugins.Supervisor, []},
+      Cympho.Skills.Loader,
+      Cympho.Skills.Resolver,
       # Skill hot-reload for development
       {Cympho.Skills.HotReloader, []},
       # Rate limiting (must precede Dispatcher: orphan recovery broadcasts

@@ -169,24 +169,15 @@ defmodule Cympho.Adapters.HealthChecker do
   # Private Helpers
   # ---------------------------------------------------------------------------
 
-  # Stream agents in batches so a 10k-agent install doesn't load the whole
-  # table into memory on every health-check tick. We only need each agent's
-  # id to look it up in `check_agent_health/2`, so the projection stays small.
-  @health_check_batch_size 500
-
   defp perform_health_checks(state) do
-    query = from a in Agent, where: a.status != :offline, select: a.id
+    agent_ids = Repo.all(from a in Agent, where: a.status != :offline, select: a.id)
 
-    {:ok, {count, state}} =
-      Repo.transaction(fn ->
-        query
-        |> Repo.stream(max_rows: @health_check_batch_size)
-        |> Enum.reduce({0, state}, fn agent_id, {count, state} ->
-          {count + 1, check_agent_health(agent_id, state)}
-        end)
+    state =
+      Enum.reduce(agent_ids, state, fn agent_id, state ->
+        check_agent_health(agent_id, state)
       end)
 
-    Logger.debug("[HealthChecker] checked #{count} active agents")
+    Logger.debug("[HealthChecker] checked #{length(agent_ids)} active agents")
     state
   end
 
@@ -198,7 +189,12 @@ defmodule Cympho.Adapters.HealthChecker do
 
       {:error, :not_found} ->
         Logger.debug("[HealthChecker] agent #{agent_id} not found")
-        :ok
+
+        %{
+          state
+          | consecutive_failures: Map.delete(state.consecutive_failures, agent_id),
+            last_health_status: Map.delete(state.last_health_status, agent_id)
+        }
     end
   end
 
