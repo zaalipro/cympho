@@ -37,6 +37,13 @@ defmodule Cympho.Adapters.Adapter do
     - `{:turn_completed, session_id, result}`
     - `{:turn_ended_with_error, session_id, reason}`
 
+  Port-backed adapters should also send, throttled, while the run is in flight:
+    - `{:turn_progress, session_id, %{bytes: n, chunks: n}}`
+
+  Output is buffered until the process exits, so without this an owner sees
+  nothing between "running" and a finished comment. Counts are used rather than
+  content so the signal does not depend on the CLI's output format.
+
   Returns a `session_id` (reference) immediately.
   """
   @callback run(issue :: map(), agent_id :: String.t(), recipient_pid :: pid(), opts :: keyword()) ::

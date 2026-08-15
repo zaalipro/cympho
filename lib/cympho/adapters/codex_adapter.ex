@@ -245,7 +245,13 @@ defmodule Cympho.Adapters.CodexAdapter do
   defp collect_output(port, acc, %RunDeadline{} = deadline, session_id, recipient_pid) do
     receive do
       {^port, {:data, data}} ->
-        collect_output(port, acc <> data, RunDeadline.touch(deadline), session_id, recipient_pid)
+        collect_output(
+          port,
+          acc <> data,
+          RunDeadline.observe(deadline, data, session_id, recipient_pid),
+          session_id,
+          recipient_pid
+        )
 
       {:EXIT, ^port, _reason} ->
         collect_output(port, acc, deadline, session_id, recipient_pid)

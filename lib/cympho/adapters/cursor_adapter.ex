@@ -187,7 +187,13 @@ defmodule Cympho.Adapters.CursorAdapter do
   defp collect_output(port, acc, %RunDeadline{} = deadline, session_id, recipient_pid) do
     receive do
       {^port, {:data, data}} ->
-        collect_output(port, acc <> data, RunDeadline.touch(deadline), session_id, recipient_pid)
+        collect_output(
+          port,
+          acc <> data,
+          RunDeadline.observe(deadline, data, session_id, recipient_pid),
+          session_id,
+          recipient_pid
+        )
 
       {^port, {:exit_status, 0}} ->
         {:ok, acc}

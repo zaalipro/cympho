@@ -295,7 +295,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
           port,
           session_id,
           recipient_pid,
-          RunDeadline.touch(deadline),
+          RunDeadline.observe(deadline, data, session_id, recipient_pid),
           acc <> data
         )
 

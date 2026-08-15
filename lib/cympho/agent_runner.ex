@@ -320,6 +320,9 @@ defmodule Cympho.AgentRunner do
       loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, %{
         started_at: started_at,
         last_output_time: started_at,
+        bytes: 0,
+        chunks: 0,
+        last_report_at: nil,
         turn_completed?: false,
         buffer: ""
       })
@@ -333,11 +336,15 @@ defmodule Cympho.AgentRunner do
       {^port, {:data, output}} ->
         buffer = state.buffer <> output
 
-        state = %{
-          state
-          | last_output_time: System.system_time(:millisecond),
-            buffer: buffer
-        }
+        state =
+          %{
+            state
+            | last_output_time: System.system_time(:millisecond),
+              buffer: buffer,
+              bytes: state.bytes + byte_size(output),
+              chunks: state.chunks + 1
+          }
+          |> maybe_report_progress(session_id, recipient_pid)
 
         case parse_json_output(buffer) do
           {:ok, result} ->
@@ -427,6 +434,27 @@ defmodule Cympho.AgentRunner do
             # Clock resolution edge: re-enter and recompute remaining wait.
             loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, state)
         end
+    end
+  end
+
+  # Output is buffered until the process exits, so an owner watching an issue
+  # saw nothing between "running" and a finished comment — for up to the full
+  # wall-clock cap. Reporting byte and chunk counts as they arrive is
+  # format-independent and cheap; the throttle keeps a chatty CLI from turning
+  # every chunk into a PubSub broadcast.
+  defp maybe_report_progress(state, session_id, recipient_pid) do
+    now = System.system_time(:millisecond)
+    interval = Application.get_env(:cympho, :adapter_progress_interval_ms, 1_000)
+
+    if is_nil(state.last_report_at) or now - state.last_report_at >= interval do
+      send(
+        recipient_pid,
+        {:turn_progress, session_id, %{bytes: state.bytes, chunks: state.chunks}}
+      )
+
+      %{state | last_report_at: now}
+    else
+      state
     end
   end
 

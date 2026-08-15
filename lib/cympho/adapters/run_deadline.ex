@@ -16,16 +16,34 @@ defmodule Cympho.Adapters.RunDeadline do
 
   `Cympho.AgentRunner` already had its own `max_run_ms`; this is the same idea
   for the adapters that talk to a port directly.
+
+  It also counts what the run has produced. Adapters buffer stdout until the
+  process exits, so an owner watching an issue saw nothing at all between
+  "running" and a finished comment — for up to the full wall-clock cap. The
+  byte and chunk counts are reported to the run's owner as it goes, which is
+  format-independent: it works the same whether the CLI emits one JSON envelope
+  at the end or a stream.
   """
 
   @enforce_keys [:stall_timeout, :max_run_ms, :started_at, :last_output_at]
-  defstruct [:stall_timeout, :max_run_ms, :started_at, :last_output_at]
+  defstruct [
+    :stall_timeout,
+    :max_run_ms,
+    :started_at,
+    :last_output_at,
+    bytes: 0,
+    chunks: 0,
+    last_report_at: nil
+  ]
 
   @type t :: %__MODULE__{
           stall_timeout: pos_integer(),
           max_run_ms: pos_integer(),
           started_at: integer(),
-          last_output_at: integer()
+          last_output_at: integer(),
+          bytes: non_neg_integer(),
+          chunks: non_neg_integer(),
+          last_report_at: integer() | nil
         }
 
   @default_max_run_ms 3_600_000
@@ -70,6 +88,48 @@ defmodule Cympho.Adapters.RunDeadline do
   @spec touch(t()) :: t()
   def touch(%__MODULE__{} = deadline) do
     %{deadline | last_output_at: System.monotonic_time(:millisecond)}
+  end
+
+  @doc """
+  Records a chunk of output and tells the run's owner about it, at most once
+  per `report_interval_ms`.
+
+  Throttling matters: a chatty CLI produces chunks far faster than a UI can use
+  them, and each report becomes a PubSub broadcast.
+  """
+  @spec observe(t(), binary(), term(), pid()) :: t()
+  def observe(%__MODULE__{} = deadline, data, session_id, recipient_pid)
+      when is_binary(data) and is_pid(recipient_pid) do
+    now = System.monotonic_time(:millisecond)
+
+    deadline = %{
+      deadline
+      | last_output_at: now,
+        bytes: deadline.bytes + byte_size(data),
+        chunks: deadline.chunks + 1
+    }
+
+    if report_due?(deadline, now) do
+      send(
+        recipient_pid,
+        {:turn_progress, session_id, %{bytes: deadline.bytes, chunks: deadline.chunks}}
+      )
+
+      %{deadline | last_report_at: now}
+    else
+      deadline
+    end
+  end
+
+  def observe(%__MODULE__{} = deadline, _data, _session_id, _recipient_pid), do: touch(deadline)
+
+  defp report_due?(%__MODULE__{last_report_at: nil}, _now), do: true
+
+  defp report_due?(%__MODULE__{last_report_at: last}, now),
+    do: now - last >= report_interval_ms()
+
+  defp report_interval_ms do
+    Application.get_env(:cympho, :adapter_progress_interval_ms, 1_000)
   end
 
   @doc """

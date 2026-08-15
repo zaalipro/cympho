@@ -264,6 +264,18 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
+  def handle_info({:turn_progress, _session_id, progress}, %__MODULE__{} = session) do
+    # The moduledoc has always advertised publishing to `orchestrator:<issue_id>`
+    # for LiveView, but nothing ever broadcast there — the only test of
+    # `subscribe/1` broadcast to itself, so it passed without a publisher
+    # existing. This is that publisher: it is what an owner sees between
+    # "running" and a finished comment.
+    CymphoWeb.Events.broadcast_run_progress(session.issue, session.run_id, progress)
+
+    {:noreply, session}
+  end
+
+  @impl true
   def handle_info({:tool_call_detected, _session_id, tool_call}, %__MODULE__{} = session) do
     issue = session.issue
     agent_id = session.agent_id

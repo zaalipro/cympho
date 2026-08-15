@@ -97,6 +97,48 @@ defmodule CymphoWeb.Events do
   end
 
   @doc """
+  Broadcast a running agent's output progress.
+
+  Adapters buffer stdout until the process exits, so nothing told an owner what
+  was happening between "running" and a finished comment — for up to the full
+  wall-clock cap. This carries byte and chunk counts, which are
+  format-independent: no assumption about whether the CLI emits one JSON
+  envelope at the end or a stream.
+
+  It publishes to both `orchestrator:<issue_id>`, which `Orchestrator.subscribe/1`
+  has always subscribed to without any publisher existing, and the
+  company-scoped runs topic the UI already listens on.
+  """
+  def broadcast_run_progress(issue, run_id, progress)
+
+  def broadcast_run_progress(
+        %Issue{company_id: company_id, id: issue_id},
+        run_id,
+        %{} = progress
+      )
+      when is_binary(company_id) and company_id != "" and is_binary(issue_id) and issue_id != "" do
+    payload = %{
+      event_type: :run_progress,
+      issue_id: issue_id,
+      run_id: run_id,
+      bytes: Map.get(progress, :bytes, 0),
+      chunks: Map.get(progress, :chunks, 0),
+      timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    Phoenix.PubSub.broadcast(
+      Cympho.PubSub,
+      "orchestrator:#{issue_id}",
+      {:run_progress, payload}
+    )
+
+    Cympho.RateLimiting.dedup_broadcast("company:#{company_id}:runs", "run_progress", payload)
+  end
+
+  # Refuse a "company::runs" leak from an unscoped issue.
+  def broadcast_run_progress(_issue, _run_id, _progress), do: :ok
+
+  @doc """
   Broadcast an agent heartbeat event to WebSocket clients.
   """
   def broadcast_agent_heartbeat(
