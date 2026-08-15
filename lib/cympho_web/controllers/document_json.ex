@@ -15,11 +15,13 @@ defmodule CymphoWeb.DocumentJSON do
     %{data: revision_data(revision)}
   end
 
+  # `Documents.get_diff/2` names the older revision `other` and the newer one
+  # `current`; the API exposes them as `base` and `target`.
   def diff(%{result: result}) do
     %{
       data: %{
-        base: result.base && revision_data(result.base),
-        target: revision_data(result.target),
+        base: revision_data(result.other),
+        target: revision_data(result.current),
         diff: result.diff
       }
     }
@@ -45,11 +47,10 @@ defmodule CymphoWeb.DocumentJSON do
       body: revision.body,
       document_id: revision.document_id,
       revision_number: revision.revision_number,
-      format: revision.format,
       change_summary: revision.change_summary,
-      base_revision_id: revision.base_revision_id,
-      created_by_agent_id: revision.created_by_agent_id,
-      created_by_user_id: revision.created_by_user_id,
+      author_id: revision.author_id,
+      author_type: revision.author_type,
+      parent_revision_number: revision.parent_revision_number,
       inserted_at: revision.inserted_at
     }
   end

@@ -249,9 +249,21 @@ defmodule Cympho.Adapters.HealthChecker do
     end
   end
 
+  # The adapter behaviour and this module disagree on vocabulary: every adapter
+  # reports failure as `:unhealthy`, while the branches below only recognise
+  # `health_state()` — `:healthy | :degraded | :unavailable`. Without this,
+  # `:unhealthy` fell through to the no-op `true ->` clause, so no failure was
+  # ever counted, no agent ever reached `:error`, and recovery could never fire
+  # because `last_health_status` never left `:healthy`. Normalise at the
+  # boundary rather than editing eight adapters: this module owns the
+  # vocabulary it branches on.
+  defp normalize_health_status(:healthy), do: :healthy
+  defp normalize_health_status(:degraded), do: :degraded
+  defp normalize_health_status(_other), do: :unavailable
+
   defp process_health_result(agent, health_result, state) do
     current_health_status = Map.get(state.last_health_status, agent.id, :healthy)
-    new_health_status = health_result.status
+    new_health_status = normalize_health_status(health_result.status)
     consecutive_failures = Map.get(state.consecutive_failures, agent.id, 0)
 
     cond do

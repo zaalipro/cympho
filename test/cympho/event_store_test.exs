@@ -15,6 +15,44 @@ defmodule Cympho.EventStoreTest do
     end
   end
 
+  describe "purge_old/1 index ordering" do
+    # A purge tick rewrites each visited topic's id index. It must preserve the
+    # newest-first invariant that fetch_since/3 and fetch_latest rely on, even
+    # when nothing is old enough to be evicted.
+    test "replay still works after a purge that evicts nothing" do
+      id1 = Cympho.EventStore.append("test_purge_order", %{n: 1})
+      _id2 = Cympho.EventStore.append("test_purge_order", %{n: 2})
+      _id3 = Cympho.EventStore.append("test_purge_order", %{n: 3})
+
+      assert 0 = Cympho.EventStore.purge_old(300_000)
+
+      assert {:ok, events} = Cympho.EventStore.fetch_since("test_purge_order", id1)
+      assert Enum.map(events, & &1.payload) == [%{n: 2}, %{n: 3}]
+    end
+
+    test "fetch_latest returns the newest events after a purge" do
+      _id1 = Cympho.EventStore.append("test_purge_latest", %{n: 1})
+      _id2 = Cympho.EventStore.append("test_purge_latest", %{n: 2})
+      _id3 = Cympho.EventStore.append("test_purge_latest", %{n: 3})
+
+      assert 0 = Cympho.EventStore.purge_old(300_000)
+
+      {:ok, events} = Cympho.EventStore.fetch_since("test_purge_latest", nil, 2)
+      assert Enum.map(events, & &1.payload) == [%{n: 2}, %{n: 3}]
+    end
+
+    test "events appended after a purge stay replayable" do
+      _id1 = Cympho.EventStore.append("test_purge_append", %{n: 1})
+      assert 0 = Cympho.EventStore.purge_old(300_000)
+
+      id2 = Cympho.EventStore.append("test_purge_append", %{n: 2})
+      _id3 = Cympho.EventStore.append("test_purge_append", %{n: 3})
+
+      assert {:ok, events} = Cympho.EventStore.fetch_since("test_purge_append", id2)
+      assert Enum.map(events, & &1.payload) == [%{n: 3}]
+    end
+  end
+
   describe "fetch_since/3" do
     test "returns events after the given event_id" do
       id1 = Cympho.EventStore.append("test_b", %{n: 1})

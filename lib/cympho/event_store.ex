@@ -231,19 +231,21 @@ defmodule Cympho.EventStore do
 
   # ids are newest-first; we drop the tail entries (oldest) whose timestamps
   # are older than the cutoff. Walk from the end.
+  #
+  # The reduce walks oldest-first and prepends, so `kept` comes back
+  # newest-first already — the same order it went in. Do not reverse it again:
+  # `fetch_since/3` reads `List.last/1` as the oldest retained id, so an
+  # ascending index makes almost every live watermark look expired.
   defp drop_old_ids(ids, cutoff) do
-    {kept_rev, evicted} =
-      ids
-      |> Enum.reverse()
-      |> Enum.reduce({[], []}, fn id, {kept, evicted} ->
-        case :ets.lookup(@table, id) do
-          [{^id, _topic, _payload, ts}] when ts >= cutoff -> {[id | kept], evicted}
-          [{^id, _topic, _payload, _ts}] -> {kept, [id | evicted]}
-          [] -> {kept, evicted}
-        end
-      end)
-
-    {Enum.reverse(kept_rev), evicted}
+    ids
+    |> Enum.reverse()
+    |> Enum.reduce({[], []}, fn id, {kept, evicted} ->
+      case :ets.lookup(@table, id) do
+        [{^id, _topic, _payload, ts}] when ts >= cutoff -> {[id | kept], evicted}
+        [{^id, _topic, _payload, _ts}] -> {kept, [id | evicted]}
+        [] -> {kept, evicted}
+      end
+    end)
   end
 
   defp lookup_events(ids) do

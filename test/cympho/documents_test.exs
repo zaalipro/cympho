@@ -17,6 +17,80 @@ defmodule Cympho.DocumentsTest do
     %{issue: issue}
   end
 
+  describe "get_diff/2" do
+    setup %{issue: issue} do
+      {:ok, doc} =
+        Documents.create_document(%{
+          key: "plan",
+          title: "Plan",
+          body: "alpha\nbravo\ncharlie",
+          issue_id: issue.id
+        })
+
+      # Each update snapshots the *previous* body into a revision, so two
+      # updates give us two revisions holding the first two bodies.
+      {:ok, doc} = Documents.update_document(doc, %{body: "alpha\nDELTA\ncharlie"})
+      {:ok, doc} = Documents.update_document(doc, %{body: "unused"})
+
+      [newer, older] = Documents.list_revisions(doc.id)
+      %{newer: newer, older: older}
+    end
+
+    test "returns a result instead of raising", %{newer: newer, older: older} do
+      assert %{current: current, other: other, diff: diff} =
+               Documents.get_diff(newer.id, older.id)
+
+      assert current.id == newer.id
+      assert other.id == older.id
+      assert is_list(diff)
+    end
+
+    test "marks unchanged, deleted and added lines for a mid-file edit", %{
+      newer: newer,
+      older: older
+    } do
+      %{diff: diff} = Documents.get_diff(newer.id, older.id)
+
+      assert diff == [
+               %{type: :same, line: "alpha"},
+               %{type: :deletion, line: "bravo"},
+               %{type: :addition, line: "DELTA"},
+               %{type: :same, line: "charlie"}
+             ]
+    end
+
+    test "reports every line as unchanged when the bodies match", %{newer: newer} do
+      %{diff: diff} = Documents.get_diff(newer.id, newer.id)
+
+      assert diff == [
+               %{type: :same, line: "alpha"},
+               %{type: :same, line: "DELTA"},
+               %{type: :same, line: "charlie"}
+             ]
+    end
+
+    test "reports appended lines as additions", %{issue: issue} do
+      {:ok, doc} =
+        Documents.create_document(%{
+          key: "notes",
+          title: "Notes",
+          body: "one",
+          issue_id: issue.id
+        })
+
+      {:ok, doc} = Documents.update_document(doc, %{body: "one\ntwo"})
+      {:ok, doc} = Documents.update_document(doc, %{body: "unused"})
+
+      [newer, older] = Documents.list_revisions(doc.id)
+      %{diff: diff} = Documents.get_diff(newer.id, older.id)
+
+      assert diff == [
+               %{type: :same, line: "one"},
+               %{type: :addition, line: "two"}
+             ]
+    end
+  end
+
   describe "list_documents/1" do
     test "returns empty list when no documents", %{issue: issue} do
       assert Documents.list_documents(issue.id) == []

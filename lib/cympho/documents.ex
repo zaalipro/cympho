@@ -256,61 +256,38 @@ defmodule Cympho.Documents do
     }
   end
 
+  # Keep the shared head and tail, then treat everything between as a wholesale
+  # replacement. Correct, but not minimal: scattered edits collapse into one
+  # deletion block followed by one addition block.
+  #
+  # This replaces an implementation that could never run — it destructured a
+  # 3-tuple from a function returning four elements, and its `find_common_sequence/4`
+  # discarded the tail of the new document on every divergence.
   defp compute_diff(old_text, new_text) do
-    # Simple line-by-line diff implementation
     old_lines = String.split(old_text, "\n")
     new_lines = String.split(new_text, "\n")
 
-    {diff, _, _} = compute_line_diff(old_lines, new_lines, [])
-    diff
+    {prefix, old_rest, new_rest} = take_common_prefix(old_lines, new_lines, [])
+    {suffix, old_middle, new_middle} = take_common_suffix(old_rest, new_rest)
+
+    Enum.map(prefix, &%{type: :same, line: &1}) ++
+      Enum.map(old_middle, &%{type: :deletion, line: &1}) ++
+      Enum.map(new_middle, &%{type: :addition, line: &1}) ++
+      Enum.map(suffix, &%{type: :same, line: &1})
   end
 
-  # Simple line diff algorithm
-  defp compute_line_diff(old_lines, new_lines, _acc) do
-    {old_rest, new_rest, ops} = diff_lines(old_lines, new_lines, [], [])
+  defp take_common_prefix([head | old_rest], [head | new_rest], acc),
+    do: take_common_prefix(old_rest, new_rest, [head | acc])
 
-    diff = Enum.reverse(ops)
-    {diff, old_rest, new_rest}
-  end
+  defp take_common_prefix(old_lines, new_lines, acc),
+    do: {Enum.reverse(acc), old_lines, new_lines}
 
-  defp diff_lines([], [], same_ops, diff_ops) do
-    {Enum.reverse(same_ops), [], [], Enum.reverse(diff_ops)}
-  end
+  # A common suffix is a common prefix of the reversed lines.
+  defp take_common_suffix(old_lines, new_lines) do
+    {suffix, old_middle, new_middle} =
+      take_common_prefix(Enum.reverse(old_lines), Enum.reverse(new_lines), [])
 
-  defp diff_lines(old_lines, [], same_ops, diff_ops) do
-    deletions = Enum.map(old_lines, fn line -> %{type: :deletion, line: line} end)
-    {Enum.reverse(same_ops), old_lines, [], Enum.reverse(diff_ops) ++ deletions}
-  end
-
-  defp diff_lines([], new_lines, same_ops, diff_ops) do
-    additions = Enum.map(new_lines, fn line -> %{type: :addition, line: line} end)
-    {Enum.reverse(same_ops), [], new_lines, Enum.reverse(diff_ops) ++ additions}
-  end
-
-  defp diff_lines(
-         [old_head | old_rest] = _old_lines,
-         [new_head | new_rest] = _new_lines,
-         same_ops,
-         diff_ops
-       ) do
-    if old_head == new_head do
-      diff_lines(old_rest, new_rest, [old_head | same_ops], diff_ops)
-    else
-      # Find the length of the common prefix
-      {_common_prefix, old_remainder, new_remainder} =
-        find_common_sequence(old_rest, new_rest, [old_head], [new_head])
-
-      # Flush same_ops if any
-      same_ops_flushed =
-        if same_ops != [], do: [%{type: :same, lines: Enum.reverse(same_ops)}], else: []
-
-      diff_lines(old_remainder, new_remainder, [], diff_ops ++ same_ops_flushed)
-    end
-  end
-
-  defp find_common_sequence(old_lines, _new_lines, old_prefix, new_prefix) do
-    # Simple approach: return what we have
-    {Enum.reverse(old_prefix), old_lines, Enum.reverse(new_prefix)}
+    {Enum.reverse(suffix), Enum.reverse(old_middle), Enum.reverse(new_middle)}
   end
 
   def change_document(%IssueDocument{} = document, attrs \\ %{}) do

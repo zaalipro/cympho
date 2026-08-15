@@ -155,6 +155,88 @@ defmodule Cympho.Adapters.HealthCheckerTest do
     end
   end
 
+  describe "adapter failure normalisation" do
+    setup do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Health Unhealthy Corp",
+          slug: "health-unhealthy-#{System.unique_integer([:positive])}"
+        })
+
+      # The http adapter rejects a disallowed host before making any network
+      # call, so this reports :unhealthy deterministically and offline. Every
+      # adapter in the tree uses :unhealthy for failures.
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Unhealthy HTTP Agent",
+          role: :engineer,
+          adapter: :http,
+          status: :idle,
+          company_id: company.id,
+          config: %{"url" => "http://127.0.0.1:1/"}
+        })
+
+      %{agent: agent}
+    end
+
+    test "an adapter reporting :unhealthy is recorded as a failure", %{agent: agent} do
+      agent_id = agent.id
+      pid = Process.whereis(HealthChecker)
+
+      try do
+        HealthChecker.subscribe()
+
+        assert :ok = HealthChecker.check_agent_now(agent_id)
+        :sys.get_state(pid)
+
+        assert {:ok, :unavailable} = HealthChecker.get_health_status(agent_id)
+
+        assert_receive {:health_status_changed,
+                        %{agent_id: ^agent_id, old_status: :healthy, new_status: :unavailable}},
+                       1_000
+      after
+        HealthChecker.unsubscribe()
+      end
+    end
+
+    test "consecutive :unhealthy checks trip the agent to :error", %{agent: agent} do
+      pid = Process.whereis(HealthChecker)
+
+      for _ <- 1..3 do
+        assert :ok = HealthChecker.check_agent_now(agent.id)
+        :sys.get_state(pid)
+      end
+
+      reloaded = Repo.reload!(agent)
+      assert reloaded.status == :error
+      assert reloaded.health_status == :unavailable
+    end
+
+    test "recovery from :unhealthy returns the agent to :idle", %{agent: agent} do
+      pid = Process.whereis(HealthChecker)
+
+      for _ <- 1..3 do
+        assert :ok = HealthChecker.check_agent_now(agent.id)
+        :sys.get_state(pid)
+      end
+
+      assert Repo.reload!(agent).status == :error
+
+      {:ok, agent} =
+        Agents.update_agent(Repo.reload!(agent), %{
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      assert :ok = HealthChecker.check_agent_now(agent.id)
+      :sys.get_state(pid)
+
+      reloaded = Repo.reload!(agent)
+      assert reloaded.status == :idle
+      assert reloaded.health_status == :healthy
+    end
+  end
+
   test "manual checks retain health status and use secret-backed runtime config" do
     {:ok, company} =
       Companies.create_company(%{
