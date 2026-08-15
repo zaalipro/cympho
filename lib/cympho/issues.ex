@@ -539,6 +539,14 @@ defmodule Cympho.Issues do
     * `:in_progress_minutes` (default 120) — stuck during execution
     * `:in_review_minutes`   (default 60)  — reviewer hasn't picked up
     * `:blocked_minutes`     (default 30)  — blocker not yet resolved
+    * `:todo_minutes`        (default 120) — queued but never dispatched
+
+  `:todo` is where delegated child issues land, and it was the one
+  non-terminal state no threshold covered: an issue whose role has no usable
+  agent, or whose named assignee can never run it, sat there indefinitely and
+  no sweep ever looked at it. The threshold is deliberately as generous as
+  `:in_progress` because queueing behind busy capacity is normal and only
+  sustained non-dispatch is a fault.
 
   Issues with `origin_type == "backlog_planner"` (the synthetic mission
   planning issue) are excluded — those are intentionally re-used and not
@@ -559,6 +567,7 @@ defmodule Cympho.Issues do
     in_progress_min = Keyword.get(opts, :in_progress_minutes, 120)
     in_review_min = Keyword.get(opts, :in_review_minutes, 60)
     blocked_min = Keyword.get(opts, :blocked_minutes, 30)
+    todo_min = Keyword.get(opts, :todo_minutes, 120)
 
     now = DateTime.utc_now()
 
@@ -577,7 +586,12 @@ defmodule Cympho.Issues do
         do: DateTime.add(now, -blocked_min * 60, :second),
         else: nil
 
-    case combined_stuck_clause(in_progress_cutoff, in_review_cutoff, blocked_cutoff) do
+    todo_cutoff =
+      if todo_min > 0,
+        do: DateTime.add(now, -todo_min * 60, :second),
+        else: nil
+
+    case combined_stuck_clause(in_progress_cutoff, in_review_cutoff, blocked_cutoff, todo_cutoff) do
       nil ->
         # All thresholds disabled — return empty list.
         []
@@ -612,12 +626,13 @@ defmodule Cympho.Issues do
   # together. We must combine them in the dynamic itself (not via or_where)
   # because or_where would OR with the company / origin_type filters above
   # it and let cross-company rows through.
-  defp combined_stuck_clause(in_progress_cutoff, in_review_cutoff, blocked_cutoff) do
+  defp combined_stuck_clause(in_progress_cutoff, in_review_cutoff, blocked_cutoff, todo_cutoff) do
     parts =
       [
         in_progress_dynamic(in_progress_cutoff),
         in_review_dynamic(in_review_cutoff),
-        blocked_dynamic(blocked_cutoff)
+        blocked_dynamic(blocked_cutoff),
+        todo_dynamic(todo_cutoff)
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -656,6 +671,20 @@ defmodule Cympho.Issues do
 
   defp blocked_dynamic(cutoff) do
     dynamic([i], i.status == :blocked and i.updated_at < ^cutoff)
+  end
+
+  defp todo_dynamic(nil), do: nil
+
+  # A `:todo` issue that never produced a run is one nobody could dispatch.
+  # Requiring "no run ever" (rather than "no recent run") keeps rework out of
+  # this bucket: an issue bounced back to :todo by request_changes already has
+  # run history and belongs to the review nudges, not to stall patrol.
+  defp todo_dynamic(cutoff) do
+    dynamic(
+      [i],
+      i.status == :todo and i.updated_at < ^cutoff and
+        not exists(from r in Run, where: r.issue_id == parent_as(:issue).id)
+    )
   end
 
   def get_issue!(id),

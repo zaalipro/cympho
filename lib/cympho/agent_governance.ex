@@ -15,7 +15,9 @@ defmodule Cympho.AgentGovernance do
   @doc """
   Pauses an agent with optional approval requirement.
   """
-  def pause_agent(agent_id, opts \\ %{}, actor) do
+  # `opts` is read with `Keyword.get/3`, so the default must be a keyword list —
+  # `%{}` made every 2-arity call raise a FunctionClauseError instead of pausing.
+  def pause_agent(agent_id, opts \\ [], actor) do
     agent = Repo.get!(Agent, agent_id)
     requires_approval = Keyword.get(opts, :requires_board_approval, false)
 
@@ -72,7 +74,7 @@ defmodule Cympho.AgentGovernance do
   @doc """
   Terminates an agent with board approval requirement.
   """
-  def terminate_agent(agent_id, reason, opts \\ %{}, actor) do
+  def terminate_agent(agent_id, reason, opts \\ [], actor) do
     agent = Repo.get!(Agent, agent_id)
     requires_approval = Keyword.get(opts, :requires_board_approval, true)
 
@@ -188,7 +190,9 @@ defmodule Cympho.AgentGovernance do
       governance_status: "paused",
       governance_reasoning: reason,
       pause_reason: reason,
-      paused_at: DateTime.utc_now(),
+      # `paused_at` is `:utc_datetime`, so an untruncated stamp made every
+      # governance pause raise on dump. `Agents.pause_agent/2` truncates.
+      paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
       paused_by_user_id: extract_user_id(actor)
     })
     |> Repo.update()
@@ -231,6 +235,15 @@ defmodule Cympho.AgentGovernance do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
+        # Same posture as pause: flipping the governance field alone leaves
+        # every non-terminal issue pinned to an agent that can never run it.
+        # Without this, terminating an engineer stranded their whole queue and
+        # only Patrol's dead-assignee sweep noticed, minutes later.
+        _ =
+          Cympho.Issues.RehomePaused.rehome_for_paused_agent(updated,
+            reason: reason || "Agent terminated"
+          )
+
         GovernanceAuditLogs.log_action(
           "agent_terminated",
           actor,

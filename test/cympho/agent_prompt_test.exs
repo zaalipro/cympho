@@ -401,14 +401,18 @@ defmodule Cympho.AgentPromptTest do
       assert prompt =~ "Reuse named idle delivery capacity before spawning new engineers"
 
       assert prompt =~ "use `spawn_agent` only when the required role is absent, at capacity"
-      assert prompt =~ "- engineer: 1 agents (1 idle, 0 working) — 0 active assignments"
+      assert prompt =~ "- engineer: 1 available agents (1 idle, 0 working) — 0 active assignments"
 
       assert prompt =~
                "eligible idle: #{engineer.name} (id: #{engineer.id}, load: 0/1)"
 
-      assert prompt =~ "- qa_engineer: 0 agents (0 idle, 0 working) — 0 active assignments"
-      assert prompt =~ "- release_engineer: 0 agents (0 idle, 0 working) — 0 active assignments"
-      assert prompt =~ "no agents in role; spawn only if the work truly belongs here"
+      assert prompt =~
+               "- qa_engineer: 0 available agents (0 idle, 0 working) — 0 active assignments"
+
+      assert prompt =~
+               "- release_engineer: 0 available agents (0 idle, 0 working) — 0 active assignments"
+
+      assert prompt =~ "no usable agents in role; spawn only if the work truly belongs here"
     end
 
     test "CEO prompt names the CTO and core delegation lanes before hiring", %{
@@ -432,17 +436,19 @@ defmodule Cympho.AgentPromptTest do
                "If an eligible idle name appears for a role, do not spawn that role in this turn"
 
       assert prompt =~ "copying the full `id:` UUID into `delegate.to_agent_id`"
-      assert prompt =~ "- cto: 1 agents (1 idle, 0 working) — 0 active assignments"
+      assert prompt =~ "- cto: 1 available agents (1 idle, 0 working) — 0 active assignments"
 
       assert prompt =~
                "eligible idle: #{cto.name} (id: #{cto.id}, load: 0/2)"
 
-      assert prompt =~ "- engineer: 1 agents (1 idle, 0 working) — 0 active assignments"
+      assert prompt =~ "- engineer: 1 available agents (1 idle, 0 working) — 0 active assignments"
 
       assert prompt =~
                "eligible idle: #{engineer.name} (id: #{engineer.id}, load: 0/1)"
 
-      assert prompt =~ "- qa_engineer: 0 agents (0 idle, 0 working) — 0 active assignments"
+      assert prompt =~
+               "- qa_engineer: 0 available agents (0 idle, 0 working) — 0 active assignments"
+
       assert prompt =~ "spawn only if the work truly belongs here"
     end
 
@@ -466,7 +472,7 @@ defmodule Cympho.AgentPromptTest do
 
       prompt = AgentPrompt.build(issue, cto.id)
 
-      assert prompt =~ "- engineer: 1 agents (1 idle, 0 working) — 1 active assignments"
+      assert prompt =~ "- engineer: 1 available agents (1 idle, 0 working) — 1 active assignments"
 
       assert prompt =~
                "no repo-capable idle candidate; spawn a repo-capable engineer or configure an existing delivery agent before creating implementation work"
@@ -490,7 +496,7 @@ defmodule Cympho.AgentPromptTest do
 
       prompt = AgentPrompt.build(issue, cto.id)
 
-      assert prompt =~ "- engineer: 1 agents (1 idle, 0 working) — 0 active assignments"
+      assert prompt =~ "- engineer: 1 available agents (1 idle, 0 working) — 0 active assignments"
 
       refute prompt =~
                "eligible idle: #{engineer.name} (id: #{engineer.id}, load: 0/1)"

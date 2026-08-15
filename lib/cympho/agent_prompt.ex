@@ -142,21 +142,36 @@ defmodule Cympho.AgentPrompt do
   end
 
   defp team_status_line(role, company_id, assignments) do
-    scoped = Cympho.Agents.list_agents_by_role(role, company_id)
-    idle = Enum.count(scoped, &(&1.status == :idle))
-    working = Enum.count(scoped, &(&1.status == :running))
+    # Split on governance, not on `status`: a governance-terminated agent keeps
+    # `status: :idle`, so counting the raw roster advertised dead agents as
+    # idle capacity — and the staffing rule below then forbade hiring the
+    # replacement the role actually needed.
+    {available, stopped} =
+      role
+      |> Cympho.Agents.list_agents_by_role(company_id)
+      |> Enum.split_with(&Cympho.Agents.governance_active?/1)
+
+    idle = Enum.count(available, &(&1.status == :idle))
+    working = Enum.count(available, &(&1.status == :running))
 
     total_in_flight =
-      scoped
+      available
       |> Enum.map(fn a -> Map.get(assignments, a.id, 0) end)
       |> Enum.sum()
 
     base =
-      "- #{role}: #{length(scoped)} agents (#{idle} idle, #{working} working) " <>
-        "— #{total_in_flight} active assignments"
+      "- #{role}: #{length(available)} available agents (#{idle} idle, #{working} working)" <>
+        stopped_suffix(stopped) <> " — #{total_in_flight} active assignments"
 
-    "#{base}; #{team_capacity_guidance(role, scoped, assignments)}"
+    "#{base}; #{team_capacity_guidance(role, available, assignments)}"
   end
+
+  # Name the stopped headcount explicitly. Silently dropping it would let the
+  # CTO hire a duplicate for a role whose agent is only temporarily paused.
+  defp stopped_suffix([]), do: ""
+
+  defp stopped_suffix(stopped),
+    do: " + #{length(stopped)} stopped by governance (unusable)"
 
   defp team_capacity_guidance(role, agents, assignments) do
     eligible =
@@ -172,7 +187,7 @@ defmodule Cympho.AgentPrompt do
         "eligible idle: #{Enum.map_join(eligible, ", ", &agent_capacity_label(&1, assignments))}"
 
       agents == [] ->
-        "no agents in role; spawn only if the work truly belongs here"
+        "no usable agents in role; spawn only if the work truly belongs here"
 
       role in Agent.pr_delivery_roles() ->
         "no repo-capable idle candidate; spawn a repo-capable #{role} or configure an existing delivery agent before creating implementation work"
@@ -525,9 +540,22 @@ defmodule Cympho.AgentPrompt do
     |> String.trim()
   end
 
+  # The CTO outranks every delivery role and `spawn_agent` authorises on rank,
+  # so it can staff this gap itself — the dispatcher now routes engineering
+  # gaps here directly. The old text told the CTO only the CEO could hire,
+  # which contradicted its own spawn_agent contract and wasted the turn.
+  defp wake_preamble("no_agent_for_role", metadata, :cto) do
+    role = Map.get(metadata, "missing_role") || "an unknown role"
+
+    """
+    The dispatcher exhausted the fallback chain looking for someone to take an issue requiring role `#{role}`, and you own staffing for that lane. Act this turn: either (a) `spawn_agent` to hire a repo-capable agent with that role, (b) `delegate` to an existing agent who can absorb the work, or (c) `escalate` to the CEO if the gap is a budget or headcount decision rather than a technical one. Letting the wake go unanswered leaves the issue backing off indefinitely.
+    """
+    |> String.trim()
+  end
+
   defp wake_preamble("no_agent_for_role", _metadata, _other_role) do
     """
-    A `no_agent_for_role` wake fired but you are not the CEO. Forward this to the CEO via `comment` — only the CEO can hire new agents.
+    A `no_agent_for_role` wake fired but staffing this role is not yours to decide. Forward it via `comment` or `escalate` to the CTO for engineering roles, or to the CEO otherwise.
     """
     |> String.trim()
   end

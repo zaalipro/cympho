@@ -198,6 +198,13 @@ defmodule Cympho.Runtime do
 
   defp verify_agent(%Agent{status: status} = agent, %Issue{} = issue, opts) do
     cond do
+      # Checked ahead of `skip_agent_status?` on purpose: that flag exists to
+      # relax the *operational* status for an owned run, not to let a paused or
+      # terminated agent through. Governance writers leave `status` untouched,
+      # so this is the only field that reflects a governance stop.
+      not Agents.governance_active?(agent) ->
+        {:error, {:agent_governance_blocked, agent.governance_status}}
+
       Keyword.get(opts, :skip_agent_status?, false) ->
         :ok
 

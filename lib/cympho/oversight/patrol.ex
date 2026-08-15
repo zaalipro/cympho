@@ -16,6 +16,9 @@ defmodule Cympho.Oversight.Patrol do
     - in_review stalled work → wake the issue's current assignee (the
       reviewer who hasn't picked it up), unless that assignee is
       paused/terminated — then escalate to parent/CEO.
+    - unassigned stalled work → wake the manager that delegated it: the
+      `monitor_state["decomposition_owner_id"]` that parked the issue, else
+      the parent issue's assignee, else the company CEO.
     - root issue with no parent_id → wake the company CEO.
     - paused/terminated supervisors are never waked; resolution walks
       the parent chain then CEO, skipping dead agents.
@@ -268,18 +271,62 @@ defmodule Cympho.Oversight.Patrol do
     end
   end
 
-  defp resolve_supervisor(%Issue{assignee_id: assignee_id, company_id: company_id})
+  defp resolve_supervisor(%Issue{assignee_id: assignee_id, company_id: company_id} = issue)
        when is_binary(assignee_id) do
     case Agents.get_agent(assignee_id) do
       {:ok, %Agent{} = agent} ->
         parent_or_ceo(agent, company_id)
 
       _ ->
-        ceo_or_nil(company_id)
+        delegating_manager(issue) || ceo_or_nil(company_id)
     end
   end
 
-  defp resolve_supervisor(%Issue{company_id: company_id}), do: ceo_or_nil(company_id)
+  # Unassigned. Before falling through to the CEO, ask who actually owns this
+  # work: a manager that decomposed an issue parks it `:blocked` with no
+  # assignee and records itself in `monitor_state`, and a delegated child names
+  # its parent. Skipping straight to the CEO escalated a stalled CTO fan-out
+  # one level too far — past the only agent holding the decomposition context.
+  defp resolve_supervisor(%Issue{company_id: company_id} = issue),
+    do: delegating_manager(issue) || ceo_or_nil(company_id)
+
+  defp delegating_manager(%Issue{} = issue) do
+    decomposition_owner(issue) || parent_issue_owner(issue)
+  end
+
+  defp decomposition_owner(%Issue{monitor_state: monitor_state} = issue) do
+    case get_in(monitor_state || %{}, ["decomposition_owner_id"]) do
+      id when is_binary(id) -> awakeable_agent(id, issue.company_id)
+      _ -> nil
+    end
+  end
+
+  defp parent_issue_owner(%Issue{parent_id: parent_id, company_id: company_id})
+       when is_binary(parent_id) do
+    case Repo.get(Issue, parent_id) do
+      %Issue{assignee_id: assignee_id} when is_binary(assignee_id) ->
+        awakeable_agent(assignee_id, company_id)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp parent_issue_owner(%Issue{}), do: nil
+
+  # Fail-closed: a supervisor must belong to the issue's company, so a stale
+  # monitor_state id can never wake an agent in another tenant.
+  defp awakeable_agent(agent_id, company_id) when is_binary(company_id) do
+    case Agents.get_agent(agent_id) do
+      {:ok, %Agent{company_id: ^company_id} = agent} ->
+        if agent_awakeable?(agent), do: agent, else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp awakeable_agent(_agent_id, _company_id), do: nil
 
   defp parent_or_ceo(%Agent{parent_id: parent_id} = agent, company_id)
        when is_binary(parent_id) do

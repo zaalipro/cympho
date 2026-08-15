@@ -595,16 +595,17 @@ defmodule Cympho.Wakes do
   end
 
   @doc """
-  Wakes the CEO when the dispatcher's fallback chain has exhausted itself
-  with no eligible agent. This is the dispatcher giving up and asking the
-  CEO to either spawn a new agent or cancel the work.
+  Wakes the role's staffing owner when the dispatcher's fallback chain has
+  exhausted itself with no eligible agent. This is the dispatcher giving up and
+  asking that owner to either spawn a new agent or cancel the work. The caller
+  picks the owner — the CTO for delivery roles it can hire, else the CEO.
   """
   @spec wake_for_no_agent_for_role(String.t(), String.t() | nil, map()) ::
           {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
-  def wake_for_no_agent_for_role(ceo_agent_id, issue_id, metadata \\ %{})
-      when is_binary(ceo_agent_id) do
+  def wake_for_no_agent_for_role(staffing_owner_id, issue_id, metadata \\ %{})
+      when is_binary(staffing_owner_id) do
     do_wake_agent(
-      ceo_agent_id,
+      staffing_owner_id,
       issue_id,
       "no_agent_for_role",
       "system",

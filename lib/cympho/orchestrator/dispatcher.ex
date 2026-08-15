@@ -52,6 +52,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @adapter_stop_confirm_attempts 10
   @adapter_stop_confirm_sleep_ms 25
   @low_power_priorities [:critical, :high]
+  # Delivery roles the CTO both manages and outranks, so it can staff them
+  # itself. See `staffing_owner/2`.
+  @cto_staffed_roles Cympho.Agents.Agent.pr_delivery_roles()
 
   # Client
 
@@ -1369,9 +1372,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
     %{state | retry_attempts: new_retries}
   end
 
-  # Best-effort escalation. If the company has no CEO this no-ops; the issue
-  # will continue to back off and will be retried when the next agent goes
-  # idle (which won't help, but at least nothing crashes).
+  # Best-effort escalation. If the company has no staffing owner this no-ops;
+  # the issue will continue to back off and will be retried when the next agent
+  # goes idle (which won't help, but at least nothing crashes).
   defp escalate_no_agent_for_role(%Cympho.Issues.Issue{company_id: nil}), do: :ok
 
   defp escalate_no_agent_for_role(%Cympho.Issues.Issue{
@@ -1379,13 +1382,13 @@ defmodule Cympho.Orchestrator.Dispatcher do
          company_id: company_id,
          assigned_role: role
        }) do
-    case Cympho.Agents.get_company_ceo(company_id) do
-      {:ok, %Cympho.Agents.Agent{id: ceo_id}} ->
+    case staffing_owner(company_id, role) do
+      {:ok, %Cympho.Agents.Agent{id: owner_id}} ->
         # Coalesce: don't spam if a recent no_agent_for_role already exists
         # for this issue. The wake queue dedups on agent+issue+reason, so
         # this is more of a logging guard than a correctness one.
         _ =
-          Cympho.Wakes.wake_for_no_agent_for_role(ceo_id, issue_id, %{
+          Cympho.Wakes.wake_for_no_agent_for_role(owner_id, issue_id, %{
             "company_id" => company_id,
             "missing_role" => role && to_string(role)
           })
@@ -1402,6 +1405,19 @@ defmodule Cympho.Orchestrator.Dispatcher do
       )
 
       :ok
+  end
+
+  # Engineering staffing belongs to the CTO, who outranks every delivery role
+  # and can hire them directly. Routing every gap to the CEO cost a turn and an
+  # extra hop, and left the CTO holding a plan it could not staff. Falls back to
+  # the CEO when the company has no CTO.
+  defp staffing_owner(company_id, role) do
+    with true <- Cympho.Agents.Agent.normalize_role(role) in @cto_staffed_roles,
+         {:ok, cto} <- Cympho.Agents.get_company_cto(company_id) do
+      {:ok, cto}
+    else
+      _ -> Cympho.Agents.get_company_ceo(company_id)
+    end
   end
 
   defp agent_for_issue(%Cympho.Issues.Issue{} = issue) do
@@ -1455,6 +1471,22 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
     cond do
       agent.status != :idle ->
+        {:error, :no_agent_available}
+
+      # `list_eligible_agents/2` filters governance on the routed path; the
+      # explicit-assignee path bypassed it entirely. Since governance
+      # termination/pause leaves `status` untouched, a stopped agent kept
+      # receiving every issue already pinned to it — which is exactly what a
+      # manager's `delegate` produces.
+      not Agents.governance_active?(agent) ->
+        Logger.info("[Dispatcher] assignee blocked by governance",
+          agent_id: agent.id,
+          issue_id: issue.id,
+          company_id: issue.company_id,
+          status: agent.governance_status,
+          component: "dispatcher"
+        )
+
         {:error, :no_agent_available}
 
       Agents.is_agent_at_capacity?(agent) ->

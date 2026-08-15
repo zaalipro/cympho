@@ -319,6 +319,18 @@ defmodule Cympho.AgentActions do
 
   defp maybe_emit_rejection_comment(
          %Issue{} = issue,
+         {:delegate_target_stopped, target_id, governance_status}
+       ) do
+    system_comment(
+      issue,
+      "delegate rejected: agent #{target_id} is #{governance_status} and cannot take work. " <>
+        "Pick a different agent from the team status block, use role-based handoff, " <>
+        "or spawn_agent if the role has no usable capacity left."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
          {:work_mode_action_forbidden, :planning, action_type}
        ) do
     system_comment(
@@ -2832,6 +2844,14 @@ defmodule Cympho.AgentActions do
 
       Agents.role_rank(caller.role) <= Agents.role_rank(target.role) ->
         {:error, :delegate_rank_violation}
+
+      # Rank and tenancy were the only gates, so a manager could pin an issue
+      # onto a paused or terminated agent and get `{:ok, ...}` back. Nothing
+      # downstream reopens it: the issue is assigned, so the dispatcher never
+      # re-routes by role. Reject here — this is retriable, so the CTO sees the
+      # rejection comment and can pick a live owner or hire on the next turn.
+      not Agents.governance_active?(target) ->
+        {:error, {:delegate_target_stopped, target.id, target.governance_status}}
 
       true ->
         :ok

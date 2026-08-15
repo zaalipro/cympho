@@ -16,6 +16,10 @@ defmodule Cympho.Agents do
   # from OOMing the node if data ever grows past expectations.
   @list_agents_safety_cap 5_000
 
+  # Governance states in which an agent must neither be handed new work nor
+  # continue running work it already holds. See `governance_active?/1`.
+  @blocked_governance_statuses ["paused", "terminated", "pending_approval"]
+
   def temporary?(%Agent{} = agent) do
     truthy_config?(agent.config, "temporary") or
       truthy_config?(agent.config, "one_time") or
@@ -431,8 +435,23 @@ defmodule Cympho.Agents do
   end
 
   defp where_active_governance(query) do
-    where(query, [a], a.governance_status not in ["paused", "terminated", "pending_approval"])
+    where(query, [a], a.governance_status not in ^@blocked_governance_statuses)
   end
+
+  @doc """
+  True when governance permits this agent to be given or to run work.
+
+  `status` and `governance_status` are independent fields, and the governance
+  writers do not keep them in sync: `AgentGovernance.do_terminate_agent/3` and
+  `Decisions.Executor.pause_engineer/2` both set only `governance_status`, so a
+  terminated or decision-paused agent keeps `status: :idle`. Any dispatch-path
+  check written against `status` alone therefore hands work to an agent
+  governance has already stopped. This is the struct-level twin of the
+  `where_active_governance/1` clause `list_eligible_agents/2` applies.
+  """
+  @spec governance_active?(Agent.t()) :: boolean()
+  def governance_active?(%Agent{governance_status: status}),
+    do: status not in @blocked_governance_statuses
 
   @doc """
   Counts the number of :in_progress issues assigned to an agent.
@@ -1216,15 +1235,27 @@ defmodule Cympho.Agents do
   Terminates an agent by setting status to :terminated.
   """
   def terminate_agent(%Agent{} = agent) do
-    case agent.status do
-      :running ->
-        case kill_session(agent.id) do
-          :ok -> update_agent(agent, %{status: :terminated, terminated_at: DateTime.utc_now()})
-          error -> error
-        end
+    result =
+      case agent.status do
+        :running ->
+          case kill_session(agent.id) do
+            :ok -> update_agent(agent, %{status: :terminated, terminated_at: DateTime.utc_now()})
+            error -> error
+          end
 
-      _ ->
-        update_agent(agent, %{status: :terminated, terminated_at: DateTime.utc_now()})
+        _ ->
+          update_agent(agent, %{status: :terminated, terminated_at: DateTime.utc_now()})
+      end
+
+    # Terminating left the agent's whole queue pinned to them. Pause has always
+    # rehomed; termination is the more permanent stop and needs it more.
+    with {:ok, terminated} <- result do
+      _ =
+        Cympho.Issues.RehomePaused.rehome_for_paused_agent(terminated,
+          reason: "Agent terminated"
+        )
+
+      {:ok, terminated}
     end
   end
 
