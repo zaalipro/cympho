@@ -6,7 +6,9 @@
 #     Docker builder using the pinned Elixir 1.19.5 / OTP 28 image — the host's
 #     system Elixir is too old to build with. The release RUNS natively under
 #     systemd (no container at runtime).
-#   * Postgres runs as a docker container bound to loopback.
+#   * Postgres runs natively under systemd on the host, bound to loopback. The
+#     script does not provision it — see the "Verifying Postgres" step for what
+#     to create by hand on a fresh host.
 #   * nginx (already on 80/443) reverse-proxies cympho.llmotions.com with TLS
 #     from Let's Encrypt (certbot --nginx). The site config is a separate
 #     sites-available file symlinked into sites-enabled — never edited into the
@@ -23,10 +25,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${SCRIPT_DIR}"
 
 # --- Target / identity -------------------------------------------------------
-# GCP VPS (zaali@35.232.94.44). CYMPHO_-namespaced overrides win; the generic
+# GCP VPS (zaali@34.136.10.30). CYMPHO_-namespaced overrides win; the generic
 # DEPLOY_HOST/DEPLOY_USER from ~/.secrets point at the same box.
 DEPLOY_USER="${CYMPHO_DEPLOY_USER:-${DEPLOY_USER:-zaali}}"
-DEPLOY_HOST="${CYMPHO_DEPLOY_HOST:-${DEPLOY_HOST:-35.232.94.44}}"
+DEPLOY_HOST="${CYMPHO_DEPLOY_HOST:-${DEPLOY_HOST:-34.136.10.30}}"
 DEPLOY_PORT="${CYMPHO_DEPLOY_PORT:-22}"
 DEPLOY_TARGET="${DEPLOY_USER}@${DEPLOY_HOST}"
 
@@ -35,11 +37,10 @@ APP_NAME="${CYMPHO_APP_NAME:-cympho}"
 APP_USER="${CYMPHO_APP_USER:-cympho}"
 DOMAIN="${CYMPHO_DOMAIN:-cympho.llmotions.com}"
 APP_PORT="${CYMPHO_APP_PORT:-4000}"
-DB_PORT="${CYMPHO_DB_PORT:-5442}"
+DB_PORT="${CYMPHO_DB_PORT:-5432}"
 DEPLOY_ROOT="${CYMPHO_DEPLOY_ROOT:-/opt/cympho}"
 ENV_FILE="${CYMPHO_ENV_FILE:-/etc/cympho.env}"
 SERVICE_NAME="${CYMPHO_SERVICE_NAME:-cympho}"
-COMPOSE_PROJECT="${CYMPHO_COMPOSE_PROJECT:-cympho}"
 
 # TLS certificate contact for certbot's first issuance on this host.
 CERTBOT_EMAIL="${CYMPHO_CERTBOT_EMAIL:-admin@llmotions.com}"
@@ -139,7 +140,10 @@ fi
 step "Bootstrapping host (user, directories, systemd unit)"
 run_remote_script <<EOF
 command -v systemctl >/dev/null 2>&1 || { echo "systemd required" >&2; exit 1; }
-command -v docker >/dev/null 2>&1 || { echo "docker required" >&2; exit 1; }
+# Docker is only used to build the release (deploy/build.Dockerfile pins
+# Elixir 1.19.5 / OTP 28; the host's system Elixir is 1.18.4). Nothing runs in
+# a container at runtime.
+command -v docker >/dev/null 2>&1 || { echo "docker required (release builder)" >&2; exit 1; }
 
 if ! id -u ${APP_USER} >/dev/null 2>&1; then
   _sudo useradd --system --create-home --shell /usr/sbin/nologin --user-group ${APP_USER}
@@ -219,23 +223,28 @@ fi
 _sudo systemctl enable ${SERVICE_NAME} >/dev/null 2>&1 || true
 EOF
 
-step "Starting Postgres container"
+step "Verifying Postgres (native, ${DB_PORT})"
 run_remote_script <<EOF
-cd ${SOURCE_DIR}
-# db.env is a root-owned secret (0600), so compose must read it as root.
-_sudo docker compose -p ${COMPOSE_PROJECT} --env-file ${DB_ENV_FILE} up -d
-status=starting
-for _ in \$(seq 1 30); do
-  status=\$(docker inspect -f '{{.State.Health.Status}}' cympho-db 2>/dev/null || echo starting)
-  [ "\$status" = "healthy" ] && break
-  sleep 2
-done
-if [ "\$status" != "healthy" ]; then
-  echo "Postgres did not become healthy" >&2
-  docker logs --tail 40 cympho-db >&2 || true
+# Postgres runs natively under systemd — there is no container to start. We
+# only assert the cluster is up and the app's database exists before building
+# and cutting over, so a dead database fails the deploy early rather than
+# after the release symlink has moved.
+if ! _sudo -u postgres pg_isready -h 127.0.0.1 -p ${DB_PORT} -q; then
+  echo "Postgres is not accepting connections on 127.0.0.1:${DB_PORT}." >&2
+  echo "Start it with: sudo systemctl start postgresql" >&2
   exit 1
 fi
-echo "Postgres healthy."
+
+if ! _sudo -u postgres psql -tAc "select 1 from pg_database where datname='cympho'" | grep -q 1; then
+  echo "Database 'cympho' does not exist on 127.0.0.1:${DB_PORT}." >&2
+  echo "On a fresh host, create the role and database once (password must match" >&2
+  echo "POSTGRES_PASSWORD in ${DB_ENV_FILE} / DATABASE_URL in ${ENV_FILE}):" >&2
+  echo "  sudo -u postgres psql -c \"CREATE ROLE cympho LOGIN PASSWORD '<pass>'\"" >&2
+  echo "  sudo -u postgres psql -c 'CREATE DATABASE cympho OWNER cympho'" >&2
+  exit 1
+fi
+
+echo "Postgres reachable, database present."
 EOF
 
 step "Building release via Docker (deps + assets + release; first run is slow)"
