@@ -71,7 +71,10 @@ config :logger, :default_formatter,
     :status,
     :exit_status,
     :host,
-    :port
+    :port,
+    :repo,
+    :path,
+    :count
   ]
 
 config :phoenix, :json_library, Jason

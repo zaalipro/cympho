@@ -180,6 +180,92 @@ Definition of done: Simple mode shows one owner-facing queue for assigned human 
 - No framework migration or visual rewrite.
 - No production deployment in the same change unless the completed tranche passes the full verification gate.
 
+## Runtime hardening tranche (2026-08-14)
+
+Closing G6 and G13 finished the *feature* register. It did not make Cympho the
+better product on its own — parity on a feature list is worth little if the
+runtime underneath drops work. This tranche came out of an adversarial audit of
+the BEAM/OTP layer: 66 candidate findings, 36 refuted on inspection, 30
+confirmed against code. Each fix below has a regression test that was verified
+to fail when the fix is reverted.
+
+Correctness and spend:
+
+- **Adapter workers were not tied to their orchestrator.** A brutal kill skips
+  `terminate/2`, and every recovery path from there is a database write — so a
+  live CLI kept writing into the workspace the next dispatch reuses. Workers now
+  monitor their owner and close their port when it dies.
+- **`AgentRunner` abandoned a live `claude` process** on the mid-run parse-error
+  branch, the only terminal branch that skipped `close_port/1`. Shell preamble on
+  the first chunk triggers it milliseconds after spawn.
+- **Codex, Cursor and Process adapters had no wall-clock cap.** Their timeout
+  reset on every chunk, so a chatty CLI never died: it pinned a dispatch slot and
+  billed indefinitely.
+- **`PortKiller` was a silent no-op** wherever PATH lacked `kill`/`pgrep`, and
+  snapshotted the process tree *after* closing the port, contradicting its own
+  documented invariant.
+- **The Agrenting adapter's paid remote hiring was uncancellable** — unregistered
+  and sleeping between polls — and stopping locally left the remote side billing.
+- **Approved governance actions could be dropped silently.** `executed_at` was
+  both the claim and the success marker, so a claimed-then-failed approval was
+  invisible to recovery forever.
+- **The delivery receipt gate was a coin flip.** Second-precision timestamps tied
+  within one action batch, so which comment counted as the handoff depended on
+  row order.
+
+Availability:
+
+- **The dispatcher's poll timer multiplied.** `poll_now/0` delivers the same
+  message the periodic timer uses and runs on issue launch, dashboard actions and
+  heartbeats, so the poll rate grew for a node's whole life.
+- **A budget hard stop froze the global dispatcher** for ~15s against the very
+  orchestrator that triggered it, and skipped the enforcement steps after it.
+- **`Orchestrator.stop/2` waited `:infinity`**, so one orchestrator wedged in
+  `terminate/2` blocked all dispatch permanently.
+- **Blocking `git clone` and remote environment acquisition ran inside the
+  dispatcher process**, because `dispatchable?/3` set a `:phase` flag nothing
+  read and ran the full preflight the orchestrator runs again anyway.
+- **A permanent atom was minted per routine trigger.** Atoms are never collected
+  and the VM aborts at the limit.
+- **MCP plugin tools had a 5s call whose timeout is an exit**, uncatchable by the
+  surrounding `rescue`, so the request 500'd instead of returning a structured
+  error.
+- **RuntimePreflight forked a login shell per board card**, serially, inside the
+  LiveView process.
+
+Scale and multi-tenancy:
+
+- **Dispatch was hardcoded to 3 concurrent agents platform-wide**, compile-time
+  only, with no runtime knob and no relation to machine resources.
+- **The per-company cap defaulted to the global cap**, which made it dead code.
+- **One tenant's backlog starved every other tenant**: candidates came from a
+  single globally priority-ordered window, so other companies' issues were never
+  loaded and the freed slots went unused.
+- **Paused issues at the head of that window froze dispatch entirely** — and a
+  budget hard stop sets that flag automatically.
+
+Observability, which is where the BEAM should be an advantage rather than a
+missed one:
+
+- `Cympho.Telemetry` emitted domain events that nothing consumed;
+  `telemetry_metrics` and `telemetry_poller` were declared dependencies with no
+  metrics module and no poller.
+- Phoenix LiveDashboard was a dependency whose RequestLogger plug was installed
+  but whose route was never mounted. It is now at `/beam`, gated as an
+  instance-operator surface rather than a tenant one.
+- Logger dropped every structured metadata key the codebase attaches — the
+  convention in CLAUDE.md was documented, followed at hundreds of call sites, and
+  never rendered.
+- Mailbox depth on the singleton processes every dispatch and broadcast passes
+  through, and saturation of the two `DynamicSupervisor`s with hard ceilings, are
+  now measured.
+- Adapters buffered all output, so an owner saw nothing between "running" and a
+  finished comment. Runs now publish progress — including to the
+  `orchestrator:<issue_id>` topic the moduledoc had always advertised and nothing
+  had ever published to.
+- Tool-call traces, a hash-chained governance surface, had no production
+  producer at all. MCP calls now feed it.
+
 ## Open residuals (2026-08-14)
 
 No register gap remains open. `mix cympho.compare` reports zero gaps.
@@ -188,6 +274,22 @@ Known scope limits that are deliberate, not hidden:
 
 - **G6** — `:ssh` is the only registered real provider. Vendor SaaS sandboxes (E2B, Daytona, Modal, Kubernetes) stay unregistered and fail closed; adding one is a new tranche, not a residual.
 - **G13** — merge covers the blueprint collections (`labels`, `projects`, `goals`, `agents`). `users`, `memberships`, `issues`, and `secret_manifest` are reported as unsupported for merge and remain whole-company-import only.
+
+Open items from the runtime audit, deliberately not attempted here:
+
+1. **Single-node only.** `:dns_cluster` is a declared dependency that is never
+   started, and every registry, rate limiter, ETS cache, and singleton GenServer
+   is node-local. Orphan recovery is node-blind — `heartbeat_runs` has no owner
+   node — so a second node would terminate healthy peer-node runs, and Quantum
+   cron would fire once per node. Clustering is a design tranche of its own, not
+   a fix; nothing here pretends otherwise.
+2. **CLI-internal tool use is still not captured.** MCP calls are traced, but
+   recording what the agent CLI does inside a run needs `--output-format
+   stream-json` and a parser for envelopes that cannot be verified without the
+   real binary.
+3. **`Dispatcher.stop_company` still tears down issues serially** inside its own
+   `handle_call`. The unbounded wait is gone, but a company with many live
+   sessions still stops one at a time.
 
 Re-verify with:
 
