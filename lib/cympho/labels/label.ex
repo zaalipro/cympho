@@ -22,6 +22,6 @@ defmodule Cympho.Labels.Label do
     |> validate_format(:color, ~r/^#[0-9A-Fa-f]{6}$/,
       message: "must be a valid hex color (e.g. #FF0000)"
     )
-    |> unique_constraint(:name, name: :labels_name_index)
+    |> unique_constraint(:name, name: :labels_company_id_name_index)
   end
 end

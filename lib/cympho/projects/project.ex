@@ -40,7 +40,7 @@ defmodule Cympho.Projects.Project do
     |> validate_format(:prefix, ~r/^[A-Z]+$/, message: "must be uppercase, 2-10 characters")
     |> validate_repo_url()
     |> validate_color()
-    |> unique_constraint(:prefix)
+    |> unique_constraint(:prefix, name: :projects_company_id_prefix_index)
     |> assoc_constraint(:company)
   end
 

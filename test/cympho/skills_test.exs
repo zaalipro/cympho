@@ -33,6 +33,49 @@ defmodule Cympho.SkillsTest do
     |> Repo.insert!()
   end
 
+  describe "assign_skill_to_agent/3 tenancy" do
+    # The only caller is a LiveView handle_event whose "plugin_id" comes
+    # straight from the client, so nothing upstream constrains it to the
+    # caller's company.
+    setup %{company: company} do
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Skills Other Co",
+          slug: "skills-other-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Cympho.Agents.create_agent(%{
+          name: "Skill Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      %{other_company: other_company, agent: agent}
+    end
+
+    test "assigns a plugin from the agent's own company", %{company: company, agent: agent} do
+      plugin = insert_plugin(company.id)
+      assert {:ok, _} = Skills.assign_skill_to_agent(agent.id, plugin.id)
+    end
+
+    test "refuses a plugin owned by another company", %{other_company: other, agent: agent} do
+      foreign = insert_plugin(other.id)
+
+      assert {:error, :company_mismatch} = Skills.assign_skill_to_agent(agent.id, foreign.id)
+
+      assert Repo.aggregate(
+               Ecto.Query.from(s in Cympho.Skills.AgentSkill, where: s.agent_id == ^agent.id),
+               :count
+             ) == 0
+    end
+
+    test "refuses an unknown plugin", %{agent: agent} do
+      assert {:error, :not_found} = Skills.assign_skill_to_agent(agent.id, Ecto.UUID.generate())
+    end
+  end
+
   describe "list_plugins/1" do
     test "returns plugins scoped to the given company", %{company: company} do
       {:ok, other_company} =

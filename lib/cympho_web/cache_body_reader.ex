@@ -10,8 +10,26 @@ defmodule CymphoWeb.CacheBodyReader do
   """
 
   def read_body(conn, opts) do
-    {:ok, body, conn} = Plug.Conn.read_body(conn, opts)
-    conn = Plug.Conn.assign(conn, :raw_body, [body | conn.assigns[:raw_body] || []])
-    {:ok, body, conn}
+    read_chunks(conn, opts, [])
+  end
+
+  # `Plug.Conn.read_body/2` returns `{:more, partial, conn}` once the body
+  # exceeds the `:length` option (8MB via Plug.Parsers' default; GitHub permits
+  # webhook payloads up to 25MB). Matching only `{:ok, ...}` raised a
+  # MatchError inside Plug.Parsers — before `verify_signature/2` ever ran — so
+  # an oversized webhook 500'd instead of being authenticated. Accumulate
+  # instead, and keep the whole body so the HMAC covers the bytes sent.
+  defp read_chunks(conn, opts, acc) do
+    case Plug.Conn.read_body(conn, opts) do
+      {:ok, body, conn} ->
+        full = IO.iodata_to_binary(Enum.reverse([body | acc]))
+        {:ok, full, Plug.Conn.assign(conn, :raw_body, [full | conn.assigns[:raw_body] || []])}
+
+      {:more, partial, conn} ->
+        read_chunks(conn, opts, [partial | acc])
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 end

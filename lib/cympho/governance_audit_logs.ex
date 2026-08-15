@@ -101,8 +101,8 @@ defmodule Cympho.GovernanceAuditLogs do
 
     case create_governance_audit_log(attrs) do
       {:ok, log} ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
+        Cympho.PubSubGuard.company_broadcast(
+          log.company_id,
           "governance_audit",
           {:audit_log_created, log}
         )
@@ -115,10 +115,13 @@ defmodule Cympho.GovernanceAuditLogs do
   end
 
   @doc """
-  Subscribes to governance audit log events.
+  Subscribes to this company's governance audit log events.
+
+  Scoped per company: the previous global topic delivered every tenant's audit
+  trail to every subscriber.
   """
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "governance_audit")
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:governance_audit")
   end
 
   defp extract_actor_info(%{__struct__: type, id: id}) when is_binary(id) do

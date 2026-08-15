@@ -74,7 +74,7 @@ defmodule Cympho.ToolCallTraces.ToolCallTrace do
     |> assoc_constraint(:company)
     |> assoc_constraint(:run)
     |> unique_constraint([:company_id, :sequence_number])
-    |> unique_constraint(:content_hash)
+    |> unique_constraint(:content_hash, name: :tool_call_traces_company_id_content_hash_index)
   end
 
   def creation_changeset(attrs, prev_chain_hash \\ nil) do

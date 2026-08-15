@@ -87,8 +87,8 @@ defmodule Cympho.PrincipalPermissions do
           }
         )
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
+        Cympho.PubSubGuard.company_broadcast(
+          grant.company_id,
           "principal_permissions",
           {:permission_grant_created, grant}
         )
@@ -154,8 +154,8 @@ defmodule Cympho.PrincipalPermissions do
           }
         )
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
+        Cympho.PubSubGuard.company_broadcast(
+          revoked.company_id,
           "principal_permissions",
           {:permission_grant_revoked, revoked}
         )
@@ -263,10 +263,13 @@ defmodule Cympho.PrincipalPermissions do
   end
 
   @doc """
-  Subscribes to principal permission events.
+  Subscribes to this company's principal permission events.
+
+  Scoped per company: the previous global topic delivered every tenant's
+  grants to every subscriber.
   """
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "principal_permissions")
+  def subscribe(company_id) when is_binary(company_id) and company_id != "" do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:principal_permissions")
   end
 
   defp normalize_scopes(scopes) when is_list(scopes) do

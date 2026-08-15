@@ -128,12 +128,26 @@ defmodule Cympho.ProjectsTest do
       assert {:error, %Ecto.Changeset{}} = create_project_with_company(attrs)
     end
 
-    test "returns error changeset for duplicate prefix" do
-      attrs = %{name: "First", prefix: "DUPE"}
-      assert {:ok, _} = create_project_with_company(attrs)
+    # create_project_with_company/1 makes a fresh company per call, so this
+    # previously only failed because the unique index was global. Prefixes are
+    # unique per company, so pin both projects to one company.
+    test "returns error changeset for duplicate prefix in the same company" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Dupe Co",
+          slug: "dupe-co-#{System.unique_integer([:positive])}"
+        })
 
-      attrs2 = %{name: "Second", prefix: "DUPE"}
-      assert {:error, %Ecto.Changeset{}} = create_project_with_company(attrs2)
+      assert {:ok, _} =
+               Projects.create_project(%{name: "First", prefix: "DUPE", company_id: company.id})
+
+      assert {:error, %Ecto.Changeset{}} =
+               Projects.create_project(%{name: "Second", prefix: "DUPE", company_id: company.id})
+    end
+
+    test "allows the same prefix in a different company" do
+      assert {:ok, _} = create_project_with_company(%{name: "First", prefix: "SHARE"})
+      assert {:ok, _} = create_project_with_company(%{name: "Second", prefix: "SHARE"})
     end
   end
 

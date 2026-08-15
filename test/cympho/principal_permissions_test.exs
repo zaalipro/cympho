@@ -123,6 +123,66 @@ defmodule Cympho.PrincipalPermissionsTest do
     assert PrincipalPermissions.list_principal_permission_grants(company_b.id) == []
   end
 
+  describe "broadcast scoping" do
+    # These were published on the global topic "principal_permissions", so any
+    # subscriber received every tenant's grants. CLAUDE.md requires per-company
+    # topics for exactly this reason.
+    test "a grant in company A is not delivered to a subscriber in company B" do
+      company_a = create_company()
+      company_b = create_company()
+      user = create_user()
+
+      :ok = PrincipalPermissions.subscribe(company_b.id)
+
+      {:ok, grant} =
+        PrincipalPermissions.create_permission_grant(%{
+          company_id: company_a.id,
+          principal_id: user.id,
+          principal_type: "user",
+          permission: "task.assign"
+        })
+
+      refute_receive {:permission_grant_created, ^grant}, 200
+    end
+
+    test "a grant is delivered to a subscriber in its own company" do
+      company_a = create_company()
+      user = create_user()
+
+      :ok = PrincipalPermissions.subscribe(company_a.id)
+
+      {:ok, grant} =
+        PrincipalPermissions.create_permission_grant(%{
+          company_id: company_a.id,
+          principal_id: user.id,
+          principal_type: "user",
+          permission: "task.assign"
+        })
+
+      grant_id = grant.id
+      assert_receive {:permission_grant_created, %{id: ^grant_id}}, 500
+    end
+
+    test "revocation is also company-scoped" do
+      company_a = create_company()
+      company_b = create_company()
+      user = create_user()
+
+      {:ok, grant} =
+        PrincipalPermissions.create_permission_grant(%{
+          company_id: company_a.id,
+          principal_id: user.id,
+          principal_type: "user",
+          permission: "task.assign"
+        })
+
+      :ok = PrincipalPermissions.subscribe(company_b.id)
+      {:ok, revoked} = PrincipalPermissions.revoke_permission_grant(grant)
+
+      refute_receive {:permission_grant_revoked, ^revoked}, 200
+    end
+  end
+
   defp create_company do
     unique = System.unique_integer([:positive])
 

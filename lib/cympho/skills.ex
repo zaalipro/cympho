@@ -583,19 +583,44 @@ defmodule Cympho.Skills do
   Assigns a plugin (skill) to an agent with an optional version lock.
   """
   def assign_skill_to_agent(agent_id, plugin_id, opts \\ []) do
-    attrs = %{
-      agent_id: agent_id,
-      plugin_id: plugin_id,
-      locked_version: Keyword.get(opts, :locked_version)
-    }
+    # `plugin_id` reaches here straight from a LiveView event payload, which is
+    # client-controlled, and nothing upstream constrains it to the caller's
+    # company. Without this check a crafted event attaches any tenant's plugin
+    # to your own agent.
+    with {:ok, agent} <- fetch_agent(agent_id),
+         {:ok, plugin} <- fetch_plugin(plugin_id),
+         :ok <- same_company(agent, plugin) do
+      attrs = %{
+        agent_id: agent_id,
+        plugin_id: plugin_id,
+        locked_version: Keyword.get(opts, :locked_version)
+      }
 
-    %AgentSkill{}
-    |> AgentSkill.changeset(attrs)
-    |> Repo.insert(
-      on_conflict: [set: [locked_version: attrs.locked_version]],
-      conflict_target: [:agent_id, :plugin_id]
-    )
+      %AgentSkill{}
+      |> AgentSkill.changeset(attrs)
+      |> Repo.insert(
+        on_conflict: [set: [locked_version: attrs.locked_version]],
+        conflict_target: [:agent_id, :plugin_id]
+      )
+    end
   end
+
+  defp fetch_agent(agent_id) do
+    case Repo.get(Cympho.Agents.Agent, agent_id) do
+      nil -> {:error, :not_found}
+      agent -> {:ok, agent}
+    end
+  end
+
+  defp fetch_plugin(plugin_id) do
+    case Repo.get(Plugin, plugin_id) do
+      nil -> {:error, :not_found}
+      plugin -> {:ok, plugin}
+    end
+  end
+
+  defp same_company(%{company_id: same}, %Plugin{company_id: same}) when is_binary(same), do: :ok
+  defp same_company(_agent, _plugin), do: {:error, :company_mismatch}
 
   @doc """
   Removes a skill (plugin) assignment from an agent.

@@ -59,8 +59,14 @@ defmodule CymphoWeb.CompanySwitcherController do
   defp is_safe_path?(path) when is_binary(path) do
     # Normalize to lowercase for case-insensitive protocol check
     path = String.downcase(path)
-    # Must start with / and not contain dangerous protocols
-    String.starts_with?(path, "/") &&
+    # Must start with / and not contain dangerous protocols.
+    #
+    # "//host" and "/\host" also start with "/" but are protocol-relative URLs
+    # pointing off-site. Phoenix's redirect/2 refuses them (validate_local_url/1
+    # raises), so letting them through here turned a crafted return_to into a
+    # 500 rather than a redirect — still a crash worth closing here.
+    not String.starts_with?(path, ["//", "/\\"]) &&
+      String.starts_with?(path, "/") &&
       !String.contains?(path, ["javascript:", "data:", "vbscript:", "file:"]) &&
       !String.contains?(path, ["\n", "\r", "\t"])
   end
