@@ -187,11 +187,64 @@ defmodule Cympho.Mcp.Server do
   end
 
   def call_tool(name, args, %Agent{} = agent) do
-    do_call(name, args || %{}, agent)
+    result = do_call(name, args || %{}, agent)
+    _ = record_trace(name, args, agent, result)
+    result
   rescue
     e ->
-      %{error: "Internal error", detail: Exception.message(e)}
+      error = %{error: "Internal error", detail: Exception.message(e)}
+      _ = record_trace(name, args, agent, error)
+      error
   end
+
+  # Tool-call traces are a governance surface — a hash-chained record of which
+  # agent invoked which tool — but nothing in production wrote to it. Its only
+  # producer was `AgentRunner.extract_and_send_tool_calls/3`, which scans a
+  # Messages-API-shaped `content` array; the stock `claude --output-format json`
+  # envelope this codebase builds has no such key, so the whole subsystem ran on
+  # synthetic test messages. MCP is a real tool-call boundary: every call here is
+  # an authenticated agent invoking a named tool, which is exactly what the
+  # subsystem is meant to record.
+  #
+  # Never let tracing break a tool call.
+  defp record_trace(name, args, %Agent{} = agent, result) do
+    {status, error_message} = trace_outcome(result)
+
+    Cympho.ToolCallTraces.create_tool_call_trace(%{
+      trace_type: "mcp_tool_call",
+      tool_name: to_string(name),
+      # Arguments and results are redacted by ToolCallTraces before they land.
+      tool_arguments: normalize_trace_arguments(args),
+      error_message: error_message,
+      status: status,
+      company_id: agent.company_id,
+      agent_id: agent.id,
+      actor_type: "agent",
+      actor_id: agent.id,
+      occurred_at: DateTime.utc_now()
+    })
+  rescue
+    exception ->
+      Logger.warning("failed to record MCP tool call trace",
+        component: "mcp",
+        company_id: agent.company_id,
+        agent_id: agent.id,
+        reason: Exception.message(exception)
+      )
+
+      :ok
+  end
+
+  defp trace_outcome(%{success: false} = result), do: {"error", trace_error(result)}
+  defp trace_outcome(%{error: _} = result), do: {"error", trace_error(result)}
+  defp trace_outcome(_result), do: {"success", nil}
+
+  defp trace_error(%{error: error}) when is_binary(error), do: error
+  defp trace_error(%{error: error}), do: inspect(error)
+  defp trace_error(_result), do: "tool call failed"
+
+  defp normalize_trace_arguments(args) when is_map(args), do: args
+  defp normalize_trace_arguments(_args), do: %{}
 
   defp static_tool_names do
     Enum.map(static_tools(), & &1.name)
