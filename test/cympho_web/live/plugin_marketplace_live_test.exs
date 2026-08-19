@@ -8,11 +8,16 @@ defmodule CymphoWeb.PluginMarketplaceLiveTest do
   alias Cympho.Plugins.Runtime
 
   setup %{conn: conn, current_company: company} = context do
-    unless context[:regular_member] do
-      user_id = Plug.Conn.get_session(conn, :user_id)
-      membership = Companies.get_membership(user_id, company.id)
-      assert {:ok, _membership} = Companies.update_membership(membership, %{role: "admin"})
-    end
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    membership = Companies.get_membership(user_id, company.id)
+
+    role = context[:membership_role] || if(context[:regular_member], do: "member", else: "admin")
+
+    assert {:ok, _membership} =
+             Companies.update_membership(membership, %{
+               role: role,
+               is_board_member: context[:board_member] == true
+             })
 
     :ok
   end
@@ -131,6 +136,22 @@ defmodule CymphoWeb.PluginMarketplaceLiveTest do
 
       assert {:error, :not_found} =
                Skills.get_plugin_by_identifier("example-plugin", company.id)
+    end
+
+    @tag membership_role: "member", board_member: true
+    test "member board users can install marketplace plugins", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, view, _html} = live(conn, "/plugins/marketplace")
+
+      assert has_element?(view, "button[phx-click='install']")
+      render_click(view, "install", %{"identifier" => "example-plugin"})
+
+      assert {:ok, %Plugin{} = plugin} =
+               Skills.get_plugin_by_identifier("example-plugin", company.id)
+
+      assert :ok = Runtime.stop_plugin(plugin)
     end
   end
 

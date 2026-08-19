@@ -155,6 +155,7 @@ defmodule Cympho.Agents.Agent do
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:created_by_agent_id)
     |> foreign_key_constraint(:default_environment_id)
+    |> prepare_changes(&validate_assignment_scope/1)
   end
 
   @doc """
@@ -211,6 +212,106 @@ defmodule Cympho.Agents.Agent do
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:created_by_agent_id)
     |> foreign_key_constraint(:default_environment_id)
+    |> prepare_changes(&validate_assignment_scope/1)
+  end
+
+  defp validate_assignment_scope(changeset) do
+    company_id = get_field(changeset, :company_id)
+
+    changeset
+    |> validate_parent_assignment()
+    |> validate_same_company(:project_id, Cympho.Projects.Project, company_id)
+    |> validate_same_company(:created_by_agent_id, __MODULE__, company_id)
+    |> validate_default_environment(company_id)
+  end
+
+  defp validate_same_company(changeset, field, schema, company_id) do
+    case get_field(changeset, field) do
+      nil ->
+        changeset
+
+      id ->
+        case changeset.repo.get(schema, id) do
+          %{company_id: ^company_id} -> changeset
+          nil -> changeset
+          _record -> add_error(changeset, field, "must belong to the same company")
+        end
+    end
+  end
+
+  defp validate_default_environment(changeset, company_id) do
+    environment_id = get_field(changeset, :default_environment_id)
+    project_id = get_field(changeset, :project_id)
+
+    case environment_id && changeset.repo.get(Cympho.Workspaces.Environment, environment_id) do
+      nil ->
+        changeset
+
+      %{company_id: ^company_id, project_id: environment_project_id}
+      when is_nil(project_id) or is_nil(environment_project_id) or
+             environment_project_id == project_id ->
+        changeset
+
+      %{company_id: ^company_id} ->
+        add_error(changeset, :default_environment_id, "must belong to the agent project")
+
+      _environment ->
+        add_error(changeset, :default_environment_id, "must belong to the same company")
+    end
+  end
+
+  defp validate_parent_assignment(changeset) do
+    if parent_scope_changed?(changeset) do
+      case get_field(changeset, :parent_id) do
+        nil ->
+          changeset
+
+        parent_id ->
+          validate_parent(changeset, changeset.repo.get(__MODULE__, parent_id))
+      end
+    else
+      changeset
+    end
+  end
+
+  defp parent_scope_changed?(changeset) do
+    match?({:ok, _value}, fetch_change(changeset, :parent_id)) or
+      match?({:ok, _value}, fetch_change(changeset, :company_id))
+  end
+
+  defp validate_parent(changeset, nil), do: changeset
+
+  defp validate_parent(changeset, %__MODULE__{} = parent) do
+    cond do
+      parent.company_id != get_field(changeset, :company_id) ->
+        add_error(changeset, :parent_id, "must belong to the same company")
+
+      hierarchy_cycle?(changeset.repo, parent.id, changeset.data.id, MapSet.new()) ->
+        add_error(changeset, :parent_id, "would create a hierarchy cycle")
+
+      true ->
+        changeset
+    end
+  end
+
+  defp hierarchy_cycle?(_repo, _parent_id, nil, _visited), do: false
+  defp hierarchy_cycle?(_repo, agent_id, agent_id, _visited), do: true
+
+  defp hierarchy_cycle?(repo, parent_id, agent_id, visited) do
+    if MapSet.member?(visited, parent_id) do
+      true
+    else
+      case repo.get(__MODULE__, parent_id) do
+        nil ->
+          false
+
+        %__MODULE__{parent_id: nil} ->
+          false
+
+        %__MODULE__{parent_id: next_parent_id} ->
+          hierarchy_cycle?(repo, next_parent_id, agent_id, MapSet.put(visited, parent_id))
+      end
+    end
   end
 
   def status_options,

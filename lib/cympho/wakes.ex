@@ -915,7 +915,9 @@ defmodule Cympho.Wakes do
       |> Repo.update_all(
         set: [
           status: "cancelled",
-          last_error: reason
+          last_error: reason,
+          claim_token: nil,
+          claimed_at: nil
         ]
       )
 
@@ -992,7 +994,9 @@ defmodule Cympho.Wakes do
       |> Repo.update_all(
         set: [
           status: "cancelled",
-          last_error: reason
+          last_error: reason,
+          claim_token: nil,
+          claimed_at: nil
         ]
       )
 
@@ -1014,7 +1018,9 @@ defmodule Cympho.Wakes do
       |> Repo.update_all(
         set: [
           status: "cancelled",
-          last_error: reason
+          last_error: reason,
+          claim_token: nil,
+          claimed_at: nil
         ]
       )
 

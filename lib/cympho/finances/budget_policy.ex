@@ -56,7 +56,7 @@ defmodule Cympho.Finances.BudgetPolicy do
     |> validate_number(:warning_threshold_pct, greater_than: 0, less_than_or_equal_to: 100)
     |> foreign_key_constraint(:company_id)
     |> foreign_key_constraint(:budget_id)
-    |> unique_constraint(:budget_id)
+    |> unique_constraint(:budget_id, name: :budget_policies_budget_id_uidx)
     |> maybe_require_scope_id()
   end
 

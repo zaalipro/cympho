@@ -1,7 +1,7 @@
 defmodule CymphoWeb.AttachmentController do
   use CymphoWeb, :controller
 
-  alias Cympho.{Attachments, Issues}
+  alias Cympho.{Attachments, Issues, PrincipalPermissions}
   alias Cympho.Attachments.Attachment
 
   action_fallback CymphoWeb.FallbackController
@@ -22,7 +22,8 @@ defmodule CymphoWeb.AttachmentController do
             content_type: upload.content_type,
             file_size: file_size(upload.path),
             path: relative_path,
-            issue_id: issue.id
+            issue_id: issue.id,
+            created_by_agent_id: conn.assigns.current_agent.id
           }
 
           with {:ok, %Attachment{} = attachment} <- Attachments.create_attachment(attrs) do
@@ -76,6 +77,8 @@ defmodule CymphoWeb.AttachmentController do
 
   def delete(conn, %{"id" => id}) do
     with {:ok, %Attachment{} = attachment} <- scoped_attachment(conn, id),
+         {:ok, issue} <- scoped_issue(conn, attachment.issue_id),
+         :ok <- authorize_delete(conn.assigns.current_agent, attachment, issue),
          {:ok, _} <- Attachments.delete_attachment(attachment) do
       send_resp(conn, :no_content, "")
     end
@@ -89,6 +92,42 @@ defmodule CymphoWeb.AttachmentController do
 
   defp scoped_attachment(conn, id) do
     Attachments.get_company_attachment(conn.assigns.current_agent.company_id, id)
+  end
+
+  defp authorize_delete(agent, attachment, issue) do
+    scopes = [
+      company: agent.company_id,
+      issue: issue.id,
+      attachment: attachment.id
+    ]
+
+    if agent.role in [:ceo, :cto] or attachment.created_by_agent_id == agent.id or
+         issue.assignee_id == agent.id or
+         issue.created_by_agent_id == agent.id or agent_delete_capability?(agent) or
+         Enum.any?(["attachment.delete", "attachments.delete"], fn permission ->
+           PrincipalPermissions.has_permission_in_scope?(
+             agent.id,
+             "agent",
+             permission,
+             scopes
+           )
+         end) do
+      :ok
+    else
+      {:error, :forbidden}
+    end
+  end
+
+  defp agent_delete_capability?(agent) do
+    Enum.any?([agent.permissions, agent.capabilities], fn
+      map when is_map(map) ->
+        Map.get(map, "attachment.delete") in [true, "true", 1, "1"] or
+          Map.get(map, "attachments.delete") in [true, "true", 1, "1"] or
+          Map.get(map, "can_delete_attachments") in [true, "true", 1, "1"]
+
+      _ ->
+        false
+    end)
   end
 
   defp upload_fits?(%Plug.Upload{path: path}) do

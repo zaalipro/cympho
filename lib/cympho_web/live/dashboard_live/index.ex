@@ -1,5 +1,6 @@
 defmodule CymphoWeb.DashboardLive.Index do
   use CymphoWeb, :live_view
+  alias Cympho.CompanyRBAC
   alias Cympho.Dashboard
   alias Cympho.Companies
   alias Cympho.Issues
@@ -113,6 +114,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   @impl true
   def handle_event("low_power_company", _params, socket) do
     with company when not is_nil(company) <- current_company(socket),
+         :ok <- authorize_runtime_control(socket, company),
          {:ok, updated} <- Companies.enter_low_power_mode(company, "Low power from dashboard") do
       {:noreply,
        socket
@@ -120,12 +122,14 @@ defmodule CymphoWeb.DashboardLive.Index do
        |> assign_metrics()
        |> push_event("toast", %{message: "Low power enabled", type: "info"})}
     else
+      {:error, :forbidden} -> deny_runtime_control(socket)
       _ -> {:noreply, socket}
     end
   end
 
   def handle_event("pause_company", _params, socket) do
     with company when not is_nil(company) <- current_company(socket),
+         :ok <- authorize_runtime_control(socket, company),
          {:ok, updated} <- Companies.pause_company(company, "Paused from dashboard") do
       {:noreply,
        socket
@@ -133,12 +137,14 @@ defmodule CymphoWeb.DashboardLive.Index do
        |> assign_metrics()
        |> push_event("toast", %{message: "Autonomy paused", type: "warning"})}
     else
+      {:error, :forbidden} -> deny_runtime_control(socket)
       _ -> {:noreply, socket}
     end
   end
 
   def handle_event("resume_company", _params, socket) do
     with company when not is_nil(company) <- current_company(socket),
+         :ok <- authorize_runtime_control(socket, company),
          {:ok, updated} <- Companies.resume_company(company) do
       _ = Dispatcher.poll_now()
 
@@ -148,6 +154,7 @@ defmodule CymphoWeb.DashboardLive.Index do
        |> assign_metrics()
        |> push_event("toast", %{message: "Autonomy resumed", type: "success"})}
     else
+      {:error, :forbidden} -> deny_runtime_control(socket)
       _ -> {:noreply, socket}
     end
   end
@@ -251,6 +258,7 @@ defmodule CymphoWeb.DashboardLive.Index do
 
     socket
     |> assign(:company, company)
+    |> assign(:runtime_controls_allowed, runtime_control_allowed?(socket, company))
     |> assign(:autonomy_status, autonomy_status(company))
     |> assign(:runtime_enabled?, Dispatcher.enabled?())
     |> assign(:operating_mode, operating_mode(company))
@@ -295,6 +303,30 @@ defmodule CymphoWeb.DashboardLive.Index do
       _ ->
         nil
     end
+  end
+
+  defp authorize_runtime_control(socket, company) do
+    if runtime_control_allowed?(socket, company), do: :ok, else: {:error, :forbidden}
+  end
+
+  defp runtime_control_allowed?(
+         %{assigns: %{current_user: %{id: user_id}}},
+         %{id: company_id}
+       )
+       when is_binary(user_id) and is_binary(company_id) do
+    CompanyRBAC.manager?(user_id, company_id)
+  end
+
+  defp runtime_control_allowed?(_socket, _company), do: false
+
+  defp deny_runtime_control(socket) do
+    {:noreply,
+     socket
+     |> assign(:runtime_controls_allowed, false)
+     |> push_event("toast", %{
+       message: "Only owners, admins, or board members can control runtime.",
+       type: "error"
+     })}
   end
 
   defp scoped_issue(socket, issue_id) do

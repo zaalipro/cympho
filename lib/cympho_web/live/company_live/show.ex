@@ -42,21 +42,21 @@ defmodule CymphoWeb.CompanyLive.Show do
 
   @impl true
   def handle_event("delete_membership", %{"id" => membership_id}, socket) do
-    membership =
-      if socket.assigns.can_manage? do
-        Enum.find(socket.assigns.memberships, fn m -> m.id == membership_id end)
+    authorize_company_management(socket, "Membership not found", fn socket ->
+      memberships = Companies.list_memberships(socket.assigns.company.id)
+      membership = Enum.find(memberships, fn membership -> membership.id == membership_id end)
+
+      if membership do
+        {:ok, _} = Companies.delete_membership(membership)
+
+        {:noreply,
+         socket
+         |> assign(:memberships, Companies.list_memberships(socket.assigns.company.id))
+         |> put_flash(:info, "Membership removed")}
+      else
+        {:noreply, put_flash(socket, :error, "Membership not found")}
       end
-
-    if membership do
-      {:ok, _} = Companies.delete_membership(membership)
-
-      {:noreply,
-       socket
-       |> assign(:memberships, Companies.list_memberships(socket.assigns.company.id))
-       |> put_flash(:info, "Membership removed")}
-    else
-      {:noreply, put_flash(socket, :error, "Membership not found")}
-    end
+    end)
   end
 
   def handle_event("show_pause_modal", _, socket),
@@ -72,24 +72,20 @@ defmodule CymphoWeb.CompanyLive.Show do
     reason =
       if socket.assigns.pause_reason == "", do: "Manual pause", else: socket.assigns.pause_reason
 
-    case socket.assigns.can_manage? && Companies.pause_company(socket.assigns.company, reason) do
-      {:ok, u} ->
-        {:noreply,
-         socket
-         |> assign(:company, u)
-         |> assign(:show_pause_modal, false)
-         |> put_flash(:info, "Company paused.")}
+    authorize_company_management(socket, fn socket ->
+      case Companies.pause_company(socket.assigns.company, reason) do
+        {:ok, u} ->
+          {:noreply,
+           socket
+           |> assign(:company, u)
+           |> assign(:show_pause_modal, false)
+           |> put_flash(:info, "Company paused.")}
 
-      {:error, _} ->
-        {:noreply,
-         socket |> assign(:show_pause_modal, false) |> put_flash(:error, "Failed to pause.")}
-
-      false ->
-        {:noreply,
-         socket
-         |> assign(:show_pause_modal, false)
-         |> put_flash(:error, "You cannot control this company's runtime.")}
-    end
+        {:error, _} ->
+          {:noreply,
+           socket |> assign(:show_pause_modal, false) |> put_flash(:error, "Failed to pause.")}
+      end
+    end)
   end
 
   def handle_event("show_resume_modal", _, socket),
@@ -99,41 +95,67 @@ defmodule CymphoWeb.CompanyLive.Show do
     do: {:noreply, assign(socket, show_resume_modal: false)}
 
   def handle_event("resume_company", _, socket) do
-    case socket.assigns.can_manage? && Companies.resume_company(socket.assigns.company) do
-      {:ok, u} ->
-        {:noreply,
-         socket
-         |> assign(:company, u)
-         |> assign(:show_resume_modal, false)
-         |> put_flash(:info, "Company resumed.")}
+    authorize_company_management(socket, fn socket ->
+      case Companies.resume_company(socket.assigns.company) do
+        {:ok, u} ->
+          {:noreply,
+           socket
+           |> assign(:company, u)
+           |> assign(:show_resume_modal, false)
+           |> put_flash(:info, "Company resumed.")}
 
-      {:error, _} ->
-        {:noreply,
-         socket |> assign(:show_resume_modal, false) |> put_flash(:error, "Failed to resume.")}
-
-      false ->
-        {:noreply,
-         socket
-         |> assign(:show_resume_modal, false)
-         |> put_flash(:error, "You cannot control this company's runtime.")}
-    end
+        {:error, _} ->
+          {:noreply,
+           socket |> assign(:show_resume_modal, false) |> put_flash(:error, "Failed to resume.")}
+      end
+    end)
   end
 
-  defp maybe_show_runtime_modal(%{assigns: %{can_manage?: true}} = socket, :pause) do
-    {:noreply, assign(socket, show_pause_modal: true, pause_reason: "")}
+  defp maybe_show_runtime_modal(socket, :pause) do
+    authorize_company_management(socket, fn socket ->
+      {:noreply, assign(socket, show_pause_modal: true, pause_reason: "")}
+    end)
   end
 
-  defp maybe_show_runtime_modal(%{assigns: %{can_manage?: true}} = socket, :resume) do
-    {:noreply, assign(socket, show_resume_modal: true)}
+  defp maybe_show_runtime_modal(socket, :resume) do
+    authorize_company_management(socket, fn socket ->
+      {:noreply, assign(socket, show_resume_modal: true)}
+    end)
   end
 
   defp maybe_show_runtime_modal(socket, _mode) do
     {:noreply, put_flash(socket, :error, "You cannot control this company's runtime.")}
   end
 
-  defp company_manager?(user_id, company_id) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+  defp authorize_company_management(socket, action) when is_function(action, 1) do
+    authorize_company_management(socket, nil, action)
   end
+
+  defp authorize_company_management(socket, denied_message, action)
+       when is_function(action, 1) do
+    user_id = socket.assigns.current_user.id
+    company_id = socket.assigns.company.id
+
+    if company_manager?(user_id, company_id) do
+      action.(assign(socket, :can_manage?, true))
+    else
+      denied_message = denied_message || "You cannot control this company's runtime."
+
+      {:noreply,
+       socket
+       |> assign(:can_manage?, false)
+       |> assign(:show_pause_modal, false)
+       |> assign(:show_resume_modal, false)
+       |> put_flash(:error, denied_message)}
+    end
+  end
+
+  defp company_manager?(user_id, company_id)
+       when is_binary(user_id) and is_binary(company_id) do
+    Cympho.CompanyRBAC.manager?(user_id, company_id)
+  end
+
+  defp company_manager?(_user_id, _company_id), do: false
 
   def format_inserted_at(company), do: Calendar.strftime(company.inserted_at, "%Y-%m-%d %H:%M")
   def role_label("owner"), do: "Owner"

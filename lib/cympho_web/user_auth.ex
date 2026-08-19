@@ -19,10 +19,14 @@ defmodule CymphoWeb.UserAuth do
       user_id when is_binary(user_id) ->
         case Users.get_user(user_id) do
           {:ok, user} ->
-            conn
-            |> Plug.Conn.assign(:current_user, user)
-            |> assign_browser_company_context(user)
-            |> sync_theme(user)
+            if Users.session_version_valid?(Plug.Conn.get_session(conn, :session_version), user) do
+              conn
+              |> Plug.Conn.assign(:current_user, user)
+              |> assign_browser_company_context(user)
+              |> sync_theme(user)
+            else
+              redirect_to_login(conn)
+            end
 
           {:error, :not_found} ->
             redirect_to_login(conn)
@@ -111,7 +115,11 @@ defmodule CymphoWeb.UserAuth do
       String.starts_with?(path, "//") ->
         nil
 
-      String.contains?(path, ["\n", "\r", "\t"]) ->
+      # Phoenix refuses backslashes in local redirects because browsers may
+      # interpret them as path separators (for example `/\\evil.example`).
+      # Reject them here so a crafted return_to falls back instead of raising
+      # from redirect/2 with a 500.
+      String.contains?(path, ["\\", "\n", "\r", "\t"]) ->
         nil
 
       true ->
@@ -272,6 +280,7 @@ defmodule CymphoWeb.UserAuth do
     |> Plug.Conn.assign(:user_companies, companies)
     |> Plug.Conn.assign(:current_company, company)
     |> Plug.Conn.assign(:current_company_id, company && company.id)
+    |> Plug.Conn.assign(:current_company_role, company && Companies.get_role(user.id, company.id))
     |> Plug.Conn.assign(:runtime_controls_allowed, runtime_control_allowed?(user, company))
     |> assign_browser_sidebar_data(company)
   end
@@ -335,17 +344,21 @@ defmodule CymphoWeb.UserAuth do
       user_id ->
         case Users.get_user(user_id) do
           {:ok, user} ->
-            # Store lightweight map instead of full Ecto struct to avoid
-            # Jason.Encoder errors in LiveView test mode
-            user_map = %{
-              id: user.id,
-              email: user.email,
-              name: user.name,
-              company_id: user.company_id,
-              theme: user.theme
-            }
+            if Users.session_version_valid?(session["session_version"], user) do
+              # Store lightweight map instead of full Ecto struct to avoid
+              # Jason.Encoder errors in LiveView test mode
+              user_map = %{
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                company_id: user.company_id,
+                theme: user.theme
+              }
 
-            assign(socket, :current_user, user_map)
+              assign(socket, :current_user, user_map)
+            else
+              assign(socket, :current_user, nil)
+            end
 
           {:error, :not_found} ->
             assign(socket, :current_user, nil)
@@ -400,6 +413,7 @@ defmodule CymphoWeb.UserAuth do
 
     socket
     |> assign(:current_company, company)
+    |> assign(:current_company_role, company && Companies.get_role(user.id, company.id))
     |> assign(:runtime_controls_allowed, runtime_control_allowed?(user, company))
   end
 
@@ -442,7 +456,7 @@ defmodule CymphoWeb.UserAuth do
 
   defp runtime_control_allowed?(%{id: user_id}, %{id: company_id})
        when is_binary(user_id) and is_binary(company_id) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    Cympho.CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp runtime_control_allowed?(_user, _company), do: false

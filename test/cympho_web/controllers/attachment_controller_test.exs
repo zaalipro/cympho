@@ -1,7 +1,7 @@
 defmodule CymphoWeb.AttachmentControllerTest do
   use CymphoWeb.ConnCase, async: true
 
-  alias Cympho.{Agents, Authentication, Companies, Issues, Attachments}
+  alias Cympho.{Agents, Attachments, Authentication, Companies, Issues, PrincipalPermissions}
 
   setup %{conn: conn} do
     {:ok, company} =
@@ -28,6 +28,8 @@ defmodule CymphoWeb.AttachmentControllerTest do
         description: "Test description",
         status: :backlog,
         priority: :medium,
+        assignee_id: agent.id,
+        assigned_role: "engineer",
         company_id: company.id
       })
 
@@ -179,6 +181,58 @@ defmodule CymphoWeb.AttachmentControllerTest do
     test "returns 404 for non-existent attachment", %{conn: conn} do
       conn = delete(conn, ~p"/api/attachments/00000000-0000-0000-0000-000000000000")
       assert conn.status == 404
+    end
+
+    test "requires ownership or an explicit scoped permission", %{
+      company: company,
+      issue: issue,
+      agent: owner
+    } do
+      {:ok, attachment} =
+        Attachments.create_attachment(%{
+          filename: "protected.pdf",
+          content_type: "application/pdf",
+          file_size: 100,
+          path: "#{issue.id}/protected.pdf",
+          issue_id: issue.id,
+          created_by_agent_id: owner.id
+        })
+
+      {:ok, other} =
+        Agents.create_agent(%{
+          name: "Other attachment agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, {_key, token}} = Authentication.create_agent_api_key(other.id, "Other Key")
+
+      denied_conn =
+        build_conn()
+        |> put_req_header("x-api-key", token)
+        |> delete(~p"/api/attachments/#{attachment.id}")
+
+      assert json_response(denied_conn, 403)
+      assert {:ok, _} = Attachments.get_attachment(attachment.id)
+
+      {:ok, _grant} =
+        PrincipalPermissions.create_permission_grant(%{
+          company_id: company.id,
+          principal_id: other.id,
+          principal_type: "agent",
+          permission: "attachments.delete",
+          scope_type: "issue",
+          scope_id: issue.id
+        })
+
+      allowed_conn =
+        build_conn()
+        |> put_req_header("x-api-key", token)
+        |> delete(~p"/api/attachments/#{attachment.id}")
+
+      assert allowed_conn.status == 204
+      assert {:error, :not_found} = Attachments.get_attachment(attachment.id)
     end
   end
 end

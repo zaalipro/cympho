@@ -9,6 +9,8 @@ defmodule Cympho.Decisions do
   alias Cympho.GovernanceAuditLogs
   alias Cympho.AuditTrail.Instrumenter
 
+  @nil_uuid "00000000-0000-0000-0000-000000000000"
+
   @doc """
   Returns the list of decisions.
   """
@@ -116,51 +118,7 @@ defmodule Cympho.Decisions do
     |> case do
       {:ok, decision} ->
         decision = Repo.preload(decision, :company)
-
-        GovernanceAuditLogs.log_action(
-          "decision_created",
-          actor || extract_actor(decision),
-          "Decision recorded: #{decision.decision_type} - #{decision.outcome}",
-          resource: decision,
-          reasoning: decision.reasoning,
-          metadata:
-            Map.merge(decision.context, %{
-              decision_key: decision.decision_key,
-              resource: "#{decision.resource_type}:#{decision.resource_id}",
-              reversible: decision.reversible
-            })
-        )
-
-        # Record audit event for decision creation
-        {actor_type, actor_id} =
-          case actor || extract_actor(decision) do
-            {type, id} -> {to_string(type), id}
-            _ -> {"system", "decision_creation"}
-          end
-
-        _ =
-          Instrumenter.record_decision(
-            decision,
-            "created",
-            actor_type,
-            actor_id
-          )
-
-        Cympho.PubSubGuard.company_broadcast(
-          decision.company_id,
-          "decisions",
-          {:decision_created, decision}
-        )
-
-        # Global topic for Cympho.Decisions.Executor — subscribes once and
-        # acts on every company's decisions instead of one subscription
-        # per company.
-        Cympho.PubSubGuard.broadcast(
-          "system:decisions",
-          {:decision_created, decision}
-        )
-
-        maybe_mark_parent_superseded(decision)
+        dispatch_created_decision(decision, actor)
 
         {:ok, decision}
 
@@ -173,11 +131,28 @@ defmodule Cympho.Decisions do
   Records a decision from a board approval.
   """
   def record_board_decision(board_approval, actor) do
-    {actor_type, actor_id} =
-      case actor do
-        {type, id} when is_binary(type) and is_binary(id) -> {type, id}
-        nil -> {"system", "00000000-0000-0000-0000-000000000000"}
-      end
+    board_approval
+    |> board_decision_changeset(actor)
+    |> Repo.insert()
+    |> case do
+      {:ok, decision} ->
+        decision = Repo.preload(decision, :company)
+        dispatch_created_decision(decision, actor)
+        {:ok, decision}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Builds the Decision row that must commit with a board-approval resolution.
+
+  Callers that insert this changeset in a larger transaction must invoke
+  `dispatch_created_decision/2` only after that transaction commits.
+  """
+  def board_decision_changeset(board_approval, actor) do
+    {actor_type, actor_id} = decision_actor(actor)
 
     attrs = %{
       decision_type: "board_approval",
@@ -199,33 +174,101 @@ defmodule Cympho.Decisions do
       }
     }
 
-    create_decision(attrs, actor)
+    Decision.create_changeset(%Decision{}, attrs)
   end
 
   @doc """
   Records a decision from an issue approval.
   """
-  def record_issue_decision(approval, actor) do
+  def record_issue_decision(approval, actor, company_id \\ nil) do
+    approval
+    |> issue_decision_changeset(actor, company_id || issue_approval_company_id(approval))
+    |> Repo.insert()
+    |> case do
+      {:ok, decision} ->
+        decision = Repo.preload(decision, :company)
+        dispatch_created_decision(decision, actor)
+        {:ok, decision}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Builds the Decision row required by an ordinary approval resolution.
+
+  Callers that commit this changeset alongside another record must invoke
+  `dispatch_created_decision/2` only after their transaction commits.
+  """
+  def issue_decision_changeset(approval, actor, company_id) do
+    {actor_type, actor_id} = decision_actor(actor)
+
     attrs = %{
       decision_type: "issue_approval",
       decision_key: "issue_approval_#{approval.id}",
-      outcome: approval.status,
+      outcome: to_string(approval.status),
       reasoning: approval.resolution_reason,
-      actor_type: safe_actor_type(actor),
-      actor_id: safe_actor_id(actor),
+      actor_type: actor_type,
+      actor_id: actor_id,
       resource_type: "approval",
       resource_id: approval.id,
       context: %{
         approval_id: approval.id,
         type: approval.type
       },
+      company_id: company_id,
       metadata: %{
         approval_id: approval.id,
         requested_by_agent_id: approval.requested_by_agent_id
       }
     }
 
-    create_decision(attrs, actor)
+    Decision.create_changeset(%Decision{}, attrs)
+  end
+
+  @doc """
+  Runs notifications and best-effort audit instrumentation for a committed
+  Decision row. It must not be called from inside a transaction that may still
+  roll back.
+  """
+  def dispatch_created_decision(%Decision{} = decision, actor) do
+    GovernanceAuditLogs.log_action(
+      "decision_created",
+      actor || extract_actor(decision),
+      "Decision recorded: #{decision.decision_type} - #{decision.outcome}",
+      resource: decision,
+      reasoning: decision.reasoning,
+      metadata:
+        Map.merge(decision.context, %{
+          decision_key: decision.decision_key,
+          resource: "#{decision.resource_type}:#{decision.resource_id}",
+          reversible: decision.reversible
+        })
+    )
+
+    {actor_type, actor_id} =
+      case actor || extract_actor(decision) do
+        {type, id} -> {to_string(type), id}
+        _ -> {"system", @nil_uuid}
+      end
+
+    _ = Instrumenter.record_decision(decision, "created", actor_type, actor_id)
+
+    Cympho.PubSubGuard.company_broadcast(
+      decision.company_id,
+      "decisions",
+      {:decision_created, decision}
+    )
+
+    # Global topic for Cympho.Decisions.Executor — subscribes once and acts on
+    # every company's decisions instead of one subscription per company.
+    Cympho.PubSubGuard.broadcast(
+      "system:decisions",
+      {:decision_created, decision}
+    )
+
+    maybe_mark_parent_superseded(decision)
   end
 
   @doc """
@@ -359,7 +402,22 @@ defmodule Cympho.Decisions do
 
   def subscribe(_company_id), do: :ok
 
-  @nil_uuid "00000000-0000-0000-0000-000000000000"
+  defp decision_actor({type, id}) when is_binary(type) and is_binary(id), do: {type, id}
+
+  defp decision_actor({type, id}) when is_atom(type) and is_binary(id),
+    do: {Atom.to_string(type), id}
+
+  defp decision_actor(_actor), do: {"system", @nil_uuid}
+
+  defp issue_approval_company_id(%{requested_by: %{company_id: company_id}})
+       when is_binary(company_id),
+       do: company_id
+
+  defp issue_approval_company_id(%{issues: [%{company_id: company_id} | _]})
+       when is_binary(company_id),
+       do: company_id
+
+  defp issue_approval_company_id(_approval), do: nil
 
   defp extract_actor(%Decision{actor_type: type, actor_id: id}), do: {type, id}
   defp extract_actor(_), do: {"system", @nil_uuid}

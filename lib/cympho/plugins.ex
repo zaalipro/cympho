@@ -5,9 +5,9 @@ defmodule Cympho.Plugins do
   `Cympho.Plugins.HostServices`, `Cympho.Plugins.PluginState`,
   `Cympho.Plugins.PluginLog`, and `Cympho.Plugins.PluginWebhook`.
 
-  Plugin domain CRUD (list, create, update, delete, toggle, change) lives on
-  `Cympho.Skills`. The duplicate CRUD surface that previously lived here was
-  consolidated into `Cympho.Skills` in spec 02.
+  Plugin persistence reads and changesets live on `Cympho.Skills`. Runtime
+  mutations go through `Cympho.Plugins.Runtime` so workers, dynamic tools, and
+  grants stay synchronized with the plugin row.
   """
 
   import Ecto.Query, warn: false

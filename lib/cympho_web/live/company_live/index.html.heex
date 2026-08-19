@@ -293,7 +293,7 @@
                 <.icon name="hero-pencil-square-mini" class="h-4 w-4" />
               </.app_link>
               <button
-                :if={can_manage_company?(@current_user, company)}
+                :if={can_delete_company?(@current_user, company)}
                 phx-click="delete_company"
                 phx-value-id={company.id}
                 title={"Delete #{company.name}"}

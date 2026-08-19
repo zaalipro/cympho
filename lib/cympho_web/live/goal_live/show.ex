@@ -42,17 +42,17 @@ defmodule CymphoWeb.GoalLive.Show do
     end
   end
 
-  defp list_goal_issues(%{id: goal_id}) do
+  defp list_goal_issues(%{id: goal_id, company_id: company_id}) do
     Issue
-    |> where(goal_id: ^goal_id)
+    |> where(goal_id: ^goal_id, company_id: ^company_id)
     |> order_by(desc: :inserted_at)
     |> limit(10)
     |> Repo.all()
   end
 
-  defp status_counts(%{id: goal_id}) do
+  defp status_counts(%{id: goal_id, company_id: company_id}) do
     Issue
-    |> where(goal_id: ^goal_id)
+    |> where(goal_id: ^goal_id, company_id: ^company_id)
     |> group_by(:status)
     |> select([i], {i.status, count(i.id)})
     |> Repo.all()

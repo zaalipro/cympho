@@ -33,4 +33,56 @@ defmodule Cympho.NotificationsTest do
       assert result == {:error, :user_not_found}
     end
   end
+
+  describe "test_webhook/2" do
+    test "returns immediately for an invalid URL" do
+      resolver = fn _host, _family -> flunk("invalid URLs must not be resolved") end
+      requester = fn _target, _headers, _body -> flunk("invalid URLs must not be sent") end
+
+      assert Notifications.test_webhook("http://127.0.0.1/hook",
+               resolver: resolver,
+               requester: requester
+             ) == {:error, :invalid_url}
+    end
+
+    test "rejects a private DNS answer without sending" do
+      resolver = fn "hooks.example", family ->
+        case family do
+          :inet -> {:ok, [{10, 0, 0, 1}]}
+          :inet6 -> {:error, :nxdomain}
+        end
+      end
+
+      requester = fn _target, _headers, _body -> flunk("private targets must not be sent") end
+
+      assert Notifications.test_webhook("https://hooks.example/hook",
+               resolver: resolver,
+               requester: requester
+             ) == {:error, :blocked_webhook_url}
+    end
+
+    test "does not follow redirects" do
+      test_pid = self()
+
+      resolver = fn "hooks.example", family ->
+        case family do
+          :inet -> {:ok, [{8, 8, 8, 8}]}
+          :inet6 -> {:error, :nxdomain}
+        end
+      end
+
+      requester = fn target, _headers, _body ->
+        send(test_pid, {:request, target})
+        {:ok, 302}
+      end
+
+      assert Notifications.test_webhook("https://hooks.example/hook",
+               resolver: resolver,
+               requester: requester
+             ) == {:error, {:http_error, 302}}
+
+      assert_receive {:request, %{address: {8, 8, 8, 8}}}
+      refute_receive {:request, _target}
+    end
+  end
 end

@@ -929,7 +929,7 @@ defmodule CymphoWeb.InboxLiveTest do
     end
 
     test "renders and resolves an ordinary approval inline", %{conn: conn} do
-      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn, %{role: "owner"})
 
       {:ok, agent} =
         Agents.create_agent(%{
@@ -965,6 +965,48 @@ defmodule CymphoWeb.InboxLiveTest do
       assert {:ok, resolved} = Approvals.get_company_approval(company.id, approval.id)
       assert resolved.status == :approved
       refute render(view) =~ "Approve the production release"
+    end
+
+    test "ordinary members cannot resolve an approval through forged Inbox events", %{conn: conn} do
+      {conn, user, company} =
+        ConnCase.register_and_log_in_user(conn, %{role: "member"})
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Member Approval Request Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, approval} =
+        Approvals.create_approval(%{
+          type: "member_deploy_release",
+          requested_by_agent_id: agent.id,
+          payload: %{"title" => "Member cannot approve this release"}
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/inbox?status=action")
+
+      refute has_element?(
+               view,
+               "button[phx-click='approve_approval'][phx-value-approval_id='#{approval.id}']"
+             )
+
+      refute has_element?(
+               view,
+               "button[phx-click='deny_approval'][phx-value-approval_id='#{approval.id}']"
+             )
+
+      render_click(view, :approve_approval, %{"approval_id" => approval.id})
+
+      flash = :sys.get_state(view.pid).socket.assigns.flash
+
+      assert Phoenix.Flash.get(flash, :error) ==
+               "Only company owners, admins, and board members can resolve approvals."
+
+      assert {:ok, pending} = Approvals.get_company_approval(company.id, approval.id)
+      assert pending.status == :pending
     end
 
     test "links board decisions to their authoritative workflow without inline resolution", %{

@@ -1,11 +1,20 @@
 defmodule CymphoWeb.WorkProductControllerTest do
   use CymphoWeb.ConnCase, async: true
 
-  alias Cympho.Issues
-  alias Cympho.WorkProducts
+  alias Cympho.{Attachments, Companies, Issues, WorkProducts}
+
+  defp create_attachment(issue, filename) do
+    Attachments.create_attachment(%{
+      filename: filename,
+      content_type: "text/plain",
+      file_size: 42,
+      path: "#{issue.id}/#{filename}",
+      issue_id: issue.id
+    })
+  end
 
   setup %{conn: conn} do
-    {conn, _user, company} = register_and_log_in_user(conn)
+    {conn, _user, company} = register_and_log_in_user(conn, %{role: "admin"})
 
     {:ok, issue} =
       Issues.create_issue(%{
@@ -74,6 +83,74 @@ defmodule CymphoWeb.WorkProductControllerTest do
       conn = post(conn, "/api/issues/#{fake_issue_id}/work-products", params)
       assert json_response(conn, 404)
     end
+
+    test "accepts an attachment belonging to the same issue", %{conn: conn, issue: issue} do
+      {:ok, attachment} = create_attachment(issue, "same-issue.txt")
+
+      conn =
+        post(conn, "/api/issues/#{issue.id}/work-products", %{
+          "kind" => "artifact",
+          "title" => "Attached evidence",
+          "attachment_id" => attachment.id
+        })
+
+      assert %{"data" => %{"attachment_id" => attachment_id}} = json_response(conn, 201)
+      assert attachment_id == attachment.id
+    end
+
+    test "rejects a forged attachment_id from another issue", %{
+      conn: conn,
+      issue: issue,
+      company: company
+    } do
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Other attachment issue",
+          status: :todo,
+          company_id: company.id
+        })
+
+      {:ok, attachment} = create_attachment(other_issue, "other-issue.txt")
+
+      conn =
+        post(conn, "/api/issues/#{issue.id}/work-products", %{
+          "kind" => "artifact",
+          "title" => "Forged evidence",
+          "attachment_id" => attachment.id
+        })
+
+      assert %{"errors" => %{"attachment_id" => ["must belong to the same issue"]}} =
+               json_response(conn, 422)
+    end
+
+    test "rejects a forged attachment_id from another company", %{conn: conn, issue: issue} do
+      unique = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Foreign Work Product #{unique}",
+          slug: "foreign-work-product-#{unique}"
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Foreign attachment issue",
+          status: :todo,
+          company_id: other_company.id
+        })
+
+      {:ok, attachment} = create_attachment(other_issue, "foreign-issue.txt")
+
+      conn =
+        post(conn, "/api/issues/#{issue.id}/work-products", %{
+          "kind" => "artifact",
+          "title" => "Cross-tenant evidence",
+          "attachment_id" => attachment.id
+        })
+
+      assert %{"errors" => %{"attachment_id" => ["must belong to the same issue"]}} =
+               json_response(conn, 422)
+    end
   end
 
   describe "GET /api/issues/:issue_id/work-products" do
@@ -133,6 +210,25 @@ defmodule CymphoWeb.WorkProductControllerTest do
       conn = get(conn, "/api/issues/#{issue.id}/work-products/#{fake_id}")
       assert %{"errors" => _} = json_response(conn, 404)
     end
+
+    test "returns 404 when a work-product ID is forged under another issue", %{
+      conn: conn,
+      issue: issue,
+      company: company
+    } do
+      {:ok, other_issue} =
+        Issues.create_issue(%{title: "Other work product issue", company_id: company.id})
+
+      {:ok, work_product} =
+        WorkProducts.create_work_product(%{
+          issue_id: other_issue.id,
+          kind: "document",
+          title: "Other issue private evidence"
+        })
+
+      conn = get(conn, "/api/issues/#{issue.id}/work-products/#{work_product.id}")
+      assert json_response(conn, 404)
+    end
   end
 
   describe "PATCH /api/issues/:issue_id/work-products/:id" do
@@ -165,6 +261,35 @@ defmodule CymphoWeb.WorkProductControllerTest do
 
       conn = patch(conn, "/api/issues/#{issue.id}/work-products/#{wp.id}", params)
       assert %{"errors" => _} = json_response(conn, 422)
+    end
+
+    test "rejects a forged attachment_id when updating", %{
+      conn: conn,
+      issue: issue,
+      company: company
+    } do
+      {:ok, work_product} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          kind: "document",
+          title: "Original evidence"
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{title: "Other update issue", company_id: company.id})
+
+      {:ok, attachment} = create_attachment(other_issue, "forged-update.txt")
+
+      conn =
+        patch(conn, "/api/issues/#{issue.id}/work-products/#{work_product.id}", %{
+          "attachment_id" => attachment.id
+        })
+
+      assert %{"errors" => %{"attachment_id" => ["must belong to the same issue"]}} =
+               json_response(conn, 422)
+
+      assert {:ok, unchanged} = WorkProducts.get_work_product(work_product.id)
+      assert unchanged.attachment_id == nil
     end
 
     test "returns 404 for non-existent work product", %{conn: conn, issue: issue} do

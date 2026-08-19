@@ -64,9 +64,8 @@ defmodule CymphoWeb.DocumentController do
       }) do
     with {:ok, issue} <- scoped_issue(conn, issue_id),
          {:ok, document} <- Documents.get_document_by_key(issue.id, key),
-         :ok <- validate_revision_ref(document, revision_id),
-         :ok <- validate_revision_ref(document, other_revision_id) do
-      result = Documents.get_diff(revision_id, other_revision_id)
+         {:ok, result} <-
+           Documents.get_document_diff(document.id, revision_id, other_revision_id) do
       render(conn, :diff, document: document, result: result)
     end
   end

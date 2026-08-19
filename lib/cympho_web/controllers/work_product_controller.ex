@@ -37,16 +37,16 @@ defmodule CymphoWeb.WorkProductController do
     end
   end
 
-  def show(conn, %{"id" => id}) do
-    with {:ok, %IssueWorkProduct{} = work_product} <- WorkProducts.get_work_product(id),
-         :ok <- enforce_company(conn, work_product) do
+  def show(conn, %{"issue_id" => issue_id, "id" => id}) do
+    with {:ok, issue} <- scoped_issue(conn, issue_id),
+         {:ok, %IssueWorkProduct{} = work_product} <- scoped_work_product(issue, id) do
       render(conn, :show, work_product: work_product)
     end
   end
 
-  def update(conn, %{"id" => id} = params) do
-    with {:ok, %IssueWorkProduct{} = work_product} <- WorkProducts.get_work_product(id),
-         :ok <- enforce_company(conn, work_product) do
+  def update(conn, %{"issue_id" => issue_id, "id" => id} = params) do
+    with {:ok, issue} <- scoped_issue(conn, issue_id),
+         {:ok, %IssueWorkProduct{} = work_product} <- scoped_work_product(issue, id) do
       attrs =
         Map.take(params, [
           "kind",
@@ -65,9 +65,9 @@ defmodule CymphoWeb.WorkProductController do
     end
   end
 
-  def delete(conn, %{"id" => id}) do
-    with {:ok, %IssueWorkProduct{} = work_product} <- WorkProducts.get_work_product(id),
-         :ok <- enforce_company(conn, work_product),
+  def delete(conn, %{"issue_id" => issue_id, "id" => id}) do
+    with {:ok, issue} <- scoped_issue(conn, issue_id),
+         {:ok, %IssueWorkProduct{} = work_product} <- scoped_work_product(issue, id),
          :ok <- WorkProducts.delete_work_product(work_product) do
       send_resp(conn, :no_content, "")
     end
@@ -77,10 +77,13 @@ defmodule CymphoWeb.WorkProductController do
     Issues.get_company_issue(conn.assigns.current_company.id, issue_id)
   end
 
-  defp enforce_company(conn, %IssueWorkProduct{issue_id: issue_id}) do
-    case scoped_issue(conn, issue_id) do
-      {:ok, _} -> :ok
-      {:error, :not_found} -> {:error, :not_found}
+  defp scoped_work_product(issue, id) do
+    case WorkProducts.get_work_product(id) do
+      {:ok, %IssueWorkProduct{issue_id: issue_id} = work_product} when issue_id == issue.id ->
+        {:ok, work_product}
+
+      _ ->
+        {:error, :not_found}
     end
   end
 

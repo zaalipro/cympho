@@ -167,7 +167,7 @@
       <aside class="space-y-6">
         <div class="rounded-xl border border-border bg-panel p-5 lg:sticky lg:top-6">
           <p class="text-eyebrow uppercase text-text-quaternary">Decision actions</p>
-          <%= if @approval.status == :pending do %>
+          <%= if @approval.status == :pending and @can_resolve_approvals do %>
             <div class="mt-4 grid gap-2">
               <button
                 type="button"
@@ -189,7 +189,11 @@
             </div>
           <% else %>
             <p class="mt-3 text-sm leading-6 text-text-tertiary">
-              This approval is already resolved. It's kept here for the record.
+              <%= if @approval.status == :pending do %>
+                Only company owners, admins, and board members can resolve this approval.
+              <% else %>
+                This approval is already resolved. It's kept here for the record.
+              <% end %>
             </p>
           <% end %>
         </div>

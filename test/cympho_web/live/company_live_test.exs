@@ -159,5 +159,76 @@ defmodule CymphoWeb.CompanyLiveTest do
       assert html =~ "Membership not found"
       assert Companies.get_membership(membership.user_id, company.id)
     end
+
+    test "an open company view honors manager demotion for every sensitive event", %{
+      conn: conn,
+      current_company: company
+    } do
+      [membership] = Companies.list_memberships(company.id)
+
+      {:ok, membership} =
+        Companies.update_membership(membership, %{role: "owner", is_board_member: true})
+
+      {:ok, view, _html} = live(conn, "/companies/#{company.id}")
+
+      {:ok, _demoted} =
+        Companies.update_membership(membership, %{role: "member", is_board_member: false})
+
+      html = render_click(view, "show_pause_modal")
+      assert html =~ "You cannot control this company&#39;s runtime."
+
+      render_click(view, "pause_company")
+      assert Companies.get_company!(company.id).status == "active"
+
+      html = render_click(view, "delete_membership", %{"id" => membership.id})
+      assert html =~ "Membership not found"
+      assert Companies.get_membership(membership.user_id, company.id)
+
+      {:ok, _paused} = Companies.pause_company(company, "authorization test setup")
+
+      html = render_click(view, "show_resume_modal")
+      assert html =~ "You cannot control this company&#39;s runtime."
+
+      render_click(view, "resume_company")
+      assert Companies.get_company!(company.id).status == "paused"
+    end
+
+    test "an open company view honors membership removal", %{
+      conn: conn,
+      current_company: company
+    } do
+      [membership] = Companies.list_memberships(company.id)
+
+      {:ok, membership} =
+        Companies.update_membership(membership, %{role: "owner", is_board_member: true})
+
+      {:ok, view, _html} = live(conn, "/companies/#{company.id}")
+      {:ok, _deleted} = Companies.delete_membership(membership)
+
+      render_click(view, "pause_company")
+
+      assert Companies.get_company!(company.id).status == "active"
+    end
+
+    test "an open company edit form honors manager demotion", %{
+      conn: conn,
+      current_company: company
+    } do
+      [membership] = Companies.list_memberships(company.id)
+
+      {:ok, membership} =
+        Companies.update_membership(membership, %{role: "owner", is_board_member: true})
+
+      {:ok, view, _html} = live(conn, "/companies/#{company.id}/edit")
+
+      {:ok, _demoted} =
+        Companies.update_membership(membership, %{role: "member", is_board_member: false})
+
+      view
+      |> form("#company-form", company: %{name: "Unauthorized Rename", slug: company.slug})
+      |> render_submit()
+
+      assert Companies.get_company!(company.id).name == company.name
+    end
   end
 end

@@ -62,6 +62,9 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
           adapter: "process"
         })
 
+      old = DateTime.utc_now() |> DateTime.add(-16 * 60, :second) |> DateTime.truncate(:second)
+      run |> Ecto.Changeset.change(inserted_at: old) |> Repo.update!()
+
       assert :ok = Watchdog.check_now()
       # Sync through the GenServer so the check_now cast has been processed.
       _ = :sys.get_state(Process.whereis(Watchdog))
@@ -99,6 +102,9 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
       assert checked_out.status == :in_progress
       assert is_nil(Cympho.Orchestrator.whereis(checked_out.id))
 
+      old = DateTime.utc_now() |> DateTime.add(-16 * 60, :second) |> DateTime.truncate(:second)
+      checked_out |> Ecto.Changeset.change(checked_out_at: old) |> Repo.update!()
+
       assert :ok = Watchdog.check_now()
       _ = :sys.get_state(Process.whereis(Watchdog))
 
@@ -112,6 +118,54 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
   end
 
   describe "stranded wake recovery" do
+    test "reclaims an expired running wake claim and re-triggers its agent" do
+      case start_supervised({Registry, keys: :unique, name: Cympho.AgentHeartbeat.Registry}) do
+        {:ok, _} -> :ok
+        {:error, {:already_started, _}} -> :ok
+      end
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Expired Wake Claim Agent",
+          role: :engineer,
+          status: :idle
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Expired running wake",
+          status: :todo,
+          assignee_id: agent.id
+        })
+
+      {:ok, _wake} =
+        Cympho.HeartbeatEngine.WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_commented"
+        })
+
+      {:ok, claimed} = Cympho.HeartbeatEngine.WakeupQueue.dequeue(agent.id)
+
+      claimed
+      |> Ecto.Changeset.change(%{
+        claimed_at: DateTime.add(DateTime.utc_now(), -60 * 60, :second)
+      })
+      |> Repo.update!()
+
+      {:ok, _} = Registry.register(Cympho.AgentHeartbeat.Registry, agent.id, nil)
+
+      assert :ok = Watchdog.check_now()
+      _ = :sys.get_state(Process.whereis(Watchdog))
+
+      assert_receive :heartbeat, 2_000
+
+      reloaded = Repo.get!(Cympho.Wakes.AgentWake, claimed.id)
+      assert reloaded.status == "pending"
+      assert is_nil(reloaded.claim_token)
+      assert Watchdog.last_results().stale_wake_claims_recovered >= 1
+    end
+
     test "re-triggers heartbeats for agents with old pending wakes" do
       case start_supervised({Registry, keys: :unique, name: Cympho.AgentHeartbeat.Registry}) do
         {:ok, _} -> :ok

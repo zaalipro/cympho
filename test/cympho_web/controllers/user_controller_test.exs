@@ -1,6 +1,51 @@
 defmodule CymphoWeb.UserControllerTest do
   use CymphoWeb.ConnCase, async: true
 
+  alias Cympho.Companies
+
+  describe "create" do
+    test "admins invite an unknown teammate without reserving a global user", %{conn: conn} do
+      {conn, _user, company} = register_and_log_in_user(conn, %{role: "admin"})
+      unique = System.unique_integer([:positive])
+      email = "teammate-#{unique}@example.com"
+
+      conn =
+        post(conn, "/api/users", %{
+          "user" => %{
+            "name" => "Invited Teammate",
+            "email" => " TEAMMATE-#{unique}@Example.COM ",
+            "password" => "admin-must-not-set-this"
+          }
+        })
+
+      assert %{
+               "data" => %{
+                 "invited" => true,
+                 "email" => ^email,
+                 "role" => "member",
+                 "token" => token
+               }
+             } = json_response(conn, 201)
+
+      assert {:error, :not_found} = Cympho.Users.get_user_by_email(email)
+      assert invite = Companies.get_invite_by_token(token)
+      assert invite.company_id == company.id
+      assert invite.status == "pending"
+    end
+
+    test "regular members cannot invite teammates", %{conn: conn} do
+      {conn, _user, company} = register_and_log_in_user(conn, %{role: "member"})
+      unique = System.unique_integer([:positive])
+      email = "blocked-teammate-#{unique}@example.com"
+
+      conn = post(conn, "/api/users", %{"user" => %{"email" => email}})
+
+      assert %{"errors" => [%{"detail" => "Forbidden"}]} = json_response(conn, 403)
+      assert {:error, :not_found} = Cympho.Users.get_user_by_email(email)
+      assert Companies.list_pending_invites(company.id) == []
+    end
+  end
+
   describe "update_notification_prefs" do
     setup %{conn: conn} do
       {conn, user, _company} = register_and_log_in_user(conn)

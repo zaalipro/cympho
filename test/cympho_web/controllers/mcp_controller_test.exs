@@ -1,7 +1,7 @@
 defmodule CymphoWeb.McpControllerTest do
   use CymphoWeb.ConnCase, async: false
 
-  alias Cympho.{Agents, Authentication, Comments, Companies, Issues}
+  alias Cympho.{Agents, Authentication, Comments, Companies, Issues, PrincipalPermissions}
   alias Cympho.RateLimiting.AgentActionLimiter
 
   setup %{conn: conn} do
@@ -95,6 +95,53 @@ defmodule CymphoWeb.McpControllerTest do
     assert body["error"] == "rate_limited"
     assert body["result"]["error"] == "rate_limited"
     assert body["result"]["success"] == false
+  end
+
+  test "static mutations require agent authority before rate limiting", %{company: company} do
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Restricted MCP Agent",
+        role: :engineer,
+        status: :idle,
+        company_id: company.id
+      })
+
+    {:ok, {_key, token}} = Authentication.create_agent_api_key(agent.id, "Restricted MCP Key")
+
+    denied =
+      build_conn()
+      |> put_req_header("x-api-key", token)
+      |> post("/api/mcp/call", %{
+        "tool" => "create_issue",
+        "args" => %{"title" => "Not authorized"}
+      })
+
+    assert %{
+             "result" => %{
+               "error" => "Tool not authorized",
+               "decision" => "deny",
+               "static" => true,
+               "success" => false
+             }
+           } = json_response(denied, 200)
+
+    {:ok, _grant} =
+      PrincipalPermissions.create_permission_grant(%{
+        company_id: company.id,
+        principal_id: agent.id,
+        principal_type: "agent",
+        permission: "task.create"
+      })
+
+    allowed =
+      build_conn()
+      |> put_req_header("x-api-key", token)
+      |> post("/api/mcp/call", %{
+        "tool" => "create_issue",
+        "args" => %{"title" => "Explicitly authorized"}
+      })
+
+    assert %{"result" => %{"success" => true}} = json_response(allowed, 200)
   end
 
   test "lists and calls only granted dynamic tools", %{

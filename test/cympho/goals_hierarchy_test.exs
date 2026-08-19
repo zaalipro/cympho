@@ -26,6 +26,7 @@ defmodule Cympho.GoalsHierarchyTest do
         Goals.create_goal(%{title: "Child Goal", project_id: project.id, parent_id: parent.id})
 
       assert child.parent_id == parent.id
+      assert child.company_id == project.company_id
     end
 
     test "get_goal_with_tree! loads nested children", %{project: project} do
@@ -48,6 +49,10 @@ defmodule Cympho.GoalsHierarchyTest do
         Goals.create_goal(%{title: "Child", project_id: project.id, parent_id: parent.id})
 
       assert Goals.would_create_cycle?(parent.id, child.id)
+
+      assert {:error, changeset} = Goals.update_goal(parent, %{parent_id: child.id})
+      assert %{parent_id: ["would create a cycle"]} = errors_on(changeset)
+      assert Goals.get_goal!(parent.id).parent_id == nil
     end
 
     test "self-reference is detected as cycle", %{project: project} do
@@ -59,6 +64,128 @@ defmodule Cympho.GoalsHierarchyTest do
       {:ok, g1} = Goals.create_goal(%{title: "Goal 1", project_id: project.id})
       {:ok, g2} = Goals.create_goal(%{title: "Goal 2", project_id: project.id})
       refute Goals.would_create_cycle?(g1.id, g2.id)
+    end
+
+    test "create and update reject cross-company projects and parents", %{
+      company: company,
+      project: project
+    } do
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Other Goal Co",
+          slug: "other-goal-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, other_project} =
+        Cympho.Projects.create_project(%{
+          name: "Other Goal Project",
+          prefix: "OTH",
+          company_id: other_company.id
+        })
+
+      {:ok, other_parent} =
+        Goals.create_goal(%{
+          title: "Other Parent",
+          company_id: other_company.id,
+          project_id: other_project.id
+        })
+
+      assert {:error, create_changeset} =
+               Goals.create_goal(%{
+                 title: "Forged child",
+                 company_id: company.id,
+                 project_id: other_project.id,
+                 parent_id: other_parent.id
+               })
+
+      assert %{
+               project_id: ["must belong to the same company"],
+               parent_id: ["must belong to the same company"]
+             } = errors_on(create_changeset)
+
+      {:ok, goal} =
+        Goals.create_goal(%{
+          title: "Our Goal",
+          company_id: company.id,
+          project_id: project.id
+        })
+
+      assert {:error, update_changeset} =
+               Goals.update_goal(goal, %{
+                 project_id: other_project.id,
+                 parent_id: other_parent.id
+               })
+
+      assert %{
+               project_id: ["must belong to the same company"],
+               parent_id: ["must belong to the same company"]
+             } = errors_on(update_changeset)
+
+      unchanged = Goals.get_goal!(goal.id)
+      assert unchanged.project_id == project.id
+      assert unchanged.parent_id == nil
+    end
+
+    test "update ignores a forged company_id", %{company: company, project: project} do
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Forged Tenant",
+          slug: "forged-tenant-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, goal} =
+        Goals.create_goal(%{
+          title: "Tenant-bound goal",
+          company_id: company.id,
+          project_id: project.id
+        })
+
+      assert {:ok, updated} =
+               Goals.update_goal(goal, %{title: "Still ours", company_id: other_company.id})
+
+      assert updated.title == "Still ours"
+      assert updated.company_id == company.id
+    end
+
+    test "legacy cycles do not recurse forever and cannot gain new children", %{
+      company: company,
+      project: project
+    } do
+      {:ok, a} =
+        Goals.create_goal(%{
+          title: "Legacy A",
+          company_id: company.id,
+          project_id: project.id
+        })
+
+      {:ok, b} =
+        Goals.create_goal(%{
+          title: "Legacy B",
+          company_id: company.id,
+          project_id: project.id,
+          parent_id: a.id
+        })
+
+      {1, nil} =
+        Repo.update_all(from(g in Cympho.Goals.Goal, where: g.id == ^a.id),
+          set: [parent_id: b.id]
+        )
+
+      assert Enum.map(Goals.get_ancestors(a.id), & &1.id) == [b.id]
+      assert Enum.map(Goals.get_descendants(a.id), & &1.id) == [b.id]
+
+      tree = Goals.get_goal_with_tree!(a.id)
+      assert [%{id: b_id, children: []}] = tree.children
+      assert b_id == b.id
+
+      assert {:error, changeset} =
+               Goals.create_goal(%{
+                 title: "Must not attach",
+                 company_id: company.id,
+                 parent_id: a.id
+               })
+
+      assert %{parent_id: ["would create a cycle"]} = errors_on(changeset)
     end
   end
 

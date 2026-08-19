@@ -15,15 +15,20 @@ defmodule CymphoWeb.SetupController do
   @setup_lock_key 7_214_001
 
   def new(conn, _params) do
-    if users_exist?() do
-      redirect(conn, to: "/login")
-    else
-      conn |> put_layout(false) |> html(setup_page(%{}, nil))
+    cond do
+      users_exist?() ->
+        redirect(conn, to: "/login")
+
+      bootstrap_unavailable?() ->
+        bootstrap_unavailable(conn)
+
+      true ->
+        render_setup(conn, %{}, nil)
     end
   end
 
   def create(conn, %{"user" => user_params}) do
-    case create_first_user(user_params) do
+    case create_first_user(user_params, conn.params["bootstrap_secret"]) do
       {:ok, user} ->
         conn
         |> SessionController.sign_in(user)
@@ -40,10 +45,14 @@ defmodule CymphoWeb.SetupController do
           redirect(conn, to: "/login")
         end
 
+      {:error, :bootstrap_unavailable} ->
+        bootstrap_unavailable(conn)
+
+      {:error, :invalid_bootstrap_secret} ->
+        render_setup(conn, user_params, "Bootstrap secret is invalid.", :forbidden)
+
       {:error, %Ecto.Changeset{} = changeset} ->
-        conn
-        |> put_layout(false)
-        |> html(setup_page(user_params, first_error(changeset)))
+        render_setup(conn, user_params, first_error(changeset))
     end
   end
 
@@ -51,27 +60,86 @@ defmodule CymphoWeb.SetupController do
 
   defp users_exist?, do: Repo.aggregate(User, :count) > 0
 
-  defp create_first_user(params) do
+  defp create_first_user(params, submitted_secret) do
     Repo.transaction(fn ->
       Repo.query!("SELECT pg_advisory_xact_lock($1)", [@setup_lock_key])
 
       if users_exist?() do
         Repo.rollback(:already_configured)
       else
-        # Trim + downcase the email: authenticate_user/2 matches emails
-        # byte-for-byte, and a first-run typo ("Nick@Example.com ") would
-        # permanently lock out the only owner on an instance that has no
-        # password-reset flow.
-        case Authentication.register_user(%{
-               "name" => String.trim(params["name"] || ""),
-               "email" => params["email"] |> to_string() |> String.trim() |> String.downcase(),
-               "password" => params["password"]
-             }) do
-          {:ok, user} -> user
-          {:error, changeset} -> Repo.rollback(changeset)
+        case authorize_bootstrap(submitted_secret) do
+          :ok ->
+            # Trim + downcase the email: authenticate_user/2 matches emails
+            # byte-for-byte, and a first-run typo ("Nick@Example.com ") would
+            # permanently lock out the only owner on an instance that has no
+            # password-reset flow.
+            case Authentication.register_user(%{
+                   "name" => String.trim(params["name"] || ""),
+                   "email" =>
+                     params["email"] |> to_string() |> String.trim() |> String.downcase(),
+                   "password" => params["password"]
+                 }) do
+              {:ok, user} -> user
+              {:error, changeset} -> Repo.rollback(changeset)
+            end
+
+          {:error, reason} ->
+            Repo.rollback(reason)
         end
       end
     end)
+  end
+
+  defp authorize_bootstrap(submitted_secret) do
+    config = bootstrap_config()
+
+    if Keyword.get(config, :required, false) do
+      case Keyword.get(config, :secret) do
+        expected when is_binary(expected) and is_binary(submitted_secret) ->
+          if secrets_match?(expected, submitted_secret),
+            do: :ok,
+            else: {:error, :invalid_bootstrap_secret}
+
+        expected when is_binary(expected) ->
+          {:error, :invalid_bootstrap_secret}
+
+        _missing ->
+          {:error, :bootstrap_unavailable}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp secrets_match?(expected, submitted) do
+    Plug.Crypto.secure_compare(
+      :crypto.hash(:sha256, expected),
+      :crypto.hash(:sha256, submitted)
+    )
+  end
+
+  defp bootstrap_config,
+    do: Application.get_env(:cympho, :bootstrap_protection, required: false, secret: nil)
+
+  defp bootstrap_required?, do: Keyword.get(bootstrap_config(), :required, false)
+
+  defp bootstrap_unavailable? do
+    bootstrap_required?() and not is_binary(Keyword.get(bootstrap_config(), :secret))
+  end
+
+  defp render_setup(conn, params, error, status \\ :ok) do
+    conn
+    |> put_status(status)
+    |> put_layout(false)
+    |> html(setup_page(params, error, bootstrap_required?()))
+  end
+
+  defp bootstrap_unavailable(conn) do
+    conn
+    |> put_resp_header("retry-after", "300")
+    |> put_status(:service_unavailable)
+    |> put_layout(false)
+    |> html(setup_unavailable_page())
   end
 
   defp first_error(changeset) do
@@ -84,9 +152,21 @@ defmodule CymphoWeb.SetupController do
     |> List.first()
   end
 
-  defp setup_page(params, error) do
+  defp setup_page(params, error, bootstrap_required?) do
     csrf = Plug.CSRFProtection.get_csrf_token()
     error_html = if error, do: ~s(<p class="error">#{escape(error)}</p>), else: ""
+
+    bootstrap_secret_input =
+      if bootstrap_required? do
+        """
+        <label>
+          Bootstrap secret
+          <input name="bootstrap_secret" type="password" autocomplete="off" required>
+        </label>
+        """
+      else
+        ""
+      end
 
     """
     <!doctype html>
@@ -128,6 +208,7 @@ defmodule CymphoWeb.SetupController do
               <p>This instance is brand new. Create the owner account, then the setup wizard will launch your first autonomous company.</p>
             </div>
             #{error_html}
+            #{bootstrap_secret_input}
             <label>
               Name
               <input name="user[name]" type="text" autocomplete="name" value="#{escape(params["name"])}" required>
@@ -142,6 +223,34 @@ defmodule CymphoWeb.SetupController do
             </label>
             <button type="submit">Create owner account</button>
           </form>
+        </main>
+      </body>
+    </html>
+    """
+  end
+
+  defp setup_unavailable_page do
+    """
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="robots" content="noindex, nofollow">
+        <title>Setup locked · Cympho</title>
+        <style>
+          :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #20201E; color: #FAF9F5; }
+          body { min-height: 100dvh; margin: 0; display: grid; place-items: center; }
+          main { width: min(420px, calc(100vw - 32px)); padding: 30px; box-sizing: border-box; border: 1px solid rgba(255,250,245,.10); border-radius: 20px; background: #262624; }
+          h1 { margin: 0 0 10px; font-size: 27px; }
+          p { margin: 0; color: #B0A99C; font-size: 14px; line-height: 1.5; }
+          code { color: #E08A6B; }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>First-run setup is locked</h1>
+          <p>An operator must configure a strong <code>CYMPHO_BOOTSTRAP_SECRET</code> and restart the service before the first owner can be created.</p>
         </main>
       </body>
     </html>

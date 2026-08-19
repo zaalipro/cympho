@@ -14,6 +14,7 @@ defmodule Cympho.Companies do
   alias Cympho.Issues.Issue
   alias Cympho.Projects.Project
   alias Cympho.Secrets.Secret
+  alias Cympho.Users.User
 
   @runtime_mode_key "runtime_mode"
   @low_power_mode "low_power"
@@ -2783,6 +2784,27 @@ defmodule Cympho.Companies do
     |> Repo.all()
   end
 
+  @doc """
+  Returns a company the user is actually a member of.
+
+  The legacy `users.company_id` preference is honored only while its matching
+  membership still exists; otherwise the oldest membership is selected.
+  """
+  def default_company_id_for_user(%User{id: user_id, company_id: company_id}) do
+    if is_binary(company_id) and has_access?(user_id, company_id) do
+      company_id
+    else
+      Repo.one(
+        from(m in CompanyMembership,
+          where: m.user_id == ^user_id,
+          order_by: [asc: m.inserted_at, asc: m.id],
+          select: m.company_id,
+          limit: 1
+        )
+      )
+    end
+  end
+
   def get_membership(user_id, company_id) do
     Repo.get_by(CompanyMembership, user_id: user_id, company_id: company_id)
   end
@@ -2887,8 +2909,17 @@ defmodule Cympho.Companies do
     token = CompanyInvite.generate_token()
     expires_at = DateTime.add(DateTime.utc_now(), 7 * 24 * 3600, :second)
 
+    attrs = %{
+      company_id: attrs[:company_id] || attrs["company_id"],
+      inviter_id: attrs[:inviter_id] || attrs["inviter_id"],
+      email: attrs[:email] || attrs["email"],
+      role: attrs[:role] || attrs["role"] || "member",
+      token: token,
+      expires_at: expires_at
+    }
+
     %CompanyInvite{}
-    |> CompanyInvite.changeset(Map.merge(attrs, %{"token" => token, "expires_at" => expires_at}))
+    |> CompanyInvite.changeset(attrs)
     |> Repo.insert()
   end
 
@@ -2904,44 +2935,69 @@ defmodule Cympho.Companies do
     |> Repo.all()
   end
 
-  def accept_invite(token, user_id) do
-    invite = get_invite_by_token(token)
-    user = user_id && Cympho.Users.get_user!(user_id)
+  def accept_invite(token, user_id) when is_binary(token) and is_binary(user_id) do
+    invite_transaction(fn ->
+      invite = get_invite_by_token_for_update(token)
+      user = Repo.get(User, user_id)
 
-    cond do
-      is_nil(invite) ->
-        {:error, :not_found}
+      with :ok <- validate_invite_recipient(invite, user) do
+        ensure_invited_membership!(invite, user)
 
-      CompanyInvite.expired?(invite) ->
-        mark_invite_expired(invite)
-        {:error, :expired}
-
-      invite.status != "pending" ->
-        {:error, :already_used}
-
-      invite_email_mismatch?(invite, user) ->
-        {:error, :email_mismatch}
-
-      true ->
-        Repo.transaction(fn ->
-          create_membership!(%{
-            user_id: user_id,
-            company_id: invite.company_id,
-            role: invite.role
-          })
-
-          invite
-          |> CompanyInvite.changeset(%{status: "accepted"})
-          |> Repo.update!()
-        end)
-    end
+        invite
+        |> CompanyInvite.changeset(%{status: "accepted"})
+        |> Repo.update()
+        |> unwrap_or_rollback()
+      end
+    end)
   end
+
+  def accept_invite(_token, _user_id), do: {:error, :not_found}
+
+  @doc """
+  Creates a new password-backed account from a recipient-bound invite and
+  accepts that invite in the same transaction.
+
+  Existing accounts are never modified through this path; they must
+  authenticate normally before calling `accept_invite/2`.
+  """
+  def register_from_invite(token, attrs) when is_binary(token) and is_map(attrs) do
+    invite_transaction(fn ->
+      invite = get_invite_by_token_for_update(token)
+
+      with :ok <- validate_invite_for_registration(invite, attrs) do
+        attrs = put_invited_email(attrs, invite.email)
+
+        user =
+          %User{}
+          |> User.registration_changeset(attrs)
+          |> Repo.insert()
+          |> unwrap_or_rollback()
+
+        ensure_invited_membership!(invite, user)
+
+        user =
+          user
+          |> Ecto.Changeset.change(company_id: invite.company_id)
+          |> Repo.update()
+          |> unwrap_or_rollback()
+
+        invite
+        |> CompanyInvite.changeset(%{status: "accepted"})
+        |> Repo.update()
+        |> unwrap_or_rollback()
+
+        user
+      end
+    end)
+  end
+
+  def register_from_invite(_token, _attrs), do: {:error, :not_found}
 
   # An invite that names a recipient email may be accepted only by the user
   # with that email. Invites without an email (open links) stay unrestricted.
   defp invite_email_mismatch?(%{email: invite_email}, %{email: user_email})
        when is_binary(invite_email) and is_binary(user_email) do
-    String.downcase(invite_email) != String.downcase(user_email)
+    User.normalize_email(invite_email) != User.normalize_email(user_email)
   end
 
   defp invite_email_mismatch?(_invite, _user), do: false
@@ -2963,6 +3019,94 @@ defmodule Cympho.Companies do
     |> CompanyInvite.changeset(%{status: "expired"})
     |> Repo.update()
   end
+
+  defp get_invite_by_token_for_update(token) do
+    Repo.one(from(i in CompanyInvite, where: i.token == ^token, lock: "FOR UPDATE"))
+  end
+
+  defp validate_invite_recipient(nil, _user), do: {:error, :not_found}
+  defp validate_invite_recipient(_invite, nil), do: {:error, :not_found}
+
+  defp validate_invite_recipient(%CompanyInvite{} = invite, %User{} = user) do
+    cond do
+      CompanyInvite.expired?(invite) ->
+        mark_invite_expired(invite)
+        {:error, :expired}
+
+      invite.status != "pending" ->
+        {:error, :already_used}
+
+      invite_email_mismatch?(invite, user) ->
+        {:error, :email_mismatch}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_invite_for_registration(nil, _attrs), do: {:error, :not_found}
+
+  defp validate_invite_for_registration(%CompanyInvite{} = invite, attrs) do
+    submitted_email = attrs[:email] || attrs["email"]
+
+    cond do
+      CompanyInvite.expired?(invite) ->
+        mark_invite_expired(invite)
+        {:error, :expired}
+
+      invite.status != "pending" ->
+        {:error, :already_used}
+
+      is_binary(submitted_email) and
+          User.normalize_email(submitted_email) != User.normalize_email(invite.email) ->
+        {:error, :email_mismatch}
+
+      not is_nil(submitted_email) and not is_binary(submitted_email) ->
+        {:error, :email_mismatch}
+
+      Repo.exists?(from(u in User, where: u.email == ^invite.email)) ->
+        {:error, :account_exists}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp ensure_invited_membership!(%CompanyInvite{} = invite, %User{} = user) do
+    case get_membership(user.id, invite.company_id) do
+      nil ->
+        %CompanyMembership{}
+        |> CompanyMembership.changeset(%{
+          user_id: user.id,
+          company_id: invite.company_id,
+          role: invite.role
+        })
+        |> Repo.insert()
+        |> unwrap_or_rollback()
+
+      %CompanyMembership{} = membership ->
+        membership
+    end
+  end
+
+  defp put_invited_email(attrs, email) do
+    %{
+      email: email,
+      name: attrs[:name] || attrs["name"],
+      password: attrs[:password] || attrs["password"]
+    }
+  end
+
+  defp invite_transaction(fun) do
+    case Repo.transaction(fun) do
+      {:ok, {:error, reason}} -> {:error, reason}
+      {:ok, result} -> {:ok, result}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp unwrap_or_rollback({:ok, record}), do: record
+  defp unwrap_or_rollback({:error, reason}), do: Repo.rollback(reason)
 
   def expire_stale_invites do
     from(i in CompanyInvite,
@@ -3205,11 +3349,24 @@ defmodule Cympho.Companies do
   def preview_import(data, opts \\ []), do: Portability.preview_import(data, opts)
 
   def import_company(data, opts \\ []) do
+    do_import_company(data, nil, opts)
+  end
+
+  @doc """
+  Imports a company and grants the importing user owner/board membership in
+  the same transaction as every imported record.
+  """
+  def import_company_for_owner(data, owner_user_id, opts \\ []) do
+    do_import_company(data, owner_user_id, opts)
+  end
+
+  defp do_import_company(data, owner_user_id, opts) do
     slug_strategy = Keyword.get(opts, :slug_strategy, :suffix)
 
-    with {:ok, preview} <- Portability.preview_import(data, slug_strategy: slug_strategy),
+    with {:ok, owner} <- import_owner(owner_user_id),
+         {:ok, preview} <- Portability.preview_import(data, slug_strategy: slug_strategy),
          :ok <- import_preview_ready(preview) do
-      import_company!(data, slug_strategy, preview.target.slug)
+      import_company!(data, slug_strategy, preview.target.slug, owner)
     else
       {:error, %{errors: errors}} when is_list(errors) ->
         {:error, Enum.map_join(errors, " ", & &1.message)}
@@ -3219,13 +3376,24 @@ defmodule Cympho.Companies do
     end
   end
 
+  defp import_owner(nil), do: {:ok, nil}
+
+  defp import_owner(owner_user_id) when is_binary(owner_user_id) do
+    case Cympho.Users.get_user(owner_user_id) do
+      {:ok, user} -> {:ok, user}
+      {:error, :not_found} -> {:error, :owner_not_found}
+    end
+  end
+
+  defp import_owner(_owner_user_id), do: {:error, :owner_not_found}
+
   defp import_preview_ready(%{ready?: true}), do: :ok
 
   defp import_preview_ready(%{target: %{requested_slug: slug}}) do
     {:error, "Company slug #{slug} already exists and the fail strategy blocks import."}
   end
 
-  defp import_company!(data, slug_strategy, target_slug) when is_map(data) do
+  defp import_company!(data, slug_strategy, target_slug, owner) when is_map(data) do
     company_data = get_export_field(data, :company, %{})
 
     Repo.transaction(fn ->
@@ -3240,6 +3408,8 @@ defmodule Cympho.Companies do
 
       # Import memberships
       import_memberships(get_export_field(data, :memberships, []), company.id, user_id_map)
+
+      ensure_import_owner!(owner, company)
 
       # Import labels (issues reference them)
       label_id_map = import_labels(get_export_field(data, :labels, []), company.id)
@@ -3286,6 +3456,34 @@ defmodule Cympho.Companies do
         secrets_to_restore: secrets_to_restore(data, id_maps)
       }
     end)
+  end
+
+  defp ensure_import_owner!(nil, _company), do: :ok
+
+  defp ensure_import_owner!(%User{} = owner, %Company{} = company) do
+    case get_membership(owner.id, company.id) do
+      nil ->
+        %CompanyMembership{}
+        |> CompanyMembership.changeset(%{
+          user_id: owner.id,
+          company_id: company.id,
+          role: "owner",
+          is_board_member: true
+        })
+        |> Repo.insert()
+        |> import_record!("Import owner membership")
+
+      %CompanyMembership{} = membership ->
+        membership
+        |> CompanyMembership.changeset(%{role: "owner", is_board_member: true})
+        |> Repo.update()
+        |> import_record!("Import owner membership")
+    end
+
+    owner
+    |> Ecto.Changeset.change(company_id: company.id)
+    |> Repo.update()
+    |> import_record!("Import owner")
   end
 
   defp secrets_to_restore(data, id_maps) do
@@ -3375,7 +3573,11 @@ defmodule Cympho.Companies do
       source_id = source_id!(user_data, "user")
 
       # Check if user with this email already exists
-      existing_user = Repo.get_by(Cympho.Users.User, email: get_export_field(user_data, :email))
+      existing_user =
+        case Cympho.Users.get_user_by_email(get_export_field(user_data, :email)) do
+          {:ok, user} -> user
+          {:error, :not_found} -> nil
+        end
 
       if existing_user do
         # Link to existing user - the membership will use the existing user

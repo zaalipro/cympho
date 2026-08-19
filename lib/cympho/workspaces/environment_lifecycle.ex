@@ -7,6 +7,7 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
   fail closed. Provider refs are persisted on the execution workspace or lease.
   """
 
+  import Ecto.Query, warn: false
   require Logger
 
   alias Cympho.Repo
@@ -36,18 +37,29 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
   def ensure_acquired(%ExecutionWorkspace{} = ew, opts \\ %{}) do
     opts = normalize_opts(opts)
 
-    case normalize_provider(ew.provider_type) do
+    case Repo.get(ExecutionWorkspace, ew.id) do
       nil ->
-        {:ok, ew}
+        {:error, :execution_workspace_not_found}
+
+      %ExecutionWorkspace{} = current ->
+        ensure_current_acquired(current, opts)
+    end
+  end
+
+  defp ensure_current_acquired(%ExecutionWorkspace{} = current, opts) do
+    case normalize_provider(current.provider_type) do
+      nil ->
+        {:ok, current}
 
       provider ->
-        with {:ok, company_id} <- fetch_company_id(ew, opts),
+        with {:ok, company_id} <- fetch_company_id(current, opts),
              {:ok, driver} <- EnvironmentDrivers.resolve(provider) do
-          if present?(ew.provider_ref) do
-            {:ok, ew}
+          if present?(current.provider_ref) do
+            {:ok, current}
           else
-            with {:ok, config} <- EnvironmentConfig.resolve(provider, company_id, ew.metadata) do
-              acquire_and_persist(ew, driver, company_id, opts, config)
+            with {:ok, config} <-
+                   EnvironmentConfig.resolve(provider, company_id, current.metadata) do
+              acquire_and_persist(current, driver, company_id, opts, config)
             end
           end
         end
@@ -65,19 +77,21 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
           {:ok, ExecutionWorkspace.t()} | {:error, term()}
   def release(%ExecutionWorkspace{} = ew, opts \\ %{}) do
     opts = normalize_opts(opts)
+    current = Repo.get(ExecutionWorkspace, ew.id) || ew
 
-    case normalize_provider(ew.provider_type) do
+    case normalize_provider(current.provider_type) do
       nil ->
-        {:ok, ew}
+        {:ok, current}
 
-      _provider when not is_binary(ew.provider_ref) or ew.provider_ref == "" ->
-        {:ok, ew}
+      _provider when not is_binary(current.provider_ref) or current.provider_ref == "" ->
+        {:ok, current}
 
       provider ->
         with {:ok, driver} <- EnvironmentDrivers.resolve(provider),
-             {:ok, config} <- EnvironmentConfig.resolve(provider, ew.company_id, ew.metadata),
-             :ok <- driver.release(ew.provider_ref, release_opts(ew, opts, config)) do
-          persist_provider_ref(ew, nil)
+             {:ok, config} <-
+               EnvironmentConfig.resolve(provider, current.company_id, current.metadata),
+             :ok <- driver.release(current.provider_ref, release_opts(current, opts, config)) do
+          clear_provider_ref(current, current.provider_ref)
         end
     end
   end
@@ -90,28 +104,30 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
           {:ok, ExecutionWorkspace.t()} | {:error, term()}
   def cancel(%ExecutionWorkspace{} = ew, opts \\ %{}) do
     opts = normalize_opts(opts)
+    current = Repo.get(ExecutionWorkspace, ew.id) || ew
 
-    case normalize_provider(ew.provider_type) do
+    case normalize_provider(current.provider_type) do
       nil ->
-        {:ok, ew}
+        {:ok, current}
 
-      _provider when not is_binary(ew.provider_ref) or ew.provider_ref == "" ->
-        {:ok, ew}
+      _provider when not is_binary(current.provider_ref) or current.provider_ref == "" ->
+        {:ok, current}
 
       provider ->
         with {:ok, driver} <- EnvironmentDrivers.resolve(provider),
-             {:ok, config} <- EnvironmentConfig.resolve(provider, ew.company_id, ew.metadata) do
-          driver_opts = release_opts(ew, opts, config)
+             {:ok, config} <-
+               EnvironmentConfig.resolve(provider, current.company_id, current.metadata) do
+          driver_opts = release_opts(current, opts, config)
 
           result =
             if function_exported?(driver, :cancel, 2) do
-              driver.cancel(ew.provider_ref, driver_opts)
+              driver.cancel(current.provider_ref, driver_opts)
             else
-              driver.release(ew.provider_ref, driver_opts)
+              driver.release(current.provider_ref, driver_opts)
             end
 
           case result do
-            :ok -> persist_provider_ref(ew, nil)
+            :ok -> clear_provider_ref(current, current.provider_ref)
             {:error, reason} -> {:error, reason}
           end
         end
@@ -134,19 +150,32 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
     with {:ok, attrs} <- maybe_copy_provider_from_environment(attrs) do
       provider = get_field(attrs, :provider)
 
-      case normalize_provider(provider) do
-        nil ->
+      case {normalize_provider(provider), get_field(attrs, :provider_lease_id)} do
+        {_provider, provider_lease_id}
+        when is_binary(provider_lease_id) and provider_lease_id != "" ->
           {:ok, attrs}
 
-        normalized ->
+        {nil, _provider_lease_id} ->
+          {:ok, attrs}
+
+        {normalized, _provider_lease_id} ->
           company_id = get_field(attrs, :company_id)
 
           metadata = get_field(attrs, :metadata) || %{}
 
+          idempotency_key =
+            get_field(attrs, :idempotency_key) || get_field(metadata, :idempotency_key)
+
           with {:ok, company_id} <- require_company_id(company_id),
                {:ok, driver} <- EnvironmentDrivers.resolve(normalized),
                {:ok, config} <- EnvironmentConfig.resolve(normalized, company_id, metadata) do
-            case driver.acquire(%{company_id: company_id, metadata: metadata}, config) do
+            acquire_opts = %{
+              company_id: company_id,
+              idempotency_key: idempotency_key,
+              metadata: metadata
+            }
+
+            case driver.acquire(acquire_opts, config) do
               {:ok, handle} ->
                 now = DateTime.utc_now() |> DateTime.truncate(:second)
 
@@ -163,6 +192,27 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
             end
           end
       end
+    end
+  end
+
+  @doc false
+  @spec release_prepared_lease(map()) :: :ok | {:error, term()}
+  def release_prepared_lease(attrs) when is_map(attrs) do
+    provider = normalize_provider(get_field(attrs, :provider))
+    provider_lease_id = get_field(attrs, :provider_lease_id)
+
+    cond do
+      is_nil(provider) or not present?(provider_lease_id) ->
+        :ok
+
+      true ->
+        company_id = get_field(attrs, :company_id)
+        metadata = get_field(attrs, :metadata) || %{}
+
+        with {:ok, driver} <- EnvironmentDrivers.resolve(provider),
+             {:ok, config} <- EnvironmentConfig.resolve(provider, company_id, metadata) do
+          driver.release(provider_lease_id, Map.put(config, :company_id, company_id))
+        end
     end
   end
 
@@ -213,22 +263,104 @@ defmodule Cympho.Workspaces.EnvironmentLifecycle do
   defp acquire_and_persist(%ExecutionWorkspace{} = ew, driver, company_id, opts, config) do
     acquire_opts = %{
       company_id: company_id,
+      idempotency_key: "execution_workspace:#{ew.id}",
       metadata: Map.get(opts, :metadata) || Map.get(opts, "metadata") || %{}
     }
 
     case driver.acquire(acquire_opts, config) do
       {:ok, handle} ->
-        persist_provider_ref(ew, handle.provider_ref)
+        persist_acquired_provider_ref(ew, handle, driver, opts, config)
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  defp persist_provider_ref(%ExecutionWorkspace{} = ew, provider_ref) do
-    ew
-    |> ExecutionWorkspace.changeset(%{provider_ref: provider_ref})
-    |> Repo.update()
+  defp persist_acquired_provider_ref(ew, handle, driver, opts, config) do
+    persistence_result =
+      try do
+        Repo.transaction(fn ->
+          now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+          {count, _rows} =
+            ExecutionWorkspace
+            |> where([current], current.id == ^ew.id)
+            |> where([current], current.provider_type == ^ew.provider_type)
+            |> where([current], is_nil(current.provider_ref) or current.provider_ref == "")
+            |> Repo.update_all(set: [provider_ref: handle.provider_ref, updated_at: now])
+
+          case {count, Repo.get(ExecutionWorkspace, ew.id)} do
+            {1, %ExecutionWorkspace{} = updated} ->
+              {:ok, updated}
+
+            {0, %ExecutionWorkspace{provider_ref: ref} = winner}
+            when is_binary(ref) and ref != "" ->
+              {:reuse, winner}
+
+            {0, nil} ->
+              {:error, :execution_workspace_not_found}
+
+            {0, _current} ->
+              {:error, :provider_ref_compare_and_set_failed}
+          end
+        end)
+        |> case do
+          {:ok, result} -> result
+          {:error, reason} -> {:error, reason}
+        end
+      rescue
+        error -> {:error, error}
+      catch
+        kind, reason -> {:error, {kind, reason}}
+      end
+
+    case persistence_result do
+      {:ok, updated} ->
+        {:ok, updated}
+
+      {:reuse, winner} ->
+        if winner.provider_ref != handle.provider_ref do
+          _ = compensate_acquisition(driver, handle, ew, opts, config)
+        end
+
+        {:ok, winner}
+
+      {:error, reason} ->
+        compensation = compensate_acquisition(driver, handle, ew, opts, config)
+
+        if compensation != :ok do
+          Logger.error("failed to compensate unpersisted provider environment",
+            component: "EnvironmentLifecycle",
+            execution_workspace_id: ew.id,
+            provider_ref: handle.provider_ref,
+            persistence_error: inspect(reason),
+            compensation_error: inspect(compensation)
+          )
+        end
+
+        {:error, {:provider_ref_persist_failed, reason}}
+    end
+  end
+
+  defp compensate_acquisition(driver, handle, ew, opts, config) do
+    driver.release(handle, release_opts(ew, opts, config))
+  rescue
+    error -> {:error, error}
+  catch
+    kind, reason -> {:error, {kind, reason}}
+  end
+
+  defp clear_provider_ref(%ExecutionWorkspace{} = ew, expected_ref) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    ExecutionWorkspace
+    |> where([current], current.id == ^ew.id and current.provider_ref == ^expected_ref)
+    |> Repo.update_all(set: [provider_ref: nil, updated_at: now])
+
+    case Repo.get(ExecutionWorkspace, ew.id) do
+      %ExecutionWorkspace{} = current -> {:ok, current}
+      nil -> {:error, :execution_workspace_not_found}
+    end
   end
 
   defp maybe_copy_provider_from_environment(attrs) do

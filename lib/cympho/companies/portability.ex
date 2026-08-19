@@ -640,6 +640,7 @@ defmodule Cympho.Companies.Portability do
       users
       |> Enum.map(&field(&1, :email))
       |> Enum.filter(&(is_binary(&1) and &1 != ""))
+      |> Enum.map(&User.normalize_email/1)
       |> Enum.uniq()
 
     case emails do

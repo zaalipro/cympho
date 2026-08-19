@@ -24,7 +24,8 @@ defmodule CymphoWeb.Plugs.UserAuth do
     with {:ok, token} <- bearer_token(conn),
          {:ok, claims} <- UserAuthJWT.verify_token(token),
          {:ok, user_id} <- UserAuthJWT.get_user_id(claims),
-         {:ok, user} <- Users.get_user(user_id) do
+         {:ok, user} <- Users.get_user(user_id),
+         true <- Users.session_version_valid?(claims["session_version"], user) do
       companies = list_user_companies(user.id)
 
       cond do
@@ -41,6 +42,7 @@ defmodule CymphoWeb.Plugs.UserAuth do
               |> assign(:current_user, user)
               |> assign(:user_companies, companies)
               |> assign(:current_company, company)
+              |> assign(:current_company_role, Cympho.Companies.get_role(user.id, company.id))
 
             {:error, :no_companies} ->
               unauthorized(conn, "User has no company memberships")

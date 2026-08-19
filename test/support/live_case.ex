@@ -21,7 +21,7 @@ defmodule CymphoWeb.LiveCase do
 
   setup tags do
     Cympho.DataCase.setup_sandbox(tags)
-    conn = authenticated_conn()
+    conn = authenticated_conn(%{role: Map.get(tags, :membership_role, "member")})
     {:ok, conn: conn, current_company: current_company()}
   end
 

@@ -134,7 +134,17 @@ defmodule Cympho.Comments do
   def delete_comment(%Comment{} = comment) do
     issue_id = comment.issue_id
 
-    case Repo.delete(comment) do
+    Repo.transaction(fn ->
+      persisted_comment = Repo.get!(Comment, comment.id)
+
+      _users = IssueReadStates.repoint_deleted_comment(persisted_comment)
+
+      case Repo.delete(persisted_comment) do
+        {:ok, deleted_comment} -> deleted_comment
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+    |> case do
       {:ok, _comment} ->
         case Repo.get(Issue, issue_id) do
           nil ->
@@ -152,8 +162,8 @@ defmodule Cympho.Comments do
 
         :ok
 
-      {:error, changeset} ->
-        {:error, changeset}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

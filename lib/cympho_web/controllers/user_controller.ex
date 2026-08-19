@@ -1,9 +1,9 @@
 defmodule CymphoWeb.UserController do
   use CymphoWeb, :controller
 
+  alias Cympho.Companies
   alias Cympho.Users
   alias Cympho.Users.User
-  alias Cympho.Companies
 
   action_fallback CymphoWeb.FallbackController
 
@@ -18,19 +18,27 @@ defmodule CymphoWeb.UserController do
   end
 
   def create(conn, %{"user" => user_params}) do
-    # Self-registration is `/api/register`. This authenticated path is for
-    # creating a teammate; the new user is added as a member of the current
-    # company.
     company_id = conn.assigns.current_company.id
 
-    with {:ok, %User{} = user} <- Users.create_user(user_params),
-         {:ok, _} <-
-           Companies.create_membership(%{
-             user_id: user.id,
+    with :ok <- require_company_admin(conn.assigns.current_user.id, company_id),
+         {:ok, invite} <-
+           Companies.create_invite(%{
              company_id: company_id,
+             inviter_id: conn.assigns.current_user.id,
+             email: user_params["email"] || user_params[:email],
              role: "member"
            }) do
-      conn |> put_status(:created) |> render(:show, user: user)
+      conn
+      |> put_status(:created)
+      |> json(%{
+        data: %{
+          invited: true,
+          email: invite.email,
+          role: invite.role,
+          token: invite.token,
+          expires_at: invite.expires_at
+        }
+      })
     end
   end
 
@@ -73,5 +81,9 @@ defmodule CymphoWeb.UserController do
 
   defp enforce_company_member(company_id, user_id) do
     if Companies.has_access?(user_id, company_id), do: :ok, else: {:error, :not_found}
+  end
+
+  defp require_company_admin(user_id, company_id) do
+    if Companies.admin?(user_id, company_id), do: :ok, else: {:error, :forbidden}
   end
 end

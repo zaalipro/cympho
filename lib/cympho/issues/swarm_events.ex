@@ -13,6 +13,17 @@ defmodule Cympho.Issues.SwarmEvents do
   alias Cympho.Repo
 
   @default_limit 80
+  @event_fields [
+    :company_id,
+    :parent_issue_id,
+    :issue_id,
+    :agent_id,
+    :event_type,
+    :status,
+    :message,
+    :metadata,
+    :occurred_at
+  ]
   @event_order %{
     "launch_started" => 10,
     "temporary_agents_created" => 20,
@@ -44,7 +55,7 @@ defmodule Cympho.Issues.SwarmEvents do
   def list_for_issue(%Issue{} = issue, opts \\ []) do
     case parent_issue_id(issue) do
       nil -> []
-      parent_issue_id -> list_for_parent(parent_issue_id, opts)
+      parent_issue_id -> list_for_company_parent(issue.company_id, parent_issue_id, opts)
     end
   end
 
@@ -63,13 +74,34 @@ defmodule Cympho.Issues.SwarmEvents do
 
   def list_for_parent(_parent_issue_id, _opts), do: []
 
+  def list_for_company_parent(company_id, parent_issue_id, opts \\ [])
+
+  def list_for_company_parent(company_id, parent_issue_id, opts)
+      when is_binary(company_id) and is_binary(parent_issue_id) do
+    limit = Keyword.get(opts, :limit, @default_limit)
+
+    SwarmEvent
+    |> join(:inner, [event], parent in assoc(event, :parent_issue))
+    |> where(
+      [event, parent],
+      event.company_id == ^company_id and event.parent_issue_id == ^parent_issue_id and
+        parent.company_id == ^company_id
+    )
+    |> order_by([e], desc: e.occurred_at, desc: e.inserted_at)
+    |> limit(^limit)
+    |> Repo.all()
+    |> Enum.sort_by(&event_sort_key/1)
+  end
+
+  def list_for_company_parent(_company_id, _parent_issue_id, _opts), do: []
+
   def record(%Issue{} = issue, attrs) when is_map(attrs) do
     attrs =
       attrs
-      |> Map.new()
-      |> Map.put_new(:company_id, issue.company_id)
-      |> Map.put_new(:parent_issue_id, parent_issue_id(issue))
-      |> Map.put_new(:issue_id, issue.id)
+      |> normalize_attrs()
+      |> Map.put(:company_id, issue.company_id)
+      |> Map.put(:parent_issue_id, parent_issue_id(issue))
+      |> Map.put(:issue_id, issue.id)
       |> Map.update(:metadata, %{}, &normalize_metadata/1)
 
     safe_insert(attrs)
@@ -78,7 +110,7 @@ defmodule Cympho.Issues.SwarmEvents do
   def record(attrs) when is_map(attrs) do
     attrs =
       attrs
-      |> Map.new()
+      |> normalize_attrs()
       |> Map.update(:metadata, %{}, &normalize_metadata/1)
 
     safe_insert(attrs)
@@ -145,6 +177,23 @@ defmodule Cympho.Issues.SwarmEvents do
 
   defp normalize_metadata(metadata) when is_map(metadata), do: metadata
   defp normalize_metadata(_metadata), do: %{}
+
+  defp normalize_attrs(attrs) do
+    Enum.reduce(@event_fields, %{}, fn field, normalized ->
+      string_field = Atom.to_string(field)
+
+      cond do
+        Map.has_key?(attrs, field) ->
+          Map.put(normalized, field, Map.get(attrs, field))
+
+        Map.has_key?(attrs, string_field) ->
+          Map.put(normalized, field, Map.get(attrs, string_field))
+
+        true ->
+          normalized
+      end
+    end)
+  end
 
   defp event_sort_key(%SwarmEvent{} = event) do
     {

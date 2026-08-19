@@ -227,6 +227,46 @@ defmodule CymphoWeb.BudgetLiveTest do
       assert html =~
                "Delete Runtime hard stop? Autonomous preflight will stop using this spend guardrail."
     end
+
+    test "mounted board view redirects after board authority is revoked" do
+      {conn, company} = board_conn()
+      user_id = Plug.Conn.get_session(conn, :user_id)
+      membership = Cympho.Companies.get_membership(user_id, company.id)
+      {:ok, view, _html} = live(conn, "/budgets")
+
+      assert {:ok, _membership} =
+               Cympho.Companies.update_membership(membership, %{is_board_member: false})
+
+      send(view.pid, :fresh_board_authority_probe)
+      assert_redirect(view, "/")
+    end
+
+    test "budget component rechecks board authority before saving" do
+      {conn, company} = board_conn()
+      user_id = Plug.Conn.get_session(conn, :user_id)
+      membership = Cympho.Companies.get_membership(user_id, company.id)
+      {:ok, view, _html} = live(conn, "/budgets/new")
+
+      assert {:ok, _membership} =
+               Cympho.Companies.update_membership(membership, %{is_board_member: false})
+
+      result =
+        view
+        |> form("#budget-form",
+          budget: %{
+            name: "Revoked board budget",
+            scope_type: "company",
+            limit_amount: "50.00",
+            currency: "USD",
+            threshold_alert_percentage: "80",
+            hard_stop: "true"
+          }
+        )
+        |> render_submit()
+
+      assert {:error, {:live_redirect, %{to: "/"}}} = result
+      assert Budgets.list_budgets(company_id: company.id) == []
+    end
   end
 
   describe "BudgetLive.Show" do

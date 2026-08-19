@@ -6,6 +6,7 @@ defmodule Cympho.UserAuthJWT do
   - User ID
   - Email
   - Company ID
+  - Server-side session revocation version
   - Expiration time
 
   Tokens are signed using HS256 and a secret key from configuration.
@@ -33,6 +34,7 @@ defmodule Cympho.UserAuthJWT do
       "user_id" => user.id,
       "email" => user.email,
       "company_id" => company_id,
+      "session_version" => user.session_version || 0,
       "exp" => System.system_time(:second) + @token_ttl_seconds,
       "iat" => System.system_time(:second),
       "typ" => "user_session"

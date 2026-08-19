@@ -69,6 +69,29 @@ defmodule Cympho.Users.UserTest do
       assert Keyword.get(changeset.errors, :webhook_url)
     end
 
+    test "invalid changeset when webhook_url is not a public HTTPS URL" do
+      invalid_urls = [
+        "http://example.com/webhook",
+        "https://user:pass@example.com/webhook",
+        "https://127.0.0.1/webhook",
+        "https://10.0.0.1/webhook",
+        "https://[::1]/webhook",
+        "https://[fd00::1]/webhook"
+      ]
+
+      Enum.each(invalid_urls, fn webhook_url ->
+        changeset =
+          User.changeset(%User{}, %{
+            email: "test@example.com",
+            name: "Test User",
+            webhook_url: webhook_url
+          })
+
+        refute changeset.valid?
+        assert Keyword.get(changeset.errors, :webhook_url)
+      end)
+    end
+
     test "invalid changeset when email exceeds max length" do
       long_email = String.pad_leading("test@example.com", 300, "a")
       attrs = %{email: long_email, name: "Test User"}

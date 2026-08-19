@@ -15,7 +15,12 @@ defmodule Cympho.IssuesLabelsTest do
       Projects.create_project(%{name: "Test", prefix: "TST", company_id: company.id})
 
     {:ok, issue} =
-      Issues.create_issue(%{title: "Test", description: "Desc", project_id: project.id})
+      Issues.create_issue(%{
+        title: "Test",
+        description: "Desc",
+        project_id: project.id,
+        company_id: company.id
+      })
 
     {:ok, label} = Labels.create_label(%{name: "Bug", color: "#FF0000", company_id: company.id})
 
@@ -36,7 +41,12 @@ defmodule Cympho.IssuesLabelsTest do
     {:ok, _} = Issues.add_label_to_issue(issue, label)
 
     {:ok, issue2} =
-      Issues.create_issue(%{title: "Other", description: "Desc2", project_id: issue.project_id})
+      Issues.create_issue(%{
+        title: "Other",
+        description: "Desc2",
+        project_id: issue.project_id,
+        company_id: issue.company_id
+      })
 
     {:ok, _} = Issues.add_label_to_issue(issue2, label)
     {:ok, _} = Issues.add_label_to_issue(issue2, label2)

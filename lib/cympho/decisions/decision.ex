@@ -29,6 +29,13 @@ defmodule Cympho.Decisions.Decision do
     field :reversed_by_id, :binary_id
     field :reversed_at, :utc_datetime
     field :metadata, :map, default: %{}
+    field :execution_state, :string, default: "pending"
+    field :execution_attempts, :integer, default: 0
+    field :execution_available_at, :utc_datetime_usec
+    field :execution_locked_at, :utc_datetime_usec
+    field :execution_locked_by, :string
+    field :execution_last_error, :string
+    field :execution_completed_at, :utc_datetime_usec
 
     belongs_to :company, Company
     has_many :child_decisions, Decision, foreign_key: :parent_decision_id
@@ -87,10 +94,15 @@ defmodule Cympho.Decisions.Decision do
   end
 
   def create_changeset(decision, attrs) do
+    now = DateTime.utc_now()
+
     decision
     |> changeset(attrs)
-    |> put_change(:effective_at, DateTime.utc_now() |> DateTime.truncate(:second))
+    |> put_change(:effective_at, DateTime.truncate(now, :second))
     |> put_change(:status, "active")
+    |> put_change(:execution_state, "pending")
+    |> put_change(:execution_attempts, 0)
+    |> put_change(:execution_available_at, now)
   end
 
   def reversal_changeset(decision, attrs) do

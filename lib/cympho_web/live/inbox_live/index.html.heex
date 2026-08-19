@@ -530,7 +530,7 @@
               Open issue
             </.app_link>
             <button
-              :if={Map.get(item, :kind) == :approval}
+              :if={Map.get(item, :kind) == :approval and @can_resolve_approvals}
               type="button"
               phx-click="deny_approval"
               phx-value-approval_id={item.source_id}
@@ -543,7 +543,7 @@
               Deny
             </button>
             <button
-              :if={Map.get(item, :kind) == :approval}
+              :if={Map.get(item, :kind) == :approval and @can_resolve_approvals}
               type="button"
               phx-click="approve_approval"
               phx-value-approval_id={item.source_id}

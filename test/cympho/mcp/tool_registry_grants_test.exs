@@ -448,6 +448,44 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
              }
     end
 
+    test "a disabled plugin is denied even while its stale worker and grant still exist", %{
+      agent: agent,
+      company: company,
+      plugin: plugin
+    } do
+      {:ok, pid} = EchoToolWorker.start_link(plugin: plugin, company_id: company.id)
+      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+
+      {:ok, _tool} =
+        ToolRegistry.register(company.id, %{
+          "name" => "disabled_plugin_tool",
+          "plugin_id" => plugin.id
+        })
+
+      {:ok, _grant} =
+        ToolGrants.create_grant(%{
+          company_id: company.id,
+          tool_name: "disabled_plugin_tool",
+          agent_id: agent.id,
+          status: "allow"
+        })
+
+      assert ToolGrants.authorize_call(company.id, agent.id, "disabled_plugin_tool") == :allow
+      assert %{success: true} = Server.call_tool("disabled_plugin_tool", %{}, agent)
+
+      assert {:ok, _disabled} =
+               Skills.update_plugin(plugin, %{enabled: false, status: "disabled"})
+
+      assert Process.alive?(pid)
+      assert ToolGrants.authorize_call(company.id, agent.id, "disabled_plugin_tool") == :deny
+      refute Enum.any?(Server.tools_for(agent), &(&1.name == "disabled_plugin_tool"))
+
+      assert Server.call_tool("disabled_plugin_tool", %{}, agent) == %{
+               error: "Tool not authorized",
+               decision: "deny"
+             }
+    end
+
     test "a plugin tool that hangs returns a structured timeout, not an exit", %{
       agent: agent,
       company: company,
@@ -523,7 +561,7 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
       assert error =~ "plugin_exit"
     end
 
-    test "authorized dynamic call with unknown plugin_id returns plugin_not_found", %{
+    test "dynamic call with unknown plugin_id is denied before dispatch", %{
       agent: agent,
       company: company
     } do
@@ -543,10 +581,8 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
         })
 
       assert Server.call_tool("ghost_plugin_tool", %{}, agent) == %{
-               success: false,
-               dynamic: true,
-               tool: "ghost_plugin_tool",
-               error: ":plugin_not_found"
+               error: "Tool not authorized",
+               decision: "deny"
              }
     end
 
@@ -708,6 +744,22 @@ defmodule Cympho.Mcp.ToolRegistryGrantsTest do
                  %{"name" => "nope"},
                  []
                )
+    end
+
+    test "disabled plugins cannot expose new tools", %{plugin: plugin, company_a: company_a} do
+      assert {:ok, _disabled} =
+               Skills.update_plugin(plugin, %{enabled: false, status: "disabled"})
+
+      assert {:error, :plugin_inactive} =
+               HostServices.expose_tool(
+                 plugin.id,
+                 company_a.id,
+                 %{"name" => "disabled_registration"},
+                 ["expose:tools"]
+               )
+
+      assert {:error, :not_found} =
+               ToolRegistry.get_active(company_a.id, "disabled_registration")
     end
 
     test "rejects forged company_id when using 4-arity company scope", %{

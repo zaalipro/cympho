@@ -542,6 +542,7 @@ defmodule CymphoWeb.OperationsLive.Index do
 
     parent_issue_id =
       Keyword.get(opts, :parent_issue_id, socket.assigns[:delegated_parent_issue_id])
+      |> scoped_parent_issue_id(company_id)
 
     snapshot =
       RuntimeOperations.snapshot(
@@ -581,13 +582,26 @@ defmodule CymphoWeb.OperationsLive.Index do
   end
 
   defp assign_swarm_events(socket, parent_issue_id) do
-    events = SwarmEvents.list_for_parent(parent_issue_id, limit: 20)
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+    events = SwarmEvents.list_for_company_parent(company_id, parent_issue_id, limit: 20)
 
     assign(socket,
       swarm_events: events,
       swarm_event_rows: events |> Enum.reverse() |> Enum.map(&swarm_event_row/1)
     )
   end
+
+  defp scoped_parent_issue_id(parent_issue_id, company_id)
+       when is_binary(parent_issue_id) and is_binary(company_id) do
+    with {:ok, parent_issue_id} <- Ecto.UUID.cast(parent_issue_id),
+         {:ok, issue} <- Issues.get_company_issue(company_id, parent_issue_id) do
+      issue.id
+    else
+      _ -> nil
+    end
+  end
+
+  defp scoped_parent_issue_id(_parent_issue_id, _company_id), do: nil
 
   defp operations_url(density, parent_issue_id) do
     params =

@@ -8,7 +8,7 @@
     </p>
     <:actions>
       <button
-        :if={@proxy_admin?}
+        :if={@can_manage_proxies}
         type="button"
         phx-click="show_create_form"
         class="inline-flex items-center justify-center gap-2 rounded-lg border border-brand/25 bg-brand/15 px-3 py-2 text-sm font-510 text-brand transition hover:bg-brand/20"
@@ -58,14 +58,15 @@
   </section>
 
   <section
-    :if={!@proxy_admin?}
+    :if={!@can_manage_proxies}
+    data-testid="proxy-profiles-read-only"
     class="rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
   >
     Proxy profiles can contain private routing credentials. Ask a company admin or board member to manage them.
   </section>
 
   <section
-    :if={@show_form and @proxy_admin?}
+    :if={@show_form and @can_manage_proxies}
     data-testid="proxy-profile-form"
     class="mb-4 rounded-lg border border-border bg-panel p-4"
   >
@@ -196,7 +197,7 @@
           </p>
         </div>
 
-        <div class="flex shrink-0 gap-2">
+        <div :if={@can_manage_proxies} class="flex shrink-0 gap-2">
           <button
             type="button"
             phx-click="test"

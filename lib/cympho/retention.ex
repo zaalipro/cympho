@@ -6,6 +6,7 @@ defmodule Cympho.Retention do
     - tool_call_traces: 90 days
     - issue_activities: 180 days
     - governance_audit_logs: 1825 days (5 years; regulatory floor)
+    - routine_scheduled_occurrences: 30 days
 
   Each prune is a single bulk DELETE indexed on `inserted_at`. Logged at
   `:info` with the row count for observability.
@@ -18,12 +19,14 @@ defmodule Cympho.Retention do
   @tool_call_traces_days 90
   @activities_days 180
   @audit_logs_days 1_825
+  @routine_occurrences_days 30
 
   @doc "Quantum entrypoint for daily retention sweep."
   def run_all do
     prune_tool_call_traces()
     prune_activities()
     prune_audit_logs()
+    prune_routine_scheduled_occurrences()
     :ok
   end
 
@@ -54,6 +57,22 @@ defmodule Cympho.Retention do
       Repo.delete_all(from l in "governance_audit_logs", where: l.inserted_at < ^cutoff)
 
     Logger.info("[Retention] pruned governance_audit_logs older than #{days} days: #{count} rows")
+    {:ok, count}
+  end
+
+  def prune_routine_scheduled_occurrences(days \\ @routine_occurrences_days) do
+    cutoff = DateTime.add(DateTime.utc_now(), -days * 86_400, :second)
+
+    {count, _} =
+      Repo.delete_all(
+        from occurrence in "routine_scheduled_occurrences",
+          where: occurrence.inserted_at < ^cutoff
+      )
+
+    Logger.info(
+      "[Retention] pruned routine_scheduled_occurrences older than #{days} days: #{count} rows"
+    )
+
     {:ok, count}
   end
 end

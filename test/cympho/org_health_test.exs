@@ -11,7 +11,15 @@ defmodule Cympho.OrgHealthTest do
       other_company = create_company("other")
       other_parent = create_agent(other_company, "External CTO", :cto)
 
-      create_agent(company, "Detached Engineer", :engineer, parent_id: other_parent.id)
+      detached_agent = create_agent(company, "Detached Engineer", :engineer)
+
+      # Simulate legacy-corrupt data without weakening the production changeset,
+      # which correctly rejects cross-company reporting lines.
+      {1, nil} =
+        Repo.update_all(
+          from(agent in Cympho.Agents.Agent, where: agent.id == ^detached_agent.id),
+          set: [parent_id: other_parent.id]
+        )
 
       snapshot = OrgHealth.snapshot(company.id)
 

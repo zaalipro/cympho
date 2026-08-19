@@ -15,6 +15,7 @@ defmodule Cympho.RoutineTriggers.RoutineRun do
     field :completed_at, :utc_datetime
     field :variables, :map, default: %{}
     field :failure_reason, :string
+    field :concurrency_guarded, :boolean, default: false
 
     belongs_to :issue, Issue
     belongs_to :routine, Routine
@@ -32,6 +33,7 @@ defmodule Cympho.RoutineTriggers.RoutineRun do
       :completed_at,
       :variables,
       :failure_reason,
+      :concurrency_guarded,
       :issue_id,
       :routine_id,
       :trigger_id
@@ -40,5 +42,6 @@ defmodule Cympho.RoutineTriggers.RoutineRun do
     |> validate_inclusion(:status, ["pending", "running", "completed", "failed"])
     |> validate_inclusion(:trigger_type, ["schedule", "webhook", "manual"])
     |> assoc_constraint(:routine)
+    |> unique_constraint(:routine_id, name: :routine_runs_one_guarded_active_index)
   end
 end

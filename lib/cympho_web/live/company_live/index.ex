@@ -51,7 +51,7 @@ defmodule CymphoWeb.CompanyLive.Index do
   def handle_event("delete_company", %{"id" => id}, socket) do
     user_id = socket.assigns.current_user.id
 
-    if company_manager?(user_id, id) do
+    if company_owner?(user_id, id) do
       company = Companies.get_company!(id)
       {:ok, _} = Companies.delete_company(company)
 
@@ -111,12 +111,23 @@ defmodule CymphoWeb.CompanyLive.Index do
     company_manager?(user && user.id, company && company.id)
   end
 
+  def can_delete_company?(user, company) do
+    company_owner?(user && user.id, company && company.id)
+  end
+
   defp company_manager?(user_id, company_id)
        when is_binary(user_id) and is_binary(company_id) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    Cympho.CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp company_manager?(_user_id, _company_id), do: false
+
+  defp company_owner?(user_id, company_id)
+       when is_binary(user_id) and is_binary(company_id) do
+    Companies.get_role(user_id, company_id) == "owner"
+  end
+
+  defp company_owner?(_user_id, _company_id), do: false
 
   defp launch_posture(0, _active_count, _paused_count) do
     %{

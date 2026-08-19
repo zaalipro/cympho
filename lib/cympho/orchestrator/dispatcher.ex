@@ -51,6 +51,10 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @max_backoff_ms Application.compile_env(:cympho, [:orchestrator, :max_backoff_ms], 600_000)
   @adapter_stop_confirm_attempts 10
   @adapter_stop_confirm_sleep_ms 25
+  @default_company_stop_deadline_ms 12_000
+  @default_company_stop_max_concurrency 8
+  @dispatcher_snapshot_timeout_ms 1_000
+  @orphan_checkout_grace_seconds 15 * 60
   @low_power_priorities [:critical, :high]
   # Delivery roles the CTO both manages and outranks, so it can staff them
   # itself. See `staffing_owner/2`.
@@ -138,7 +142,10 @@ defmodule Cympho.Orchestrator.Dispatcher do
         {:ok, stop_company_runtime(company_id, reason, MapSet.new())}
 
       pid ->
-        GenServer.call(pid, {:stop_company, company_id, reason}, 15_000)
+        running_issue_ids = dispatcher_running_issue_ids(pid)
+        result = stop_company_runtime(company_id, reason, running_issue_ids, self())
+        send(pid, {:company_stop_finished, result.issue_ids})
+        {:ok, result}
     end
   end
 
@@ -278,9 +285,15 @@ defmodule Cympho.Orchestrator.Dispatcher do
           skipped: non_neg_integer()
         }
   def recover_orphaned_in_progress do
+    stale_before =
+      DateTime.utc_now()
+      |> DateTime.add(-@orphan_checkout_grace_seconds, :second)
+
     in_progress =
       from(i in Issue,
-        where: i.status == :in_progress,
+        where:
+          i.status == :in_progress and
+            fragment("COALESCE(?, ?) < ?", i.checked_out_at, i.updated_at, ^stale_before),
         select: %{id: i.id, assignee_id: i.assignee_id}
       )
       |> Cympho.Repo.all()
@@ -408,16 +421,19 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   @impl true
-  def handle_call({:stop_company, company_id, reason}, {requester, _tag}, %State{} = state) do
-    result = stop_company_runtime(company_id, reason, state.running_issue_ids, requester)
+  def handle_call({:stop_company, company_id, reason}, {requester, _tag} = from, %State{} = state) do
+    # Backward-compatible message handling for callers that bypass stop_company/2.
+    # Cleanup must never execute inside this single global GenServer.
+    dispatcher = self()
 
-    new_state = %{
-      state
-      | running_issue_ids:
-          MapSet.difference(state.running_issue_ids, MapSet.new(result.issue_ids))
-    }
+    {:ok, _pid} =
+      Task.start(fn ->
+        result = stop_company_runtime(company_id, reason, state.running_issue_ids, requester)
+        GenServer.reply(from, {:ok, result})
+        send(dispatcher, {:company_stop_finished, result.issue_ids})
+      end)
 
-    {:reply, {:ok, result}, new_state}
+    {:noreply, state}
   end
 
   @impl true
@@ -448,6 +464,16 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @impl true
   def handle_info({:session_ended, issue_id, _reason}, %State{} = state) do
     new_state = %{state | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)}
+    {:noreply, new_state}
+  end
+
+  def handle_info({:company_stop_finished, issue_ids}, %State{} = state)
+      when is_list(issue_ids) do
+    new_state = %{
+      state
+      | running_issue_ids: MapSet.difference(state.running_issue_ids, MapSet.new(issue_ids))
+    }
+
     {:noreply, new_state}
   end
 
@@ -644,9 +670,105 @@ defmodule Cympho.Orchestrator.Dispatcher do
   defp active_runs_for_issue(_issue_id), do: []
 
   defp stop_company_runtime(company_id, reason, running_issue_ids, requester \\ self()) do
-    company_runtime_issues(company_id, running_issue_ids)
-    |> Enum.reduce(empty_stop_result(reason, requester), &stop_runtime_issue/2)
-    |> Map.update!(:issue_ids, &Enum.reverse/1)
+    issues = company_runtime_issues(company_id, running_issue_ids)
+    deadline_ms = company_stop_deadline_ms()
+
+    task =
+      Task.async(fn ->
+        stop_runtime_issues_parallel(issues, reason, requester, deadline_ms)
+      end)
+
+    # The task is monitored by Task.yield/2; unlink it so an unexpected worker
+    # failure cannot take down an orchestrator caller or runtime-control request.
+    Process.unlink(task.pid)
+
+    case Task.yield(task, deadline_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} ->
+        result
+
+      {:exit, exit_reason} ->
+        empty_stop_result(reason, requester)
+        |> add_stop_error(nil, {:company_stop_worker_failed, exit_reason})
+
+      nil ->
+        empty_stop_result(reason, requester)
+        |> Map.put(:issue_ids, Enum.map(issues, & &1.id))
+        |> add_stop_error(nil, {:company_stop_deadline_exceeded, deadline_ms})
+    end
+  end
+
+  defp stop_runtime_issues_parallel([], reason, requester, _deadline_ms),
+    do: empty_stop_result(reason, requester)
+
+  defp stop_runtime_issues_parallel(issues, reason, requester, deadline_ms) do
+    max_concurrency = min(length(issues), company_stop_max_concurrency())
+
+    issues
+    |> Task.async_stream(
+      fn issue -> stop_runtime_issue(issue, empty_stop_result(reason, requester)) end,
+      max_concurrency: max_concurrency,
+      ordered: true,
+      timeout: deadline_ms,
+      on_timeout: :kill_task
+    )
+    |> Enum.reduce(empty_stop_result(reason, requester), fn
+      {:ok, result}, acc -> merge_stop_results(acc, result)
+      {:exit, task_reason}, acc -> add_stop_error(acc, nil, {:issue_stop_failed, task_reason})
+    end)
+  end
+
+  defp company_stop_deadline_ms do
+    :cympho
+    |> Application.get_env(:orchestrator, [])
+    |> Keyword.get(:company_stop_deadline_ms, @default_company_stop_deadline_ms)
+    |> positive_integer_or(@default_company_stop_deadline_ms)
+  end
+
+  defp company_stop_max_concurrency do
+    :cympho
+    |> Application.get_env(:orchestrator, [])
+    |> Keyword.get(:company_stop_max_concurrency, @default_company_stop_max_concurrency)
+    |> positive_integer_or(@default_company_stop_max_concurrency)
+  end
+
+  defp positive_integer_or(value, _default) when is_integer(value) and value > 0, do: value
+  defp positive_integer_or(_value, default), do: default
+
+  defp merge_stop_results(acc, result) do
+    numeric_keys = [
+      :orchestrators_stopped,
+      :adapter_sessions_cancel_requested,
+      :adapter_sessions_cancel_confirmed,
+      :adapter_sessions_still_registered,
+      :issues_released,
+      :runs_cancelled,
+      :agents_idled
+    ]
+
+    acc =
+      Enum.reduce(numeric_keys, acc, fn key, merged ->
+        Map.update!(merged, key, &(&1 + Map.fetch!(result, key)))
+      end)
+
+    %{
+      acc
+      | issue_ids: acc.issue_ids ++ result.issue_ids,
+        errors: acc.errors ++ result.errors
+    }
+  end
+
+  defp dispatcher_running_issue_ids(pid) do
+    pid
+    |> GenServer.call(:running_issue_ids, @dispatcher_snapshot_timeout_ms)
+    |> MapSet.new()
+  catch
+    :exit, reason ->
+      Logger.warning("[Dispatcher] could not snapshot running issues before company stop",
+        component: "dispatcher",
+        error: inspect(reason)
+      )
+
+      MapSet.new()
   end
 
   # `requester` is the process that asked for the stop. When it turns out to be

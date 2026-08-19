@@ -17,6 +17,8 @@ defmodule Cympho.Wakes.AgentWake do
     field :attempt_count, :integer, default: 0
     field :last_error, :string
     field :consumed_at, :utc_datetime
+    field :claim_token, :binary_id
+    field :claimed_at, :utc_datetime_usec
     field :triggered_by_type, :string
     field :triggered_by_id, :string
     field :metadata, :map, default: %{}
@@ -71,6 +73,8 @@ defmodule Cympho.Wakes.AgentWake do
       :attempt_count,
       :last_error,
       :consumed_at,
+      :claim_token,
+      :claimed_at,
       :triggered_by_type,
       :triggered_by_id,
       :metadata

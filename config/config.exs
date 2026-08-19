@@ -19,6 +19,24 @@ config :cympho, CymphoWeb.Endpoint,
   pubsub_server: Cympho.PubSub,
   live_view: [signing_salt: "cympho_secret"]
 
+# Browser sessions are deliberately finite and HttpOnly in every environment.
+# Production adds `secure: true` in prod.exs; keeping it false here preserves
+# plain-HTTP localhost development and ConnCase tests.
+config :cympho, :session_options,
+  store: :cookie,
+  key: "_cympho_key",
+  signing_salt: "cympho_signing_salt",
+  path: "/",
+  http_only: true,
+  same_site: "Lax",
+  max_age: 60 * 60 * 24 * 7,
+  secure: false
+
+# Runtime production configuration enables the transport guard and the
+# first-owner bootstrap secret. Dev/test remain frictionless by default.
+config :cympho, :transport_security, force_ssl: false, trusted_proxy_ips: []
+config :cympho, :bootstrap_protection, required: false, secret: nil
+
 config :esbuild,
   version: "0.17.11",
   cympho: [
@@ -78,6 +96,7 @@ config :logger, :default_formatter,
   ]
 
 config :phoenix, :json_library, Jason
+config :phoenix, :filter_parameters, ["password", "secret", "token", "api_key"]
 
 # Sentry SDK base config. DSN is loaded from SENTRY_DSN in runtime.exs and
 # is `nil` by default, which makes Sentry a no-op (no events are sent).

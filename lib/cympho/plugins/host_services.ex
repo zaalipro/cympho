@@ -225,8 +225,15 @@ defmodule Cympho.Plugins.HostServices do
 
   defp resolve_plugin_company(plugin_id) when is_binary(plugin_id) do
     case Cympho.Skills.get_plugin(plugin_id) do
-      {:ok, %{company_id: company_id}} when is_binary(company_id) and company_id != "" ->
+      {:ok, %{company_id: company_id, enabled: true, status: "active"}}
+      when is_binary(company_id) and company_id != "" ->
         {:ok, company_id}
+
+      {:ok, %{enabled: false}} ->
+        {:error, :plugin_inactive}
+
+      {:ok, %{status: status}} when status != "active" ->
+        {:error, :plugin_inactive}
 
       {:ok, _} ->
         {:error, :invalid_company_scope}

@@ -3,7 +3,7 @@ defmodule Cympho.AgentsTest do
 
   alias Cympho.Agents
   alias Cympho.Agents.Agent
-  alias Cympho.Companies
+  alias Cympho.{Companies, Projects, Workspaces}
 
   setup do
     {:ok, agent} =
@@ -38,6 +38,18 @@ defmodule Cympho.AgentsTest do
       })
 
     %{agent: agent}
+  end
+
+  defp create_tenant(label) do
+    unique = System.unique_integer([:positive])
+
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "#{label} #{unique}",
+        slug: "#{String.downcase(label)}-#{unique}"
+      })
+
+    company
   end
 
   describe "list_agents/0" do
@@ -323,6 +335,67 @@ defmodule Cympho.AgentsTest do
       assert agent.parent_id == parent.id
     end
 
+    test "rejects a forged parent_id from another company" do
+      company = create_tenant("Child")
+      other_company = create_tenant("Parent")
+
+      {:ok, foreign_parent} =
+        Agents.create_agent(%{
+          name: "Foreign Parent",
+          role: :cto,
+          company_id: other_company.id
+        })
+
+      assert {:error, changeset} =
+               Agents.create_agent(%{
+                 name: "Tenant Child",
+                 role: :engineer,
+                 company_id: company.id,
+                 parent_id: foreign_parent.id
+               })
+
+      assert errors_on(changeset).parent_id == ["must belong to the same company"]
+    end
+
+    test "rejects forged project, creator, and default environment associations" do
+      company = create_tenant("AgentScope")
+      other_company = create_tenant("ForeignAgentScope")
+
+      {:ok, foreign_project} =
+        Projects.create_project(%{
+          name: "Foreign agent project",
+          prefix: "FAP",
+          company_id: other_company.id
+        })
+
+      {:ok, foreign_creator} =
+        Agents.create_agent(%{
+          name: "Foreign agent creator",
+          role: :cto,
+          company_id: other_company.id
+        })
+
+      {:ok, foreign_environment} =
+        Workspaces.create_environment(%{
+          name: "Foreign agent environment",
+          company_id: other_company.id,
+          project_id: foreign_project.id
+        })
+
+      for {field, value} <- [
+            project_id: foreign_project.id,
+            created_by_agent_id: foreign_creator.id,
+            default_environment_id: foreign_environment.id
+          ] do
+        assert {:error, changeset} =
+                 %{name: "Scoped agent #{field}", role: :engineer, company_id: company.id}
+                 |> Map.put(field, value)
+                 |> Agents.create_agent()
+
+        assert Map.has_key?(errors_on(changeset), field)
+      end
+    end
+
     test "returns error for invalid adapter" do
       attrs = %{
         name: "Bad Adapter",
@@ -367,6 +440,91 @@ defmodule Cympho.AgentsTest do
     test "returns error changeset for invalid data", %{agent: agent} do
       attrs = %{name: ""}
       assert {:error, %Ecto.Changeset{}} = Agents.update_agent(agent, attrs)
+    end
+
+    test "rejects a forged parent_id from another company" do
+      company = create_tenant("UpdateChild")
+      other_company = create_tenant("UpdateParent")
+
+      {:ok, agent} =
+        Agents.create_agent(%{name: "Tenant Agent", role: :engineer, company_id: company.id})
+
+      {:ok, foreign_parent} =
+        Agents.create_agent(%{
+          name: "Foreign Manager",
+          role: :cto,
+          company_id: other_company.id
+        })
+
+      assert {:error, changeset} = Agents.update_agent(agent, %{parent_id: foreign_parent.id})
+      assert errors_on(changeset).parent_id == ["must belong to the same company"]
+      assert Agents.get_agent!(agent.id).parent_id == nil
+    end
+
+    test "rejects parent assignments that create hierarchy cycles" do
+      company = create_tenant("Cycle")
+
+      {:ok, manager} =
+        Agents.create_agent(%{name: "Cycle Manager", role: :cto, company_id: company.id})
+
+      {:ok, report} =
+        Agents.create_agent(%{
+          name: "Cycle Report",
+          role: :engineer,
+          company_id: company.id,
+          parent_id: manager.id
+        })
+
+      assert {:error, self_changeset} =
+               Agents.update_agent(manager, %{parent_id: manager.id})
+
+      assert errors_on(self_changeset).parent_id == ["would create a hierarchy cycle"]
+
+      assert {:error, changeset} = Agents.update_agent(manager, %{parent_id: report.id})
+      assert errors_on(changeset).parent_id == ["would create a hierarchy cycle"]
+      assert Agents.get_agent!(manager.id).parent_id == nil
+    end
+
+    test "rejects forged project, creator, and default environment updates" do
+      company = create_tenant("UpdateAgentScope")
+      other_company = create_tenant("UpdateForeignAgentScope")
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Update scoped agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, foreign_project} =
+        Projects.create_project(%{
+          name: "Foreign update project",
+          prefix: "FUP",
+          company_id: other_company.id
+        })
+
+      {:ok, foreign_creator} =
+        Agents.create_agent(%{
+          name: "Foreign update creator",
+          role: :cto,
+          company_id: other_company.id
+        })
+
+      {:ok, foreign_environment} =
+        Workspaces.create_environment(%{
+          name: "Foreign update environment",
+          company_id: other_company.id,
+          project_id: foreign_project.id
+        })
+
+      for {field, value} <- [
+            project_id: foreign_project.id,
+            created_by_agent_id: foreign_creator.id,
+            default_environment_id: foreign_environment.id
+          ] do
+        assert {:error, changeset} = Agents.update_agent(agent, %{field => value})
+        assert Map.has_key?(errors_on(changeset), field)
+      end
     end
   end
 

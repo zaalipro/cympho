@@ -13,11 +13,17 @@ defmodule CymphoWeb.SettingsHubTest do
 
   describe "hub tabs mount inside the shared shell" do
     setup %{conn: conn, current_company: company} = context do
-      unless context[:regular_member] do
-        user_id = Plug.Conn.get_session(conn, :user_id)
-        membership = Companies.get_membership(user_id, company.id)
-        assert {:ok, _membership} = Companies.update_membership(membership, %{role: "admin"})
-      end
+      user_id = Plug.Conn.get_session(conn, :user_id)
+      membership = Companies.get_membership(user_id, company.id)
+
+      role =
+        context[:membership_role] || if(context[:regular_member], do: "member", else: "admin")
+
+      assert {:ok, _membership} =
+               Companies.update_membership(membership, %{
+                 role: role,
+                 is_board_member: context[:board_member] == true
+               })
 
       :ok
     end
@@ -151,6 +157,25 @@ defmodule CymphoWeb.SettingsHubTest do
 
       assert {:error, :not_found} =
                Secrets.get_secret_by_key(company.id, "MEMBER_CREATED_KEY", scope: "company")
+    end
+
+    @tag membership_role: "member", board_member: true
+    test "board members can manage company secrets", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/settings/secrets")
+
+      refute html =~ ~s(data-testid="secrets-read-only")
+      assert has_element?(view, ~s(button[phx-click="show_create_form"]))
+    end
+
+    @tag membership_role: "viewer", board_member: true
+    test "a board flag does not make a viewer writable", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/settings/secrets")
+
+      assert html =~ ~s(data-testid="secrets-read-only")
+      refute has_element?(view, ~s(button[phx-click="show_create_form"]))
+
+      assert render_click(view, "show_create_form", %{}) =~
+               "Only company owners, admins, and board members can change secrets."
     end
 
     test "an open secret form rechecks authorization before saving", %{

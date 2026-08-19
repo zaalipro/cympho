@@ -687,15 +687,23 @@ defmodule Cympho.AgentActionsTest do
         })
 
       for index <- 1..max_children do
-        {:ok, _child} =
+        {:ok, child} =
           Issues.create_issue(%{
             title: "Other-company active child #{index}",
             description: "Should not count against this company",
             status: :todo,
             priority: :medium,
-            company_id: other_company.id,
+            company_id: issue.company_id,
             parent_id: issue.id
           })
+
+        # Deliberately model a legacy corrupt row. Public issue writes reject
+        # cross-company parents, which is the invariant under test elsewhere.
+        {1, _} =
+          Repo.update_all(
+            from(i in Cympho.Issues.Issue, where: i.id == ^child.id),
+            set: [company_id: other_company.id]
+          )
       end
 
       actions = [
@@ -2614,15 +2622,21 @@ defmodule Cympho.AgentActionsTest do
           slug: "other-approval-#{System.unique_integer([:positive])}"
         })
 
-      {:ok, _foreign_child} =
+      {:ok, foreign_child} =
         Issues.create_issue(%{
           title: "Foreign open child",
           description: "Should not block approval in the parent company.",
           status: :todo,
           priority: :medium,
-          company_id: other_company.id,
+          company_id: issue.company_id,
           parent_id: issue.id
         })
+
+      {1, _} =
+        Repo.update_all(
+          from(i in Cympho.Issues.Issue, where: i.id == ^foreign_child.id),
+          set: [company_id: other_company.id]
+        )
 
       insert_completed_run(ceo, issue)
       insert_work_product(issue, ceo)

@@ -1,7 +1,8 @@
 defmodule CymphoWeb.PluginLive.New do
   use CymphoWeb, :live_view
 
-  alias Cympho.{Companies, Skills}
+  alias Cympho.{CompanyRBAC, Skills}
+  alias Cympho.Plugins.Runtime
   alias CymphoWeb.PluginLive.FormHelpers
 
   @mutation_forbidden_message "Only company owners, admins, and board members can change plugins."
@@ -33,7 +34,7 @@ defmodule CymphoWeb.PluginLive.New do
     authorize_plugin_mutation(socket, fn ->
       with {:ok, plugin_params} <-
              FormHelpers.normalize_plugin_params(socket, plugin_params, put_company_scope: true) do
-        case Skills.create_plugin(plugin_params) do
+        case Runtime.create_plugin(plugin_params) do
           {:ok, plugin} ->
             {:noreply,
              socket
@@ -86,7 +87,7 @@ defmodule CymphoWeb.PluginLive.New do
            current_company: %{id: company_id}
          }
        }) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp can_manage_plugins?(_socket), do: false

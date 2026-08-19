@@ -8,7 +8,7 @@ defmodule Cympho.Budgets do
 
   alias Cympho.Repo
   alias Cympho.Budgets.Budget
-  alias Cympho.{Finances, GovernanceAuditLogs, Activities, BoardApprovals}
+  alias Cympho.{Activities, Agents, BoardApprovals, Finances, GovernanceAuditLogs, Projects}
   alias Cympho.AuditTrail.Instrumenter
 
   @doc """
@@ -99,10 +99,29 @@ defmodule Cympho.Budgets do
   end
 
   @doc """
+  Returns the newest active budget for an agent within one company.
+
+  The ID tie-breaker keeps selection stable for rows created in the same second.
+  """
+  def get_active_agent_budget(company_id, agent_id)
+      when is_binary(company_id) and is_binary(agent_id) do
+    from(b in Budget,
+      where:
+        b.company_id == ^company_id and b.scope_type == "agent" and
+          b.agent_id == ^agent_id and b.status == "active",
+      order_by: [desc: b.inserted_at, desc: b.id],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  def get_active_agent_budget(_company_id, _agent_id), do: nil
+
+  @doc """
   Returns an `%Ecto.Changeset{}` for tracking budget changes.
   """
   def change_budget(%Budget{} = budget, attrs \\ %{}) do
-    Budget.changeset(budget, attrs)
+    budget_changeset(budget, attrs)
   end
 
   @doc """
@@ -110,7 +129,7 @@ defmodule Cympho.Budgets do
   Used by the approval executor to enact board-approved budget changes.
   """
   def execute_budget_creation(attrs, actor \\ nil) do
-    changeset = Budget.changeset(%Budget{}, attrs)
+    changeset = budget_changeset(%Budget{}, attrs)
     do_create_budget(changeset, actor)
   end
 
@@ -133,7 +152,7 @@ defmodule Cympho.Budgets do
   (used when executing an already-approved board action).
   """
   def create_budget(attrs, actor \\ nil, opts \\ []) do
-    changeset = Budget.changeset(%Budget{}, attrs)
+    changeset = budget_changeset(%Budget{}, attrs)
 
     if changeset.valid? do
       if Keyword.get(opts, :skip_governance, false) do
@@ -199,25 +218,62 @@ defmodule Cympho.Budgets do
   (used when executing an already-approved board action).
   """
   def update_budget(%Budget{} = budget, attrs, actor \\ nil, opts \\ []) do
-    if Keyword.get(opts, :skip_governance, false) do
-      do_update_budget(budget, attrs, actor)
+    changeset = budget_changeset(budget, attrs)
+
+    if not changeset.valid? do
+      {:error, changeset}
     else
-      case check_update_approval_needed(budget, attrs) do
-        {:ok, :approval_needed, company} ->
-          create_pending_budget_update_approval(company, budget, attrs, actor)
+      if Keyword.get(opts, :skip_governance, false) do
+        do_update_budget(budget, attrs, actor)
+      else
+        case check_update_approval_needed(budget, attrs) do
+          {:ok, :approval_needed, company} ->
+            create_pending_budget_update_approval(company, budget, attrs, actor)
 
-        {:ok, :not_needed} ->
-          do_update_budget(budget, attrs, actor)
+          {:ok, :not_needed} ->
+            do_update_budget(budget, attrs, actor)
 
-        {:error, :company_not_found} ->
-          do_update_budget(budget, attrs, actor)
+          {:error, :company_not_found} ->
+            do_update_budget(budget, attrs, actor)
+        end
       end
+    end
+  end
+
+  defp budget_changeset(%Budget{} = budget, attrs) do
+    budget
+    |> Budget.changeset(attrs)
+    |> validate_scope_target()
+  end
+
+  defp validate_scope_target(changeset) do
+    company_id = Ecto.Changeset.get_field(changeset, :company_id)
+    scope_type = Ecto.Changeset.get_field(changeset, :scope_type)
+    scope_id = Ecto.Changeset.get_field(changeset, :scope_id)
+
+    result =
+      if is_binary(company_id) and is_binary(scope_id) do
+        case scope_type do
+          "agent" -> Agents.get_company_agent(company_id, scope_id)
+          "project" -> Projects.get_company_project(company_id, scope_id)
+          _ -> :skip
+        end
+      else
+        :skip
+      end
+
+    case result do
+      {:error, :not_found} ->
+        Ecto.Changeset.add_error(changeset, :scope_id, "is not in this company")
+
+      _ ->
+        changeset
     end
   end
 
   defp do_update_budget(budget, attrs, actor) do
     budget
-    |> Budget.changeset(attrs)
+    |> budget_changeset(attrs)
     |> Repo.update()
     |> case do
       {:ok, updated} ->

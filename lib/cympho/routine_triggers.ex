@@ -14,6 +14,7 @@ defmodule Cympho.RoutineTriggers do
   require Logger
 
   alias Cympho.Repo
+  alias Cympho.RoutineTriggers.ScheduledOccurrence
   alias Cympho.RoutineTriggers.RoutineTrigger
   alias Cympho.RoutineTriggers.RoutineRun
   alias Cympho.Routines.Routine
@@ -155,44 +156,13 @@ defmodule Cympho.RoutineTriggers do
     trigger_type = Keyword.get(opts, :trigger_type, trigger.type)
     variables = Keyword.get(opts, :variables, %{})
 
-    with {:ok, company_id} <- resolve_routine_company_id(routine),
-         {:ok, :enqueue} <- apply_concurrency_policy(routine) do
-      now = DateTime.utc_now()
-
-      run_attrs = %{
-        "trigger_type" => trigger_type,
-        "triggered_at" => now,
-        "routine_id" => routine.id,
-        "trigger_id" => trigger.id,
-        "status" => "pending",
-        "variables" => variables
-      }
-
-      multi =
-        Ecto.Multi.new()
-        |> Ecto.Multi.insert(:run, RoutineRun.changeset(%RoutineRun{}, run_attrs))
-        |> Ecto.Multi.run(:issue, fn repo, %{run: run} ->
-          create_run_issue(repo, run, trigger, routine, company_id, now)
-        end)
-        |> Ecto.Multi.run(:update_run, fn repo, %{issue: issue, run: run} ->
-          run
-          |> Ecto.Changeset.change(%{
-            issue_id: issue.id,
-            status: "running"
-          })
-          |> repo.update()
-        end)
-
-      case Repo.transaction(multi) do
-        {:ok, %{issue: issue, update_run: run}} ->
-          wake_routine_agent(routine)
-          {:ok, %{issue: issue, run: run}}
-
-        {:error, step, changeset, _} ->
-          Logger.error("fire_trigger failed at #{step}: #{inspect(changeset)}")
-          {:error, {step, changeset}}
-      end
-    end
+    enqueue_run(
+      routine.id,
+      trigger,
+      trigger_type,
+      variables,
+      Keyword.get(opts, :scheduled_for)
+    )
   end
 
   defp create_run_issue(repo, run, trigger, routine, company_id, now) do
@@ -391,10 +361,15 @@ defmodule Cympho.RoutineTriggers do
     :exit, _ -> nil
   end
 
-  def execute_scheduled_trigger(trigger_id) do
+  def execute_scheduled_trigger(trigger_id), do: execute_scheduled_trigger(trigger_id, nil)
+
+  @doc false
+  def execute_scheduled_trigger(trigger_id, scheduled_for) do
     case get_trigger(trigger_id) do
       {:ok, trigger} ->
-        fire_trigger(trigger, trigger_type: "schedule")
+        with {:ok, occurrence} <- scheduled_occurrence(trigger, scheduled_for) do
+          fire_trigger(trigger, trigger_type: "schedule", scheduled_for: occurrence)
+        end
 
       {:error, :not_found} ->
         Logger.warning("scheduled trigger not found, removing from Quantum",
@@ -436,44 +411,7 @@ defmodule Cympho.RoutineTriggers do
   defp do_manual_run(routine, opts) do
     variables = Keyword.get(opts, :variables, %{})
 
-    with {:ok, company_id} <- resolve_routine_company_id(routine),
-         {:ok, :enqueue} <- apply_concurrency_policy(routine) do
-      now = DateTime.utc_now()
-
-      run_attrs = %{
-        "trigger_type" => "manual",
-        "triggered_at" => now,
-        "routine_id" => routine.id,
-        "trigger_id" => nil,
-        "status" => "pending",
-        "variables" => variables
-      }
-
-      multi =
-        Ecto.Multi.new()
-        |> Ecto.Multi.insert(:run, RoutineRun.changeset(%RoutineRun{}, run_attrs))
-        |> Ecto.Multi.run(:issue, fn repo, %{run: run} ->
-          create_manual_run_issue(repo, run, routine, company_id, now)
-        end)
-        |> Ecto.Multi.run(:update_run, fn repo, %{issue: issue, run: run} ->
-          run
-          |> Ecto.Changeset.change(%{
-            issue_id: issue.id,
-            status: "running"
-          })
-          |> repo.update()
-        end)
-
-      case Repo.transaction(multi) do
-        {:ok, %{issue: issue, update_run: run}} ->
-          wake_routine_agent(routine)
-          {:ok, %{issue: issue, run: run}}
-
-        {:error, step, changeset, _} ->
-          Logger.error("manual_run failed at #{step}: #{inspect(changeset)}")
-          {:error, {step, changeset}}
-      end
-    end
+    enqueue_run(routine.id, nil, "manual", variables, nil)
   end
 
   defp create_manual_run_issue(repo, _run, routine, company_id, now) do
@@ -546,24 +484,186 @@ defmodule Cympho.RoutineTriggers do
 
   defp tap_ok(error, _fun), do: error
 
-  # Honors the routine's concurrency_policy against in-flight runs. :always_enqueue
-  # always allows; :skip_if_active / :coalesce_if_active suppress a new run while one
-  # is already pending or running (callers receive {:skip, policy} via the `with`).
-  defp apply_concurrency_policy(routine) do
-    case routine.concurrency_policy do
-      policy when policy in [:skip_if_active, :coalesce_if_active] ->
-        if active_run?(routine.id), do: {:skip, policy}, else: {:ok, :enqueue}
+  defp enqueue_run(routine_id, trigger, trigger_type, variables, scheduled_for) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-      _ ->
-        {:ok, :enqueue}
+    result =
+      Repo.transaction(fn ->
+        # All entry points lock the same durable row before checking active
+        # runs, so a manual, webhook, or cron fire cannot pass the check while
+        # another fire is still creating its run and issue.
+        with {:ok, context} <- lock_run_context(Repo, routine_id),
+             :claimed <-
+               claim_scheduled_occurrence(
+                 Repo,
+                 trigger,
+                 trigger_type,
+                 scheduled_for,
+                 now
+               ) do
+          case context.decision do
+            :enqueue -> insert_run_and_issue(Repo, context, trigger, trigger_type, variables, now)
+            {:skip, policy} -> {:skip, policy}
+          end
+        else
+          {:skip, _reason} = skip -> skip
+          {:error, reason} -> Repo.rollback({:run_context, reason})
+        end
+      end)
+
+    finish_run_transaction(result)
+  end
+
+  defp lock_run_context(repo, routine_id) do
+    case repo.one(from(r in Routine, where: r.id == ^routine_id, lock: "FOR UPDATE")) do
+      nil ->
+        {:error, :routine_not_found}
+
+      routine ->
+        routine = repo.preload(routine, [:agent, :project])
+
+        with :ok <- ensure_active_routine(routine),
+             {:ok, company_id} <- resolve_routine_company_id(routine) do
+          policy = routine.concurrency_policy
+          guarded = policy in [:skip_if_active, :coalesce_if_active]
+
+          decision =
+            if guarded and active_run?(repo, routine.id),
+              do: {:skip, policy},
+              else: :enqueue
+
+          {:ok,
+           %{
+             company_id: company_id,
+             concurrency_guarded: guarded,
+             decision: decision,
+             policy: policy,
+             routine: routine
+           }}
+        end
     end
   end
 
-  defp active_run?(routine_id) do
-    Repo.exists?(
+  defp ensure_active_routine(%Routine{status: status}) when status in [:active, "active"], do: :ok
+  defp ensure_active_routine(%Routine{}), do: {:error, :routine_paused}
+
+  defp active_run?(repo, routine_id) do
+    repo.exists?(
       from(r in RoutineRun,
         where: r.routine_id == ^routine_id and r.status in ["pending", "running"]
       )
     )
+  end
+
+  defp insert_run_and_issue(repo, context, trigger, trigger_type, variables, now) do
+    attrs = %{
+      "trigger_type" => trigger_type,
+      "triggered_at" => now,
+      "routine_id" => context.routine.id,
+      "trigger_id" => trigger && trigger.id,
+      "status" => "pending",
+      "variables" => variables,
+      "concurrency_guarded" => context.concurrency_guarded
+    }
+
+    case %RoutineRun{} |> RoutineRun.changeset(attrs) |> repo.insert() do
+      {:ok, run} ->
+        insert_run_issue(repo, context, trigger, run, now)
+
+      {:error, changeset} ->
+        if context.concurrency_guarded and guarded_active_constraint?(changeset) do
+          repo.rollback({:guarded_conflict, context.policy})
+        else
+          repo.rollback({:run, changeset})
+        end
+    end
+  end
+
+  defp insert_run_issue(repo, context, trigger, run, now) do
+    issue_result =
+      if trigger do
+        create_run_issue(repo, run, trigger, context.routine, context.company_id, now)
+      else
+        create_manual_run_issue(repo, run, context.routine, context.company_id, now)
+      end
+
+    with {:ok, issue} <- issue_result,
+         {:ok, run} <-
+           run
+           |> Ecto.Changeset.change(%{issue_id: issue.id, status: "running"})
+           |> repo.update() do
+      {:enqueued, issue, run, context.routine}
+    else
+      {:error, changeset} -> repo.rollback({:issue, changeset})
+    end
+  end
+
+  defp finish_run_transaction({:ok, {:enqueued, issue, run, routine}}) do
+    wake_routine_agent(routine)
+    {:ok, %{issue: issue, run: run}}
+  end
+
+  defp finish_run_transaction({:ok, {:skip, reason}}), do: {:skip, reason}
+  defp finish_run_transaction({:error, {:guarded_conflict, policy}}), do: {:skip, policy}
+  defp finish_run_transaction({:error, {:run_context, reason}}), do: {:error, reason}
+
+  defp finish_run_transaction({:error, {step, reason}}) do
+    Logger.error("routine run failed at #{step}: #{inspect(reason)}")
+    {:error, {step, reason}}
+  end
+
+  defp guarded_active_constraint?(changeset) do
+    Enum.any?(changeset.errors, fn
+      {:routine_id, {_message, opts}} ->
+        opts[:constraint_name] == "routine_runs_one_guarded_active_index"
+
+      _ ->
+        false
+    end)
+  end
+
+  defp claim_scheduled_occurrence(_repo, _trigger, _trigger_type, nil, _now), do: :claimed
+
+  defp claim_scheduled_occurrence(
+         repo,
+         %RoutineTrigger{} = trigger,
+         "schedule",
+         %DateTime{} = scheduled_for,
+         now
+       ) do
+    # Dynamic Quantum jobs exist on every node. The unique occurrence row is
+    # claimed in the run transaction, making a losing node a durable no-op and
+    # rolling the claim back if run/issue creation fails.
+    attrs = %{
+      id: Ecto.UUID.generate(),
+      trigger_id: trigger.id,
+      scheduled_for: DateTime.truncate(scheduled_for, :second),
+      inserted_at: now,
+      updated_at: now
+    }
+
+    case repo.insert_all(ScheduledOccurrence, [attrs],
+           on_conflict: :nothing,
+           conflict_target: [:trigger_id, :scheduled_for]
+         ) do
+      {1, _} -> :claimed
+      {0, _} -> {:skip, :duplicate_occurrence}
+    end
+  end
+
+  defp claim_scheduled_occurrence(_repo, _trigger, _trigger_type, _scheduled_for, _now),
+    do: :claimed
+
+  defp scheduled_occurrence(_trigger, %DateTime{} = scheduled_for) do
+    {:ok, DateTime.truncate(scheduled_for, :second)}
+  end
+
+  defp scheduled_occurrence(%RoutineTrigger{} = trigger, nil) do
+    with {:ok, cron} <- Crontab.CronExpression.Parser.parse(trigger.cron_expression),
+         {:ok, scheduled_for} <-
+           Crontab.Scheduler.get_previous_run_date(cron, NaiveDateTime.utc_now()),
+         {:ok, scheduled_for} <- DateTime.from_naive(scheduled_for, "Etc/UTC") do
+      {:ok, scheduled_for}
+    end
   end
 end

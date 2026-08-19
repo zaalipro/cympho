@@ -38,7 +38,7 @@ defmodule Cympho.Users do
   Gets a user by email.
   """
   def get_user_by_email(email) when is_binary(email) do
-    case Repo.get_by(User, email: email) do
+    case Repo.get_by(User, email: User.normalize_email(email)) do
       nil -> {:error, :not_found}
       user -> {:ok, user}
     end
@@ -116,6 +116,29 @@ defmodule Cympho.Users do
     |> User.theme_changeset(%{theme: theme})
     |> Repo.update()
   end
+
+  @doc """
+  Invalidates every browser session and user JWT issued before this call.
+
+  The increment is atomic, so concurrent revocations cannot lose an update.
+  """
+  def revoke_sessions(%User{id: user_id}) do
+    case Repo.update_all(
+           from(u in User, where: u.id == ^user_id),
+           inc: [session_version: 1]
+         ) do
+      {1, _} -> get_user(user_id)
+      {0, _} -> {:error, :not_found}
+    end
+  end
+
+  # Credentials issued before session_version existed have no value. Treat
+  # them as version zero so an upgrade preserves them until the user's first
+  # explicit revocation.
+  def session_version_valid?(nil, %User{session_version: version}), do: version in [nil, 0]
+
+  def session_version_valid?(version, %User{session_version: current}),
+    do: version == (current || 0)
 
   @doc """
   Deletes a user.

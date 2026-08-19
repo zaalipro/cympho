@@ -118,7 +118,7 @@ defmodule CymphoWeb.GoalLive.FormHelpers do
   defp maybe_put_company_scope(_company_id, params, false), do: params
 
   defp maybe_put_company_scope(company_id, params, _put_scope?),
-    do: Map.put_new(params, "company_id", company_id)
+    do: Map.put(params, "company_id", company_id)
 
   defp blank?(value), do: value in [nil, ""]
 

@@ -105,7 +105,7 @@ defmodule Cympho.Documents do
       :revision,
       revision_changeset(document, old_title, old_body, current_revision, author_id, author_type)
     )
-    |> Ecto.Multi.update(:document, IssueDocument.changeset(document, attrs))
+    |> Ecto.Multi.update(:document, IssueDocument.update_changeset(document, attrs))
     |> Repo.transaction()
     |> case do
       {:ok, %{document: updated}} ->
@@ -170,16 +170,21 @@ defmodule Cympho.Documents do
     end
   end
 
-  def get_document_revision(document_id, id) when is_binary(document_id) do
-    revision =
-      Repo.one(
-        from r in IssueDocumentRevision,
-          where: r.document_id == ^document_id and r.id == ^id
-      )
+  def get_document_revision(document_id, id) when is_binary(document_id) and is_binary(id) do
+    with {:ok, document_id} <- Ecto.UUID.cast(document_id),
+         {:ok, id} <- Ecto.UUID.cast(id) do
+      revision =
+        Repo.one(
+          from r in IssueDocumentRevision,
+            where: r.document_id == ^document_id and r.id == ^id
+        )
 
-    case revision do
-      nil -> {:error, :not_found}
-      revision -> {:ok, revision}
+      case revision do
+        nil -> {:error, :not_found}
+        revision -> {:ok, revision}
+      end
+    else
+      :error -> {:error, :not_found}
     end
   end
 
@@ -215,7 +220,7 @@ defmodule Cympho.Documents do
           )
           |> Ecto.Multi.update(
             :document,
-            IssueDocument.changeset(document, %{body: revision.body, title: revision.title})
+            IssueDocument.update_changeset(document, %{body: revision.body, title: revision.title})
           )
           |> Repo.transaction()
           |> case do
@@ -249,6 +254,17 @@ defmodule Cympho.Documents do
     revision = get_revision!(revision_id)
     other_revision = get_revision!(other_revision_id)
 
+    build_diff(revision, other_revision)
+  end
+
+  def get_document_diff(document_id, revision_id, other_revision_id) do
+    with {:ok, revision} <- get_document_revision(document_id, revision_id),
+         {:ok, other_revision} <- get_document_revision(document_id, other_revision_id) do
+      {:ok, build_diff(revision, other_revision)}
+    end
+  end
+
+  defp build_diff(revision, other_revision) do
     %{
       current: revision,
       other: other_revision,
@@ -291,7 +307,9 @@ defmodule Cympho.Documents do
   end
 
   def change_document(%IssueDocument{} = document, attrs \\ %{}) do
-    IssueDocument.changeset(document, attrs)
+    if document.id,
+      do: IssueDocument.update_changeset(document, attrs),
+      else: IssueDocument.changeset(document, attrs)
   end
 
   # Fail-closed: never publish the unscoped "documents" topic or company::documents.

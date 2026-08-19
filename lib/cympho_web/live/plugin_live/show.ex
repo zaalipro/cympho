@@ -1,7 +1,8 @@
 defmodule CymphoWeb.PluginLive.Show do
   use CymphoWeb, :live_view
 
-  alias Cympho.{Companies, Repo, Skills}
+  alias Cympho.{CompanyRBAC, Repo, Skills}
+  alias Cympho.Plugins.Runtime
 
   @mutation_forbidden_message "Only company owners, admins, and board members can change plugins."
 
@@ -55,7 +56,7 @@ defmodule CymphoWeb.PluginLive.Show do
   @impl true
   def handle_event("toggle_plugin", _params, socket) do
     authorize_plugin_mutation(socket, fn ->
-      case Skills.toggle_plugin(socket.assigns.plugin) do
+      case Runtime.toggle_plugin(socket.assigns.plugin) do
         {:ok, updated_plugin} ->
           updated_plugin = Repo.preload(updated_plugin, [:company, :project])
 
@@ -76,7 +77,7 @@ defmodule CymphoWeb.PluginLive.Show do
   @impl true
   def handle_event("delete", _params, socket) do
     authorize_plugin_mutation(socket, fn ->
-      case Skills.delete_plugin(socket.assigns.plugin) do
+      case Runtime.delete_plugin(socket.assigns.plugin) do
         {:ok, _} ->
           {:noreply,
            socket
@@ -106,7 +107,7 @@ defmodule CymphoWeb.PluginLive.Show do
            current_company: %{id: company_id}
          }
        }) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp can_manage_plugins?(_socket), do: false

@@ -67,12 +67,12 @@ defmodule Cympho.Labels do
   end
 
   def change_label(%Label{} = label, attrs \\ %{}) do
-    Label.changeset(label, attrs)
+    if label.id, do: Label.update_changeset(label, attrs), else: Label.changeset(label, attrs)
   end
 
   def update_label(%Label{} = label, attrs) do
     label
-    |> Label.changeset(attrs)
+    |> Label.update_changeset(attrs)
     |> Repo.update()
   end
 

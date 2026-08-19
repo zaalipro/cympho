@@ -14,7 +14,10 @@ defmodule CymphoWeb.ApiTenancyTest do
   alias Cympho.Workspaces
 
   setup %{conn: conn} do
-    {conn, user, company} = register_and_log_in_user(conn)
+    # This suite exercises tenant hiding behind both ordinary and manager-only
+    # APIs. Use a manager so authorization does not mask the intended 404
+    # assertions for forged cross-company identifiers.
+    {conn, user, company} = register_and_log_in_user(conn, %{role: "admin"})
     unique = System.unique_integer([:positive])
 
     {:ok, project} =
@@ -242,13 +245,8 @@ defmodule CymphoWeb.ApiTenancyTest do
       })
 
     {:ok, service} =
-      Workspaces.create_runtime_service(%{
-        service_name: "Other service #{unique}",
-        status: "stopped",
-        company_id: other_company.id,
-        project_id: other_project.id,
-        project_workspace_id: workspace.id,
-        execution_workspace_id: execution_workspace.id
+      Workspaces.create_runtime_service(execution_workspace, %{
+        service_name: "Other service #{unique}"
       })
 
     conn = patch(conn, ~p"/api/services/#{service.id}/start")
@@ -274,21 +272,18 @@ defmodule CymphoWeb.ApiTenancyTest do
     {:ok, execution_workspace} =
       Workspaces.create_execution_workspace(%{
         name: "Other preview execution workspace #{unique}",
+        status: "open",
         project_id: other_project.id,
         company_id: other_company.id,
         project_workspace_id: workspace.id
       })
 
     {:ok, service} =
-      Workspaces.create_runtime_service(%{
-        service_name: "Other preview service #{unique}",
-        status: "running",
-        port: 4000,
-        company_id: other_company.id,
-        project_id: other_project.id,
-        project_workspace_id: workspace.id,
-        execution_workspace_id: execution_workspace.id
+      Workspaces.create_runtime_service(execution_workspace, %{
+        service_name: "Other preview service #{unique}"
       })
+
+    {:ok, service} = Workspaces.issue_service_preview(service, 4000)
 
     conn = get(conn, ~p"/api/preview/#{service.id}")
     assert json_response(conn, 404)

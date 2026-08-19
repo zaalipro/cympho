@@ -1,6 +1,5 @@
 defmodule CymphoWeb.SecretsLive.FormComponent do
   use CymphoWeb, :live_component
-  alias Cympho.Companies
   alias Cympho.Secrets
   alias Cympho.Secrets.Secret
   alias CymphoWeb.UserAuth
@@ -117,7 +116,7 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
          assigns: %{current_user_id: user_id, company_id: company_id}
        })
        when is_binary(user_id) and is_binary(company_id) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    Cympho.CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp can_manage_secrets?(_socket), do: false

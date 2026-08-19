@@ -5,6 +5,8 @@ defmodule Cympho.Workspaces.PreviewUrl do
 
   alias Cympho.Workspaces.RuntimeService
 
+  @token_salt "runtime preview capability"
+
   # Common dev server ports for auto-discovery
   @common_dev_ports [
     {3000, "webpack", ["node", "webpack", "vite"]},
@@ -31,12 +33,55 @@ defmodule Cympho.Workspaces.PreviewUrl do
   Returns a proxied URL that routes through the application.
   """
   def generate_preview_url(%RuntimeService{} = service, base_url) do
-    if service.port && service.status == "running" do
-      "#{base_url}/api/preview/#{service.id}/proxy"
+    with true <- previewable?(service),
+         preview_host when is_binary(preview_host) <- preview_host(),
+         {:ok, base_uri} <- URI.new(base_url),
+         true <- base_uri.host != nil and normalize_host(base_uri.host) != preview_host do
+      token = sign_capability(service)
+
+      base_uri
+      |> Map.put(:host, preview_host)
+      |> Map.put(:path, "/api/preview/#{service.id}/#{token}/proxy")
+      |> Map.put(:query, nil)
+      |> Map.put(:fragment, nil)
+      |> URI.to_string()
     else
-      nil
+      _ -> nil
     end
   end
+
+  @doc false
+  def sign_capability(%RuntimeService{} = service, opts \\ []) do
+    Phoenix.Token.sign(
+      CymphoWeb.Endpoint,
+      @token_salt,
+      %{service_id: service.id, preview_ref: service.preview_ref},
+      opts
+    )
+  end
+
+  @doc "Verifies a short-lived preview capability and returns its preview identity."
+  def verify_capability(service_id, token) when is_binary(service_id) and is_binary(token) do
+    max_age = Application.get_env(:cympho, :preview_token_max_age, 300)
+
+    case Phoenix.Token.verify(CymphoWeb.Endpoint, @token_salt, token, max_age: max_age) do
+      {:ok, %{service_id: ^service_id, preview_ref: preview_ref}}
+      when is_binary(preview_ref) ->
+        {:ok, preview_ref}
+
+      {:ok, %{"service_id" => ^service_id, "preview_ref" => preview_ref}}
+      when is_binary(preview_ref) ->
+        {:ok, preview_ref}
+
+      _ ->
+        {:error, :invalid_capability}
+    end
+  end
+
+  def verify_capability(_service_id, _token), do: {:error, :invalid_capability}
+
+  @doc "Returns the configured cookie-free preview hostname."
+  def preview_host, do: Application.get_env(:cympho, :preview_host)
 
   @doc """
   Get the Finch target for a runtime service.
@@ -44,14 +89,22 @@ defmodule Cympho.Workspaces.PreviewUrl do
   Always loopback. `service.url` is a display field and is ignored.
   """
   def get_target_url(%RuntimeService{} = service) do
-    case service.port do
-      port when is_integer(port) and port in 1..65535 ->
-        "http://127.0.0.1:" <> Integer.to_string(port)
-
-      _ ->
-        nil
-    end
+    if previewable?(service), do: "http://127.0.0.1:#{service.port}"
   end
+
+  def previewable?(%RuntimeService{
+        status: "running",
+        port: port,
+        preview_ref: preview_ref,
+        execution_workspace_id: execution_workspace_id
+      })
+      when is_integer(port) and port in 1..65535 and is_binary(preview_ref) and
+             is_binary(execution_workspace_id),
+      do: true
+
+  def previewable?(_service), do: false
+
+  defp normalize_host(host), do: host |> String.downcase() |> String.trim_trailing(".")
 
   @doc """
   Auto-discover common dev server ports by examining running processes.

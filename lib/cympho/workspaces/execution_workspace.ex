@@ -70,6 +70,11 @@ defmodule Cympho.Workspaces.ExecutionWorkspace do
     ])
     |> validate_required([:name, :project_id, :company_id, :project_workspace_id])
     |> validate_safe_cwd()
+    |> foreign_key_constraint(:company_id)
+    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:project_workspace_id)
+    |> foreign_key_constraint(:source_issue_id)
+    |> foreign_key_constraint(:derived_from_execution_workspace_id)
   end
 
   def update_changeset(execution_workspace, attrs) do
@@ -85,18 +90,20 @@ defmodule Cympho.Workspaces.ExecutionWorkspace do
       :branch_name,
       :provider_type,
       :provider_ref,
-      :derived_from_execution_workspace_id,
       :last_used_at,
       :opened_at,
       :closed_at,
       :cleanup_eligible_at,
       :cleanup_reason,
-      :metadata,
-      :project_workspace_id,
-      :source_issue_id
+      :metadata
     ])
     |> validate_required([:name, :project_workspace_id])
     |> validate_safe_cwd()
+    |> foreign_key_constraint(:company_id)
+    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:project_workspace_id)
+    |> foreign_key_constraint(:source_issue_id)
+    |> foreign_key_constraint(:derived_from_execution_workspace_id)
   end
 
   defp validate_safe_cwd(changeset) do

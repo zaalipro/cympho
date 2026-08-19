@@ -9,6 +9,7 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
   """
 
   import Ecto.Query, warn: false
+  alias Cympho.Agents.Agent
   alias Cympho.Repo
   alias Cympho.Wakes.AgentWake
   require Logger
@@ -49,64 +50,27 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
     triggered_by_id = attr(attrs, :triggered_by_id)
     metadata = attr(attrs, :metadata, %{}) || %{}
 
-    existing =
-      AgentWake
-      |> where([w], w.agent_id == ^agent_id and w.reason == ^reason and w.status == "pending")
-      |> where_issue(issue_id)
-      |> order_by([w], desc: w.inserted_at)
-      |> limit(1)
-      |> Repo.one()
-
     result =
-      case existing do
-        nil ->
-          cap = max_pending_wakes_per_agent()
+      Repo.transaction(fn ->
+        # The parent row is a per-agent mutex. Coalescing and the depth check
+        # must see one serialized view or concurrent inserts can both miss the
+        # existing wake / observe capacity and overfill the queue.
+        Agent
+        |> where([a], a.id == ^agent_id)
+        |> select([a], a.id)
+        |> lock("FOR UPDATE")
+        |> Repo.one()
 
-          cond do
-            recent_consumed_duplicate?(
-              agent_id,
-              issue_id,
-              reason,
-              attrs_fingerprint(triggered_by_type, triggered_by_id, metadata)
-            ) ->
-              Logger.debug(
-                "WakeupQueue: suppressing recent duplicate wake for agent #{agent_id}, issue #{inspect(issue_id)}, reason #{reason}"
-              )
-
-              {:error, :recent_duplicate_wake}
-
-            pending_count(agent_id) >= cap ->
-              Logger.warning(
-                "WakeupQueue: rejecting wake for agent #{agent_id}, queue full (cap=#{cap})"
-              )
-
-              {:error, :wakeup_queue_full}
-
-            true ->
-              %AgentWake{}
-              |> AgentWake.changeset(%{
-                agent_id: agent_id,
-                issue_id: issue_id,
-                reason: reason,
-                status: "pending",
-                triggered_by_type: triggered_by_type,
-                triggered_by_id: triggered_by_id,
-                metadata: metadata
-              })
-              |> Repo.insert()
-          end
-
-        wake ->
-          Logger.debug("WakeupQueue: coalescing wake for agent #{agent_id}, issue #{issue_id}")
-
-          wake
-          |> AgentWake.changeset(%{
-            triggered_by_type: triggered_by_type,
-            triggered_by_id: triggered_by_id,
-            metadata: merge_metadata(wake.metadata, metadata)
-          })
-          |> Repo.update()
-      end
+        enqueue_locked(
+          agent_id,
+          issue_id,
+          reason,
+          triggered_by_type,
+          triggered_by_id,
+          metadata
+        )
+      end)
+      |> unwrap_transaction()
 
     case result do
       {:ok, wake} ->
@@ -123,6 +87,73 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
     end
   end
 
+  defp enqueue_locked(
+         agent_id,
+         issue_id,
+         reason,
+         triggered_by_type,
+         triggered_by_id,
+         metadata
+       ) do
+    existing =
+      AgentWake
+      |> where([w], w.agent_id == ^agent_id and w.reason == ^reason and w.status == "pending")
+      |> where_issue(issue_id)
+      |> order_by([w], desc: w.inserted_at)
+      |> limit(1)
+      |> Repo.one()
+
+    case existing do
+      nil ->
+        cap = max_pending_wakes_per_agent()
+
+        cond do
+          recent_consumed_duplicate?(
+            agent_id,
+            issue_id,
+            reason,
+            attrs_fingerprint(triggered_by_type, triggered_by_id, metadata)
+          ) ->
+            Logger.debug(
+              "WakeupQueue: suppressing recent duplicate wake for agent #{agent_id}, issue #{inspect(issue_id)}, reason #{reason}"
+            )
+
+            {:error, :recent_duplicate_wake}
+
+          pending_count(agent_id) >= cap ->
+            Logger.warning(
+              "WakeupQueue: rejecting wake for agent #{agent_id}, queue full (cap=#{cap})"
+            )
+
+            {:error, :wakeup_queue_full}
+
+          true ->
+            %AgentWake{}
+            |> AgentWake.changeset(%{
+              agent_id: agent_id,
+              issue_id: issue_id,
+              reason: reason,
+              status: "pending",
+              triggered_by_type: triggered_by_type,
+              triggered_by_id: triggered_by_id,
+              metadata: metadata
+            })
+            |> Repo.insert()
+        end
+
+      wake ->
+        Logger.debug("WakeupQueue: coalescing wake for agent #{agent_id}, issue #{issue_id}")
+
+        wake
+        |> AgentWake.changeset(%{
+          triggered_by_type: triggered_by_type,
+          triggered_by_id: triggered_by_id,
+          metadata: merge_metadata(wake.metadata, metadata)
+        })
+        |> Repo.update()
+    end
+  end
+
   @doc """
   Returns the PubSub topic on which `enqueue/1` broadcasts wake events for an agent.
   Subscribers receive `{:wakeup_enqueued, agent_id, %AgentWake{}}` on enqueue.
@@ -131,23 +162,102 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
   def topic_for_agent(agent_id), do: "wakeups:#{agent_id}"
 
   @doc """
-  Dequeues the next wake event for a given agent.
-  Returns the oldest pending wake for the agent, or nil.
+  Claims the next wake event for a given agent.
+
+  Selection and the `pending` to `running` transition occur in the same
+  transaction so two consumers cannot receive the same wake.
   """
   @spec dequeue(String.t()) :: {:ok, AgentWake.t()} | {:error, :empty}
   def dequeue(agent_id) do
-    wake =
-      Repo.one(
-        from w in AgentWake,
-          where: w.agent_id == ^agent_id and w.status == "pending",
-          order_by: [asc: w.inserted_at, asc: w.id],
-          limit: 1,
-          lock: "FOR UPDATE SKIP LOCKED"
-      )
+    claim_token = Ecto.UUID.generate()
+    claimed_at = DateTime.utc_now()
 
-    case wake do
-      nil -> {:error, :empty}
-      wake -> {:ok, wake}
+    Repo.transaction(fn ->
+      wake =
+        Repo.one(
+          from w in AgentWake,
+            where: w.agent_id == ^agent_id and w.status == "pending",
+            order_by: [asc: w.inserted_at, asc: w.id],
+            limit: 1,
+            lock: "FOR UPDATE SKIP LOCKED"
+        )
+
+      case wake do
+        nil ->
+          {:error, :empty}
+
+        wake ->
+          wake
+          |> AgentWake.changeset(%{
+            status: "running",
+            attempt_count: (wake.attempt_count || 0) + 1,
+            last_error: nil,
+            claim_token: claim_token,
+            claimed_at: claimed_at
+          })
+          |> Repo.update()
+      end
+    end)
+    |> unwrap_transaction()
+  end
+
+  @doc """
+  Returns stale or malformed running claims to the pending queue.
+
+  Claim ownership is a per-attempt UUID rather than a node name. A live claim
+  is never reclaimed merely because a process restarted on the same node; only
+  a missing claim timestamp/token or an expired timestamp is eligible.
+  """
+  @spec recover_stale_running(pos_integer(), pos_integer()) :: %{
+          recovered: non_neg_integer(),
+          agent_ids: [String.t()]
+        }
+  def recover_stale_running(older_than_minutes, limit \\ 100)
+      when is_integer(older_than_minutes) and older_than_minutes > 0 and is_integer(limit) and
+             limit > 0 do
+    cutoff = DateTime.utc_now() |> DateTime.add(-older_than_minutes * 60, :second)
+
+    Repo.transaction(fn ->
+      wakes =
+        AgentWake
+        |> where(
+          [w],
+          w.status == "running" and
+            (is_nil(w.claim_token) or is_nil(w.claimed_at) or w.claimed_at < ^cutoff)
+        )
+        |> order_by([w], asc_nulls_first: w.claimed_at, asc: w.id)
+        |> limit(^limit)
+        |> lock("FOR UPDATE SKIP LOCKED")
+        |> Repo.all()
+
+      ids = Enum.map(wakes, & &1.id)
+
+      recovered =
+        case ids do
+          [] ->
+            0
+
+          ids ->
+            {count, _} =
+              AgentWake
+              |> where([w], w.id in ^ids and w.status == "running")
+              |> Repo.update_all(
+                set: [
+                  status: "pending",
+                  claim_token: nil,
+                  claimed_at: nil,
+                  last_error: "stale_wake_claim_recovered"
+                ]
+              )
+
+            count
+        end
+
+      %{recovered: recovered, agent_ids: wakes |> Enum.map(& &1.agent_id) |> Enum.uniq()}
+    end)
+    |> case do
+      {:ok, result} -> result
+      {:error, reason} -> raise "failed to recover stale wake claims: #{inspect(reason)}"
     end
   end
 
@@ -208,11 +318,45 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
   @doc """
   Marks a wake as consumed after an agent has started processing it.
   """
-  @spec mark_consumed(AgentWake.t()) :: {:ok, AgentWake.t()} | {:error, Ecto.Changeset.t()}
+  @spec mark_consumed(AgentWake.t()) ::
+          {:ok, AgentWake.t()} | {:error, Ecto.Changeset.t() | :claim_lost}
   def mark_consumed(%AgentWake{} = wake) do
-    wake
-    |> AgentWake.changeset(%{status: "consumed", consumed_at: DateTime.utc_now()})
-    |> Repo.update()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    query =
+      case wake do
+        %AgentWake{status: "running", claim_token: token} when is_binary(token) ->
+          where(
+            AgentWake,
+            [w],
+            w.id == ^wake.id and w.status == "running" and w.claim_token == ^token
+          )
+
+        %AgentWake{status: status} when status in ["pending", "running"] ->
+          where(
+            AgentWake,
+            [w],
+            w.id == ^wake.id and w.status == ^status and is_nil(w.claim_token)
+          )
+
+        _ ->
+          where(AgentWake, [w], w.id == ^wake.id and w.status == ^wake.status)
+      end
+
+    case Repo.update_all(query,
+           set: [
+             status: "consumed",
+             consumed_at: now,
+             claim_token: nil,
+             claimed_at: nil
+           ]
+         ) do
+      {1, _} ->
+        {:ok, %{wake | status: "consumed", consumed_at: now, claim_token: nil, claimed_at: nil}}
+
+      {0, _} ->
+        {:error, :claim_lost}
+    end
   end
 
   @doc """
@@ -223,9 +367,11 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
     now = DateTime.utc_now()
 
     AgentWake
-    |> where([w], w.agent_id == ^agent_id and w.status == "pending")
+    |> where([w], w.agent_id == ^agent_id and w.status in ["pending", "running"])
     |> where_issue(issue_id)
-    |> Repo.update_all(set: [status: "consumed", consumed_at: now])
+    |> Repo.update_all(
+      set: [status: "consumed", consumed_at: now, claim_token: nil, claimed_at: nil]
+    )
 
     :ok
   end
@@ -314,6 +460,9 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
   defp attr(attrs, key, default \\ nil) do
     Map.get(attrs, key, Map.get(attrs, to_string(key), default))
   end
+
+  defp unwrap_transaction({:ok, result}), do: result
+  defp unwrap_transaction({:error, reason}), do: {:error, reason}
 
   defp merge_metadata(existing, new) do
     existing = existing || %{}

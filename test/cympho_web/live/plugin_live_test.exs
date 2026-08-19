@@ -6,11 +6,16 @@ defmodule CymphoWeb.PluginLiveTest do
   alias Cympho.Skills.Plugin
 
   setup %{conn: conn, current_company: company} = context do
-    unless context[:regular_member] do
-      user_id = Plug.Conn.get_session(conn, :user_id)
-      membership = Companies.get_membership(user_id, company.id)
-      assert {:ok, _membership} = Companies.update_membership(membership, %{role: "admin"})
-    end
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    membership = Companies.get_membership(user_id, company.id)
+
+    role = context[:membership_role] || if(context[:regular_member], do: "member", else: "admin")
+
+    assert {:ok, _membership} =
+             Companies.update_membership(membership, %{
+               role: role,
+               is_board_member: context[:board_member] == true
+             })
 
     :ok
   end
@@ -255,6 +260,40 @@ defmodule CymphoWeb.PluginLiveTest do
 
       assert {:error, {:live_redirect, %{to: "/plugins"}}} =
                live(conn, "/plugins/#{plugin.id}/edit")
+    end
+
+    @tag membership_role: "member", board_member: true
+    test "member board users can create and manage plugins", %{
+      conn: conn,
+      current_company: company
+    } do
+      plugin = insert_plugin(company.id, %{enabled: true, status: "active"})
+
+      {:ok, view, _html} = live(conn, "/plugins")
+
+      assert has_element?(view, ~s(a[href="/plugins/new"]))
+      assert has_element?(view, ~s(button[phx-click="toggle_plugin"]))
+      assert {:ok, _new_view, _html} = live(conn, "/plugins/new")
+
+      render_click(view, "toggle_plugin", %{"id" => plugin.id})
+      refute Repo.get!(Plugin, plugin.id).enabled
+    end
+
+    @tag membership_role: "viewer", board_member: true
+    test "a board flag does not make a viewer a plugin manager", %{
+      conn: conn,
+      current_company: company
+    } do
+      plugin = insert_plugin(company.id, %{enabled: true, status: "active"})
+
+      {:ok, view, _html} = live(conn, "/plugins")
+
+      refute has_element?(view, ~s(a[href="/plugins/new"]))
+      refute has_element?(view, ~s(button[phx-click="toggle_plugin"]))
+      assert {:error, {:live_redirect, %{to: "/plugins"}}} = live(conn, "/plugins/new")
+
+      render_click(view, "toggle_plugin", %{"id" => plugin.id})
+      assert Repo.get!(Plugin, plugin.id).enabled
     end
   end
 

@@ -34,6 +34,7 @@ defmodule CymphoWeb.SettingsLive.IntegrationsTest do
       assert html =~ "Save connection"
     end
 
+    @tag membership_role: "admin"
     test "creates a scoped MCP API key for an agent", %{conn: conn, current_company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
@@ -72,6 +73,7 @@ defmodule CymphoWeb.SettingsLive.IntegrationsTest do
       assert api_key.name == "Owner MCP client"
     end
 
+    @tag membership_role: "admin"
     test "saves company-scoped Agrenting secrets", %{conn: conn, current_company: company} do
       {:ok, view, _html} = live(conn, "/settings/integrations")
 
@@ -107,6 +109,7 @@ defmodule CymphoWeb.SettingsLive.IntegrationsTest do
       assert {:ok, "repo-token"} = Secrets.get_secret_value(repo_token_secret.id)
     end
 
+    @tag membership_role: "admin"
     test "disconnect deactivates Agrenting secrets", %{conn: conn, current_company: company} do
       assert {:ok, _status} =
                Agrenting.save_company_config(company.id, %{

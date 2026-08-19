@@ -1,12 +1,14 @@
 defmodule CymphoWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :cympho
 
-  @session_options [
-    store: :cookie,
-    key: "_cympho_key",
-    signing_salt: "cympho_signing_salt",
-    same_site: "Lax"
-  ]
+  @session_options Application.compile_env!(:cympho, :session_options)
+
+  # This runs before sockets, static files, parsers, and sessions. Production
+  # enables it from runtime.exs; local development and tests leave it disabled.
+  plug CymphoWeb.Plugs.TransportSecurity
+  plug CymphoWeb.Plugs.PreviewHost
+
+  def session_options, do: @session_options
 
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [:peer_data, :x_headers, session: @session_options]],

@@ -9,7 +9,7 @@ defmodule Cympho.Onboarding do
 
   import Ecto.Query, warn: false
 
-  alias Cympho.Companies
+  alias Cympho.CompanyRBAC
   alias Cympho.Goals
   alias Cympho.Goals.Goal
   alias Cympho.Issues
@@ -376,7 +376,7 @@ defmodule Cympho.Onboarding do
   defp sanitize_role_adapter(_adapter), do: nil
 
   defp improvement_authorized?(user_id, company_id) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp field(map, key, default \\ nil) when is_map(map) do

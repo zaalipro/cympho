@@ -13,6 +13,7 @@ defmodule CymphoWeb.ApprovalLive.Index do
      assign(socket,
        page_title: "Approvals",
        status_filter: nil,
+       can_resolve_approvals: can_resolve_approvals?(socket),
        approval_command: empty_approval_command(),
        infinite_scroll: %{}
      )}
@@ -75,10 +76,10 @@ defmodule CymphoWeb.ApprovalLive.Index do
   # refreshes the stream for every subscribed view.
   defp resolve_inline(socket, id, decision, reason) do
     with %{id: company_id} <- socket.assigns[:current_company],
-         {:ok, _approval} <- Approvals.get_company_approval(company_id, id),
+         %{id: user_id} <- socket.assigns[:current_user],
          {:ok, _resolved} <-
-           Approvals.resolve_approval(id, decision, %{
-             resolved_by_user_id: current_user_id(socket),
+           Approvals.resolve_company_approval(company_id, id, decision, %{
+             resolved_by_user_id: user_id,
              resolution_reason: reason
            }) do
       {:noreply,
@@ -86,14 +87,25 @@ defmodule CymphoWeb.ApprovalLive.Index do
        |> put_flash(:info, if(decision == :approved, do: "Approved", else: "Denied"))
        |> reload_approvals()}
     else
-      _ -> {:noreply, put_flash(socket, :error, "Could not resolve approval")}
+      {:error, :forbidden} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Only company owners, admins, and board members can resolve approvals."
+         )}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Could not resolve approval")}
     end
   end
 
-  defp current_user_id(socket) do
-    case socket.assigns[:current_user] do
-      %{id: id} -> id
-      _ -> nil
+  defp can_resolve_approvals?(socket) do
+    with %{id: user_id} <- socket.assigns[:current_user],
+         %{id: company_id} <- socket.assigns[:current_company] do
+      Approvals.resolver_authorized?(user_id, company_id)
+    else
+      _ -> false
     end
   end
 

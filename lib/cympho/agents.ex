@@ -8,6 +8,7 @@ defmodule Cympho.Agents do
   alias Cympho.Agents.Agent
   alias Cympho.Agents.AgentConfigRevision
   alias Cympho.AgentInstructionStudio
+  alias Cympho.Authentication
   alias Cympho.BoardApprovals
   alias Cympho.Issues.Issue
 
@@ -1250,6 +1251,8 @@ defmodule Cympho.Agents do
     # Terminating left the agent's whole queue pinned to them. Pause has always
     # rehomed; termination is the more permanent stop and needs it more.
     with {:ok, terminated} <- result do
+      {:ok, _revoked_count} = Authentication.revoke_agent_api_keys(terminated.id)
+
       _ =
         Cympho.Issues.RehomePaused.rehome_for_paused_agent(terminated,
           reason: "Agent terminated"

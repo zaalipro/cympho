@@ -9,8 +9,7 @@ defmodule CymphoWeb.Plugs.AgentAuth do
 
   import Plug.Conn
   import Ecto.Query, only: [from: 2]
-  alias Cympho.Agents
-  alias Cympho.AgentAuthJWT
+  alias Cympho.Authentication
 
   def init(opts), do: opts
 
@@ -43,13 +42,10 @@ defmodule CymphoWeb.Plugs.AgentAuth do
 
   defp authenticate_with_jwt(conn) do
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
-         {:ok, claims} <- AgentAuthJWT.verify_token(token),
-         {:ok, agent_id} <- AgentAuthJWT.get_agent_id(claims),
-         {:ok, run_id} <- AgentAuthJWT.get_run_id(claims),
-         {:ok, agent} <- Agents.get_agent(agent_id) do
+         {:ok, %{agent: agent, run: run}} <- Authentication.authenticate_heartbeat_token(token) do
       conn
       |> assign(:current_agent, agent)
-      |> assign(:run_id, run_id)
+      |> assign(:run_id, run.id)
       |> assign(:auth_method, :jwt)
     else
       _ ->
@@ -59,8 +55,7 @@ defmodule CymphoWeb.Plugs.AgentAuth do
 
   defp authenticate_with_api_key(conn) do
     with [api_key | _] <- get_req_header(conn, "x-api-key"),
-         {:ok, agent_api_key} <- get_agent_api_key(api_key),
-         {:ok, agent} <- Agents.get_agent(agent_api_key.agent_id) do
+         {:ok, {agent_api_key, agent}} <- Authentication.authenticate_agent_api_key(api_key) do
       # Fire-and-forget update; skip in test to avoid sandbox disconnect noise
       unless Application.get_env(:cympho, :env) == :test do
         Task.Supervisor.start_child(
@@ -77,22 +72,6 @@ defmodule CymphoWeb.Plugs.AgentAuth do
     else
       _ ->
         unauthorized(conn, "Invalid API key")
-    end
-  end
-
-  defp get_agent_api_key(api_key) do
-    key_hash = Cympho.Agents.AgentApiKey.hash_api_key(api_key)
-
-    query =
-      from(ak in Cympho.Agents.AgentApiKey,
-        where: ak.key_hash == ^key_hash,
-        where: is_nil(ak.expires_at) or ak.expires_at > ^DateTime.utc_now(),
-        preload: [:agent]
-      )
-
-    case Cympho.Repo.one(query) do
-      nil -> {:error, :not_found}
-      api_key -> {:ok, api_key}
     end
   end
 

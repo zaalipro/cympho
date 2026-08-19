@@ -16,6 +16,7 @@ defmodule Cympho.CtoOrchestrationTest do
   alias Cympho.AgentGovernance
   alias Cympho.AgentPrompt
   alias Cympho.Agents
+  alias Cympho.Authentication
   alias Cympho.Companies
   alias Cympho.Issues
   alias Cympho.Issues.Issue
@@ -553,6 +554,46 @@ defmodule Cympho.CtoOrchestrationTest do
       assert paused.status == :paused
       assert %DateTime{microsecond: {0, 0}} = paused.paused_at
       refute Agents.governance_active?(paused)
+    end
+
+    test "termination revokes every active API key", %{engineer: engineer} do
+      {:ok, {_first_key, first_token}} =
+        Authentication.create_agent_api_key(engineer.id, "First key")
+
+      {:ok, {_second_key, second_token}} =
+        Authentication.create_agent_api_key(engineer.id, "Second key")
+
+      terminate(engineer)
+
+      revoked = Authentication.list_agent_api_keys(engineer.id)
+      assert length(revoked) == 2
+      assert Enum.all?(revoked, &match?(%DateTime{}, &1.expires_at))
+      assert {:error, :invalid_api_key} = Authentication.validate_api_key(first_token)
+      assert {:error, :invalid_api_key} = Authentication.validate_api_key(second_token)
+    end
+
+    test "pause preserves a key but blocks it until governance resumes the agent", %{
+      engineer: engineer
+    } do
+      {:ok, {api_key, token}} = Authentication.create_agent_api_key(engineer.id, "Resume key")
+
+      assert {:ok, paused} = AgentGovernance.pause_agent(engineer.id, nil)
+      assert {:error, :invalid_api_key} = Authentication.validate_api_key(token)
+      assert is_nil(Authentication.get_agent_api_key(api_key.id).expires_at)
+
+      assert {:ok, resumed} = AgentGovernance.resume_agent(paused.id, "Ready again", nil)
+      assert resumed.status == :idle
+      assert resumed.governance_status == "active"
+      assert {:ok, authenticated} = Authentication.validate_api_key(token)
+      assert authenticated.id == engineer.id
+    end
+
+    test "direct runtime termination also revokes active API keys", %{engineer: engineer} do
+      {:ok, {_api_key, token}} = Authentication.create_agent_api_key(engineer.id, "Runtime key")
+
+      assert {:ok, terminated} = Agents.terminate_agent(engineer)
+      assert terminated.status == :terminated
+      assert {:error, :invalid_api_key} = Authentication.validate_api_key(token)
     end
   end
 end

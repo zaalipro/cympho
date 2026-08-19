@@ -10,8 +10,8 @@ defmodule CymphoWeb.CacheBodyReaderTest do
   # broken reader means the HMAC check never executes at all.
   #
   # The tests force a tiny :length so the chunked path is exercised cheaply.
-  defp conn_with_body(body, read_opts) do
-    Plug.Test.conn(:post, "/webhook", body)
+  defp conn_with_body(body, read_opts, path \\ "/api/github/webhook") do
+    Plug.Test.conn(:post, path, body)
     |> Plug.Conn.put_req_header("content-type", "application/json")
     |> CacheBodyReader.read_body(read_opts)
   end
@@ -54,6 +54,51 @@ defmodule CymphoWeb.CacheBodyReaderTest do
     test "handles an empty body" do
       assert {:ok, "", conn} = conn_with_body("", [])
       assert raw_binary(conn) == ""
+    end
+
+    test "does not retain or accumulate bodies on unrelated routes" do
+      body = String.duplicate("x", 2_048)
+
+      assert {:more, chunk, conn} = conn_with_body(body, [length: 1_024], "/api/login")
+      assert byte_size(chunk) == 1_024
+      refute Map.has_key?(conn.assigns, :raw_body)
+    end
+
+    test "stops once the cumulative webhook body limit is exceeded" do
+      body = String.duplicate("x", 4_097)
+
+      conn =
+        Plug.Test.conn(:post, "/api/github/webhook", body)
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+
+      assert {:more, "", conn} = CacheBodyReader.read_body(conn, [length: 1_024], 4_096)
+      refute Map.has_key?(conn.assigns, :raw_body)
+    end
+
+    test "the cumulative limit becomes an HTTP 413 parser error" do
+      conn =
+        Plug.Test.conn(
+          :post,
+          "/api/github/webhook",
+          ~s({"data":"#{String.duplicate("x", 4_096)}"})
+        )
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+
+      opts =
+        Plug.Parsers.init(
+          parsers: [:json],
+          pass: ["*/*"],
+          json_decoder: Jason,
+          length: 1_024,
+          body_reader: {CacheBodyReader, :read_body, [4_096]}
+        )
+
+      error =
+        assert_raise Plug.Parsers.RequestTooLargeError, fn ->
+          Plug.Parsers.call(conn, opts)
+        end
+
+      assert error.plug_status == 413
     end
   end
 end

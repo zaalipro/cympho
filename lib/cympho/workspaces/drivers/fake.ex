@@ -23,7 +23,7 @@ defmodule Cympho.Workspaces.Drivers.Fake do
     case fetch_company_id(opts) do
       {:ok, company_id} ->
         ensure_table()
-        provider_ref = "fake-" <> Ecto.UUID.generate()
+        provider_ref = provider_ref(company_id, opts)
         raw_metadata = merge_metadata(opts, config)
         metadata = redact_metadata(raw_metadata)
 
@@ -35,7 +35,19 @@ defmodule Cympho.Workspaces.Drivers.Fake do
           executions: []
         }
 
-        :ets.insert(@table, {provider_ref, entry})
+        # A provider idempotency key maps retries to the same handle. Preserve
+        # an already-acquired entry so a concurrent retry cannot reset work
+        # recorded between the two calls; a released handle is reacquired.
+        case :ets.insert_new(@table, {provider_ref, entry}) do
+          true ->
+            :ok
+
+          false ->
+            case :ets.lookup(@table, provider_ref) do
+              [{^provider_ref, %{status: :acquired}}] -> :ok
+              _ -> :ets.insert(@table, {provider_ref, entry})
+            end
+        end
 
         {:ok,
          %{
@@ -135,6 +147,34 @@ defmodule Cympho.Workspaces.Drivers.Fake do
 
     base
     |> Map.merge(if is_map(from_config), do: from_config, else: %{})
+  end
+
+  defp provider_ref(company_id, opts) do
+    case Map.get(opts, :idempotency_key) || Map.get(opts, "idempotency_key") do
+      key when is_binary(key) ->
+        case String.trim(key) do
+          "" -> "fake-" <> Ecto.UUID.generate()
+          key -> "fake-" <> deterministic_uuid(company_id <> ":" <> key)
+        end
+
+      _ ->
+        "fake-" <> Ecto.UUID.generate()
+    end
+  end
+
+  defp deterministic_uuid(value) do
+    hex = value |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
+
+    Enum.join(
+      [
+        binary_part(hex, 0, 8),
+        binary_part(hex, 8, 4),
+        binary_part(hex, 12, 4),
+        binary_part(hex, 16, 4),
+        binary_part(hex, 20, 12)
+      ],
+      "-"
+    )
   end
 
   defp provider_ref(%{provider_ref: ref}) when is_binary(ref), do: ref

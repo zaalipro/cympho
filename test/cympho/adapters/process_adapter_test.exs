@@ -221,7 +221,10 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
     sleep = System.find_executable("sleep")
 
     pid_file =
-      Path.join(System.tmp_dir!(), "cympho-chatty-pid-#{System.unique_integer([:positive])}")
+      Path.join(
+        System.tmp_dir!(),
+        "cympho-chatty-pid-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
 
     on_exit(fn -> File.rm(pid_file) end)
 
@@ -235,28 +238,7 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
       done
       """,
       fn ->
-        # The configured timeout is a *stall* timeout and this process never
-        # stalls, so before the absolute deadline existed this run could hold
-        # its dispatch slot and bill forever.
-        session_id =
-          ProcessAdapter.run(@issue, "agent-1", self(),
-            config: %{
-              "command" => "chatty-agent",
-              "timeout" => 60_000,
-              "prompt_stdin" => false
-            }
-          )
-
-        assert_receive {:session_started, ^session_id}, 5_000
-        assert_receive {:turn_ended_with_error, ^session_id, :max_run_timeout}, 6_000
-
-        # Deciding to end the run is not the same as ending it: the OS process
-        # has to actually be gone.
-        os_pid = pid_file |> File.read!() |> String.trim()
-        assert os_pid != ""
-
-        assert wait_until_gone(os_pid),
-               "the subprocess (#{os_pid}) outlived its absolute deadline"
+        assert_chatty_process_reaped(pid_file)
       end
     )
   end
@@ -315,6 +297,52 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
       not os_process_alive?(os_pid) -> true
       attempts <= 1 -> false
       true -> Process.sleep(50) && wait_until_gone(os_pid, attempts - 1)
+    end
+  end
+
+  defp assert_chatty_process_reaped(pid_file, attempts \\ 5)
+
+  defp assert_chatty_process_reaped(_pid_file, 0) do
+    flunk("the subprocess did not publish its PID before five absolute-deadline attempts")
+  end
+
+  defp assert_chatty_process_reaped(pid_file, attempts) do
+    File.rm(pid_file)
+
+    # The configured timeout is a *stall* timeout and this process never
+    # stalls, so before the absolute deadline existed this run could hold its
+    # dispatch slot and bill forever. Each attempt retains the exact 700 ms
+    # wall-clock cap. A retry only handles a saturated host delaying the OS
+    # child until after that cap, before its first shell instruction can publish
+    # the PID this test needs for the independent reaping assertion.
+    session_id =
+      ProcessAdapter.run(@issue, "agent-1", self(),
+        config: %{
+          "command" => "chatty-agent",
+          "timeout" => 60_000,
+          "prompt_stdin" => false
+        }
+      )
+
+    assert_receive {:session_started, ^session_id}, 5_000
+    assert_receive {:turn_ended_with_error, ^session_id, :max_run_timeout}, 6_000
+    assert wait_until(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
+
+    case File.read(pid_file) do
+      {:ok, contents} when contents != "" ->
+        os_pid = String.trim(contents)
+
+        assert wait_until_gone(os_pid),
+               "the subprocess (#{os_pid}) outlived its absolute deadline"
+
+      {:ok, ""} ->
+        assert_chatty_process_reaped(pid_file, attempts - 1)
+
+      {:error, :enoent} ->
+        assert_chatty_process_reaped(pid_file, attempts - 1)
+
+      {:error, reason} ->
+        flunk("could not read the subprocess PID file: #{inspect(reason)}")
     end
   end
 

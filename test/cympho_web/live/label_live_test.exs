@@ -112,6 +112,38 @@ defmodule CymphoWeb.LabelLiveTest do
       assert still.company_id == foreign.id
     end
 
+    test "update ignores client company_id", %{conn: conn, current_company: company} do
+      unique = System.unique_integer([:positive])
+      foreign = create_company()
+
+      {:ok, label} =
+        Labels.create_label(%{
+          name: "Bound Label #{unique}",
+          color: "#123456",
+          company_id: company.id
+        })
+
+      {:ok, view, _html} = live(conn, "/labels")
+      _html = render_click(view, "edit_label", %{"id" => label.id})
+
+      html =
+        render_submit(view, "update_label", %{
+          "label" => %{
+            "name" => "Still Bound #{unique}",
+            "color" => "#654321",
+            "company_id" => foreign.id
+          }
+        })
+
+      assert html =~ "Label updated"
+
+      updated = Labels.get_label!(label.id)
+      assert updated.name == "Still Bound #{unique}"
+      assert updated.company_id == company.id
+      assert Labels.list_labels_by_company(foreign.id) == []
+    end
+
+    @tag membership_role: "admin"
     test "delete of a foreign label flashes Label not found and leaves it", %{conn: conn} do
       unique = System.unique_integer([:positive])
       foreign = create_company()

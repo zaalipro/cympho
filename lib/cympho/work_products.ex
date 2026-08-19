@@ -56,7 +56,7 @@ defmodule Cympho.WorkProducts do
 
   def update_work_product(%IssueWorkProduct{} = work_product, attrs) do
     case work_product
-         |> IssueWorkProduct.changeset(attrs)
+         |> IssueWorkProduct.update_changeset(attrs)
          |> Repo.update() do
       {:ok, updated} ->
         updated = Repo.preload(updated, [:created_by_agent, :attachment])

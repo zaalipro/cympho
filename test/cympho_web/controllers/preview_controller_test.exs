@@ -61,8 +61,112 @@ defmodule CymphoWeb.PreviewControllerTest do
     conn = get(conn, "/api/preview/#{service.id}")
     assert %{"data" => data} = json_response(conn, 200)
     assert data["preview_url"] =~ "/api/preview/"
-    assert data["preview_url"] =~ "/api/preview/#{service.id}/proxy"
+    preview_uri = URI.parse(data["preview_url"])
+    assert preview_uri.host == PreviewUrl.preview_host()
+    assert preview_uri.host != conn.host
+    assert preview_uri.path =~ ~r{^/api/preview/#{service.id}/[^/]+/proxy$}
+    refute data["preview_url"] =~ service.preview_ref
     refute data["preview_url"] =~ ~r{(?<!/api)/preview/#{service.id}(?:/|$)}
+  end
+
+  test "signed proxy capability works only on the dedicated preview host", %{
+    conn: conn,
+    company: company,
+    project: project,
+    workspace: workspace,
+    execution_workspace: execution_workspace,
+    unique: unique
+  } do
+    {:ok, service} =
+      create_service(company, project, workspace, execution_workspace, unique,
+        status: "running",
+        port: 4329
+      )
+
+    path = preview_path(service)
+
+    app_origin_conn = get(conn, path)
+    assert app_origin_conn.status == 404
+
+    preview_origin_conn = conn |> on_preview_host() |> get("/api/preview/#{service.id}")
+    assert preview_origin_conn.status == 404
+  end
+
+  test "preview route accepts an ordinary browser HTML request", context do
+    {:ok, service} =
+      create_service(
+        context.company,
+        context.project,
+        context.workspace,
+        context.execution_workspace,
+        context.unique,
+        status: "running",
+        port: 4329
+      )
+
+    with_mock Finch, [:passthrough],
+      stream_while: fn _request, Cympho.Finch, initial, reducer, _opts ->
+        state =
+          [
+            {:status, 200},
+            {:headers, [{"content-type", "text/html; charset=utf-8"}]},
+            {:data, "<h1>Preview</h1>"}
+          ]
+          |> Enum.reduce(initial, fn event, state ->
+            {:cont, state} = reducer.(event, state)
+            state
+          end)
+
+        {:ok, state}
+      end do
+      conn =
+        context.conn
+        |> put_req_header("accept", "text/html")
+        |> on_preview_host()
+        |> get(preview_path(service))
+
+      assert conn.status == 200
+      assert conn.resp_body == "<h1>Preview</h1>"
+      assert get_resp_header(conn, "referrer-policy") == ["no-referrer"]
+    end
+  end
+
+  test "tampered and expired preview capabilities are rejected", context do
+    {:ok, service} =
+      create_service(
+        context.company,
+        context.project,
+        context.workspace,
+        context.execution_workspace,
+        context.unique,
+        status: "running",
+        port: 4329
+      )
+
+    token = PreviewUrl.sign_capability(service)
+    last = binary_part(token, byte_size(token) - 1, 1)
+    replacement = if last == "A", do: "B", else: "A"
+    tampered = binary_part(token, 0, byte_size(token) - 1) <> replacement
+
+    tampered_conn =
+      context.conn
+      |> on_preview_host()
+      |> get("/api/preview/#{service.id}/#{tampered}/proxy")
+
+    assert %{"error" => "Runtime service not found"} = json_response(tampered_conn, 404)
+
+    expired_token =
+      PreviewUrl.sign_capability(service,
+        signed_at: System.system_time(:second) - 301,
+        max_age: 300
+      )
+
+    expired_conn =
+      context.conn
+      |> on_preview_host()
+      |> get("/api/preview/#{service.id}/#{expired_token}/proxy")
+
+    assert %{"error" => "Runtime service not found"} = json_response(expired_conn, 404)
   end
 
   test "proxy does not raise and forwards a path that is not id/proxy/...", %{
@@ -82,17 +186,48 @@ defmodule CymphoWeb.PreviewControllerTest do
     test_pid = self()
 
     with_mock Finch, [:passthrough],
-      request: fn request, Cympho.Finch, _opts ->
+      stream_while: fn request, Cympho.Finch, initial, reducer, _opts ->
         send(test_pid, {:finch_request, request})
-        {:ok, %Finch.Response{status: 200, body: "ok", headers: [{"content-type", "text/plain"}]}}
+
+        state =
+          [
+            {:status, 200},
+            {:headers,
+             [
+               {"content-type", "text/plain"},
+               {"set-cookie", "upstream=secret"},
+               {"connection", "keep-alive"},
+               {"x-upstream-secret", "secret"}
+             ]},
+            {:data, "ok"}
+          ]
+          |> Enum.reduce(initial, fn event, state ->
+            {:cont, state} = reducer.(event, state)
+            state
+          end)
+
+        {:ok, state}
       end do
       conn =
         conn
+        |> delete_req_header("authorization")
         |> put_req_header("cookie", "session=secret")
-        |> get("/api/preview/#{service.id}/proxy/app")
+        |> put_req_header("x-forwarded-for", "127.0.0.1")
+        |> put_req_header("x-preview-secret", "secret")
+        |> on_preview_host()
+        |> get(preview_path(service, "/app"))
 
       assert conn.status == 200
       assert conn.resp_body == "ok"
+      assert get_resp_header(conn, "content-type") == ["text/plain"]
+
+      refute Enum.any?(
+               get_resp_header(conn, "set-cookie"),
+               &String.contains?(&1, "upstream=secret")
+             )
+
+      assert get_resp_header(conn, "connection") == []
+      assert get_resp_header(conn, "x-upstream-secret") == []
     end
 
     assert_receive {:finch_request, request}
@@ -107,6 +242,8 @@ defmodule CymphoWeb.PreviewControllerTest do
     refute "authorization" in header_names
     refute "cookie" in header_names
     refute "host" in header_names
+    refute "x-forwarded-for" in header_names
+    refute "x-preview-secret" in header_names
   end
 
   test "metadata URL cannot become the Finch target because url is ignored", %{
@@ -132,17 +269,29 @@ defmodule CymphoWeb.PreviewControllerTest do
     conn_show = get(conn, "/api/preview/#{service.id}")
     assert %{"data" => data} = json_response(conn_show, 200)
     assert data["target_url"] == "http://127.0.0.1:4000"
-    assert data["preview_url"] =~ "/api/preview/#{service.id}/proxy"
+
+    assert URI.parse(data["preview_url"]).path =~
+             ~r{^/api/preview/#{service.id}/[^/]+/proxy$}
+
     refute data["target_url"] =~ "169.254.169.254"
 
     test_pid = self()
 
     with_mock Finch, [:passthrough],
-      request: fn request, Cympho.Finch, _opts ->
+      stream_while: fn request, Cympho.Finch, initial, reducer, _opts ->
         send(test_pid, {:finch_request, request})
-        {:ok, %Finch.Response{status: 200, body: "ok", headers: [{"content-type", "text/plain"}]}}
+
+        state =
+          [{:status, 200}, {:headers, [{"content-type", "text/plain"}]}, {:data, "ok"}]
+          |> Enum.reduce(initial, fn event, state ->
+            {:cont, state} = reducer.(event, state)
+            state
+          end)
+
+        {:ok, state}
       end do
-      conn = get(conn, "/api/preview/#{service.id}/proxy/latest/meta-data")
+      conn = conn |> on_preview_host() |> get(preview_path(service, "/latest/meta-data"))
+
       assert conn.status == 200
     end
 
@@ -153,7 +302,7 @@ defmodule CymphoWeb.PreviewControllerTest do
     refute to_string(request.host) =~ "169.254"
   end
 
-  test "missing or invalid port returns 403 JSON", %{
+  test "service without an issued preview identity is not proxyable", %{
     conn: conn,
     company: company,
     project: project,
@@ -167,23 +316,103 @@ defmodule CymphoWeb.PreviewControllerTest do
         port: nil
       )
 
-    conn = get(conn, "/api/preview/#{service.id}/proxy/app")
-    assert %{"error" => "Proxy target address is not allowed"} = json_response(conn, 403)
+    conn =
+      conn
+      |> on_preview_host()
+      |> get("/api/preview/#{service.id}/invalid-capability/proxy/app")
+
+    assert %{"error" => "Runtime service not found"} = json_response(conn, 404)
   end
 
-  defp create_service(company, project, workspace, execution_workspace, unique, attrs) do
-    Workspaces.create_runtime_service(
-      Map.merge(
-        %{
-          service_name: "Preview svc #{unique}",
-          company_id: company.id,
-          project_id: project.id,
-          project_workspace_id: workspace.id,
-          execution_workspace_id: execution_workspace.id
-        },
-        Map.new(attrs)
+  test "proxy stops an oversized upstream response before buffering its body", %{
+    conn: conn,
+    company: company,
+    project: project,
+    workspace: workspace,
+    execution_workspace: execution_workspace,
+    unique: unique
+  } do
+    {:ok, service} =
+      create_service(company, project, workspace, execution_workspace, unique,
+        status: "running",
+        port: 4329
       )
-    )
+
+    with_mock Finch, [:passthrough],
+      stream_while: fn _request, Cympho.Finch, initial, reducer, _opts ->
+        {:cont, state} = reducer.({:status, 200}, initial)
+        {:cont, state} = reducer.({:headers, []}, state)
+        first_chunk = :binary.copy(<<0>>, 8 * 1024 * 1024)
+        second_chunk = :binary.copy(<<0>>, 8 * 1024 * 1024 + 1)
+        {:cont, state} = reducer.({:data, first_chunk}, state)
+        {:halt, state} = reducer.({:data, second_chunk}, state)
+
+        {:ok, state}
+      end do
+      conn = conn |> on_preview_host() |> get(preview_path(service, "/large.bin"))
+
+      assert %{"error" => "Preview response exceeds the allowed size"} =
+               json_response(conn, 502)
+    end
+  end
+
+  test "proxy rejects an oversized response header set", %{
+    conn: conn,
+    company: company,
+    project: project,
+    workspace: workspace,
+    execution_workspace: execution_workspace,
+    unique: unique
+  } do
+    {:ok, service} =
+      create_service(company, project, workspace, execution_workspace, unique,
+        status: "running",
+        port: 4329
+      )
+
+    with_mock Finch, [:passthrough],
+      stream_while: fn _request, Cympho.Finch, initial, reducer, _opts ->
+        {:cont, state} = reducer.({:status, 200}, initial)
+        headers = Enum.map(1..101, &{"x-preview-#{&1}", "value"})
+        {:halt, state} = reducer.({:headers, headers}, state)
+        {:ok, state}
+      end do
+      conn = conn |> on_preview_host() |> get(preview_path(service, "/headers"))
+      assert %{"error" => "Failed to proxy request"} = json_response(conn, 502)
+    end
+  end
+
+  defp preview_path(service, suffix \\ "") do
+    service
+    |> PreviewUrl.generate_preview_url("http://localhost")
+    |> URI.parse()
+    |> Map.fetch!(:path)
+    |> Kernel.<>(suffix)
+  end
+
+  defp on_preview_host(conn) do
+    Map.put(conn, :host, PreviewUrl.preview_host())
+  end
+
+  defp create_service(_company, _project, _workspace, execution_workspace, unique, attrs) do
+    create_attrs =
+      Map.merge(
+        %{service_name: "Preview svc #{unique}"},
+        attrs |> Map.new() |> Map.drop([:status, :port, :url])
+      )
+
+    with {:ok, service} <- Workspaces.create_runtime_service(execution_workspace, create_attrs) do
+      case {Keyword.get(attrs, :status), Keyword.get(attrs, :port)} do
+        {"running", port} when is_integer(port) ->
+          Workspaces.issue_service_preview(service, port, %{url: Keyword.get(attrs, :url)})
+
+        {"running", _port} ->
+          Workspaces.mark_service_running(service)
+
+        _ ->
+          {:ok, service}
+      end
+    end
   end
 
   defp project_prefix(base, unique) do

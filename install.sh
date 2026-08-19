@@ -27,6 +27,7 @@ select INST_TYPE in "Local" "Production"; do
 done
 
 DOMAIN=""
+PREVIEW_DOMAIN=""
 if [ "$IS_PROD" -eq 1 ]; then
     read -p "Enter your Domain or Subdomain (e.g., cympho.example.com): " DOMAIN
 
@@ -34,6 +35,16 @@ if [ "$IS_PROD" -eq 1 ]; then
         echo "Error: Enter a bare hostname such as cympho.example.com (no scheme or path)."
         exit 1
     fi
+
+    read -p "Enter the separate Preview Domain (default: preview.$DOMAIN): " PREVIEW_DOMAIN
+    PREVIEW_DOMAIN=${PREVIEW_DOMAIN:-preview.$DOMAIN}
+
+    if [[ ! "$PREVIEW_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || [ "$PREVIEW_DOMAIN" = "$DOMAIN" ]; then
+        echo "Error: Preview Domain must be a different bare hostname from the app Domain."
+        exit 1
+    fi
+
+    echo "Ensure DNS for both $DOMAIN and $PREVIEW_DOMAIN points to this server before Caddy starts."
 fi
 
 echo ""
@@ -192,13 +203,18 @@ if [ "$IS_PROD" -eq 1 ]; then
 MIX_ENV=prod
 PORT=4000
 APP_HOST=$DOMAIN
+PREVIEW_HOST=$PREVIEW_DOMAIN
 SECRET_KEY_BASE=$SECRET_KEY_BASE
 LIVE_VIEW_SALT=$LIVE_VIEW_SALT
 CYMPHO_ENCRYPTION_KEY=$CYMPHO_ENCRYPTION_KEY
 CYMPHO_USER_JWT_SECRET=$CYMPHO_USER_JWT_SECRET
 CYMPHO_AGENT_JWT_SECRET=$CYMPHO_AGENT_JWT_SECRET
+# Caddy is the only process allowed to assert the browser-facing HTTPS scheme.
+CYMPHO_TRUSTED_PROXY_IPS=127.0.0.1,::1
 DATABASE_URL=ecto://cympho_user:$DB_PASS@localhost/cympho_prod
 EOF
+    elif ! grep -q '^PREVIEW_HOST=' "$ENV_FILE"; then
+        echo "PREVIEW_HOST=$PREVIEW_DOMAIN" >> "$ENV_FILE"
     fi
     chmod 600 "$ENV_FILE"
     set -a
@@ -306,6 +322,10 @@ if [ "$IS_PROD" -eq 1 ] && [ "$MACHINE" == "Linux" ]; then
 $DOMAIN {
     reverse_proxy localhost:4000
 }
+
+$PREVIEW_DOMAIN {
+    reverse_proxy localhost:4000
+}
 EOF
     run_as_root systemctl restart caddy
     run_as_root systemctl enable caddy
@@ -342,6 +362,7 @@ EOF
     echo "==================================================="
     echo "  Production Installation Complete!                "
     echo "  Your app should now be running at: https://$DOMAIN"
+    echo "  Runtime previews use: https://$PREVIEW_DOMAIN     "
     echo "  Systemd service 'cympho' is running the server.  "
     echo "==================================================="
 else

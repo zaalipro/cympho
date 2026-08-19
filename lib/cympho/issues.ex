@@ -1070,33 +1070,15 @@ defmodule Cympho.Issues do
   explicitly waiting on owner verification, and no child work is still open.
   """
   def accept_owner_verification(%Issue{} = issue, opts \\ []) do
-    issue =
-      issue
-      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :project],
-        force: true
-      )
-
-    cond do
-      not owner_verification_closeable?(issue) ->
-        {:error, :not_owner_verification}
-
-      is_blocked?(issue) ->
-        {:error, :blocked_by_active_issues}
-
-      true ->
-        with {:ok, _comment} <-
-               Comments.create_comment(owner_acceptance_comment_attrs(issue, opts)),
-             {:ok, review_issue} <- owner_acceptance_review_issue(issue),
-             {:ok, done_issue} <- transition_issue(review_issue, :done),
-             {:ok, done_issue} <- update_issue(done_issue, %{assignee_id: nil}) do
-          {:ok,
-           Repo.preload(
-             done_issue,
-             [:comments, :blocked_by, :blocks, :assignee, :labels, :project],
-             force: true
-           )}
-        end
-    end
+    owner_verification_transaction(issue, fn locked_issue ->
+      with {:ok, _comment} <-
+             Comments.create_comment(owner_acceptance_comment_attrs(locked_issue, opts)),
+           {:ok, review_issue} <- owner_acceptance_review_issue(locked_issue),
+           {:ok, done_issue} <- transition_issue(review_issue, :done),
+           {:ok, done_issue} <- update_issue(done_issue, %{assignee_id: nil}) do
+        {:ok, done_issue}
+      end
+    end)
   end
 
   @doc """
@@ -1108,33 +1090,60 @@ defmodule Cympho.Issues do
   the decision, and dispatch focus is queued for the next runtime pass.
   """
   def request_owner_verification_revision(%Issue{} = issue, opts \\ []) do
-    issue =
-      issue
-      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :project],
-        force: true
-      )
+    owner_verification_transaction(issue, fn locked_issue ->
+      with {:ok, _comment} <-
+             Comments.create_comment(owner_revision_comment_attrs(locked_issue, opts)),
+           {:ok, reopened_issue} <- transition_issue(locked_issue, :todo),
+           {:ok, routed_issue} <-
+             update_issue(reopened_issue, owner_revision_routing_attrs(locked_issue)),
+           {:ok, focused_issue} <- prioritize_for_dispatch(routed_issue, opts) do
+        {:ok, focused_issue}
+      end
+    end)
+  end
 
-    cond do
-      not owner_verification_closeable?(issue) ->
-        {:error, :not_owner_verification}
+  defp owner_verification_transaction(%Issue{} = issue, operation) do
+    Repo.transaction(fn ->
+      locked_issue =
+        issue.id
+        |> lock_issue_for_update()
+        |> case do
+          %Issue{} = locked_issue ->
+            Repo.preload(
+              locked_issue,
+              [:comments, :blocked_by, :blocks, :assignee, :labels, :project],
+              force: true
+            )
 
-      is_blocked?(issue) ->
-        {:error, :blocked_by_active_issues}
-
-      true ->
-        with {:ok, _comment} <-
-               Comments.create_comment(owner_revision_comment_attrs(issue, opts)),
-             {:ok, reopened_issue} <- transition_issue(issue, :todo),
-             {:ok, routed_issue} <-
-               update_issue(reopened_issue, owner_revision_routing_attrs(issue)),
-             {:ok, focused_issue} <- prioritize_for_dispatch(routed_issue, opts) do
-          {:ok,
-           Repo.preload(
-             focused_issue,
-             [:comments, :blocked_by, :blocks, :assignee, :labels, :project],
-             force: true
-           )}
+          nil ->
+            Repo.rollback(:not_found)
         end
+
+      cond do
+        not owner_verification_closeable?(locked_issue) ->
+          Repo.rollback(:not_owner_verification)
+
+        active_blockers_exist?(locked_issue.id) ->
+          Repo.rollback(:blocked_by_active_issues)
+
+        true ->
+          case operation.(locked_issue) do
+            {:ok, result} -> result
+            {:error, reason} -> Repo.rollback(reason)
+          end
+      end
+    end)
+    |> case do
+      {:ok, result} ->
+        {:ok,
+         Repo.preload(
+           result,
+           [:comments, :blocked_by, :blocks, :assignee, :labels, :project],
+           force: true
+         )}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -1845,6 +1854,9 @@ defmodule Cympho.Issues do
       new_status == :done and is_blocked?(issue) ->
         {:error, :blocked_by_active_issues}
 
+      new_status == :done ->
+        do_transition(issue, new_status)
+
       not StateMachine.valid_transition?(issue.status, new_status) ->
         {:error, :invalid_transition}
 
@@ -1859,6 +1871,9 @@ defmodule Cympho.Issues do
     cond do
       new_status == :done and is_blocked?(issue) ->
         {:error, :blocked_by_active_issues}
+
+      new_status == :done ->
+        do_transition(issue, new_status)
 
       not StateMachine.valid_transition?(issue.status, new_status) ->
         {:error, :invalid_transition}
@@ -2036,11 +2051,52 @@ defmodule Cympho.Issues do
       end
 
     case attrs do
+      {:error, _} = error when new_status == :done ->
+        transition_to_done(issue, new_status, error)
+
       {:error, _} = error ->
         error
 
       attrs ->
-        do_transition_update(issue, maybe_clear_checkout_on_leave_in_progress(issue, attrs))
+        attrs = maybe_clear_checkout_on_leave_in_progress(issue, attrs)
+
+        if extract_status(attrs) == :done do
+          transition_to_done(issue, new_status, attrs)
+        else
+          do_transition_update(issue, attrs)
+        end
+    end
+  end
+
+  defp transition_to_done(%Issue{} = issue, requested_status, attrs_or_error) do
+    Repo.transaction(fn ->
+      case lock_issue_for_update(issue.id) do
+        %Issue{} = locked_issue ->
+          cond do
+            active_blockers_exist?(issue.id) ->
+              Repo.rollback(:blocked_by_active_issues)
+
+            not StateMachine.valid_transition?(locked_issue.status, requested_status) ->
+              Repo.rollback(:invalid_transition)
+
+            match?({:error, _}, attrs_or_error) ->
+              {:error, reason} = attrs_or_error
+              Repo.rollback(reason)
+
+            true ->
+              case update_issue(issue, attrs_or_error) do
+                {:ok, updated} -> updated
+                {:error, reason} -> Repo.rollback(reason)
+              end
+          end
+
+        nil ->
+          Repo.rollback(:not_found)
+      end
+    end)
+    |> case do
+      {:ok, updated} -> finish_transition(issue, updated)
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -2068,23 +2124,27 @@ defmodule Cympho.Issues do
 
   defp do_transition_update(issue, attrs) do
     with {:ok, updated} <- update_issue(issue, attrs) do
-      cond do
-        updated.status in [:done, :cancelled] ->
-          unblock_dependents(issue.id)
-
-          maybe_complete_parent(updated)
-          _ = Wakes.notify_children_completed(updated)
-
-        updated.status == :in_review ->
-          _ = Wakes.notify_child_in_review(updated)
-
-        true ->
-          :ok
-      end
-
-      if updated.status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
-      {:ok, updated}
+      finish_transition(issue, updated)
     end
+  end
+
+  defp finish_transition(issue, updated) do
+    cond do
+      updated.status in [:done, :cancelled] ->
+        unblock_dependents(issue.id)
+
+        maybe_complete_parent(updated)
+        _ = Wakes.notify_children_completed(updated)
+
+      updated.status == :in_review ->
+        _ = Wakes.notify_child_in_review(updated)
+
+      true ->
+        :ok
+    end
+
+    if updated.status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
+    {:ok, updated}
   end
 
   defp maybe_complete_parent(%Issue{parent_id: nil}), do: :ok
@@ -2891,35 +2951,53 @@ defmodule Cympho.Issues do
   end
 
   def add_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
-    cond do
-      blocked_issue.id == blocker_issue.id ->
-        {:error, :cannot_block_self}
+    if blocked_issue.id == blocker_issue.id do
+      {:error, :cannot_block_self}
+    else
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-      transitively_blocked_by?(blocker_issue, blocked_issue) ->
-        {:error, :circular_blocker}
+      Repo.transaction(fn ->
+        locked = lock_blocker_issue_pair!(blocked_issue.id, blocker_issue.id)
+        locked_blocked_issue = Map.fetch!(locked, blocked_issue.id)
+        locked_blocker_issue = Map.fetch!(locked, blocker_issue.id)
 
-      true ->
-        now = DateTime.utc_now()
+        cond do
+          locked_blocked_issue.company_id != locked_blocker_issue.company_id ->
+            Repo.rollback(:not_found)
 
-        Repo.transaction(fn ->
-          Repo.query!(
-            """
-              INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
-              VALUES ($1, $2, $3, $4)
-              ON CONFLICT DO NOTHING
-            """,
-            [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now]
-          )
+          locked_blocked_issue.status in @terminal_issue_statuses and
+              locked_blocker_issue.status not in @terminal_issue_statuses ->
+            Repo.rollback(:terminal_issue)
 
-          Repo.reload(blocked_issue)
-        end)
-        |> case do
-          {:ok, issue} ->
-            issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+          transitively_blocked_by?(locked_blocker_issue, locked_blocked_issue) ->
+            Repo.rollback(:circular_blocker)
 
+          true ->
+            result =
+              Repo.query!(
+                """
+                  INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
+                  VALUES ($1, $2, $3, $4)
+                  ON CONFLICT DO NOTHING
+                """,
+                [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now]
+              )
+
+            if result.num_rows == 1 do
+              touch_blocker_issue!(blocked_issue.id, now)
+            end
+
+            {Repo.get!(Issue, blocked_issue.id), result.num_rows == 1}
+        end
+      end)
+      |> case do
+        {:ok, {issue, inserted?}} ->
+          issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+
+          if inserted? do
             Activities.log_activity(%{
-              issue_id: blocked_issue.id,
-              company_id: blocked_issue.company_id,
+              issue_id: issue.id,
+              company_id: issue.company_id,
               actor_type: "system",
               action: "blocker_added",
               metadata: %{blocker_id: blocker_issue.id}
@@ -2930,13 +3008,47 @@ defmodule Cympho.Issues do
               "issues",
               {:issue_updated, issue}
             )
+          end
 
-            {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
+          {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
-          {:error, reason} ->
-            {:error, reason}
-        end
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
+  end
+
+  defp lock_blocker_issue_pair!(blocked_issue_id, blocker_issue_id) do
+    [blocked_issue_id, blocker_issue_id]
+    |> Enum.sort()
+    |> Map.new(fn issue_id ->
+      case lock_issue_for_update(issue_id) do
+        %Issue{} = issue -> {issue_id, issue}
+        nil -> Repo.rollback(:not_found)
+      end
+    end)
+  end
+
+  defp lock_issue_for_update(issue_id) do
+    Repo.one(from i in Issue, where: i.id == ^issue_id, lock: "FOR UPDATE")
+  end
+
+  defp active_blockers_exist?(issue_id) do
+    Repo.exists?(
+      from bb in "issue_blockers",
+        join: blocker in Issue,
+        on: blocker.id == type(bb.blocking_issue_id, Ecto.UUID),
+        where:
+          bb.blocked_issue_id == type(^issue_id, Ecto.UUID) and
+            blocker.status not in ^@terminal_issue_statuses
+    )
+  end
+
+  defp touch_blocker_issue!(issue_id, now) do
+    from(i in Issue, where: i.id == ^issue_id)
+    |> Repo.update_all(set: [updated_at: now], inc: [lock_version: 1])
+
+    :ok
   end
 
   defp transitively_blocked_by?(issue, target) do
@@ -2970,34 +3082,55 @@ defmodule Cympho.Issues do
   end
 
   def remove_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
-    {count, _} =
-      from(bb in "issue_blockers",
-        where:
-          bb.blocked_issue_id == type(^blocked_issue.id, Ecto.UUID) and
-            bb.blocking_issue_id == type(^blocker_issue.id, Ecto.UUID)
-      )
-      |> Repo.delete_all()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    if count == 0 do
-      {:error, :not_found}
-    else
-      issue = Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks, :labels])
+    Repo.transaction(fn ->
+      locked = lock_blocker_issue_pair!(blocked_issue.id, blocker_issue.id)
 
-      Activities.log_activity(%{
-        issue_id: blocked_issue.id,
-        company_id: blocked_issue.company_id,
-        actor_type: "system",
-        action: "blocker_removed",
-        metadata: %{blocker_id: blocker_issue.id}
-      })
+      locked_blocked_issue = Map.fetch!(locked, blocked_issue.id)
+      locked_blocker_issue = Map.fetch!(locked, blocker_issue.id)
 
-      Cympho.PubSubGuard.company_broadcast(
-        issue.company_id,
-        "issues",
-        {:issue_updated, issue}
-      )
+      if locked_blocked_issue.company_id != locked_blocker_issue.company_id do
+        Repo.rollback(:not_found)
+      end
 
-      {:ok, issue}
+      {count, _} =
+        from(bb in "issue_blockers",
+          where:
+            bb.blocked_issue_id == type(^blocked_issue.id, Ecto.UUID) and
+              bb.blocking_issue_id == type(^blocker_issue.id, Ecto.UUID)
+        )
+        |> Repo.delete_all()
+
+      if count == 0 do
+        Repo.rollback(:not_found)
+      else
+        touch_blocker_issue!(blocked_issue.id, now)
+        Repo.get!(Issue, blocked_issue.id)
+      end
+    end)
+    |> case do
+      {:ok, issue} ->
+        issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])
+
+        Activities.log_activity(%{
+          issue_id: issue.id,
+          company_id: issue.company_id,
+          actor_type: "system",
+          action: "blocker_removed",
+          metadata: %{blocker_id: blocker_issue.id}
+        })
+
+        Cympho.PubSubGuard.company_broadcast(
+          issue.company_id,
+          "issues",
+          {:issue_updated, issue}
+        )
+
+        {:ok, issue}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -3260,48 +3393,106 @@ defmodule Cympho.Issues do
   defp broadcast_stage_completed(_other, _policy, _idx, _transition), do: :ok
 
   def add_label_to_issue(%Issue{} = issue, %Label{} = label) do
-    issue = Repo.preload(issue, :labels)
+    with {:ok, issue, label} <- fetch_issue_label_relation(issue.id, label.id) do
+      issue = Repo.preload(issue, :labels)
 
-    if Enum.any?(issue.labels, &(&1.id == label.id)) do
-      {:ok, issue}
-    else
-      issue
-      |> Ecto.Changeset.change()
-      |> Ecto.Changeset.put_assoc(:labels, issue.labels ++ [label])
-      |> Repo.update()
-      |> case do
-        {:ok, updated} -> {:ok, Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])}
-        {:error, changeset} -> {:error, changeset}
+      if Enum.any?(issue.labels, &(&1.id == label.id)) do
+        {:ok, issue}
+      else
+        issue
+        |> Ecto.Changeset.change()
+        |> Ecto.Changeset.put_assoc(:labels, issue.labels ++ [label])
+        |> Repo.update()
+        |> case do
+          {:ok, updated} ->
+            {:ok, Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])}
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
       end
     end
   end
 
   def remove_label_from_issue(%Issue{} = issue, %Label{} = label) do
-    issue = Repo.preload(issue, :labels)
+    with {:ok, issue, label} <- fetch_issue_label_relation(issue.id, label.id) do
+      issue = Repo.preload(issue, :labels)
+      new_labels = Enum.reject(issue.labels, &(&1.id == label.id))
 
-    new_labels = Enum.reject(issue.labels, &(&1.id == label.id))
+      issue
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.put_assoc(:labels, new_labels)
+      |> Repo.update()
+      |> case do
+        {:ok, updated} ->
+          {:ok, Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])}
 
-    issue
-    |> Ecto.Changeset.change()
-    |> Ecto.Changeset.put_assoc(:labels, new_labels)
-    |> Repo.update()
-    |> case do
-      {:ok, updated} -> {:ok, Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])}
-      {:error, changeset} -> {:error, changeset}
+        {:error, changeset} ->
+          {:error, changeset}
+      end
     end
   end
 
   def set_issue_labels(%Issue{} = issue, label_ids) when is_list(label_ids) do
-    issue = Repo.preload(issue, :labels)
-    labels = Repo.all(from l in Label, where: l.id in ^label_ids)
+    with {:ok, issue} <- fetch_issue_for_label_relation(issue.id),
+         {:ok, label_ids} <- cast_label_ids(label_ids),
+         labels <-
+           Repo.all(
+             from l in Label,
+               where: l.company_id == ^issue.company_id and l.id in ^label_ids
+           ),
+         true <- length(labels) == length(label_ids) do
+      issue = Repo.preload(issue, :labels)
 
-    issue
-    |> Ecto.Changeset.change()
-    |> Ecto.Changeset.put_assoc(:labels, labels)
-    |> Repo.update()
+      issue
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.put_assoc(:labels, labels)
+      |> Repo.update()
+      |> case do
+        {:ok, updated} ->
+          {:ok, Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])}
+
+        {:error, changeset} ->
+          {:error, changeset}
+      end
+    else
+      false -> {:error, :not_found}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp fetch_issue_label_relation(issue_id, label_id) do
+    with {:ok, issue} <- fetch_issue_for_label_relation(issue_id),
+         {:ok, label_id} <- Ecto.UUID.cast(label_id),
+         %Label{} = label <- Repo.get(Label, label_id),
+         true <- label.company_id == issue.company_id do
+      {:ok, issue, label}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp fetch_issue_for_label_relation(issue_id) do
+    with {:ok, issue_id} <- Ecto.UUID.cast(issue_id),
+         %Issue{company_id: company_id} = issue <- Repo.get(Issue, issue_id),
+         false <- is_nil(company_id) do
+      {:ok, issue}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp cast_label_ids(label_ids) do
+    label_ids
+    |> Enum.reduce_while({:ok, []}, fn label_id, {:ok, ids} ->
+      case Ecto.UUID.cast(label_id) do
+        {:ok, id} -> {:cont, {:ok, [id | ids]}}
+        :error -> {:halt, {:error, :not_found}}
+      end
+    end)
     |> case do
-      {:ok, updated} -> {:ok, Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])}
-      {:error, changeset} -> {:error, changeset}
+      {:ok, ids} -> {:ok, ids |> Enum.reverse() |> Enum.uniq()}
+      {:error, _} = error -> error
     end
   end
 

@@ -5,35 +5,45 @@ defmodule Cympho.BoardApprovals do
 
   import Ecto.Query, warn: false
   alias Cympho.Repo
-  alias Cympho.BoardApprovals.{BoardApproval, BoardApprovalVote}
+  alias Cympho.BoardApprovals.{BoardApproval, BoardApprovalEffect, BoardApprovalVote}
   alias Cympho.GovernanceAuditLogs
   alias Cympho.Decisions
   alias Cympho.AuditTrail.Instrumenter
 
   @nil_uuid "00000000-0000-0000-0000-000000000000"
+  @execution_lease_seconds 300
 
   @doc """
-  Atomically claims an approved approval for execution by stamping
-  `executed_at` and `executor_node`. Returns `{:ok, approval}` if this caller
-  won the race and `{:error, :already_executed}` if another process or node
-  already claimed it.
-
-  Combined with the partial index on `(executed_at IS NULL AND status =
-  'approved')` this is the single-writer primitive used by the executor.
+  Atomically claims an approved approval for execution. A claim has a unique
+  token and a bounded lease, so a different node can recover it after the
+  original executor disappears or comes back under a different node name.
   """
   def claim_for_execution(approval_id) when is_binary(approval_id) do
     node_name = to_string(node())
     now = DateTime.utc_now() |> DateTime.truncate(:second)
+    lease_expires_at = DateTime.add(now, @execution_lease_seconds, :second)
+    claim_token = Ecto.UUID.generate()
 
     query =
       from ba in BoardApproval,
-        where: ba.id == ^approval_id and is_nil(ba.executed_at) and ba.status == "approved"
+        where:
+          ba.id == ^approval_id and ba.status == "approved" and
+            (is_nil(ba.execution_state) or
+               (ba.execution_state == "claimed" and
+                  (is_nil(ba.execution_lease_expires_at) or
+                     ba.execution_lease_expires_at <= ^now)))
 
-    updates = [executed_at: now, executor_node: node_name, execution_state: "claimed"]
+    updates = [
+      executed_at: now,
+      executor_node: node_name,
+      execution_state: "claimed",
+      execution_claim_token: claim_token,
+      execution_lease_expires_at: lease_expires_at
+    ]
 
     case Repo.update_all(query, set: updates) do
       {1, _} ->
-        case Repo.get(BoardApproval, approval_id) do
+        case Repo.get_by(BoardApproval, id: approval_id, execution_claim_token: claim_token) do
           nil -> {:error, :not_found}
           approval -> {:ok, Repo.preload(approval, [:requested_by, :votes, :company])}
         end
@@ -49,11 +59,55 @@ defmodule Cympho.BoardApprovals do
   Until this exists, `executed_at` is only a claim: it says an executor started,
   not that the action happened.
   """
-  def mark_executed(approval_id) when is_binary(approval_id) do
-    query = from ba in BoardApproval, where: ba.id == ^approval_id
-    Repo.update_all(query, set: [execution_state: "executed"])
-    :ok
+  def mark_executed(%BoardApproval{execution_claim_token: claim_token} = approval)
+      when is_binary(claim_token) do
+    mark_executed(approval.id, claim_token)
   end
+
+  def mark_executed(%BoardApproval{}), do: {:error, :claim_lost}
+
+  def mark_executed(approval_id, claim_token)
+      when is_binary(approval_id) and is_binary(claim_token) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    query =
+      from ba in BoardApproval,
+        where:
+          ba.id == ^approval_id and ba.execution_state == "claimed" and
+            ba.execution_claim_token == ^claim_token
+
+    case Repo.update_all(query,
+           set: [
+             executed_at: now,
+             execution_state: "executed",
+             execution_claim_token: nil,
+             execution_lease_expires_at: nil
+           ]
+         ) do
+      {1, _} -> :ok
+      {0, _} -> {:error, :claim_lost}
+    end
+  end
+
+  @doc false
+  def renew_execution_claim(%BoardApproval{execution_claim_token: claim_token} = approval)
+      when is_binary(claim_token) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    lease_expires_at = DateTime.add(now, @execution_lease_seconds, :second)
+
+    query =
+      from ba in BoardApproval,
+        where:
+          ba.id == ^approval.id and ba.execution_state == "claimed" and
+            ba.execution_claim_token == ^claim_token
+
+    case Repo.update_all(query, set: [execution_lease_expires_at: lease_expires_at]) do
+      {1, _} -> :ok
+      {0, _} -> {:error, :claim_lost}
+    end
+  end
+
+  def renew_execution_claim(%BoardApproval{}), do: {:error, :claim_lost}
 
   @doc """
   Records that a claimed approval gave up after exhausting its retries.
@@ -62,10 +116,31 @@ defmodule Cympho.BoardApprovals do
   visible to an operator rather than silently retried on every boot. Use
   `reclaim_for_retry/1` to put it back in the queue.
   """
-  def mark_execution_failed(approval_id) when is_binary(approval_id) do
-    query = from ba in BoardApproval, where: ba.id == ^approval_id
-    Repo.update_all(query, set: [execution_state: "failed"])
-    :ok
+  def mark_execution_failed(%BoardApproval{execution_claim_token: claim_token} = approval)
+      when is_binary(claim_token) do
+    mark_execution_failed(approval.id, claim_token)
+  end
+
+  def mark_execution_failed(%BoardApproval{}), do: {:error, :claim_lost}
+
+  def mark_execution_failed(approval_id, claim_token)
+      when is_binary(approval_id) and is_binary(claim_token) do
+    query =
+      from ba in BoardApproval,
+        where:
+          ba.id == ^approval_id and ba.execution_state == "claimed" and
+            ba.execution_claim_token == ^claim_token
+
+    case Repo.update_all(query,
+           set: [
+             execution_state: "failed",
+             execution_claim_token: nil,
+             execution_lease_expires_at: nil
+           ]
+         ) do
+      {1, _} -> :ok
+      {0, _} -> {:error, :claim_lost}
+    end
   end
 
   @doc """
@@ -74,32 +149,62 @@ defmodule Cympho.BoardApprovals do
   def release_claim(approval_id) when is_binary(approval_id) do
     query = from ba in BoardApproval, where: ba.id == ^approval_id
 
-    Repo.update_all(query, set: [executed_at: nil, executor_node: nil, execution_state: nil])
+    Repo.update_all(query,
+      set: [
+        executed_at: nil,
+        executor_node: nil,
+        execution_state: nil,
+        execution_claim_token: nil,
+        execution_lease_expires_at: nil
+      ]
+    )
+
     :ok
   end
 
   @doc """
-  Releases claims this node abandoned, so boot recovery can execute them.
+  Releases abandoned claims so boot recovery can execute them.
 
   Retry state lives in the executor's mailbox as a `Process.send_after/3` timer.
   A crash or a redeploy during backoff discards it, and the claim alone made the
-  approval invisible to replay forever. Any approval still `"claimed"` by *this*
-  node when the executor starts is by definition abandoned — the process that
-  owned it no longer exists. Claims held by other nodes are left alone.
+  approval invisible to replay forever. A claim is abandoned once its lease
+  expires, regardless of the node name stamped on it.
 
   Returns the number of approvals released.
   """
-  def reclaim_abandoned_claims do
+  def reclaim_abandoned_claims(opts \\ []) do
+    include_current_node? = Keyword.get(opts, :include_current_node, true)
     node_name = to_string(node())
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     query =
       from ba in BoardApproval,
         where:
           ba.status == "approved" and ba.execution_state == "claimed" and
-            ba.executor_node == ^node_name
+            (is_nil(ba.execution_lease_expires_at) or
+               ba.execution_lease_expires_at <= ^now)
+
+    query =
+      if include_current_node? do
+        from ba in BoardApproval,
+          where:
+            ba.status == "approved" and ba.execution_state == "claimed" and
+              (ba.executor_node == ^node_name or is_nil(ba.execution_lease_expires_at) or
+                 ba.execution_lease_expires_at <= ^now)
+      else
+        query
+      end
 
     {released, _} =
-      Repo.update_all(query, set: [executed_at: nil, executor_node: nil, execution_state: nil])
+      Repo.update_all(query,
+        set: [
+          executed_at: nil,
+          executor_node: nil,
+          execution_state: nil,
+          execution_claim_token: nil,
+          execution_lease_expires_at: nil
+        ]
+      )
 
     released
   end
@@ -217,12 +322,28 @@ defmodule Cympho.BoardApprovals do
       reasoning: reasoning
     }
 
-    %BoardApprovalVote{}
-    |> BoardApprovalVote.changeset(attrs)
-    |> Repo.insert()
-    |> case do
-      {:ok, vote_record} ->
-        board_approval = get_board_approval!(board_approval_id)
+    transaction_result =
+      Repo.transaction(fn ->
+        board_approval = lock_pending_board_approval!(board_approval_id)
+
+        vote_record =
+          %BoardApprovalVote{}
+          |> BoardApprovalVote.changeset(attrs)
+          |> Repo.insert()
+          |> case do
+            {:ok, vote_record} -> vote_record
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+
+        actor = {"system", @nil_uuid}
+        resolved = maybe_auto_approve_locked(board_approval)
+        decision = if resolved, do: insert_board_decision!(resolved, actor)
+        {vote_record, board_approval, resolved, decision}
+      end)
+
+    case transaction_result do
+      {:ok, {vote_record, board_approval, resolved, decision}} ->
+        board_approval = Repo.preload(board_approval, [:requested_by, :company])
 
         GovernanceAuditLogs.log_action(
           "board_vote_cast",
@@ -251,12 +372,14 @@ defmodule Cympho.BoardApprovals do
           {:board_vote_cast, vote_record}
         )
 
-        check_auto_approve(board_approval)
+        if resolved do
+          publish_resolution(resolved, {"system", @nil_uuid}, decision)
+        end
 
         {:ok, vote_record}
 
-      error ->
-        error
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -264,47 +387,39 @@ defmodule Cympho.BoardApprovals do
   Resolves a board approval proposal.
   """
   def resolve_board_approval(board_approval_id, status, attrs, actor) do
-    board_approval = Repo.get!(BoardApproval, board_approval_id)
+    transaction_result =
+      Repo.transaction(fn ->
+        board_approval = lock_pending_board_approval!(board_approval_id)
 
+        updated =
+          board_approval
+          |> BoardApproval.approve_changeset(Map.put(attrs, :status, status))
+          |> Repo.update()
+          |> case do
+            {:ok, updated} -> updated
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+
+        decision = insert_board_decision!(updated, actor)
+        {updated, decision}
+      end)
+
+    case transaction_result do
+      {:ok, {updated, decision}} ->
+        {:ok, publish_resolution(updated, actor, decision)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp insert_board_decision!(board_approval, actor) do
     board_approval
-    |> BoardApproval.approve_changeset(Map.put(attrs, :status, status))
-    |> Repo.update()
+    |> Decisions.board_decision_changeset(actor)
+    |> Repo.insert()
     |> case do
-      {:ok, updated} ->
-        updated = Repo.preload(updated, [:requested_by, :company])
-
-        GovernanceAuditLogs.log_action(
-          "board_decision",
-          actor,
-          "Board approval #{status}: #{updated.title}",
-          resource: updated,
-          reasoning: Map.get(attrs, :decision_reasoning),
-          metadata: %{
-            status: status,
-            vote_summary: BoardApproval.vote_summary(updated)
-          }
-        )
-
-        Decisions.record_board_decision(updated, actor)
-
-        Cympho.PubSubGuard.company_broadcast(
-          updated.company_id,
-          "approvals",
-          {:board_approval_resolved, updated}
-        )
-
-        Cympho.PubSubGuard.broadcast(
-          "system:board_approvals",
-          {:board_approval_resolved, updated}
-        )
-
-        # Execution is handled by BoardApprovalActionExecutor GenServer
-        # to prevent race conditions and ensure consistent async processing
-
-        {:ok, updated}
-
-      error ->
-        error
+      {:ok, decision} -> decision
+      {:error, changeset} -> Repo.rollback(changeset)
     end
   end
 
@@ -312,39 +427,42 @@ defmodule Cympho.BoardApprovals do
   Cancels a pending board approval.
   """
   def cancel_board_approval(board_approval_id, actor \\ nil) do
-    board_approval = Repo.get!(BoardApproval, board_approval_id)
+    transaction_result =
+      Repo.transaction(fn ->
+        board_approval_id
+        |> lock_pending_board_approval!()
+        |> Ecto.Changeset.change(%{status: "cancelled"})
+        |> Repo.update()
+        |> case do
+          {:ok, updated} -> updated
+          {:error, changeset} -> Repo.rollback(changeset)
+        end
+      end)
 
-    if board_approval.status == "pending" do
-      board_approval
-      |> Ecto.Changeset.change(%{status: "cancelled"})
-      |> Repo.update()
-      |> case do
-        {:ok, updated} ->
-          GovernanceAuditLogs.log_action(
-            "board_proposal_cancelled",
-            actor,
-            "Board approval cancelled: #{updated.title}",
-            resource: updated
-          )
+    case transaction_result do
+      {:ok, updated} ->
+        GovernanceAuditLogs.log_action(
+          "board_proposal_cancelled",
+          actor,
+          "Board approval cancelled: #{updated.title}",
+          resource: updated
+        )
 
-          Cympho.PubSubGuard.company_broadcast(
-            updated.company_id,
-            "approvals",
-            {:board_approval_cancelled, updated}
-          )
+        Cympho.PubSubGuard.company_broadcast(
+          updated.company_id,
+          "approvals",
+          {:board_approval_cancelled, updated}
+        )
 
-          Cympho.PubSubGuard.broadcast(
-            "system:board_approvals",
-            {:board_approval_cancelled, updated}
-          )
+        Cympho.PubSubGuard.broadcast(
+          "system:board_approvals",
+          {:board_approval_cancelled, updated}
+        )
 
-          {:ok, updated}
+        {:ok, updated}
 
-        error ->
-          error
-      end
-    else
-      {:error, :not_pending}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -621,19 +739,69 @@ defmodule Cympho.BoardApprovals do
   defp extract_agent_id({"agent", id}), do: id
   defp extract_agent_id(_), do: nil
 
-  defp check_auto_approve(%BoardApproval{} = board_approval) do
+  defp lock_pending_board_approval!(board_approval_id) do
+    board_approval =
+      BoardApproval
+      |> where([ba], ba.id == ^board_approval_id)
+      |> lock("FOR UPDATE")
+      |> Repo.one!()
+
+    if board_approval.status == "pending" do
+      board_approval
+    else
+      Repo.rollback(:not_pending)
+    end
+  end
+
+  defp maybe_auto_approve_locked(%BoardApproval{} = board_approval) do
     threshold_opts = load_threshold_opts(board_approval.company_id)
 
     if BoardApproval.approval_threshold_met?(board_approval, threshold_opts) do
-      resolve_board_approval(
-        board_approval.id,
-        "approved",
-        %{
-          decision_reasoning: "Auto-approved based on board vote threshold"
-        },
-        {"system", @nil_uuid}
-      )
+      board_approval
+      |> BoardApproval.approve_changeset(%{
+        status: "approved",
+        decision_reasoning: "Auto-approved based on board vote threshold"
+      })
+      |> Repo.update()
+      |> case do
+        {:ok, updated} -> updated
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    else
+      nil
     end
+  end
+
+  defp publish_resolution(%BoardApproval{} = updated, actor, decision) do
+    updated = Repo.preload(updated, [:requested_by, :company])
+    decision = Repo.preload(decision, :company)
+
+    GovernanceAuditLogs.log_action(
+      "board_decision",
+      actor,
+      "Board approval #{updated.status}: #{updated.title}",
+      resource: updated,
+      reasoning: updated.decision_reasoning,
+      metadata: %{
+        status: updated.status,
+        vote_summary: BoardApproval.vote_summary(updated)
+      }
+    )
+
+    Decisions.dispatch_created_decision(decision, actor)
+
+    Cympho.PubSubGuard.company_broadcast(
+      updated.company_id,
+      "approvals",
+      {:board_approval_resolved, updated}
+    )
+
+    Cympho.PubSubGuard.broadcast(
+      "system:board_approvals",
+      {:board_approval_resolved, updated}
+    )
+
+    updated
   end
 
   defp load_threshold_opts(company_id) do
@@ -651,8 +819,60 @@ defmodule Cympho.BoardApprovals do
   @doc """
   Executes the approved action for a board approval.
   Called by BoardApprovalActionExecutor GenServer for async execution.
+
+  The durable effect row and the database side effect commit in the same
+  transaction. If the executor dies before commit, both roll back; if it dies
+  after commit, a retry observes the unique effect row and does nothing.
   """
   def execute_approved_action(%BoardApproval{status: "approved"} = board_approval) do
+    execute_action_once(board_approval, fn -> dispatch_approved_action(board_approval) end)
+  end
+
+  def execute_approved_action(_), do: :ok
+
+  @doc false
+  def execute_action_once(%BoardApproval{status: "approved"} = board_approval, action)
+      when is_function(action, 0) do
+    effect_key = "board_approval:#{board_approval.id}:#{board_approval.category}"
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.transaction(fn ->
+      {inserted, _} =
+        Repo.insert_all(
+          BoardApprovalEffect,
+          [
+            %{
+              id: Ecto.UUID.generate(),
+              board_approval_id: board_approval.id,
+              effect_key: effect_key,
+              category: board_approval.category,
+              inserted_at: now,
+              updated_at: now
+            }
+          ],
+          on_conflict: :nothing,
+          conflict_target: [:board_approval_id]
+        )
+
+      if inserted == 0 do
+        :already_executed
+      else
+        case action.() do
+          {:error, :already_executed} -> :already_executed
+          {:error, reason} -> Repo.rollback({:effect_failed, reason})
+          result -> result
+        end
+      end
+    end)
+    |> case do
+      {:ok, :already_executed} -> :ok
+      {:ok, result} -> result
+      {:error, {:effect_failed, reason}} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp dispatch_approved_action(board_approval) do
     case board_approval.category do
       "agent_hire" ->
         trigger_agent_hire(board_approval)
@@ -679,8 +899,6 @@ defmodule Cympho.BoardApprovals do
         :ok
     end
   end
-
-  def execute_approved_action(_), do: :ok
 
   defp trigger_agent_hire(board_approval) do
     proposal_data = board_approval.proposal_data || %{}
@@ -725,27 +943,41 @@ defmodule Cympho.BoardApprovals do
     if agent_id do
       case Cympho.Agents.get_agent(agent_id) do
         {:ok, agent} ->
-          Cympho.Agents.do_update_agent(agent, %{status: :offline})
+          actor = {"system", board_approval.id}
+          reason = board_approval.description || "Board-approved agent termination"
 
-          GovernanceAuditLogs.log_action(
-            "agent_termination_executed",
-            {"board_approval", board_approval.id},
-            "Agent terminated via board approval: #{agent.name}",
-            resource: agent,
-            metadata: %{board_approval_id: board_approval.id, agent_id: agent_id}
-          )
+          case Cympho.AgentGovernance.terminate_agent(
+                 agent.id,
+                 reason,
+                 [requires_board_approval: false],
+                 actor
+               ) do
+            {:ok, terminated} ->
+              GovernanceAuditLogs.log_action(
+                "agent_termination_executed",
+                actor,
+                "Agent terminated via board approval: #{terminated.name}",
+                resource: terminated,
+                metadata: %{board_approval_id: board_approval.id, agent_id: agent_id}
+              )
 
-          Cympho.PubSubGuard.company_broadcast(
-            board_approval.company_id,
-            "governance",
-            {:agent_termination_approved, board_approval.id, agent_id}
-          )
+              Cympho.PubSubGuard.company_broadcast(
+                board_approval.company_id,
+                "governance",
+                {:agent_termination_approved, board_approval.id, agent_id}
+              )
 
-          {:ok, agent}
+              {:ok, terminated}
+
+            error ->
+              error
+          end
 
         {:error, _} ->
           {:error, :agent_not_found}
       end
+    else
+      {:error, :invalid_proposal_data}
     end
   end
 
@@ -785,6 +1017,8 @@ defmodule Cympho.BoardApprovals do
         {:error, _} ->
           {:error, :agent_not_found}
       end
+    else
+      {:error, :invalid_proposal_data}
     end
   end
 
@@ -797,7 +1031,10 @@ defmodule Cympho.BoardApprovals do
 
     case action do
       "create_budget" ->
-        attrs = get_in(board_approval.proposal_data, ["budget_attrs"]) || %{}
+        attrs =
+          board_approval.proposal_data
+          |> get_in(["budget_attrs"])
+          |> bind_budget_company(board_approval.company_id)
 
         case Cympho.Budgets.create_budget(attrs, actor, skip_governance: true) do
           {:ok, budget} ->
@@ -831,10 +1068,14 @@ defmodule Cympho.BoardApprovals do
 
       "update_budget" ->
         budget_id = get_in(board_approval.proposal_data, ["budget_id"])
-        update_attrs = get_in(board_approval.proposal_data, ["update_attrs"]) || %{}
+
+        update_attrs =
+          board_approval.proposal_data
+          |> get_in(["update_attrs"])
+          |> bind_budget_company(board_approval.company_id)
 
         if budget_id do
-          case Cympho.Budgets.get_budget(budget_id) do
+          case Cympho.Budgets.get_company_budget(board_approval.company_id, budget_id) do
             {:ok, budget} ->
               case Cympho.Budgets.update_budget(budget, update_attrs, actor,
                      skip_governance: true
@@ -896,6 +1137,8 @@ defmodule Cympho.BoardApprovals do
             "governance",
             {:budget_increase_approved, board_approval.id, budget_id, new_limit}
           )
+        else
+          {:error, :invalid_proposal_data}
         end
     end
   end
@@ -970,6 +1213,8 @@ defmodule Cympho.BoardApprovals do
         "governance",
         {:permission_grant_approved, board_approval.id, principal_id, permission}
       )
+    else
+      {:error, :invalid_proposal_data}
     end
   end
 
@@ -1009,4 +1254,12 @@ defmodule Cympho.BoardApprovals do
       {k, v} -> {k, v}
     end)
   end
+
+  defp bind_budget_company(attrs, company_id) when is_map(attrs) do
+    attrs
+    |> stringify_keys()
+    |> Map.put("company_id", company_id)
+  end
+
+  defp bind_budget_company(_attrs, company_id), do: %{"company_id" => company_id}
 end

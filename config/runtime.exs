@@ -2,6 +2,39 @@ import Config
 
 host = System.get_env("APP_HOST") || "localhost"
 
+preview_host =
+  case System.get_env("PREVIEW_HOST") do
+    value when value in [nil, ""] ->
+      if config_env() in [:dev, :test] do
+        "preview.localhost"
+      else
+        raise "PREVIEW_HOST must be set in production to a hostname separate from APP_HOST"
+      end
+
+    value ->
+      value = value |> String.trim() |> String.downcase() |> String.trim_trailing(".")
+
+      valid_hostname? =
+        Regex.match?(
+          ~r/\A(?=.{1,253}\z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/,
+          value
+        )
+
+      unless valid_hostname? do
+        raise "PREVIEW_HOST must be a hostname without a scheme, port, or path"
+      end
+
+      value
+  end
+
+if String.downcase(String.trim_trailing(host, ".")) == preview_host do
+  raise "PREVIEW_HOST must use a different origin from APP_HOST"
+end
+
+config :cympho,
+  preview_host: preview_host,
+  preview_token_max_age: String.to_integer(System.get_env("PREVIEW_TOKEN_MAX_AGE") || "300")
+
 port =
   if config_env() == :prod, do: 443, else: String.to_integer(System.get_env("PORT") || "4329")
 
@@ -19,6 +52,64 @@ bind_ip =
   end
 
 config :cympho, env: config_env()
+
+if config_env() == :prod do
+  bootstrap_secret =
+    case System.get_env("CYMPHO_BOOTSTRAP_SECRET") do
+      value when value in [nil, ""] ->
+        nil
+
+      value when byte_size(value) >= 32 ->
+        value
+
+      _value ->
+        raise "CYMPHO_BOOTSTRAP_SECRET must be at least 32 bytes when set"
+    end
+
+  # A missing secret is intentionally allowed at boot, but leaves first-run
+  # /setup unavailable. Existing configured instances do not need this secret.
+  config :cympho, :bootstrap_protection, required: true, secret: bootstrap_secret
+
+  force_ssl =
+    case System.get_env("CYMPHO_FORCE_SSL") do
+      value when value in [nil, "", "1", "true", "TRUE", "yes", "YES"] -> true
+      value when value in ["0", "false", "FALSE", "no", "NO"] -> false
+      _value -> raise "CYMPHO_FORCE_SSL must be a boolean value"
+    end
+
+  trusted_proxy_ips =
+    System.get_env("CYMPHO_TRUSTED_PROXY_IPS", "")
+    |> String.split(",", trim: true)
+    |> Enum.map(fn value ->
+      value = String.trim(value)
+
+      case String.split(value, "/", parts: 2) do
+        [address] ->
+          case :inet.parse_address(String.to_charlist(address)) do
+            {:ok, ip} ->
+              ip
+
+            {:error, _reason} ->
+              raise "invalid IP in CYMPHO_TRUSTED_PROXY_IPS: #{inspect(value)}"
+          end
+
+        [address, prefix_string] ->
+          with {:ok, ip} <- :inet.parse_address(String.to_charlist(address)),
+               {prefix, ""} <- Integer.parse(prefix_string),
+               max_prefix <- if(tuple_size(ip) == 4, do: 32, else: 128),
+               true <- prefix in 0..max_prefix do
+            {ip, prefix}
+          else
+            _ -> raise "invalid CIDR in CYMPHO_TRUSTED_PROXY_IPS: #{inspect(value)}"
+          end
+      end
+    end)
+
+  config :cympho, :transport_security,
+    force_ssl: force_ssl,
+    host: host,
+    trusted_proxy_ips: trusted_proxy_ips
+end
 
 # Optional OTLP tracing. Dependencies are marked `runtime: false` and are
 # started explicitly by Cympho only when the base endpoint is present. Keeping

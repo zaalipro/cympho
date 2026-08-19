@@ -305,9 +305,10 @@ defmodule CymphoWeb.DashboardLiveTest do
 
     test "owner sees global runtime controls in the app shell" do
       conn = authenticated_conn(%{role: "owner", is_board_member: true})
-      {:ok, _view, html} = live(conn, "/dashboard")
+      {:ok, view, html} = live(conn, "/dashboard")
 
       assert html =~ ~s(data-testid="runtime-controls")
+      assert has_element?(view, "summary[aria-label='Company controls']")
       assert html =~ ~s(data-testid="runtime-status-trigger")
       assert html =~ ~s(title="Runtime: Review mode")
       assert html =~ "Pause"
@@ -320,6 +321,34 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ ~s(data-mobile-drawer)
       assert html =~ ~s(aria-controls="sidebar")
       assert html =~ ~s(aria-expanded="false")
+    end
+
+    test "members and viewers cannot see or forge dashboard company controls" do
+      for role <- ["member", "viewer"] do
+        conn = authenticated_conn(%{role: role, is_board_member: false})
+        company = current_company()
+
+        {:ok, view, _html} = live(conn, "/dashboard")
+
+        refute has_element?(view, "summary[aria-label='Company controls']")
+
+        render_click(view, "low_power_company")
+        reloaded = Companies.get_company!(company.id)
+        refute Companies.low_power?(reloaded)
+
+        render_click(view, "pause_company")
+        assert Companies.get_company!(company.id).status == "active"
+
+        {:ok, _paused} =
+          Companies.execute_company_update(reloaded, %{
+            status: "paused",
+            paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
+            paused_reason: "authorization test setup"
+          })
+
+        render_click(view, "resume_company")
+        assert Companies.get_company!(company.id).status == "paused"
+      end
     end
 
     test "paused company shell topbar offers resume instead of pause" do

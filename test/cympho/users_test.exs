@@ -162,6 +162,13 @@ defmodule Cympho.UsersTest do
       attrs = %{webhook_url: "not-a-valid-url"}
       assert {:error, %Ecto.Changeset{}} = Users.update_notification_prefs(user, attrs)
     end
+
+    test "rejects HTTP and private webhook URLs", %{user: user} do
+      for url <- ["http://example.com/webhook", "https://127.0.0.1/webhook"] do
+        assert {:error, %Ecto.Changeset{}} =
+                 Users.update_notification_prefs(user, %{webhook_url: url})
+      end
+    end
   end
 
   describe "delete_user/1" do

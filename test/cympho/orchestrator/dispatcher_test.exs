@@ -592,6 +592,8 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       assert checked_out.assignee_id == agent.id
       assert is_nil(Orchestrator.whereis(checked_out.id))
 
+      checked_out = backdate_checkout(checked_out)
+
       # Simulate a monitored fake orchestrator that dies non-gracefully so
       # release_crashed_session_issue runs (brutal kill skips terminate/2).
       fake_orchestrator = spawn(fn -> Process.sleep(:infinity) end)
@@ -727,6 +729,8 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
     } do
       {:ok, checked_out} = Issues.checkout_issue(issue, agent)
       assert checked_out.status == :in_progress
+
+      checked_out = backdate_checkout(checked_out)
       assert checked_out.assignee_id == agent.id
       assert is_nil(Orchestrator.whereis(checked_out.id))
 
@@ -748,6 +752,8 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       {:ok, checked_out} = Issues.checkout_issue(issue, agent)
       assert checked_out.status == :in_progress
 
+      checked_out = backdate_checkout(checked_out)
+
       {:ok, _} = Registry.register(Cympho.OrchestratorRegistry, checked_out.id, nil)
       assert is_pid(Orchestrator.whereis(checked_out.id))
 
@@ -760,6 +766,21 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       assert reloaded.assignee_id == agent.id
     end
 
+    test "does not reclaim a fresh checkout during the cross-node startup window", %{
+      agent: agent,
+      issue: issue
+    } do
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      assert is_nil(Orchestrator.whereis(checked_out.id))
+
+      result = Dispatcher.recover_orphaned_in_progress()
+
+      assert result.recovered == 0
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :in_progress
+      assert reloaded.checked_out_at == checked_out.checked_out_at
+    end
+
     test "re-checks live orchestrator inside reclaim before cancel_and_release", %{
       agent: agent,
       issue: issue
@@ -767,6 +788,8 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       {:ok, checked_out} = Issues.checkout_issue(issue, agent)
       assert checked_out.status == :in_progress
       assert is_nil(Orchestrator.whereis(checked_out.id))
+
+      checked_out = backdate_checkout(checked_out)
 
       # Outer recover_orphaned_in_progress sees no orch (first whereis), then a
       # successor registers before reclaim_orphaned_issue mutates — second live
@@ -810,6 +833,8 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
     } do
       {:ok, checked_out} = Issues.checkout_issue(issue, agent)
 
+      checked_out = backdate_checkout(checked_out)
+
       {:ok, _run} =
         Cympho.HeartbeatEngine.create_run(%{
           company_id: company.id,
@@ -848,6 +873,8 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
 
       assert zombie_run.status == "pending"
       assert is_nil(Orchestrator.whereis(checked_out.id))
+
+      backdate_run(zombie_run)
 
       # Inline poll (same path as handle_info :poll / :poll_company) must run
       # recover_orphaned_runs — previously only handle_continue(:recover_orphans)
@@ -888,6 +915,8 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
                  adapter: "claude_code"
                })
 
+      backdate_run(zombie_run)
+
       assert {:noreply, %State{}} =
                Dispatcher.handle_continue(:recover_orphans, State.new())
 
@@ -921,6 +950,16 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       assert reloaded.assignee_id == agent.id
       assert is_nil(reloaded.checked_out_at)
     end
+  end
+
+  defp backdate_checkout(issue) do
+    old = DateTime.utc_now() |> DateTime.add(-16 * 60, :second) |> DateTime.truncate(:second)
+    issue |> Ecto.Changeset.change(checked_out_at: old) |> Cympho.Repo.update!()
+  end
+
+  defp backdate_run(run) do
+    old = DateTime.utc_now() |> DateTime.add(-16 * 60, :second) |> DateTime.truncate(:second)
+    run |> Ecto.Changeset.change(inserted_at: old) |> Cympho.Repo.update!()
   end
 
   describe "poll scheduling" do

@@ -9,6 +9,11 @@ defmodule Cympho.AgentAuthJWT do
   - Expiration time
 
   Tokens are signed using HS256 and a secret key from configuration.
+
+  `verify_token/1` verifies only the signed claims and their timestamps. HTTP
+  and WebSocket callers must use
+  `Cympho.Authentication.authenticate_heartbeat_token/1` so the current agent
+  lifecycle and run ownership are also checked.
   """
 
   require Logger

@@ -1,7 +1,7 @@
 defmodule CymphoWeb.PluginMarketplaceLive.Index do
   use CymphoWeb, :live_view
 
-  alias Cympho.{Companies, Skills}
+  alias Cympho.{CompanyRBAC, Skills}
   alias Cympho.Plugins.{Catalog, Runtime}
 
   @mutation_forbidden_message "Only company owners, admins, and board members can change plugins."
@@ -150,7 +150,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
            current_company: %{id: company_id}
          }
        }) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp can_manage_plugins?(_socket), do: false

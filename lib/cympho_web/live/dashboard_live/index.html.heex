@@ -26,6 +26,7 @@
         </div>
         <:actions>
           <.overflow_menu
+            :if={@runtime_controls_allowed}
             label="Company controls"
             class={
               if @autonomy_status == :paused or @operating_mode == :review,

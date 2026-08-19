@@ -35,6 +35,7 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:inbox_command, empty_inbox_command())
       |> assign(:inbox_action_queue, [])
       |> assign(:owner_attention_items, [])
+      |> assign(:can_resolve_approvals, can_resolve_approvals?(socket))
 
     if connected?(socket) do
       if socket.assigns.selected_agent_id do
@@ -354,9 +355,8 @@ defmodule CymphoWeb.InboxLive.Index do
   defp resolve_approval(socket, approval_id, decision, reason) do
     with %{id: company_id} <- socket.assigns[:current_company],
          %{id: user_id} <- socket.assigns[:current_user],
-         {:ok, _approval} <- Approvals.get_company_approval(company_id, approval_id),
          {:ok, _resolved} <-
-           Approvals.resolve_approval(approval_id, decision, %{
+           Approvals.resolve_company_approval(company_id, approval_id, decision, %{
              resolved_by_user_id: user_id,
              resolution_reason: reason
            }) do
@@ -367,11 +367,29 @@ defmodule CymphoWeb.InboxLive.Index do
        |> put_flash(:info, message)
        |> load_inbox()}
     else
+      {:error, :forbidden} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :error,
+           "Only company owners, admins, and board members can resolve approvals."
+         )
+         |> load_inbox()}
+
       _ ->
         {:noreply,
          socket
          |> put_flash(:error, "Could not resolve this approval.")
          |> load_inbox()}
+    end
+  end
+
+  defp can_resolve_approvals?(socket) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         %{id: user_id} <- socket.assigns[:current_user] do
+      Approvals.resolver_authorized?(user_id, company_id)
+    else
+      _ -> false
     end
   end
 

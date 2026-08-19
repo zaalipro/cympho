@@ -89,6 +89,51 @@ defmodule Cympho.Mcp.ToolRegistry do
   def unregister(_), do: {:error, :invalid_tool_id}
 
   @doc """
+  Unregisters every tool owned by a plugin and revokes every live grant for
+  those tool names, including grants created after an earlier unregister.
+  """
+  @spec unregister_for_plugin(String.t()) ::
+          {:ok, [RegisteredTool.t()]} | {:error, term()}
+  def unregister_for_plugin(plugin_id) when is_binary(plugin_id) and plugin_id != "" do
+    tools =
+      from(t in RegisteredTool,
+        where: t.plugin_id == ^plugin_id,
+        order_by: [asc: t.name]
+      )
+      |> Repo.all()
+
+    Repo.transaction(fn ->
+      Enum.map(tools, fn tool ->
+        case unregister_plugin_tool(tool) do
+          {:ok, tool} -> tool
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+    end)
+    |> case do
+      {:ok, unregistered} -> {:ok, unregistered}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def unregister_for_plugin(_plugin_id), do: {:error, :invalid_plugin_id}
+
+  defp unregister_plugin_tool(%RegisteredTool{status: "active"} = tool) do
+    unregister(tool.id)
+  end
+
+  defp unregister_plugin_tool(%RegisteredTool{status: "unregistered"} = tool) do
+    _ =
+      ToolGrants.revoke_all_for_tool(
+        tool.company_id,
+        tool.name,
+        "owning plugin removed"
+      )
+
+    {:ok, tool}
+  end
+
+  @doc """
   Returns the active registered tool for `company_id` + `name`, if any.
   """
   @spec get_active(String.t(), String.t()) :: {:ok, RegisteredTool.t()} | {:error, :not_found}

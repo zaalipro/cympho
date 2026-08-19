@@ -144,5 +144,58 @@ defmodule CymphoWeb.DocumentControllerTest do
 
       assert json_response(conn, 404)
     end
+
+    test "404s when either revision ID belongs to another company", %{
+      conn: conn,
+      issue: issue,
+      document: document,
+      newer: newer,
+      older: older
+    } do
+      unique = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Foreign Doc Company #{unique}",
+          slug: "foreign-doc-company-#{unique}"
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Foreign Doc Issue",
+          status: :backlog,
+          company_id: other_company.id
+        })
+
+      {:ok, other_document} =
+        Documents.create_document(%{
+          key: "foreign-plan",
+          title: "Foreign Plan",
+          body: "private revision",
+          issue_id: other_issue.id
+        })
+
+      {:ok, other_document} =
+        Documents.update_document(other_document, %{body: "still private"})
+
+      [foreign_revision] = Documents.list_revisions(other_document.id)
+
+      forged_target =
+        get(
+          conn,
+          ~p"/api/issues/#{issue.id}/documents/#{document.key}/revisions/#{foreign_revision.id}/diff",
+          %{"other_revision_id" => older.id}
+        )
+
+      forged_base =
+        get(
+          conn,
+          ~p"/api/issues/#{issue.id}/documents/#{document.key}/revisions/#{newer.id}/diff",
+          %{"other_revision_id" => foreign_revision.id}
+        )
+
+      assert json_response(forged_target, 404)
+      assert json_response(forged_base, 404)
+    end
   end
 end

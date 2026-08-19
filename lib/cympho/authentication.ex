@@ -9,9 +9,14 @@ defmodule Cympho.Authentication do
   """
 
   import Ecto.Query, warn: false
+  alias Cympho.Agents.{Agent, AgentApiKey}
   alias Cympho.Repo
-  alias Cympho.Agents.AgentApiKey
   alias Cympho.AgentAuthJWT
+  alias Cympho.HeartbeatEngine.Run
+
+  @active_run_statuses ~w(pending queued running)
+  @blocked_agent_statuses [:paused, :pending_approval, :terminated]
+  @blocked_governance_statuses ["paused", "pending_approval", "terminated"]
 
   @doc """
   Creates a new API key for an agent.
@@ -71,6 +76,27 @@ defmodule Cympho.Authentication do
   end
 
   @doc """
+  Revokes every API key issued to an agent.
+
+  Termination uses hard revocation because it is permanent. Pausing and a
+  pending governance decision leave key rows in place so an explicit resume
+  can restore access without rotating credentials.
+  """
+  def revoke_agent_api_keys(agent_id) when is_binary(agent_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      AgentApiKey
+      |> where(
+        [ak],
+        ak.agent_id == ^agent_id and (is_nil(ak.expires_at) or ak.expires_at > ^now)
+      )
+      |> Repo.update_all(set: [expires_at: now, updated_at: now])
+
+    {:ok, count}
+  end
+
+  @doc """
   Generates a JWT token for an agent heartbeat.
 
   ## Parameters
@@ -98,6 +124,34 @@ defmodule Cympho.Authentication do
   end
 
   @doc """
+  Authenticates a run-scoped agent JWT against current database state.
+
+  A valid signature is not sufficient: the run must still be pending, queued,
+  or running and its agent and company must exactly match the token claims.
+  Paused, pending-approval, and terminated agents cannot start a new HTTP or
+  WebSocket authentication, even during the short pause/cancellation race.
+
+  Heartbeat run finalization is intentionally separate from this boundary:
+  an already executing Orchestrator may still complete, fail, or cancel its
+  run after an agent is paused without re-authenticating the agent credential.
+  """
+  def authenticate_heartbeat_token(token) do
+    with {:ok, claims} <- AgentAuthJWT.verify_token(token),
+         {:ok, agent_id} <- claim_uuid(claims, &AgentAuthJWT.get_agent_id/1),
+         {:ok, run_id} <- claim_uuid(claims, &AgentAuthJWT.get_run_id/1),
+         {:ok, company_id} <- claim_uuid(claims, &AgentAuthJWT.get_company_id/1),
+         %Agent{} = agent <- Repo.get(Agent, agent_id),
+         %Run{} = run <- Repo.get(Run, run_id),
+         :ok <- validate_agent_credential_state(agent),
+         :ok <- validate_run_scope(run, agent, company_id) do
+      {:ok, %{agent: agent, run: run, claims: claims}}
+    else
+      nil -> {:error, :invalid_agent_jwt}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc """
   Authenticates a user with email and password.
 
   ## Returns
@@ -105,6 +159,7 @@ defmodule Cympho.Authentication do
     - {:error, :invalid_credentials} on failure
   """
   def authenticate_user(email, password) do
+    email = Cympho.Users.User.normalize_email(email)
     query = from(u in Cympho.Users.User, where: u.email == ^email)
 
     case Repo.one(query) do
@@ -142,6 +197,14 @@ defmodule Cympho.Authentication do
     - {:error, :invalid_api_key} on failure
   """
   def validate_api_key(plain_text_key) do
+    case authenticate_agent_api_key(plain_text_key) do
+      {:ok, {_api_key, agent}} -> {:ok, agent}
+      {:error, _reason} -> {:error, :invalid_api_key}
+    end
+  end
+
+  @doc false
+  def authenticate_agent_api_key(plain_text_key) when is_binary(plain_text_key) do
     key_hash = AgentApiKey.hash_api_key(plain_text_key)
 
     query =
@@ -152,8 +215,42 @@ defmodule Cympho.Authentication do
       )
 
     case Repo.one(query) do
-      nil -> {:error, :invalid_api_key}
-      api_key -> {:ok, api_key.agent}
+      nil ->
+        {:error, :invalid_api_key}
+
+      %AgentApiKey{agent: %Agent{} = agent} = api_key ->
+        with :ok <- validate_agent_credential_state(agent) do
+          {:ok, {api_key, agent}}
+        end
+    end
+  end
+
+  def authenticate_agent_api_key(_plain_text_key), do: {:error, :invalid_api_key}
+
+  defp validate_agent_credential_state(%Agent{status: status} = agent) do
+    if status in @blocked_agent_statuses or
+         agent.governance_status in @blocked_governance_statuses do
+      {:error, :agent_inactive}
+    else
+      :ok
+    end
+  end
+
+  defp validate_run_scope(%Run{} = run, %Agent{} = agent, company_id) do
+    if run.status in @active_run_statuses and run.agent_id == agent.id and
+         run.company_id == company_id and agent.company_id == company_id do
+      :ok
+    else
+      {:error, :invalid_run_scope}
+    end
+  end
+
+  defp claim_uuid(claims, extractor) do
+    with {:ok, value} <- extractor.(claims),
+         {:ok, uuid} <- Ecto.UUID.cast(value) do
+      {:ok, uuid}
+    else
+      _ -> {:error, :invalid_agent_jwt}
     end
   end
 end

@@ -13,12 +13,13 @@ defmodule Cympho.Workspaces.RuntimeService do
     field :scope_type, :string
     field :scope_id, :binary_id
     field :service_name, :string
-    field :status, :string
+    field :status, :string, default: "stopped"
     field :lifecycle, :string
     field :reuse_key, :string
     field :command, :string
     field :cwd, :string
     field :port, :integer
+    field :preview_ref, :binary_id
     field :url, :string
     field :provider, :string
     field :provider_ref, :string
@@ -43,15 +44,24 @@ defmodule Cympho.Workspaces.RuntimeService do
   def changeset(runtime_service, attrs) do
     runtime_service
     |> cast(attrs, [
-      :scope_type,
-      :scope_id,
       :service_name,
-      :status,
-      :lifecycle,
       :reuse_key,
       :command,
-      :cwd,
+      :cwd
+    ])
+    |> validate_required([:service_name, :status])
+  end
+
+  @doc false
+  def lifecycle_changeset(runtime_service, attrs) do
+    runtime_service
+    |> cast(attrs, [
+      :scope_type,
+      :scope_id,
+      :status,
+      :lifecycle,
       :port,
+      :preview_ref,
       :url,
       :provider,
       :provider_ref,
@@ -61,13 +71,9 @@ defmodule Cympho.Workspaces.RuntimeService do
       :started_at,
       :stopped_at,
       :stop_policy,
-      :health_status,
-      :company_id,
-      :project_id,
-      :project_workspace_id,
-      :issue_id,
-      :execution_workspace_id
+      :health_status
     ])
     |> validate_required([:service_name, :status, :company_id, :project_id])
+    |> validate_number(:port, greater_than: 0, less_than_or_equal_to: 65_535)
   end
 end

@@ -219,6 +219,7 @@
 
                 <div class="flex shrink-0 flex-wrap items-center gap-2 md:justify-end">
                   <button
+                    :if={@can_resolve_approvals}
                     type="button"
                     phx-click="approve"
                     phx-value-id={approval.id}
@@ -228,6 +229,7 @@
                     <span class="hero-check-mini h-4 w-4"></span> Approve
                   </button>
                   <button
+                    :if={@can_resolve_approvals}
                     type="button"
                     phx-click="deny"
                     phx-value-id={approval.id}

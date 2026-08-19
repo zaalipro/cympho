@@ -8,7 +8,6 @@ defmodule CymphoWeb.CompanyController do
   plug CymphoWeb.Plugs.CompanyAccess
        when action in [
               :show,
-              :update_governance_config,
               :list_members,
               :list_invites,
               :list_join_requests,
@@ -17,10 +16,10 @@ defmodule CymphoWeb.CompanyController do
             ]
 
   plug CymphoWeb.Plugs.CompanyAccess,
-       [require_admin: true]
+       [require: :manager]
        when action in [
               :update,
-              :delete,
+              :update_governance_config,
               :add_member,
               :remove_member,
               :create_invite,
@@ -28,6 +27,8 @@ defmodule CymphoWeb.CompanyController do
               :approve_join_request,
               :reject_join_request
             ]
+
+  plug CymphoWeb.Plugs.CompanyAccess, [require: :owner] when action in [:delete]
 
   plug :require_export_authorization when action in [:export]
 
@@ -38,32 +39,28 @@ defmodule CymphoWeb.CompanyController do
       Companies.list_memberships_for_user(user.id)
       |> Enum.map(& &1.company)
 
-    json(conn, %{data: companies})
+    json(conn, %{data: Enum.map(companies, &company_data/1)})
   end
 
   def show(conn, %{"id" => id}) do
     company = Companies.get_company!(id)
-    json(conn, %{data: company})
+    json(conn, %{data: company_data(company)})
   end
 
   def create(conn, %{"company" => company_params}) do
     user = conn.assigns.current_user
 
-    case Companies.create_company(company_params) do
+    case Companies.create_company_for_owner(company_params, user.id) do
       {:ok, company} ->
-        # The creator becomes the first owner.
-        Companies.create_membership(%{
-          user_id: user.id,
-          company_id: company.id,
-          role: "owner"
-        })
+        conn |> put_status(:created) |> json(%{data: company_data(company)})
 
-        conn |> put_status(:created) |> json(%{data: company})
-
-      {:error, changeset} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{errors: translate_errors(changeset)})
+
+      {:error, reason} ->
+        conn |> put_status(:unprocessable_entity) |> json(%{error: to_string(reason)})
     end
   end
 
@@ -71,7 +68,7 @@ defmodule CymphoWeb.CompanyController do
     company = Companies.get_company!(id)
 
     case Companies.update_company(company, company_params) do
-      {:ok, company} -> json(conn, %{data: company})
+      {:ok, company} -> json(conn, %{data: company_data(company)})
       {:error, changeset} -> error_changeset(conn, changeset)
     end
   end
@@ -80,7 +77,7 @@ defmodule CymphoWeb.CompanyController do
     company = Companies.get_company!(id)
 
     case Companies.update_governance_config(company, config_params) do
-      {:ok, company} -> json(conn, %{data: company})
+      {:ok, company} -> json(conn, %{data: company_data(company)})
       {:error, changeset} -> error_changeset(conn, changeset)
     end
   end
@@ -210,18 +207,15 @@ defmodule CymphoWeb.CompanyController do
         _ -> :suffix
       end
 
-    case Companies.import_company(company_data, slug_strategy: slug_strategy) do
+    case Companies.import_company_for_owner(
+           company_data,
+           conn.assigns.current_user.id,
+           slug_strategy: slug_strategy
+         ) do
       {:ok, %{company: company, secrets_to_restore: secrets_to_restore}} ->
-        # Creator becomes owner of the imported company.
-        Companies.create_membership(%{
-          user_id: conn.assigns.current_user.id,
-          company_id: company.id,
-          role: "owner"
-        })
-
         conn
         |> put_status(:created)
-        |> json(%{data: company, secrets_to_restore: secrets_to_restore})
+        |> json(%{data: company_data(company), secrets_to_restore: secrets_to_restore})
 
       {:error, changeset} when is_struct(changeset) ->
         error_changeset(conn, changeset)
@@ -237,8 +231,7 @@ defmodule CymphoWeb.CompanyController do
     user = conn.assigns.current_user
     company_id = conn.params["company_id"]
 
-    if Companies.admin?(user.id, company_id) or
-         Companies.is_board_member?(user.id, company_id) do
+    if Cympho.CompanyRBAC.manager?(user.id, company_id) do
       conn
     else
       conn
@@ -278,5 +271,19 @@ defmodule CymphoWeb.CompanyController do
         opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
       end)
     end)
+  end
+
+  defp company_data(company) do
+    company
+    |> Map.from_struct()
+    |> Map.drop([
+      :__meta__,
+      :memberships,
+      :users,
+      :projects,
+      :agents,
+      :invites,
+      :join_requests
+    ])
   end
 end

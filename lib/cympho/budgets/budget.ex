@@ -53,6 +53,9 @@ defmodule Cympho.Budgets.Budget do
     |> validate_number(:threshold_alert_percentage, greater_than: 0, less_than_or_equal_to: 100)
     |> validate_inclusion(:status, ["active", "exhausted", "cancelled"])
     |> validate_inclusion(:scope_type, ["company", "project", "agent", "custom"])
+    |> normalize_scope_fields()
+    |> validate_scope_fields()
+    |> validate_company_unchanged()
     |> validate_budget_period()
     |> validate_amounts()
   end
@@ -91,6 +94,73 @@ defmodule Cympho.Budgets.Budget do
   end
 
   def active?(%__MODULE__{status: status}), do: status == "active"
+
+  defp normalize_scope_fields(changeset) do
+    case get_field(changeset, :scope_type) do
+      "company" ->
+        changeset
+        |> put_change(:scope_id, get_field(changeset, :company_id))
+        |> put_change(:project_id, nil)
+        |> put_change(:agent_id, nil)
+
+      "project" ->
+        normalize_relational_scope(changeset, :project_id, :agent_id)
+
+      "agent" ->
+        normalize_relational_scope(changeset, :agent_id, :project_id)
+
+      "custom" ->
+        changeset
+        |> put_change(:project_id, nil)
+        |> put_change(:agent_id, nil)
+
+      _ ->
+        changeset
+    end
+  end
+
+  defp normalize_relational_scope(changeset, relation_field, other_relation_field) do
+    scope_id_changed? = changed?(changeset, :scope_id)
+    relation_id_changed? = changed?(changeset, relation_field)
+    scope_id = get_field(changeset, :scope_id)
+    relation_id = get_field(changeset, relation_field)
+
+    if scope_id_changed? and relation_id_changed? and scope_id != relation_id do
+      add_error(changeset, :scope_id, "must match #{relation_field}")
+    else
+      target_id =
+        cond do
+          scope_id_changed? -> scope_id
+          relation_id_changed? -> relation_id
+          true -> relation_id || scope_id
+        end
+
+      changeset
+      |> put_change(:scope_id, target_id)
+      |> put_change(relation_field, target_id)
+      |> put_change(other_relation_field, nil)
+    end
+  end
+
+  defp validate_scope_fields(changeset) do
+    case get_field(changeset, :scope_type) do
+      "company" -> validate_required(changeset, [:company_id, :scope_id])
+      "project" -> validate_required(changeset, [:company_id, :scope_id, :project_id])
+      "agent" -> validate_required(changeset, [:company_id, :scope_id, :agent_id])
+      _ -> changeset
+    end
+  end
+
+  defp validate_company_unchanged(%{data: %{id: id, company_id: company_id}} = changeset)
+       when not is_nil(id) do
+    case fetch_change(changeset, :company_id) do
+      :error -> changeset
+      {:ok, ^company_id} -> changeset
+      {:ok, _other_company_id} -> add_error(changeset, :company_id, "cannot be changed")
+    end
+  end
+
+  defp validate_company_unchanged(changeset), do: changeset
 
   defp validate_budget_period(changeset) do
     period_start = get_change(changeset, :period_start)

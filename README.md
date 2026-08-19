@@ -463,9 +463,36 @@ Set the usual Phoenix release environment variables, plus a Cympho encryption ke
 SECRET_KEY_BASE=...
 DATABASE_URL=...
 APP_HOST=...
+PREVIEW_HOST=previews.example.com
 LIVE_VIEW_SALT=...
 CYMPHO_ENCRYPTION_KEY=32-byte-or-longer-secret
+CYMPHO_USER_JWT_SECRET=...
+CYMPHO_AGENT_JWT_SECRET=...
 ```
+
+`PREVIEW_HOST` is required in production and must be a different hostname from
+`APP_HOST`. Point both DNS names at the same trusted reverse proxy and route
+both to Cympho. Runtime preview HTML is available only on `PREVIEW_HOST` through
+short-lived signed URLs; the authenticated application and preview proxy paths
+return 404 on the wrong host. Never configure a wildcard application-session
+cookie that includes the preview host. Existing running services without a
+preview identity remain unavailable until their trusted launcher reissues one.
+
+A production database with no users keeps `/setup` locked unless
+`CYMPHO_BOOTSTRAP_SECRET` is set to at least 32 bytes. Generate it with
+`mix phx.gen.secret`, enter it in the first-owner form, then remove it from the
+environment after setup and restart. The installer already seeds an owner and
+does not need browser bootstrap.
+
+Production forces HTTPS and emits HSTS by default. Only
+`X-Forwarded-Proto: https` from an immediate proxy explicitly listed in
+`CYMPHO_TRUSTED_PROXY_IPS` is trusted. The comma-separated entries may be exact
+IPv4/IPv6 addresses or CIDRs; the default is to trust no proxy. Forwarded host
+and port values never affect redirects, and forwarded client IPs are used for
+socket telemetry only from the same trusted peers. The installer configures
+loopback for its local Caddy instance. Keep the Bandit listener private.
+`CYMPHO_FORCE_SSL=false` is an explicit escape hatch for deployments whose
+trusted edge enforces HTTPS before requests can reach Cympho.
 
 Background execution should be enabled deliberately in production, with adapter credentials, budgets, governance policies, and project repository settings configured before agents are allowed to run.
 

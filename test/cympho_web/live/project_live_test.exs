@@ -66,7 +66,7 @@ defmodule CymphoWeb.ProjectLiveTest do
     end
 
     test "does not archive a project from another company", %{conn: conn} do
-      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn, %{role: "admin"})
 
       {:ok, other_company} =
         Cympho.Companies.create_company(%{
@@ -91,7 +91,7 @@ defmodule CymphoWeb.ProjectLiveTest do
     end
 
     test "archives a current-company project and updates the visible state", %{conn: conn} do
-      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn, %{role: "admin"})
 
       {:ok, project} =
         Projects.create_project(%{

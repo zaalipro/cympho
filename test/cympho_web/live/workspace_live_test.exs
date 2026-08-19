@@ -12,14 +12,10 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       project = create_project(company, "Workspace Project")
       workspace = create_project_workspace(company, project, "Runtime Workspace")
 
-      {:ok, _service} =
-        Workspaces.create_runtime_service(%{
-          service_name: "Preview",
-          status: "running",
-          company_id: company.id,
-          project_id: project.id,
-          project_workspace_id: workspace.id
-        })
+      {:ok, service} =
+        Workspaces.create_runtime_service(workspace, %{service_name: "Preview"})
+
+      {:ok, _service} = Workspaces.mark_service_running(service)
 
       {:ok, view, html} = live(conn, "/workspaces")
 
@@ -46,17 +42,13 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       workspace = create_project_workspace(company, project, "Runtime Workspace")
       execution_workspace = create_execution_workspace(company, project, workspace)
 
-      {:ok, _service} =
-        Workspaces.create_runtime_service(%{
-          service_name: "Preview",
-          status: "running",
-          health_status: "healthy",
-          port: 4329,
-          company_id: company.id,
-          project_id: project.id,
-          project_workspace_id: workspace.id,
-          execution_workspace_id: execution_workspace.id
+      {:ok, service} =
+        Workspaces.create_runtime_service(execution_workspace, %{
+          service_name: "Preview"
         })
+
+      {:ok, _service} =
+        Workspaces.issue_service_preview(service, 4329, %{health_status: "healthy"})
 
       {:ok, view, html} = live(conn, "/workspaces/#{workspace.id}")
 
@@ -78,18 +70,14 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       workspace = create_project_workspace(company, project, "Runtime Workspace")
       execution_workspace = create_execution_workspace(company, project, workspace)
 
-      {:ok, _service} =
-        Workspaces.create_runtime_service(%{
+      {:ok, service} =
+        Workspaces.create_runtime_service(execution_workspace, %{
           service_name: "Phoenix preview",
-          status: "running",
-          health_status: "healthy",
-          command: "mix phx.server",
-          port: 4329,
-          company_id: company.id,
-          project_id: project.id,
-          project_workspace_id: workspace.id,
-          execution_workspace_id: execution_workspace.id
+          command: "mix phx.server"
         })
+
+      {:ok, _service} =
+        Workspaces.issue_service_preview(service, 4329, %{health_status: "healthy"})
 
       {:ok, environment} =
         Workspaces.create_environment(%{

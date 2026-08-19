@@ -42,6 +42,53 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Edit settings"
     end
 
+    @tag membership_role: "admin"
+    test "forged lifecycle events cannot mutate agents from another company", %{conn: conn} do
+      {:ok, foreign_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign Agent Company",
+          slug: "foreign-agent-company-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, pause_target} =
+        Agents.create_agent(%{
+          company_id: foreign_company.id,
+          name: "Foreign Pause Target",
+          role: :engineer,
+          status: :idle
+        })
+
+      {:ok, resume_target} =
+        Agents.create_agent(%{
+          company_id: foreign_company.id,
+          name: "Foreign Resume Target",
+          role: :engineer,
+          status: :paused
+        })
+
+      {:ok, terminate_target} =
+        Agents.create_agent(%{
+          company_id: foreign_company.id,
+          name: "Foreign Terminate Target",
+          role: :engineer,
+          status: :idle
+        })
+
+      {:ok, view, _html} = live(conn, "/agents")
+
+      for {event, agent, expected_status} <- [
+            {"pause_agent", pause_target, :idle},
+            {"resume_agent", resume_target, :paused},
+            {"terminate_agent", terminate_target, :idle}
+          ] do
+        render_click(view, event, %{"id" => agent.id})
+
+        flash = :sys.get_state(view.pid).socket.assigns.flash
+        assert Phoenix.Flash.get(flash, :error) == "Agent not found"
+        assert Agents.get_agent!(agent.id).status == expected_status
+      end
+    end
+
     test "roster shows Never until last_heartbeat_at is stamped, then a real time", %{
       conn: conn
     } do
@@ -130,6 +177,7 @@ defmodule CymphoWeb.AgentLiveTest do
   end
 
   describe "Index - Kill Session" do
+    @tag membership_role: "admin"
     test "shows stop button for running agents", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{name: "Running Agent", role: :engineer, status: :running})
@@ -149,6 +197,7 @@ defmodule CymphoWeb.AgentLiveTest do
       refute has_element?(view, "button[phx-click='kill_session'][phx-value-id='#{agent.id}']")
     end
 
+    @tag membership_role: "admin"
     test "kill_session event returns error when agent not running", %{conn: conn} do
       {:ok, agent} = create_agent(%{name: "Idle Agent", role: :engineer, status: :idle})
 
@@ -257,6 +306,7 @@ defmodule CymphoWeb.AgentLiveTest do
       assert has_element?(view, "[data-testid='agent-runs-panel'].ui-advanced-only")
     end
 
+    @tag membership_role: "admin"
     test "dashboard queues an immediate heartbeat for an idle agent", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{
@@ -536,6 +586,8 @@ defmodule CymphoWeb.AgentLiveTest do
   end
 
   describe "Edit - Agent Configuration" do
+    @describetag membership_role: "admin"
+
     test "renders edit page with max concurrent jobs slider", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{
@@ -1228,6 +1280,7 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Rollback: Use the agent Instruction Studio revision history"
     end
 
+    @tag membership_role: "admin"
     test "configuration tab restores older instruction revision", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{
@@ -1810,6 +1863,8 @@ defmodule CymphoWeb.AgentLiveTest do
   end
 
   describe "Adapter Selection" do
+    @describetag membership_role: "admin"
+
     test "defaults to OpenAI Chat when the company already has that provider", %{
       conn: conn,
       current_company: company

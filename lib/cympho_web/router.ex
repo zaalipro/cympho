@@ -19,14 +19,23 @@ defmodule CymphoWeb.Router do
 
   pipeline :company_scoped do
     plug :require_company
+    plug CymphoWeb.Plugs.CompanyRBAC
   end
 
   pipeline :api do
     plug :accepts, ["json"]
   end
 
+  # Preview responses can be HTML, CSS, images, or arbitrary development-server
+  # content. This pipeline intentionally has no session fetch, CSRF plug, or
+  # Accept restriction; the endpoint host guard and signed path are its boundary.
+  pipeline :preview do
+    plug :put_preview_response_headers
+  end
+
   pipeline :api_authenticated do
     plug CymphoWeb.Plugs.UserAuth
+    plug CymphoWeb.Plugs.CompanyRBAC
   end
 
   pipeline :api_agent do
@@ -81,7 +90,11 @@ defmodule CymphoWeb.Router do
     post "/runtime-control/resume", RuntimeControlController, :resume
 
     live_session :default,
-      on_mount: [{CymphoWeb.UserAuth, :default}, {CymphoWeb.UserAuth, :require_company}] do
+      on_mount: [
+        {CymphoWeb.UserAuth, :default},
+        {CymphoWeb.UserAuth, :require_company},
+        {CymphoWeb.Live.CompanyRBAC, :default}
+      ] do
       live "/", DashboardLive.Index, :home
       live "/dashboard", DashboardLive.Index
       live "/operations", OperationsLive.Index
@@ -161,6 +174,7 @@ defmodule CymphoWeb.Router do
       on_mount: [
         {CymphoWeb.UserAuth, :default},
         {CymphoWeb.UserAuth, :require_company},
+        {CymphoWeb.Live.CompanyRBAC, :default},
         {CymphoWeb.Live.BoardAuth, :default}
       ] do
       live "/budgets", BudgetLive.Index
@@ -173,7 +187,11 @@ defmodule CymphoWeb.Router do
     end
 
     live_session :authenticated_company_show,
-      on_mount: [{CymphoWeb.UserAuth, :default}, {CymphoWeb.UserAuth, :require_company}] do
+      on_mount: [
+        {CymphoWeb.UserAuth, :default},
+        {CymphoWeb.UserAuth, :require_company},
+        {CymphoWeb.Live.CompanyRBAC, :default}
+      ] do
       live "/companies/:id", CompanyLive.Show
     end
 
@@ -195,6 +213,19 @@ defmodule CymphoWeb.Router do
 
   defp require_company(conn, opts) do
     CymphoWeb.UserAuth.require_company(conn, opts)
+  end
+
+  defp put_preview_response_headers(conn, _opts) do
+    Plug.Conn.put_resp_header(conn, "referrer-policy", "no-referrer")
+  end
+
+  # Runtime previews are untrusted agent output. They live on PREVIEW_HOST and
+  # authenticate with a short-lived signed capability, never the user's app
+  # session cookie. PreviewHost rejects this path on every other origin.
+  scope "/api", CymphoWeb do
+    pipe_through :preview
+
+    get "/preview/:service_id/:token/proxy/*path", PreviewController, :proxy
   end
 
   # ── Public API endpoints (no auth) ──
@@ -333,7 +364,6 @@ defmodule CymphoWeb.Router do
 
     # Preview URLs for runtime services
     get "/preview/:service_id", PreviewController, :show
-    get "/preview/:service_id/proxy/*path", PreviewController, :proxy
     get "/exec-workspaces/:id/previews", PreviewController, :index
   end
 

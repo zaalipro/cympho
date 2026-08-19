@@ -34,16 +34,11 @@ defmodule Cympho.WorkspaceHealthTest do
           last_used_at: DateTime.add(now, -5 * 60 * 60, :second)
         })
 
+      {:ok, service} =
+        Workspaces.create_runtime_service(execution_workspace, %{service_name: "Preview"})
+
       {:ok, _service} =
-        Workspaces.create_runtime_service(%{
-          service_name: "Preview",
-          status: "running",
-          health_status: "unhealthy",
-          company_id: company.id,
-          project_id: project.id,
-          project_workspace_id: workspace.id,
-          execution_workspace_id: execution_workspace.id
-        })
+        Workspaces.mark_service_running(service, %{health_status: "unhealthy"})
 
       {:ok, environment} =
         Workspaces.create_environment(%{
@@ -108,17 +103,11 @@ defmodule Cympho.WorkspaceHealthTest do
           last_used_at: DateTime.add(now, -5 * 60, :second)
         })
 
+      {:ok, service} =
+        Workspaces.create_runtime_service(execution_workspace, %{service_name: "Preview"})
+
       {:ok, _service} =
-        Workspaces.create_runtime_service(%{
-          service_name: "Preview",
-          status: "running",
-          health_status: "healthy",
-          port: 4000,
-          company_id: company.id,
-          project_id: project.id,
-          project_workspace_id: workspace.id,
-          execution_workspace_id: execution_workspace.id
-        })
+        Workspaces.issue_service_preview(service, 4000, %{health_status: "healthy"})
 
       assert %{
                level: :healthy,
@@ -150,16 +139,11 @@ defmodule Cympho.WorkspaceHealthTest do
           last_used_at: DateTime.add(now, -5 * 60, :second)
         })
 
+      {:ok, service} =
+        Workspaces.create_runtime_service(execution_workspace, %{service_name: "Preview"})
+
       {:ok, _service} =
-        Workspaces.create_runtime_service(%{
-          service_name: "Preview",
-          status: "running",
-          health_status: "healthy",
-          company_id: company.id,
-          project_id: project.id,
-          project_workspace_id: workspace.id,
-          execution_workspace_id: execution_workspace.id
-        })
+        Workspaces.mark_service_running(service, %{health_status: "healthy"})
 
       assert [
                %{

@@ -17,7 +17,12 @@ defmodule Cympho.IssuesPaginatedFilterTest do
       Projects.create_project(%{name: "FilterProj", prefix: "FP", company_id: company.id})
 
     {:ok, agent} =
-      Agents.create_agent(%{name: "Test Agent", role: :engineer, status: :idle})
+      Agents.create_agent(%{
+        name: "Test Agent",
+        role: :engineer,
+        status: :idle,
+        company_id: company.id
+      })
 
     {:ok, label} =
       Labels.create_label(%{name: "feature", color: "#00ff00", company_id: company.id})
@@ -28,6 +33,7 @@ defmodule Cympho.IssuesPaginatedFilterTest do
         description: "We need this feature",
         status: :backlog,
         priority: :high,
+        company_id: company.id,
         project_id: project.id,
         assignee_id: agent.id
       })
@@ -39,7 +45,8 @@ defmodule Cympho.IssuesPaginatedFilterTest do
         title: "Minor bug fix needed",
         description: "Small cosmetic issue",
         status: :in_progress,
-        priority: :low
+        priority: :low,
+        company_id: company.id
       })
 
     {:ok, _issue_medium_todo} =
@@ -47,10 +54,12 @@ defmodule Cympho.IssuesPaginatedFilterTest do
         title: "Documentation update",
         description: "Update the docs for new API",
         status: :todo,
-        priority: :medium
+        priority: :medium,
+        company_id: company.id
       })
 
     %{
+      company: company,
       project: project,
       agent: agent,
       label: label
@@ -150,17 +159,32 @@ defmodule Cympho.IssuesPaginatedFilterTest do
       assert length(result.issues) == 2
     end
 
-    test "page 2 returns different issues" do
+    test "page 2 returns different issues", %{company: company} do
       # Create issues, then backdate their timestamps so second-precision
       # ordering is deterministic without sleeping across second boundaries.
       {:ok, i1} =
-        Issues.create_issue(%{title: "Page1Issue", description: "first", status: :backlog})
+        Issues.create_issue(%{
+          title: "Page1Issue",
+          description: "first",
+          status: :backlog,
+          company_id: company.id
+        })
 
       {:ok, i2} =
-        Issues.create_issue(%{title: "Page1Issue2", description: "second", status: :backlog})
+        Issues.create_issue(%{
+          title: "Page1Issue2",
+          description: "second",
+          status: :backlog,
+          company_id: company.id
+        })
 
       {:ok, _i3} =
-        Issues.create_issue(%{title: "Page2Issue", description: "third", status: :backlog})
+        Issues.create_issue(%{
+          title: "Page2Issue",
+          description: "third",
+          status: :backlog,
+          company_id: company.id
+        })
 
       now = DateTime.utc_now() |> DateTime.truncate(:second)
 

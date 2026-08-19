@@ -160,6 +160,7 @@ defmodule Cympho.AuthenticationUnitTest do
       assert claims["user_id"] == "user-123"
       assert claims["email"] == "test@example.com"
       assert claims["company_id"] == company_id
+      assert claims["session_version"] == 0
       assert claims["typ"] == "user_session"
     end
 

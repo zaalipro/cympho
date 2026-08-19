@@ -16,6 +16,7 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
     assert html =~ "require_human"
   end
 
+  @tag membership_role: "admin"
   test "new policy form saves guided stage builder fields", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/settings/policies/new")
 
@@ -71,6 +72,7 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
            ]
   end
 
+  @tag membership_role: "admin"
   test "new policy form parses stage config JSON before saving", %{conn: conn} do
     stage_configs = [
       %{"type" => "executor", "participant_id" => "engineer"},
@@ -119,6 +121,7 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
            ]
   end
 
+  @tag membership_role: "admin"
   test "new policy form keeps invalid JSON editable", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/settings/policies/new")
 
@@ -136,6 +139,7 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
     assert html =~ "["
   end
 
+  @tag membership_role: "admin"
   test "edit policy form parses updated stage config JSON", %{
     conn: conn,
     current_company: company
@@ -195,6 +199,7 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
            ]
   end
 
+  @tag membership_role: "admin"
   test "edit policy form saves guided stage builder changes", %{
     conn: conn,
     current_company: company
@@ -314,6 +319,7 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
     assert html =~ "Ready"
   end
 
+  @tag membership_role: "admin"
   test "new policy stamps current company and ignores client company_id", %{
     conn: conn,
     current_company: company
@@ -402,6 +408,7 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
              ExecutionPolicies.get_company_execution_policy(other_company.id, policy.id)
   end
 
+  @tag membership_role: "admin"
   test "delete of a foreign policy id does not remove the other tenant", %{conn: conn} do
     unique = System.unique_integer([:positive])
 

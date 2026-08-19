@@ -7,6 +7,7 @@ defmodule CymphoWeb.Plugs.BoardAuth do
   """
 
   import Plug.Conn
+  alias Cympho.CompanyRBAC
   alias Cympho.Companies
   alias Cympho.GovernanceAuditLogs
 
@@ -15,11 +16,7 @@ defmodule CymphoWeb.Plugs.BoardAuth do
   def call(conn, _opts) do
     user = conn.assigns[:current_user]
 
-    company_id =
-      case conn.assigns[:current_company] do
-        %{id: id} -> id
-        _ -> conn.assigns[:current_company_id]
-      end
+    company_id = authorization_company_id(conn)
 
     cond do
       is_nil(user) ->
@@ -27,6 +24,10 @@ defmodule CymphoWeb.Plugs.BoardAuth do
 
       is_nil(company_id) ->
         deny(conn, "Company context required")
+
+      not CompanyRBAC.allowed?(Companies.get_role(user.id, company_id), :write) ->
+        log_denial(conn, user, company_id)
+        deny(conn, "Writable company role required")
 
       board_members_present?(company_id) and not Companies.is_board_member?(user.id, company_id) ->
         log_denial(conn, user, company_id)
@@ -45,6 +46,37 @@ defmodule CymphoWeb.Plugs.BoardAuth do
     case Companies.list_board_members(company_id) do
       [] -> false
       _ -> true
+    end
+  end
+
+  defp authorization_company_id(conn) do
+    case action_key(conn) do
+      {CymphoWeb.CompanyController, :update_governance_config} ->
+        conn.path_params["id"]
+
+      _other_action ->
+        case conn.assigns[:current_company] do
+          %{id: id} -> id
+          _ -> conn.assigns[:current_company_id]
+        end
+    end
+  end
+
+  defp action_key(conn) do
+    case {conn.private[:phoenix_controller], conn.private[:phoenix_action]} do
+      {controller, action} when not is_nil(controller) and not is_nil(action) ->
+        {controller, action}
+
+      _ ->
+        case Phoenix.Router.route_info(
+               CymphoWeb.Router,
+               conn.method,
+               conn.request_path,
+               conn.host
+             ) do
+          %{plug: controller, plug_opts: action} -> {controller, action}
+          _ -> {nil, nil}
+        end
     end
   end
 

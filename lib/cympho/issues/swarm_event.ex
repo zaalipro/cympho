@@ -42,6 +42,30 @@ defmodule Cympho.Issues.SwarmEvent do
     |> assoc_constraint(:parent_issue)
     |> assoc_constraint(:issue)
     |> assoc_constraint(:agent)
+    |> prepare_changes(&validate_company_scope/1)
+  end
+
+  defp validate_company_scope(changeset) do
+    company_id = get_field(changeset, :company_id)
+
+    changeset
+    |> validate_same_company(:parent_issue_id, Cympho.Issues.Issue, company_id)
+    |> validate_same_company(:issue_id, Cympho.Issues.Issue, company_id)
+    |> validate_same_company(:agent_id, Cympho.Agents.Agent, company_id)
+  end
+
+  defp validate_same_company(changeset, field, schema, company_id) do
+    case get_field(changeset, field) do
+      nil ->
+        changeset
+
+      id ->
+        case changeset.repo.get(schema, id) do
+          %{company_id: ^company_id} -> changeset
+          nil -> changeset
+          _record -> add_error(changeset, field, "must belong to the same company")
+        end
+    end
   end
 
   defp put_default_occurred_at(changeset) do

@@ -41,9 +41,10 @@ defmodule CymphoWeb.BudgetController do
 
   def update(conn, %{"id" => id, "budget" => budget_params}) do
     company_id = conn.assigns.current_company.id
+    params = Map.put(budget_params, "company_id", company_id)
 
     with {:ok, budget} <- Budgets.get_company_budget(company_id, id) do
-      case Budgets.update_budget(budget, budget_params, conn.assigns[:current_user]) do
+      case Budgets.update_budget(budget, params, conn.assigns[:current_user]) do
         {:ok, budget} ->
           json(conn, %{data: budget})
 

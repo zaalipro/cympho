@@ -24,6 +24,7 @@ defmodule Cympho.Companies.CompanyInvite do
   def changeset(invite, attrs) do
     invite
     |> cast(attrs, [:company_id, :inviter_id, :email, :role, :token, :status, :expires_at])
+    |> update_change(:email, &Cympho.Users.User.normalize_email/1)
     |> validate_required([:company_id, :inviter_id, :email, :token, :expires_at])
     |> validate_format(:email, ~r/@/, message: "must be a valid email address")
     |> validate_inclusion(:role, @valid_roles)

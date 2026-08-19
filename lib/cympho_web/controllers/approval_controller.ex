@@ -11,7 +11,7 @@ defmodule CymphoWeb.ApprovalController do
 
     approvals = Approvals.list_approvals(%{status: parsed_status, company_id: company_id})
 
-    json(conn, %{data: approvals})
+    json(conn, %{data: Enum.map(approvals, &approval_data/1)})
   end
 
   def create(conn, %{"approval" => approval_params}) do
@@ -31,7 +31,7 @@ defmodule CymphoWeb.ApprovalController do
         {:ok, approval} ->
           conn
           |> put_status(:created)
-          |> json(%{data: approval})
+          |> json(%{data: approval_data(approval)})
 
         {:error, changeset} ->
           conn
@@ -45,36 +45,47 @@ defmodule CymphoWeb.ApprovalController do
     company_id = conn.assigns.current_company.id
 
     with {:ok, approval} <- Approvals.get_company_approval(company_id, id) do
-      json(conn, %{data: approval})
+      json(conn, %{data: approval_data(approval)})
     end
   end
 
   def update(conn, %{"id" => id, "approval" => approval_params}) do
     company_id = conn.assigns.current_company.id
 
-    with {:ok, _approval} <- Approvals.get_company_approval(company_id, id) do
-      status = approval_params["status"]
-
-      if status in ["approved", "denied"] do
+    case approval_params["status"] do
+      status when status in ["approved", "denied"] ->
         opts = %{
           resolved_by_user_id: conn.assigns.current_user.id,
           resolution_reason: approval_params["resolution_reason"]
         }
 
-        case Approvals.resolve_approval(id, approval_resolution(status), opts) do
+        case Approvals.resolve_company_approval(
+               company_id,
+               id,
+               approval_resolution(status),
+               opts
+             ) do
           {:ok, approval} ->
-            json(conn, %{data: approval})
+            json(conn, %{data: approval_data(approval)})
 
-          {:error, changeset} ->
+          {:error, %Ecto.Changeset{} = changeset} ->
             conn
             |> put_status(:unprocessable_entity)
             |> json(%{errors: format_errors(changeset)})
+
+          {:error, :not_pending} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{error: "approval is no longer pending"})
+
+          {:error, reason} ->
+            {:error, reason}
         end
-      else
+
+      _status ->
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{error: "status must be approved or denied"})
-      end
     end
   end
 
@@ -124,5 +135,20 @@ defmodule CymphoWeb.ApprovalController do
 
   defp company_issue?(company_id, issue_id) do
     match?({:ok, _issue}, Issues.get_company_issue(company_id, issue_id))
+  end
+
+  defp approval_data(approval) do
+    %{
+      id: approval.id,
+      type: approval.type,
+      status: approval.status,
+      payload: approval.payload,
+      resolution_reason: approval.resolution_reason,
+      requested_by_agent_id: approval.requested_by_agent_id,
+      resolved_by_user_id: approval.resolved_by_user_id,
+      issue_ids: Enum.map(approval.issues, & &1.id),
+      inserted_at: approval.inserted_at,
+      updated_at: approval.updated_at
+    }
   end
 end

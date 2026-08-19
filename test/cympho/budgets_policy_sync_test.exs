@@ -5,7 +5,7 @@ defmodule Cympho.BudgetsPolicySyncTest do
   """
   use Cympho.DataCase, async: false
 
-  alias Cympho.{Agents, Budgets, Companies, Finances, Issues}
+  alias Cympho.{Agents, Budgets, Companies, Finances, Issues, Projects}
   alias Cympho.Finances.{BudgetPolicy, TokenUsage}
   alias Cympho.Repo
 
@@ -86,6 +86,101 @@ defmodule Cympho.BudgetsPolicySyncTest do
       assert policy.scope == "agent"
       assert policy.scope_id == agent.id
       assert policy.action_on_exceed == "block"
+    end
+  end
+
+  describe "tenant-scoped targets" do
+    test "create rejects an agent from another company" do
+      company = company_fixture()
+      other_agent = company_fixture() |> agent_fixture()
+
+      assert {:error, changeset} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "Cross-tenant agent cap",
+                 scope_type: "agent",
+                 scope_id: other_agent.id,
+                 limit_amount: Decimal.new("1.00")
+               })
+
+      assert "is not in this company" in errors_on(changeset).scope_id
+      assert Budgets.list_budgets(company_id: company.id) == []
+      assert Finances.list_budget_policies(company.id) == []
+    end
+
+    test "approval executor creation rejects an agent from another company" do
+      company = company_fixture()
+      other_agent = company_fixture() |> agent_fixture()
+
+      assert {:error, changeset} =
+               Budgets.execute_budget_creation(%{
+                 company_id: company.id,
+                 name: "Cross-tenant approved cap",
+                 scope_type: "agent",
+                 scope_id: other_agent.id,
+                 limit_amount: Decimal.new("1.00")
+               })
+
+      assert "is not in this company" in errors_on(changeset).scope_id
+      assert Budgets.list_budgets(company_id: company.id) == []
+      assert Finances.list_budget_policies(company.id) == []
+    end
+
+    test "agent and project scopes keep their relational ids coherent" do
+      company = company_fixture()
+      agent = agent_fixture(company)
+      project = project_fixture(company)
+
+      assert {:ok, budget} =
+               Budgets.create_budget(%{
+                 company_id: company.id,
+                 name: "Coherent agent cap",
+                 scope_type: "agent",
+                 scope_id: agent.id,
+                 limit_amount: Decimal.new("5.00")
+               })
+
+      assert budget.scope_id == agent.id
+      assert budget.agent_id == agent.id
+      assert is_nil(budget.project_id)
+
+      assert {:ok, updated} =
+               Budgets.update_budget(budget, %{
+                 scope_type: "project",
+                 scope_id: project.id
+               })
+
+      assert updated.scope_id == project.id
+      assert updated.project_id == project.id
+      assert is_nil(updated.agent_id)
+    end
+
+    test "update rejects a project from another company without moving the budget" do
+      company = company_fixture()
+      agent = agent_fixture(company)
+      other_project = company_fixture() |> project_fixture()
+
+      {:ok, budget} =
+        Budgets.create_budget(%{
+          company_id: company.id,
+          name: "Tenant-bound cap",
+          scope_type: "agent",
+          scope_id: agent.id,
+          limit_amount: Decimal.new("5.00")
+        })
+
+      assert {:error, changeset} =
+               Budgets.update_budget(budget, %{
+                 scope_type: "project",
+                 scope_id: other_project.id
+               })
+
+      assert "is not in this company" in errors_on(changeset).scope_id
+      persisted = Repo.reload!(budget)
+      assert persisted.scope_type == "agent"
+      assert persisted.scope_id == agent.id
+      assert persisted.agent_id == agent.id
+      assert is_nil(persisted.project_id)
     end
   end
 
@@ -380,6 +475,46 @@ defmodule Cympho.BudgetsPolicySyncTest do
       assert Finances.matching_budget_policy(keep).is_active
       refute Repo.get!(BudgetPolicy, drop_policy.id).is_active
     end
+
+    test "scope-alignment migration detaches a cross-company legacy owner before sync" do
+      source =
+        File.read!(
+          Path.expand(
+            "../../priv/repo/migrations/20260819130000_align_budget_scope_relations.exs",
+            __DIR__
+          )
+        )
+
+      assert source =~ "SET budget_id = NULL"
+      assert source =~ "p.company_id IS DISTINCT FROM b.company_id"
+    end
+
+    test "budget ownership unique-index violations return a changeset error" do
+      company = company_fixture()
+      other_company = company_fixture()
+
+      {:ok, budget} =
+        Budgets.create_budget(%{
+          company_id: company.id,
+          name: "Uniquely owned policy",
+          scope_type: "company",
+          scope_id: company.id,
+          limit_amount: Decimal.new("13.00")
+        })
+
+      # A legacy cross-company link is still accepted by the single-column FK;
+      # the database's named partial unique index must be mapped by the
+      # changeset instead of escaping as Ecto.ConstraintError.
+      assert {:error, collision_changeset} =
+               Finances.create_budget_policy(%{
+                 company_id: other_company.id,
+                 budget_id: budget.id,
+                 scope: "company",
+                 budget_limit_usd: Decimal.new("99.00")
+               })
+
+      assert "has already been taken" in errors_on(collision_changeset).budget_id
+    end
   end
 
   defp company_fixture do
@@ -408,6 +543,19 @@ defmodule Cympho.BudgetsPolicySyncTest do
       })
 
     agent
+  end
+
+  defp project_fixture(company) do
+    unique = System.unique_integer([:positive])
+
+    {:ok, project} =
+      Projects.create_project(%{
+        company_id: company.id,
+        name: "Sync Project #{unique}",
+        prefix: "BP"
+      })
+
+    project
   end
 
   defp issue_fixture(company, agent) do

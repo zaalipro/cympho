@@ -23,6 +23,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
   @max_retries 5
   @replay_batch_size 50
+  @recovery_interval_ms 60_000
   @base_retry_delay_ms 1000
   @max_retry_delay_ms 30000
 
@@ -37,7 +38,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     # Recover any pending approvals that may have been missed during downtime
     send(self(), :recover_pending_approvals)
 
-    {:ok, %{}}
+    {:ok, %{initial_recovery?: true}}
   end
 
   @impl true
@@ -45,7 +46,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     # Claims this node abandoned (crash or redeploy during retry backoff) are
     # released first — retry state lives only in this process's mailbox, so a
     # claim we still hold at startup can never be finished by anyone.
-    case BoardApprovals.reclaim_abandoned_claims() do
+    case BoardApprovals.reclaim_abandoned_claims(include_current_node: state.initial_recovery?) do
       0 ->
         :ok
 
@@ -60,13 +61,13 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     # large backlog after downtime can't monopolize this GenServer for minutes.
     case replay_pending_approvals(@replay_batch_size) do
       :done ->
-        :ok
+        Process.send_after(self(), :recover_pending_approvals, @recovery_interval_ms)
 
       :more ->
         send(self(), :recover_pending_approvals)
     end
 
-    {:noreply, state}
+    {:noreply, %{state | initial_recovery?: false}}
   end
 
   def handle_info({:board_approval_resolved, %{status: "approved"} = approval}, state) do
@@ -91,15 +92,18 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
   end
 
   def handle_info({:retry_approval, approval, attempt}, state) do
-    execute_with_retry(approval, attempt)
+    case BoardApprovals.renew_execution_claim(approval) do
+      :ok -> execute_with_retry(approval, attempt)
+      {:error, :claim_lost} -> :ok
+    end
+
     {:noreply, state}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
 
   # Replay pending approvals for durability. Uses claim_for_execution/1 so
-  # only one node ever wins for any given approval — the partial index on
-  # (executed_at IS NULL AND status = 'approved') makes this cheap.
+  # only one node ever owns a live claim for any given approval.
   # Returns :done if no more candidates remain, :more if there could be.
   defp replay_pending_approvals(batch_size) do
     import Ecto.Query
@@ -138,7 +142,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     # Mark it failed rather than leaving it indistinguishable from a successful
     # execution. The claim stays so it is not silently retried on every boot;
     # an operator can put it back with BoardApprovals.release_claim/1.
-    BoardApprovals.mark_execution_failed(approval.id)
+    BoardApprovals.mark_execution_failed(approval)
 
     GovernanceAuditLogs.log_action(
       "board_decision",
@@ -156,11 +160,11 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
   defp execute_with_retry(approval, attempt) do
     case execute_approved_action(approval) do
       :ok ->
-        BoardApprovals.mark_executed(approval.id)
+        BoardApprovals.mark_executed(approval)
         :ok
 
       {:ok, _result} ->
-        BoardApprovals.mark_executed(approval.id)
+        BoardApprovals.mark_executed(approval)
         :ok
 
       {:error, _reason} ->
@@ -188,7 +192,20 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     min(delay, @max_retry_delay_ms)
   end
 
-  defp execute_approved_action(%{category: "agent_hire"} = approval) do
+  defp execute_approved_action(approval) do
+    case approval.category do
+      "agent_hire" ->
+        BoardApprovals.execute_action_once(approval, fn -> execute_agent_hire(approval) end)
+
+      "agent_promotion" ->
+        BoardApprovals.execute_action_once(approval, fn -> execute_agent_promotion(approval) end)
+
+      _ ->
+        BoardApprovals.execute_approved_action(approval)
+    end
+  end
+
+  defp execute_agent_hire(approval) do
     proposal_data = approval.proposal_data || %{}
 
     # Idempotency check: if agent already exists for this approval, return success
@@ -217,7 +234,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     end
   end
 
-  defp execute_approved_action(%{category: "agent_promotion"} = approval) do
+  defp execute_agent_promotion(approval) do
     proposal_data = approval.proposal_data || %{}
     agent_id = proposal_data["agent_id"]
     new_role = proposal_data["new_role"]
@@ -306,16 +323,6 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
       {:error, :invalid_proposal_data}
     end
   end
-
-  defp execute_approved_action(%{category: "budget_increase"} = approval) do
-    Cympho.BoardApprovals.execute_approved_action(approval)
-  end
-
-  defp execute_approved_action(%{category: "policy_change"} = approval) do
-    Cympho.BoardApprovals.execute_approved_action(approval)
-  end
-
-  defp execute_approved_action(_), do: :ok
 
   defp audit_non_executed(approval, status) do
     GovernanceAuditLogs.log_action(

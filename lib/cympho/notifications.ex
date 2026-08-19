@@ -3,7 +3,7 @@ defmodule Cympho.Notifications do
   The Notifications context for dispatching messages through multiple channels.
   """
 
-  alias Cympho.Notifications.{Dispatcher, Message}
+  alias Cympho.Notifications.{Dispatcher, Message, WebhookURL}
 
   @doc """
   Send a notification to a user.
@@ -24,11 +24,7 @@ defmodule Cympho.Notifications do
   @doc """
   Send a test ping to a webhook URL.
   """
-  def test_webhook(url) do
-    unless is_binary(url) and String.match?(url, ~r/^https:\/\/.+/) do
-      {:error, :invalid_url}
-    end
-
+  def test_webhook(url, opts \\ []) do
     payload = %{
       event: "test_ping",
       message: "Test notification from Cympho",
@@ -38,11 +34,9 @@ defmodule Cympho.Notifications do
     encoded = Jason.encode!(payload)
     headers = [{"Content-Type", "application/json"}]
 
-    req = Finch.build(:post, url, headers, encoded)
-
-    case Finch.request(req, Cympho.Finch) do
-      {:ok, %{status: status}} when status in 200..299 -> {:ok, status}
-      {:ok, %{status: status}} -> {:error, {:http_error, status}}
+    case WebhookURL.post(url, headers, encoded, opts) do
+      {:ok, status} when status in 200..299 -> {:ok, status}
+      {:ok, status} -> {:error, {:http_error, status}}
       {:error, reason} -> {:error, reason}
     end
   end

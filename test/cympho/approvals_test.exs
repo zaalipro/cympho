@@ -1,8 +1,9 @@
 defmodule Cympho.ApprovalsTest do
-  use Cympho.DataCase, async: true
+  use Cympho.DataCase, async: false
 
   alias Cympho.Approvals
   alias Cympho.Approvals.Approval
+  alias Cympho.Decisions.Decision
 
   describe "create_approval/1" do
     test "creates an approval with valid attrs" do
@@ -106,7 +107,7 @@ defmodule Cympho.ApprovalsTest do
 
       {:ok, approved} = Approvals.resolve_approval(approval.id, :approved, %{})
 
-      assert {:error, _changeset} = Approvals.resolve_approval(approved.id, :denied, %{})
+      assert {:error, :not_pending} = Approvals.resolve_approval(approved.id, :denied, %{})
     end
 
     test "broadcasts approval_resolved event" do
@@ -131,11 +132,128 @@ defmodule Cympho.ApprovalsTest do
 
       assert_received {:approval_resolved, _}
     end
+
+    test "commits the approval and its company-scoped Decision together" do
+      company = insert_company()
+      agent = insert_agent(company_id: company.id)
+      {:ok, approval} = create_test_approval(agent)
+
+      assert {:ok, updated} =
+               Approvals.resolve_approval(approval.id, :approved, %{
+                 resolution_reason: "Approved with an audit decision"
+               })
+
+      decision =
+        Repo.one!(
+          from(d in Decision,
+            where: d.resource_type == "approval" and d.resource_id == ^approval.id
+          )
+        )
+
+      assert updated.status == :approved
+      assert decision.company_id == company.id
+      assert decision.outcome == "approved"
+      assert decision.reasoning == "Approved with an audit decision"
+    end
+
+    test "rolls back the status when the required Decision cannot be recorded" do
+      agent = insert_agent(without_company: true)
+      {:ok, approval} = create_test_approval(agent)
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Approvals.resolve_approval(approval.id, :approved, %{})
+
+      assert %{company_id: ["can't be blank"]} = errors_on(changeset)
+      assert Approvals.get_approval!(approval.id).status == :pending
+
+      refute Repo.exists?(
+               from(d in Decision,
+                 where: d.resource_type == "approval" and d.resource_id == ^approval.id
+               )
+             )
+    end
+
+    test "only one concurrent contradictory resolution wins" do
+      company = insert_company()
+      agent = insert_agent(company_id: company.id)
+      {:ok, approval} = create_test_approval(agent)
+
+      results =
+        run_concurrently([
+          fn -> Approvals.resolve_approval(approval.id, :approved, %{}) end,
+          fn -> Approvals.resolve_approval(approval.id, :denied, %{}) end
+        ])
+
+      assert 1 == Enum.count(results, &match?({:ok, %Approval{}}, &1))
+      assert 1 == Enum.count(results, &match?({:error, :not_pending}, &1))
+
+      resolved = Approvals.get_approval!(approval.id)
+
+      [decision] =
+        Repo.all(
+          from(d in Decision,
+            where: d.resource_type == "approval" and d.resource_id == ^approval.id
+          )
+        )
+
+      assert resolved.status in [:approved, :denied]
+      assert decision.outcome == to_string(resolved.status)
+    end
+
+    test "cancellation and resolution use the same pending-state compare-and-set" do
+      company = insert_company()
+      agent = insert_agent(company_id: company.id)
+      {:ok, approval} = create_test_approval(agent)
+
+      results =
+        run_concurrently([
+          fn -> Approvals.resolve_approval(approval.id, :approved, %{}) end,
+          fn -> Approvals.cancel_approval(approval.id) end
+        ])
+
+      assert 1 == Enum.count(results, &match?({:ok, %Approval{}}, &1))
+      assert 1 == Enum.count(results, &match?({:error, :not_pending}, &1))
+      assert Approvals.get_approval!(approval.id).status in [:approved, :cancelled]
+    end
+  end
+
+  describe "resolver authorization" do
+    test "permits owners, admins, and board members but not ordinary members" do
+      company = insert_company()
+      owner = insert_member(company, "owner")
+      admin = insert_member(company, "admin")
+      board_member = insert_member(company, "member", true)
+      member = insert_member(company, "member")
+      viewer = insert_member(company, "viewer")
+      viewer_board_member = insert_member(company, "viewer", true)
+
+      assert Approvals.resolver_authorized?(owner.id, company.id)
+      assert Approvals.resolver_authorized?(admin.id, company.id)
+      assert Approvals.resolver_authorized?(board_member.id, company.id)
+      refute Approvals.resolver_authorized?(member.id, company.id)
+      refute Approvals.resolver_authorized?(viewer.id, company.id)
+      refute Approvals.resolver_authorized?(viewer_board_member.id, company.id)
+    end
+
+    test "company-scoped resolution rejects an unauthorized member without mutation" do
+      company = insert_company()
+      member = insert_member(company, "member")
+      agent = insert_agent(company_id: company.id)
+      {:ok, approval} = create_test_approval(agent)
+
+      assert {:error, :forbidden} =
+               Approvals.resolve_company_approval(company.id, approval.id, :approved, %{
+                 resolved_by_user_id: member.id
+               })
+
+      assert Approvals.get_approval!(approval.id).status == :pending
+      refute Repo.exists?(from d in Decision, where: d.resource_id == ^approval.id)
+    end
   end
 
   describe "cancel_approval/1" do
     test "cancels a pending approval" do
-      agent = insert_agent()
+      agent = insert_agent(without_company: true)
       {:ok, approval} = create_test_approval(agent)
 
       assert {:ok, updated} = Approvals.cancel_approval(approval.id)
@@ -241,7 +359,7 @@ defmodule Cympho.ApprovalsTest do
   describe "fail-closed pubsub (lb-pubsub-fail-closed)" do
     test "does not publish unscoped approvals or company:: when company cannot be resolved" do
       # Agent with no company_id and no linked issues → no tenant topic.
-      agent = insert_agent()
+      agent = insert_agent(without_company: true)
       assert is_nil(agent.company_id)
 
       Phoenix.PubSub.subscribe(Cympho.PubSub, "approvals")
@@ -322,12 +440,14 @@ defmodule Cympho.ApprovalsTest do
       status: :idle
     }
 
-    agent =
-      if opts[:company_id] do
-        %{agent | company_id: opts[:company_id]}
-      else
-        agent
+    company_id =
+      cond do
+        opts[:without_company] -> nil
+        opts[:company_id] -> opts[:company_id]
+        true -> insert_company().id
       end
+
+    agent = %{agent | company_id: company_id}
 
     %{id: id} = Cympho.Repo.insert!(agent)
     Cympho.Repo.get!(Cympho.Agents.Agent, id)
@@ -385,5 +505,46 @@ defmodule Cympho.ApprovalsTest do
       end
 
     Approvals.create_approval(attrs)
+  end
+
+  defp insert_member(company, role, board_member \\ false) do
+    unique = System.unique_integer([:positive])
+
+    {:ok, user} =
+      Cympho.Users.create_user(%{
+        email: "approval-resolver-#{unique}@example.com",
+        name: "Approval Resolver #{unique}",
+        password: "password1234"
+      })
+
+    {:ok, _membership} =
+      Cympho.Companies.create_membership(%{
+        user_id: user.id,
+        company_id: company.id,
+        role: role,
+        is_board_member: board_member
+      })
+
+    user
+  end
+
+  defp run_concurrently(funs) do
+    parent = self()
+
+    tasks =
+      Enum.map(funs, fn fun ->
+        Task.async(fn ->
+          send(parent, {:ready, self()})
+
+          receive do
+            :go -> fun.()
+          end
+        end)
+      end)
+
+    task_pids = Enum.map(tasks, & &1.pid)
+    Enum.each(task_pids, fn pid -> assert_receive {:ready, ^pid} end)
+    Enum.each(task_pids, &send(&1, :go))
+    Task.await_many(tasks, 5_000)
   end
 end

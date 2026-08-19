@@ -72,6 +72,15 @@ defmodule Cympho.AgentRunnerTest do
   end
 
   describe "run/4" do
+    test "adapter config can lower but cannot raise the global output ceiling" do
+      assert AgentRunner.effective_max_output_bytes([], %{"max_output_bytes" => 16_384}) ==
+               16_384
+
+      assert AgentRunner.effective_max_output_bytes([], %{
+               "max_output_bytes" => 80_000_000
+             }) == 8_000_000
+    end
+
     test "uses the command from resolved adapter config" do
       tmp_dir = Path.join(System.tmp_dir!(), "cympho-agent-runner-#{System.unique_integer()}")
       File.mkdir_p!(tmp_dir)
@@ -490,6 +499,59 @@ defmodule Cympho.AgentRunnerTest do
       assert_receive {:session_started, ^session_id}, @receive_timeout
       assert_receive {:turn_ended_with_error, ^session_id, :max_run_timeout}, 2_000
       refute_receive {:turn_completed, ^session_id, _result}, 100
+      assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
+    end
+
+    test "kills a process that exceeds the stdout cap and reports only a bounded tail" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-output-cap-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      pid_file = Path.join(tmp_dir, "child.pid")
+      command = Path.join(tmp_dir, "fake-claude")
+
+      File.write!(command, """
+      #!/bin/sh
+      echo $$ > '#{pid_file}'
+      printf '{\"result\":\"'
+      while true; do
+        printf 'tail-marker-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n'
+      done
+      """)
+
+      File.chmod!(command, 0o755)
+
+      issue = %{
+        id: "output-cap-command",
+        title: "Output cap command",
+        description: "Never completes its JSON output"
+      }
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", self(),
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 5_000,
+          max_run_ms: 5_000,
+          max_output_bytes: 16_384
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:output_limit_exceeded, 16_384, tail}},
+                     @receive_timeout
+
+      assert byte_size(tail) == 8_192
+      assert tail =~ "tail-marker"
+      refute tail =~ ~s({"result":")
+      assert eventually(fn -> File.exists?(pid_file) end)
+
+      os_pid = pid_file |> File.read!() |> String.trim()
+      assert eventually(fn -> not os_process_alive?(os_pid) end, 60)
       assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
     end
 

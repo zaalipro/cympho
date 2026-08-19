@@ -509,10 +509,8 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
     service.status in ["failed", "error"] or service.health_status in @bad_service_health
   end
 
-  defp preview_href(%{status: "running", port: port, id: id}) when is_integer(port),
-    do: "/api/preview/#{id}/proxy"
-
-  defp preview_href(_service), do: nil
+  defp preview_href(service),
+    do: Cympho.Workspaces.PreviewUrl.generate_preview_url(service, "")
 
   defp connection_string(%{url: url}) when is_binary(url) and url != "", do: url
   defp connection_string(%{port: port}) when is_integer(port), do: "localhost:#{port}"

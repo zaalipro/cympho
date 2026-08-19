@@ -152,6 +152,7 @@ defmodule CymphoWeb.RoutineLiveTest do
       assert html =~ "Active"
     end
 
+    @tag membership_role: "admin"
     test "archives a routine", %{conn: conn} do
       {:ok, routine} = create_routine(%{name: "To Archive"})
 

@@ -4,7 +4,7 @@ defmodule CymphoWeb.IssueControllerTest do
   alias Cympho.Projects
 
   setup %{conn: conn} do
-    {conn, _user, company} = register_and_log_in_user(conn)
+    {conn, user, company} = register_and_log_in_user(conn)
 
     {:ok, project} =
       Projects.create_project(%{
@@ -13,7 +13,7 @@ defmodule CymphoWeb.IssueControllerTest do
         company_id: company.id
       })
 
-    %{conn: conn, project: project, company: company}
+    %{conn: conn, user: user, project: project, company: company}
   end
 
   describe "POST /api/issues" do
@@ -66,6 +66,60 @@ defmodule CymphoWeb.IssueControllerTest do
 
       conn = post(conn, "/api/issues", params)
       assert %{"errors" => _} = json_response(conn, 422)
+    end
+
+    test "ignores forged system and tenant fields and records the authenticated creator", %{
+      conn: conn,
+      user: user,
+      project: project,
+      company: company
+    } do
+      forged_id = Ecto.UUID.generate()
+
+      conn =
+        post(conn, "/api/issues", %{
+          "issue" => %{
+            "title" => "Request-owned fields",
+            "project_id" => project.id,
+            "company_id" => forged_id,
+            "created_by_user_id" => forged_id,
+            "created_by_agent_id" => forged_id,
+            "last_reviewer_id" => forged_id,
+            "checkout_run_id" => forged_id,
+            "project_workspace_id" => forged_id,
+            "execution_workspace_id" => forged_id,
+            "identifier" => "FORGED-999",
+            "issue_number" => 999,
+            "origin_type" => "forged",
+            "origin_id" => "forged",
+            "request_depth" => 999,
+            "execution_state" => %{"forged" => true},
+            "monitor_state" => %{"forged" => true},
+            "lineage" => %{"forged" => true},
+            "actor_type" => "agent",
+            "actor_id" => forged_id
+          }
+        })
+
+      %{"data" => %{"id" => issue_id}} = json_response(conn, 201)
+      issue = Cympho.Repo.get!(Cympho.Issues.Issue, issue_id)
+
+      assert issue.company_id == company.id
+      assert issue.created_by_user_id == user.id
+      assert issue.project_id == project.id
+      assert issue.identifier != "FORGED-999"
+      assert issue.issue_number != 999
+      assert is_nil(issue.created_by_agent_id)
+      assert is_nil(issue.last_reviewer_id)
+      assert is_nil(issue.checkout_run_id)
+      assert is_nil(issue.project_workspace_id)
+      assert is_nil(issue.execution_workspace_id)
+      assert is_nil(issue.origin_type)
+      assert is_nil(issue.origin_id)
+      assert issue.request_depth == 0
+      assert issue.execution_state == %{}
+      assert issue.monitor_state == %{}
+      refute issue.lineage == %{"forged" => true}
     end
   end
 

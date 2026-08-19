@@ -1,7 +1,30 @@
 defmodule CymphoWeb.WorkspaceController do
   use CymphoWeb, :controller
 
-  alias Cympho.{Projects, Workspaces}
+  alias Cympho.{Issues, Projects, Workspaces}
+
+  @execution_workspace_writable_fields ~w(
+    mode
+    strategy_type
+    name
+    cwd
+    repo_url
+    base_ref
+    branch_name
+    provider_type
+    metadata
+  )
+  @execution_workspace_create_relation_fields ~w(
+    source_issue_id
+    derived_from_execution_workspace_id
+  )
+  @lease_writable_fields ~w(
+    lease_policy
+    environment_id
+    issue_id
+    expires_at
+    metadata
+  )
 
   action_fallback CymphoWeb.FallbackController
 
@@ -119,9 +142,14 @@ defmodule CymphoWeb.WorkspaceController do
            Workspaces.get_company_project_workspace(company_id(conn), pw_id) do
       params =
         workspace_params
+        |> Map.take(
+          @execution_workspace_writable_fields ++ @execution_workspace_create_relation_fields
+        )
         |> Map.put("company_id", project_workspace.company_id)
         |> Map.put("project_id", project_workspace.project_id)
         |> Map.put("project_workspace_id", project_workspace.id)
+        |> Map.put("status", "open")
+        |> Map.put("opened_at", DateTime.utc_now() |> DateTime.truncate(:second))
 
       case Workspaces.create_execution_workspace(params) do
         {:ok, workspace} ->
@@ -140,7 +168,10 @@ defmodule CymphoWeb.WorkspaceController do
   def update_exec_workspace(conn, %{"id" => id, "execution_workspace" => workspace_params}) do
     case Workspaces.get_company_execution_workspace(company_id(conn), id) do
       {:ok, workspace} ->
-        case Workspaces.update_execution_workspace(workspace, workspace_params) do
+        case Workspaces.update_execution_workspace(
+               workspace,
+               Map.take(workspace_params, @execution_workspace_writable_fields)
+             ) do
           {:ok, updated} ->
             json(conn, %{data: updated})
 
@@ -272,25 +303,18 @@ defmodule CymphoWeb.WorkspaceController do
     with {:ok, execution_workspace} <-
            Workspaces.get_company_execution_workspace(company_id(conn), ew_id) do
       services = Workspaces.list_runtime_services(execution_workspace.id)
-      json(conn, %{data: services})
+      json(conn, %{data: encode_records(services)})
     end
   end
 
   def create_service(conn, %{"id" => ew_id, "runtime_service" => service_params}) do
     with {:ok, execution_workspace} <-
            Workspaces.get_company_execution_workspace(company_id(conn), ew_id) do
-      params =
-        service_params
-        |> Map.put("company_id", execution_workspace.company_id)
-        |> Map.put("project_id", execution_workspace.project_id)
-        |> Map.put("project_workspace_id", execution_workspace.project_workspace_id)
-        |> Map.put("execution_workspace_id", execution_workspace.id)
-
-      case Workspaces.create_runtime_service(params) do
+      case Workspaces.create_runtime_service(execution_workspace, service_params) do
         {:ok, service} ->
           conn
           |> put_status(:created)
-          |> json(%{data: service})
+          |> json(%{data: encode_records(service)})
 
         {:error, changeset} ->
           conn
@@ -309,7 +333,7 @@ defmodule CymphoWeb.WorkspaceController do
         |> render(:"404")
 
       {:ok, service} ->
-        json(conn, %{data: service})
+        json(conn, %{data: encode_records(service)})
     end
   end
 
@@ -324,7 +348,7 @@ defmodule CymphoWeb.WorkspaceController do
       {:ok, service} ->
         case Workspaces.start_service(service) do
           {:ok, updated} ->
-            json(conn, %{data: updated})
+            json(conn, %{data: encode_records(updated)})
 
           {:error, changeset} ->
             conn
@@ -345,7 +369,7 @@ defmodule CymphoWeb.WorkspaceController do
       {:ok, service} ->
         case Workspaces.stop_service(service) do
           {:ok, updated} ->
-            json(conn, %{data: updated})
+            json(conn, %{data: encode_records(updated)})
 
           {:error, changeset} ->
             conn
@@ -366,7 +390,7 @@ defmodule CymphoWeb.WorkspaceController do
       {:ok, service} ->
         case Workspaces.restart_service(service) do
           {:ok, updated} ->
-            json(conn, %{data: updated})
+            json(conn, %{data: encode_records(updated)})
 
           {:error, changeset} ->
             conn
@@ -398,13 +422,16 @@ defmodule CymphoWeb.WorkspaceController do
 
   # --- Leases ---
 
-  def create_lease(conn, %{"lease" => lease_params}) do
-    with {:ok, lease_params} <- scoped_lease_params(conn, lease_params) do
+  def create_lease(conn, %{"id" => execution_workspace_id, "lease" => lease_params}) do
+    with {:ok, execution_workspace} <-
+           Workspaces.get_company_execution_workspace(company_id(conn), execution_workspace_id),
+         {:ok, lease_params} <-
+           scoped_lease_params(conn, execution_workspace, lease_params) do
       case Workspaces.create_lease(lease_params) do
         {:ok, lease} ->
           conn
           |> put_status(:created)
-          |> json(%{data: lease})
+          |> json(%{data: encode_records(lease)})
 
         {:error, changeset} ->
           conn
@@ -425,7 +452,7 @@ defmodule CymphoWeb.WorkspaceController do
       {:ok, lease} ->
         case Workspaces.revoke_lease(lease) do
           {:ok, updated} ->
-            json(conn, %{data: updated})
+            json(conn, %{data: encode_records(updated)})
 
           {:error, changeset} ->
             conn
@@ -458,12 +485,17 @@ defmodule CymphoWeb.WorkspaceController do
     end
   end
 
-  defp scoped_lease_params(conn, params) do
+  defp scoped_lease_params(conn, execution_workspace, params) do
     company_id = company_id(conn)
 
     with :ok <- validate_environment_ref(company_id, params["environment_id"]),
-         :ok <- validate_execution_workspace_ref(company_id, params["execution_workspace_id"]) do
-      {:ok, Map.put(params, "company_id", company_id)}
+         :ok <- validate_issue_ref(company_id, params["issue_id"]) do
+      {:ok,
+       params
+       |> Map.take(@lease_writable_fields)
+       |> Map.put("company_id", company_id)
+       |> Map.put("execution_workspace_id", execution_workspace.id)
+       |> Map.put("status", "active")}
     end
   end
 
@@ -477,12 +509,12 @@ defmodule CymphoWeb.WorkspaceController do
     end
   end
 
-  defp validate_execution_workspace_ref(_company_id, nil), do: :ok
-  defp validate_execution_workspace_ref(_company_id, ""), do: :ok
+  defp validate_issue_ref(_company_id, nil), do: :ok
+  defp validate_issue_ref(_company_id, ""), do: :ok
 
-  defp validate_execution_workspace_ref(company_id, execution_workspace_id) do
-    case Workspaces.get_company_execution_workspace(company_id, execution_workspace_id) do
-      {:ok, _execution_workspace} -> :ok
+  defp validate_issue_ref(company_id, issue_id) do
+    case Issues.get_company_issue(company_id, issue_id) do
+      {:ok, _issue} -> :ok
       {:error, _} -> {:error, :not_found}
     end
   end

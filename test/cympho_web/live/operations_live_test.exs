@@ -7,6 +7,7 @@ defmodule CymphoWeb.OperationsLiveTest do
   alias Cympho.AgentActions
   alias Cympho.Agents
   alias Cympho.Comments
+  alias Cympho.Companies
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Inbox
   alias Cympho.Issues
@@ -203,6 +204,39 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       assert element_attrs(html, "[data-density-option='detailed']")["href"] =~
                "density=detailed"
+    end
+
+    test "does not show swarm events for a forged parent from another company", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      conn = live_session_conn(conn, user, company)
+      unique = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Foreign Operations #{unique}",
+          slug: "foreign-operations-#{unique}"
+        })
+
+      {:ok, foreign_parent} =
+        Issues.create_issue(%{
+          title: "Foreign swarm parent",
+          status: :todo,
+          company_id: other_company.id
+        })
+
+      :ok =
+        SwarmEvents.record(foreign_parent, %{
+          event_type: "launch_ready",
+          status: "success",
+          message: "FOREIGN SWARM EVENT #{unique}"
+        })
+
+      {:ok, _view, html} =
+        live(conn, "/operations?parent_issue_id=#{foreign_parent.id}")
+
+      refute html =~ "FOREIGN SWARM EVENT #{unique}"
+      refute html =~ ~s(data-testid="operations-swarm-log")
+      refute html =~ "parent_issue_id=#{foreign_parent.id}"
     end
 
     test "explains launch-ready adapter health warnings", %{conn: conn} do
@@ -1477,7 +1511,7 @@ defmodule CymphoWeb.OperationsLiveTest do
     end
 
     test "recovers stale checked-out issues from runtime capacity", %{conn: conn} do
-      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn, %{role: "admin"})
       conn = live_session_conn(conn, user, company)
 
       {:ok, agent} =

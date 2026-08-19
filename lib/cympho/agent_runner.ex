@@ -16,6 +16,8 @@ defmodule Cympho.AgentRunner do
   # Absolute wall-clock cap independent of output drip. Stall timeout alone
   # resets on any stdout, so a slow drip can burn spend forever without this.
   @max_run_ms Application.compile_env(:cympho, :agent_runner_max_run_ms, 3_600_000)
+  @max_output_bytes Application.compile_env(:cympho, :agent_runner_max_output_bytes, 8_000_000)
+  @diagnostic_tail_bytes 8_192
   @fresh_turn_wake_reasons ~w(issue_commented issue_comment_mentioned)
 
   @doc """
@@ -28,14 +30,19 @@ defmodule Cympho.AgentRunner do
     - `:stall_timeout` — milliseconds of silence before killing hung process (default 300_000 / 5 min)
     - `:max_run_ms` — absolute wall-clock milliseconds for the whole run, even if
       output keeps dripping (default 3_600_000 / 1 hour). Also read from config.
+    - `:max_output_bytes` — absolute stdout/stderr byte cap for the whole run
+      (default 8_000_000). Also read from config.
   """
   def run(issue, agent_id, recipient_pid, opts \\ []) when is_pid(recipient_pid) do
     session_id = make_ref()
     config = option_value(opts, :config) || %{}
     cwd = option_value(opts, :cwd) || option_value(config, :cwd) || issue_workspace_path(issue)
     resume_decision = resume_decision(issue, cwd, resume_requested?(opts, config), opts)
-    stall_timeout = resolve_timeout_ms(opts, config, :stall_timeout, @stall_timeout)
-    max_run_ms = resolve_timeout_ms(opts, config, :max_run_ms, @max_run_ms)
+    stall_timeout = resolve_positive_integer(opts, config, :stall_timeout, @stall_timeout)
+    max_run_ms = resolve_positive_integer(opts, config, :max_run_ms, @max_run_ms)
+
+    max_output_bytes = effective_max_output_bytes(opts, config)
+
     env = opts[:env] || runtime_context_env(opts[:runtime_context])
 
     cmd = build_claude_command(issue, agent_id, resume_decision, opts)
@@ -52,11 +59,20 @@ defmodule Cympho.AgentRunner do
         Process.monitor(recipient_pid)
 
         try do
-          do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, max_run_ms, env)
+          do_run(
+            session_id,
+            cmd,
+            cwd,
+            recipient_pid,
+            stall_timeout,
+            max_run_ms,
+            max_output_bytes,
+            env
+          )
         rescue
           exception ->
             # Every other adapter reports a crashing worker; this one did not.
-            # `do_run/7` writes a prompt file and opens a port before it sends
+            # `do_run/8` writes a prompt file and opens a port before it sends
             # anything, so an ENOSPC or EACCES there killed the worker silently.
             # The orchestrator keeps stamping run heartbeats, which hides the run
             # from the watchdog's stale scan, and its own dead-worker detector
@@ -83,7 +99,7 @@ defmodule Cympho.AgentRunner do
     session_id
   end
 
-  defp resolve_timeout_ms(opts, config, key, default) do
+  defp resolve_positive_integer(opts, config, key, default) do
     case option_value(opts, key) || option_value(config, key) do
       value when is_integer(value) and value > 0 ->
         value
@@ -97,6 +113,13 @@ defmodule Cympho.AgentRunner do
       _ ->
         default
     end
+  end
+
+  @doc false
+  def effective_max_output_bytes(opts, config) do
+    opts
+    |> resolve_positive_integer(config, :max_output_bytes, @max_output_bytes)
+    |> min(@max_output_bytes)
   end
 
   defp build_claude_command(issue, agent_id, resume_decision, opts) do
@@ -265,12 +288,12 @@ defmodule Cympho.AgentRunner do
          recipient_pid,
          stall_timeout,
          max_run_ms,
+         max_output_bytes,
          runtime_env
        ) do
-    quoted =
-      Enum.map([command | args], fn token ->
-        "'" <> String.replace(to_string(token), "'", "'\"'\"'") <> "'"
-      end)
+    quoted = Enum.map([command | args], &shell_quote/1)
+    pipe_limit = max_output_bytes + 1
+    limiter = output_limiter_command(pipe_limit)
 
     anthropic_api_key =
       runtime_env["ANTHROPIC_API_KEY"] || runtime_env[:ANTHROPIC_API_KEY] || api_key()
@@ -292,8 +315,10 @@ defmodule Cympho.AgentRunner do
             cd: cwd,
             args: [
               "-lc",
-              "source \"$HOME/.cld\" 2>/dev/null || true; exec " <>
-                Enum.join(quoted, " ") <> " < \"$CYMPHO_PROMPT_FILE\""
+              "set -o pipefail; { source \"$HOME/.cld\" 2>/dev/null || true; exec " <>
+                Enum.join(quoted, " ") <>
+                " < \"$CYMPHO_PROMPT_FILE\"; } 2>&1 | " <>
+                limiter <> " -c #{pipe_limit}; exit \"${PIPESTATUS[0]}\""
             ],
             env: port_opts_env
           ])
@@ -320,11 +345,13 @@ defmodule Cympho.AgentRunner do
       loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, %{
         started_at: started_at,
         last_output_time: started_at,
+        max_output_bytes: max_output_bytes,
         bytes: 0,
         chunks: 0,
         last_report_at: nil,
         turn_completed?: false,
-        buffer: ""
+        buffer: "",
+        diagnostic_tail: ""
       })
     end)
   end
@@ -333,6 +360,17 @@ defmodule Cympho.AgentRunner do
     wait_ms = watchdog_wait_ms(state, stall_timeout, max_run_ms)
 
     receive do
+      {^port, {:data, output}}
+      when state.bytes + byte_size(output) > state.max_output_bytes ->
+        diagnostic_tail = append_diagnostic_tail(state.diagnostic_tail, output)
+        close_port(port)
+
+        send(
+          recipient_pid,
+          {:turn_ended_with_error, session_id,
+           {:output_limit_exceeded, state.max_output_bytes, diagnostic_tail}}
+        )
+
       {^port, {:data, output}} ->
         buffer = state.buffer <> output
 
@@ -341,6 +379,7 @@ defmodule Cympho.AgentRunner do
             state
             | last_output_time: System.system_time(:millisecond),
               buffer: buffer,
+              diagnostic_tail: append_diagnostic_tail(state.diagnostic_tail, output),
               bytes: state.bytes + byte_size(output),
               chunks: state.chunks + 1
           }
@@ -437,6 +476,19 @@ defmodule Cympho.AgentRunner do
     end
   end
 
+  defp append_diagnostic_tail(_tail, output) when byte_size(output) >= @diagnostic_tail_bytes do
+    output
+    |> binary_part(byte_size(output) - @diagnostic_tail_bytes, @diagnostic_tail_bytes)
+    |> :binary.copy()
+  end
+
+  defp append_diagnostic_tail(tail, output) do
+    output_size = byte_size(output)
+    retained_tail_size = min(byte_size(tail), @diagnostic_tail_bytes - output_size)
+
+    binary_part(tail, byte_size(tail) - retained_tail_size, retained_tail_size) <> output
+  end
+
   # Output is buffered until the process exits, so an owner watching an issue
   # saw nothing between "running" and a finished comment — for up to the full
   # wall-clock cap. Reporting byte and chunk counts as they arrive is
@@ -460,6 +512,34 @@ defmodule Cympho.AgentRunner do
 
   defp close_port(port) when is_port(port) do
     Cympho.PortKiller.close(port)
+  end
+
+  defp shell_quote(token) do
+    "'" <> String.replace(to_string(token), "'", "'\"'\"'") <> "'"
+  end
+
+  # `head -c` reads all requested bytes before it writes anything on common
+  # platforms. That hides progress and turns the stall timer into a false
+  # positive for every normal response below the cap. This relay uses
+  # unbuffered syscalls, streams promptly, and closes its input after exactly
+  # `limit` bytes so the child receives SIGPIPE before excess output can enter
+  # the BEAM mailbox. Minimal systems without Perl fall back to byte-wise `dd`:
+  # slower only for unusually large output, but still bounded and streaming.
+  defp output_limiter_command(limit) do
+    case System.find_executable("perl") do
+      perl when is_binary(perl) ->
+        program =
+          "$r=shift; while($r>0){$w=$r<65536?$r:65536;" <>
+            "$n=sysread(STDIN,$b,$w); last unless $n; $o=0;" <>
+            "while($o<$n){$x=syswrite(STDOUT,$b,$n-$o,$o); exit 1 unless $x; $o+=$x;}" <>
+            "$r-=$n;}"
+
+        Enum.map_join([perl, "-e", program, Integer.to_string(limit)], " ", &shell_quote/1)
+
+      _ ->
+        dd = System.find_executable("dd") || "/bin/dd"
+        "#{shell_quote(dd)} bs=1 count=#{limit} 2>/dev/null"
+    end
   end
 
   # Nearest of absolute max-run and stall-silence deadlines. Zero means the

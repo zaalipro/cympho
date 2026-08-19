@@ -418,7 +418,7 @@ defmodule CymphoWeb.SecretsLive.Index do
   end
 
   defp can_manage_secrets?(%{id: user_id}, company_id) when is_binary(company_id) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    Cympho.CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp can_manage_secrets?(_user, _company_id), do: false

@@ -12,7 +12,11 @@ defmodule CymphoWeb.ApprovalLive.Show do
 
         {:ok,
          socket
-         |> assign(approval: approval, page_title: "Approval #{approval.id}")
+         |> assign(
+           approval: approval,
+           page_title: "Approval #{approval.id}",
+           can_resolve_approvals: can_resolve_approvals?(socket)
+         )
          |> assign_decision_packet()}
 
       {:error, :not_found} ->
@@ -29,33 +33,33 @@ defmodule CymphoWeb.ApprovalLive.Show do
 
   @impl true
   def handle_event("approve", _params, socket) do
-    case Approvals.resolve_approval(socket.assigns.approval.id, :approved, %{
-           resolved_by_user_id: current_user_id(socket),
-           resolution_reason: "Approved via UI"
-         }) do
+    case resolve_approval(socket, :approved, "Approved via UI") do
       {:ok, approval} ->
         {:noreply,
          socket
          |> assign(:approval, approval)
          |> assign_decision_packet()}
 
-      {:error, _changeset} ->
+      {:error, :forbidden} ->
+        {:noreply, put_flash(socket, :error, resolver_forbidden_message())}
+
+      {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Failed to approve")}
     end
   end
 
   def handle_event("deny", _params, socket) do
-    case Approvals.resolve_approval(socket.assigns.approval.id, :denied, %{
-           resolved_by_user_id: current_user_id(socket),
-           resolution_reason: "Denied via UI"
-         }) do
+    case resolve_approval(socket, :denied, "Denied via UI") do
       {:ok, approval} ->
         {:noreply,
          socket
          |> assign(:approval, approval)
          |> assign_decision_packet()}
 
-      {:error, _changeset} ->
+      {:error, :forbidden} ->
+        {:noreply, put_flash(socket, :error, resolver_forbidden_message())}
+
+      {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Failed to deny")}
     end
   end
@@ -94,12 +98,31 @@ defmodule CymphoWeb.ApprovalLive.Show do
     }
   end
 
-  defp current_user_id(socket) do
-    case socket.assigns[:current_user] do
-      %{id: id} -> id
-      _ -> nil
+  defp resolve_approval(socket, decision, reason) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         %{id: user_id} <- socket.assigns[:current_user] do
+      Approvals.resolve_company_approval(
+        company_id,
+        socket.assigns.approval.id,
+        decision,
+        %{resolved_by_user_id: user_id, resolution_reason: reason}
+      )
+    else
+      _ -> {:error, :forbidden}
     end
   end
+
+  defp can_resolve_approvals?(socket) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         %{id: user_id} <- socket.assigns[:current_user] do
+      Approvals.resolver_authorized?(user_id, company_id)
+    else
+      _ -> false
+    end
+  end
+
+  defp resolver_forbidden_message,
+    do: "Only company owners, admins, and board members can resolve approvals."
 
   defp status_label(status) do
     status

@@ -50,6 +50,10 @@ defmodule Cympho.Workspaces.EnvironmentLease do
       :issue_id
     ])
     |> validate_required([:status, :company_id, :environment_id])
+    |> foreign_key_constraint(:company_id)
+    |> foreign_key_constraint(:environment_id)
+    |> foreign_key_constraint(:execution_workspace_id)
+    |> foreign_key_constraint(:issue_id)
   end
 
   @doc false

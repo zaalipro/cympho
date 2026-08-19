@@ -141,7 +141,11 @@ defmodule CymphoWeb.CompanyImportLive do
 
     result =
       try do
-        case Companies.import_company(import_data, slug_strategy: slug_strategy) do
+        case Companies.import_company_for_owner(
+               import_data,
+               socket.assigns.current_user.id,
+               slug_strategy: slug_strategy
+             ) do
           {:ok, %{company: company} = import_result} ->
             # Emit a pubsub notification for real-time updates
             CymphoWeb.Endpoint.broadcast("companies:lobby", "company_imported", %{

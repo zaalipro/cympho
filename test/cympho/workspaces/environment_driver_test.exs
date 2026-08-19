@@ -92,6 +92,18 @@ defmodule Cympho.Workspaces.EnvironmentDriverTest do
       assert :ok = Fake.release(handle.provider_ref, %{})
     end
 
+    test "acquire reuses a provider handle for the same idempotency key" do
+      company_id = Ecto.UUID.generate()
+
+      assert {:ok, first} =
+               Fake.acquire(%{company_id: company_id, idempotency_key: "lease-request-1"}, %{})
+
+      assert {:ok, second} =
+               Fake.acquire(%{company_id: company_id, idempotency_key: "lease-request-1"}, %{})
+
+      assert second.provider_ref == first.provider_ref
+    end
+
     test "execute after release fails" do
       company_id = Ecto.UUID.generate()
       assert {:ok, handle} = Fake.acquire(%{"company_id" => company_id}, %{})
@@ -231,8 +243,7 @@ defmodule Cympho.Workspaces.EnvironmentDriverTest do
     end
 
     test "refuses cross-company workspace release" do
-      %{company: company_a, project: project, project_workspace: pw, issue: issue} =
-        seed_workspace_graph()
+      %{company: company_a, issue: issue} = seed_workspace_graph()
 
       {:ok, company_b} =
         Companies.create_company(%{
@@ -242,19 +253,50 @@ defmodule Cympho.Workspaces.EnvironmentDriverTest do
 
       assert {:ok, handle} = Fake.acquire(%{company_id: company_b.id}, %{})
 
+      foreign_prefix =
+        System.unique_integer([:positive])
+        |> Integer.to_string(26)
+        |> String.upcase()
+        |> String.replace(~r/[^A-Z]/, "A")
+        |> String.pad_leading(3, "F")
+        |> String.slice(0, 6)
+        |> then(&("FP" <> &1))
+
+      {:ok, project_b} =
+        Projects.create_project(%{
+          name: "Foreign Project #{System.unique_integer([:positive])}",
+          prefix: foreign_prefix,
+          company_id: company_b.id
+        })
+
+      {:ok, pw_b} =
+        Workspaces.create_project_workspace(%{
+          name: "Foreign Workspace #{System.unique_integer([:positive])}",
+          company_id: company_b.id,
+          project_id: project_b.id
+        })
+
       {:ok, ew} =
         Workspaces.create_execution_workspace(%{
           name: "Foreign Lane",
           status: "open",
           company_id: company_b.id,
-          project_id: project.id,
-          project_workspace_id: pw.id,
+          project_id: project_b.id,
+          project_workspace_id: pw_b.id,
           provider_type: "fake",
           provider_ref: handle.provider_ref
         })
 
-      # Attach foreign workspace id onto issue of company_a (pathological).
-      {:ok, issue} = Issues.update_issue(issue, %{execution_workspace_id: ew.id})
+      # Simulate a legacy/corrupted foreign workspace reference. The public
+      # changeset now rejects this relationship, so bypass it deliberately to
+      # verify cleanup still fails closed when old bad data is encountered.
+      {1, _} =
+        Repo.update_all(
+          from(i in Cympho.Issues.Issue, where: i.id == ^issue.id),
+          set: [execution_workspace_id: ew.id]
+        )
+
+      issue = Issues.get_issue!(issue.id)
       assert issue.company_id == company_a.id
 
       # Company-scoped lookup does not see the foreign workspace → no-op

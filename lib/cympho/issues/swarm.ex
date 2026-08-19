@@ -11,7 +11,7 @@ defmodule Cympho.Issues.Swarm do
   alias Cympho.Agents.Agent
   alias Cympho.Adapters.RuntimeOptions
   alias Cympho.Comments
-  alias Cympho.Companies
+  alias Cympho.CompanyRBAC
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.Issues.SwarmEvents
@@ -218,7 +218,10 @@ defmodule Cympho.Issues.Swarm do
                }
              }),
            {:ok, blocked_cto} <-
-             block_for_swarm(cto_issue, cto_blocker_note(parent, worker_issues)),
+             block_for_swarm(
+               Issues.get_issue!(cto_issue.id),
+               cto_blocker_note(parent, worker_issues)
+             ),
            :ok <-
              SwarmEvents.record(parent, %{
                event_type: "cto_blocked_on_workers",
@@ -227,7 +230,8 @@ defmodule Cympho.Issues.Swarm do
                message: "The CTO review waits until every worker finishes.",
                metadata: %{"worker_issue_ids" => Enum.map(worker_issues, & &1.id)}
              }),
-           {:ok, blocked_parent} <- block_for_swarm(parent, parent_blocker_note(cto_issue)),
+           {:ok, blocked_parent} <-
+             block_for_swarm(Issues.get_issue!(parent.id), parent_blocker_note(cto_issue)),
            :ok <-
              SwarmEvents.record(parent, %{
                event_type: "parent_blocked_on_cto",
@@ -955,7 +959,7 @@ defmodule Cympho.Issues.Swarm do
       is_nil(user_id) ->
         true
 
-      Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id) ->
+      CompanyRBAC.manager?(user_id, company_id) ->
         true
 
       true ->

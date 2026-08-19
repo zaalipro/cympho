@@ -1918,6 +1918,7 @@ defmodule Cympho.AgentActions do
         with {:ok, created} <- Issues.create_issue(attrs),
              {:ok, created} <- assign_child_owner_for_dispatch(created),
              {:ok, blocker_results} <- attach_depends_on(created, issue, action["depends_on"]),
+             {:ok, created} <- Issues.get_issue(created.id),
              {:ok, created} <- maybe_park_unresolved_depends_on(created, blocker_results),
              {:ok, _comment} <- maybe_agent_comment(issue, agent, created_issue_note(created)) do
           # Wake the dispatcher so the child issue is picked up by its role

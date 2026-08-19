@@ -153,33 +153,33 @@ defmodule CymphoWeb.AgentLive.Index do
   end
 
   def handle_event("pause_agent", %{"id" => id}, socket) do
-    case Agents.pause_agent(id) do
-      {:ok, _agent} ->
-        {:noreply, put_flash(socket, :info, "Agent paused successfully")}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to pause agent")}
-    end
+    scoped_agent_action(
+      socket,
+      id,
+      &Agents.pause_agent/1,
+      "Agent paused successfully",
+      "Failed to pause agent"
+    )
   end
 
   def handle_event("resume_agent", %{"id" => id}, socket) do
-    case Agents.resume_agent(id) do
-      {:ok, _agent} ->
-        {:noreply, put_flash(socket, :info, "Agent resumed successfully")}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to resume agent")}
-    end
+    scoped_agent_action(
+      socket,
+      id,
+      &Agents.resume_agent/1,
+      "Agent resumed successfully",
+      "Failed to resume agent"
+    )
   end
 
   def handle_event("terminate_agent", %{"id" => id}, socket) do
-    case Agents.terminate_agent(id) do
-      {:ok, _agent} ->
-        {:noreply, put_flash(socket, :info, "Agent terminated successfully")}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to terminate agent")}
-    end
+    scoped_agent_action(
+      socket,
+      id,
+      &Agents.terminate_agent/1,
+      "Agent terminated successfully",
+      "Failed to terminate agent"
+    )
   end
 
   def status_dot_class(:running), do: "bg-brand"
@@ -432,8 +432,21 @@ defmodule CymphoWeb.AgentLive.Index do
 
   defp get_scoped_agent(socket, id) do
     case current_company_id(socket) do
-      nil -> Agents.get_agent(id)
+      nil -> {:error, :not_found}
       company_id -> Agents.get_company_agent(company_id, id)
+    end
+  end
+
+  defp scoped_agent_action(socket, id, action, success_message, error_message) do
+    with {:ok, agent} <- get_scoped_agent(socket, id),
+         {:ok, _agent} <- action.(agent) do
+      {:noreply, put_flash(socket, :info, success_message)}
+    else
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Agent not found")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, error_message)}
     end
   end
 

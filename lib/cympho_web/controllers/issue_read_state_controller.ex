@@ -15,8 +15,9 @@ defmodule CymphoWeb.IssueReadStateController do
 
   def mark_all_read(conn, _params) do
     user_id = conn.assigns.current_user.id
+    company_id = conn.assigns.current_company.id
 
-    with {:ok, count} <- IssueReadStates.mark_all_read(user_id) do
+    with {:ok, count} <- IssueReadStates.mark_all_read(user_id, company_id) do
       json(conn, %{data: %{status: "ok", count: count}})
     end
   end

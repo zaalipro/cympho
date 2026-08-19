@@ -16,7 +16,17 @@ defmodule Cympho.Mcp.Server do
   import Ecto.Query, only: [from: 2]
   require Logger
 
-  alias Cympho.{Agents, Comments, GovernanceAuditLogs, Issues, Repo, Search, Skills}
+  alias Cympho.{
+    Agents,
+    Comments,
+    GovernanceAuditLogs,
+    Issues,
+    PrincipalPermissions,
+    Repo,
+    Search,
+    Skills
+  }
+
   alias Cympho.Agents.Agent
   alias Cympho.Mcp.{ToolGrants, ToolRegistry}
   alias Cympho.Plugins.Runtime
@@ -25,6 +35,20 @@ defmodule Cympho.Mcp.Server do
   # Stable error body returned to MCP clients when a mutation is throttled.
   # Shape is intentional and part of the external contract — do not rename keys.
   @rate_limited_error %{error: "rate_limited", success: false}
+  @not_authorized_error %{
+    error: "Tool not authorized",
+    decision: "deny",
+    success: false,
+    static: true
+  }
+
+  @issue_create_permissions ~w(
+    mcp.create_issue issue.create issues.create task.create tasks.create tasks:create
+    task.assign tasks.assign tasks:assign can_assign_tasks can_create_tasks
+  )
+  @comment_create_permissions ~w(
+    mcp.create_issue_comment issue.comment issues.comment comments.create can_comment
+  )
 
   # Plugin tools reach third-party services; 5 seconds (the GenServer.call
   # default) is not a realistic budget for one. Overridable at runtime via
@@ -291,7 +315,7 @@ defmodule Cympho.Mcp.Server do
     case tool.plugin_id do
       plugin_id when is_binary(plugin_id) ->
         case Skills.get_company_plugin(agent.company_id, plugin_id) do
-          {:ok, plugin} ->
+          {:ok, %{enabled: true, status: "active"} = plugin} ->
             case Runtime.whereis(plugin) do
               nil ->
                 plugin_not_found
@@ -416,9 +440,9 @@ defmodule Cympho.Mcp.Server do
        when is_binary(body) do
     body = String.trim(body)
 
-    with :ok <- authorize_mutation("create_issue_comment", agent),
-         :ok <- validate_comment_body(body),
+    with :ok <- validate_comment_body(body),
          {:ok, issue} <- Issues.get_company_issue(agent.company_id, id),
+         :ok <- authorize_mutation("create_issue_comment", agent, issue),
          {:ok, comment} <-
            Comments.create_comment(%{
              issue_id: issue.id,
@@ -429,6 +453,7 @@ defmodule Cympho.Mcp.Server do
       %{success: true, comment: summarize_comment(comment)}
     else
       {:error, :rate_limited} -> @rate_limited_error
+      {:error, :not_authorized} -> @not_authorized_error
       {:error, :not_found} -> %{error: "Issue not found"}
       {:error, errors} when is_map(errors) -> %{success: false, errors: errors}
       {:error, changeset} -> %{success: false, errors: format_errors(changeset)}
@@ -445,8 +470,8 @@ defmodule Cympho.Mcp.Server do
           if project_belongs_to_company?(id, agent.company_id), do: id, else: :forbidden
       end
 
-    with :ok <- authorize_mutation("create_issue", agent),
-         :ok <- validate_project_id(project_id),
+    with :ok <- validate_project_id(project_id),
+         :ok <- authorize_mutation("create_issue", agent, project_id),
          {:ok, routing_attrs} <- routing_attrs(args, agent.company_id) do
       attrs =
         %{
@@ -470,6 +495,7 @@ defmodule Cympho.Mcp.Server do
       end
     else
       {:error, :rate_limited} -> @rate_limited_error
+      {:error, :not_authorized} -> @not_authorized_error
       {:error, errors} -> %{success: false, errors: errors}
     end
   end
@@ -525,16 +551,22 @@ defmodule Cympho.Mcp.Server do
     %{error: "Unknown or malformed tool invocation"}
   end
 
-  # Rate-limit + audit gate for MCP mutations that can auto-ignite wakes or
-  # otherwise amplify spend. Fail-closed when company_id is missing.
-  defp authorize_mutation(tool, %Agent{id: agent_id, company_id: company_id} = agent)
+  # Explicit authority is checked before the spend-amplification limiter. A
+  # leadership role is the built-in policy for issue creation; delivery agents
+  # need an explicit capability/grant. Comments additionally allow agents that
+  # own or are assigned the target issue.
+  defp authorize_mutation(tool, %Agent{id: agent_id, company_id: company_id} = agent, target)
        when is_binary(agent_id) and is_binary(company_id) do
-    case AgentActionLimiter.check_for_company(agent_id, company_id) do
-      :ok ->
-        audit_authorize(agent, tool, "allowed")
-        :ok
+    with :ok <- authorize_static_mutation(tool, agent, target),
+         :ok <- AgentActionLimiter.check_for_company(agent_id, company_id) do
+      audit_authorize(agent, tool, "allowed")
+      :ok
+    else
+      {:error, :not_authorized} = error ->
+        audit_authorize(agent, tool, "denied")
+        error
 
-      {:error, :rate_limited} ->
+      {:error, :rate_limited} = error ->
         audit_authorize(agent, tool, "rate_limited")
 
         Logger.warning("MCP mutation rate limited",
@@ -544,14 +576,77 @@ defmodule Cympho.Mcp.Server do
           tool: tool
         )
 
-        {:error, :rate_limited}
+        error
     end
   end
 
-  defp authorize_mutation(tool, agent) do
+  defp authorize_mutation(tool, agent, _target) do
     audit_authorize(agent, tool, "denied")
-    {:error, :rate_limited}
+    {:error, :not_authorized}
   end
+
+  defp authorize_static_mutation("create_issue", %Agent{} = agent, project_id) do
+    scopes = [company: agent.company_id, project: valid_scope_id(project_id)]
+
+    if agent.role in [:ceo, :cto] or
+         agent_has_permission?(agent, @issue_create_permissions, scopes) do
+      :ok
+    else
+      {:error, :not_authorized}
+    end
+  end
+
+  defp authorize_static_mutation(
+         "create_issue_comment",
+         %Agent{} = agent,
+         %Cympho.Issues.Issue{} = issue
+       ) do
+    scopes = [company: agent.company_id, project: issue.project_id, issue: issue.id]
+
+    if agent.role in [:ceo, :cto] or issue.assignee_id == agent.id or
+         issue.created_by_agent_id == agent.id or
+         agent_has_permission?(agent, @comment_create_permissions, scopes) do
+      :ok
+    else
+      {:error, :not_authorized}
+    end
+  end
+
+  defp authorize_static_mutation(_tool, _agent, _target), do: {:error, :not_authorized}
+
+  defp agent_has_permission?(%Agent{} = agent, permissions, scopes) do
+    permission_map_allows?(agent.permissions, permissions) or
+      permission_map_allows?(agent.capabilities, permissions) or
+      Enum.any?(permissions, fn permission ->
+        PrincipalPermissions.has_permission_in_scope?(
+          agent.id,
+          "agent",
+          permission,
+          scopes
+        )
+      end)
+  end
+
+  defp permission_map_allows?(map, permissions) when is_map(map) do
+    Enum.any?(permissions, &truthy?(Map.get(map, &1) || Map.get(map, safe_existing_atom(&1)))) or
+      Enum.any?([Map.get(map, "permissions"), Map.get(map, :permissions)], fn
+        values when is_list(values) -> Enum.any?(values, &(to_string(&1) in permissions))
+        _ -> false
+      end)
+  end
+
+  defp permission_map_allows?(_map, _permissions), do: false
+
+  defp truthy?(value), do: value in [true, "true", 1, "1"]
+
+  defp safe_existing_atom(value) do
+    String.to_existing_atom(value)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp valid_scope_id(id) when is_binary(id), do: id
+  defp valid_scope_id(_id), do: nil
 
   defp audit_authorize(%Agent{} = agent, tool, decision) when is_binary(tool) do
     _ =

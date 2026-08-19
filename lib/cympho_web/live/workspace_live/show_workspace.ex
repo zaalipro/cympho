@@ -431,7 +431,9 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     service.status in ["failed", "error"] or service.health_status in @bad_service_health
   end
 
-  defp previewless_service?(service), do: is_nil(service.port) and blank?(service.url)
+  defp previewless_service?(service),
+    do: not Cympho.Workspaces.PreviewUrl.previewable?(service)
+
   defp blank?(value), do: is_nil(value) or value == ""
 
   defp workspace_location(%{cwd: cwd}) when is_binary(cwd) and cwd != "", do: cwd
@@ -469,10 +471,8 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
   defp service_port(%{port: nil}), do: nil
   defp service_port(%{port: port}), do: ":#{port}"
 
-  defp preview_href(%{status: "running", port: port, id: id}) when is_integer(port),
-    do: "/api/preview/#{id}/proxy"
-
-  defp preview_href(_service), do: nil
+  defp preview_href(service),
+    do: Cympho.Workspaces.PreviewUrl.generate_preview_url(service, "")
 
   defp connection_string(%{url: url}) when is_binary(url) and url != "", do: url
   defp connection_string(%{port: port}) when is_integer(port), do: "localhost:#{port}"

@@ -32,6 +32,13 @@ defmodule Cympho.Issues.AtomicOwnerAttentionTest do
         password: "password1234"
       })
 
+    {:ok, _membership} =
+      Companies.create_membership(%{
+        user_id: user.id,
+        company_id: company.id,
+        role: "owner"
+      })
+
     {:ok, agent} =
       Agents.create_agent(%{
         name: "Atomic OA Agent",

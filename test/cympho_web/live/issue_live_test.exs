@@ -8,6 +8,7 @@ defmodule CymphoWeb.IssueLiveTest do
   alias Cympho.Agents
   alias Cympho.AuditTrail
   alias Cympho.Companies
+  alias Cympho.Documents
   alias Cympho.Goals
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Inbox
@@ -945,6 +946,55 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ issue.description
       assert html =~ "backlog"
       assert html =~ "high"
+    end
+
+    test "rejects a forged cross-company revision diff event", %{issue: issue} do
+      {:ok, document} =
+        Documents.create_document(%{
+          key: "tenant-plan",
+          title: "Tenant Plan",
+          body: "tenant version one",
+          issue_id: issue.id
+        })
+
+      {:ok, document} = Documents.update_document(document, %{body: "tenant version two"})
+      {:ok, _document} = Documents.update_document(document, %{body: "tenant version three"})
+
+      unique = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Foreign Revision #{unique}",
+          slug: "foreign-revision-#{unique}"
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Foreign revision issue",
+          company_id: other_company.id
+        })
+
+      {:ok, other_document} =
+        Documents.create_document(%{
+          key: "foreign-plan",
+          title: "Foreign Plan",
+          body: "FOREIGN REVISION BODY #{unique}",
+          issue_id: other_issue.id
+        })
+
+      {:ok, other_document} =
+        Documents.update_document(other_document, %{body: "foreign version two"})
+
+      [foreign_revision] = Documents.list_revisions(other_document.id)
+      {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
+
+      render_hook(view, "show_document_revisions", %{"document_key" => "tenant-plan"})
+
+      html =
+        render_hook(view, "show_revision_diff", %{"revision_id" => foreign_revision.id})
+
+      assert html =~ "Revision not found"
+      refute html =~ "FOREIGN REVISION BODY #{unique}"
     end
 
     test "a run_status broadcast updates the view without crashing it", %{issue: issue} do
@@ -3567,6 +3617,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert comment.body =~ "[owner_update]"
     end
 
+    @tag membership_role: "admin"
     test "issue runtime can be paused and resumed from the issue page", %{issue: issue} do
       {:ok, issue} = Issues.update_issue(issue, %{status: :todo})
 

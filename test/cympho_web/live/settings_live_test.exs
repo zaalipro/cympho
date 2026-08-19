@@ -1,11 +1,18 @@
 defmodule CymphoWeb.SettingsLiveTest do
-  use CymphoWeb.LiveCase, async: true
+  use CymphoWeb.LiveCase, async: false
 
   import Phoenix.LiveViewTest
   import Mock
 
   alias Cympho.{Users, Repo}
-  alias Cympho.Notifications.{Dispatcher, Message, NotificationPreference, WebhookChannel}
+
+  alias Cympho.Notifications.{
+    Dispatcher,
+    Message,
+    NotificationPreference,
+    WebhookChannel,
+    WebhookURL
+  }
 
   setup %{conn: conn} do
     {:ok, user} = Users.get_user(Plug.Conn.get_session(conn, :user_id))
@@ -181,14 +188,17 @@ defmodule CymphoWeb.SettingsLiveTest do
       Users.ensure_default_prefs(user.id)
       Users.update_notification_prefs(user, %{webhook_url: "https://example.com/hook"})
 
-      {:ok, view, _html} = live(conn, "/settings/notifications")
+      with_mock WebhookURL, [:passthrough],
+        post: fn "https://example.com/hook", _headers, _body, [] -> {:ok, 204} end do
+        {:ok, view, _html} = live(conn, "/settings/notifications")
 
-      result =
-        view
-        |> element("button[phx-click='test_webhook']")
-        |> render_click()
+        result =
+          view
+          |> element("button[phx-click='test_webhook']")
+          |> render_click()
 
-      assert result =~ "Test" or result =~ "failed" or result =~ "Webhook test"
+        assert result =~ "Test passed"
+      end
     end
   end
 
@@ -289,10 +299,10 @@ defmodule CymphoWeb.SettingsLiveTest do
   end
 
   describe "WebhookChannel SSRF guard" do
-    test "rejects loopback, RFC1918, metadata, and userinfo URLs without calling Finch" do
+    test "rejects non-HTTPS, private literals, and userinfo without resolving or sending" do
       message = Message.new("Subject", "Body", "user-123")
 
-      blocked_urls = [
+      invalid_urls = [
         "http://127.0.0.1/hook",
         "http://localhost/hook",
         "http://10.0.0.1/hook",
@@ -300,20 +310,56 @@ defmodule CymphoWeb.SettingsLiveTest do
         "http://172.16.0.1/hook",
         "http://169.254.169.254/latest/meta-data",
         "http://metadata.google.internal/",
-        "https://user:pass@example.com/hook",
         "http://[::1]/",
         "http://[::ffff:127.0.0.1]/",
         "http://[::ffff:10.0.0.1]/"
       ]
 
-      with_mock Finch,
-        build: fn _, _, _, _ ->
-          flunk("Finch.build must not be called for blocked webhook URLs")
-        end,
-        request: fn _, _ -> flunk("Finch.request must not be called for blocked webhook URLs") end do
-        Enum.each(blocked_urls, fn url ->
-          assert WebhookChannel.deliver(message, %{url: url}) == {:error, :blocked_webhook_url}
-        end)
+      resolver = fn _host, _family -> flunk("invalid URLs must not be resolved") end
+      requester = fn _target, _headers, _body -> flunk("invalid URLs must not be sent") end
+
+      Enum.each(invalid_urls, fn url ->
+        assert WebhookChannel.deliver(message, %{url: url},
+                 resolver: resolver,
+                 requester: requester
+               ) == {:error, :invalid_url}
+      end)
+
+      blocked_urls = [
+        "https://127.0.0.1/hook",
+        "https://10.0.0.1/hook",
+        "https://169.254.169.254/latest/meta-data",
+        "https://user:pass@example.com/hook",
+        "https://[::1]/",
+        "https://[::ffff:127.0.0.1]/"
+      ]
+
+      Enum.each(blocked_urls, fn url ->
+        assert WebhookChannel.deliver(message, %{url: url},
+                 resolver: resolver,
+                 requester: requester
+               ) == {:error, :blocked_webhook_url}
+      end)
+    end
+
+    test "rejects metadata and localhost DNS answers without sending" do
+      message = Message.new("Subject", "Body", "user-123")
+
+      resolver = fn host, family ->
+        case {host, family} do
+          {"metadata.google.internal", :inet} -> {:ok, [{169, 254, 169, 254}]}
+          {"localhost", :inet} -> {:ok, [{127, 0, 0, 1}]}
+          {_host, :inet6} -> {:error, :nxdomain}
+        end
+      end
+
+      requester = fn _target, _headers, _body -> flunk("private targets must not be sent") end
+
+      for url <- ["https://metadata.google.internal/", "https://localhost/hook"] do
+        assert WebhookChannel.deliver(message, %{url: url},
+                 resolver: resolver,
+                 requester: requester
+               ) == {:error, :blocked_webhook_url}
       end
     end
   end

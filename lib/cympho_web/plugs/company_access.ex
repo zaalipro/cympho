@@ -9,18 +9,27 @@ defmodule CymphoWeb.Plugs.CompanyAccess do
 
       plug CymphoWeb.Plugs.CompanyAccess when action in [...]
 
-  Optionally pass `:require_admin` to require an admin/owner role:
+  Pass `require: :manager` for company-management actions. Managers are
+  owners/admins or writable-role board members; read-only viewers never gain
+  mutation rights from a board flag alone.
 
-      plug CymphoWeb.Plugs.CompanyAccess, [require_admin: true] when action in [...]
+      plug CymphoWeb.Plugs.CompanyAccess, [require: :manager] when action in [...]
   """
 
   import Plug.Conn
+  alias Cympho.CompanyRBAC
   alias Cympho.Companies
 
   def init(opts), do: opts
 
   def call(conn, opts) do
-    require_admin? = Keyword.get(opts, :require_admin, false)
+    required_access =
+      Keyword.get(
+        opts,
+        :require,
+        if(Keyword.get(opts, :require_admin, false), do: :admin, else: :read)
+      )
+
     user = conn.assigns[:current_user]
     company_id = conn.path_params["company_id"] || conn.path_params["id"]
 
@@ -31,13 +40,19 @@ defmodule CymphoWeb.Plugs.CompanyAccess do
       not Companies.has_access?(user.id, company_id) ->
         not_found(conn)
 
-      require_admin? and not Companies.admin?(user.id, company_id) ->
+      not authorized?(user.id, company_id, required_access) ->
         forbidden(conn)
 
       true ->
         conn
     end
   end
+
+  defp authorized?(user_id, company_id, :manager),
+    do: CompanyRBAC.manager?(user_id, company_id)
+
+  defp authorized?(user_id, company_id, access),
+    do: CompanyRBAC.allowed?(Companies.get_role(user_id, company_id), access)
 
   defp not_found(conn) do
     conn

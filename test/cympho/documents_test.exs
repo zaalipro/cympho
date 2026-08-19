@@ -244,6 +244,22 @@ defmodule Cympho.DocumentsTest do
       {:ok, _d2} = Documents.update_document(d1, %{title: "v2", body: "body2"})
       assert length(Documents.list_revisions(document.id)) == 2
     end
+
+    test "cannot move an existing document to another issue", %{
+      document: document,
+      issue: issue
+    } do
+      {:ok, other_issue} = Issues.create_issue(%{title: "Other document issue"})
+
+      assert {:ok, updated} =
+               Documents.update_document(document, %{
+                 title: "Updated in place",
+                 issue_id: other_issue.id
+               })
+
+      assert updated.issue_id == issue.id
+      assert Documents.get_document!(document.id).issue_id == issue.id
+    end
   end
 
   describe "delete_document/1" do

@@ -160,6 +160,23 @@ defmodule Cympho.LabelsTest do
     assert updated.name == "New"
   end
 
+  test "update_label/2 ignores a forged company_id" do
+    company = create_company()
+    other_company = create_company()
+    {:ok, label} = Labels.create_label(%{name: "Tenant Bound", company_id: company.id})
+
+    assert {:ok, updated} =
+             Labels.update_label(label, %{name: "Still Bound", company_id: other_company.id})
+
+    assert updated.name == "Still Bound"
+    assert updated.company_id == company.id
+
+    refute Ecto.Changeset.changed?(
+             Label.update_changeset(label, %{company_id: other_company.id}),
+             :company_id
+           )
+  end
+
   test "delete_label/1 deletes" do
     company = create_company()
     {:ok, label} = Labels.create_label(%{name: "Gone", company_id: company.id})

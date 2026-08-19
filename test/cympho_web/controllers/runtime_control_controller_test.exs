@@ -226,6 +226,28 @@ defmodule CymphoWeb.RuntimeControlControllerTest do
     assert Companies.get_company!(company.id).status == "active"
   end
 
+  test "member board users can control runtime while viewer board users remain read-only", %{
+    conn: setup_conn
+  } do
+    {member_conn, _user, member_company} =
+      register_and_log_in_user(setup_conn, %{role: "member", is_board_member: true})
+
+    member_conn =
+      post(member_conn, ~p"/runtime-control/low-power", %{"return_to" => "/dashboard"})
+
+    assert redirected_to(member_conn) == "/dashboard"
+    assert Companies.low_power?(Companies.get_company!(member_company.id))
+
+    {viewer_conn, _user, viewer_company} =
+      register_and_log_in_user(build_conn(), %{role: "viewer", is_board_member: true})
+
+    viewer_conn =
+      post(viewer_conn, ~p"/runtime-control/low-power", %{"return_to" => "/dashboard"})
+
+    assert redirected_to(viewer_conn) == "/dashboard"
+    refute Companies.low_power?(Companies.get_company!(viewer_company.id))
+  end
+
   test "owner can resume runtime", %{conn: conn} do
     {conn, user, company} = register_and_log_in_user(conn, %{role: "owner"})
     {:ok, _paused} = Companies.pause_company(company, "setup")

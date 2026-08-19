@@ -10,6 +10,7 @@ defmodule Cympho.Plugins.CatalogTest do
   end
 
   alias Cympho.Companies
+  alias Cympho.Mcp.{ToolGrants, ToolRegistry}
   alias Cympho.Plugins.Catalog
   alias Cympho.Plugins.ExamplePlugin
   alias Cympho.Plugins.Runtime
@@ -144,6 +145,20 @@ defmodule Cympho.Plugins.CatalogTest do
     assert unchanged.manifest_errors == %{}
   end
 
+  test "disabling a catalog plugin stops its supervised worker" do
+    entry = Enum.find(Catalog.entries(), & &1.installable?)
+    {:ok, company} = Companies.create_company(%{name: "Catalog Disable", slug: unique_slug()})
+    {:ok, plugin} = Runtime.install_catalog_entry(entry, company.id)
+    pid = Runtime.whereis(plugin)
+
+    assert is_pid(pid)
+    assert {:ok, disabled} = Runtime.disable_plugin(plugin)
+    assert disabled.enabled == false
+    assert disabled.status == "disabled"
+    refute Process.alive?(pid)
+    assert Runtime.whereis(disabled) == nil
+  end
+
   test "runtime start failure leaves a visible disabled error record" do
     entry = Enum.find(Catalog.entries(), & &1.installable?)
     {:ok, company} = Companies.create_company(%{name: "Catalog Failure", slug: unique_slug()})
@@ -172,6 +187,65 @@ defmodule Cympho.Plugins.CatalogTest do
     assert failed.enabled == false
     assert failed.manifest_errors == %{"runtime_start" => "worker_failed_to_start"}
     assert Runtime.whereis(failed) == nil
+  end
+
+  test "deleting a plugin stops its worker, unregisters tools, and revokes grants" do
+    entry = Enum.find(Catalog.entries(), & &1.installable?)
+    {:ok, company} = Companies.create_company(%{name: "Catalog Delete", slug: unique_slug()})
+    {:ok, plugin} = Runtime.install_catalog_entry(entry, company.id)
+    pid = Runtime.whereis(plugin)
+
+    assert is_pid(pid)
+
+    {:ok, tool} =
+      ToolRegistry.register(company.id, %{
+        "name" => "catalog_cleanup_tool",
+        "plugin_id" => plugin.id
+      })
+
+    {:ok, grant} =
+      ToolGrants.create_grant(%{
+        company_id: company.id,
+        tool_id: tool.id,
+        tool_name: tool.name,
+        status: "allow"
+      })
+
+    assert {:ok, deleted} = Runtime.delete_plugin(plugin)
+    assert deleted.id == plugin.id
+    refute Process.alive?(pid)
+    assert {:error, :not_found} = Skills.get_plugin(plugin.id)
+    assert {:error, :not_found} = ToolRegistry.get_active(company.id, tool.name)
+    assert Repo.get!(Cympho.Mcp.RegisteredTool, tool.id).status == "unregistered"
+    assert Repo.get!(Cympho.Mcp.ToolGrant, grant.id).status == "revoked"
+  end
+
+  test "runtime configuration edits restart a worker with fresh settings and capabilities" do
+    entry = Enum.find(Catalog.entries(), & &1.installable?)
+    {:ok, company} = Companies.create_company(%{name: "Catalog Refresh", slug: unique_slug()})
+    {:ok, plugin} = Runtime.install_catalog_entry(entry, company.id)
+    old_pid = Runtime.whereis(plugin)
+
+    assert is_pid(old_pid)
+    assert :sys.get_state(old_pid).api_key == "default-key"
+
+    assert {:ok, updated} =
+             Runtime.update_plugin(plugin, %{
+               settings: %{"api_key" => "rotated-key"},
+               capabilities: ["expose:tools"]
+             })
+
+    new_pid = Runtime.whereis(updated)
+    state = :sys.get_state(new_pid)
+
+    assert is_pid(new_pid)
+    assert new_pid != old_pid
+    refute Process.alive?(old_pid)
+    assert state.api_key == "rotated-key"
+    assert state.plugin.settings == %{"api_key" => "rotated-key"}
+    assert state.plugin.capabilities == ["expose:tools"]
+
+    assert {:ok, _deleted} = Runtime.delete_plugin(updated)
   end
 
   defp unique_slug do

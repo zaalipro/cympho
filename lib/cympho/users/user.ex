@@ -2,6 +2,8 @@ defmodule Cympho.Users.User do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Cympho.Notifications.WebhookURL
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   schema "users" do
@@ -15,6 +17,7 @@ defmodule Cympho.Users.User do
     field :webhook_url, :string
     field :theme, :string, default: "claude"
     field :onboarding_draft, :map, default: %{}
+    field :session_version, :integer, default: 0
 
     belongs_to :company, Cympho.Companies.Company
     has_many :memberships, Cympho.Companies.CompanyMembership
@@ -35,10 +38,12 @@ defmodule Cympho.Users.User do
       :webhook_enabled,
       :webhook_url
     ])
+    |> normalize_email_change()
     |> validate_required([:email, :name])
     |> validate_email()
     |> validate_webhook_url()
     |> unique_constraint(:email)
+    |> unique_constraint(:email, name: :users_normalized_email_index)
   end
 
   @doc """
@@ -47,12 +52,22 @@ defmodule Cympho.Users.User do
   def registration_changeset(user, attrs) do
     user
     |> cast(attrs, [:email, :name, :password])
+    |> normalize_email_change()
     |> validate_required([:email, :name, :password])
     |> validate_email()
     |> validate_password()
     |> put_password_hash()
     |> unique_constraint(:email)
+    |> unique_constraint(:email, name: :users_normalized_email_index)
   end
+
+  def normalize_email(email) when is_binary(email) do
+    email
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  def normalize_email(email), do: email
 
   @doc """
   Changeset for notification preferences only.
@@ -84,6 +99,10 @@ defmodule Cympho.Users.User do
     changeset
     |> validate_format(:email, ~r/@/, message: "must be a valid email address")
     |> validate_length(:email, max: 255)
+  end
+
+  defp normalize_email_change(changeset) do
+    update_change(changeset, :email, &normalize_email/1)
   end
 
   defp validate_password(changeset) do
@@ -122,10 +141,11 @@ defmodule Cympho.Users.User do
       url when url == "" ->
         changeset
 
-      _url ->
-        validate_format(changeset, :webhook_url, ~r/^https?:\/\/.+/,
-          message: "must be a valid URL"
-        )
+      url ->
+        case WebhookURL.validate(url) do
+          {:ok, _uri} -> changeset
+          {:error, _reason} -> add_error(changeset, :webhook_url, "must be a valid URL")
+        end
     end
   end
 end

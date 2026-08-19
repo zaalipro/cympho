@@ -1,13 +1,15 @@
 defmodule CymphoWeb.ApprovalLiveTest do
   use CymphoWeb.LiveCase, async: true
 
-  alias Cympho.{Agents, Approvals, Issues}
+  alias Cympho.{Agents, Approvals, Companies, Issues}
 
   describe "Approvals index" do
     test "renders a decision queue for company-scoped approvals", %{
       conn: conn,
       current_company: company
     } do
+      grant_resolver(conn, company)
+
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Approval Owner",
@@ -98,6 +100,8 @@ defmodule CymphoWeb.ApprovalLiveTest do
       conn: conn,
       current_company: company
     } do
+      grant_resolver(conn, company)
+
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Inline Approver",
@@ -127,6 +131,8 @@ defmodule CymphoWeb.ApprovalLiveTest do
       conn: conn,
       current_company: company
     } do
+      grant_resolver(conn, company)
+
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Inline Denier",
@@ -151,6 +157,40 @@ defmodule CymphoWeb.ApprovalLiveTest do
       assert resolved.status == :denied
     end
 
+    test "ordinary members cannot resolve from the queue, including forged events", %{
+      conn: conn,
+      current_company: company
+    } do
+      set_resolver_role(conn, company, "member")
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Read-only Approval Member",
+          role: :ceo,
+          company_id: company.id
+        })
+
+      {:ok, approval} =
+        Approvals.create_approval(%{
+          type: "member_gate",
+          requested_by_agent_id: agent.id
+        })
+
+      {:ok, view, html} = live(conn, "/approvals")
+
+      refute html =~ ~s(data-testid="approval-approve-#{approval.id}")
+      refute html =~ ~s(data-testid="approval-deny-#{approval.id}")
+
+      render_click(view, :approve, %{"id" => approval.id})
+
+      flash = :sys.get_state(view.pid).socket.assigns.flash
+
+      assert Phoenix.Flash.get(flash, :error) ==
+               "Only company owners, admins, and board members can resolve approvals."
+
+      assert Approvals.get_approval!(approval.id).status == :pending
+    end
+
     test "status filter event patches to the selected status", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/approvals")
 
@@ -173,6 +213,8 @@ defmodule CymphoWeb.ApprovalLiveTest do
       conn: conn,
       current_company: company
     } do
+      grant_resolver(conn, company)
+
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Detail Approval Owner",
@@ -222,5 +264,50 @@ defmodule CymphoWeb.ApprovalLiveTest do
       assert approval.status == :approved
       assert approval.resolved_by_user_id == Plug.Conn.get_session(conn, :user_id)
     end
+
+    test "ordinary members cannot resolve from approval detail events", %{
+      conn: conn,
+      current_company: company
+    } do
+      set_resolver_role(conn, company, "member")
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Read-only Detail Member",
+          role: :ceo,
+          company_id: company.id
+        })
+
+      {:ok, approval} =
+        Approvals.create_approval(%{
+          type: "detail_member_gate",
+          requested_by_agent_id: agent.id
+        })
+
+      {:ok, view, html} = live(conn, "/approvals/#{approval.id}")
+
+      refute has_element?(view, "button[phx-click='approve']")
+      refute has_element?(view, "button[phx-click='deny']")
+      assert html =~ "Only company owners, admins, and board members can resolve this approval."
+
+      render_click(view, :deny)
+
+      flash = :sys.get_state(view.pid).socket.assigns.flash
+
+      assert Phoenix.Flash.get(flash, :error) ==
+               "Only company owners, admins, and board members can resolve approvals."
+
+      assert Approvals.get_approval!(approval.id).status == :pending
+    end
+  end
+
+  defp grant_resolver(conn, company) do
+    set_resolver_role(conn, company, "owner")
+  end
+
+  defp set_resolver_role(conn, company, role) do
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    membership = Companies.get_membership(user_id, company.id)
+    {:ok, _membership} = Companies.update_membership(membership, %{role: role})
   end
 end

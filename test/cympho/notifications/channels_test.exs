@@ -1,8 +1,6 @@
 defmodule Cympho.Notifications.ChannelsTest do
   use ExUnit.Case, async: false
 
-  import Mock
-
   alias Cympho.Notifications.Message
   alias Cympho.Notifications.WebhookChannel
   alias Cympho.Notifications.EmailChannel
@@ -18,9 +16,9 @@ defmodule Cympho.Notifications.ChannelsTest do
       assert WebhookChannel.available?(config) == true
     end
 
-    test "available? returns true when URL is valid http" do
+    test "available? returns false for http" do
       config = %{url: "http://example.com/webhook"}
-      assert WebhookChannel.available?(config) == true
+      assert WebhookChannel.available?(config) == false
     end
 
     test "available? accepts persisted string-key URL config" do
@@ -58,48 +56,50 @@ defmodule Cympho.Notifications.ChannelsTest do
     test "deliver sends persisted string-key config with signature and event type" do
       test_pid = self()
 
-      with_mock Finch,
-        build: fn :post, url, headers, body ->
-          send(test_pid, {:webhook_request, url, headers, body})
-          :webhook_request
-        end,
-        request: fn :webhook_request, Cympho.Finch ->
-          {:ok, %Finch.Response{status: 202, body: "", headers: []}}
-        end do
-        message =
-          Message.new(
-            "Blocked issue",
-            "Human input required",
-            "user-123",
-            %{"type" => "issue.blocked"},
-            "issue.blocked"
-          )
+      resolver = public_resolver()
 
-        config = %{
-          "url" => "https://example.com/webhook",
-          "hmac_secret" => "test-secret"
-        }
-
-        assert :ok = WebhookChannel.deliver(message, config)
-
-        assert_receive {:webhook_request, "https://example.com/webhook", headers, body}
-
-        assert {"Content-Type", "application/json"} in headers
-
-        signature =
-          :crypto.mac(:hmac, :sha256, "test-secret", body)
-          |> Base.encode16(case: :lower)
-
-        assert {"X-Cympho-Signature", "sha256=#{signature}"} in headers
-
-        payload = Jason.decode!(body)
-        assert payload["event_type"] == "issue.blocked"
-        assert payload["subject"] == "Blocked issue"
-        assert payload["body"] == "Human input required"
-        assert payload["user_id"] == "user-123"
-        assert payload["metadata"] == %{"type" => "issue.blocked"}
-        assert is_binary(payload["timestamp"])
+      requester = fn target, headers, body ->
+        send(test_pid, {:webhook_request, target, headers, body})
+        {:ok, 202}
       end
+
+      message =
+        Message.new(
+          "Blocked issue",
+          "Human input required",
+          "user-123",
+          %{"type" => "issue.blocked"},
+          "issue.blocked"
+        )
+
+      config = %{
+        "url" => "https://example.com/webhook",
+        "hmac_secret" => "test-secret"
+      }
+
+      assert :ok =
+               WebhookChannel.deliver(message, config,
+                 resolver: resolver,
+                 requester: requester
+               )
+
+      assert_receive {:webhook_request, %{address: {8, 8, 8, 8}}, headers, body}
+
+      assert {"Content-Type", "application/json"} in headers
+
+      signature =
+        :crypto.mac(:hmac, :sha256, "test-secret", body)
+        |> Base.encode16(case: :lower)
+
+      assert {"X-Cympho-Signature", "sha256=#{signature}"} in headers
+
+      payload = Jason.decode!(body)
+      assert payload["event_type"] == "issue.blocked"
+      assert payload["subject"] == "Blocked issue"
+      assert payload["body"] == "Human input required"
+      assert payload["user_id"] == "user-123"
+      assert payload["metadata"] == %{"type" => "issue.blocked"}
+      assert is_binary(payload["timestamp"])
     end
   end
 
@@ -159,6 +159,15 @@ defmodule Cympho.Notifications.ChannelsTest do
       message = Message.new("Subject", "Body", "user-123")
       config = %{}
       assert TelegramChannel.deliver(message, config) == {:error, :no_telegram_chat_id}
+    end
+  end
+
+  defp public_resolver do
+    fn "example.com", family ->
+      case family do
+        :inet -> {:ok, [{8, 8, 8, 8}]}
+        :inet6 -> {:error, :nxdomain}
+      end
     end
   end
 end

@@ -121,6 +121,7 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
   end
 
   defp run_check(state) do
+    usage_reconciliation = reconcile_terminal_usage()
     stale_runs = HeartbeatEngine.find_stale_runs(@stale_threshold)
     stale_run_ids = MapSet.new(stale_runs, & &1.id)
 
@@ -181,7 +182,8 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
         end
       end)
 
-    stranded_wake_agents = rewake_stranded_agents()
+    stale_wake_claims = WakeupQueue.recover_stale_running(@stale_threshold)
+    stranded_wake_agents = rewake_stranded_agents(stale_wake_claims.agent_ids)
 
     # Reclaim stranded :in_progress issues and age-threshold checkouts that
     # hold capacity without a live orchestrator/run. Same helpers the
@@ -196,10 +198,13 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
     hard_stops_completed = Finances.recover_incomplete_hard_stops()
 
     results = %{
+      terminal_usage_reconciled: usage_reconciliation.reconciled,
+      terminal_usage_reconciliation_failed: usage_reconciliation.failed,
       stale_found: length(stale_runs),
       stale_recovered: length(stale_recovered),
       orphaned_found: length(orphaned_runs),
       orphaned_recovered: length(orphaned_recovered),
+      stale_wake_claims_recovered: stale_wake_claims.recovered,
       stranded_wake_agents: length(stranded_wake_agents),
       orphaned_issues_checked: orphaned_issues.checked,
       orphaned_issues_recovered: orphaned_issues.recovered,
@@ -209,8 +214,10 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
       checked_at: DateTime.utc_now()
     }
 
-    if results.stale_found > 0 or results.orphaned_found > 0 or
-         results.stranded_wake_agents > 0 or results.orphaned_issues_recovered > 0 or
+    if results.terminal_usage_reconciled > 0 or results.terminal_usage_reconciliation_failed > 0 or
+         results.stale_found > 0 or results.orphaned_found > 0 or
+         results.stale_wake_claims_recovered > 0 or results.stranded_wake_agents > 0 or
+         results.orphaned_issues_recovered > 0 or
          results.stale_checkouts_released > 0 or results.hard_stops_completed > 0 do
       Logger.info("Watchdog: #{inspect(results)}")
     end
@@ -218,13 +225,31 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
     %{state | last_results: results, check_count: state.check_count + 1}
   end
 
+  defp reconcile_terminal_usage do
+    case HeartbeatEngine.reconcile_unrecorded_terminal_usage() do
+      {:ok, count} ->
+        %{reconciled: count, failed: 0}
+
+      {:error, reason} ->
+        Logger.error("Watchdog: terminal usage reconciliation failed; will retry next tick",
+          component: "watchdog",
+          error: inspect(reason)
+        )
+
+        %{reconciled: 0, failed: 1}
+    end
+  end
+
   # A wake row is durable but its delivery is a fire-and-forget PubSub
   # broadcast. When the target heartbeat process was dead (crash, node
   # restart, never started), the wake stays "pending" forever and the agent
   # sleeps through it. Sweep for old pending wakes and re-trigger — or
   # restart — the owning heartbeat loop.
-  defp rewake_stranded_agents do
-    agent_ids = WakeupQueue.agent_ids_with_stale_pending(@stale_threshold)
+  defp rewake_stranded_agents(recovered_agent_ids) do
+    agent_ids =
+      recovered_agent_ids
+      |> Kernel.++(WakeupQueue.agent_ids_with_stale_pending(@stale_threshold))
+      |> Enum.uniq()
 
     Enum.each(agent_ids, fn agent_id ->
       case AgentHeartbeat.trigger_heartbeat(agent_id) do

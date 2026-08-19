@@ -674,11 +674,12 @@ defmodule Cympho.IssuesTest do
       assert {:error, %Ecto.Changeset{}} = Issues.update_issue(issue, attrs)
     end
 
-    test "updates assignee", %{issue: issue} do
+    test "updates assignee", %{issue: issue, company: company} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Test Agent",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
 
       attrs = %{assignee_id: agent.id}
@@ -810,6 +811,66 @@ defmodule Cympho.IssuesTest do
              )
     end
 
+    test "rolls back the acceptance comment when closure fails" do
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Atomic Owner Verification CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Atomic CEO verification",
+          status: :blocked,
+          assignee_id: ceo.id,
+          assigned_role: "ceo",
+          execution_state: %{
+            current_stage_index: 0,
+            current_stage_type: :reviewer,
+            current_participant: ceo.id,
+            return_assignee: nil,
+            last_decision_outcome: nil,
+            history: []
+          }
+        })
+
+      Repo.insert!(%Run{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        company_id: issue.company_id,
+        status: "completed",
+        adapter: "openai_chat"
+      })
+
+      for body <- [
+            "[owner_update] What happened: CEO produced the status. Business status: ready. Current state: waiting on owner verification. Next decision: owner verifies. Owner decision needed: verify.",
+            "[blocked] Cause: Waiting for owner verification. Current state: blocked on owner verification. Next decision: owner accepts."
+          ] do
+        {:ok, _comment} =
+          Comments.create_comment(%{
+            body: body,
+            author_type: "agent",
+            author_id: ceo.id,
+            issue_id: issue.id
+          })
+      end
+
+      assert {:error, :execution_policy_not_complete} =
+               Issues.accept_owner_verification(Issues.get_issue!(issue.id),
+                 actor: "owner-user"
+               )
+
+      assert Issues.get_issue!(issue.id).status == :blocked
+
+      refute Enum.any?(
+               Comments.list_comments(issue.id),
+               &String.contains?(&1.body, "owner accepted the CEO verification update")
+             )
+    end
+
     test "records owner revision requests and queues focused CEO dispatch" do
       {:ok, ceo} =
         Agents.create_agent(%{
@@ -902,7 +963,8 @@ defmodule Cympho.IssuesTest do
       {:ok, blocker_issue} =
         Issues.create_issue(%{
           title: "Blocker",
-          description: "This blocks the other issue"
+          description: "This blocks the other issue",
+          company_id: blocked_issue.company_id
         })
 
       assert {:ok, updated} = Issues.add_blocker(blocked_issue, blocker_issue)
@@ -918,6 +980,60 @@ defmodule Cympho.IssuesTest do
 
       assert {:error, :cannot_block_self} = Issues.add_blocker(issue, issue)
     end
+
+    test "rejects a blocker from another company", %{issue: blocked_issue} do
+      suffix = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign blocker company #{suffix}",
+          slug: "foreign-blocker-company-#{suffix}"
+        })
+
+      {:ok, foreign_blocker} =
+        Issues.create_issue(%{
+          title: "Foreign blocker",
+          company_id: other_company.id
+        })
+
+      assert {:error, :not_found} = Issues.add_blocker(blocked_issue, foreign_blocker)
+      assert Issues.get_issue!(blocked_issue.id).blocked_by == []
+    end
+
+    test "rejects transitive blocker cycles", %{issue: first_issue} do
+      {:ok, second_issue} =
+        Issues.create_issue(%{
+          title: "Second cycle issue",
+          company_id: first_issue.company_id
+        })
+
+      {:ok, third_issue} =
+        Issues.create_issue(%{
+          title: "Third cycle issue",
+          company_id: first_issue.company_id
+        })
+
+      assert {:ok, _} = Issues.add_blocker(first_issue, second_issue)
+      assert {:ok, _} = Issues.add_blocker(second_issue, third_issue)
+      assert {:error, :circular_blocker} = Issues.add_blocker(third_issue, first_issue)
+      assert Issues.get_issue!(third_issue.id).blocked_by == []
+    end
+
+    test "advances issue concurrency versions when the edge changes", %{
+      issue: blocked_issue
+    } do
+      {:ok, blocker_issue} =
+        Issues.create_issue(%{
+          title: "Versioned blocker",
+          company_id: blocked_issue.company_id
+        })
+
+      assert {:ok, added} = Issues.add_blocker(blocked_issue, blocker_issue)
+      assert added.lock_version == blocked_issue.lock_version + 1
+
+      assert {:ok, removed} = Issues.remove_blocker(added, Issues.get_issue!(blocker_issue.id))
+      assert removed.lock_version == added.lock_version + 1
+    end
   end
 
   describe "remove_blocker/2" do
@@ -925,12 +1041,106 @@ defmodule Cympho.IssuesTest do
       {:ok, blocker_issue} =
         Issues.create_issue(%{
           title: "Blocker",
-          description: "Will be removed"
+          description: "Will be removed",
+          company_id: blocked_issue.company_id
         })
 
       {:ok, _} = Issues.add_blocker(blocked_issue, blocker_issue)
       assert {:ok, updated} = Issues.remove_blocker(blocked_issue, blocker_issue)
       refute Enum.any?(updated.blocked_by || [], fn b -> b.id == blocker_issue.id end)
+    end
+
+    test "rejects cross-company issue pairs without touching a corrupt edge", %{
+      issue: blocked_issue
+    } do
+      suffix = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign removal company #{suffix}",
+          slug: "foreign-removal-company-#{suffix}"
+        })
+
+      {:ok, blocker_issue} =
+        Issues.create_issue(%{
+          title: "Movable blocker",
+          company_id: blocked_issue.company_id
+        })
+
+      assert {:ok, _} = Issues.add_blocker(blocked_issue, blocker_issue)
+
+      from(i in Cympho.Issues.Issue, where: i.id == ^blocker_issue.id)
+      |> Repo.update_all(set: [company_id: other_company.id])
+
+      assert {:error, :not_found} = Issues.remove_blocker(blocked_issue, blocker_issue)
+
+      assert Enum.any?(
+               Issues.get_issue!(blocked_issue.id).blocked_by,
+               &(&1.id == blocker_issue.id)
+             )
+    end
+  end
+
+  describe "issue label relationships" do
+    test "rejects cross-company labels even when caller structs forge company ids", %{
+      issue: issue
+    } do
+      suffix = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign label company #{suffix}",
+          slug: "foreign-label-company-#{suffix}"
+        })
+
+      {:ok, foreign_label} =
+        Cympho.Labels.create_label(%{
+          name: "Foreign label #{suffix}",
+          color: "#AABBCC",
+          company_id: other_company.id
+        })
+
+      assert {:error, :not_found} =
+               Issues.add_label_to_issue(issue, %{foreign_label | company_id: issue.company_id})
+
+      assert {:error, :not_found} =
+               Issues.add_label_to_issue(%{issue | company_id: other_company.id}, foreign_label)
+
+      assert {:error, :not_found} = Issues.remove_label_from_issue(issue, foreign_label)
+      assert Issues.get_issue!(issue.id).labels == []
+    end
+
+    test "set rejects foreign or missing labels atomically", %{issue: issue} do
+      suffix = System.unique_integer([:positive])
+
+      {:ok, local_label} =
+        Cympho.Labels.create_label(%{
+          name: "Local label #{suffix}",
+          color: "#112233",
+          company_id: issue.company_id
+        })
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign set company #{suffix}",
+          slug: "foreign-set-company-#{suffix}"
+        })
+
+      {:ok, foreign_label} =
+        Cympho.Labels.create_label(%{
+          name: "Foreign set label #{suffix}",
+          color: "#445566",
+          company_id: other_company.id
+        })
+
+      assert {:ok, _} = Issues.add_label_to_issue(issue, local_label)
+
+      assert {:error, :not_found} =
+               Issues.set_issue_labels(issue, [local_label.id, foreign_label.id])
+
+      assert {:error, :not_found} = Issues.set_issue_labels(issue, [Ecto.UUID.generate()])
+
+      assert Enum.map(Issues.get_issue!(issue.id).labels, & &1.id) == [local_label.id]
     end
   end
 
@@ -1016,6 +1226,21 @@ defmodule Cympho.IssuesTest do
       assert {:ok, updated} = Issues.transition_issue(reloaded, :done)
       assert updated.status == :done
     end
+
+    test "rechecks blockers from the database instead of a stale preload" do
+      {:ok, closing_snapshot} =
+        Issues.create_issue(%{title: "Stale close snapshot", status: :in_review})
+
+      {:ok, open_blocker} =
+        Issues.create_issue(%{title: "Late blocker", status: :in_progress})
+
+      assert {:ok, _} = Issues.add_blocker(closing_snapshot, open_blocker)
+
+      assert {:error, :blocked_by_active_issues} =
+               Issues.transition_issue(closing_snapshot, :done)
+
+      assert Issues.get_issue!(closing_snapshot.id).status == :in_review
+    end
   end
 
   describe "add_blocker/2 edge cases" do
@@ -1023,7 +1248,8 @@ defmodule Cympho.IssuesTest do
       {:ok, blocker} =
         Issues.create_issue(%{
           title: "Blocker",
-          description: "Same blocker twice"
+          description: "Same blocker twice",
+          company_id: blocked_issue.company_id
         })
 
       assert {:ok, _} = Issues.add_blocker(blocked_issue, blocker)
@@ -1188,14 +1414,16 @@ defmodule Cympho.IssuesTest do
         Issues.create_issue(%{
           title: "Open Blocker",
           description: "Open",
-          status: :in_progress
+          status: :in_progress,
+          company_id: blocked_issue.company_id
         })
 
       {:ok, done_blocker} =
         Issues.create_issue(%{
           title: "Done Blocker",
           description: "Done",
-          status: :done
+          status: :done,
+          company_id: blocked_issue.company_id
         })
 
       {:ok, _} = Issues.add_blocker(blocked_issue, open_blocker)

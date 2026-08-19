@@ -186,13 +186,9 @@ defmodule CymphoWeb.IssueLive.Show do
     do: assign(socket, :description_return_to, nil)
 
   defp safe_return_path(return_to) when is_binary(return_to) do
-    return_to = URI.decode(return_to)
-
-    cond do
-      String.starts_with?(return_to, "//") -> nil
-      String.starts_with?(return_to, "/") and not String.contains?(return_to, "://") -> return_to
-      true -> nil
-    end
+    return_to
+    |> URI.decode()
+    |> CymphoWeb.UserAuth.safe_return_path()
   end
 
   defp safe_return_path(_return_to), do: nil
@@ -1043,8 +1039,15 @@ defmodule CymphoWeb.IssueLive.Show do
       end
 
     if latest_revision do
-      diff_result = Documents.get_diff(revision_id, latest_revision.id)
-      {:noreply, assign(socket, :selected_revision_diff, diff_result)}
+      document = socket.assigns.selected_document
+
+      case Documents.get_document_diff(document.id, revision_id, latest_revision.id) do
+        {:ok, diff_result} ->
+          {:noreply, assign(socket, :selected_revision_diff, diff_result)}
+
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "Revision not found")}
+      end
     else
       {:noreply, put_flash(socket, :error, "No revisions to compare")}
     end

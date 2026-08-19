@@ -210,7 +210,8 @@ defmodule Cympho.Mcp.ServerMutationThrottleTest do
         company_id: company.id,
         name: "Other MCP Agent",
         role: :engineer,
-        status: :idle
+        status: :idle,
+        permissions: %{"can_create_tasks" => true}
       })
 
     for i <- 1..2 do

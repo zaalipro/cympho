@@ -244,6 +244,8 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
 
       assert {:ok, dequeued} = WakeupQueue.dequeue(agent.id)
       assert dequeued.id == first.id
+      assert is_binary(dequeued.claim_token)
+      assert %DateTime{} = dequeued.claimed_at
     end
 
     test "returns error when no wakes exist" do
@@ -253,6 +255,52 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
     test "selects the pending wake with FOR UPDATE SKIP LOCKED" do
       source = File.read!("lib/cympho/heartbeat_engine/wakeup_queue.ex")
       assert source =~ ~s(lock: "FOR UPDATE SKIP LOCKED")
+    end
+  end
+
+  describe "running claim recovery" do
+    test "reclaims only expired running claims and rejects a stale owner", %{
+      agent: agent,
+      issue: issue,
+      issue2: issue2
+    } do
+      {:ok, stale_wake} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_commented"
+        })
+
+      {:ok, stale_claim} = WakeupQueue.dequeue(agent.id)
+
+      stale_claim
+      |> Ecto.Changeset.change(%{claimed_at: DateTime.add(DateTime.utc_now(), -16 * 60, :second)})
+      |> Repo.update!()
+
+      {:ok, fresh_wake} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue2.id,
+          reason: "issue_blockers_resolved"
+        })
+
+      {:ok, fresh_claim} = WakeupQueue.dequeue(agent.id)
+
+      assert %{recovered: 1, agent_ids: [agent_id]} = WakeupQueue.recover_stale_running(15)
+      assert agent_id == agent.id
+
+      reloaded_stale = Repo.get!(Cympho.Wakes.AgentWake, stale_wake.id)
+      assert reloaded_stale.status == "pending"
+      assert is_nil(reloaded_stale.claim_token)
+      assert is_nil(reloaded_stale.claimed_at)
+
+      reloaded_fresh = Repo.get!(Cympho.Wakes.AgentWake, fresh_wake.id)
+      assert reloaded_fresh.status == "running"
+      assert reloaded_fresh.claim_token == fresh_claim.claim_token
+
+      assert {:error, :claim_lost} = WakeupQueue.mark_consumed(stale_claim)
+      assert {:ok, consumed} = WakeupQueue.mark_consumed(fresh_claim)
+      assert consumed.status == "consumed"
     end
   end
 

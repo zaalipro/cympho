@@ -4,6 +4,7 @@ defmodule CymphoWeb.RuntimeControlController do
   require Logger
 
   alias Cympho.AuditTrail
+  alias Cympho.CompanyRBAC
   alias Cympho.Companies
   alias CymphoWeb.UserAuth
 
@@ -80,7 +81,7 @@ defmodule CymphoWeb.RuntimeControlController do
   defp authorize(conn, company) do
     user = conn.assigns[:current_user]
 
-    if Companies.admin?(user.id, company.id) or Companies.is_board_member?(user.id, company.id) do
+    if CompanyRBAC.manager?(user.id, company.id) do
       :ok
     else
       {:error, :forbidden}

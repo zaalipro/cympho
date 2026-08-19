@@ -16,6 +16,7 @@ defmodule Cympho.Skills.HotReloader do
   import Ecto.Query
 
   alias Cympho.{Repo, Skills, Skills.Plugin}
+  alias Cympho.Plugins.Runtime
 
   @name __MODULE__
   @reload_timeout 2000
@@ -283,7 +284,7 @@ defmodule Cympho.Skills.HotReloader do
   defp find_plugin_by_identifier(_), do: {:error, :missing_identifier}
 
   defp update_plugin_manifest(plugin, manifest_data) do
-    Skills.update_plugin(plugin, %{manifest: manifest_data})
+    Runtime.update_plugin(plugin, %{manifest: manifest_data})
   end
 
   defp log_reload_failure(file_path, reason) do

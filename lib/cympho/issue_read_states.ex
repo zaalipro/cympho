@@ -7,7 +7,9 @@ defmodule Cympho.IssueReadStates do
   """
   import Ecto.Query, warn: false
   alias Cympho.Repo
+  alias Cympho.Comments.Comment
   alias Cympho.IssueReadStates.IssueReadState
+  alias Cympho.Issues.Issue
 
   @pubsub Cympho.PubSub
   @topic "issue_read_states"
@@ -159,16 +161,21 @@ defmodule Cympho.IssueReadStates do
   end
 
   @doc """
-  Mark all issues as read for a user (bulk operation).
+  Mark all issues in a company as read for a user (bulk operation).
   """
-  def mark_all_read(user_id) do
+  def mark_all_read(user_id, company_id)
+      when is_binary(user_id) and is_binary(company_id) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    # Get all issues the user has viewed (has read states)
+    # A user can belong to multiple companies, so the company constraint must
+    # live at the context boundary rather than relying on a scoped caller.
     existing_states =
       Repo.all(
         from rs in IssueReadState,
+          join: issue in Issue,
+          on: issue.id == rs.issue_id,
           where: rs.user_id == ^user_id,
+          where: issue.company_id == ^company_id,
           select: rs
       )
 
@@ -205,6 +212,46 @@ defmodule Cympho.IssueReadStates do
     last_comment = List.last(comments)
     last_comment_id = if last_comment, do: last_comment.id, else: nil
     mark_read(user_id, issue_id, last_comment_id)
+  end
+
+  @doc false
+  def repoint_deleted_comment(%Comment{} = comment) do
+    previous_comment_id =
+      Repo.one(
+        from c in Comment,
+          where:
+            c.issue_id == ^comment.issue_id and c.id != ^comment.id and
+              (c.inserted_at < ^comment.inserted_at or
+                 (c.inserted_at == ^comment.inserted_at and c.id < ^comment.id)),
+          order_by: [desc: c.inserted_at, desc: c.id],
+          limit: 1,
+          select: c.id
+      )
+
+    states =
+      Repo.all(
+        from rs in IssueReadState,
+          where: rs.last_read_comment_id == ^comment.id,
+          lock: "FOR UPDATE"
+      )
+
+    Enum.each(states, fn state ->
+      attrs =
+        if previous_comment_id do
+          %{last_read_comment_id: previous_comment_id}
+        else
+          %{
+            last_read_comment_id: nil,
+            last_read_at: DateTime.truncate(comment.inserted_at, :second)
+          }
+        end
+
+      state
+      |> IssueReadState.changeset(attrs)
+      |> Repo.update!()
+    end)
+
+    Enum.map(states, & &1.user_id)
   end
 
   @doc """

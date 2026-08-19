@@ -12,6 +12,7 @@ defmodule Cympho.Mcp.ToolGrants do
   alias Cympho.GovernanceAuditLogs
   alias Cympho.Mcp.{RegisteredTool, ToolGrant, ToolRegistry}
   alias Cympho.Repo
+  alias Cympho.Skills.Plugin
 
   @type decision :: :allow | :deny | :pending | :revoked
 
@@ -87,14 +88,18 @@ defmodule Cympho.Mcp.ToolGrants do
       {:error, :not_found} ->
         :deny
 
-      {:ok, _tool} ->
-        case latest_applicable_grant(company_id, agent_id, tool_name) do
-          nil -> :deny
-          %ToolGrant{status: "allow"} -> :allow
-          %ToolGrant{status: "deny"} -> :deny
-          %ToolGrant{status: "pending"} -> :pending
-          %ToolGrant{status: "revoked"} -> :revoked
-          _ -> :deny
+      {:ok, tool} ->
+        if owning_plugin_active?(tool) do
+          case latest_applicable_grant(company_id, agent_id, tool_name) do
+            nil -> :deny
+            %ToolGrant{status: "allow"} -> :allow
+            %ToolGrant{status: "deny"} -> :deny
+            %ToolGrant{status: "pending"} -> :pending
+            %ToolGrant{status: "revoked"} -> :revoked
+            _ -> :deny
+          end
+        else
+          :deny
         end
     end
   end
@@ -235,6 +240,18 @@ defmodule Cympho.Mcp.ToolGrants do
       # Allow grants against a name even if not yet active (pending approval flow);
       # authorize_call still requires an active registration.
       {:error, :not_found} -> {:ok, nil}
+    end
+  end
+
+  defp owning_plugin_active?(%RegisteredTool{plugin_id: nil}), do: true
+
+  defp owning_plugin_active?(%RegisteredTool{
+         plugin_id: plugin_id,
+         company_id: company_id
+       }) do
+    case Repo.get(Plugin, plugin_id) do
+      %Plugin{company_id: ^company_id, enabled: true, status: "active"} -> true
+      _plugin -> false
     end
   end
 

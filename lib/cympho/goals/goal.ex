@@ -25,23 +25,44 @@ defmodule Cympho.Goals.Goal do
   @statuses ~w(active completed cancelled)
   @priorities ~w(critical high medium low)
 
-  def changeset(goal, attrs) do
+  @editable_fields [
+    :title,
+    :description,
+    :status,
+    :priority,
+    :goal_type,
+    :target_date,
+    :project_id,
+    :parent_id
+  ]
+
+  def changeset(%__MODULE__{id: nil} = goal, attrs) do
     goal
-    |> cast(attrs, [
-      :title,
-      :description,
-      :status,
-      :priority,
-      :goal_type,
-      :target_date,
-      :project_id,
-      :company_id,
-      :parent_id
-    ])
+    |> cast(attrs, [:company_id | @editable_fields])
+    |> validate_changes()
+  end
+
+  def changeset(%__MODULE__{} = goal, attrs), do: update_changeset(goal, attrs)
+
+  @doc """
+  Request-safe changeset for an existing goal.
+
+  A goal's tenant is immutable after creation, so `company_id` is deliberately
+  excluded even when it is present in user-supplied parameters.
+  """
+  def update_changeset(goal, attrs) do
+    goal
+    |> cast(attrs, @editable_fields)
+    |> validate_changes()
+  end
+
+  defp validate_changes(changeset) do
+    changeset
     |> validate_required([:title])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:priority, @priorities)
     |> validate_length(:title, min: 1, max: 255)
+    |> foreign_key_constraint(:company_id)
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:parent_id)
     |> maybe_set_goal_type()

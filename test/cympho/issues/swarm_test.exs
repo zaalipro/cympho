@@ -9,11 +9,53 @@ defmodule Cympho.Issues.SwarmTest do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.Issues.Swarm
+  alias Cympho.Issues.SwarmEvent
   alias Cympho.Issues.SwarmEvents
   alias Cympho.Proxies
   alias Cympho.Repo
   alias Cympho.Users
   alias Cympho.Wakes.AgentWake
+
+  describe "event scope" do
+    test "the issue argument overrides caller-supplied tenant and issue identifiers" do
+      unique = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Swarm event scope A #{unique}",
+          slug: "swarm-event-scope-a-#{unique}"
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Swarm event scope B #{unique}",
+          slug: "swarm-event-scope-b-#{unique}"
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{title: "Trusted swarm event issue", company_id: company.id})
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{title: "Foreign swarm event issue", company_id: other_company.id})
+
+      message = "Trusted swarm scope #{unique}"
+
+      assert :ok =
+               SwarmEvents.record(issue, %{
+                 "company_id" => other_company.id,
+                 "parent_issue_id" => other_issue.id,
+                 "issue_id" => other_issue.id,
+                 "event_type" => "worker_completed",
+                 "status" => "success",
+                 "message" => message
+               })
+
+      event = Repo.get_by!(SwarmEvent, message: message)
+      assert event.company_id == company.id
+      assert event.parent_issue_id == issue.id
+      assert event.issue_id == issue.id
+    end
+  end
 
   describe "normalize_config/1" do
     test "defaults to a local reviewable runtime instead of credential-gated providers" do

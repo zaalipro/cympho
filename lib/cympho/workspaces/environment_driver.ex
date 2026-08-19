@@ -38,7 +38,9 @@ defmodule Cympho.Workspaces.EnvironmentDriver do
 
   `opts` must include a non-empty `:company_id` or `"company_id"`. Returns a
   handle with a reusable `provider_ref` and redacted metadata (secret-like
-  keys must not appear in cleartext).
+  keys must not appear in cleartext). When `:idempotency_key` is provided,
+  repeated acquisition attempts for that company/key must reuse the same
+  provider handle.
   """
   @callback acquire(opts(), config()) :: {:ok, handle()} | {:error, term()}
 

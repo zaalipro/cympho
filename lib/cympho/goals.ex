@@ -1,11 +1,14 @@
 defmodule Cympho.Goals do
   import Ecto.Query, warn: false
+  import Ecto.Changeset, only: [add_error: 3, get_field: 2, put_change: 3]
   alias Cympho.Repo
   alias Cympho.Goals.Goal
   alias Cympho.Issues.Issue
+  alias Cympho.Projects.Project
 
   @open_issue_statuses [:backlog, :todo, :in_progress, :in_review, :blocked]
   @alignment_risk_limit 5
+  @max_hierarchy_depth 100
 
   def list_goals do
     Goal
@@ -216,35 +219,130 @@ defmodule Cympho.Goals do
   end
 
   def get_company_goal(company_id, id) do
-    case Repo.one(from g in Goal, where: g.id == ^id and g.company_id == ^company_id) do
-      nil -> {:error, :not_found}
-      goal -> {:ok, goal}
+    with {:ok, company_id} <- Ecto.UUID.cast(company_id),
+         {:ok, id} <- Ecto.UUID.cast(id) do
+      case Repo.one(from g in Goal, where: g.id == ^id and g.company_id == ^company_id) do
+        nil -> {:error, :not_found}
+        goal -> {:ok, goal}
+      end
+    else
+      :error -> {:error, :not_found}
     end
   end
 
   def get_goal_with_tree!(id) do
-    goal = Repo.get!(Goal, id) |> Repo.preload([:project, :children])
-    %{goal | children: load_tree(goal.children)}
+    goal = Repo.get!(Goal, id) |> Repo.preload(:project)
+
+    {children, _visited} =
+      load_tree(goal.id, goal.company_id, MapSet.new([goal.id]), 0)
+
+    %{goal | children: children}
   end
 
-  defp load_tree(goals) do
-    goals
-    |> Repo.preload([:children])
-    |> Enum.map(fn goal -> %{goal | children: load_tree(goal.children)} end)
+  defp load_tree(_parent_id, _company_id, visited, depth)
+       when depth >= @max_hierarchy_depth,
+       do: {[], visited}
+
+  defp load_tree(parent_id, company_id, visited, depth) do
+    parent_id
+    |> child_goals_query(company_id)
+    |> Repo.all()
+    |> Enum.reduce({[], visited}, fn child, {children, visited} ->
+      if MapSet.member?(visited, child.id) do
+        {children, visited}
+      else
+        visited = MapSet.put(visited, child.id)
+        {grandchildren, visited} = load_tree(child.id, company_id, visited, depth + 1)
+        {children ++ [%{child | children: grandchildren}], visited}
+      end
+    end)
   end
 
   def create_goal(attrs \\ %{}) do
-    %Goal{} |> Goal.changeset(attrs) |> Repo.insert()
+    changeset =
+      %Goal{}
+      |> Goal.changeset(attrs)
+      |> validate_create_references()
+
+    Repo.insert(changeset)
   end
 
   def update_goal(%Goal{} = goal, attrs) do
-    goal |> Goal.changeset(attrs) |> Repo.update()
+    changeset =
+      goal
+      |> Goal.update_changeset(attrs)
+      |> validate_update_references(goal)
+
+    Repo.update(changeset)
   end
 
   def delete_goal(%Goal{} = goal), do: Repo.delete(goal)
 
   def change_goal(%Goal{} = goal, attrs \\ %{}) do
-    Goal.changeset(goal, attrs)
+    if goal.id, do: Goal.update_changeset(goal, attrs), else: Goal.changeset(goal, attrs)
+  end
+
+  defp validate_create_references(changeset) do
+    project = referenced_record(Project, get_field(changeset, :project_id))
+    parent = referenced_record(Goal, get_field(changeset, :parent_id))
+
+    changeset
+    |> maybe_infer_company(project, parent)
+    |> validate_reference_company(:project_id, project)
+    |> validate_reference_company(:parent_id, parent)
+    |> validate_parent_cycle(nil, parent)
+  end
+
+  defp validate_update_references(changeset, goal) do
+    project = referenced_record(Project, get_field(changeset, :project_id))
+    parent = referenced_record(Goal, get_field(changeset, :parent_id))
+
+    changeset
+    |> validate_reference_company(:project_id, project)
+    |> validate_reference_company(:parent_id, parent)
+    |> validate_parent_cycle(goal.id, parent)
+  end
+
+  defp referenced_record(_schema, nil), do: nil
+  defp referenced_record(schema, id) when is_binary(id), do: Repo.get(schema, id)
+  defp referenced_record(_schema, _id), do: nil
+
+  defp maybe_infer_company(changeset, project, parent) do
+    case get_field(changeset, :company_id) do
+      nil ->
+        case project || parent do
+          %{company_id: company_id} when is_binary(company_id) ->
+            put_change(changeset, :company_id, company_id)
+
+          _ ->
+            changeset
+        end
+
+      _company_id ->
+        changeset
+    end
+  end
+
+  defp validate_reference_company(changeset, _field, nil), do: changeset
+
+  defp validate_reference_company(changeset, field, reference) do
+    if reference.company_id == get_field(changeset, :company_id) do
+      changeset
+    else
+      add_error(changeset, field, "must belong to the same company")
+    end
+  end
+
+  defp validate_parent_cycle(changeset, _goal_id, nil), do: changeset
+
+  defp validate_parent_cycle(changeset, goal_id, parent) do
+    target_id = goal_id || :new_goal
+
+    if ancestor_reaches?(parent.id, target_id, MapSet.new(), 0) do
+      add_error(changeset, :parent_id, "would create a cycle")
+    else
+      changeset
+    end
   end
 
   def goal_progress(goal_id) do
@@ -275,51 +373,142 @@ defmodule Cympho.Goals do
 
   def get_ancestors(goal_id) do
     case Repo.get(Goal, goal_id) do
-      nil -> []
-      %{parent_id: nil} -> []
-      %{parent_id: pid} -> walk_ancestors(pid, [])
+      nil ->
+        []
+
+      %{parent_id: nil} ->
+        []
+
+      %{parent_id: parent_id, company_id: company_id} ->
+        walk_ancestors(
+          parent_id,
+          company_id,
+          MapSet.new([goal_id]),
+          0,
+          []
+        )
     end
   end
 
-  defp walk_ancestors(nil, acc), do: acc
+  defp walk_ancestors(nil, _company_id, _visited, _depth, acc), do: acc
 
-  defp walk_ancestors(id, acc) do
-    case Repo.get(Goal, id) do
-      nil ->
-        acc
+  defp walk_ancestors(_id, _company_id, _visited, depth, acc)
+       when depth >= @max_hierarchy_depth,
+       do: acc
 
-      goal ->
-        acc = [goal | acc]
-        if goal.parent_id, do: walk_ancestors(goal.parent_id, acc), else: acc
+  defp walk_ancestors(id, company_id, visited, depth, acc) do
+    if MapSet.member?(visited, id) do
+      acc
+    else
+      case Repo.get(Goal, id) do
+        nil ->
+          acc
+
+        %{company_id: ^company_id} = goal ->
+          walk_ancestors(
+            goal.parent_id,
+            company_id,
+            MapSet.put(visited, id),
+            depth + 1,
+            [goal | acc]
+          )
+
+        _other_company ->
+          acc
+      end
     end
   end
 
   def get_descendants(goal_id) do
-    children = from(g in Goal, where: g.parent_id == ^goal_id) |> Repo.all()
+    case Repo.get(Goal, goal_id) do
+      nil ->
+        []
 
-    Enum.flat_map(children, fn child ->
-      [child | get_descendants(child.id)]
+      goal ->
+        {descendants, _visited} =
+          walk_descendants(
+            goal.id,
+            goal.company_id,
+            MapSet.new([goal.id]),
+            0
+          )
+
+        descendants
+    end
+  end
+
+  defp walk_descendants(_parent_id, _company_id, visited, depth)
+       when depth >= @max_hierarchy_depth,
+       do: {[], visited}
+
+  defp walk_descendants(parent_id, company_id, visited, depth) do
+    parent_id
+    |> child_goals_query(company_id)
+    |> Repo.all()
+    |> Enum.reduce({[], visited}, fn child, {descendants, visited} ->
+      if MapSet.member?(visited, child.id) do
+        {descendants, visited}
+      else
+        visited = MapSet.put(visited, child.id)
+
+        {child_descendants, visited} =
+          walk_descendants(child.id, company_id, visited, depth + 1)
+
+        {descendants ++ [child | child_descendants], visited}
+      end
     end)
   end
 
-  def would_create_cycle?(goal_id, parent_id) do
-    if goal_id == parent_id,
-      do: true,
-      else: ancestor_reaches?(parent_id, goal_id, MapSet.new())
+  defp child_goals_query(parent_id, nil) do
+    from(g in Goal,
+      where: g.parent_id == ^parent_id and is_nil(g.company_id),
+      order_by: [asc: g.inserted_at, asc: g.id]
+    )
   end
 
-  defp ancestor_reaches?(current_id, target_id, visited) do
-    if MapSet.member?(visited, current_id) do
-      false
-    else
-      visited = MapSet.put(visited, current_id)
+  defp child_goals_query(parent_id, company_id) do
+    from(g in Goal,
+      where: g.parent_id == ^parent_id and g.company_id == ^company_id,
+      order_by: [asc: g.inserted_at, asc: g.id]
+    )
+  end
 
-      case Repo.get(Goal, current_id) do
-        nil -> false
-        %{parent_id: nil} -> false
-        %{parent_id: ^target_id} -> true
-        %{parent_id: pid} -> ancestor_reaches?(pid, target_id, visited)
-      end
+  def would_create_cycle?(goal_id, parent_id)
+      when is_binary(goal_id) and is_binary(parent_id) do
+    goal_id == parent_id or
+      ancestor_reaches?(parent_id, goal_id, MapSet.new(), 0)
+  end
+
+  def would_create_cycle?(_goal_id, _parent_id), do: false
+
+  # Fail closed when an existing parent chain is cyclic or exceeds the walk
+  # bound. Attaching more nodes to malformed legacy data would only make the
+  # hierarchy harder to repair.
+  defp ancestor_reaches?(_current_id, _target_id, _visited, depth)
+       when depth >= @max_hierarchy_depth,
+       do: true
+
+  defp ancestor_reaches?(current_id, target_id, visited, depth) do
+    cond do
+      current_id == target_id ->
+        true
+
+      MapSet.member?(visited, current_id) ->
+        true
+
+      true ->
+        visited = MapSet.put(visited, current_id)
+
+        case Repo.get(Goal, current_id) do
+          nil ->
+            false
+
+          %{parent_id: nil} ->
+            false
+
+          %{parent_id: parent_id} ->
+            ancestor_reaches?(parent_id, target_id, visited, depth + 1)
+        end
     end
   end
 

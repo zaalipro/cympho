@@ -7,7 +7,9 @@ defmodule CymphoWeb.SessionController do
   alias Cympho.Companies
   alias Cympho.Companies.CompanyMembership
   alias Cympho.Repo
+  alias Cympho.Users
   alias Cympho.Users.User
+  alias CymphoWeb.Endpoint
   alias CymphoWeb.UserAuth
 
   @dev Mix.env() == :dev
@@ -49,6 +51,16 @@ defmodule CymphoWeb.SessionController do
   end
 
   def delete(conn, _params) do
+    with user_id when is_binary(user_id) <- get_session(conn, :user_id),
+         {:ok, user} <- Users.get_user(user_id),
+         true <- Users.session_version_valid?(get_session(conn, :session_version), user),
+         {:ok, _user} <- Users.revoke_sessions(user) do
+      # Signed cookie sessions and user JWTs are otherwise valid until their
+      # expiration. Incrementing the persisted version makes sign-out an
+      # immediate all-sessions revocation point.
+      disconnect_user_sockets(user_id, get_session(conn, :company_id))
+    end
+
     conn
     |> configure_session(drop: true)
     |> redirect(to: "/login")
@@ -58,9 +70,29 @@ defmodule CymphoWeb.SessionController do
     conn
     |> configure_session(renew: true)
     |> put_session(:user_id, user.id)
+    |> put_session(:session_version, user.session_version || 0)
+    |> put_session(:live_socket_id, live_socket_id(user.id))
     |> put_session(:company_id, default_company_id(user))
     |> seed_theme_cookie(user)
   end
+
+  defp disconnect_user_sockets(user_id, session_company_id) do
+    Endpoint.broadcast(live_socket_id(user_id), "disconnect", %{})
+
+    company_ids =
+      [
+        session_company_id
+        | Enum.map(Companies.list_memberships_for_user(user_id), & &1.company_id)
+      ]
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+
+    Enum.each(company_ids, fn company_id ->
+      Endpoint.broadcast("socket:#{company_id}:#{user_id}", "disconnect", %{})
+    end)
+  end
+
+  defp live_socket_id(user_id), do: "users_sessions:#{user_id}"
 
   # Mirror the user's saved theme into a (non-HttpOnly) cookie so the root
   # layout server-renders the right `data-theme` on the next request and the

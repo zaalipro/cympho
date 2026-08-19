@@ -1,19 +1,21 @@
 defmodule CymphoWeb.Socket do
   use Phoenix.Socket
 
+  alias Cympho.Authentication
   alias Cympho.Companies
+  alias Cympho.Users
+  alias CymphoWeb.Plugs.TransportSecurity
 
   channel "company:*", CymphoWeb.CompanyChannel
 
   @impl true
   def connect(%{"token" => token}, socket, connect_info) do
-    with {:ok, claims} <- Cympho.AgentAuthJWT.verify_token(token),
-         {:ok, company_id} <- Cympho.AgentAuthJWT.get_company_id(claims),
-         {:ok, agent_id} <- Cympho.AgentAuthJWT.get_agent_id(claims) do
+    with {:ok, %{agent: agent, run: run}} <- Authentication.authenticate_heartbeat_token(token) do
       {:ok,
        socket
-       |> assign(:company_id, company_id)
-       |> assign(:user_id, agent_id)
+       |> assign(:company_id, agent.company_id)
+       |> assign(:user_id, agent.id)
+       |> assign(:run_id, run.id)
        |> assign(:auth_method, :jwt)
        |> assign(:ip_address, extract_ip(connect_info))}
     else
@@ -25,7 +27,9 @@ defmodule CymphoWeb.Socket do
     case connect_info[:session] do
       %{"user_id" => user_id, "company_id" => company_id}
       when is_binary(user_id) and is_binary(company_id) ->
-        if Companies.has_access?(user_id, company_id) do
+        with {:ok, user} <- Users.get_user(user_id),
+             true <- Users.session_version_valid?(connect_info[:session]["session_version"], user),
+             true <- Companies.has_access?(user_id, company_id) do
           {:ok,
            socket
            |> assign(:company_id, company_id)
@@ -33,7 +37,7 @@ defmodule CymphoWeb.Socket do
            |> assign(:auth_method, :session)
            |> assign(:ip_address, extract_ip(connect_info))}
         else
-          :error
+          _ -> :error
         end
 
       _ ->
@@ -45,15 +49,19 @@ defmodule CymphoWeb.Socket do
   def id(socket), do: "socket:#{socket.assigns.company_id}:#{socket.assigns.user_id}"
 
   def extract_ip(connect_info) do
-    case forwarded_address(connect_info[:x_headers]) do
-      {:ok, address} ->
-        address
-
-      :error ->
-        case connect_info[:peer_data] do
-          %{address: address} -> address
-          _ -> {127, 0, 0, 1}
+    case connect_info[:peer_data] do
+      %{address: peer_address} ->
+        if TransportSecurity.trusted_peer?(peer_address) do
+          case forwarded_address(connect_info[:x_headers]) do
+            {:ok, forwarded_address} -> forwarded_address
+            :error -> peer_address
+          end
+        else
+          peer_address
         end
+
+      _ ->
+        {127, 0, 0, 1}
     end
   end
 

@@ -45,6 +45,39 @@ defmodule CymphoWeb.SessionControllerTest do
       assert redirected_to(conn) == "/"
     end
 
+    test "rejects backslashes in a return target instead of raising" do
+      user = registered_user()
+
+      conn =
+        build_conn()
+        |> post("/login", %{
+          "return_to" => "/\\evil.example",
+          "user" => %{"email" => user.email, "password" => "password1234"}
+        })
+
+      assert redirected_to(conn) == "/"
+    end
+
+    test "writes a finite HttpOnly SameSite browser session cookie" do
+      user = registered_user()
+
+      conn =
+        build_conn()
+        |> post("/login", %{
+          "user" => %{"email" => user.email, "password" => "password1234"}
+        })
+
+      session_cookie =
+        conn
+        |> get_resp_header("set-cookie")
+        |> Enum.find(&String.starts_with?(&1, "_cympho_key="))
+
+      assert session_cookie =~ "HttpOnly"
+      assert session_cookie =~ "SameSite=Lax"
+      assert session_cookie =~ "max-age=604800"
+      refute session_cookie =~ "; Secure"
+    end
+
     test "dev login also respects a safe return target", %{conn: conn} do
       conn = get(conn, "/dev/login?return_to=/operations")
 
@@ -133,6 +166,35 @@ defmodule CymphoWeb.SessionControllerTest do
 
       assert get_session(conn, :company_id) == default_company.id
     end
+
+    test "server-side revocation invalidates an already-issued browser session" do
+      user = registered_user()
+
+      conn =
+        build_conn()
+        |> post("/login", %{
+          "user" => %{"email" => user.email, "password" => "password1234"}
+        })
+
+      assert get_session(conn, :session_version) == 0
+      assert get_session(conn, :live_socket_id) == "users_sessions:#{user.id}"
+      assert {:ok, _user} = Cympho.Users.revoke_sessions(user)
+
+      conn = conn |> recycle() |> get("/onboarding")
+
+      assert redirected_to(conn) == "/login?return_to=%2Fonboarding"
+    end
+
+    test "server-side revocation invalidates an already-issued user JWT", %{conn: conn} do
+      {conn, user, _company} = register_and_log_in_user(conn)
+      assert {:ok, _user} = Cympho.Users.revoke_sessions(user)
+
+      conn = get(conn, "/api/dashboard")
+
+      assert json_response(conn, 401) == %{
+               "errors" => [%{"detail" => "Authentication required"}]
+             }
+    end
   end
 
   describe "logout" do
@@ -153,6 +215,37 @@ defmodule CymphoWeb.SessionControllerTest do
 
       assert redirected_to(conn) == "/login"
       assert conn.private.plug_session_info == :drop
+      assert Cympho.Users.get_user!(user.id).session_version == 1
+    end
+
+    test "disconnects active LiveView and company sockets after revocation", %{conn: conn} do
+      {_conn, user, company} = register_and_log_in_user(conn)
+      live_socket_id = "users_sessions:#{user.id}"
+      company_socket_id = "socket:#{company.id}:#{user.id}"
+
+      :ok = CymphoWeb.Endpoint.subscribe(live_socket_id)
+      :ok = CymphoWeb.Endpoint.subscribe(company_socket_id)
+
+      conn =
+        conn
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session("user_id", user.id)
+        |> Plug.Conn.put_session("company_id", company.id)
+        |> Plug.Conn.put_session("session_version", 0)
+        |> Plug.Conn.put_session("live_socket_id", live_socket_id)
+        |> delete("/logout")
+
+      assert redirected_to(conn) == "/login"
+
+      assert_receive %Phoenix.Socket.Broadcast{
+        event: "disconnect",
+        topic: ^live_socket_id
+      }
+
+      assert_receive %Phoenix.Socket.Broadcast{
+        event: "disconnect",
+        topic: ^company_socket_id
+      }
     end
   end
 

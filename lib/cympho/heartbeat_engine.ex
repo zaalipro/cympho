@@ -16,12 +16,14 @@ defmodule Cympho.HeartbeatEngine do
   alias Cympho.Repo
   alias Cympho.Adapters.Error, as: AdapterError
   alias Cympho.Budgets.Budget
+  alias Cympho.Finances.TokenUsage
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.{Agents, Finances, Issues, Workspace, Workspaces}
   alias Cympho.Issues.Issue
   require Logger
 
   @active_run_statuses ~w(pending queued running)
+  @terminal_run_statuses ~w(completed succeeded failed cancelled timed_out)
 
   @default_budget_allocation Decimal.new("5.00")
   @stale_threshold_minutes 15
@@ -39,6 +41,7 @@ defmodule Cympho.HeartbeatEngine do
   def create_run(attrs) do
     with {:ok, agent} <- Agents.get_agent(attrs.agent_id),
          :ok <- validate_run_company_scope(agent, attrs),
+         {:ok, attrs} <- put_run_company_scope(agent, attrs),
          :ok <- check_budget(agent, attrs[:issue_id]),
          :ok <- check_finance_budget(agent, attrs[:issue_id]),
          {:ok, run} <- %Run{} |> Run.create_changeset(attrs) |> Repo.insert(),
@@ -160,6 +163,7 @@ defmodule Cympho.HeartbeatEngine do
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_cancelled")
+      record_usage_event(updated)
       CymphoWeb.Events.broadcast_run_status(updated, :run_cancelled)
     end)
   end
@@ -362,6 +366,15 @@ defmodule Cympho.HeartbeatEngine do
     end
   end
 
+  defp put_run_company_scope(_agent, %{issue_id: issue_id} = attrs) when issue_id in [nil, ""],
+    do: {:ok, attrs}
+
+  defp put_run_company_scope(_agent, %{issue_id: issue_id} = attrs) do
+    with {:ok, %Issue{} = issue} <- Issues.get_issue(issue_id) do
+      {:ok, Map.put(attrs, :company_id, attrs[:company_id] || issue.company_id)}
+    end
+  end
+
   defp check_budget(agent, issue_id) do
     budget = get_agent_budget(agent)
 
@@ -382,8 +395,7 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   defp get_agent_budget(agent) do
-    budgets = Cympho.Budgets.list_budgets(scope_type: "agent", scope_id: agent.id)
-    Enum.find(budgets, &(&1.status == "active"))
+    Cympho.Budgets.get_active_agent_budget(agent.company_id, agent.id)
   rescue
     error ->
       # A broken budget read must not block the run (fail-open for liveness),
@@ -402,9 +414,11 @@ defmodule Cympho.HeartbeatEngine do
   defp check_finance_budget(agent, issue_id) do
     with {:ok, %Issue{} = issue} <- Issues.get_issue(issue_id) do
       if is_binary(issue.company_id) do
-        case Finances.check_runtime_budget(issue, agent) do
-          {:ok, _budget} -> :ok
-          {:error, _reason} = error -> error
+        with :ok <- ensure_usage_reconciled(issue.company_id) do
+          case Finances.check_runtime_budget(issue, agent) do
+            {:ok, _budget} -> :ok
+            {:error, _reason} = error -> error
+          end
         end
       else
         :ok
@@ -633,6 +647,7 @@ defmodule Cympho.HeartbeatEngine do
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_recovered_stale")
+      record_usage_event(updated)
     end)
   end
 
@@ -651,8 +666,11 @@ defmodule Cympho.HeartbeatEngine do
 
   @doc """
   Finds runs whose orchestrator process has crashed or disappeared.
-  An orphaned run is pending, queued, or running with no active orchestrator
-  for the issue.
+
+  Local Registry state is only a final optimization: registries are not
+  cluster-wide, so absence on this node is never enough to destroy work. A run
+  must first have an expired durable database liveness timestamp (or an old
+  creation timestamp for work that never started).
   """
   @spec find_orphaned_runs() :: [Run.t()]
   def find_orphaned_runs do
@@ -676,6 +694,90 @@ defmodule Cympho.HeartbeatEngine do
   # Cost tracking
   # ---------------------------------------------------------------------------
 
+  @usage_reconcile_batch_size 200
+
+  @doc """
+  Reconciles durable terminal-run spend into the finance ledger.
+
+  A run is the durable source of the provider result. The ledger has a unique
+  `heartbeat_run_id`, so retries after a crash or transient database error are
+  safe and cannot double-count spend.
+  """
+  @spec reconcile_unrecorded_terminal_usage(String.t() | nil, keyword()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def reconcile_unrecorded_terminal_usage(company_id \\ nil, opts \\ []) do
+    limit = Keyword.get(opts, :limit, @usage_reconcile_batch_size)
+
+    company_id
+    |> unrecorded_terminal_usage_query()
+    |> limit(^limit)
+    |> Repo.all()
+    |> Enum.reduce_while({:ok, 0}, fn run, {:ok, count} ->
+      case persist_run_usage(run) do
+        :ok -> {:cont, {:ok, count + 1}}
+        {:error, reason} -> {:halt, {:error, %{run_id: run.id, reason: reason}}}
+      end
+    end)
+  rescue
+    error -> {:error, error}
+  end
+
+  @doc false
+  @spec ensure_usage_reconciled(String.t()) :: :ok | {:error, term()}
+  def ensure_usage_reconciled(company_id) when is_binary(company_id) do
+    case reconcile_unrecorded_terminal_usage(company_id) do
+      {:ok, _count} ->
+        if Repo.exists?(unrecorded_terminal_usage_query(company_id)) do
+          {:error, :usage_reconciliation_backlog}
+        else
+          :ok
+        end
+
+      {:error, reason} ->
+        Logger.error("HeartbeatEngine: blocking new spend until usage reconciliation succeeds",
+          company_id: company_id,
+          component: "heartbeat_engine",
+          error: inspect(reason)
+        )
+
+        {:error, :usage_reconciliation_pending}
+    end
+  rescue
+    error ->
+      Logger.error("HeartbeatEngine: usage reconciliation check failed closed",
+        company_id: company_id,
+        component: "heartbeat_engine",
+        error: inspect(error)
+      )
+
+      {:error, :usage_reconciliation_pending}
+  end
+
+  defp unrecorded_terminal_usage_query(company_id) do
+    query =
+      from r in Run,
+        left_join: issue in Issue,
+        on: issue.id == r.issue_id,
+        left_join: usage in TokenUsage,
+        on: usage.heartbeat_run_id == r.id,
+        where: r.status in ^@terminal_run_statuses,
+        where: not is_nil(r.company_id) or not is_nil(issue.company_id),
+        where: r.input_tokens > 0 or r.output_tokens > 0 or r.cost_usd > 0,
+        where: is_nil(usage.id),
+        order_by: [asc: r.completed_at, asc: r.id]
+
+    if is_binary(company_id) do
+      where(
+        query,
+        [r, issue],
+        issue.company_id == ^company_id or
+          (is_nil(issue.company_id) and r.company_id == ^company_id)
+      )
+    else
+      query
+    end
+  end
+
   defp stale_runs_query(threshold_minutes) do
     threshold = DateTime.add(DateTime.utc_now(), -threshold_minutes * 60, :second)
 
@@ -690,8 +792,18 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   defp orphaned_runs_query do
+    stale_before =
+      DateTime.utc_now()
+      |> DateTime.add(-@stale_threshold_minutes * 60, :second)
+
     Run
-    |> where([r], r.status in ["pending", "queued", "running"])
+    |> where(
+      [r],
+      (r.status in ["pending", "queued"] and r.inserted_at < ^stale_before) or
+        (r.status == "running" and
+           ((is_nil(r.last_heartbeat_at) and r.inserted_at < ^stale_before) or
+              r.last_heartbeat_at < ^stale_before))
+    )
     |> order_by([r], asc: r.inserted_at)
     |> limit(^@stale_run_batch_size)
   end
@@ -706,32 +818,37 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   defp record_usage_event(%Run{} = run) do
+    case persist_run_usage(run) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("HeartbeatEngine: failed to persist runtime usage; watchdog will retry",
+          run_id: run.id,
+          company_id: run.company_id,
+          error: inspect(reason)
+        )
+    end
+
+    :ok
+  rescue
+    error ->
+      Logger.error("HeartbeatEngine: runtime usage persistence raised; watchdog will retry",
+        run_id: run.id,
+        company_id: run.company_id,
+        error: inspect(error)
+      )
+
+      :ok
+  end
+
+  defp persist_run_usage(%Run{} = run) do
     cost = run.cost_usd || Decimal.new("0")
     input_tokens = run.input_tokens || 0
     output_tokens = run.output_tokens || 0
 
     if input_tokens > 0 or output_tokens > 0 or Decimal.positive?(cost) do
-      with {:ok, %Issue{} = issue} <- Issues.get_issue(run.issue_id),
-           company_id when is_binary(company_id) <- issue.company_id || run.company_id do
-        attrs = %{
-          company_id: company_id,
-          agent_id: run.agent_id,
-          project_id: issue.project_id,
-          goal_id: issue.goal_id,
-          issue_id: issue.id,
-          heartbeat_run_id: run.id,
-          provider: run_provider(run),
-          model: run_model(run),
-          input_tokens: input_tokens,
-          output_tokens: output_tokens,
-          cost_usd: cost,
-          metadata: %{
-            "heartbeat_run_id" => run.id,
-            "run_status" => run.status,
-            "invocation_source" => run.invocation_source
-          }
-        }
-
+      with {:ok, attrs} <- run_usage_attrs(run) do
         case Finances.record_token_usage(attrs) do
           {:ok, _usage} ->
             :ok
@@ -741,27 +858,61 @@ defmodule Cympho.HeartbeatEngine do
             # returned; this is an enforcement outcome, not a ledger failure.
             Logger.warning("HeartbeatEngine: runtime usage crossed a hard-stop budget",
               run_id: run.id,
-              company_id: company_id,
+              company_id: attrs.company_id,
               agent_id: run.agent_id
             )
 
-          error ->
-            Logger.error("HeartbeatEngine: failed to persist runtime usage",
-              run_id: run.id,
-              company_id: company_id,
-              error: inspect(error)
-            )
-        end
-      else
-        _ ->
-          Logger.error("HeartbeatEngine: cannot persist runtime usage without an issue company",
-            run_id: run.id,
-            issue_id: run.issue_id
-          )
-      end
-    end
+            :ok
 
-    :ok
+          error ->
+            {:error, error}
+        end
+      end
+    else
+      :ok
+    end
+  end
+
+  defp run_usage_attrs(%Run{} = run) do
+    case Repo.get(Issue, run.issue_id) do
+      %Issue{} = issue ->
+        company_id = issue.company_id || run.company_id
+
+        if is_binary(company_id) do
+          {:ok, usage_attrs(run, company_id, issue.id, issue.project_id, issue.goal_id)}
+        else
+          {:error, :usage_company_required}
+        end
+
+      nil when is_binary(run.company_id) ->
+        # Issue deletion nilifies the run FK. Preserve company/agent spend even
+        # though the more granular issue dimensions no longer exist.
+        {:ok, usage_attrs(run, run.company_id, nil, nil, nil)}
+
+      nil ->
+        {:error, :usage_company_required}
+    end
+  end
+
+  defp usage_attrs(run, company_id, issue_id, project_id, goal_id) do
+    %{
+      company_id: company_id,
+      agent_id: run.agent_id,
+      project_id: project_id,
+      goal_id: goal_id,
+      issue_id: issue_id,
+      heartbeat_run_id: run.id,
+      provider: run_provider(run),
+      model: run_model(run),
+      input_tokens: run.input_tokens || 0,
+      output_tokens: run.output_tokens || 0,
+      cost_usd: run.cost_usd || Decimal.new("0"),
+      metadata: %{
+        "heartbeat_run_id" => run.id,
+        "run_status" => run.status,
+        "invocation_source" => run.invocation_source
+      }
+    }
   end
 
   defp run_provider(%Run{} = run) do

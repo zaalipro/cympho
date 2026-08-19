@@ -4,7 +4,7 @@ defmodule CymphoWeb.LaunchItemControllerTest do
   alias Cympho.{Companies, LaunchItems, Users}
 
   setup %{conn: conn} do
-    {conn, current_user, company} = register_and_log_in_user(conn)
+    {conn, current_user, company} = register_and_log_in_user(conn, %{role: "admin"})
     unique = System.unique_integer([:positive])
 
     {:ok, backup_owner} =

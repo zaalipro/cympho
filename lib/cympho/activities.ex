@@ -155,35 +155,45 @@ defmodule Cympho.Activities do
   def subscribe(_company_id), do: :ok
 
   def log_activity(attrs) when is_map(attrs) do
-    attrs = put_company_id(attrs)
-
-    case %Activity{} |> Activity.changeset(attrs) |> Repo.insert() do
+    case attrs |> activity_changeset() |> Repo.insert() do
       {:ok, activity} ->
-        company_id = activity.company_id || issue_company_id(activity.issue_id)
-
-        # Fail-closed: only publish company-scoped activities when company_id is present.
-        # Never emit company::activities or the unscoped activities:* global topic.
-        if is_binary(company_id) and company_id != "" do
-          Cympho.RateLimiting.dedup_pubsub(
-            Cympho.PubSub,
-            "company:#{company_id}:activities",
-            {:activity_created, activity}
-          )
-        end
-
-        if is_binary(activity.issue_id) do
-          Cympho.RateLimiting.dedup_broadcast(
-            "issue:#{activity.issue_id}",
-            "activity_created",
-            activity
-          )
-        end
-
+        dispatch_activity(activity)
         {:ok, activity}
 
       error ->
         error
     end
+  end
+
+  @doc false
+  def activity_changeset(attrs) when is_map(attrs) do
+    attrs = put_company_id(attrs)
+    Activity.changeset(%Activity{}, attrs)
+  end
+
+  @doc false
+  def dispatch_activity(%Activity{} = activity) do
+    company_id = activity.company_id || issue_company_id(activity.issue_id)
+
+    # Fail-closed: only publish company-scoped activities when company_id is present.
+    # Never emit company::activities or the unscoped activities:* global topic.
+    if is_binary(company_id) and company_id != "" do
+      Cympho.RateLimiting.dedup_pubsub(
+        Cympho.PubSub,
+        "company:#{company_id}:activities",
+        {:activity_created, activity}
+      )
+    end
+
+    if is_binary(activity.issue_id) do
+      Cympho.RateLimiting.dedup_broadcast(
+        "issue:#{activity.issue_id}",
+        "activity_created",
+        activity
+      )
+    end
+
+    :ok
   end
 
   def log_issue_changes(old_issue, new_issue, attrs) do

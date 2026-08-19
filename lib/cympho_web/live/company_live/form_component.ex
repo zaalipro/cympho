@@ -3,6 +3,8 @@ defmodule CymphoWeb.CompanyLive.FormComponent do
 
   alias Cympho.Companies
 
+  @management_forbidden_message "Only company owners, admins, or board members can edit this company."
+
   @impl true
   def update(%{company: company} = assigns, socket) do
     changeset = Companies.change_company(company)
@@ -28,24 +30,28 @@ defmodule CymphoWeb.CompanyLive.FormComponent do
   end
 
   defp save_company(socket, :edit, company_params) do
-    case Companies.update_company(socket.assigns.company, company_params) do
-      {:ok, company} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Company updated successfully")
-         |> push_navigate(to: ~p"/companies/#{company}")}
+    if company_manager?(socket) do
+      case Companies.update_company(socket.assigns.company, company_params) do
+        {:ok, company} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Company updated successfully")
+           |> push_navigate(to: ~p"/companies/#{company}")}
 
-      {:pending_approval, _approval} ->
-        {:noreply,
-         socket
-         |> put_flash(
-           :warning,
-           "Governance config change requires board approval. A proposal has been submitted."
-         )
-         |> push_navigate(to: ~p"/companies")}
+        {:pending_approval, _approval} ->
+          {:noreply,
+           socket
+           |> put_flash(
+             :warning,
+             "Governance config change requires board approval. A proposal has been submitted."
+           )
+           |> push_navigate(to: ~p"/companies")}
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign_form(socket, changeset)}
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:noreply, assign_form(socket, changeset)}
+      end
+    else
+      {:noreply, put_flash(socket, :error, @management_forbidden_message)}
     end
   end
 
@@ -68,4 +74,12 @@ defmodule CymphoWeb.CompanyLive.FormComponent do
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
     assign(socket, :form, to_form(changeset))
   end
+
+  defp company_manager?(%{
+         assigns: %{current_user: %{id: user_id}, company: %{id: company_id}}
+       }) do
+    Cympho.CompanyRBAC.manager?(user_id, company_id)
+  end
+
+  defp company_manager?(_socket), do: false
 end

@@ -5,7 +5,7 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
   alias Cympho.RoutineTriggers
 
   setup %{conn: conn} do
-    {conn, user, company} = register_and_log_in_user(conn)
+    {conn, user, company} = register_and_log_in_user(conn, %{role: "admin"})
     {:ok, conn: conn, user: user, company: company}
   end
 

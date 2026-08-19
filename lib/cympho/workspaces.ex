@@ -4,9 +4,11 @@ defmodule Cympho.Workspaces do
   runtime services, operations, and environment leases.
   """
   import Ecto.Query, warn: false
+  import Ecto.Changeset, only: [add_error: 3, get_field: 2]
   require Logger
   alias Cympho.Repo
 
+  alias Cympho.Projects.Project
   alias Cympho.Workspaces.ProjectWorkspace
   alias Cympho.Workspaces.ExecutionWorkspace
   alias Cympho.Workspaces.RuntimeService
@@ -69,6 +71,7 @@ defmodule Cympho.Workspaces do
   def create_project_workspace(attrs \\ %{}) do
     %ProjectWorkspace{}
     |> ProjectWorkspace.changeset(attrs)
+    |> validate_project_workspace_scope()
     |> Repo.insert()
   end
 
@@ -121,13 +124,148 @@ defmodule Cympho.Workspaces do
   def create_execution_workspace(attrs \\ %{}) do
     %ExecutionWorkspace{}
     |> ExecutionWorkspace.changeset(attrs)
+    |> validate_execution_workspace_scope()
     |> Repo.insert()
   end
 
   def update_execution_workspace(%ExecutionWorkspace{} = ew, attrs) do
     ew
     |> ExecutionWorkspace.update_changeset(attrs)
+    |> validate_execution_workspace_scope()
     |> Repo.update()
+  end
+
+  defp validate_project_workspace_scope(changeset) do
+    company_id = get_field(changeset, :company_id)
+
+    case referenced_record(Project, get_field(changeset, :project_id)) do
+      nil ->
+        maybe_add_invalid_reference(changeset, :project_id)
+
+      %Project{company_id: ^company_id} ->
+        changeset
+
+      %Project{} ->
+        add_error(changeset, :project_id, "must belong to the same company")
+    end
+  end
+
+  defp validate_execution_workspace_scope(changeset) do
+    company_id = get_field(changeset, :company_id)
+    project_id = get_field(changeset, :project_id)
+    project_workspace_id = get_field(changeset, :project_workspace_id)
+
+    changeset
+    |> validate_execution_project(company_id, project_id)
+    |> validate_execution_project_workspace(company_id, project_id, project_workspace_id)
+    |> validate_execution_source_issue(company_id, project_id)
+    |> validate_derived_execution_workspace(company_id, project_id, project_workspace_id)
+  end
+
+  defp validate_execution_project(changeset, company_id, project_id) do
+    case referenced_record(Project, project_id) do
+      nil ->
+        maybe_add_invalid_reference(changeset, :project_id)
+
+      %Project{company_id: ^company_id} ->
+        changeset
+
+      %Project{} ->
+        add_error(changeset, :project_id, "must belong to the same company")
+    end
+  end
+
+  defp validate_execution_project_workspace(
+         changeset,
+         company_id,
+         project_id,
+         project_workspace_id
+       ) do
+    case referenced_record(ProjectWorkspace, project_workspace_id) do
+      nil ->
+        maybe_add_invalid_reference(changeset, :project_workspace_id)
+
+      %ProjectWorkspace{company_id: ^company_id, project_id: ^project_id} ->
+        changeset
+
+      %ProjectWorkspace{} ->
+        add_error(
+          changeset,
+          :project_workspace_id,
+          "must belong to the same company and project"
+        )
+    end
+  end
+
+  defp validate_execution_source_issue(changeset, company_id, project_id) do
+    source_issue_id = get_field(changeset, :source_issue_id)
+
+    case referenced_record(Issue, source_issue_id) do
+      nil when is_nil(source_issue_id) ->
+        changeset
+
+      nil ->
+        add_error(changeset, :source_issue_id, "is invalid")
+
+      %Issue{company_id: ^company_id, project_id: issue_project_id}
+      when issue_project_id in [nil, project_id] ->
+        changeset
+
+      %Issue{} ->
+        add_error(changeset, :source_issue_id, "must belong to the same company and project")
+    end
+  end
+
+  defp validate_derived_execution_workspace(
+         changeset,
+         company_id,
+         project_id,
+         project_workspace_id
+       ) do
+    derived_id = get_field(changeset, :derived_from_execution_workspace_id)
+    execution_workspace_id = get_field(changeset, :id)
+
+    case referenced_record(ExecutionWorkspace, derived_id) do
+      nil when is_nil(derived_id) ->
+        changeset
+
+      nil ->
+        add_error(changeset, :derived_from_execution_workspace_id, "is invalid")
+
+      %ExecutionWorkspace{id: id} when id == execution_workspace_id ->
+        add_error(changeset, :derived_from_execution_workspace_id, "cannot reference itself")
+
+      %ExecutionWorkspace{
+        company_id: ^company_id,
+        project_id: ^project_id,
+        project_workspace_id: ^project_workspace_id
+      } ->
+        changeset
+
+      %ExecutionWorkspace{} ->
+        add_error(
+          changeset,
+          :derived_from_execution_workspace_id,
+          "must belong to the same company, project, and project workspace"
+        )
+    end
+  end
+
+  defp referenced_record(_schema, nil), do: nil
+
+  defp referenced_record(schema, id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} -> Repo.get(schema, id)
+      :error -> nil
+    end
+  end
+
+  defp referenced_record(_schema, _id), do: nil
+
+  defp maybe_add_invalid_reference(changeset, field) do
+    if is_nil(get_field(changeset, field)),
+      do: changeset,
+      else: add_error(changeset, field, "is invalid")
   end
 
   def destroy_execution_workspace(%ExecutionWorkspace{} = ew) do
@@ -603,17 +741,86 @@ defmodule Cympho.Workspaces do
     end
   end
 
-  def create_runtime_service(attrs \\ %{}) do
-    %RuntimeService{}
+  def get_company_preview_service(company_id, id, preview_ref)
+      when is_binary(company_id) and is_binary(id) and is_binary(preview_ref) do
+    with {:ok, id} <- Ecto.UUID.cast(id),
+         {:ok, preview_ref} <- Ecto.UUID.cast(preview_ref) do
+      query =
+        from rs in RuntimeService,
+          join: ew in ExecutionWorkspace,
+          on: ew.id == rs.execution_workspace_id,
+          where:
+            rs.id == ^id and rs.company_id == ^company_id and
+              rs.preview_ref == ^preview_ref and rs.status == "running" and
+              ew.company_id == rs.company_id and ew.project_id == rs.project_id and
+              ew.project_workspace_id == rs.project_workspace_id and
+              ew.status in ["open", "running", "active"]
+
+      case Repo.one(query) do
+        nil -> {:error, :not_found}
+        service -> {:ok, service}
+      end
+    else
+      :error -> {:error, :not_found}
+    end
+  end
+
+  def get_company_preview_service(_company_id, _id, _preview_ref), do: {:error, :not_found}
+
+  def get_preview_service(id, preview_ref) when is_binary(id) and is_binary(preview_ref) do
+    with {:ok, id} <- Ecto.UUID.cast(id),
+         {:ok, preview_ref} <- Ecto.UUID.cast(preview_ref) do
+      query =
+        from rs in RuntimeService,
+          join: ew in ExecutionWorkspace,
+          on: ew.id == rs.execution_workspace_id,
+          where:
+            rs.id == ^id and rs.preview_ref == ^preview_ref and rs.status == "running" and
+              not is_nil(rs.company_id) and ew.company_id == rs.company_id and
+              ew.project_id == rs.project_id and
+              ew.project_workspace_id == rs.project_workspace_id and
+              ew.status in ["open", "running", "active"]
+
+      case Repo.one(query) do
+        nil -> {:error, :not_found}
+        service -> {:ok, service}
+      end
+    else
+      :error -> {:error, :not_found}
+    end
+  end
+
+  def get_preview_service(_id, _preview_ref), do: {:error, :not_found}
+
+  def create_runtime_service(%ExecutionWorkspace{} = execution_workspace, attrs) do
+    %RuntimeService{
+      status: "stopped",
+      company_id: execution_workspace.company_id,
+      project_id: execution_workspace.project_id,
+      project_workspace_id: execution_workspace.project_workspace_id,
+      execution_workspace_id: execution_workspace.id
+    }
+    |> RuntimeService.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def create_runtime_service(%ProjectWorkspace{} = project_workspace, attrs) do
+    %RuntimeService{
+      status: "stopped",
+      company_id: project_workspace.company_id,
+      project_id: project_workspace.project_id,
+      project_workspace_id: project_workspace.id
+    }
     |> RuntimeService.changeset(attrs)
     |> Repo.insert()
   end
 
   def start_service(%RuntimeService{} = svc) do
     svc
-    |> RuntimeService.changeset(%{
-      status: "running",
-      started_at: DateTime.utc_now(),
+    |> RuntimeService.lifecycle_changeset(%{
+      status: "starting",
+      port: nil,
+      preview_ref: nil,
       stopped_at: nil
     })
     |> Repo.update()
@@ -621,15 +828,21 @@ defmodule Cympho.Workspaces do
 
   def stop_service(%RuntimeService{} = svc) do
     svc
-    |> RuntimeService.changeset(%{status: "stopped", stopped_at: DateTime.utc_now()})
+    |> RuntimeService.lifecycle_changeset(%{
+      status: "stopped",
+      port: nil,
+      preview_ref: nil,
+      stopped_at: DateTime.utc_now()
+    })
     |> Repo.update()
   end
 
   def restart_service(%RuntimeService{} = svc) do
     svc
-    |> RuntimeService.changeset(%{
-      status: "running",
-      started_at: DateTime.utc_now(),
+    |> RuntimeService.lifecycle_changeset(%{
+      status: "starting",
+      port: nil,
+      preview_ref: nil,
       stopped_at: nil
     })
     |> Repo.update()
@@ -637,10 +850,45 @@ defmodule Cympho.Workspaces do
 
   @doc """
   Update runtime service with discovered port information.
+
+  This is a trusted runtime callback. It issues a fresh preview identity only
+  after the launcher has observed the service port; request parameters never
+  reach this function.
   """
-  def update_service_port(%RuntimeService{} = svc, port, attrs \\ %{}) do
+  def issue_service_preview(%RuntimeService{} = svc, port, attrs \\ %{}) do
+    with :ok <- validate_preview_scope(svc) do
+      lifecycle_attrs =
+        %{
+          port: port,
+          preview_ref: Ecto.UUID.generate(),
+          status: "running",
+          started_at: DateTime.utc_now(),
+          stopped_at: nil
+        }
+        |> Map.merge(optional_lifecycle_attrs(attrs))
+
+      svc
+      |> RuntimeService.lifecycle_changeset(lifecycle_attrs)
+      |> Repo.update()
+    end
+  end
+
+  def update_service_port(%RuntimeService{} = svc, port, attrs \\ %{}),
+    do: issue_service_preview(svc, port, attrs)
+
+  @doc "Marks a service running without issuing a preview target."
+  def mark_service_running(%RuntimeService{} = svc, attrs \\ %{}) do
     svc
-    |> RuntimeService.changeset(Map.merge(attrs, %{port: port, status: "running"}))
+    |> RuntimeService.lifecycle_changeset(
+      %{
+        status: "running",
+        port: nil,
+        preview_ref: nil,
+        started_at: DateTime.utc_now(),
+        stopped_at: nil
+      }
+      |> Map.merge(optional_lifecycle_attrs(attrs))
+    )
     |> Repo.update()
   end
 
@@ -649,8 +897,36 @@ defmodule Cympho.Workspaces do
   """
   def set_service_url(%RuntimeService{} = svc, url) do
     svc
-    |> RuntimeService.changeset(%{url: url})
+    |> RuntimeService.lifecycle_changeset(%{url: url})
     |> Repo.update()
+  end
+
+  defp validate_preview_scope(%RuntimeService{execution_workspace_id: nil}),
+    do: {:error, :invalid_preview_scope}
+
+  defp validate_preview_scope(%RuntimeService{} = service) do
+    case get_company_execution_workspace(service.company_id, service.execution_workspace_id) do
+      {:ok, execution_workspace}
+      when execution_workspace.project_id == service.project_id and
+             execution_workspace.project_workspace_id == service.project_workspace_id and
+             execution_workspace.status in ["open", "running", "active"] ->
+        :ok
+
+      _ ->
+        {:error, :invalid_preview_scope}
+    end
+  end
+
+  defp optional_lifecycle_attrs(attrs) do
+    Enum.reduce([:url, :health_status], %{}, fn key, acc ->
+      string_key = Atom.to_string(key)
+
+      cond do
+        Map.has_key?(attrs, key) -> Map.put(acc, key, Map.get(attrs, key))
+        Map.has_key?(attrs, string_key) -> Map.put(acc, key, Map.get(attrs, string_key))
+        true -> acc
+      end
+    end)
   end
 
   @doc """
@@ -683,10 +959,314 @@ defmodule Cympho.Workspaces do
   # --- Leases ---
 
   def create_lease(attrs \\ %{}) do
-    with {:ok, attrs} <- EnvironmentLifecycle.prepare_lease_attrs(attrs) do
-      %EnvironmentLease{}
-      |> EnvironmentLease.changeset(attrs)
-      |> Repo.insert()
+    supplied_provider_ref? = present_attr?(attrs, :provider_lease_id)
+    {attrs, identity} = put_lease_idempotency_key(attrs)
+
+    case lease_lock_scope(attrs) do
+      {:ok, company_id, environment_id} ->
+        Repo.transaction(fn ->
+          # The environment row is the durable acquisition mutex. Holding it
+          # across lookup, provider acquire, and insert prevents concurrent
+          # retries for the same logical holder from provisioning twice.
+          Environment
+          |> where([environment], environment.id == ^environment_id)
+          |> where([environment], environment.company_id == ^company_id)
+          |> lock("FOR UPDATE")
+          |> Repo.one()
+
+          case existing_logical_lease(identity) do
+            %EnvironmentLease{} = lease -> {:ok, lease}
+            nil -> acquire_and_insert_lease(attrs, supplied_provider_ref?)
+          end
+        end)
+        |> unwrap_lease_transaction()
+
+      :error ->
+        # Invalid/missing scope still flows through the changeset so callers
+        # receive the existing validation errors. Any provider acquired before
+        # that insert fails is compensated below.
+        acquire_and_insert_lease(attrs, supplied_provider_ref?)
+    end
+  end
+
+  defp acquire_and_insert_lease(attrs, supplied_provider_ref?) do
+    changeset = lease_changeset(attrs)
+
+    if changeset.valid? do
+      acquire_valid_lease(attrs, supplied_provider_ref?)
+    else
+      {:error, changeset}
+    end
+  end
+
+  defp acquire_valid_lease(attrs, supplied_provider_ref?) do
+    with {:ok, prepared_attrs} <- EnvironmentLifecycle.prepare_lease_attrs(attrs) do
+      result =
+        try do
+          prepared_attrs
+          |> lease_changeset()
+          |> Repo.insert()
+        rescue
+          error ->
+            maybe_release_unpersisted_lease(prepared_attrs, supplied_provider_ref?)
+            reraise error, __STACKTRACE__
+        catch
+          kind, reason ->
+            maybe_release_unpersisted_lease(prepared_attrs, supplied_provider_ref?)
+            :erlang.raise(kind, reason, __STACKTRACE__)
+        end
+
+      case result do
+        {:ok, _lease} = ok ->
+          ok
+
+        {:error, _changeset} = error ->
+          maybe_release_unpersisted_lease(prepared_attrs, supplied_provider_ref?)
+          error
+      end
+    end
+  end
+
+  defp lease_changeset(attrs) do
+    %EnvironmentLease{}
+    |> EnvironmentLease.changeset(attrs)
+    |> validate_environment_lease_scope()
+  end
+
+  defp validate_environment_lease_scope(changeset) do
+    company_id = get_field(changeset, :company_id)
+    environment_id = get_field(changeset, :environment_id)
+    execution_workspace_id = get_field(changeset, :execution_workspace_id)
+    issue_id = get_field(changeset, :issue_id)
+
+    environment = referenced_record(Environment, environment_id)
+    execution_workspace = referenced_record(ExecutionWorkspace, execution_workspace_id)
+    issue = referenced_record(Issue, issue_id)
+
+    changeset
+    |> validate_lease_reference(:environment_id, environment_id, environment, company_id)
+    |> validate_lease_reference(
+      :execution_workspace_id,
+      execution_workspace_id,
+      execution_workspace,
+      company_id
+    )
+    |> validate_lease_reference(:issue_id, issue_id, issue, company_id)
+    |> validate_lease_project_coherence(environment, execution_workspace, issue, company_id)
+  end
+
+  defp validate_lease_reference(changeset, _field, nil, _record, _company_id), do: changeset
+
+  defp validate_lease_reference(changeset, field, _id, nil, _company_id),
+    do: add_error(changeset, field, "is invalid")
+
+  defp validate_lease_reference(changeset, _field, _id, %{company_id: company_id}, company_id),
+    do: changeset
+
+  defp validate_lease_reference(changeset, field, _id, _record, _company_id),
+    do: add_error(changeset, field, "must belong to the same company")
+
+  defp validate_lease_project_coherence(
+         changeset,
+         %{company_id: company_id} = environment,
+         execution_workspace,
+         issue,
+         company_id
+       ) do
+    scoped_records =
+      [environment, execution_workspace, issue]
+      |> Enum.reject(&is_nil/1)
+
+    if Enum.all?(scoped_records, &(&1.company_id == company_id)) do
+      project_ids =
+        scoped_records
+        |> Enum.map(&Map.get(&1, :project_id))
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+
+      if length(project_ids) <= 1 do
+        changeset
+      else
+        changeset
+        |> maybe_add_project_mismatch(:execution_workspace_id, execution_workspace)
+        |> maybe_add_project_mismatch(:issue_id, issue)
+      end
+    else
+      changeset
+    end
+  end
+
+  defp validate_lease_project_coherence(
+         changeset,
+         _environment,
+         _execution_workspace,
+         _issue,
+         _company_id
+       ),
+       do: changeset
+
+  defp maybe_add_project_mismatch(changeset, _field, nil), do: changeset
+
+  defp maybe_add_project_mismatch(changeset, field, _record),
+    do: add_error(changeset, field, "must belong to the same project as the environment")
+
+  defp unwrap_lease_transaction({:ok, result}), do: result
+  defp unwrap_lease_transaction({:error, reason}), do: {:error, reason}
+
+  defp lease_lock_scope(attrs) do
+    with {:ok, company_id} <- Ecto.UUID.cast(attr_value(attrs, :company_id)),
+         {:ok, environment_id} <- Ecto.UUID.cast(attr_value(attrs, :environment_id)) do
+      {:ok, company_id, environment_id}
+    else
+      _ -> :error
+    end
+  end
+
+  defp put_lease_idempotency_key(attrs) do
+    metadata = attr_value(attrs, :metadata) || %{}
+    explicit_key = attr_value(attrs, :idempotency_key) || attr_value(metadata, :idempotency_key)
+    company_id = attr_value(attrs, :company_id)
+    environment_id = attr_value(attrs, :environment_id)
+    execution_workspace_id = attr_value(attrs, :execution_workspace_id)
+    issue_id = attr_value(attrs, :issue_id)
+    lease_policy = attr_value(attrs, :lease_policy) || "default"
+    status = attr_value(attrs, :status)
+
+    identity =
+      cond do
+        status != "active" ->
+          nil
+
+        present_string?(explicit_key) ->
+          {:explicit, company_id, environment_id, String.trim(explicit_key)}
+
+        present_string?(execution_workspace_id) ->
+          {:execution_workspace, company_id, environment_id, execution_workspace_id}
+
+        present_string?(issue_id) ->
+          {:issue, company_id, environment_id, issue_id}
+
+        present_string?(environment_id) ->
+          # Legacy/API callers may omit a holder. In that case the only safe
+          # identity is one active anonymous lease per environment + policy.
+          {:environment, company_id, environment_id, to_string(lease_policy)}
+
+        true ->
+          nil
+      end
+
+    key = lease_identity_key(identity)
+
+    if is_binary(key) and is_map(metadata) do
+      metadata = Map.put(metadata, "idempotency_key", key)
+      {put_attr_value(attrs, :metadata, metadata), identity}
+    else
+      {attrs, identity}
+    end
+  end
+
+  defp lease_identity_key({:explicit, _company_id, _environment_id, key}), do: key
+
+  defp lease_identity_key({:execution_workspace, _company_id, environment_id, workspace_id}),
+    do: "execution_workspace:#{workspace_id}:environment:#{environment_id}"
+
+  defp lease_identity_key({:issue, _company_id, environment_id, issue_id}),
+    do: "issue:#{issue_id}:environment:#{environment_id}"
+
+  defp lease_identity_key({:environment, _company_id, environment_id, lease_policy}),
+    do: "environment:#{environment_id}:policy:#{lease_policy}"
+
+  defp lease_identity_key(nil), do: nil
+
+  defp existing_logical_lease(nil), do: nil
+
+  defp existing_logical_lease({:explicit, company_id, environment_id, key}) do
+    EnvironmentLease
+    |> active_lease_identity_query(company_id, environment_id)
+    |> where([lease], fragment("?->>'idempotency_key' = ?", lease.metadata, ^key))
+    |> Repo.one()
+  end
+
+  defp existing_logical_lease(
+         {:execution_workspace, company_id, environment_id, execution_workspace_id}
+       ) do
+    EnvironmentLease
+    |> active_lease_identity_query(company_id, environment_id)
+    |> where([lease], lease.execution_workspace_id == ^execution_workspace_id)
+    |> Repo.one()
+  end
+
+  defp existing_logical_lease({:issue, company_id, environment_id, issue_id}) do
+    EnvironmentLease
+    |> active_lease_identity_query(company_id, environment_id)
+    |> where([lease], lease.issue_id == ^issue_id)
+    |> Repo.one()
+  end
+
+  defp existing_logical_lease({:environment, company_id, environment_id, lease_policy}) do
+    query =
+      EnvironmentLease
+      |> active_lease_identity_query(company_id, environment_id)
+      |> where(
+        [lease],
+        is_nil(lease.execution_workspace_id) and is_nil(lease.issue_id)
+      )
+
+    query =
+      if lease_policy == "default" do
+        where(query, [lease], is_nil(lease.lease_policy) or lease.lease_policy == "")
+      else
+        where(query, [lease], lease.lease_policy == ^lease_policy)
+      end
+
+    Repo.one(query)
+  end
+
+  defp active_lease_identity_query(query, company_id, environment_id) do
+    query
+    |> where(
+      [lease],
+      lease.company_id == ^company_id and lease.environment_id == ^environment_id and
+        lease.status == "active"
+    )
+    |> order_by([lease], desc: lease.inserted_at, desc: lease.id)
+    |> limit(1)
+  end
+
+  defp attr_value(attrs, key) when is_map(attrs),
+    do: Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key))
+
+  defp put_attr_value(attrs, key, value) do
+    string_key = Atom.to_string(key)
+
+    cond do
+      Map.has_key?(attrs, string_key) ->
+        Map.put(attrs, string_key, value)
+
+      Map.has_key?(attrs, key) ->
+        Map.put(attrs, key, value)
+
+      Enum.all?(Map.keys(attrs), &is_binary/1) ->
+        Map.put(attrs, string_key, value)
+
+      true ->
+        Map.put(attrs, key, value)
+    end
+  end
+
+  defp present_string?(value), do: is_binary(value) and String.trim(value) != ""
+
+  defp maybe_release_unpersisted_lease(_attrs, true), do: :ok
+
+  defp maybe_release_unpersisted_lease(attrs, false) do
+    _ = EnvironmentLifecycle.release_prepared_lease(attrs)
+    :ok
+  end
+
+  defp present_attr?(attrs, key) when is_map(attrs) do
+    case Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key)) do
+      value when is_binary(value) -> String.trim(value) != ""
+      _ -> false
     end
   end
 
@@ -779,7 +1359,20 @@ defmodule Cympho.Workspaces do
   def create_environment(attrs \\ %{}) do
     %Environment{}
     |> Environment.changeset(attrs)
+    |> validate_environment_scope()
     |> Repo.insert()
+  end
+
+  defp validate_environment_scope(changeset) do
+    company_id = get_field(changeset, :company_id)
+    project_id = get_field(changeset, :project_id)
+
+    case referenced_record(Project, project_id) do
+      nil when is_nil(project_id) -> changeset
+      nil -> add_error(changeset, :project_id, "is invalid")
+      %Project{company_id: ^company_id} -> changeset
+      %Project{} -> add_error(changeset, :project_id, "must belong to the same company")
+    end
   end
 
   # --- Environment Probes ---
@@ -1077,7 +1670,7 @@ defmodule Cympho.Workspaces do
   end
 
   defp previewless_service?(%RuntimeService{} = service) do
-    is_nil(service.port) and blank?(service.url)
+    not Cympho.Workspaces.PreviewUrl.previewable?(service)
   end
 
   defp expiring_lease?(%EnvironmentLease{expires_at: nil}, _cutoff), do: false
@@ -1089,8 +1682,6 @@ defmodule Cympho.Workspaces do
 
   defp before?(nil, _cutoff), do: false
   defp before?(datetime, cutoff), do: DateTime.compare(datetime, cutoff) == :lt
-
-  defp blank?(value), do: is_nil(value) or value == ""
 
   defp workspace_health_recommendations(metrics) do
     []

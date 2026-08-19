@@ -1,7 +1,8 @@
 defmodule CymphoWeb.PluginLive.Edit do
   use CymphoWeb, :live_view
 
-  alias Cympho.{Companies, Repo, Skills}
+  alias Cympho.{CompanyRBAC, Repo, Skills}
+  alias Cympho.Plugins.Runtime
   alias CymphoWeb.PluginLive.FormHelpers
 
   @mutation_forbidden_message "Only company owners, admins, and board members can change plugins."
@@ -51,7 +52,7 @@ defmodule CymphoWeb.PluginLive.Edit do
              FormHelpers.normalize_plugin_params(socket, plugin_params,
                plugin: socket.assigns.plugin
              ) do
-        case Skills.update_plugin(socket.assigns.plugin, plugin_params) do
+        case Runtime.update_plugin(socket.assigns.plugin, plugin_params) do
           {:ok, plugin} ->
             {:noreply,
              socket
@@ -60,6 +61,14 @@ defmodule CymphoWeb.PluginLive.Edit do
 
           {:error, %Ecto.Changeset{} = changeset} ->
             {:noreply, assign_form(socket, changeset)}
+
+          {:error, _reason} ->
+            {:noreply,
+             put_flash(
+               socket,
+               :error,
+               "Plugin configuration was saved but its worker failed to refresh"
+             )}
         end
       else
         {:error, :not_found} ->
@@ -104,7 +113,7 @@ defmodule CymphoWeb.PluginLive.Edit do
            current_company: %{id: company_id}
          }
        }) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp can_manage_plugins?(_socket), do: false

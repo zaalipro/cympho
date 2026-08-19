@@ -2,6 +2,7 @@ defmodule CymphoWeb.LoginController do
   use CymphoWeb, :controller
 
   alias Cympho.Authentication
+  alias Cympho.Companies
   alias Cympho.Users.User
   alias Cympho.UserAuthJWT
 
@@ -11,11 +12,13 @@ defmodule CymphoWeb.LoginController do
       when is_binary(email) and is_binary(password) do
     case Authentication.authenticate_user(email, password) do
       {:ok, %User{} = user} ->
-        case UserAuthJWT.generate_token(user, user.company_id) do
+        company_id = Companies.default_company_id_for_user(user)
+
+        case UserAuthJWT.generate_token(user, company_id) do
           {:ok, token} ->
             conn
             |> put_status(:ok)
-            |> render(:show, user: user, token: token)
+            |> render(:show, user: user, company_id: company_id, token: token)
 
           {:error, _reason} ->
             conn

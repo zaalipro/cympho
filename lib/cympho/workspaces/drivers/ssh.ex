@@ -78,7 +78,7 @@ defmodule Cympho.Workspaces.Drivers.Ssh do
   def acquire(opts, config) when is_map(opts) and is_map(config) do
     with {:ok, company_id} <- fetch_company_id(opts),
          {:ok, settings} <- settings(config) do
-      provider_ref = @ref_prefix <> Ecto.UUID.generate()
+      provider_ref = provider_ref(company_id, opts)
       dir = workspace_dir(settings, provider_ref)
 
       script = """
@@ -517,6 +517,34 @@ defmodule Cympho.Workspaces.Drivers.Ssh do
   # --- Helpers ----------------------------------------------------------------
 
   defp workspace_dir(settings, provider_ref), do: settings.workspace_root <> "/" <> provider_ref
+
+  defp provider_ref(company_id, opts) do
+    case Map.get(opts, :idempotency_key) || Map.get(opts, "idempotency_key") do
+      key when is_binary(key) ->
+        case String.trim(key) do
+          "" -> @ref_prefix <> Ecto.UUID.generate()
+          key -> @ref_prefix <> deterministic_uuid(company_id <> ":" <> key)
+        end
+
+      _ ->
+        @ref_prefix <> Ecto.UUID.generate()
+    end
+  end
+
+  defp deterministic_uuid(value) do
+    hex = value |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
+
+    Enum.join(
+      [
+        binary_part(hex, 0, 8),
+        binary_part(hex, 8, 4),
+        binary_part(hex, 12, 4),
+        binary_part(hex, 16, 4),
+        binary_part(hex, 20, 12)
+      ],
+      "-"
+    )
+  end
 
   defp validated_ref(%{provider_ref: ref}), do: validated_ref(ref)
   defp validated_ref(%{"provider_ref" => ref}), do: validated_ref(ref)

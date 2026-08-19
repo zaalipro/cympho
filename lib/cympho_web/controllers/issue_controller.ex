@@ -13,7 +13,26 @@ defmodule CymphoWeb.IssueController do
          :ok <- validate_agent_ref(company_id, issue_params["assignee_id"]) do
       issue_params =
         issue_params
+        |> Map.take([
+          "title",
+          "description",
+          "status",
+          "priority",
+          "work_mode",
+          "project_id",
+          "goal_id",
+          "parent_id",
+          "assignee_id",
+          "assignee_user_id",
+          "execution_policy_id",
+          "assigned_role",
+          "billing_code",
+          "due_on",
+          "github_pr_url",
+          "github_pr_number"
+        ])
         |> Map.put("company_id", company_id)
+        |> Map.put("created_by_user_id", conn.assigns.current_user.id)
         |> Map.put("actor_type", "user")
         |> Map.put("actor_id", conn.assigns.current_user.id)
 

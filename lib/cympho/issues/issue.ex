@@ -21,6 +21,7 @@ defmodule Cympho.Issues.Issue do
 
   use Ecto.Schema
   import Ecto.Changeset
+  import Ecto.Query, only: [from: 2]
 
   alias Cympho.Comments.Comment
   alias Cympho.Documents.IssueDocument
@@ -29,6 +30,8 @@ defmodule Cympho.Issues.Issue do
   alias Cympho.Projects.Project
   alias Cympho.Agents.Agent
   alias Cympho.ExecutionPolicies.ExecutionPolicy
+  alias Cympho.HeartbeatEngine.Run
+  alias Cympho.Workspaces.{ExecutionWorkspace, ProjectWorkspace}
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -149,7 +152,163 @@ defmodule Cympho.Issues.Issue do
     |> validate_inclusion(:work_mode, work_mode_options())
     |> unique_constraint(:identifier, name: :issues_project_id_identifier_index)
     |> unique_constraint(:issue_number, name: :issues_company_id_issue_number_index)
+    |> foreign_key_constraint(:company_id)
+    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:goal_id)
+    |> foreign_key_constraint(:assignee_id)
+    |> foreign_key_constraint(:assignee_user_id)
+    |> foreign_key_constraint(:checkout_run_id)
+    |> foreign_key_constraint(:created_by_agent_id)
+    |> foreign_key_constraint(:created_by_user_id)
+    |> foreign_key_constraint(:parent_id)
+    |> foreign_key_constraint(:execution_policy_id)
+    |> foreign_key_constraint(:project_workspace_id)
+    |> foreign_key_constraint(:execution_workspace_id)
+    |> foreign_key_constraint(:last_reviewer_id)
+    |> prepare_changes(&validate_association_scope/1)
   end
+
+  defp validate_association_scope(changeset) do
+    company_id = get_field(changeset, :company_id)
+
+    changeset
+    |> validate_company_immutable(company_id)
+    |> validate_same_company(:project_id, Project, company_id)
+    |> validate_same_company(:goal_id, Cympho.Goals.Goal, company_id)
+    |> validate_same_company(:assignee_id, Agent, company_id)
+    |> validate_same_company(:created_by_agent_id, Agent, company_id)
+    |> validate_same_company(:last_reviewer_id, Agent, company_id)
+    |> validate_same_company(:parent_id, __MODULE__, company_id)
+    |> validate_same_company(:execution_policy_id, ExecutionPolicy, company_id)
+    |> validate_user_membership(:assignee_user_id, company_id)
+    |> validate_user_membership(:created_by_user_id, company_id)
+    |> validate_project_workspace(company_id)
+    |> validate_execution_workspace(company_id)
+    |> validate_checkout_run(company_id)
+  end
+
+  defp validate_company_immutable(
+         %{data: %{id: id, company_id: old_company_id}} = changeset,
+         new_company_id
+       )
+       when not is_nil(id) and is_binary(old_company_id) and old_company_id != new_company_id,
+       do: add_error(changeset, :company_id, "cannot be changed")
+
+  defp validate_company_immutable(changeset, _company_id), do: changeset
+
+  # Company-less legacy rows remain readable/updateable, but every scoped row
+  # must keep all tenant-bearing references inside its own company.
+  defp validate_same_company(changeset, _field, _schema, company_id)
+       when not is_binary(company_id),
+       do: changeset
+
+  defp validate_same_company(changeset, field, schema, company_id) do
+    case get_field(changeset, field) do
+      nil ->
+        changeset
+
+      id ->
+        case changeset.repo.get(schema, id) do
+          %{company_id: ^company_id} -> changeset
+          nil -> changeset
+          _ -> add_error(changeset, field, "must belong to the same company")
+        end
+    end
+  end
+
+  defp validate_user_membership(changeset, _field, company_id)
+       when not is_binary(company_id),
+       do: changeset
+
+  defp validate_user_membership(changeset, field, company_id) do
+    case get_field(changeset, field) do
+      nil ->
+        changeset
+
+      user_id ->
+        member? =
+          changeset.repo.exists?(
+            from membership in Cympho.Companies.CompanyMembership,
+              where: membership.user_id == ^user_id and membership.company_id == ^company_id
+          )
+
+        if member?, do: changeset, else: add_error(changeset, field, "must belong to the company")
+    end
+  end
+
+  defp validate_project_workspace(changeset, company_id) when is_binary(company_id) do
+    project_id = get_field(changeset, :project_id)
+
+    case get_field(changeset, :project_workspace_id) do
+      nil ->
+        changeset
+
+      workspace_id ->
+        case changeset.repo.get(ProjectWorkspace, workspace_id) do
+          %ProjectWorkspace{company_id: ^company_id, project_id: workspace_project_id}
+          when workspace_project_id == project_id ->
+            changeset
+
+          nil ->
+            changeset
+
+          _ ->
+            add_error(
+              changeset,
+              :project_workspace_id,
+              "must belong to the issue company and project"
+            )
+        end
+    end
+  end
+
+  defp validate_project_workspace(changeset, _company_id), do: changeset
+
+  defp validate_execution_workspace(changeset, company_id) when is_binary(company_id) do
+    project_id = get_field(changeset, :project_id)
+
+    case get_field(changeset, :execution_workspace_id) do
+      nil ->
+        changeset
+
+      workspace_id ->
+        case changeset.repo.get(ExecutionWorkspace, workspace_id) do
+          %ExecutionWorkspace{company_id: ^company_id, project_id: workspace_project_id}
+          when workspace_project_id == project_id ->
+            changeset
+
+          nil ->
+            changeset
+
+          _ ->
+            add_error(
+              changeset,
+              :execution_workspace_id,
+              "must belong to the issue company and project"
+            )
+        end
+    end
+  end
+
+  defp validate_execution_workspace(changeset, _company_id), do: changeset
+
+  defp validate_checkout_run(changeset, company_id) when is_binary(company_id) do
+    case get_field(changeset, :checkout_run_id) do
+      nil ->
+        changeset
+
+      run_id ->
+        issue_id = changeset.data.id
+
+        case changeset.repo.get(Run, run_id) do
+          %Run{company_id: ^company_id, issue_id: ^issue_id} -> changeset
+          nil -> changeset
+          _ -> add_error(changeset, :checkout_run_id, "must belong to this issue")
+        end
+    end
+  end
+
+  defp validate_checkout_run(changeset, _company_id), do: changeset
 
   def status_options, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked, :cancelled]
   def priority_options, do: [:low, :medium, :high, :critical]

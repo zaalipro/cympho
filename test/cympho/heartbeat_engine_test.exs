@@ -686,33 +686,85 @@ defmodule Cympho.HeartbeatEngineTest do
   describe "budget gate" do
     test "allows run creation when the active agent budget has headroom" do
       agent_id = Ecto.UUID.generate()
-      insert_agent(agent_id)
-      insert_budget(agent_id, limit: "100.00", spent: "10.00")
+      issue_id = insert_issue()
+      company_id = Cympho.Repo.get!(Cympho.Issues.Issue, issue_id).company_id
+      insert_agent(agent_id, company_id)
+      insert_budget(agent_id, company_id, limit: "100.00", spent: "10.00")
 
       assert {:ok, _run} =
                HeartbeatEngine.create_run(%{
                  agent_id: agent_id,
-                 issue_id: insert_issue(),
+                 issue_id: issue_id,
                  adapter: "claude_local"
                })
     end
 
     test "blocks run creation with an operator signal when the budget is exhausted" do
       agent_id = Ecto.UUID.generate()
-      insert_agent(agent_id)
-      insert_budget(agent_id, limit: "10.00", spent: "9.50")
+      issue_id = insert_issue()
+      company_id = Cympho.Repo.get!(Cympho.Issues.Issue, issue_id).company_id
+      insert_agent(agent_id, company_id)
+      insert_budget(agent_id, company_id, limit: "10.00", spent: "9.50")
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, :budget_exhausted} =
                    HeartbeatEngine.create_run(%{
                      agent_id: agent_id,
-                     issue_id: insert_issue(),
+                     issue_id: issue_id,
                      adapter: "claude_local"
                    })
         end)
 
       assert log =~ "budget exhausted"
+    end
+
+    test "a budget from another company cannot block the targeted agent" do
+      budget_company = insert_company("HB Foreign Budget")
+      agent_company = insert_company("HB Target Agent")
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id, agent_company.id)
+      issue_id = insert_issue(agent_company.id)
+
+      insert_budget(agent_id, budget_company.id, limit: "5.00", spent: "5.00")
+
+      assert {:ok, _run} =
+               HeartbeatEngine.create_run(%{
+                 company_id: agent_company.id,
+                 agent_id: agent_id,
+                 issue_id: issue_id,
+                 adapter: "claude_local"
+               })
+    end
+
+    test "uses a stable id tie-breaker for active budgets created in the same second" do
+      company = insert_company("HB Deterministic Budget")
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id, company.id)
+      issue_id = insert_issue(company.id)
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      insert_budget(agent_id, company.id,
+        id: "00000000-0000-0000-0000-000000000001",
+        limit: "5.00",
+        spent: "5.00",
+        inserted_at: now
+      )
+
+      insert_budget(agent_id, company.id,
+        id: "00000000-0000-0000-0000-000000000002",
+        limit: "100.00",
+        spent: "0.00",
+        inserted_at: now
+      )
+
+      assert {:ok, _run} =
+               HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent_id,
+                 issue_id: issue_id,
+                 adapter: "claude_local"
+               })
     end
   end
 
@@ -795,7 +847,25 @@ defmodule Cympho.HeartbeatEngineTest do
           adapter: "claude_local"
         })
 
+      old = DateTime.utc_now() |> DateTime.add(-16 * 60, :second) |> DateTime.truncate(:second)
+      run |> Ecto.Changeset.change(inserted_at: old) |> Repo.update!()
+
       assert Enum.any?(HeartbeatEngine.find_orphaned_runs(), &(&1.id == run.id))
+    end
+
+    test "does not classify a fresh remote-capable run from local Registry absence" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(),
+          adapter: "claude_local"
+        })
+
+      assert is_nil(Cympho.Orchestrator.whereis(run.issue_id))
+      refute Enum.any?(HeartbeatEngine.find_orphaned_runs(), &(&1.id == run.id))
     end
 
     test "cancels orphaned runs that never started" do
@@ -833,35 +903,33 @@ defmodule Cympho.HeartbeatEngineTest do
     end
   end
 
-  defp insert_agent(agent_id) do
+  defp insert_agent(agent_id, company_id \\ nil) do
     Cympho.Repo.insert!(%Cympho.Agents.Agent{
       id: agent_id,
       name: "test-agent-#{:rand.uniform(10_000)}",
       role: :engineer,
-      status: :idle
+      status: :idle,
+      company_id: company_id
     })
   end
 
-  defp insert_budget(agent_id, opts) do
+  defp insert_budget(agent_id, company_id, opts) do
     Cympho.Repo.insert!(%Cympho.Budgets.Budget{
+      id: Keyword.get(opts, :id),
       name: "budget-#{:rand.uniform(10_000)}",
+      company_id: company_id,
       scope_type: "agent",
       scope_id: agent_id,
       agent_id: agent_id,
       limit_amount: Decimal.new(Keyword.fetch!(opts, :limit)),
       spent_amount: Decimal.new(Keyword.fetch!(opts, :spent)),
-      status: "active"
+      status: "active",
+      inserted_at: Keyword.get(opts, :inserted_at)
     })
   end
 
-  defp insert_issue do
-    company_id = Ecto.UUID.generate()
-
-    Cympho.Repo.insert!(%Cympho.Companies.Company{
-      id: company_id,
-      name: "HB Co #{:rand.uniform(100_000)}",
-      slug: "hb-co-#{:rand.uniform(1_000_000)}"
-    })
+  defp insert_issue(company_id \\ nil) do
+    company_id = company_id || insert_company("HB Co").id
 
     issue =
       Cympho.Repo.insert!(%Cympho.Issues.Issue{
@@ -870,6 +938,15 @@ defmodule Cympho.HeartbeatEngineTest do
       })
 
     issue.id
+  end
+
+  defp insert_company(name) do
+    unique = System.unique_integer([:positive])
+
+    Cympho.Repo.insert!(%Cympho.Companies.Company{
+      name: "#{name} #{unique}",
+      slug: "#{String.replace(String.downcase(name), " ", "-")}-#{unique}"
+    })
   end
 
   defp insert_repo_issue do

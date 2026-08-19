@@ -45,6 +45,24 @@ defmodule Cympho.CompaniesOnboardingTest do
     end
   end
 
+  describe "import_company_for_owner/3" do
+    test "does not import anything for an unknown owner" do
+      {:ok, source} =
+        Companies.create_company(%{
+          name: "Import Source",
+          slug: "import-owner-source-#{System.unique_integer([:positive])}"
+        })
+
+      package = Companies.export_company(source.id)
+      company_count = Repo.aggregate(Cympho.Companies.Company, :count, :id)
+
+      assert {:error, :owner_not_found} =
+               Companies.import_company_for_owner(package, Ecto.UUID.generate())
+
+      assert Repo.aggregate(Cympho.Companies.Company, :count, :id) == company_count
+    end
+  end
+
   describe "create_autonomous_company/1 owner linkage" do
     test "creates an owner board membership and sets the user's default company" do
       user = create_user!()

@@ -3,11 +3,31 @@ defmodule Cympho.Approvals do
   The Approvals context for managing approval requests.
   """
   import Ecto.Query, warn: false
+  require Logger
+
   alias Cympho.Repo
   alias Cympho.Approvals.Approval
   alias Cympho.Approvals.ApprovalIssue
   alias Cympho.Activities
+  alias Cympho.CompanyRBAC
   alias Cympho.Decisions
+
+  @resolution_statuses [:approved, :denied]
+
+  @doc """
+  Ordinary approvals may be resolved by company owners, company admins, or
+  board members. Other company members retain read-only access.
+  """
+  def resolver_authorized?(user_id, company_id)
+      when is_binary(user_id) and is_binary(company_id) do
+    CompanyRBAC.manager?(user_id, company_id)
+  end
+
+  def resolver_authorized?(_user_id, _company_id), do: false
+
+  def authorize_resolver(user_id, company_id) do
+    if resolver_authorized?(user_id, company_id), do: :ok, else: {:error, :forbidden}
+  end
 
   def list_approvals(opts \\ %{}) do
     query = from(a in Approval, order_by: [desc: a.inserted_at])
@@ -145,63 +165,54 @@ defmodule Cympho.Approvals do
     end
   end
 
-  def resolve_approval(id, status, opts \\ %{}) do
-    approval = Repo.get!(Approval, id)
-
-    attrs = %{
-      status: status,
-      resolved_by_user_id: Map.get(opts, :resolved_by_user_id),
-      resolution_reason: Map.get(opts, :resolution_reason)
-    }
-
-    approval
-    |> Approval.resolve_changeset(attrs)
-    |> Repo.update()
-    |> case do
-      {:ok, updated} ->
-        updated = Repo.preload(updated, [:requested_by, :resolved_by, :issues])
-
-        actor = {"user", Map.get(opts, :resolved_by_user_id)}
-        Decisions.record_issue_decision(updated, actor)
-
-        Enum.each(updated.issues, fn issue ->
-          Activities.log_activity(%{
-            issue_id: issue.id,
-            actor_type: "user",
-            actor_id: Map.get(opts, :resolved_by_user_id),
-            action: "approval_resolved",
-            metadata: %{approval_id: updated.id, status: to_string(status)}
-          })
-        end)
-
-        broadcast_approval(updated, {:approval_resolved, updated})
-
-        maybe_wake_agent(updated)
-        {:ok, updated}
-
-      {:error, changeset} ->
-        {:error, changeset}
+  def resolve_company_approval(company_id, id, status, opts)
+      when is_binary(company_id) and is_map(opts) do
+    with :ok <- authorize_resolver(Map.get(opts, :resolved_by_user_id), company_id) do
+      opts
+      |> Map.put(:company_id, company_id)
+      |> then(&resolve_approval(id, status, &1))
     end
   end
 
+  def resolve_company_approval(_company_id, _id, _status, _opts), do: {:error, :forbidden}
+
+  def resolve_approval(id, status, opts \\ %{})
+
+  def resolve_approval(id, status, opts) when status in @resolution_statuses and is_map(opts) do
+    actor = resolution_actor(Map.get(opts, :resolved_by_user_id))
+
+    Ecto.Multi.new()
+    |> Ecto.Multi.run(:approval, fn repo, _changes ->
+      compare_and_set_resolution(repo, id, status, opts)
+    end)
+    |> Ecto.Multi.insert(:decision, fn %{approval: approval} ->
+      company_id = Map.get(opts, :company_id) || approval_company_id(approval)
+      Decisions.issue_decision_changeset(approval, actor, company_id)
+    end)
+    |> Ecto.Multi.run(:activities, fn repo, %{approval: approval} ->
+      insert_resolution_activities(repo, approval, actor)
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{approval: updated, decision: decision, activities: activities}} ->
+        run_resolution_side_effects(updated, decision, activities, actor)
+        {:ok, updated}
+
+      {:error, _operation, reason, _changes} ->
+        {:error, reason}
+    end
+  end
+
+  def resolve_approval(_id, _status, _opts), do: {:error, :invalid_status}
+
   def cancel_approval(id) do
-    approval = Repo.get!(Approval, id)
+    case compare_and_set_status(Repo, id, :cancelled, %{}) do
+      {:ok, updated} ->
+        broadcast_approval(updated, {:approval_cancelled, updated})
+        {:ok, updated}
 
-    if approval.status == :pending do
-      approval
-      |> Approval.cancel_changeset()
-      |> Repo.update()
-      |> case do
-        {:ok, updated} ->
-          broadcast_approval(updated, {:approval_cancelled, updated})
-
-          {:ok, updated}
-
-        {:error, changeset} ->
-          {:error, changeset}
-      end
-    else
-      {:error, :not_pending}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -213,7 +224,8 @@ defmodule Cympho.Approvals do
         where: ai.issue_id == ^issue_id and a.status == :pending
       )
 
-    {count, _} = Repo.update_all(query, set: [status: :cancelled])
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    {count, _} = Repo.update_all(query, set: [status: :cancelled, updated_at: now])
 
     if count > 0 do
       company_id = issue_company_id_for_approval(issue_id)
@@ -265,13 +277,14 @@ defmodule Cympho.Approvals do
   defp approval_company_id(%Approval{} = approval) do
     approval = Repo.preload(approval, [:issues, :requested_by])
 
-    case approval.issues do
-      [%{company_id: company_id} | _] when is_binary(company_id) and company_id != "" ->
+    case approval.requested_by do
+      %Cympho.Agents.Agent{company_id: company_id}
+      when is_binary(company_id) and company_id != "" ->
         company_id
 
       _ ->
-        case approval.requested_by do
-          %Cympho.Agents.Agent{company_id: company_id}
+        case approval.issues do
+          [%{company_id: company_id} | _]
           when is_binary(company_id) and company_id != "" ->
             company_id
 
@@ -283,5 +296,122 @@ defmodule Cympho.Approvals do
 
   defp issue_company_id_for_approval(issue_id) do
     Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id)
+  end
+
+  defp compare_and_set_resolution(repo, id, status, opts) do
+    expected_company_id = Map.get(opts, :company_id)
+
+    with {:ok, _approval} <- fetch_transition_target(repo, id, expected_company_id) do
+      compare_and_set_status(repo, id, status, %{
+        resolved_by_user_id: Map.get(opts, :resolved_by_user_id),
+        resolution_reason: Map.get(opts, :resolution_reason)
+      })
+    end
+  end
+
+  defp compare_and_set_status(repo, id, status, attrs) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    updates =
+      attrs
+      |> Map.put(:status, status)
+      |> Map.put(:updated_at, now)
+      |> Enum.to_list()
+
+    query = from(a in Approval, where: a.id == ^id and a.status == :pending)
+
+    case repo.update_all(query, set: updates) do
+      {1, _} ->
+        updated = repo.get!(Approval, id)
+        {:ok, repo.preload(updated, [:requested_by, :resolved_by, :issues])}
+
+      {0, _} ->
+        transition_error(repo, id)
+    end
+  end
+
+  defp fetch_transition_target(repo, id, nil) do
+    case repo.get(Approval, id) do
+      nil -> {:error, :not_found}
+      approval -> {:ok, approval}
+    end
+  end
+
+  defp fetch_transition_target(repo, id, company_id) do
+    query =
+      from(a in Approval,
+        join: agent in assoc(a, :requested_by),
+        where: a.id == ^id and agent.company_id == ^company_id
+      )
+
+    case repo.one(query) do
+      nil -> {:error, :not_found}
+      approval -> {:ok, approval}
+    end
+  end
+
+  defp transition_error(repo, id) do
+    case repo.get(Approval, id) do
+      nil -> {:error, :not_found}
+      _approval -> {:error, :not_pending}
+    end
+  end
+
+  defp resolution_actor(user_id) when is_binary(user_id), do: {"user", user_id}
+  defp resolution_actor(_user_id), do: nil
+
+  defp insert_resolution_activities(repo, approval, actor) do
+    Enum.reduce_while(approval.issues, {:ok, []}, fn issue, {:ok, activities} ->
+      changeset =
+        Activities.activity_changeset(%{
+          issue_id: issue.id,
+          company_id: issue.company_id,
+          actor_type: elem(actor || {"system", nil}, 0),
+          actor_id: elem(actor || {"system", nil}, 1),
+          action: "approval_resolved",
+          metadata: %{approval_id: approval.id, status: to_string(approval.status)}
+        })
+
+      case repo.insert(changeset) do
+        {:ok, activity} -> {:cont, {:ok, [activity | activities]}}
+        {:error, changeset} -> {:halt, {:error, changeset}}
+      end
+    end)
+    |> case do
+      {:ok, activities} -> {:ok, Enum.reverse(activities)}
+      error -> error
+    end
+  end
+
+  defp run_resolution_side_effects(updated, decision, activities, actor) do
+    safely_after_commit(updated.id, "decision notifications", fn ->
+      Decisions.dispatch_created_decision(decision, actor)
+    end)
+
+    Enum.each(activities, fn activity ->
+      safely_after_commit(updated.id, "issue activity broadcast", fn ->
+        Activities.dispatch_activity(activity)
+      end)
+    end)
+
+    safely_after_commit(updated.id, "approval broadcast", fn ->
+      broadcast_approval(updated, {:approval_resolved, updated})
+    end)
+
+    safely_after_commit(updated.id, "requesting-agent wake", fn -> maybe_wake_agent(updated) end)
+  end
+
+  defp safely_after_commit(approval_id, effect, fun) do
+    fun.()
+  rescue
+    error ->
+      Logger.error(
+        "Approval #{approval_id} committed, but #{effect} failed: #{Exception.message(error)}"
+      )
+  catch
+    kind, reason ->
+      Logger.error(
+        "Approval #{approval_id} committed, but #{effect} failed: #{inspect({kind, reason})}"
+      )
   end
 end

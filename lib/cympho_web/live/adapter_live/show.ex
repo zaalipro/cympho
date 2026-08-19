@@ -3,7 +3,7 @@ defmodule CymphoWeb.AdapterLive.Show do
 
   alias Cympho.Adapters
   alias Cympho.Agents
-  alias Cympho.Companies
+  alias Cympho.CompanyRBAC
   alias Cympho.Repo
   alias Cympho.Secrets
 
@@ -199,7 +199,7 @@ defmodule CymphoWeb.AdapterLive.Show do
            current_company: %{id: company_id}
          }
        }) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp can_manage_adapter_settings?(_socket), do: false

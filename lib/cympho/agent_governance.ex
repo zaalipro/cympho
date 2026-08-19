@@ -4,11 +4,12 @@ defmodule Cympho.AgentGovernance do
   """
 
   import Ecto.Query, warn: false
-  alias Cympho.Repo
   alias Cympho.Agents.Agent
+  alias Cympho.Authentication
   alias Cympho.BoardApprovals
-  alias Cympho.GovernanceAuditLogs
   alias Cympho.Decisions
+  alias Cympho.GovernanceAuditLogs
+  alias Cympho.Repo
 
   @governance_statuses ["active", "paused", "terminated", "pending_approval"]
 
@@ -37,9 +38,11 @@ defmodule Cympho.AgentGovernance do
     if agent.governance_status == "paused" do
       agent
       |> Ecto.Changeset.change(%{
+        status: :idle,
         governance_status: "active",
         governance_reasoning: reason,
         paused_at: nil,
+        pause_reason: nil,
         paused_by_user_id: nil
       })
       |> Repo.update()
@@ -235,6 +238,11 @@ defmodule Cympho.AgentGovernance do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
+        # Termination is permanent, so credentials are revoked immediately.
+        # Pause and pending approval only block authentication and preserve the
+        # key rows for a possible explicit resume.
+        {:ok, _revoked_count} = Authentication.revoke_agent_api_keys(updated.id)
+
         # Same posture as pause: flipping the governance field alone leaves
         # every non-terminal issue pinned to an agent that can never run it.
         # Without this, terminating an engineer stranded their whole queue and

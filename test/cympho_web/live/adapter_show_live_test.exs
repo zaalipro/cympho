@@ -7,11 +7,17 @@ defmodule CymphoWeb.AdapterShowLiveTest do
 
   describe "AdapterLive.Show" do
     setup %{conn: conn, current_company: company} = context do
-      unless context[:regular_member] do
-        user_id = Plug.Conn.get_session(conn, :user_id)
-        membership = Companies.get_membership(user_id, company.id)
-        assert {:ok, _membership} = Companies.update_membership(membership, %{role: "admin"})
-      end
+      user_id = Plug.Conn.get_session(conn, :user_id)
+      membership = Companies.get_membership(user_id, company.id)
+
+      role =
+        context[:membership_role] || if(context[:regular_member], do: "member", else: "admin")
+
+      assert {:ok, _membership} =
+               Companies.update_membership(membership, %{
+                 role: role,
+                 is_board_member: context[:board_member] == true
+               })
 
       :ok
     end
@@ -149,6 +155,15 @@ defmodule CymphoWeb.AdapterShowLiveTest do
       assert active_secret.id == original_secret.id
       assert active_secret.version == 1
       assert {:ok, "original-encrypted-key"} = Secrets.get_secret_value(active_secret.id)
+    end
+
+    @tag membership_role: "viewer", board_member: true
+    test "a board flag does not make a viewer an adapter manager", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/settings/adapters/openai_chat")
+
+      assert html =~ ~s(data-testid="adapter-config-read-only")
+      refute has_element?(view, "form[phx-submit='save_config']")
+      refute has_element?(view, "button[phx-click='test_health']")
     end
 
     test "shows connect form in Simple mode so owners can add an endpoint", %{conn: conn} do

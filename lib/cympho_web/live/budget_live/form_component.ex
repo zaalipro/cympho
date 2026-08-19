@@ -2,6 +2,8 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
   use CymphoWeb, :live_component
 
   alias Cympho.Budgets
+  alias Cympho.CompanyRBAC
+  alias Cympho.Companies
   alias Cympho.Finances
 
   @impl true
@@ -25,7 +27,26 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
   end
 
   def handle_event("save", %{"budget" => budget_params}, socket) do
-    save_budget(socket, socket.assigns.action, budget_params)
+    if current_board_authorized?(socket) do
+      save_budget(socket, socket.assigns.action, budget_params)
+    else
+      {:noreply,
+       socket
+       |> put_flash(:error, "Your board authority changed. The budget was not saved.")
+       |> push_navigate(to: ~p"/")}
+    end
+  end
+
+  defp current_board_authorized?(socket) do
+    user_id = socket.assigns[:current_user_id]
+    company_id = socket.assigns[:current_company_id]
+    budget_company_id = socket.assigns.budget.company_id
+
+    is_binary(user_id) and is_binary(company_id) and company_id == budget_company_id and
+      match?(
+        %{role: role, is_board_member: true} when role in ~w(owner admin member),
+        Companies.get_membership(user_id, company_id)
+      ) and CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp save_budget(socket, :edit, budget_params) do
@@ -131,7 +152,7 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
     scope_type = params["scope_type"] || budget.scope_type
 
     params
-    |> put_if_blank("company_id", company_id)
+    |> Map.put("company_id", company_id)
     |> put_if_blank("scope_id", default_scope_id(scope_type, budget))
     |> put_if_blank("status", budget.status || "active")
     |> put_if_blank("currency", budget.currency || "USD")

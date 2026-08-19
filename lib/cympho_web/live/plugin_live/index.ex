@@ -1,7 +1,8 @@
 defmodule CymphoWeb.PluginLive.Index do
   use CymphoWeb, :live_view
 
-  alias Cympho.{Skills, Companies, Plugins}
+  alias Cympho.{Companies, CompanyRBAC, Plugins, Skills}
+  alias Cympho.Plugins.Runtime
 
   @filter_statuses ~w(installed active disabled error)
   @mutation_forbidden_message "Only company owners, admins, and board members can change plugins."
@@ -82,7 +83,7 @@ defmodule CymphoWeb.PluginLive.Index do
     authorize_plugin_mutation(socket, fn ->
       case fetch_company_plugin(socket, id) do
         {:ok, plugin} ->
-          case Skills.toggle_plugin(plugin) do
+          case Runtime.toggle_plugin(plugin) do
             {:ok, updated_plugin} ->
               {:noreply,
                socket
@@ -108,7 +109,7 @@ defmodule CymphoWeb.PluginLive.Index do
     authorize_plugin_mutation(socket, fn ->
       case fetch_company_plugin(socket, id) do
         {:ok, plugin} ->
-          case Skills.delete_plugin(plugin) do
+          case Runtime.delete_plugin(plugin) do
             {:ok, deleted} ->
               {:noreply,
                socket
@@ -200,14 +201,14 @@ defmodule CymphoWeb.PluginLive.Index do
            current_company: %{id: company_id}
          }
        }) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp can_manage_plugins?(_socket), do: false
 
   defp can_manage_plugin?(%{id: user_id}, %{id: company_id}, %{company_id: company_id})
        when is_binary(user_id) and is_binary(company_id) do
-    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+    CompanyRBAC.manager?(user_id, company_id)
   end
 
   defp can_manage_plugin?(_user, _current_company, _plugin), do: false

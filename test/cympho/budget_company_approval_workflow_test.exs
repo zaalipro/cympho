@@ -272,6 +272,75 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
   # ── Action execution on approval ──
 
   describe "budget_increase action execution" do
+    test "binds approved budget creation to the approval company" do
+      company = company_with_governance(["budget_increase"])
+      other_company = create_test_company(%{})
+
+      {:ok, other_agent} =
+        Cympho.Agents.create_agent(%{
+          company_id: other_company.id,
+          name: "Foreign budget target",
+          role: :engineer,
+          status: :idle
+        })
+
+      {:ok, approval} =
+        BoardApprovals.create_board_approval(%{
+          company_id: company.id,
+          title: "Forged cross-tenant budget",
+          category: "budget_increase",
+          proposal_data: %{
+            "action" => "create_budget",
+            "budget_attrs" => %{
+              "company_id" => other_company.id,
+              "name" => "Injected hard stop",
+              "scope_type" => "agent",
+              "scope_id" => other_agent.id,
+              "limit_amount" => "1.00"
+            }
+          }
+        })
+
+      approval =
+        approval
+        |> Ecto.Changeset.change(%{status: "approved"})
+        |> Cympho.Repo.update!()
+
+      assert {:error, changeset} = BoardApprovals.execute_approved_action(approval)
+      assert "is not in this company" in errors_on(changeset).scope_id
+      assert Budgets.list_budgets(company_id: company.id) == []
+      assert Budgets.list_budgets(company_id: other_company.id) == []
+    end
+
+    test "cannot apply an approved update to another company's budget" do
+      company = company_with_governance(["budget_increase"])
+      other_company = create_test_company(%{})
+      other_budget = create_test_budget(other_company, %{limit_amount: Decimal.new("10")})
+
+      {:ok, approval} =
+        BoardApprovals.create_board_approval(%{
+          company_id: company.id,
+          title: "Forged cross-tenant budget update",
+          category: "budget_increase",
+          proposal_data: %{
+            "action" => "update_budget",
+            "budget_id" => other_budget.id,
+            "update_attrs" => %{
+              "company_id" => other_company.id,
+              "limit_amount" => "1.00"
+            }
+          }
+        })
+
+      approval =
+        approval
+        |> Ecto.Changeset.change(%{status: "approved"})
+        |> Cympho.Repo.update!()
+
+      assert {:error, :not_found} = BoardApprovals.execute_approved_action(approval)
+      assert Decimal.eq?(Cympho.Repo.reload!(other_budget).limit_amount, Decimal.new("10"))
+    end
+
     test "creates budget when board approval is resolved as approved" do
       company = company_with_governance(["budget_increase"])
 

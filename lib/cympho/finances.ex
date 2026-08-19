@@ -732,7 +732,12 @@ defmodule Cympho.Finances do
         end
 
       nil ->
-        {:error, :heartbeat_run_scope_mismatch}
+        if is_nil(run.issue_id) and company_id == run.company_id and agent_id == run.agent_id and
+             is_nil(issue_id) and is_nil(project_id) and is_nil(goal_id) do
+          :ok
+        else
+          {:error, :heartbeat_run_scope_mismatch}
+        end
     end
   end
 

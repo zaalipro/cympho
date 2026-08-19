@@ -26,4 +26,14 @@ defmodule Cympho.Documents.IssueDocument do
     |> validate_inclusion(:format, ["markdown", "text"])
     |> unique_constraint([:issue_id, :key])
   end
+
+  def update_changeset(document, attrs) do
+    document
+    |> cast(attrs, [:key, :title, :format, :body])
+    |> validate_required([:key, :title, :issue_id])
+    |> validate_length(:key, min: 1, max: 100)
+    |> validate_length(:title, min: 1, max: 255)
+    |> validate_inclusion(:format, ["markdown", "text"])
+    |> unique_constraint([:issue_id, :key])
+  end
 end

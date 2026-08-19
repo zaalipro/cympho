@@ -1,9 +1,25 @@
 defmodule CymphoWeb.GoalLiveTest do
   use CymphoWeb.LiveCase, async: true
 
+  import Ecto.Query
+
   alias Cympho.Goals
   alias Cympho.Issues
+  alias Cympho.Issues.Issue
   alias Cympho.Projects
+  alias Cympho.Repo
+
+  defp create_foreign_company do
+    unique = System.unique_integer([:positive])
+
+    {:ok, company} =
+      Cympho.Companies.create_company(%{
+        name: "Foreign Goal Live Co #{unique}",
+        slug: "foreign-goal-live-#{unique}"
+      })
+
+    company
+  end
 
   defp create_project(attrs) do
     unique = System.unique_integer([:positive])
@@ -159,6 +175,36 @@ defmodule CymphoWeb.GoalLiveTest do
       assert html =~ "No issues linked yet"
       assert html =~ "Nothing linked yet"
     end
+
+    test "does not expose a legacy cross-company issue linked to the goal", %{
+      conn: conn,
+      current_company: company
+    } do
+      foreign_company = create_foreign_company()
+
+      {:ok, goal} =
+        Goals.create_goal(%{
+          title: "Scoped show mission",
+          company_id: company.id,
+          goal_type: :mission
+        })
+
+      {:ok, foreign_issue} =
+        Issues.create_issue(%{
+          title: "Foreign linked issue must stay hidden",
+          company_id: foreign_company.id,
+          status: :done
+        })
+
+      # Simulate a historical row written before association-scope validation.
+      Repo.update_all(from(i in Issue, where: i.id == ^foreign_issue.id), set: [goal_id: goal.id])
+
+      {:ok, _view, html} = live(conn, "/goals/#{goal.id}")
+
+      refute html =~ foreign_issue.title
+      assert html =~ "No issues linked yet"
+      assert html =~ "Nothing linked yet"
+    end
   end
 
   describe "Goals new" do
@@ -239,6 +285,86 @@ defmodule CymphoWeb.GoalLiveTest do
       assert goal.project_id == project.id
       assert goal.priority == "high"
     end
+
+    test "stamps the current company and rejects forged project and parent ids", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, project} = create_project(%{name: "Current Goal Project"})
+      foreign_company = create_foreign_company()
+      unique = System.unique_integer([:positive])
+
+      {:ok, foreign_project} =
+        Projects.create_project(%{
+          name: "Foreign Goal Project #{unique}",
+          prefix: "F#{alpha_suffix(unique)}",
+          company_id: foreign_company.id
+        })
+
+      {:ok, foreign_parent} =
+        Goals.create_goal(%{
+          title: "Foreign Goal Parent #{unique}",
+          company_id: foreign_company.id,
+          project_id: foreign_project.id
+        })
+
+      {:ok, view, _html} = live(conn, "/goals/new")
+
+      result =
+        render_submit(view, "save", %{
+          "goal" => %{
+            "title" => "Stamped Live Goal #{unique}",
+            "company_id" => foreign_company.id,
+            "project_id" => project.id
+          }
+        })
+
+      assert {:error, {:live_redirect, %{to: "/goals"}}} = result
+
+      stamped =
+        company.id
+        |> Goals.list_goals_by_company()
+        |> Enum.find(&(&1.title == "Stamped Live Goal #{unique}"))
+
+      assert stamped.company_id == company.id
+      assert stamped.project_id == project.id
+
+      {:ok, view, _html} = live(conn, "/goals/new")
+
+      render_submit(view, "save", %{
+        "goal" => %{
+          "title" => "Forged Project Goal #{unique}",
+          "project_id" => foreign_project.id
+        }
+      })
+
+      flash = :sys.get_state(view.pid).socket.assigns.flash
+
+      assert Phoenix.Flash.get(flash, :error) ==
+               "Choose a project and parent goal from this company."
+
+      refute Enum.any?(
+               Goals.list_goals_by_company(company.id),
+               &(&1.title == "Forged Project Goal #{unique}")
+             )
+
+      render_submit(view, "save", %{
+        "goal" => %{
+          "title" => "Forged Parent Goal #{unique}",
+          "parent_id" => foreign_parent.id
+        }
+      })
+
+      flash = :sys.get_state(view.pid).socket.assigns.flash
+
+      assert Phoenix.Flash.get(flash, :error) ==
+               "Choose a project and parent goal from this company."
+
+      refute Enum.any?(
+               Goals.list_goals_by_company(company.id),
+               &(&1.title == "Forged Parent Goal #{unique}")
+             )
+    end
   end
 
   describe "Goals edit" do
@@ -293,6 +419,66 @@ defmodule CymphoWeb.GoalLiveTest do
       assert updated.parent_id == parent.id
       assert updated.project_id == project.id
       assert updated.priority == "critical"
+    end
+
+    test "rejects an A to B to A cycle and ignores forged company_id", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, project} = create_project(%{name: "Cycle Project"})
+      foreign_company = create_foreign_company()
+
+      {:ok, a} =
+        create_goal(%{
+          title: "Live Cycle A",
+          goal_type: :mission,
+          project_id: project.id
+        })
+
+      {:ok, b} =
+        create_goal(%{
+          title: "Live Cycle B",
+          goal_type: :initiative,
+          project_id: project.id,
+          parent_id: a.id
+        })
+
+      {:ok, view, _html} = live(conn, "/goals/#{a.id}/edit")
+
+      html =
+        render_submit(view, "save", %{
+          "goal" => %{
+            "title" => "Live Cycle A renamed",
+            "company_id" => foreign_company.id,
+            "parent_id" => b.id,
+            "project_id" => project.id
+          }
+        })
+
+      assert html =~ "would create a cycle"
+
+      unchanged = Goals.get_goal!(a.id)
+      assert unchanged.title == "Live Cycle A"
+      assert unchanged.company_id == company.id
+      assert unchanged.parent_id == nil
+      assert Goals.get_goal!(b.id).parent_id == a.id
+
+      result =
+        render_submit(view, "save", %{
+          "goal" => %{
+            "title" => "Live Cycle A renamed",
+            "company_id" => foreign_company.id,
+            "parent_id" => "",
+            "project_id" => project.id
+          }
+        })
+
+      assert {:error, {:live_redirect, %{to: redirect_path}}} = result
+      assert redirect_path == "/goals/#{a.id}"
+
+      updated = Goals.get_goal!(a.id)
+      assert updated.title == "Live Cycle A renamed"
+      assert updated.company_id == company.id
     end
   end
 end
