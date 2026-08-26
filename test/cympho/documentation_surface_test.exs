@@ -86,6 +86,8 @@ defmodule Cympho.DocumentationSurfaceTest do
     assert deploy =~ "reconcile_env_key PREVIEW_HOST ${PREVIEW_DOMAIN}"
     assert deploy =~ "reconcile_env_key CYMPHO_UPLOADS_DIR ${UPLOADS_DIR}"
     assert deploy =~ "reconcile_env_key CYMPHO_IMPORT_SPOOL_DIR ${IMPORT_SPOOL_DIR}"
+    refute deploy =~ "CYMPHO_MAX_LOCAL_AGENT_RUNS="
+    refute deploy =~ "CYMPHO_LOCAL_AGENT_MEMORY_RESERVE_MB="
     assert deploy =~ "preview_site_avail=/etc/nginx/sites-available/${PREVIEW_DOMAIN}"
     assert deploy =~ "cympho-preview-access.log"
     refute deploy =~ "cp \"\$site_avail\" \"\$tmp\""
@@ -104,5 +106,24 @@ defmodule Cympho.DocumentationSurfaceTest do
     assert combined =~ "does **not** export"
     assert combined =~ "review mode"
     refute combined =~ ~r/sk-[A-Za-z0-9]{12,}/
+  end
+
+  test "operator docs distinguish total, local-process, and memory admission" do
+    operations = File.read!("docs/OPERATIONS.md")
+    quickstart = File.read!("docs/QUICKSTART.md")
+    readme = File.read!("README.md")
+
+    assert operations =~ "CYMPHO_MAX_LOCAL_AGENT_RUNS"
+    assert operations =~ "CYMPHO_LOCAL_AGENT_MEMORY_RESERVE_MB"
+
+    assert operations =~ "host/cgroup memory"
+    assert operations =~ "not a per-process memory reservation"
+    assert operations =~ "disabled memory gate"
+    assert operations =~ "not cgroup-aware"
+    assert operations =~ "Debian/Ubuntu `apt` path"
+    assert operations =~ ~r/not a\s+separately running Cympho service/
+    assert quickstart =~ "named resource profile"
+    assert readme =~ "local CLI processes"
+    assert readme =~ "gateway work"
   end
 end

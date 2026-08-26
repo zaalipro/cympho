@@ -144,9 +144,9 @@ defmodule CymphoWeb.PreviewControllerTest do
       )
 
     token = PreviewUrl.sign_capability(service)
-    last = binary_part(token, byte_size(token) - 1, 1)
-    replacement = if last == "A", do: "B", else: "A"
-    tampered = binary_part(token, 0, byte_size(token) - 1) <> replacement
+    first = binary_part(token, 0, 1)
+    replacement = if first == "A", do: "B", else: "A"
+    tampered = replacement <> binary_part(token, 1, byte_size(token) - 1)
 
     tampered_conn =
       context.conn

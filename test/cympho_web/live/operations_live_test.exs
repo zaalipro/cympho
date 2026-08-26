@@ -32,7 +32,9 @@ defmodule CymphoWeb.OperationsLiveTest do
 
   describe "Operations page" do
     test "renders runtime services and capacity for a signed-in owner", %{conn: conn} do
-      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      {conn, user, company} =
+        ConnCase.register_and_log_in_user(conn, %{role: "admin"})
+
       conn = live_session_conn(conn, user, company)
 
       {:ok, _agent} =
@@ -83,10 +85,10 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "Repo delivery lane"
       assert html =~ "Repo-ready"
       assert html =~ "repo-capable slots"
-      assert html =~ "Host footprint"
-      assert html =~ "BEAM memory"
-      assert html =~ "BEAM processes"
-      assert html =~ "External CLI memory"
+      refute html =~ "Host footprint"
+      refute html =~ "BEAM memory"
+      refute html =~ "External CLI memory"
+      refute html =~ "node limit"
       assert html =~ "CYMPHO_ORCHESTRATOR_ENABLED"
       assert html =~ ~s(id="runtime-broad-launch-command")
       assert html =~ ~s(phx-hook="CopyToClipboard")
@@ -107,10 +109,8 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "Review mode is on. 1 issue is queued for focused dispatch"
       assert html =~ "each focused command still runs one issue"
       assert html =~ "broad launch will take the focused queue first"
-      assert html =~ "Runtime will take up to 3 issues per poll after launch."
-
-      refute html =~
-               "Dispatch can start up to 3 issues per poll. This preview mirrors the dispatcher priority order before any agent is started."
+      refute html =~ "Runtime will take up to"
+      refute html =~ "Dispatch can start up to"
 
       assert html =~ "max-h-[760px]"
       assert html =~ "1 candidate"
@@ -2230,4 +2230,211 @@ defmodule CymphoWeb.OperationsLiveTest do
   end
 
   defp company_issues(company_id), do: Issues.list_issues(%{company_id: company_id})
+end
+
+defmodule CymphoWeb.OperationsAdmissionLiveTest do
+  use CymphoWeb.LiveCase, async: false
+
+  import Mock
+  import Phoenix.LiveViewTest
+
+  alias Cympho.Agents
+  alias Cympho.Issues
+  alias CymphoWeb.ConnCase
+
+  test "board members receive tenant-neutral capacity status, not node diagnostics", %{conn: conn} do
+    {conn, user, company} =
+      ConnCase.register_and_log_in_user(conn, %{role: "member", is_board_member: true})
+
+    conn =
+      conn
+      |> Plug.Test.init_test_session(%{})
+      |> Plug.Conn.put_session("user_id", user.id)
+      |> Plug.Conn.put_session("company_id", company.id)
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Admission Test Engineer",
+        role: :engineer,
+        status: :idle,
+        adapter: :codex,
+        max_concurrent_jobs: 1,
+        company_id: company.id
+      })
+
+    {:ok, _gateway} =
+      Agents.create_agent(%{
+        name: "Admission Test Gateway",
+        role: :product_manager,
+        status: :idle,
+        adapter: :openai_chat,
+        max_concurrent_jobs: 2,
+        company_id: company.id
+      })
+
+    {:ok, _issue} =
+      Issues.create_issue(%{
+        title: "Queued admission feedback",
+        status: :todo,
+        company_id: company.id,
+        assignee_id: agent.id
+      })
+
+    admission = %{
+      status: :unavailable,
+      reason: :local_slots_exhausted,
+      total_running: 1,
+      max_total_runs: 3,
+      local_running: 1,
+      max_local_runs: 1,
+      gateway_running: 0,
+      memory_check?: false,
+      memory_reserve_bytes: 1,
+      memory: nil,
+      recovery_status: :unavailable,
+      last_denial_reason: :local_slots_exhausted,
+      last_denial_age_ms: 250,
+      denial_counts: %{
+        total_slots_exhausted: 0,
+        local_slots_exhausted: 1,
+        host_memory_low: 0,
+        host_memory_unknown: 0,
+        admission_unavailable: 0
+      }
+    }
+
+    with_mock Cympho.RuntimeAdmission, snapshot: fn -> admission end do
+      {:ok, view, html} = live(conn, "/operations")
+
+      refute has_element?(view, "[data-testid='runtime-admission-reason']")
+      refute has_element?(view, "[data-testid='runtime-admission-memory']")
+      refute has_element?(view, "#host-footprint")
+      assert has_element?(view, "[data-testid='runtime-admission-shared-status']")
+      assert html =~ "Temporarily unavailable"
+      assert has_element?(view, "[data-testid='runtime-admission-simple-reason']")
+      assert html =~ "Shared runtime capacity recently delayed work"
+      assert html =~ "2 online-provider configured"
+      refute html =~ "1 of 1"
+      refute html =~ "node limit"
+      refute html =~ "sampler"
+      refute html =~ "CYMPHO_RUNTIME"
+    end
+  end
+
+  test "ordinary members see only coarse shared-capacity status", %{conn: conn} do
+    {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+    conn =
+      conn
+      |> Plug.Test.init_test_session(%{})
+      |> Plug.Conn.put_session("user_id", user.id)
+      |> Plug.Conn.put_session("company_id", company.id)
+
+    {:ok, _issue} =
+      Issues.create_issue(%{
+        title: "Queued ordinary-member capacity feedback",
+        status: :todo,
+        company_id: company.id
+      })
+
+    admission = %{
+      status: :unavailable,
+      reason: :host_memory_low,
+      total_running: 7,
+      max_total_runs: 12,
+      local_running: 7,
+      max_local_runs: 9,
+      gateway_running: 0,
+      memory_check?: true,
+      memory_reserve_bytes: 536_870_912,
+      memory: %{available_bytes: 123_456_789, total_bytes: 987_654_321, source: :cgroup},
+      recovery_status: :ok,
+      last_denial_reason: :host_memory_low,
+      last_denial_age_ms: 250,
+      denial_counts: %{
+        total_slots_exhausted: 0,
+        local_slots_exhausted: 41,
+        host_memory_low: 37,
+        host_memory_unknown: 23,
+        admission_unavailable: 11
+      }
+    }
+
+    with_mock Cympho.RuntimeAdmission, snapshot: fn -> admission end do
+      {:ok, view, html} = live(conn, "/operations")
+
+      refute has_element?(view, "[data-testid='runtime-admission-reason']")
+      refute has_element?(view, "[data-testid='runtime-admission-memory']")
+      refute has_element?(view, "#host-footprint")
+      assert has_element?(view, "[data-testid='runtime-admission-shared-status']")
+      assert has_element?(view, "[data-testid='runtime-admission-simple-reason']")
+      assert html =~ "Shared runtime capacity recently delayed work"
+      assert html =~ "Node admission"
+      assert html =~ "Managed"
+      refute html =~ "node limit"
+      refute html =~ "123456789"
+      refute html =~ "987654321"
+      refute html =~ "512.0 MB"
+      refute html =~ "Source cgroup"
+      refute html =~ "7 of 9"
+      refute html =~ "host_memory_low"
+      refute html =~ "denial_counts"
+      refute html =~ "Runtime will take up to"
+    end
+  end
+
+  test "company owners are not treated as instance operators", %{conn: conn} do
+    {conn, user, company} =
+      ConnCase.register_and_log_in_user(conn, %{role: "owner", is_board_member: true})
+
+    conn =
+      conn
+      |> Plug.Test.init_test_session(%{})
+      |> Plug.Conn.put_session("user_id", user.id)
+      |> Plug.Conn.put_session("company_id", company.id)
+
+    {:ok, _issue} =
+      Issues.create_issue(%{
+        title: "Owner must not inspect node capacity",
+        status: :todo,
+        company_id: company.id
+      })
+
+    admission = %{
+      status: :unavailable,
+      reason: :host_memory_low,
+      total_running: 17,
+      max_total_runs: 19,
+      local_running: 13,
+      max_local_runs: 14,
+      gateway_running: 4,
+      memory_check?: true,
+      memory_reserve_bytes: 805_306_368,
+      memory: %{available_bytes: 234_567_891, total_bytes: 876_543_219, source: :host},
+      recovery_status: :ok,
+      last_denial_reason: :host_memory_low,
+      last_denial_age_ms: 100,
+      denial_counts: %{
+        total_slots_exhausted: 5,
+        local_slots_exhausted: 7,
+        host_memory_low: 9,
+        host_memory_unknown: 11,
+        admission_unavailable: 13
+      }
+    }
+
+    with_mock Cympho.RuntimeAdmission, snapshot: fn -> admission end do
+      {:ok, view, html} = live(conn, "/operations")
+
+      assert has_element?(view, "[data-testid='runtime-admission-shared-status']")
+      refute has_element?(view, "[data-testid='runtime-admission-reason']")
+      refute has_element?(view, "[data-testid='runtime-admission-memory']")
+      refute has_element?(view, "#host-footprint")
+      refute html =~ "17/19"
+      refute html =~ "13/14"
+      refute html =~ "768.0 MB"
+      refute html =~ "Source host"
+      refute html =~ "node limit"
+    end
+  end
 end

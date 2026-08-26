@@ -22,7 +22,7 @@ defmodule Cympho.MixProject do
     [
       mod: {Cympho.Application, []},
       # :ssh backs the remote environment driver (Cympho.Workspaces.Drivers.Ssh).
-      extra_applications: [:logger, :runtime_tools, :ssh]
+      extra_applications: [:logger, :runtime_tools, :ssh, :os_mon]
     ]
   end
 

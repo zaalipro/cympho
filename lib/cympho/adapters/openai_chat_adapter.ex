@@ -10,6 +10,9 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  @impl true
+  def execution_class, do: :gateway
+
   alias Cympho.Adapters.HttpAdapter
   alias Cympho.Adapters.RuntimeTimeout
   alias Cympho.Secrets.Redaction
@@ -38,16 +41,14 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
     session_id = make_ref()
     config = opts[:config] || %{}
 
-    worker =
-      spawn(fn ->
+    _worker =
+      Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
         try do
           do_run(session_id, issue, agent_id, recipient_pid, config, opts)
         after
           Cympho.AdapterSessions.unregister(session_id)
         end
       end)
-
-    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end

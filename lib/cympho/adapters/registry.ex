@@ -54,17 +54,56 @@ defmodule Cympho.Adapters.Registry do
 
       _tid ->
         case :ets.lookup(__MODULE__, key) do
-          [{^key, module}] -> {:ok, module}
+          [{^key, module, _execution_class}] -> {:ok, module}
           [] -> :error
         end
     end
   end
 
+  @doc false
+  @spec execution_class(adapter_key() | adapter_module() | String.t()) ::
+          {:ok, Cympho.Adapters.Adapter.execution_class()} | :error
+  def execution_class(identifier) when is_atom(identifier) do
+    case :ets.whereis(__MODULE__) do
+      :undefined ->
+        :error
+
+      _tid ->
+        case :ets.lookup(__MODULE__, identifier) do
+          [{^identifier, _module, execution_class}] ->
+            {:ok, execution_class}
+
+          [] ->
+            case :ets.match_object(__MODULE__, {:_, identifier, :_}) do
+              [{_key, ^identifier, execution_class} | _rest] -> {:ok, execution_class}
+              [] -> :error
+            end
+        end
+    end
+  end
+
+  def execution_class(identifier) when is_binary(identifier) do
+    case :ets.whereis(__MODULE__) do
+      :undefined ->
+        :error
+
+      _tid ->
+        Enum.find_value(:ets.tab2list(__MODULE__), :error, fn
+          {key, _module, execution_class} ->
+            if Atom.to_string(key) == identifier, do: {:ok, execution_class}
+        end)
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  def execution_class(_identifier), do: :error
+
   @spec all() :: [{adapter_key(), adapter_module()}]
   def all do
     case :ets.whereis(__MODULE__) do
       :undefined -> []
-      _tid -> :ets.tab2list(__MODULE__)
+      _tid -> Enum.map(:ets.tab2list(__MODULE__), fn {key, module, _class} -> {key, module} end)
     end
   end
 
@@ -210,7 +249,10 @@ defmodule Cympho.Adapters.Registry do
   # for init to finish.
   defp register_builtin_direct do
     Enum.each(builtin_specs(), fn {key, mod} ->
-      if Code.ensure_loaded?(mod), do: :ets.insert(__MODULE__, {key, mod})
+      if Code.ensure_loaded?(mod) do
+        execution_class = Cympho.Adapters.Adapter.declared_execution_class(mod)
+        :ets.insert(__MODULE__, {key, mod, execution_class})
+      end
     end)
 
     :ok
@@ -218,7 +260,8 @@ defmodule Cympho.Adapters.Registry do
 
   @impl true
   def handle_call({:register, key, module}, _from, state) do
-    :ets.insert(__MODULE__, {key, module})
+    execution_class = Cympho.Adapters.Adapter.declared_execution_class(module)
+    :ets.insert(__MODULE__, {key, module, execution_class})
     {:reply, :ok, state}
   end
 end

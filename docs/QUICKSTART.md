@@ -95,6 +95,12 @@ service-owned directory even when attachments use S3. Development and test
 retain their temporary local default; `deploy.sh` provisions the production
 directory outside the release payload.
 
+Local development uses an authoritative total slot gate plus a local-process
+sub-limit. Production additionally
+requires readable host or cgroup memory pressure before it starts a new local
+CLI-backed run. The named resource profile supplies the total-run, local-run,
+and memory-reserve defaults; see the operator guide before overriding them.
+
 For deployment, backups, runtime controls, and incident handling, continue with
 the [operator guide](OPERATIONS.md). For trace export, see
 [observability](OBSERVABILITY.md).

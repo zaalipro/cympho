@@ -26,6 +26,9 @@ defmodule Cympho.Application do
       Cympho.Companies.ImportDecodeAdmission,
       import_transfer_sweeper_child(),
       {Registry, keys: :unique, name: Cympho.OrchestratorRegistry},
+      {Registry, keys: :unique, name: Cympho.AdapterSessions.Registry},
+      Cympho.AdapterSessions,
+      Cympho.RuntimeAdmission,
       {Registry, keys: :unique, name: Cympho.AgentHeartbeat.Registry},
       Cympho.AgentHeartbeat.Supervisor,
       Cympho.Issues.AutoAssignmentReassigner,
@@ -38,7 +41,6 @@ defmodule Cympho.Application do
       {Finch, name: Cympho.Finch},
       # Adapter system
       Cympho.Adapters.Registry,
-      Cympho.AdapterSessions,
       health_checker_child(),
       # Plugin system
       Cympho.Plugins.Registry,

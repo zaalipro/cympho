@@ -29,18 +29,61 @@ resource_profile =
 
 resource_defaults =
   case resource_profile do
-    "low" -> %{repo_pool: 5, finch_pool: 2, max_agents: 1}
-    "balanced" -> %{repo_pool: 10, finch_pool: 5, max_agents: 3}
-    "throughput" -> %{repo_pool: 25, finch_pool: 10, max_agents: nil}
+    "low" ->
+      %{repo_pool: 5, finch_pool: 2, max_agents: 1, max_local_runs: 1, memory_reserve_mb: 384}
+
+    "balanced" ->
+      %{repo_pool: 10, finch_pool: 5, max_agents: 3, max_local_runs: 2, memory_reserve_mb: 768}
+
+    "throughput" ->
+      %{
+        repo_pool: 25,
+        finch_pool: 10,
+        max_agents: nil,
+        max_local_runs: 4,
+        memory_reserve_mb: 1_536
+      }
   end
 
 max_concurrent_agents =
   positive_env.("CYMPHO_MAX_CONCURRENT_AGENTS", resource_defaults.max_agents)
 
+effective_max_concurrent_agents =
+  max_concurrent_agents ||
+    min(max(:erlang.system_info(:schedulers_online) * 2, 4), 32)
+
+max_local_runs =
+  case System.get_env("CYMPHO_MAX_LOCAL_AGENT_RUNS") do
+    value when value in [nil, ""] ->
+      min(resource_defaults.max_local_runs, effective_max_concurrent_agents)
+
+    _value ->
+      positive_env.("CYMPHO_MAX_LOCAL_AGENT_RUNS", resource_defaults.max_local_runs)
+  end
+
+memory_reserve_mb =
+  positive_env.("CYMPHO_LOCAL_AGENT_MEMORY_RESERVE_MB", resource_defaults.memory_reserve_mb)
+
+if max_local_runs > effective_max_concurrent_agents do
+  raise "CYMPHO_MAX_LOCAL_AGENT_RUNS must not exceed the effective total agent run limit"
+end
+
 config :cympho, resource_profile: resource_profile
 
-if max_concurrent_agents do
-  config :cympho, :orchestrator, max_concurrent_agents: max_concurrent_agents
+config :cympho, :orchestrator, max_concurrent_agents: effective_max_concurrent_agents
+
+if config_env() == :test do
+  config :cympho, :runtime_admission,
+    max_total_runs: effective_max_concurrent_agents,
+    max_local_runs: min(3, effective_max_concurrent_agents),
+    memory_reserve_bytes: 1,
+    memory_check?: false
+else
+  config :cympho, :runtime_admission,
+    max_total_runs: effective_max_concurrent_agents,
+    max_local_runs: max_local_runs,
+    memory_reserve_bytes: memory_reserve_mb * 1024 * 1024,
+    memory_check?: config_env() == :prod
 end
 
 config :cympho, Cympho.Finch,

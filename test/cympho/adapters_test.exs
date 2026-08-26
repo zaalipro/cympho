@@ -4,6 +4,12 @@ defmodule Cympho.AdaptersTest do
   alias Cympho.Adapters
   alias Cympho.Adapters.Registry
 
+  test "does not expose a direct adapter execution API outside runtime admission" do
+    refute Enum.any?(Adapters.__info__(:functions), fn {name, _arity} ->
+             name == :run_via_adapter
+           end)
+  end
+
   describe "list_adapters/0" do
     test "returns all registered adapters" do
       adapters = Adapters.list_adapters()

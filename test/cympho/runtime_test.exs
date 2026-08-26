@@ -1,6 +1,8 @@
 defmodule Cympho.RuntimeTest do
   use Cympho.DataCase, async: false
 
+  import Mock
+
   alias Cympho.{
     Agents,
     Companies,
@@ -196,6 +198,22 @@ defmodule Cympho.RuntimeTest do
 
     assert {:ok, _company} = Companies.pause_company(company, "operator pause")
     assert {:error, :company_paused} = Runtime.dispatchable?(issue, agent)
+  end
+
+  test "dispatch admission uses the resolved adapter module", %{agent: agent, issue: issue} do
+    caller = self()
+
+    with_mock Cympho.RuntimeAdmission,
+      available: fn adapter ->
+        send(caller, {:admission_adapter, adapter})
+        {:error, :host_memory_low}
+      end do
+      assert {:error, {:runtime_admission_deferred, :host_memory_low}} =
+               Runtime.dispatchable?(issue, agent)
+
+      assert_received {:admission_adapter, Cympho.Adapters.ProcessAdapter}
+      refute_received {:admission_adapter, :process}
+    end
   end
 
   test "preflight blocks paused companies", %{company: company, agent: agent, issue: issue} do

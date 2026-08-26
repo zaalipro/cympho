@@ -919,7 +919,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(dispatcher_source, "adapter_sessions_still_registered"),
       String.contains?(dispatcher_source, "cancel_issue_runs"),
       String.contains?(dispatcher_source, "Issues.force_release_issue"),
-      String.contains?(orchestrator_source, "cancel_adapter_session"),
+      String.contains?(orchestrator_source, "cleanup_adapter_session"),
       String.contains?(controller_source, "adapter_session_suffix"),
       String.contains?(controller_source, "defp count_phrase("),
       String.contains?(controller_source, ":orchestrators_stopped"),

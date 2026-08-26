@@ -3,8 +3,9 @@ defmodule Mix.Tasks.Cympho.Doctor do
 
   @moduledoc """
   Checks the source checkout, effective runtime configuration, PostgreSQL,
-  migrations, endpoint configuration, attachment storage, BEAM resources, and
-  aggregate adapter health without starting the Cympho application supervisor.
+  migrations, endpoint configuration, attachment storage, BEAM resources,
+  local-process capacity posture, and aggregate adapter health without starting
+  the Cympho application supervisor.
 
       mix cympho.doctor
       mix cympho.doctor --json

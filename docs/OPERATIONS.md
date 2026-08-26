@@ -66,21 +66,69 @@ CYMPHO_AGENT_JWT_SECRET
 Set one instance profile instead of independently guessing safe process and
 connection limits:
 
-| `CYMPHO_RESOURCE_PROFILE` | Concurrent agent runs | PostgreSQL pool | Finch pool | Use case |
-| --- | ---: | ---: | ---: | --- |
-| `low` | 1 | 5 | 2 | 1–2 vCPU / 1–2 GB VPS, many registered agents but one active local CLI |
-| `balanced` (default) | 3 | 10 | 5 | General self-hosting |
-| `throughput` | scheduler-derived | 25 | 10 | Measured hosts with remote/gateway-heavy execution |
+| `CYMPHO_RESOURCE_PROFILE` | Total runs | Local CLI runs | Memory reserve | PostgreSQL pool | Finch pool | Use case |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `low` | 1 | 1 | 384 MB | 5 | 2 | 1–2 vCPU / 1–2 GB VPS, many registered agents but one active local CLI |
+| `balanced` (default) | 3 | 2 | 768 MB | 10 | 5 | General self-hosting |
+| `throughput` | scheduler-derived | 4 | 1536 MB | 25 | 10 | Measured hosts with remote/gateway-heavy execution |
 
 Registered idle agents are not the same as simultaneous OS-backed jobs. Keep
 the profile at `low` to host a large roster cheaply; Cympho queues their work
 and admits one run at a time. Raise concurrency only after checking app,
-PostgreSQL, and child CLI RSS in `/beam` and at the OS level.
+PostgreSQL, and BEAM pressure in `/beam`, then checking child CLI RSS with OS
+tools. The BEAM dashboard does not include external child-process memory.
 
-`CYMPHO_MAX_CONCURRENT_AGENTS`, `POOL_SIZE`, and
-`CYMPHO_FINCH_POOL_SIZE` are positive-integer overrides. Explicit overrides win
-over the profile. Avoid setting a large DB pool as a substitute for fixing slow
-queries: each PostgreSQL connection has a real server-side memory cost.
+`CYMPHO_MAX_CONCURRENT_AGENTS`, `CYMPHO_MAX_LOCAL_AGENT_RUNS`,
+`CYMPHO_LOCAL_AGENT_MEMORY_RESERVE_MB`, `POOL_SIZE`, and
+`CYMPHO_FINCH_POOL_SIZE` are positive-integer overrides. The local limit may
+not exceed the effective total run limit. Explicit overrides win over the
+profile. Every runtime, including gateways, consumes the authoritative node
+total. Before starting a local process, production admission also requires current
+headroom above the configured floor, using the smaller host/cgroup memory value when
+both are available. This is a start gate, not a per-process memory reservation;
+it fails closed when memory pressure cannot be measured. Gateway work consumes
+a total slot but not a local-process slot. Avoid setting a
+large DB pool as a substitute for fixing slow queries: each PostgreSQL
+connection has a real server-side memory cost.
+
+The total and local-process limits are node-local. The standard deployment runs
+one BEAM node per host. If you deliberately co-locate multiple Cympho nodes,
+divide the local limits between them; this gate is not a cluster-wide cgroup or
+per-process RSS ceiling.
+
+Each admitted run is rebound from its Orchestrator to the registered adapter
+worker before provider or CLI work begins. Normal completion, cooperative
+cancellation, controller death while that worker remains schedulable, and
+admission-manager restarts retain the slot through worker cleanup. Port-backed
+workers snapshot and freeze a positive-PID process tree before closing the
+Port, then confirm the captured targets are gone before emitting a terminal
+result.
+
+This is not an OS containment boundary. A brutally killed adapter worker
+cannot run its cleanup, and a descendant that outlives the direct Port child
+can escape portable PID-tree discovery. Operators that require authoritative
+process containment should run agent commands in a dedicated cgroup or
+container. Process start-time rechecks narrow PID reuse during discovery and
+retries, but external POSIX signalling still has a final non-atomic
+check-to-signal window; pidfd or cgroup-backed custody is required to close it.
+A process stuck in uninterruptible kernel sleep, or a permanently
+uninspectable process tree, can retain a live cleanup worker and its slot
+indefinitely. That fail-closed posture avoids intentionally starting a second
+writer in the same workspace, but still requires host-level diagnosis.
+Portable discovery caps one process-tree snapshot at 4,096 targets; an unusually
+large tree likewise retains its worker and slot for operator containment rather
+than being partially released.
+Linux normally uses `/proc` for process-tree discovery and falls back to
+`pgrep`/`ps`. On the Debian/Ubuntu `apt` path supported by `install.sh`, the
+script installs the `procps` package explicitly; operators of other Linux
+distributions must install equivalent fallback tools. macOS supplies
+`/usr/bin/pgrep` and `/bin/ps`.
+
+Company-scoped Operations pages intentionally show only a coarse shared-capacity
+delay signal. Exact node counts, memory samples, and denial counters can reveal
+co-tenant activity, so instance operators should use `mix cympho.doctor`,
+bounded admission telemetry, and the separately authenticated `/beam` surface
+for node-level diagnosis.
 
 ### Isolated runtime-preview origin
 
@@ -195,7 +243,9 @@ does not change application, database, or configuration state and does not
 start `Cympho.Application`, Dispatcher, Endpoint, agent
 providers, or any provider network call. It starts only a two-connection Repo
 when needed, executes `SELECT 1`, reads `schema_migrations` using SELECTs, and
-then stops that Repo if it started it. Each configured local attachment or
+then stops that Repo if it started it. Its BEAM counters and memory-pressure
+posture describe only the doctor process and its current host view, not a
+separately running Cympho service. Each configured local attachment or
 import-transfer directory is checked with an exclusive zero-byte probe that is
 always removed. It rejects known temporary, checkout, and release-payload
 paths, but cannot prove the durability or backup policy of an arbitrary
@@ -209,6 +259,19 @@ another BEAM VM's process tree, and malformed production variables rejected
 while `config/runtime.exs` loads can prevent Mix itself from reaching the task;
 the boot error is then the authoritative diagnosis. Service status/logs,
 managed update, and backup commands remain separate roadmap work.
+
+`runtime.local_capacity` validates the total/local relationship and reports
+only boolean configuration, probe-availability, and headroom posture. In
+production, a disabled memory gate or unavailable probe fails the check; in
+development, an unavailable probe warns because development admission is
+deliberately slot-only. On Linux, the probe reads `/proc` and walks the
+process's cgroup-v2 or conventional cgroup-v1 memory hierarchy, using the
+tightest finite ancestor headroom. Detected but unreadable Linux containment
+fails closed rather than falling back to host-only data. On non-Linux systems,
+Erlang `:os_mon`/`:memsup` supplies a host-memory sample. That fallback is not cgroup-aware
+and may start the local `os_mon` application in the short-lived
+doctor VM. A pass does not prove the health or current headroom of a separately
+running Cympho service.
 
 For release deployments using local attachment storage, set
 `CYMPHO_UPLOADS_DIR` to an absolute persistent directory owned by the service

@@ -7,8 +7,7 @@ defmodule Cympho.RuntimeCapacity do
   memory footprint. These helpers keep that distinction visible in the UI.
   """
 
-  @local_adapters ~w(claude_code codex cursor process)
-  @gateway_adapters ~w(http openai_chat openclaw agrenting)
+  alias Cympho.Adapters.Adapter
 
   @type level :: :safe | :watch | :high
 
@@ -88,17 +87,11 @@ defmodule Cympho.RuntimeCapacity do
     }
   end
 
-  def local_adapter?(adapter), do: adapter_name(adapter) in @local_adapters
-  def gateway_adapter?(adapter), do: adapter_name(adapter) in @gateway_adapters
+  def local_adapter?(adapter), do: Adapter.execution_class(adapter) == :local_process
+  def gateway_adapter?(adapter), do: Adapter.execution_class(adapter) == :gateway
 
   def runtime_type(adapter) do
-    adapter = adapter_name(adapter)
-
-    cond do
-      adapter in @local_adapters -> "Local CLI/process"
-      adapter in @gateway_adapters -> "Remote gateway"
-      true -> "Unknown runtime"
-    end
+    if local_adapter?(adapter), do: "Local CLI/process", else: "Remote gateway"
   end
 
   defp agent_level(adapter, max_jobs, running_runs, score) do
@@ -131,9 +124,7 @@ defmodule Cympho.RuntimeCapacity do
   defp pressure_score(adapter, max_jobs, running_runs) do
     weight =
       cond do
-        adapter in ~w(claude_code codex cursor) -> 2
-        adapter == "process" -> 2
-        adapter in @gateway_adapters -> 1
+        local_adapter?(adapter) -> 2
         true -> 1
       end
 

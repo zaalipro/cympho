@@ -11,9 +11,9 @@ defmodule Cympho.Adapters.CodexAdapterTest do
     with_empty_path(fn ->
       session_id = CodexAdapter.run(@issue, "agent-1", self(), config: %{"timeout" => 100})
 
-      assert_receive {:session_started, ^session_id}
       assert_receive {:turn_ended_with_error, ^session_id, reason}, 3_000
       assert reason =~ "codex binary not found in PATH"
+      refute_receive {:session_started, ^session_id}, 100
     end)
   end
 
@@ -30,7 +30,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             cwd: System.tmp_dir!()
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
         assert_receive {:turn_ended_with_error, ^session_id, reason}, 6_000
         assert reason =~ "Codex exited with status 7"
         assert reason =~ "provider failed"
@@ -46,7 +46,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
           cwd: System.tmp_dir!()
         )
 
-      assert_receive {:session_started, ^session_id}
+      assert_receive {:session_started, ^session_id}, 3_000
       assert_receive {:turn_ended_with_error, ^session_id, {:parse_error, "not-json"}}, 6_000
     end)
   end
@@ -59,7 +59,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
           cwd: System.tmp_dir!()
         )
 
-      assert_receive {:session_started, ^session_id}
+      assert_receive {:session_started, ^session_id}, 3_000
       assert_receive {:turn_ended_with_error, ^session_id, :no_output}, 6_000
     end)
   end
@@ -72,9 +72,48 @@ defmodule Cympho.Adapters.CodexAdapterTest do
           cwd: System.tmp_dir!()
         )
 
-      assert_receive {:session_started, ^session_id}
+      assert_receive {:session_started, ^session_id}, 3_000
       assert_receive {:turn_ended_with_error, ^session_id, :timeout}, 3_000
     end)
+  end
+
+  test "cancellation reports terminal only after the Codex child exits" do
+    root =
+      Path.join(System.tmp_dir!(), "cympho-codex-terminal-#{System.unique_integer([:positive])}")
+
+    marker = Path.join(root, "exited")
+    pid_path = Path.join(root, "pid")
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    with_fake_codex(
+      """
+      on_exit() { printf exited > #{marker}; exit 0; }
+      trap on_exit TERM HUP INT
+      printf '%s' "$$" > #{pid_path}
+      printf 'ready\\n'
+      while true; do :; done
+      """,
+      fn ->
+        session_id =
+          CodexAdapter.run(@issue, "agent-1", self(),
+            config: %{"timeout" => 30_000},
+            cwd: System.tmp_dir!()
+          )
+
+        assert_receive {:session_started, ^session_id}, 3_000
+        assert_receive {:turn_progress, ^session_id, _progress}, 6_000
+        child_pid = pid_path |> File.read!() |> String.to_integer()
+        assert process_alive?(child_pid)
+
+        assert :ok = Cympho.AdapterSessions.cancel(session_id, :terminal_order_test)
+
+        assert_receive {:turn_ended_with_error, ^session_id, {:cancelled, :terminal_order_test}},
+                       6_000
+
+        refute process_alive?(child_pid)
+      end
+    )
   end
 
   test "does not pass arbitrary runtime environment values into Codex" do
@@ -88,7 +127,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             cwd: System.tmp_dir!()
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
         assert_receive {:turn_completed, ^session_id, %{"leaked" => false}}, 6_000
       end
     )
@@ -161,7 +200,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             runtime_context: trusted_runtime_context(issue, workspace, configured_repo_url)
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
 
         assert_receive {:turn_completed, ^session_id,
                         %{
@@ -209,7 +248,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
               runtime_context: trusted_runtime_context(issue, workspace, configured_repo_url)
             )
 
-          assert_receive {:session_started, ^session_id}
+          assert_receive {:session_started, ^session_id}, 3_000
 
           assert_receive {:turn_completed, ^session_id, %{"result" => "READ_ONLY_WORK_MODE_OK"}},
                          6_000
@@ -244,7 +283,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             runtime_context: trusted_runtime_context(issue, workspace, configured_repo_url)
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
         assert_receive {:turn_completed, ^session_id, %{"result" => "SHARED_WORKSPACE_OK"}}, 6_000
       end
     )
@@ -278,7 +317,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             runtime_context: trusted_runtime_context(issue, workspace, configured_repo_url)
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
         assert_receive {:turn_completed, ^session_id, %{"result" => "PLAIN_WORKSPACE_OK"}}, 6_000
       end
     )
@@ -310,7 +349,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             cwd: workspace
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
 
         assert_receive {:turn_completed, ^session_id,
                         %{"result" => "SELF_CREATED_GIT_STAYS_CONTAINED"}},
@@ -347,7 +386,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             runtime_context: trusted_runtime_context(issue, workspace, configured_repo_url)
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
 
         assert_receive {:turn_completed, ^session_id,
                         %{"result" => "MISMATCHED_ORIGIN_STAYS_CONTAINED"}},
@@ -384,7 +423,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             runtime_context: runtime_context
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
 
         assert_receive {:turn_completed, ^session_id,
                         %{"result" => "MATCHING_ORIGIN_USES_CUSTOM_PERMISSIONS"}},
@@ -414,7 +453,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             runtime_context: runtime_context
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
 
         assert_receive {:turn_completed, ^session_id,
                         %{"result" => "CHANGED_ORIGIN_STAYS_CONTAINED"}},
@@ -464,7 +503,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             runtime_context: trusted_runtime_context(issue, workspace, configured_repo_url)
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
 
         assert_receive {:turn_completed, ^session_id, %{"result" => "GIT_SYMLINK_GUARD_OK"}},
                        6_000
@@ -513,9 +552,9 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             runtime_context: trusted_runtime_context(issue, workspace, configured_repo_url)
           )
 
-        assert_receive {:session_started, ^session_id}
         assert_receive {:turn_ended_with_error, ^session_id, reason}, 6_000
         assert reason =~ "Codex workspace must be a direct, existing directory"
+        refute_receive {:session_started, ^session_id}, 100
       end
     )
   end
@@ -548,7 +587,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
             runtime_context: trusted_runtime_context(issue, workspace, configured_repo_url)
           )
 
-        assert_receive {:session_started, ^session_id}
+        assert_receive {:session_started, ^session_id}, 3_000
         assert_receive {:turn_completed, ^session_id, %{"result" => "TRAVERSAL_GUARD_OK"}}, 6_000
       end
     )
@@ -661,5 +700,14 @@ defmodule Cympho.Adapters.CodexAdapterTest do
     after
       File.rm_rf!(dir)
     end
+  end
+
+  defp process_alive?(os_pid) do
+    case System.cmd("/bin/kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true) do
+      {_output, 0} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
   end
 end

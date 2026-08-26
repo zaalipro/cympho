@@ -5,10 +5,12 @@ defmodule Cympho.Diagnostics do
   The diagnostic runner deliberately does not start `Cympho.Application`.
   Database checks briefly start only the repository when it is not already
   running, and neither adapter providers nor the configured HTTP endpoint are
-  called. Database and configuration checks are read-only. The local storage
-  check creates one exclusive zero-byte probe and removes it immediately; it
-  never touches an attachment record or payload. Reports contain an allowlisted
-  set of operational facts and never serialize environment values, adapter
+  called. BEAM and memory-pressure facts describe this doctor process and its
+  host/cgroup view, not a separately running Cympho service. Database and
+  configuration checks are read-only. The local storage check creates one
+  exclusive zero-byte probe and removes it immediately; it never touches an
+  attachment record or payload. Reports contain an allowlisted set of
+  operational facts and never serialize environment values, adapter
   configuration, or raw exceptions.
   """
 
@@ -26,6 +28,8 @@ defmodule Cympho.Diagnostics do
     memory_mb process_memory_mb binary_memory_mb ets_memory_mb process_count
     process_limit port_count port_limit schedulers_online run_queue profile
     repo_pool finch_pool max_concurrent_agents heartbeat_limit plugin_limit
+    limits_valid memory_check_enabled memory_probe_supported
+    memory_headroom_sufficient
     packaged_count applied_count pending_count highest_packaged highest_applied
     adapters type healthy degraded unavailable total unknown_count
   ))
@@ -174,6 +178,7 @@ defmodule Cympho.Diagnostics do
       local_storage_probe: &local_storage_probe/1,
       tcp_probe: &tcp_probe/2,
       runtime_snapshot: &default_runtime_snapshot/0,
+      memory_probe: &memory_probe/0,
       application_version: fn ->
         case Application.spec(:cympho, :vsn) do
           nil -> Mix.Project.config()[:version] || "unknown"
@@ -643,7 +648,7 @@ defmodule Cympho.Diagnostics do
       profile in ["low", "balanced", "throughput"] and positive?(repo_pool) and
         positive?(finch_pool) and positive?(max_agents)
 
-    [
+    resource_checks = [
       check(
         "runtime.beam",
         "runtime",
@@ -674,6 +679,128 @@ defmodule Cympho.Diagnostics do
         )
       )
     ]
+
+    resource_checks ++ [local_capacity_check(callbacks, profile, max_agents)]
+  end
+
+  defp local_capacity_check(callbacks, profile, total_run_limit) do
+    defaults = capacity_defaults(profile)
+    admission = callbacks.app_env.(:runtime_admission, [])
+
+    local_run_limit =
+      Keyword.get(admission, :max_local_runs, min(defaults.max_local_runs, total_run_limit))
+
+    admission_total_run_limit = Keyword.get(admission, :max_total_runs)
+
+    reserve_bytes = Keyword.get(admission, :memory_reserve_bytes, defaults.memory_reserve_bytes)
+    memory_check_enabled = effective_boolean(Keyword.get(admission, :memory_check?, true), true)
+
+    valid_relation? =
+      positive?(total_run_limit) and positive?(admission_total_run_limit) and
+        admission_total_run_limit == total_run_limit and positive?(local_run_limit) and
+        positive?(reserve_bytes) and
+        local_run_limit <= total_run_limit
+
+    probe = normalize_memory_probe(callbacks.memory_probe.())
+    environment = normalize_environment(callbacks.environment.())
+
+    {probe_supported?, available_bytes} =
+      case probe do
+        {:ok, sample} ->
+          {true, sample.available_bytes}
+
+        {:error, _reason} ->
+          {false, nil}
+      end
+
+    headroom_sufficient? =
+      probe_supported? and positive?(reserve_bytes) and available_bytes > reserve_bytes
+
+    status =
+      cond do
+        not valid_relation? -> :fail
+        not memory_check_enabled and environment == :prod -> :fail
+        not probe_supported? and environment == :prod -> :fail
+        not probe_supported? -> :warn
+        not headroom_sufficient? -> :warn
+        true -> :pass
+      end
+
+    check(
+      "runtime.local_capacity",
+      "runtime",
+      status,
+      case status do
+        :pass ->
+          "Local-process capacity configuration is coherent and this doctor process can read host memory pressure."
+
+        :warn when not probe_supported? ->
+          "Local-process capacity is configured, but host memory pressure is unavailable to this doctor process."
+
+        :warn ->
+          "Current memory headroom is at or below the configured local-process reserve."
+
+        :fail when not valid_relation? ->
+          "Local-process capacity limits are invalid or exceed the total run limit."
+
+        :fail when not memory_check_enabled ->
+          "Production local-process admission has memory-pressure checks disabled."
+
+        :fail ->
+          "Production local-process admission cannot read host or cgroup memory pressure."
+      end,
+      %{
+        limits_valid: valid_relation?,
+        memory_check_enabled: memory_check_enabled,
+        memory_probe_supported: probe_supported?,
+        memory_headroom_sufficient: headroom_sufficient?
+      },
+      if(status in [:warn, :fail],
+        do:
+          "Use coherent positive local/total limits and ensure the service can read host or cgroup memory pressure."
+      )
+    )
+  end
+
+  defp capacity_defaults("low"),
+    do: %{max_local_runs: 1, memory_reserve_bytes: 384 * 1024 * 1024}
+
+  defp capacity_defaults("balanced"),
+    do: %{max_local_runs: 2, memory_reserve_bytes: 768 * 1024 * 1024}
+
+  defp capacity_defaults("throughput"),
+    do: %{max_local_runs: 4, memory_reserve_bytes: 1_536 * 1024 * 1024}
+
+  defp capacity_defaults(_profile), do: capacity_defaults("balanced")
+
+  defp effective_boolean(value, _default) when is_boolean(value), do: value
+  defp effective_boolean(_value, default), do: default
+
+  defp normalize_memory_probe(
+         {:ok,
+          %{source: source, total_bytes: total_bytes, available_bytes: available_bytes} = sample}
+       )
+       when source in [:host, :cgroup, :host_and_cgroup] and is_integer(total_bytes) and
+              total_bytes > 0 and is_integer(available_bytes) and available_bytes >= 0 and
+              available_bytes <= total_bytes do
+    {:ok, sample}
+  end
+
+  defp normalize_memory_probe({:error, reason}) when reason in [:unsupported, :unavailable],
+    do: {:error, reason}
+
+  defp normalize_memory_probe(_result), do: {:error, :unavailable}
+
+  defp memory_probe do
+    module = Cympho.RuntimeAdmission.MemoryProbe
+
+    if Code.ensure_loaded?(module) and function_exported?(module, :sample, 0),
+      do: apply(module, :sample, []),
+      else: {:error, :unsupported}
+  rescue
+    _error -> {:error, :unavailable}
+  catch
+    _kind, _reason -> {:error, :unavailable}
   end
 
   defp adapter_checks({:ok, snapshot}, _callbacks) do

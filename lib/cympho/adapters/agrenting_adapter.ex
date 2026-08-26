@@ -5,6 +5,9 @@ defmodule Cympho.Adapters.AgrentingAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  @impl true
+  def execution_class, do: :gateway
+
   alias Cympho.Agrenting.Client
   alias Cympho.Projects
   alias Cympho.WorkProducts
@@ -19,13 +22,12 @@ defmodule Cympho.Adapters.AgrentingAdapter do
     session_id = make_ref()
     config = opts[:config] || %{}
 
-    worker =
-      spawn(fn ->
+    _worker =
+      Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
         # A hiring is a *paid* remote job that polls for up to 30 minutes. The
-        # worker was never registered, so operator stop, company pause, and
-        # budget hard-stop had no way to reach it — a cancelled run kept billing
-        # to completion. Registration makes those paths work; the monitor covers
-        # an orchestrator that dies without cancelling.
+        # Register before any paid provider work starts so operator stop,
+        # company pause, and budget hard-stop can always reach this worker.
+        # The monitor covers an orchestrator that dies without cancelling.
         Process.monitor(recipient_pid)
 
         try do
@@ -34,8 +36,6 @@ defmodule Cympho.Adapters.AgrentingAdapter do
           Cympho.AdapterSessions.unregister(session_id)
         end
       end)
-
-    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end

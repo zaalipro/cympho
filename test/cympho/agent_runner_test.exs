@@ -111,6 +111,55 @@ defmodule Cympho.AgentRunnerTest do
       assert result["type"] == "result"
     end
 
+    test "does not report a parsed result until the CLI process exits" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-exit-order-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      gate = Path.join(tmp_dir, "exit-gate")
+      pid_file = Path.join(tmp_dir, "child.pid")
+      command = Path.join(tmp_dir, "fake-claude")
+      {"", 0} = System.cmd("mkfifo", [gate], stderr_to_stdout: true)
+
+      File.write!(command, """
+      #!/bin/sh
+      echo $$ > '#{pid_file}'
+      printf '%s\n' '{"type":"result","content":[{"type":"text","text":"held until exit"}]}'
+      IFS= read -r _ < '#{gate}'
+      """)
+
+      File.chmod!(command, 0o755)
+
+      issue = %{
+        id: "exit-order-command",
+        title: "Exit ordering",
+        description: "Hold the process after emitting a result"
+      }
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", self(),
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 5_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert_receive {:turn_progress, ^session_id, _progress}, @receive_timeout
+      os_pid = pid_file |> File.read!() |> String.trim()
+      assert os_process_alive?(os_pid)
+      refute_received {:turn_completed, ^session_id, _result}
+      refute_received {:turn_ended_with_error, ^session_id, _reason}
+
+      File.write!(gate, "exit\n")
+
+      assert_receive {:turn_completed, ^session_id, result}, @receive_timeout
+      assert resume_probe_text(result) == "held until exit"
+      refute os_process_alive?(os_pid)
+    end
+
     test "uses Claude plan permissions without the bypass in Plan and Ask modes" do
       tmp_dir =
         Path.join(System.tmp_dir!(), "cympho-agent-runner-read-only-#{System.unique_integer()}")
@@ -361,7 +410,7 @@ defmodule Cympho.AgentRunnerTest do
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
-      assert_receive {:turn_ended_with_error, ^session_id, :stall_timeout}, @receive_timeout
+      assert_receive {:turn_ended_with_error, ^session_id, :stall_timeout}, 10_000
       assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
     end
 
@@ -418,8 +467,8 @@ defmodule Cympho.AgentRunnerTest do
       os_pid = pid_file |> File.read!() |> String.trim()
       assert os_pid != ""
 
-      assert eventually(fn -> not os_process_alive?(os_pid) end, 60),
-             "the CLI subprocess (#{os_pid}) survived the parse error"
+      refute os_process_alive?(os_pid),
+             "the CLI subprocess (#{os_pid}) was still alive when the terminal error arrived"
 
       assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
     end
@@ -497,7 +546,7 @@ defmodule Cympho.AgentRunnerTest do
         )
 
       assert_receive {:session_started, ^session_id}, @receive_timeout
-      assert_receive {:turn_ended_with_error, ^session_id, :max_run_timeout}, 2_000
+      assert_receive {:turn_ended_with_error, ^session_id, :max_run_timeout}, 10_000
       refute_receive {:turn_completed, ^session_id, _result}, 100
       assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
     end

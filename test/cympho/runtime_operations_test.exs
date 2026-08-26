@@ -129,6 +129,19 @@ defmodule Cympho.RuntimeOperationsTest do
              )
     end
 
+    test "exposes only tenant-neutral runtime admission status under capacity" do
+      {:ok, company} = Companies.create_company(%{name: "Admission Ops Co", slug: unique_slug()})
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert Map.keys(snapshot.capacity.admission) |> Enum.sort() ==
+               [:recent_denial?, :status]
+
+      refute inspect(snapshot.capacity.admission) =~ "sampler"
+      refute inspect(snapshot.capacity.admission) =~ "path"
+      refute inspect(snapshot.capacity.admission) =~ "secret"
+    end
+
     test "flags delivery lanes that only have text/action runtime capacity" do
       {:ok, company} =
         Companies.create_company(%{name: "Text Only Delivery Co", slug: unique_slug()})

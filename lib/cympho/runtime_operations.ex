@@ -26,9 +26,11 @@ defmodule Cympho.RuntimeOperations do
   alias Cympho.Issues
   alias Cympho.OrgHealth
   alias Cympho.Orchestrator.Dispatcher.Router
+  alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Wakes.AgentWake
   alias Cympho.Repo
   alias Cympho.ReviewNudges
+  alias Cympho.RuntimeAdmission
   alias Cympho.RuntimeCapacity
   alias Cympho.RuntimeProfiles
   alias Cympho.Secrets.Secret
@@ -75,12 +77,6 @@ defmodule Cympho.RuntimeOperations do
     "Runtime exited with an error:",
     "Unclassified failure:"
   ]
-  @dispatch_max_concurrent Application.compile_env(
-                             :cympho,
-                             [:orchestrator, :max_concurrent_agents],
-                             3
-                           )
-
   @doc """
   Returns the restart command that enables broad autonomous dispatch in dev.
   """
@@ -168,7 +164,15 @@ defmodule Cympho.RuntimeOperations do
   @spec recover_stale_checked_out_issues(String.t()) :: {:ok, map()}
   def recover_stale_checked_out_issues(company_id) when is_binary(company_id) do
     issues = stale_checked_out_issues(company_id)
-    results = Enum.map(issues, &Issues.clear_checkout_lock(&1, :todo))
+
+    results =
+      Enum.map(issues, fn issue ->
+        cond do
+          live_runtime?(issue.id) -> {:skip, :live_runtime}
+          has_active_run?(issue.id) -> {:skip, :active_run}
+          true -> Issues.clear_checkout_lock(issue, :todo)
+        end
+      end)
 
     {:ok,
      %{
@@ -218,8 +222,8 @@ defmodule Cympho.RuntimeOperations do
     results =
       Enum.map(issues, fn issue ->
         cond do
-          live_orchestrator?(issue.id) ->
-            {:skip, :live_orchestrator}
+          live_runtime?(issue.id) ->
+            {:skip, :live_runtime}
 
           has_active_run?(issue.id) ->
             {:skip, :active_run}
@@ -242,6 +246,17 @@ defmodule Cympho.RuntimeOperations do
       nil -> false
       pid -> Process.alive?(pid)
     end
+  end
+
+  defp live_runtime?(issue_id) do
+    live_orchestrator?(issue_id) or
+      case Cympho.AdapterSessions.owners_for_issue(issue_id) do
+        {:ok, []} -> false
+        {:ok, [_ | _]} -> true
+        # Recovery is destructive. If the worker ledger is unavailable, keep
+        # the checkout until a later sweep can prove no cleanup worker exists.
+        {:error, :not_started} -> true
+      end
   end
 
   defp has_active_run?(issue_id) do
@@ -269,6 +284,7 @@ defmodule Cympho.RuntimeOperations do
       agents
       |> RuntimeCapacity.company(slot_counts)
       |> Map.merge(%{
+        admission: company_admission_status(RuntimeAdmission.snapshot()),
         active_runs: sum_counts(active_counts),
         checked_out_issues: checked_out_issues.counts.total,
         stale_checked_out_issues: checked_out_issues.counts.stale,
@@ -277,7 +293,6 @@ defmodule Cympho.RuntimeOperations do
         repo_delivery: repo_delivery_coverage(agents, secret_summary_by_agent)
       })
 
-    host = host_snapshot(capacity)
     runtime_enablement = runtime_enablement(runtime_mode, services, capacity)
     launch_preview = launch_preview(company_id, runtime_mode, opts, secret_summary_by_agent)
     ceo_outcomes = ceo_outcome_snapshot(company_id, agents)
@@ -307,7 +322,6 @@ defmodule Cympho.RuntimeOperations do
         runtime_mode,
         services,
         capacity,
-        host,
         org_health,
         health,
         pressure_agents,
@@ -322,7 +336,6 @@ defmodule Cympho.RuntimeOperations do
       runtime_mode: runtime_mode,
       services: services,
       capacity: capacity,
-      host: host,
       runtime_enablement: runtime_enablement,
       launch_plan: launch_plan,
       launch_preview: launch_preview,
@@ -358,6 +371,25 @@ defmodule Cympho.RuntimeOperations do
         )
     }
   end
+
+  defp company_admission_status(admission) do
+    age = Map.get(admission, :last_denial_age_ms)
+
+    %{
+      status: admission_manager_status(admission),
+      recent_denial?: is_integer(age) and age >= 0 and age <= 60_000
+    }
+  end
+
+  # This tenant surface describes whether the node gate itself is managed, not
+  # whether another run could start at this instant. Mirroring instantaneous
+  # slot or memory availability would disclose co-tenant activity and would
+  # also label a healthy, not-yet-sampled production node as unavailable.
+  defp admission_manager_status(%{max_total_runs: max, recovery_status: :ok})
+       when is_integer(max) and max > 0,
+       do: :available
+
+  defp admission_manager_status(_admission), do: :unavailable
 
   defp org_health_snapshot(company_id) when is_binary(company_id),
     do: OrgHealth.snapshot(company_id)
@@ -829,7 +861,7 @@ defmodule Cympho.RuntimeOperations do
       shown: 0,
       primary_shown: 0,
       included_followup_candidate?: false,
-      max_concurrent: @dispatch_max_concurrent,
+      max_concurrent: Dispatcher.max_concurrent(),
       preflight_counts: empty_launch_preflight_counts(),
       candidates: []
     }
@@ -862,7 +894,7 @@ defmodule Cympho.RuntimeOperations do
       shown: length(visible_candidates),
       primary_shown: length(primary_candidates),
       included_followup_candidate?: included_followup_candidate?,
-      max_concurrent: @dispatch_max_concurrent,
+      max_concurrent: Dispatcher.max_concurrent(),
       focus_issue_id: focus_issue_id,
       focused?: not is_nil(focus_issue_id),
       focused_count: Enum.count(candidates, & &1.dispatch_pinned?),
@@ -907,7 +939,7 @@ defmodule Cympho.RuntimeOperations do
 
   defp launch_candidate(issue, index, autonomy_enabled?, secret_summary_by_agent) do
     role = Router.infer_role(issue)
-    first_poll? = index <= @dispatch_max_concurrent
+    first_poll? = index <= Dispatcher.max_concurrent()
     dispatch_pinned? = Issues.dispatch_pinned?(issue)
     preflight = launch_preflight(issue, autonomy_enabled?, secret_summary_by_agent)
     brief_readiness = launch_brief_readiness(issue, role, preflight)
@@ -2228,8 +2260,10 @@ defmodule Cympho.RuntimeOperations do
       parent_path: if(issue.parent_id, do: "/issues/#{issue.parent_id}"),
       inserted_at: issue.inserted_at,
       dispatch_order: index,
-      dispatch_group: launch_dispatch_group(dispatch_pinned?, index <= @dispatch_max_concurrent),
-      dispatch_label: launch_dispatch_label(dispatch_pinned?, index <= @dispatch_max_concurrent),
+      dispatch_group:
+        launch_dispatch_group(dispatch_pinned?, index <= Dispatcher.max_concurrent()),
+      dispatch_label:
+        launch_dispatch_label(dispatch_pinned?, index <= Dispatcher.max_concurrent()),
       dispatch_pinned?: dispatch_pinned?,
       dispatch_pinned_at: Issues.dispatch_pinned_at(issue),
       queueable?: queueable?,
@@ -3151,72 +3185,6 @@ defmodule Cympho.RuntimeOperations do
     |> to_string()
     |> String.replace("_", " ")
     |> String.capitalize()
-  end
-
-  defp host_snapshot(capacity) do
-    memory = :erlang.memory() |> Map.new()
-    memory_bytes = Map.get(memory, :total, 0)
-    process_memory_bytes = Map.get(memory, :processes_used, Map.get(memory, :processes, 0))
-    process_count = :erlang.system_info(:process_count)
-    process_limit = :erlang.system_info(:process_limit)
-    schedulers_online = :erlang.system_info(:schedulers_online)
-    run_queue = :erlang.statistics(:run_queue)
-    process_usage = process_usage_percent(process_count, process_limit)
-    level = host_level(capacity, process_usage, schedulers_online, run_queue)
-
-    %{
-      level: level,
-      label: host_level_label(level),
-      memory_bytes: memory_bytes,
-      process_memory_bytes: process_memory_bytes,
-      process_count: process_count,
-      process_limit: process_limit,
-      process_usage_percent: process_usage,
-      schedulers_online: schedulers_online,
-      run_queue: run_queue,
-      local_running: capacity.local_running,
-      local_slots: capacity.local_slots,
-      summary:
-        "#{process_count} BEAM processes on #{schedulers_online} scheduler#{plural(schedulers_online)}.",
-      hint: host_hint(level),
-      cli_note:
-        "External CLI memory is not included in BEAM memory. #{capacity.local_running} local CLI/process slot#{plural(capacity.local_running)} held across #{capacity.local_slots} configured local slot#{plural(capacity.local_slots)}."
-    }
-  end
-
-  defp process_usage_percent(_count, 0), do: 0
-
-  defp process_usage_percent(count, limit) do
-    Float.round(count / limit * 100, 1)
-  end
-
-  defp host_level(capacity, process_usage, schedulers_online, run_queue) do
-    cond do
-      capacity.level == :high or process_usage >= 80 or run_queue > schedulers_online * 2 ->
-        :high
-
-      capacity.level == :watch or process_usage >= 60 or run_queue > schedulers_online ->
-        :watch
-
-      true ->
-        :safe
-    end
-  end
-
-  defp host_level_label(:safe), do: "Host steady"
-  defp host_level_label(:watch), do: "Watch host"
-  defp host_level_label(:high), do: "Host pressure"
-
-  defp host_hint(:safe) do
-    "BEAM overhead is lightweight; watch external CLI processes when increasing autonomous fan-out."
-  end
-
-  defp host_hint(:watch) do
-    "Keep local concurrency conservative until run queue, BEAM process use, and CLI memory settle."
-  end
-
-  defp host_hint(:high) do
-    "Reduce local CLI-backed concurrency or move workers to a larger host before starting more agents."
   end
 
   defp health_summary(agents, secret_summary_by_agent) do
@@ -4238,7 +4206,6 @@ defmodule Cympho.RuntimeOperations do
          runtime_mode,
          services,
          capacity,
-         host,
          org_health,
          health,
          pressure_agents,
@@ -4260,7 +4227,6 @@ defmodule Cympho.RuntimeOperations do
         org_staffing_finding(org_health),
         repo_delivery_finding(Map.get(capacity, :repo_delivery)),
         capacity_finding(capacity, pressure_agents),
-        host_finding(host),
         adapter_health_finding(health)
       ]
       |> Enum.reject(&is_nil/1)
@@ -4514,24 +4480,6 @@ defmodule Cympho.RuntimeOperations do
 
   defp capacity_finding(_capacity, _pressure_agents), do: nil
 
-  defp host_finding(%{level: level} = host) when level in [:watch, :high] do
-    severity = if level == :high, do: :critical, else: :warning
-
-    %{
-      severity: severity,
-      label: host.label,
-      title: "Host footprint is rising",
-      body: host.summary,
-      why:
-        "Run queue, BEAM process usage, and configured local CLI slots together estimate whether this machine has enough headroom.",
-      fix: host.hint,
-      target_path: "#host-footprint",
-      target_label: "Inspect host footprint"
-    }
-  end
-
-  defp host_finding(_host), do: nil
-
   defp adapter_health_finding(health) do
     health
     |> Enum.find(&(adapter_actionable_health_count(&1) > 0))
@@ -4563,11 +4511,12 @@ defmodule Cympho.RuntimeOperations do
       severity: :ok,
       label: "Clear",
       title: "Doctor found no blockers",
-      body: "Runtime services, adapter health, host footprint, and review queues look steady.",
+      body:
+        "Runtime services, adapter health, configured capacity, and review queues look steady.",
       why:
         "Cympho could not find a current service gate, adapter error, capacity problem, or stale review request that needs operator attention.",
       fix:
-        "Keep monitoring recent failures and host footprint as you increase autonomous fan-out."
+        "Keep monitoring recent failures and company-visible capacity as you increase autonomous fan-out."
     }
   end
 

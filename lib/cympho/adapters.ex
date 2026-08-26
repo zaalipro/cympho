@@ -6,12 +6,10 @@ defmodule Cympho.Adapters do
     - Adapter discovery and resolution
     - Health checks across all adapters
     - Config validation
-    - Running agents via their assigned adapter
   """
 
   require Logger
   alias Cympho.Adapters.Registry
-  alias Cympho.Agents.Agent
 
   @default_adapter :claude_code
 
@@ -59,30 +57,6 @@ defmodule Cympho.Adapters do
 
       :error ->
         {:error, :not_found}
-    end
-  end
-
-  @doc """
-  Runs an agent's session using the agent's assigned adapter.
-  Falls back to the default adapter if the assigned adapter is unavailable.
-  """
-  @spec run_via_adapter(Agent.t(), map(), pid(), keyword()) ::
-          {:ok, reference()} | {:error, :no_adapter}
-  def run_via_adapter(%Agent{} = agent, issue, recipient_pid, opts \\ [])
-      when is_pid(recipient_pid) do
-    adapter_key = agent.adapter || Registry.default_adapter()
-
-    with {:ok, module} <- Registry.resolve(adapter_key),
-         true <- module.available?() do
-      session_id = module.run(issue, agent.id, recipient_pid, opts)
-      {:ok, session_id}
-    else
-      false ->
-        # Adapter unavailable — try fallback chain
-        fallback_run(adapter_key, issue, agent.id, recipient_pid, opts)
-
-      :error ->
-        {:error, :no_adapter}
     end
   end
 
@@ -244,36 +218,6 @@ defmodule Cympho.Adapters do
       module.available?(config)
     else
       module.available?()
-    end
-  end
-
-  defp fallback_run(failed_key, issue, agent_id, recipient_pid, opts) do
-    available = Registry.available()
-
-    # Prefer the default adapter if it's available and not the one that failed
-    default = Registry.default_adapter()
-
-    fallback =
-      Enum.find(available, fn {key, _mod} ->
-        key != failed_key and key == default
-      end) ||
-        Enum.find(available, fn {key, _mod} -> key != failed_key end)
-
-    case fallback do
-      {key, module} ->
-        Logger.warning(
-          "[Adapters] Adapter #{failed_key} unavailable, falling back to #{key} for agent #{agent_id}"
-        )
-
-        session_id = module.run(issue, agent_id, recipient_pid, opts)
-        {:ok, session_id}
-
-      nil ->
-        Logger.error(
-          "[Adapters] No available adapter for agent #{agent_id} (assigned: #{failed_key})"
-        )
-
-        {:error, :no_adapter}
     end
   end
 end

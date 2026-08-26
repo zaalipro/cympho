@@ -1,7 +1,22 @@
 defmodule Cympho.Adapters.RegistryExtendedTest do
   use ExUnit.Case, async: false
 
+  alias Cympho.Adapters.Adapter
   alias Cympho.Adapters.Registry
+
+  defmodule ClassificationProbeAdapter do
+    def execution_class do
+      if pid = Process.whereis(:adapter_classification_probe) do
+        send(pid, :execution_class_called)
+      end
+
+      :gateway
+    end
+  end
+
+  defmodule LocalClassificationProbeAdapter do
+    def execution_class, do: :local_process
+  end
 
   describe "all_types/0" do
     test "returns sorted list of registered adapter type atoms" do
@@ -31,6 +46,27 @@ defmodule Cympho.Adapters.RegistryExtendedTest do
 
     test "returns [:claude_code] when primary is the default" do
       assert Registry.fallback_chain(:claude_code) == [:claude_code]
+    end
+  end
+
+  describe "execution-class metadata" do
+    test "registration validates once and dispatch lookups do not invoke adapter code" do
+      Process.register(self(), :adapter_classification_probe)
+      on_exit(fn -> Registry.register(:mock, Cympho.Adapters.MockAdapter) end)
+
+      assert :ok = Registry.register(:mock, ClassificationProbeAdapter)
+      assert_receive :execution_class_called
+
+      assert Adapter.execution_class(ClassificationProbeAdapter) == :gateway
+      refute_receive :execution_class_called
+    end
+
+    test "string keys use registered metadata without creating atoms" do
+      on_exit(fn -> Registry.register(:mock, Cympho.Adapters.MockAdapter) end)
+
+      assert :ok = Registry.register(:mock, LocalClassificationProbeAdapter)
+      assert Adapter.execution_class("mock") == :local_process
+      assert Adapter.execution_class("not-a-registered-adapter") == :local_process
     end
   end
 

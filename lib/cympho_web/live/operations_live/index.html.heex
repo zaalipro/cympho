@@ -71,6 +71,13 @@
         </div>
       </div>
     </div>
+    <p
+      :if={recent_capacity_denial?(@capacity, @launch_preview, @wake_queue, @review_nudges)}
+      data-testid="runtime-admission-simple-reason"
+      class="mt-3 border-t border-border pt-3 text-xs leading-5 text-text-tertiary"
+    >
+      {simple_admission_message(@capacity.admission)}
+    </p>
   </section>
 
   <section
@@ -1961,8 +1968,8 @@
                   <div class="absolute right-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-panel p-3 text-left shadow-dialog sm:left-0 sm:right-auto">
                     <p class="text-xs font-590 text-text-primary">How this is diagnosed</p>
                     <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                      Doctor combines service gates, staffing gaps, adapter health, recent runtime
-                      failures, review nudges, local concurrency, and BEAM host footprint into one
+                      Doctor combines company-visible service gates, staffing gaps, adapter health,
+                      recent runtime failures, review nudges, and configured capacity into one
                       operator checklist.
                     </p>
                   </div>
@@ -2821,8 +2828,18 @@
         </div>
         <div class="stagger-children mt-4 grid divide-y divide-border overflow-hidden rounded-md border border-border sm:grid-cols-4 sm:divide-x sm:divide-y-0">
           <.quiet_stat label="Agents" value={@capacity.total_agents} class="px-4 py-3" />
-          <.quiet_stat label="Total slots" value={@capacity.total_slots} class="px-4 py-3" />
-          <.quiet_stat label="Local CLI slots" value={@capacity.local_slots} class="px-4 py-3" />
+          <.quiet_stat
+            label="Configured slots"
+            value={@capacity.total_slots}
+            detail={configured_slots_detail(@capacity)}
+            class="px-4 py-3"
+          />
+          <.quiet_stat
+            label="Node admission"
+            value={admission_status_label(@capacity.admission)}
+            detail="shared node capacity"
+            class="px-4 py-3"
+          />
           <div class="ember-stat px-4 py-3">
             <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Held slots
@@ -2841,6 +2858,13 @@
             </p>
           </div>
         </div>
+        <p
+          :if={recent_capacity_denial?(@capacity, @launch_preview, @wake_queue, @review_nudges)}
+          data-testid="runtime-admission-shared-status"
+          class="mt-4 rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5 text-sm leading-5 text-amber-100/85"
+        >
+          Shared runtime capacity recently delayed work. It will retry when safe capacity is available.
+        </p>
         <div
           :if={Map.get(@capacity, :repo_delivery)}
           data-testid="repo-delivery-capacity"
@@ -2998,57 +3022,6 @@
               </span>
             </.app_link>
           </div>
-        </div>
-      </section>
-
-      <section
-        id="host-footprint"
-        class="ui-advanced-only scroll-mt-6 rounded-lg border border-border bg-panel p-5"
-      >
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Host footprint
-            </p>
-            <h2 class="mt-1.5 text-base font-590 text-text-primary">{@host.summary}</h2>
-            <p class="mt-1 text-sm leading-5 text-text-tertiary">{@host.hint}</p>
-            <hr class="ember-rule mt-3" />
-          </div>
-          <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{capacity_badge_class(@host.level)}"}>
-            {@host.label}
-          </span>
-        </div>
-        <div class="stagger-children mt-4 grid divide-y divide-border overflow-hidden rounded-md border border-border sm:grid-cols-4 sm:divide-x sm:divide-y-0">
-          <.quiet_stat
-            label="BEAM memory"
-            value={format_memory(@host.memory_bytes)}
-            detail={"#{format_memory(@host.process_memory_bytes)} process heap"}
-            class="px-4 py-3"
-          />
-          <.quiet_stat
-            label="BEAM processes"
-            value={@host.process_count}
-            detail={"#{@host.process_usage_percent}% of limit"}
-            class="px-4 py-3"
-          />
-          <.quiet_stat
-            label="Schedulers"
-            value={@host.schedulers_online}
-            detail="Online CPU schedulers"
-            class="px-4 py-3"
-          />
-          <.quiet_stat
-            label="Run queue"
-            value={@host.run_queue}
-            detail="Runnable BEAM work"
-            class="px-4 py-3"
-          />
-        </div>
-        <div class="mt-4 rounded-md border border-border border-l-2 border-l-amber-500/70 bg-surface px-3 py-2.5">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-tertiary">
-            External CLI memory
-          </p>
-          <p class="mt-1 text-sm leading-5 text-text-tertiary">{@host.cli_note}</p>
         </div>
       </section>
 

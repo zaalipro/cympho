@@ -41,6 +41,12 @@ config :cympho, :orchestrator,
   only_issue_id: nil,
   max_concurrent_agents: 3
 
+config :cympho, :runtime_admission,
+  max_total_runs: 3,
+  max_local_runs: 3,
+  memory_reserve_bytes: 1,
+  memory_check?: false
+
 # Tests that exercise the BoardApprovalActionExecutor / HeartbeatEngine.Watchdog
 # start them explicitly via `start_supervised` so they can grant Ecto sandbox
 # access. Starting them from the application supervisor would let global PubSub

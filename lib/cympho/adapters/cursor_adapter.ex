@@ -9,6 +9,9 @@ defmodule Cympho.Adapters.CursorAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  @impl true
+  def execution_class, do: :local_process
+
   alias Cympho.Adapters.RunDeadline
   alias Cympho.Adapters.RuntimeTimeout
 
@@ -20,31 +23,39 @@ defmodule Cympho.Adapters.CursorAdapter do
     session_id = make_ref()
     config = opts[:config] || %{}
 
-    worker =
-      spawn(fn ->
+    _worker =
+      Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
         # See Cympho.AgentRunner: a brutally killed orchestrator never runs its
         # cancel path, so without this the CLI outlives its owner.
         Process.monitor(recipient_pid)
 
         try do
           do_run(session_id, issue, agent_id, recipient_pid, config, opts)
+        rescue
+          _exception ->
+            send(
+              recipient_pid,
+              {:turn_ended_with_error, session_id, {:adapter_crash, :cursor_adapter_failed}}
+            )
+        catch
+          _kind, _reason ->
+            send(
+              recipient_pid,
+              {:turn_ended_with_error, session_id, {:adapter_exit, :cursor_adapter_failed}}
+            )
         after
           Cympho.AdapterSessions.unregister(session_id)
         end
       end)
 
-    Cympho.AdapterSessions.register(session_id, worker)
-
     session_id
   end
 
   defp do_run(session_id, issue, agent_id, recipient_pid, config, opts) do
-    send(recipient_pid, {:session_started, session_id})
-
     prompt = build_prompt(issue, agent_id, opts)
     Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "cursor"})
 
-    case run_cursor(session_id, prompt, config, recipient_pid) do
+    case run_cursor(session_id, prompt, config, opts, recipient_pid) do
       {:ok, output} ->
         send(recipient_pid, {:turn_completed, session_id, output})
 
@@ -85,7 +96,7 @@ defmodule Cympho.Adapters.CursorAdapter do
     |> String.trim()
   end
 
-  defp run_cursor(session_id, prompt, config, recipient_pid) do
+  defp run_cursor(session_id, prompt, config, opts, recipient_pid) do
     try do
       cursor_bin = find_cursor_binary(config)
       timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
@@ -97,7 +108,9 @@ defmodule Cympho.Adapters.CursorAdapter do
         [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}] ++
           cursor_cwd_opt(config)
 
-      with_port({:spawn_executable, cursor_bin}, port_opts, fn port ->
+      with_port({:spawn_executable, cursor_bin}, port_opts, session_id, opts, fn port ->
+        send(recipient_pid, {:session_started, session_id})
+
         if stdin do
           write_stdin(port, stdin)
         end
@@ -114,26 +127,60 @@ defmodule Cympho.Adapters.CursorAdapter do
         end
       end)
     rescue
-      e ->
-        {:error, "Cursor process failed: #{inspect(e)}"}
+      _exception ->
+        {:error, :cursor_process_failed}
+    catch
+      _kind, _reason ->
+        {:error, :cursor_process_failed}
     end
   end
 
-  defp with_port(open_spec, port_opts, fun) do
+  defp with_port(open_spec, port_opts, session_id, runtime_opts, fun) do
     port = Port.open(open_spec, port_opts)
 
     try do
-      fun.(port)
+      case mark_local_process_started(session_id, runtime_opts) do
+        :ok -> fun.(port)
+        {:error, :runtime_admission_start_failed} = error -> error
+      end
     after
       close_port(port)
     end
   end
 
   defp close_port(port) when is_port(port) do
-    Cympho.PortKiller.close(port)
+    Cympho.PortKiller.close_and_await(port)
   end
 
   defp close_port(_port), do: :ok
+
+  defp mark_local_process_started(session_id, opts) do
+    with :ok <- Cympho.AdapterSessions.local_process_started(session_id) do
+      mark_runtime_local_process_started(opts)
+    else
+      _error -> {:error, :runtime_admission_start_failed}
+    end
+  end
+
+  defp mark_runtime_local_process_started(opts) do
+    case Keyword.get(opts, :runtime_admission_claim) do
+      {token, server, _execution_class} when is_reference(token) ->
+        mark_runtime_local_process_started(token, server)
+
+      {token, server} when is_reference(token) ->
+        mark_runtime_local_process_started(token, server)
+
+      _none ->
+        :ok
+    end
+  end
+
+  defp mark_runtime_local_process_started(token, server) do
+    case Cympho.RuntimeAdmission.local_process_started(token, server) do
+      :ok -> :ok
+      _error -> {:error, :runtime_admission_start_failed}
+    end
+  end
 
   defp build_cursor_invocation(prompt, cursor_bin, config) do
     executable = cursor_bin |> Path.basename() |> String.downcase()
@@ -199,7 +246,7 @@ defmodule Cympho.Adapters.CursorAdapter do
         {:ok, acc}
 
       {^port, {:exit_status, code}} ->
-        {:error, "Cursor exited with status #{code}: #{acc}"}
+        {:error, {:exit_code, code}}
 
       {:cancel_session, ^session_id, reason} ->
         close_port(port)

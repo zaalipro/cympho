@@ -3,6 +3,7 @@ defmodule Cympho.Adapters.MockAdapterTest do
 
   alias Cympho.Adapters.MockAdapter
   alias Cympho.Adapters.Registry, as: AdaptersRegistry
+  alias Cympho.AdapterSessions
 
   setup do
     MockAdapter.clear()
@@ -57,6 +58,11 @@ defmodule Cympho.Adapters.MockAdapterTest do
       session_id2 = MockAdapter.run(issue, agent_id, self(), mock_delay: 0)
       assert_receive {:session_started, ^session_id2}, 500
       refute_receive {:turn_completed, _, _}, 50
+
+      assert AdapterSessions.registered?(session_id1)
+      assert AdapterSessions.registered?(session_id2)
+      assert :ok = AdapterSessions.cancel_and_wait(session_id1, :test_cleanup)
+      assert :ok = AdapterSessions.cancel_and_wait(session_id2, :test_cleanup)
     end
 
     test "clear/2 removes scripts for a specific pair" do

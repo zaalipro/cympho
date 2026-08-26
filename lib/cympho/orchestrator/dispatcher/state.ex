@@ -5,7 +5,9 @@ defmodule Cympho.Orchestrator.Dispatcher.State do
   @type t :: %__MODULE__{
           running_issue_ids: MapSet.t(String.t()),
           retry_attempts: %{String.t() => retry_entry()},
-          monitors: %{reference() => String.t()},
+          monitors: %{
+            reference() => String.t() | {:adapter_cleanup, String.t(), term(), :stop | :crash}
+          },
           poll_timer: reference() | nil,
           poll_cursor: non_neg_integer()
         }

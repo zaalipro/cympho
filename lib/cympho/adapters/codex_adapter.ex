@@ -8,6 +8,9 @@ defmodule Cympho.Adapters.CodexAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  @impl true
+  def execution_class, do: :local_process
+
   alias Cympho.Adapters.{ProviderFailure, ProviderProxy, RunDeadline, RuntimeTimeout}
 
   @default_model "o4-mini"
@@ -52,8 +55,8 @@ defmodule Cympho.Adapters.CodexAdapter do
     session_id = make_ref()
     config = opts[:config] || %{}
 
-    worker =
-      spawn(fn ->
+    _worker =
+      Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
         Process.flag(:trap_exit, true)
         # See Cympho.AgentRunner: a brutally killed orchestrator never runs its
         # cancel path, so without this the CLI outlives its owner.
@@ -78,13 +81,10 @@ defmodule Cympho.Adapters.CodexAdapter do
         end
       end)
 
-    Cympho.AdapterSessions.register(session_id, worker)
-
     session_id
   end
 
   defp do_run(session_id, issue, agent_id, recipient_pid, config, opts) do
-    send(recipient_pid, {:session_started, session_id})
     prompt_runtime_context = prompt_runtime_context(Keyword.get(opts, :runtime_context))
 
     prompt =
@@ -181,18 +181,26 @@ defmodule Cympho.Adapters.CodexAdapter do
               {:env, env}
             ] ++ cwd_opt(config, opts)
 
-          with_port({:spawn_executable, String.to_charlist(shell)}, port_opts, fn port ->
-            case collect_output(port, "", timeout, session_id, recipient_pid) do
-              {:ok, raw} ->
-                case ProviderFailure.detect(raw) do
-                  :ok -> parse_codex_output(raw)
-                  {:error, _} = err -> err
-                end
+          with_port(
+            {:spawn_executable, String.to_charlist(shell)},
+            port_opts,
+            session_id,
+            opts,
+            fn port ->
+              send(recipient_pid, {:session_started, session_id})
 
-              {:error, _} = err ->
-                err
+              case collect_output(port, "", timeout, session_id, recipient_pid) do
+                {:ok, raw} ->
+                  case ProviderFailure.detect(raw) do
+                    :ok -> parse_codex_output(raw)
+                    {:error, _} = err -> err
+                  end
+
+                {:error, _} = err ->
+                  err
+              end
             end
-          end)
+          )
         end)
       end)
     rescue
@@ -222,21 +230,52 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
-  defp with_port(open_spec, port_opts, fun) do
+  defp with_port(open_spec, port_opts, session_id, runtime_opts, fun) do
     port = Port.open(open_spec, port_opts)
 
     try do
-      fun.(port)
+      case mark_local_process_started(session_id, runtime_opts) do
+        :ok -> fun.(port)
+        {:error, :runtime_admission_start_failed} = error -> error
+      end
     after
       close_port(port)
     end
   end
 
   defp close_port(port) when is_port(port) do
-    Cympho.PortKiller.close(port)
+    Cympho.PortKiller.close_and_await(port)
   end
 
   defp close_port(_port), do: :ok
+
+  defp mark_local_process_started(session_id, opts) do
+    with :ok <- Cympho.AdapterSessions.local_process_started(session_id) do
+      mark_runtime_local_process_started(opts)
+    else
+      _error -> {:error, :runtime_admission_start_failed}
+    end
+  end
+
+  defp mark_runtime_local_process_started(opts) do
+    case Keyword.get(opts, :runtime_admission_claim) do
+      {token, server, _execution_class} when is_reference(token) ->
+        mark_runtime_local_process_started(token, server)
+
+      {token, server} when is_reference(token) ->
+        mark_runtime_local_process_started(token, server)
+
+      _none ->
+        :ok
+    end
+  end
+
+  defp mark_runtime_local_process_started(token, server) do
+    case Cympho.RuntimeAdmission.local_process_started(token, server) do
+      :ok -> :ok
+      _error -> {:error, :runtime_admission_start_failed}
+    end
+  end
 
   defp collect_output(port, acc, timeout, session_id, recipient_pid) when is_integer(timeout) do
     collect_output(port, acc, RunDeadline.new(timeout), session_id, recipient_pid)

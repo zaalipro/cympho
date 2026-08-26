@@ -27,6 +27,8 @@ defmodule Cympho.Orchestrator do
     :session_id,
     :run_id,
     :runtime_context,
+    :runtime_admission_token,
+    :runtime_admission_class,
     :status,
     :fallback_profile_ids,
     no_work_retry_count: 0,
@@ -59,9 +61,13 @@ defmodule Cympho.Orchestrator do
     AuditTrail.Instrumenter
   }
 
+  alias Cympho.Adapters.Adapter
+  alias Cympho.RuntimeAdmission
+
   alias Cympho.Issues.Issue
 
   @heartbeat_tick_interval 30_000
+  @adapter_cleanup_timeout_ms 500
   # Consecutive heartbeat ticks (30s apart) the adapter session may be
   # missing from AdapterSessions after having been seen, before we treat
   # the worker as dead. Two ticks tolerates a race with late registration
@@ -297,6 +303,7 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def handle_info({:turn_completed, _session_id, result}, %__MODULE__{} = session) do
+    session = release_after_adapter_exit(session)
     issue = session.issue
     agent_id = session.agent_id
 
@@ -375,6 +382,7 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def handle_info({:turn_ended_with_error, _session_id, reason}, %__MODULE__{} = session) do
+    session = release_after_adapter_exit(session)
     issue = session.issue
     agent_id = session.agent_id
 
@@ -387,28 +395,35 @@ defmodule Cympho.Orchestrator do
 
     fail_engine_run(session, reason)
 
-    case maybe_start_provider_fallback(session, reason) do
-      {:ok, fallback_session} ->
-        {:noreply, fallback_session}
+    if session.runtime_admission_token do
+      # A terminal adapter message may arrive before its worker finishes
+      # provider/Port cleanup. Never start a fallback under a second claim
+      # while the first worker still owns node capacity.
+      finish_failed_session(session, reason)
+    else
+      case maybe_start_provider_fallback(session, reason) do
+        {:ok, fallback_session} ->
+          {:noreply, fallback_session}
 
-      {:error, start_error} ->
-        stop_before_adapter_dispatch(session, start_error)
+        {:error, start_error} ->
+          stop_before_adapter_dispatch(session, start_error)
 
-      :none ->
-        case maybe_start_no_work_retry(session, reason) do
-          {:ok, retry_session} ->
-            {:noreply, retry_session}
+        :none ->
+          case maybe_start_no_work_retry(session, reason) do
+            {:ok, retry_session} ->
+              {:noreply, retry_session}
 
-          {:error, start_error} ->
-            stop_before_adapter_dispatch(session, start_error)
+            {:error, start_error} ->
+              stop_before_adapter_dispatch(session, start_error)
 
-          :none ->
-            if no_work_failure?(reason, session) do
-              finish_retriable_no_work_session(session, reason)
-            else
-              finish_failed_session(session, reason)
-            end
-        end
+            :none ->
+              if no_work_failure?(reason, session) do
+                finish_retriable_no_work_session(session, reason)
+              else
+                finish_failed_session(session, reason)
+              end
+          end
+      end
     end
   rescue
     exception ->
@@ -700,12 +715,47 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def terminate(reason, %__MODULE__{} = session) do
-    cancel_adapter_session(session.session_id, reason)
-    finalize_active_run_on_shutdown(session, reason)
+  def handle_call(:runtime_admission_state, _from, %__MODULE__{} = session) do
+    holder_pid = runtime_admission_holder(session)
 
-    if dispatcher = Process.whereis(Cympho.Orchestrator.Dispatcher) do
-      send(dispatcher, {:session_ended, session.issue.id, reason})
+    {:reply,
+     %{
+       token: session.runtime_admission_token,
+       execution_class: session.runtime_admission_class,
+       holder_pid: holder_pid,
+       controller_pid: self()
+     }, session}
+  end
+
+  defp runtime_admission_holder(%__MODULE__{session_id: nil}), do: self()
+
+  defp runtime_admission_holder(%__MODULE__{session_id: session_id}) do
+    case Cympho.AdapterSessions.owner(session_id) do
+      {:ok, pid} -> pid
+      # Once an adapter session id exists, silently rebinding a recovered claim
+      # to the controller would be unsafe: the worker ledger may simply be in
+      # its bounded restart window. Return an invalid holder so admission stays
+      # fail-closed and retries recovery until the worker is visible again.
+      _ -> nil
+    end
+  end
+
+  @impl true
+  def terminate(reason, %__MODULE__{} = session) do
+    cleanup_result = cleanup_adapter_session(session.session_id, reason)
+
+    if cleanup_result == :ok do
+      _ = release_runtime_admission(session)
+    end
+
+    if cleanup_result == :ok do
+      finalize_active_run_on_shutdown(session, reason)
+    end
+
+    if cleanup_result == :ok do
+      if dispatcher = Process.whereis(Cympho.Orchestrator.Dispatcher) do
+        send(dispatcher, {:session_ended, session.issue.id, reason})
+      end
     end
 
     _ =
@@ -716,15 +766,14 @@ defmodule Cympho.Orchestrator do
     :ok
   end
 
-  defp cancel_adapter_session(nil, _reason), do: :ok
-  defp cancel_adapter_session(_session_id, :normal), do: :ok
+  defp cleanup_adapter_session(nil, _reason), do: :ok
 
-  defp cancel_adapter_session(session_id, reason) do
-    case Cympho.AdapterSessions.cancel(session_id, reason) do
-      :ok -> :ok
-      {:error, :not_found} -> :ok
-      {:error, :not_started} -> :ok
-    end
+  defp cleanup_adapter_session(session_id, :normal) do
+    Cympho.AdapterSessions.wait_for_exit(session_id, @adapter_cleanup_timeout_ms)
+  end
+
+  defp cleanup_adapter_session(session_id, reason) do
+    Cympho.AdapterSessions.cancel_and_wait(session_id, reason, @adapter_cleanup_timeout_ms)
   end
 
   defp finalize_active_run_on_shutdown(%__MODULE__{run_id: nil} = session, reason) do
@@ -983,6 +1032,30 @@ defmodule Cympho.Orchestrator do
   end
 
   defp start_runtime_session(session, module, config, runtime_context) do
+    admission_server = runtime_admission_server(session)
+
+    case RuntimeAdmission.checkout(module, admission_server) do
+      {:ok, token} ->
+        claimed_session = %{
+          session
+          | runtime_admission_token: token,
+            runtime_admission_class: Adapter.execution_class(module)
+        }
+
+        start_admitted_runtime_session(
+          claimed_session,
+          module,
+          config,
+          runtime_context
+        )
+
+      {:error, reason} ->
+        cancel_pending_engine_run(session)
+        {:error, {:runtime_admission_deferred, reason}}
+    end
+  end
+
+  defp start_admitted_runtime_session(session, module, config, runtime_context) do
     case start_engine_run(session) do
       :ok ->
         wake_context = runtime_wake_context(session)
@@ -997,24 +1070,60 @@ defmodule Cympho.Orchestrator do
           session
           |> run_opts(config, runtime_context)
           |> Keyword.put(:wake_context, wake_context)
+          |> Keyword.put(:runtime_issue_id, session.issue.id)
+          |> Keyword.put(
+            :runtime_admission_claim,
+            {
+              session.runtime_admission_token,
+              runtime_admission_server(session),
+              session.runtime_admission_class
+            }
+          )
 
-        session_id = module.run(session.issue, session.agent_id, self(), opts)
+        try do
+          session_id = module.run(session.issue, session.agent_id, self(), opts)
 
-        # Reset adapter-session liveness tracking for the new attempt — the new
-        # adapter may not register with AdapterSessions at all (e.g. remote
-        # marketplace adapters), and inheriting `seen?` from a previous adapter
-        # would false-positive the dead-worker detector.
-        {:ok,
-         %{
-           session
-           | session_id: session_id,
-             runtime_context: runtime_context,
-             adapter_session_seen?: false,
-             adapter_session_misses: 0
-         }}
+          case ensure_worker_adopted(session, session_id) do
+            :ok ->
+              # Reset adapter-session liveness tracking for the new attempt.
+              # Registration is mandatory, but the periodic checker still
+              # distinguishes a later worker disappearance from this startup path.
+              {:ok,
+               %{
+                 session
+                 | session_id: session_id,
+                   runtime_context: runtime_context,
+                   adapter_session_seen?: true,
+                   adapter_session_misses: 0
+               }}
+
+            {:error, _reason} ->
+              _ =
+                Cympho.AdapterSessions.cancel_and_wait(
+                  session_id,
+                  :adapter_start_failed,
+                  @adapter_cleanup_timeout_ms
+                )
+
+              failed_session = %{session | session_id: session_id}
+              fail_engine_run(failed_session, {:adapter_start_failed, :worker_unregistered})
+              {:error, {:adapter_start_failed, :worker_unregistered}}
+          end
+        rescue
+          _exception ->
+            _ = release_runtime_admission(session)
+            fail_engine_run(session, {:adapter_start_failed, :crashed})
+            {:error, {:adapter_start_failed, :crashed}}
+        catch
+          _kind, _reason ->
+            _ = release_runtime_admission(session)
+            fail_engine_run(session, {:adapter_start_failed, :exited})
+            {:error, {:adapter_start_failed, :exited}}
+        end
 
       {:error, reason} ->
-        cancel_pending_engine_run(session)
+        _ = release_runtime_admission(session)
+        fail_engine_run(session, {:engine_run_start_failed, reason})
         {:error, {:engine_run_start_failed, reason}}
     end
   end
@@ -1032,6 +1141,20 @@ defmodule Cympho.Orchestrator do
 
   defp runtime_wake_context(%__MODULE__{fallback_errors: fallback_errors}) do
     {"runtime_fallback", %{"attempts" => length(fallback_errors)}}
+  end
+
+  defp ensure_worker_adopted(%__MODULE__{} = session, session_id) do
+    with {:ok, worker_pid} <- Cympho.AdapterSessions.owner(session_id),
+         :ok <-
+           RuntimeAdmission.adopt(
+             session.runtime_admission_token,
+             worker_pid,
+             runtime_admission_server(session)
+           ) do
+      :ok
+    else
+      error -> {:error, error}
+    end
   end
 
   defp initial_runtime_attempt?(%__MODULE__{fallback_errors: [], no_work_retry_count: 0}),
@@ -1231,6 +1354,45 @@ defmodule Cympho.Orchestrator do
     end
   end
 
+  defp stop_before_adapter_dispatch(
+         %__MODULE__{} = session,
+         {:runtime_admission_deferred, reason}
+       ) do
+    create_runtime_admission_comment_once(
+      session.issue,
+      "Runtime start deferred: #{format_runtime_admission_reason(reason)} Work remains queued for retry."
+    )
+
+    set_agent_idle(session.agent_id)
+    {:stop, :normal, session}
+  end
+
+  defp stop_before_adapter_dispatch(
+         %__MODULE__{} = session,
+         {:adapter_start_failed, _kind}
+       ) do
+    create_system_comment(
+      session.issue,
+      "Runtime start failed before the adapter session became active. Work remains queued for retry."
+    )
+
+    set_agent_idle(session.agent_id)
+    {:stop, :normal, session}
+  end
+
+  defp stop_before_adapter_dispatch(
+         %__MODULE__{} = session,
+         {:engine_run_start_failed, _reason}
+       ) do
+    create_system_comment(
+      session.issue,
+      "Runtime run startup failed before adapter dispatch. Work remains queued for retry."
+    )
+
+    set_agent_idle(session.agent_id)
+    {:stop, :normal, session}
+  end
+
   defp stop_before_adapter_dispatch(%__MODULE__{} = session, reason) do
     Logger.warning("[Orchestrator] Stopping before adapter dispatch because run startup failed",
       issue_id: session.issue.id,
@@ -1239,6 +1401,59 @@ defmodule Cympho.Orchestrator do
     )
 
     {:stop, :normal, session}
+  end
+
+  defp create_runtime_admission_comment_once(issue, body) do
+    exists? =
+      Cympho.Repo.exists?(
+        from(comment in Cympho.Comments.Comment,
+          where:
+            comment.issue_id == ^issue.id and comment.author_type == "system" and
+              comment.body == ^body
+        )
+      )
+
+    unless exists? do
+      create_system_comment(issue, body)
+    end
+  end
+
+  defp format_runtime_admission_reason(:local_slots_exhausted),
+    do: "this host's local runtime slots are full."
+
+  defp format_runtime_admission_reason(:host_memory_low),
+    do: "this host does not currently have enough free memory for another local runtime."
+
+  defp format_runtime_admission_reason(:host_memory_unknown),
+    do: "Cympho could not verify safe host memory for another local runtime."
+
+  defp format_runtime_admission_reason(:admission_unavailable),
+    do: "the host runtime admission service is unavailable."
+
+  defp format_runtime_admission_reason(_reason),
+    do: "the host cannot safely admit another local runtime."
+
+  defp runtime_admission_server(%__MODULE__{opts: opts}) do
+    Keyword.get(opts || [], :runtime_admission_server, RuntimeAdmission)
+  end
+
+  defp release_runtime_admission(%__MODULE__{runtime_admission_token: nil} = session), do: session
+
+  defp release_runtime_admission(%__MODULE__{} = session) do
+    RuntimeAdmission.release(session.runtime_admission_token, runtime_admission_server(session))
+
+    %{
+      session
+      | runtime_admission_token: nil,
+        runtime_admission_class: nil
+    }
+  end
+
+  defp release_after_adapter_exit(%__MODULE__{} = session) do
+    case Cympho.AdapterSessions.wait_for_exit(session.session_id, @adapter_cleanup_timeout_ms) do
+      :ok -> release_runtime_admission(session)
+      _ -> session
+    end
   end
 
   # Single same-runtime retry for failures that produced no usable work.

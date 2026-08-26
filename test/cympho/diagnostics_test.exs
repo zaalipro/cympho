@@ -20,7 +20,7 @@ defmodule Cympho.DiagnosticsTest do
     assert report.schema_version == 1
     assert report.application == %{name: "cympho", version: "test-version", environment: "prod"}
     assert report.status == :pass
-    assert report.summary == %{passed: 14, warned: 0, failed: 0}
+    assert report.summary == %{passed: 15, warned: 0, failed: 0}
 
     assert Enum.map(report.checks, & &1.id) == [
              "toolchain.elixir",
@@ -36,6 +36,7 @@ defmodule Cympho.DiagnosticsTest do
              "storage.import_spool",
              "runtime.beam",
              "runtime.resources",
+             "runtime.local_capacity",
              "adapters.inventory"
            ]
 
@@ -310,6 +311,119 @@ defmodule Cympho.DiagnosticsTest do
     refute Jason.encode!(report) =~ @sentinel
   end
 
+  test "local capacity reports only boolean host-memory posture", %{
+    storage_dir: storage_dir
+  } do
+    report = Diagnostics.run(callbacks: healthy_callbacks(storage_dir))
+    check = find_check(report, "runtime.local_capacity")
+
+    assert check.status == :pass
+
+    assert check.details == %{
+             limits_valid: true,
+             memory_check_enabled: true,
+             memory_headroom_sufficient: true,
+             memory_probe_supported: true
+           }
+  end
+
+  test "local capacity fails closed for invalid production posture and warns below reserve", %{
+    storage_dir: storage_dir
+  } do
+    unknown =
+      Diagnostics.run(
+        callbacks:
+          healthy_callbacks(storage_dir)
+          |> Map.put(:memory_probe, fn -> {:error, :unsupported} end)
+      )
+
+    unknown_check = find_check(unknown, "runtime.local_capacity")
+    assert unknown_check.status == :fail
+    refute unknown_check.details.memory_probe_supported
+    refute unknown_check.details.memory_headroom_sufficient
+
+    disabled =
+      Diagnostics.run(
+        callbacks:
+          healthy_callbacks(storage_dir)
+          |> Map.put(:app_env, fn
+            :runtime_admission, _ ->
+              [
+                max_total_runs: 1,
+                max_local_runs: 1,
+                memory_reserve_bytes: 384 * 1024 * 1024,
+                memory_check?: false
+              ]
+
+            key, default ->
+              healthy_app_env(storage_dir, key, default)
+          end)
+      )
+
+    disabled_check = find_check(disabled, "runtime.local_capacity")
+    assert disabled_check.status == :fail
+    refute disabled_check.details.memory_check_enabled
+    assert disabled_check.details.memory_probe_supported
+
+    development =
+      Diagnostics.run(
+        callbacks:
+          healthy_callbacks(storage_dir, environment: :dev)
+          |> Map.put(:memory_probe, fn -> {:error, :unavailable} end)
+      )
+
+    assert find_check(development, "runtime.local_capacity").status == :warn
+
+    low_memory =
+      Diagnostics.run(
+        callbacks:
+          healthy_callbacks(storage_dir)
+          |> Map.put(:memory_probe, fn ->
+            {:ok,
+             %{
+               source: :cgroup,
+               total_bytes: 512 * 1024 * 1024,
+               available_bytes: 384 * 1024 * 1024
+             }}
+          end)
+      )
+
+    assert find_check(low_memory, "runtime.local_capacity").status == :warn
+
+    invalid =
+      Diagnostics.run(
+        callbacks:
+          healthy_callbacks(storage_dir)
+          |> Map.put(:app_env, fn
+            :runtime_admission, _ ->
+              [max_total_runs: 1, max_local_runs: 2, memory_reserve_bytes: 384 * 1024 * 1024]
+
+            key, default ->
+              healthy_app_env(storage_dir, key, default)
+          end)
+      )
+
+    assert find_check(invalid, "runtime.local_capacity").status == :fail
+
+    for malformed <- [
+          {:ok, %{source: :host, total_bytes: 0, available_bytes: 0}},
+          {:ok, %{source: :host, total_bytes: 100, available_bytes: 101}},
+          {:ok, %{source: :path_sentinel, total_bytes: 100, available_bytes: 50}}
+        ] do
+      report =
+        Diagnostics.run(
+          callbacks:
+            healthy_callbacks(storage_dir)
+            |> Map.put(:memory_probe, fn -> malformed end)
+        )
+
+      check = find_check(report, "runtime.local_capacity")
+      assert check.status == :fail
+      refute check.details.memory_probe_supported
+      refute check.details.memory_headroom_sufficient
+    end
+  end
+
   test "the default database code uses read-only migration discovery" do
     source = File.read!("lib/cympho/diagnostics.ex")
 
@@ -322,21 +436,12 @@ defmodule Cympho.DiagnosticsTest do
 
   defp healthy_callbacks(storage_dir, overrides \\ []) do
     env = Keyword.get(overrides, :env, healthy_env(storage_dir))
+    environment = Keyword.get(overrides, :environment, :prod)
 
     %{
       env: &Map.get(env, &1),
-      environment: fn -> :prod end,
-      app_env: fn
-        :preview_host, _default -> "preview.example.test"
-        :storage_backend, _default -> Cympho.Attachments.Storage.LocalStorage
-        :uploads_dir, _default -> storage_dir
-        :company_import_transfer_spool_root, _default -> storage_dir
-        Cympho.Repo, _default -> [pool_size: 5]
-        Cympho.Finch, _default -> [pools: [default: [size: 2]]]
-        :resource_profile, _default -> "low"
-        :orchestrator, _default -> [max_concurrent_agents: 1]
-        _key, default -> default
-      end,
+      environment: fn -> environment end,
+      app_env: &healthy_app_env(storage_dir, &1, &2),
       endpoint_config: fn ->
         [
           url: [host: "cympho.example.test", scheme: "https", port: 443],
@@ -369,10 +474,46 @@ defmodule Cympho.DiagnosticsTest do
           run_queue: 0
         }
       end,
+      memory_probe: fn ->
+        {:ok,
+         %{
+           source: :host_and_cgroup,
+           total_bytes: 2_048 * 1024 * 1024,
+           available_bytes: 1_024 * 1024 * 1024
+         }}
+      end,
       application_version: fn -> "test-version" end,
       now: fn -> ~U[2026-08-26 10:00:00Z] end
     }
   end
+
+  defp healthy_app_env(_storage_dir, :preview_host, _default), do: "preview.example.test"
+
+  defp healthy_app_env(_storage_dir, :storage_backend, _default),
+    do: Cympho.Attachments.Storage.LocalStorage
+
+  defp healthy_app_env(storage_dir, :uploads_dir, _default), do: storage_dir
+
+  defp healthy_app_env(storage_dir, :company_import_transfer_spool_root, _default),
+    do: storage_dir
+
+  defp healthy_app_env(_storage_dir, Cympho.Repo, _default), do: [pool_size: 5]
+
+  defp healthy_app_env(_storage_dir, Cympho.Finch, _default),
+    do: [pools: [default: [size: 2]]]
+
+  defp healthy_app_env(_storage_dir, :resource_profile, _default), do: "low"
+  defp healthy_app_env(_storage_dir, :orchestrator, _default), do: [max_concurrent_agents: 1]
+
+  defp healthy_app_env(_storage_dir, :runtime_admission, _default),
+    do: [
+      max_total_runs: 1,
+      max_local_runs: 1,
+      memory_reserve_bytes: 384 * 1024 * 1024,
+      memory_check?: true
+    ]
+
+  defp healthy_app_env(_storage_dir, _key, default), do: default
 
   defp healthy_env(storage_dir) do
     %{

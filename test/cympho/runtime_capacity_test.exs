@@ -3,6 +3,10 @@ defmodule Cympho.RuntimeCapacityTest do
 
   alias Cympho.RuntimeCapacity
 
+  defmodule CustomGateway do
+    def execution_class, do: :gateway
+  end
+
   test "marks low local CLI concurrency as safe" do
     capacity = RuntimeCapacity.agent(%{adapter: :codex, max_concurrent_jobs: 1}, 0)
 
@@ -32,6 +36,16 @@ defmodule Cympho.RuntimeCapacityTest do
     assert capacity.level == :safe
     assert capacity.runtime_type == "Remote gateway"
     assert capacity.slot_label == "7 gateway slots"
+  end
+
+  test "uses the shared execution-class contract and treats unknowns as local" do
+    assert RuntimeCapacity.gateway_adapter?(CustomGateway)
+    refute RuntimeCapacity.local_adapter?(CustomGateway)
+    assert RuntimeCapacity.runtime_type(CustomGateway) == "Remote gateway"
+
+    assert RuntimeCapacity.local_adapter?(:unknown_custom)
+    refute RuntimeCapacity.gateway_adapter?(:unknown_custom)
+    assert RuntimeCapacity.runtime_type(:unknown_custom) == "Local CLI/process"
   end
 
   test "summarizes company pressure across local slots" do

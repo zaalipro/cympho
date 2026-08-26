@@ -119,16 +119,15 @@ defmodule Cympho.OrchestratorTest do
            ]},
           {Cympho.AgentRunner, [],
            [
-             run: fn _issue, _agent_id, recipient_pid, _opts ->
-               worker =
-                 spawn(fn ->
+             run: fn _issue, _agent_id, recipient_pid, opts ->
+               _worker =
+                 Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
                    receive do
                      {:cancel_session, ^session_id, reason} ->
                        send(parent, {:adapter_session_cancelled, reason})
                    end
                  end)
 
-               Cympho.AdapterSessions.register(session_id, worker)
                send(recipient_pid, {:session_started, session_id})
                session_id
              end
@@ -193,9 +192,9 @@ defmodule Cympho.OrchestratorTest do
            ]},
           {Cympho.AgentRunner, [],
            [
-             run: fn _issue, _agent_id, recipient_pid, _opts ->
+             run: fn _issue, _agent_id, recipient_pid, opts ->
                worker =
-                 spawn(fn ->
+                 Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
                    receive do
                      {:cancel_session, ^session_id, reason} ->
                        send(parent, {:adapter_session_cancelled, reason})
@@ -207,7 +206,6 @@ defmodule Cympho.OrchestratorTest do
                  end)
 
                send(parent, {:adapter_worker_started, worker})
-               Cympho.AdapterSessions.register(session_id, worker)
                send(recipient_pid, {:session_started, session_id})
                session_id
              end
@@ -318,7 +316,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(make_ref(), recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -416,20 +416,42 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {MockAdapter, [:passthrough],
          [
-           run: fn _issue, _agent_id, _recipient_pid, _opts ->
-             send(test_pid, :adapter_called)
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             worker =
+               Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
+                 send(test_pid, {:adapter_called, self()})
+
+                 receive do
+                   {:finish, reason} ->
+                     send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+                     send(test_pid, {:terminal_sent, self()})
+
+                     receive do
+                       :finish_worker -> :ok
+                     end
+                 end
+
+                 Cympho.AdapterSessions.unregister(session_id)
+               end)
+
+             send(test_pid, {:adapter_worker, worker})
              session_id
            end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
-        assert_receive :adapter_called, 1_000
+        assert_receive {:adapter_called, worker}, 1_000
+        assert_receive {:adapter_worker, ^worker}, 1_000
+        assert wait_for_session_id(pid, session_id)
 
         monitor_ref = Process.monitor(pid)
-        send(pid, {:turn_ended_with_error, session_id, :no_output})
-        assert_receive {:DOWN, ^monitor_ref, :process, ^pid, :normal}, 1_000
+        send(worker, {:finish, :no_output})
+        assert_receive {:terminal_sent, ^worker}, 1_000
+        send(worker, :finish_worker)
+        assert_receive {:DOWN, ^monitor_ref, :process, ^pid, :normal}, 5_000
 
         refute_receive :adapter_called, 100
+
         assert Elixir.Agent.get(run_ids, & &1) == []
       end
     end
@@ -492,18 +514,39 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {MockAdapter, [:passthrough],
          [
-           run: fn _issue, _agent_id, _recipient_pid, _opts ->
-             send(test_pid, :adapter_called)
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             worker =
+               Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
+                 send(test_pid, {:adapter_called, self()})
+
+                 receive do
+                   {:finish, reason} ->
+                     send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+                     send(test_pid, {:terminal_sent, self()})
+
+                     receive do
+                       :finish_worker -> :ok
+                     end
+                 end
+
+                 Cympho.AdapterSessions.unregister(session_id)
+               end)
+
+             send(test_pid, {:adapter_worker, worker})
              session_id
            end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
-        assert_receive :adapter_called, 1_000
+        assert_receive {:adapter_called, worker}, 1_000
+        assert_receive {:adapter_worker, ^worker}, 1_000
+        assert wait_for_session_id(pid, session_id)
 
         monitor_ref = Process.monitor(pid)
-        send(pid, {:turn_ended_with_error, session_id, {:http_error, 503, "unavailable"}})
-        assert_receive {:DOWN, ^monitor_ref, :process, ^pid, :normal}, 1_000
+        send(worker, {:finish, {:http_error, 503, "unavailable"}})
+        assert_receive {:terminal_sent, ^worker}, 1_000
+        send(worker, :finish_worker)
+        assert_receive {:DOWN, ^monitor_ref, :process, ^pid, :normal}, 5_000
 
         refute_receive :adapter_called, 100
         assert Elixir.Agent.get(run_ids, & &1) == []
@@ -528,7 +571,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(make_ref(), recipient_pid, opts)
+           end
          ]}
       ]) do
         {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -596,7 +641,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -665,7 +712,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -726,7 +775,12 @@ defmodule Cympho.OrchestratorTest do
            end,
            fail_run: fn _run, _reason, _usage -> {:ok, %{id: run_id}} end
          ]},
-        {Cympho.AgentRunner, [], [run: fn _issue, _agent_id, _pid, _opts -> session_id end]}
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
+         ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
         send(pid, {:turn_completed, session_id, result})
@@ -775,7 +829,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -845,7 +901,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -1398,7 +1456,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -1470,7 +1530,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -1926,7 +1988,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(make_ref(), recipient_pid, opts)
+           end
          ]}
       ]) do
         {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -1956,7 +2020,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(make_ref(), recipient_pid, opts)
+           end
          ]}
       ]) do
         {:ok, pid1} = Orchestrator.start_and_run(issue, agent_id)
@@ -1999,7 +2065,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(make_ref(), recipient_pid, opts)
+           end
          ]}
       ]) do
         parent = self()
@@ -2097,7 +2165,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -2144,7 +2214,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -2197,15 +2269,14 @@ defmodule Cympho.OrchestratorTest do
         {Cympho.AgentRunner, [],
          [
            run: fn _issue, _agent_id, recipient_pid, _opts ->
-             worker =
-               spawn(fn ->
+             _worker =
+               Cympho.AdapterSessions.spawn_registered(session_id, fn ->
                  receive do
                    {:cancel_session, ^session_id, reason} ->
                      send(parent, {:adapter_session_cancelled, reason})
                  end
                end)
 
-             Cympho.AdapterSessions.register(session_id, worker)
              send(recipient_pid, {:session_started, session_id})
              session_id
            end
@@ -2261,8 +2332,11 @@ defmodule Cympho.OrchestratorTest do
            run: fn _issue, _agent_id, recipient_pid, _opts ->
              # Worker registers, then dies WITHOUT sending a terminal
              # message — the classic zombie session.
-             worker = spawn(fn -> Process.sleep(:infinity) end)
-             Cympho.AdapterSessions.register(session_id, worker)
+             _worker =
+               Cympho.AdapterSessions.spawn_registered(session_id, fn ->
+                 Process.sleep(:infinity)
+               end)
+
              send(recipient_pid, {:session_started, session_id})
              session_id
            end
@@ -2272,18 +2346,14 @@ defmodule Cympho.OrchestratorTest do
         assert wait_for_session_id(pid, session_id)
         assert eventually_adapter_session_registered?(session_id)
 
-        # Tick once while registered so the orchestrator records the session
-        # as seen. :sys.get_state blocks until the tick has been handled.
-        send(pid, :heartbeat_tick)
-        _ = :sys.get_state(pid)
-
         # Kill the worker (unregisters via monitor in AdapterSessions).
         %{sessions: sessions} = :sys.get_state(Cympho.AdapterSessions)
         %{pid: worker} = Map.fetch!(sessions, session_id)
         Process.exit(worker, :kill)
         assert eventually_adapter_session_unregistered?(session_id)
 
-        # Two consecutive misses trip the detector.
+        # Adoption arms liveness immediately; two consecutive misses trip the
+        # detector even when the worker dies before the first heartbeat tick.
         send(pid, :heartbeat_tick)
         _ = :sys.get_state(pid)
         send(pid, :heartbeat_tick)
@@ -2329,7 +2399,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -2368,7 +2440,9 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.AgentRunner, [],
          [
-           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             registered_session(session_id, recipient_pid, opts)
+           end
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -2405,7 +2479,9 @@ defmodule Cympho.OrchestratorTest do
              ]},
             {Cympho.AgentRunner, [],
              [
-               run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+               run: fn _issue, _agent_id, recipient_pid, opts ->
+                 registered_session(make_ref(), recipient_pid, opts)
+               end
              ]}
           ]) do
             {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
@@ -2469,8 +2545,23 @@ defmodule Cympho.OrchestratorTest do
         end)
 
       assert log =~ "adapter dispatch aborted"
-      assert log =~ "run startup failed"
+      assert log =~ "engine run did not start"
     end
+  end
+
+  defp registered_session(session_id, recipient_pid, opts) do
+    Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
+      monitor = Process.monitor(recipient_pid)
+
+      receive do
+        {:cancel_session, ^session_id, _reason} -> :ok
+        {:DOWN, ^monitor, :process, ^recipient_pid, _reason} -> :ok
+      end
+
+      Cympho.AdapterSessions.unregister(session_id)
+    end)
+
+    session_id
   end
 
   defp wait_for_review_nudges(issue_id) do

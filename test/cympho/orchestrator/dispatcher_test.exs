@@ -40,6 +40,86 @@ defmodule Cympho.Orchestrator.DispatcherTest do
       state = Dispatcher.state()
       refute MapSet.member?(state.running_issue_ids, "any-issue-id")
     end
+
+    @tag :capture_log
+    test "a stale company-stop completion cannot erase a live worker fence" do
+      ensure_dispatcher_running()
+      issue_id = Ecto.UUID.generate()
+      session_id = make_ref()
+
+      worker =
+        Cympho.AdapterSessions.spawn_registered(
+          session_id,
+          [runtime_issue_id: issue_id],
+          fn -> Process.sleep(:infinity) end
+        )
+
+      :sys.replace_state(Process.whereis(Dispatcher), fn %State{} = state ->
+        %{state | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id)}
+      end)
+
+      send(Dispatcher, {:company_stop_finished, [issue_id]})
+      assert MapSet.member?(Dispatcher.state().running_issue_ids, issue_id)
+
+      Process.exit(worker, :kill)
+    end
+
+    @tag :capture_log
+    test "a dead stale orchestrator registry row cannot hide a live worker" do
+      ensure_dispatcher_running()
+      issue_id = Ecto.UUID.generate()
+      parent = self()
+
+      worker =
+        Cympho.AdapterSessions.spawn_registered(
+          make_ref(),
+          [runtime_issue_id: issue_id],
+          fn -> Process.sleep(:infinity) end
+        )
+
+      stale =
+        spawn(fn ->
+          {:ok, _} = Registry.register(Cympho.OrchestratorRegistry, issue_id, nil)
+          send(parent, {:stale_registered, self()})
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive {:stale_registered, ^stale}, 1_000
+      pid_partition = Module.concat(Cympho.OrchestratorRegistry, "PIDPartition0")
+      :sys.suspend(pid_partition)
+
+      try do
+        Process.exit(stale, :kill)
+        wait_until(fn -> refute Process.alive?(stale) end)
+        assert Cympho.Orchestrator.whereis(issue_id) == stale
+
+        :sys.replace_state(Process.whereis(Dispatcher), fn %State{} = state ->
+          %{state | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id)}
+        end)
+
+        send(Dispatcher, {:session_ended, issue_id, :normal})
+        assert MapSet.member?(Dispatcher.state().running_issue_ids, issue_id)
+      after
+        :sys.resume(pid_partition)
+        Process.exit(worker, :kill)
+      end
+    end
+
+    @tag :capture_log
+    test "a stale session_ended event cannot erase a successor fence" do
+      ensure_dispatcher_running()
+      issue_id = Ecto.UUID.generate()
+      successor = start_registered_orchestrator(issue_id)
+
+      :sys.replace_state(Process.whereis(Dispatcher), fn %State{} = state ->
+        %{state | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id)}
+      end)
+
+      send(Dispatcher, {:session_ended, issue_id, :normal})
+      assert MapSet.member?(Dispatcher.state().running_issue_ids, issue_id)
+
+      stop_registered_orchestrator(successor, issue_id)
+    end
   end
 
   describe "start_link/1" do
@@ -108,6 +188,106 @@ defmodule Cympho.Orchestrator.DispatcherTest do
   end
 
   describe "orchestrator DOWN handling" do
+    test "explicit stop dominates crash across all cleanup monitors for an issue" do
+      issue_id = Ecto.UUID.generate()
+      old_worker = spawn(fn -> Process.sleep(:infinity) end)
+      stop_worker = spawn(fn -> Process.sleep(:infinity) end)
+      old_ref = Process.monitor(old_worker)
+
+      state = %{
+        State.new()
+        | monitors: %{old_ref => {:adapter_cleanup, issue_id, :old_crash, :crash}},
+          running_issue_ids: MapSet.new([issue_id])
+      }
+
+      assert {:noreply, state} =
+               Dispatcher.handle_info(
+                 {:defer_adapter_cleanup, issue_id, stop_worker, :operator_stop},
+                 state
+               )
+
+      cleanup_entries =
+        Enum.filter(state.monitors, fn
+          {_ref, {:adapter_cleanup, ^issue_id, _reason, _action}} -> true
+          _ -> false
+        end)
+
+      assert length(cleanup_entries) == 2
+
+      assert Enum.all?(cleanup_entries, fn
+               {_ref, {:adapter_cleanup, ^issue_id, :operator_stop, :stop}} -> true
+               _ -> false
+             end)
+
+      Process.exit(old_worker, :kill)
+      Process.exit(stop_worker, :kill)
+    end
+
+    @tag :capture_log
+    test "an old controller DOWN cannot erase a registered successor fence" do
+      ensure_dispatcher_running()
+      issue_id = Ecto.UUID.generate()
+      successor = start_registered_orchestrator(issue_id)
+      old_controller = spawn(fn -> Process.sleep(:infinity) end)
+
+      :sys.replace_state(Process.whereis(Dispatcher), fn %State{} = state ->
+        ref = Process.monitor(old_controller)
+
+        %{
+          state
+          | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id),
+            monitors: Map.put(state.monitors, ref, issue_id)
+        }
+      end)
+
+      Process.exit(old_controller, :kill)
+
+      wait_until(fn ->
+        assert MapSet.member?(Dispatcher.state().running_issue_ids, issue_id)
+      end)
+
+      stop_registered_orchestrator(successor, issue_id)
+    end
+
+    @tag :capture_log
+    test "old crash cleanup cannot erase a live successor worker fence" do
+      ensure_dispatcher_running()
+      issue_id = Ecto.UUID.generate()
+
+      old_worker =
+        Cympho.AdapterSessions.spawn_registered(
+          make_ref(),
+          [runtime_issue_id: issue_id],
+          fn -> Process.sleep(:infinity) end
+        )
+
+      successor =
+        Cympho.AdapterSessions.spawn_registered(
+          make_ref(),
+          [runtime_issue_id: issue_id],
+          fn -> Process.sleep(:infinity) end
+        )
+
+      :sys.replace_state(Process.whereis(Dispatcher), fn %State{} = state ->
+        ref = Process.monitor(old_worker)
+
+        %{
+          state
+          | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id),
+            monitors:
+              Map.put(state.monitors, ref, {:adapter_cleanup, issue_id, :old_crash, :crash})
+        }
+      end)
+
+      Process.exit(old_worker, :kill)
+
+      wait_until(fn ->
+        assert MapSet.member?(Dispatcher.state().running_issue_ids, issue_id)
+      end)
+
+      Process.exit(successor, :kill)
+    end
+
     @tag :capture_log
     test "a crashed (non-graceful) orchestrator frees its slot" do
       ensure_dispatcher_running()
@@ -167,6 +347,91 @@ defmodule Cympho.Orchestrator.DispatcherTest do
         refute MapSet.member?(state.running_issue_ids, issue_id)
         refute Enum.any?(state.monitors, fn {_ref, id} -> id == issue_id end)
       end)
+    end
+
+    @tag :capture_log
+    test "a crashed orchestrator retains its issue slot until its registered child worker exits" do
+      ensure_dispatcher_running()
+      issue_id = Ecto.UUID.generate()
+      session_id = make_ref()
+      parent = self()
+      root = Path.join(System.tmp_dir!(), "cympho-dispatcher-cleanup-#{System.unique_integer()}")
+      gate = Path.join(root, "gate")
+      command = Path.join(root, "child")
+      File.mkdir_p!(root)
+      on_exit(fn -> File.rm_rf!(root) end)
+      {"", 0} = System.cmd("mkfifo", [gate], stderr_to_stdout: true)
+
+      File.write!(command, """
+      #!/bin/sh
+      IFS= read -r _ < '#{gate}'
+      """)
+
+      File.chmod!(command, 0o755)
+
+      fake_orchestrator =
+        spawn(fn ->
+          controller = self()
+
+          Cympho.AdapterSessions.spawn_registered(session_id, fn ->
+            controller_monitor = Process.monitor(controller)
+
+            port =
+              Port.open({:spawn_executable, String.to_charlist(command)}, [
+                :binary,
+                :exit_status,
+                :use_stdio
+              ])
+
+            {:os_pid, os_pid} = Port.info(port, :os_pid)
+            send(parent, {:cleanup_worker_started, self(), os_pid})
+
+            assert_receive {:DOWN, ^controller_monitor, :process, ^controller, :killed}, 1_000
+            send(parent, :cleanup_waiting_for_child)
+            assert_receive {^port, {:exit_status, 0}}, 2_000
+            Cympho.AdapterSessions.unregister(session_id)
+          end)
+
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive {:cleanup_worker_started, worker, os_pid}, 1_000
+
+      :sys.replace_state(Process.whereis(Dispatcher), fn %State{} = state ->
+        ref = Process.monitor(fake_orchestrator)
+
+        %{
+          state
+          | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id),
+            monitors: Map.put(state.monitors, ref, issue_id)
+        }
+      end)
+
+      Process.exit(fake_orchestrator, :kill)
+      assert_receive :cleanup_waiting_for_child, 1_000
+
+      state = Dispatcher.state()
+      assert MapSet.member?(state.running_issue_ids, issue_id)
+      assert Process.alive?(worker)
+
+      assert match?(
+               {_output, 0},
+               System.cmd("/bin/kill", ["-0", to_string(os_pid)], stderr_to_stdout: true)
+             )
+
+      File.write!(gate, "exit\n")
+
+      wait_until(fn ->
+        state = Dispatcher.state()
+        refute MapSet.member?(state.running_issue_ids, issue_id)
+      end)
+
+      refute Process.alive?(worker)
+
+      refute match?(
+               {_output, 0},
+               System.cmd("/bin/kill", ["-0", to_string(os_pid)], stderr_to_stdout: true)
+             )
     end
   end
 
@@ -269,6 +534,29 @@ defmodule Cympho.Orchestrator.DispatcherTest do
     unless Process.whereis(Dispatcher) do
       {:ok, _} = Dispatcher.start_link([])
     end
+  end
+
+  defp start_registered_orchestrator(issue_id) do
+    parent = self()
+
+    pid =
+      spawn(fn ->
+        {:ok, _} = Registry.register(Cympho.OrchestratorRegistry, issue_id, nil)
+        send(parent, {:orchestrator_registered, self(), issue_id})
+        receive do: (:stop -> :ok)
+      end)
+
+    assert_receive {:orchestrator_registered, ^pid, ^issue_id}, 2_000
+    pid
+  end
+
+  defp stop_registered_orchestrator(pid, issue_id) do
+    monitor = Process.monitor(pid)
+    send(pid, :stop)
+    assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 2_000
+    send(Dispatcher, {:session_ended, issue_id, :normal})
+    _ = Dispatcher.state()
+    :ok
   end
 end
 
@@ -494,6 +782,60 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
     end
   end
 
+  test "explicit issue stop defers release when only an orphan worker remains", %{
+    agent: agent,
+    issue: issue
+  } do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {:ok, issue} =
+      Issues.update_issue(issue, %{
+        status: :in_progress,
+        checked_out_at: now,
+        started_at: now
+      })
+
+    parent = self()
+    session_id = make_ref()
+
+    controller =
+      spawn(fn ->
+        worker =
+          Cympho.AdapterSessions.spawn_registered(
+            session_id,
+            [runtime_issue_id: issue.id],
+            fn ->
+              receive do
+                {:cancel_session, ^session_id, _reason} ->
+                  send(parent, {:orphan_cancelled, self()})
+                  receive do: (:finish_cleanup -> :ok)
+              end
+            end
+          )
+
+        send(parent, {:orphan_worker, worker})
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive {:orphan_worker, worker}, 1_000
+    Process.exit(controller, :kill)
+    assert_receive {:orphan_cancelled, ^worker}, 1_000
+
+    assert {:ok, result} = Dispatcher.stop_issue(issue.id, :operator_issue_pause)
+    assert issue.id in result.deferred_issue_ids
+    assert Issues.get_issue!(issue.id).status == :in_progress
+    assert agent.id == issue.assignee_id
+
+    send(worker, :finish_cleanup)
+    wait_until(fn -> refute Process.alive?(worker) end)
+
+    # Drain this test's deferred cleanup before its sandbox owner exits. The
+    # application Dispatcher may not share this test's DB connection, so it
+    # deliberately retries rather than completing database cleanup here.
+    send(Dispatcher, {:session_ended, issue.id, :normal})
+    refute MapSet.member?(Dispatcher.state().running_issue_ids, issue.id)
+  end
+
   test "admits blocked issue with pending issue_children_completed wake", %{
     company: company,
     agent: agent
@@ -702,6 +1044,83 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
 
       assert %{attempts: 1} = state.retry_attempts[issue.id]
       refute MapSet.member?(state.running_issue_ids, issue.id)
+    end
+  end
+
+  test "advisory local denial consumes no slot while a later gateway dispatches", %{
+    company: company,
+    agent: local_agent,
+    issue: local_issue
+  } do
+    {:ok, local_agent} =
+      Agents.update_agent(local_agent, %{
+        adapter: :process,
+        config: %{"command" => "echo", "repo_capable" => true}
+      })
+
+    {:ok, local_issue} = Issues.update_issue(local_issue, %{priority: :critical})
+
+    {:ok, gateway_agent} =
+      Agents.create_agent(%{
+        name: "Later gateway CEO",
+        role: :ceo,
+        status: :idle,
+        company_id: company.id,
+        adapter: :http,
+        config: %{"url" => "https://example.com/runtime"}
+      })
+
+    {:ok, gateway_issue} =
+      Issues.create_issue(%{
+        title: "Strategic gateway follow-up",
+        description: "CEO task after a deferred local candidate",
+        status: :todo,
+        priority: :high,
+        company_id: company.id,
+        assignee_id: gateway_agent.id,
+        assigned_role: "ceo"
+      })
+
+    test_pid = self()
+    local_issue_id = local_issue.id
+
+    with_mocks([
+      {Cympho.RuntimeAdmission, [],
+       [
+         available: fn
+           Cympho.Adapters.ProcessAdapter -> {:error, :local_slots_exhausted}
+           Cympho.Adapters.HttpAdapter -> :ok
+         end
+       ]},
+      {Orchestrator, [],
+       [
+         start_and_run: fn checked_out, _agent_id ->
+           send(test_pid, {:provider_started, checked_out.id})
+           {:ok, spawn(fn -> Process.sleep(200) end)}
+         end,
+         whereis: fn _issue_id -> nil end,
+         stop: fn _issue_id, _reason -> :ok end
+       ]}
+    ]) do
+      assert {:noreply, %State{} = state} =
+               Dispatcher.handle_info({:poll_company, company.id}, State.new())
+
+      assert_received {:provider_started, gateway_id}
+      assert gateway_id == gateway_issue.id
+      refute_received {:provider_started, ^local_issue_id}
+
+      local = Issues.get_issue!(local_issue.id)
+      gateway = Issues.get_issue!(gateway_issue.id)
+
+      assert local.status == :todo
+      assert local.assignee_id == local_agent.id
+      assert gateway.status == :in_progress
+
+      assert %{attempts: 1, next_retry_at: retry_at} = state.retry_attempts[local.id]
+      assert retry_at > :os.system_time(:millisecond)
+      refute MapSet.member?(state.running_issue_ids, local.id)
+      assert MapSet.member?(state.running_issue_ids, gateway.id)
+      assert MapSet.size(state.running_issue_ids) == 1
     end
   end
 

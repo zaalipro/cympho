@@ -134,7 +134,10 @@ defmodule CymphoWeb.BeamDashboardTest do
           [:cympho, :kanban, :card_moved],
           [:cympho, :onboarding, :completed],
           [:cympho, :run, :lifecycle],
-          [:cympho, :dispatcher, :dispatch]
+          [:cympho, :dispatcher, :dispatch],
+          [:cympho, :runtime_admission, :checkout],
+          [:cympho, :runtime_admission, :available],
+          [:cympho, :runtime_admission, :release]
         ])
 
       for metric <- Metrics.metrics() do

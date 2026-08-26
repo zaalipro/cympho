@@ -7,6 +7,9 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  @impl true
+  def execution_class, do: :local_process
+
   alias Cympho.AgentRunner
 
   @impl true

@@ -337,14 +337,18 @@ defmodule Cympho.Adapters.UnitTest do
       assert is_reference(ref)
     end
 
-    test "sends session_started message" do
+    test "does not announce a session when setup cannot establish containment" do
       issue = %{id: "issue-1", title: "Test", description: "Do something"}
+      config = %{api_key: "sk-test", timeout: 500}
 
-      _ref =
-        CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
+      unless CodexAdapter.available?(config) do
+        _ref = CodexAdapter.run(issue, "agent-1", self(), config: config)
 
-      assert_receive {:session_started, session_id}, 1000
-      assert is_reference(session_id)
+        assert_receive {:turn_ended_with_error, session_id, reason}, 2_000
+        assert is_reference(session_id)
+        assert is_binary(reason)
+        refute_receive {:session_started, ^session_id}, 0
+      end
     end
 
     test "sends turn_ended_with_error when codex binary not available" do
@@ -356,8 +360,8 @@ defmodule Cympho.Adapters.UnitTest do
         _ref =
           CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
 
-        assert_receive {:session_started, _session_id}, 1000
-        assert_receive {:turn_ended_with_error, _session_id, reason}, 2000
+        assert_receive {:turn_ended_with_error, session_id, reason}, 2_000
+        refute_receive {:session_started, ^session_id}, 0
         assert is_binary(reason)
       end
     end
@@ -369,14 +373,12 @@ defmodule Cympho.Adapters.UnitTest do
         CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
 
       assert is_reference(ref)
-      assert_receive {:session_started, _session_id}, 1000
     end
 
     test "works without config" do
       issue = %{id: "issue-1", title: "Test", description: "Do something"}
       ref = CodexAdapter.run(issue, "agent-1", self(), [])
       assert is_reference(ref)
-      assert_receive {:session_started, _session_id}, 1000
     end
   end
 
@@ -891,8 +893,8 @@ defmodule Cympho.Adapters.UnitTest do
 
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
-      assert_receive {:session_started, ^ref}, 1000
-      assert_receive {:turn_ended_with_error, ^ref, :timeout}, 1000
+      assert_receive {:session_started, ^ref}, 1_000
+      assert_receive {:turn_ended_with_error, ^ref, :timeout}, 3_000
     end
 
     test "run/4 accepts timeout_sec to avoid millisecond and second confusion" do

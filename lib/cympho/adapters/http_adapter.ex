@@ -7,6 +7,9 @@ defmodule Cympho.Adapters.HttpAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  @impl true
+  def execution_class, do: :gateway
+
   import Bitwise
 
   alias Cympho.Adapters.RuntimeTimeout
@@ -19,16 +22,14 @@ defmodule Cympho.Adapters.HttpAdapter do
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
     session_id = make_ref()
 
-    worker =
-      spawn(fn ->
+    _worker =
+      Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
         try do
           do_run(session_id, issue, agent_id, recipient_pid, opts)
         after
           Cympho.AdapterSessions.unregister(session_id)
         end
       end)
-
-    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end

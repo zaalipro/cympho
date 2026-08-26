@@ -99,15 +99,40 @@ defmodule Mix.Tasks.CymphoDoctorTest do
       env: &Map.get(env, &1),
       environment: fn -> :prod end,
       app_env: fn
-        :preview_host, _ -> "preview.example.test"
-        :storage_backend, _ -> Cympho.Attachments.Storage.LocalStorage
-        :uploads_dir, _ -> dir
-        :company_import_transfer_spool_root, _ -> dir
-        Cympho.Repo, _ -> [pool_size: 5]
-        Cympho.Finch, _ -> [pools: [default: [size: 2]]]
-        :resource_profile, _ -> "low"
-        :orchestrator, _ -> [max_concurrent_agents: 1]
-        _key, default -> default
+        :preview_host, _ ->
+          "preview.example.test"
+
+        :storage_backend, _ ->
+          Cympho.Attachments.Storage.LocalStorage
+
+        :uploads_dir, _ ->
+          dir
+
+        :company_import_transfer_spool_root, _ ->
+          dir
+
+        Cympho.Repo, _ ->
+          [pool_size: 5]
+
+        Cympho.Finch, _ ->
+          [pools: [default: [size: 2]]]
+
+        :resource_profile, _ ->
+          "low"
+
+        :orchestrator, _ ->
+          [max_concurrent_agents: 1]
+
+        :runtime_admission, _ ->
+          [
+            max_total_runs: 1,
+            max_local_runs: 1,
+            memory_reserve_bytes: 384 * 1024 * 1024,
+            memory_check?: true
+          ]
+
+        _key, default ->
+          default
       end,
       endpoint_config: fn ->
         [
@@ -135,6 +160,14 @@ defmodule Mix.Tasks.CymphoDoctorTest do
           schedulers_online: 1,
           run_queue: 0
         }
+      end,
+      memory_probe: fn ->
+        {:ok,
+         %{
+           source: :host,
+           total_bytes: 2_048 * 1024 * 1024,
+           available_bytes: 1_024 * 1024 * 1024
+         }}
       end,
       application_version: fn -> "test" end,
       now: fn -> ~U[2026-08-26 10:00:00Z] end

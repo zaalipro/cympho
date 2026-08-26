@@ -7,6 +7,9 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  @impl true
+  def execution_class, do: :local_process
+
   alias Cympho.Adapters.RunDeadline
   alias Cympho.Adapters.RuntimeTimeout
 
@@ -18,8 +21,8 @@ defmodule Cympho.Adapters.ProcessAdapter do
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
     session_id = make_ref()
 
-    worker =
-      spawn(fn ->
+    _worker =
+      Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
         Process.flag(:trap_exit, true)
         # See Cympho.AgentRunner: a brutally killed orchestrator never runs its
         # cancel path, and every recovery step from there is a database write.
@@ -45,8 +48,6 @@ defmodule Cympho.Adapters.ProcessAdapter do
         end
       end)
 
-    Cympho.AdapterSessions.register(session_id, worker)
-
     session_id
   end
 
@@ -61,7 +62,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
         prompt = build_prompt(issue, agent_id, opts)
         Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "process"})
 
-        case start_process(issue, agent_id, config, recipient_pid, session_id, prompt) do
+        case start_process(issue, agent_id, config, recipient_pid, session_id, prompt, opts) do
           {:ok, _pid} ->
             # Process started successfully
             :ok
@@ -72,7 +73,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp start_process(issue, agent_id, config, recipient_pid, session_id, prompt) do
+  defp start_process(issue, agent_id, config, recipient_pid, session_id, prompt, runtime_opts) do
     command = command(config)
 
     if is_nil(command) or command == "" do
@@ -82,23 +83,33 @@ defmodule Cympho.Adapters.ProcessAdapter do
       env = build_env(issue, agent_id, config)
       cwd = config[:cwd] || config["cwd"]
 
-      opts = [:binary, :exit_status, :use_stdio, :stderr_to_stdout]
+      port_opts = [:binary, :exit_status, :use_stdio, :stderr_to_stdout]
 
-      opts =
+      port_opts =
         if cwd do
-          opts ++ [cd: cwd]
+          port_opts ++ [cd: cwd]
         else
-          opts
+          port_opts
         end
 
-      opts =
+      port_opts =
         if env != [] do
-          opts ++ [env: env]
+          port_opts ++ [env: env]
         else
-          opts
+          port_opts
         end
 
-      run_process(session_id, command, args, opts, recipient_pid, config, prompt)
+      run_process(
+        session_id,
+        command,
+        args,
+        port_opts,
+        recipient_pid,
+        config,
+        prompt,
+        runtime_opts
+      )
+
       {:ok, self()}
     end
   end
@@ -211,9 +222,16 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp run_process(session_id, command, args, opts, recipient_pid, config, prompt) do
-    send(recipient_pid, {:session_started, session_id})
-
+  defp run_process(
+         session_id,
+         command,
+         args,
+         port_opts,
+         recipient_pid,
+         config,
+         prompt,
+         runtime_opts
+       ) do
     # Use spawn_executable with explicit args to avoid shell injection
     # Resolve command to full path (Port.open requires absolute path)
     resolved_command = resolve_command_path(command)
@@ -227,10 +245,29 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
       command_path ->
         try do
-          with_command_port(command_path, args, opts, prompt, config, fn port ->
-            timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
-            wait_for_process(port, session_id, recipient_pid, timeout, <<>>)
-          end)
+          case with_command_port(
+                 command_path,
+                 args,
+                 port_opts,
+                 prompt,
+                 config,
+                 session_id,
+                 runtime_opts,
+                 fn {port, monitor} ->
+                   send(recipient_pid, {:session_started, session_id})
+                   timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
+                   wait_for_process(port, monitor, session_id, recipient_pid, timeout, <<>>)
+                 end
+               ) do
+            {:error, :runtime_admission_start_failed} ->
+              send(
+                recipient_pid,
+                {:turn_ended_with_error, session_id, :runtime_admission_start_failed}
+              )
+
+            _result ->
+              :ok
+          end
         rescue
           e ->
             send(recipient_pid, {:turn_ended_with_error, session_id, inspect(e)})
@@ -238,7 +275,16 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp with_command_port(command_path, args, opts, prompt, config, fun) do
+  defp with_command_port(
+         command_path,
+         args,
+         port_opts,
+         prompt,
+         config,
+         session_id,
+         runtime_opts,
+         fun
+       ) do
     if write_prompt_stdin?(config) do
       with_prompt_file(prompt, fn prompt_path ->
         shell = System.find_executable("sh") || "/bin/sh"
@@ -250,21 +296,48 @@ defmodule Cympho.Adapters.ProcessAdapter do
         ]
 
         port_opts =
-          opts
+          port_opts
           |> put_port_args(shell_args)
           |> put_port_env([{"CYMPHO_PROMPT_FILE", prompt_path}])
 
         port = Port.open({:spawn_executable, String.to_charlist(shell)}, port_opts)
-        fun.(port)
+        run_marked_port(port, session_id, runtime_opts, fun)
       end)
     else
       port_opts =
-        opts
+        port_opts
         |> put_port_args(args)
         |> put_port_env([])
 
       port = Port.open({:spawn_executable, String.to_charlist(command_path)}, port_opts)
-      fun.(port)
+      run_marked_port(port, session_id, runtime_opts, fun)
+    end
+  end
+
+  defp run_marked_port(port, session_id, runtime_opts, fun) do
+    case mark_local_process_started(session_id, runtime_opts) do
+      :ok ->
+        monitor = :erlang.monitor(:port, port)
+        run_with_port_cleanup(port, monitor, fun)
+
+      {:error, :runtime_admission_start_failed} = error ->
+        Cympho.PortKiller.close_and_await(port, grace_ms: 0)
+        error
+    end
+  end
+
+  # Terminal notifications must never race the subprocess cleanup. This also
+  # covers exceptions raised from the receive loop: the `after` completes the
+  # Port/OS-child teardown before run_process/7 reports the rescued error.
+  defp run_with_port_cleanup(port, monitor, fun) do
+    try do
+      fun.({port, monitor})
+    after
+      if Port.info(port) do
+        close_port(port, monitor)
+      else
+        Process.demonitor(monitor, [:flush])
+      end
     end
   end
 
@@ -284,15 +357,24 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp wait_for_process(port, session_id, recipient_pid, timeout, acc) when is_integer(timeout) do
-    wait_for_process(port, session_id, recipient_pid, RunDeadline.new(timeout), acc)
+  defp wait_for_process(port, monitor, session_id, recipient_pid, timeout, acc)
+       when is_integer(timeout) do
+    wait_for_process(port, monitor, session_id, recipient_pid, RunDeadline.new(timeout), acc)
   end
 
-  defp wait_for_process(port, session_id, recipient_pid, %RunDeadline{} = deadline, acc) do
+  defp wait_for_process(
+         port,
+         monitor,
+         session_id,
+         recipient_pid,
+         %RunDeadline{} = deadline,
+         acc
+       ) do
     receive do
       {^port, {:data, data}} ->
         wait_for_process(
           port,
+          monitor,
           session_id,
           recipient_pid,
           RunDeadline.observe(deadline, data, session_id, recipient_pid),
@@ -300,9 +382,10 @@ defmodule Cympho.Adapters.ProcessAdapter do
         )
 
       {:EXIT, ^port, _reason} ->
-        wait_for_process(port, session_id, recipient_pid, deadline, acc)
+        wait_for_process(port, monitor, session_id, recipient_pid, deadline, acc)
 
       {^port, {:exit_status, 0}} ->
+        Process.demonitor(monitor, [:flush])
         output = normalize_output_utf8(acc)
 
         case Cympho.Adapters.ProviderFailure.detect(output) do
@@ -315,38 +398,70 @@ defmodule Cympho.Adapters.ProcessAdapter do
         end
 
       {^port, {:exit_status, code}} ->
+        Process.demonitor(monitor, [:flush])
         output = normalize_output_utf8(acc)
         send(recipient_pid, {:turn_ended_with_error, session_id, {:exit_code, code, output}})
 
       {:cancel_session, ^session_id, reason} ->
+        close_port(port, monitor)
         send(recipient_pid, {:turn_ended_with_error, session_id, {:cancelled, reason}})
-        close_port(port)
 
       {:DOWN, _ref, :process, ^recipient_pid, _reason} ->
         # Owner is gone; nobody to report to and no reason to keep the
         # subprocess writing into a workspace that is about to be re-dispatched.
-        close_port(port)
+        close_port(port, monitor)
     after
       RunDeadline.wait_ms(deadline) ->
         # The stall timer resets on every chunk, so a chatty subprocess would
         # otherwise hold its dispatch slot forever.
         case RunDeadline.expired(deadline) do
           nil ->
-            wait_for_process(port, session_id, recipient_pid, deadline, acc)
+            wait_for_process(port, monitor, session_id, recipient_pid, deadline, acc)
 
           :max_run ->
+            close_port(port, monitor)
             send(recipient_pid, {:turn_ended_with_error, session_id, :max_run_timeout})
-            close_port(port)
 
           :stall ->
+            close_port(port, monitor)
             send(recipient_pid, {:turn_ended_with_error, session_id, :timeout})
-            close_port(port)
         end
     end
   end
 
-  defp close_port(port) when is_port(port) do
-    Cympho.PortKiller.close(port)
+  defp close_port(port, monitor) when is_port(port) and is_reference(monitor) do
+    # The caller waits for confirmed exit below, so an arbitrary grace sleep is
+    # neither necessary nor sufficient for ordering.
+    Cympho.PortKiller.close_and_await(port, grace_ms: 0)
+    Process.demonitor(monitor, [:flush])
+  end
+
+  defp mark_local_process_started(session_id, opts) do
+    with :ok <- Cympho.AdapterSessions.local_process_started(session_id) do
+      mark_runtime_local_process_started(opts)
+    else
+      _error -> {:error, :runtime_admission_start_failed}
+    end
+  end
+
+  defp mark_runtime_local_process_started(opts) do
+    case Keyword.get(opts, :runtime_admission_claim) do
+      {token, server, _execution_class} when is_reference(token) ->
+        mark_runtime_local_process_started(token, server)
+
+      {token, server} when is_reference(token) ->
+        mark_runtime_local_process_started(token, server)
+
+      _none ->
+        :ok
+    end
+  end
+
+  defp mark_runtime_local_process_started(token, server) do
+    case Cympho.RuntimeAdmission.local_process_started(token, server) do
+      :ok -> :ok
+      _error -> {:error, :runtime_admission_start_failed}
+    end
   end
 
   def with_prompt_file(prompt, fun) do

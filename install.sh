@@ -107,7 +107,7 @@ elif [ "$MACHINE" == "Linux" ]; then
     
     # Update and install basic tools
     run_as_root apt-get update -y
-    run_as_root apt-get install -y curl git unzip wget software-properties-common apt-transport-https build-essential libssl-dev automake autoconf libncurses5-dev
+    run_as_root apt-get install -y curl git unzip wget software-properties-common apt-transport-https build-essential libssl-dev automake autoconf libncurses5-dev procps
     
     # Install Node.js (needed for assets)
     if ! command -v node &> /dev/null; then

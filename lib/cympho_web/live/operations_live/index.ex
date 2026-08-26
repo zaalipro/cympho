@@ -559,7 +559,6 @@ defmodule CymphoWeb.OperationsLive.Index do
     |> assign(:runtime_mode, snapshot.runtime_mode)
     |> assign(:services, snapshot.services)
     |> assign(:capacity, snapshot.capacity)
-    |> assign(:host, snapshot.host)
     |> assign(:runtime_enablement, snapshot.runtime_enablement)
     |> assign(:launch_plan, snapshot.launch_plan)
     |> assign(:launch_preview, snapshot.launch_preview)
@@ -1475,21 +1474,16 @@ defmodule CymphoWeb.OperationsLive.Index do
     else
       "Review mode is on. This preview shows queue order and preflight checks before you start runtime; focused commands still run one issue first."
     end
-    |> maybe_append_launch_limit(launch_preview)
   end
 
-  defp launch_preview_summary(_runtime_mode, launch_preview) do
-    "Dispatch can start up to #{launch_preview.max_concurrent} #{plural_noun(launch_preview.max_concurrent, "issue")} per poll. This preview mirrors the dispatcher priority order before any agent is started."
+  defp launch_preview_summary(_runtime_mode, _launch_preview) do
+    "This preview mirrors company queue order and preflight checks before any agent is started."
   end
 
   defp focused_dispatch_phrase(1), do: "1 issue is queued for focused dispatch"
 
   defp focused_dispatch_phrase(count),
     do: "#{count} #{plural_noun(count, "issue")} are queued for focused dispatch"
-
-  defp maybe_append_launch_limit(summary, %{max_concurrent: max_concurrent}) do
-    "#{summary} Runtime will take up to #{max_concurrent} #{plural_noun(max_concurrent, "issue")} per poll after launch."
-  end
 
   defp launch_preview_footer(%{
          included_followup_candidate?: true,
@@ -1906,15 +1900,26 @@ defmodule CymphoWeb.OperationsLive.Index do
 
   defp format_duration(_), do: "<1m"
 
-  defp format_memory(bytes) when is_integer(bytes) and bytes >= 1_073_741_824 do
-    "#{Float.round(bytes / 1_073_741_824, 1)} GB"
+  defp recent_capacity_denial?(capacity, launch_preview, wake_queue, review_nudges) do
+    admission = Map.get(capacity, :admission, %{})
+
+    queued_work =
+      Map.get(launch_preview, :total_candidates, 0) +
+        now_waiting_count(wake_queue, review_nudges)
+
+    queued_work > 0 and Map.get(admission, :recent_denial?) == true
   end
 
-  defp format_memory(bytes) when is_integer(bytes) do
-    "#{Float.round(bytes / 1_048_576, 1)} MB"
+  defp configured_slots_detail(capacity) do
+    "#{capacity.gateway_slots} online-provider configured"
   end
 
-  defp format_memory(_), do: "unknown"
+  defp simple_admission_message(_admission) do
+    "Shared runtime capacity recently delayed work. It will retry when safe capacity is available."
+  end
+
+  defp admission_status_label(%{status: :available}), do: "Managed"
+  defp admission_status_label(_admission), do: "Temporarily unavailable"
 
   defp new_agent_query_for_gap(gap) do
     %{

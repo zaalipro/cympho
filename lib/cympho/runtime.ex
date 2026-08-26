@@ -16,6 +16,7 @@ defmodule Cympho.Runtime do
     Finances,
     Projects,
     Repo,
+    RuntimeAdmission,
     RuntimeContext,
     Secrets,
     Workspace,
@@ -101,8 +102,14 @@ defmodule Cympho.Runtime do
   """
   def dispatchable?(%Issue{} = issue, %Agent{} = agent, opts \\ []) do
     case verify_eligibility(issue, agent, opts) do
-      {:ok, _resolved} -> :ok
-      {:error, reason} -> {:error, reason}
+      {:ok, %{adapter: adapter}} ->
+        case RuntimeAdmission.available(adapter) do
+          :ok -> :ok
+          {:error, reason} -> {:error, {:runtime_admission_deferred, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

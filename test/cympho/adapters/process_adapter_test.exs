@@ -149,30 +149,80 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
   end
 
   test "cancels a running local process through adapter sessions" do
-    with_fake_command(
-      "fake-slow-agent",
-      """
-      sleep 30
-      printf 'should-not-finish'
-      """,
-      fn ->
-        session_id =
-          ProcessAdapter.run(@issue, "agent-1", self(),
-            config: %{
-              "command" => "fake-slow-agent",
-              "timeout" => 30_000,
-              "prompt_stdin" => false
-            }
-          )
+    pid_file = unique_pid_file("cancel-order")
+    on_exit(fn -> File.rm(pid_file) end)
+    sleep = System.find_executable("sleep")
 
-        assert_receive {:session_started, ^session_id}, 1_000
-        assert Cympho.AdapterSessions.registered?(session_id)
-        assert :ok = Cympho.AdapterSessions.cancel(session_id, :test_stop)
+    session_id =
+      ProcessAdapter.run(@issue, "agent-1", self(),
+        config: %{
+          "command" => "/bin/sh",
+          "args" => [
+            "-c",
+            "trap '' TERM; echo $$ > '#{pid_file}'; printf ready; #{sleep} 30; printf should-not-finish"
+          ],
+          "timeout" => 30_000,
+          "prompt_stdin" => false
+        }
+      )
 
-        assert_receive {:turn_ended_with_error, ^session_id, {:cancelled, :test_stop}}, 1_000
-        refute_receive {:turn_completed, ^session_id, _result}, 200
-      end
-    )
+    assert_receive {:session_started, ^session_id}, 1_000
+    assert_receive {:turn_progress, ^session_id, _progress}, 1_000
+    os_pid = pid_file |> File.read!() |> String.trim()
+    assert os_process_alive?(os_pid)
+    assert Cympho.AdapterSessions.registered?(session_id)
+    assert :ok = Cympho.AdapterSessions.cancel(session_id, :test_stop)
+
+    assert_receive {:turn_ended_with_error, ^session_id, {:cancelled, :test_stop}}, 1_000
+    refute os_process_alive?(os_pid), "terminal cancellation arrived before OS child exit"
+    refute_receive {:turn_completed, ^session_id, _result}, 200
+  end
+
+  test "timeout error is delivered only after the OS child exits" do
+    pid_file = unique_pid_file("timeout-order")
+    on_exit(fn -> File.rm(pid_file) end)
+    sleep = System.find_executable("sleep")
+
+    session_id =
+      ProcessAdapter.run(@issue, "agent-1", self(),
+        config: %{
+          "command" => "/bin/sh",
+          "args" => [
+            "-c",
+            "trap '' TERM; echo $$ > '#{pid_file}'; printf ready; #{sleep} 30"
+          ],
+          "timeout" => 500,
+          "prompt_stdin" => false
+        }
+      )
+
+    assert_receive {:session_started, ^session_id}, 1_000
+    assert_receive {:turn_progress, ^session_id, _progress}, 1_000
+    os_pid = pid_file |> File.read!() |> String.trim()
+    assert os_process_alive?(os_pid)
+
+    assert_receive {:turn_ended_with_error, ^session_id, :timeout}, 3_000
+    refute os_process_alive?(os_pid), "terminal timeout arrived before OS child exit"
+  end
+
+  test "completion is delivered only after the OS child exits" do
+    pid_file = unique_pid_file("completion-order")
+    on_exit(fn -> File.rm(pid_file) end)
+
+    session_id =
+      ProcessAdapter.run(@issue, "agent-1", self(),
+        config: %{
+          "command" => "/bin/sh",
+          "args" => ["-c", "echo $$ > '#{pid_file}'; printf done"],
+          "timeout" => 5_000,
+          "prompt_stdin" => false
+        }
+      )
+
+    assert_receive {:session_started, ^session_id}, 1_000
+    assert_receive {:turn_completed, ^session_id, %{output: "done"}}, 3_000
+    os_pid = pid_file |> File.read!() |> String.trim()
+    refute os_process_alive?(os_pid), "terminal completion arrived before OS child exit"
   end
 
   test "does not inherit parent environment while adding runtime issue variables" do
@@ -332,8 +382,8 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
       {:ok, contents} when contents != "" ->
         os_pid = String.trim(contents)
 
-        assert wait_until_gone(os_pid),
-               "the subprocess (#{os_pid}) outlived its absolute deadline"
+        refute os_process_alive?(os_pid),
+               "terminal max-run timeout arrived before subprocess #{os_pid} exited"
 
       {:ok, ""} ->
         assert_chatty_process_reaped(pid_file, attempts - 1)
@@ -350,6 +400,13 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
     match?({_output, 0}, System.cmd("/bin/kill", ["-0", os_pid], stderr_to_stdout: true))
   rescue
     _ -> false
+  end
+
+  defp unique_pid_file(label) do
+    Path.join(
+      System.tmp_dir!(),
+      "cympho-#{label}-pid-#{System.pid()}-#{System.unique_integer([:positive])}"
+    )
   end
 
   test "a silent subprocess still fails as a stall, not as a max run" do

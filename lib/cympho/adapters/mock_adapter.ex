@@ -18,6 +18,9 @@ defmodule Cympho.Adapters.MockAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  @impl true
+  def execution_class, do: :gateway
+
   @table :cympho_mock_adapter_scripts
 
   ## Public API
@@ -59,32 +62,39 @@ defmodule Cympho.Adapters.MockAdapter do
     ensure_table()
     key = key(agent_id, issue_id(issue))
 
-    spawn(fn ->
-      send(recipient_pid, {:session_started, session_id})
-      delay = Keyword.get(opts, :mock_delay, 5)
-      if delay > 0, do: Process.sleep(delay)
+    _worker =
+      Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
+        recipient_monitor = Process.monitor(recipient_pid)
 
-      case pop(key) do
-        :silent ->
-          # `:silent` sticks — re-insert so subsequent runs also stall.
-          :ets.insert(@table, {key, [:silent | lookup_queue(key)]})
-          :ok
+        try do
+          send(recipient_pid, {:session_started, session_id})
+          delay = Keyword.get(opts, :mock_delay, 5)
+          if delay > 0, do: Process.sleep(delay)
 
-        {:ok, %{result: result}} ->
-          send(recipient_pid, {:turn_completed, session_id, result})
-          send(recipient_pid, {:session_ended, session_id, :normal})
+          case pop(key) do
+            :silent ->
+              # `:silent` sticks — re-insert so subsequent runs also stall.
+              :ets.insert(@table, {key, [:silent | lookup_queue(key)]})
+              wait_for_silent_stop(session_id, recipient_pid, recipient_monitor)
 
-        {:ok, %{error: reason}} ->
-          send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+            {:ok, %{result: result}} ->
+              send(recipient_pid, {:turn_completed, session_id, result})
+              send(recipient_pid, {:session_ended, session_id, :normal})
 
-        :empty ->
-          send(
-            recipient_pid,
-            {:turn_ended_with_error, session_id,
-             {:no_script_entry, %{agent_id: agent_id, issue_id: issue_id(issue)}}}
-          )
-      end
-    end)
+            {:ok, %{error: reason}} ->
+              send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+
+            :empty ->
+              send(
+                recipient_pid,
+                {:turn_ended_with_error, session_id,
+                 {:no_script_entry, %{agent_id: agent_id, issue_id: issue_id(issue)}}}
+              )
+          end
+        after
+          Cympho.AdapterSessions.unregister(session_id)
+        end
+      end)
 
     session_id
   end
@@ -140,6 +150,19 @@ defmodule Cympho.Adapters.MockAdapter do
 
       [] ->
         :empty
+    end
+  end
+
+  defp wait_for_silent_stop(session_id, recipient_pid, recipient_monitor) do
+    receive do
+      {:cancel_session, ^session_id, _reason} ->
+        :ok
+
+      {:DOWN, ^recipient_monitor, :process, ^recipient_pid, _reason} ->
+        :ok
+
+      _other ->
+        wait_for_silent_stop(session_id, recipient_pid, recipient_monitor)
     end
   end
 

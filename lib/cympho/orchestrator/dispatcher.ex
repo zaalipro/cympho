@@ -51,6 +51,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @max_backoff_ms Application.compile_env(:cympho, [:orchestrator, :max_backoff_ms], 600_000)
   @adapter_stop_confirm_attempts 10
   @adapter_stop_confirm_sleep_ms 25
+  @adapter_ledger_retry_ms 250
   @default_company_stop_deadline_ms 12_000
   @default_company_stop_max_concurrency 8
   @dispatcher_snapshot_timeout_ms 1_000
@@ -144,7 +145,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
       pid ->
         running_issue_ids = dispatcher_running_issue_ids(pid)
         result = stop_company_runtime(company_id, reason, running_issue_ids, self())
-        send(pid, {:company_stop_finished, result.issue_ids})
+        send(pid, {:company_stop_finished, result.issue_ids -- result.deferred_issue_ids})
         {:ok, result}
     end
   end
@@ -287,6 +288,33 @@ defmodule Cympho.Orchestrator.Dispatcher do
         end
       end)
 
+    live_controller_pids = entries |> Enum.map(&elem(&1, 1)) |> MapSet.new()
+
+    adapter_sessions =
+      case Cympho.AdapterSessions.active_sessions() do
+        {:ok, sessions} -> sessions
+        {:error, :not_started} -> raise "adapter session ledger unavailable"
+      end
+
+    {running_issue_ids, monitors} =
+      adapter_sessions
+      |> Enum.reduce({running_issue_ids, monitors}, fn session, {running, monitors} ->
+        if orphan_cleanup_session?(session, live_controller_pids) do
+          ref = Process.monitor(session.pid)
+
+          {
+            MapSet.put(running, session.issue_id),
+            Map.put(
+              monitors,
+              ref,
+              {:adapter_cleanup, session.issue_id, :dispatcher_restart, :crash}
+            )
+          }
+        else
+          {running, monitors}
+        end
+      end)
+
     if MapSet.size(running_issue_ids) > 0 do
       Logger.info(
         "[Dispatcher] restored #{MapSet.size(running_issue_ids)} live orchestrator slot(s) after restart"
@@ -295,6 +323,18 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
     %{state | running_issue_ids: running_issue_ids, monitors: monitors}
   end
+
+  defp orphan_cleanup_session?(
+         %{pid: pid, controller_pid: controller_pid, issue_id: issue_id},
+         live_controller_pids
+       )
+       when is_pid(pid) and is_binary(issue_id) do
+    Process.alive?(pid) and
+      not MapSet.member?(live_controller_pids, controller_pid) and
+      (not is_pid(controller_pid) or not Process.alive?(controller_pid))
+  end
+
+  defp orphan_cleanup_session?(_session, _live_controller_pids), do: false
 
   defp live_registry_entries do
     Cympho.OrchestratorRegistry
@@ -347,16 +387,18 @@ defmodule Cympho.Orchestrator.Dispatcher do
   defp recover_orphaned_runs do
     Cympho.HeartbeatEngine.find_orphaned_runs()
     |> Enum.each(fn run ->
-      case Cympho.HeartbeatEngine.recover_orphaned_run(run) do
-        {:ok, recovered} ->
-          Logger.warning(
-            "[Dispatcher] recovered orphaned run #{run.id} (issue=#{run.issue_id}, status=#{run.status}) → #{recovered.status}"
-          )
+      unless live_orchestrator?(run.issue_id) do
+        case Cympho.HeartbeatEngine.recover_orphaned_run(run) do
+          {:ok, recovered} ->
+            Logger.warning(
+              "[Dispatcher] recovered orphaned run #{run.id} (issue=#{run.issue_id}, status=#{run.status}) → #{recovered.status}"
+            )
 
-        {:error, reason} ->
-          Logger.error(
-            "[Dispatcher] failed to recover orphaned run #{run.id}: #{inspect(reason)}"
-          )
+          {:error, reason} ->
+            Logger.error(
+              "[Dispatcher] failed to recover orphaned run #{run.id}: #{inspect(reason)}"
+            )
+        end
       end
     end)
   rescue
@@ -469,8 +511,16 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp live_orchestrator?(issue_id) do
     case Orchestrator.whereis(issue_id) do
-      nil -> false
-      pid -> Process.alive?(pid)
+      nil -> live_adapter_worker?(issue_id)
+      pid -> Process.alive?(pid) or live_adapter_worker?(issue_id)
+    end
+  end
+
+  defp live_adapter_worker?(issue_id) do
+    case Cympho.AdapterSessions.owners_for_issue(issue_id) do
+      {:ok, []} -> false
+      {:ok, [_ | _]} -> true
+      {:error, :not_started} -> true
     end
   end
 
@@ -526,7 +576,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
       Task.start(fn ->
         result = stop_company_runtime(company_id, reason, state.running_issue_ids, requester)
         GenServer.reply(from, {:ok, result})
-        send(dispatcher, {:company_stop_finished, result.issue_ids})
+        send(dispatcher, {:company_stop_finished, result.issue_ids -- result.deferred_issue_ids})
       end)
 
     {:noreply, state}
@@ -559,18 +609,103 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   @impl true
   def handle_info({:session_ended, issue_id, _reason}, %State{} = state) do
-    new_state = %{state | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)}
+    running_issue_ids =
+      if live_orchestrator?(issue_id),
+        do: MapSet.put(state.running_issue_ids, issue_id),
+        else: MapSet.delete(state.running_issue_ids, issue_id)
+
+    new_state = %{state | running_issue_ids: running_issue_ids}
     {:noreply, new_state}
   end
 
   def handle_info({:company_stop_finished, issue_ids}, %State{} = state)
       when is_list(issue_ids) do
+    removable_issue_ids =
+      Enum.reject(issue_ids, fn issue_id ->
+        live_orchestrator?(issue_id) or adapter_cleanup_pending?(state.monitors, issue_id)
+      end)
+
     new_state = %{
       state
-      | running_issue_ids: MapSet.difference(state.running_issue_ids, MapSet.new(issue_ids))
+      | running_issue_ids:
+          MapSet.difference(state.running_issue_ids, MapSet.new(removable_issue_ids))
     }
 
     {:noreply, new_state}
+  end
+
+  def handle_info({:defer_adapter_cleanup, issue_id, worker_pid, reason}, %State{} = state)
+      when is_binary(issue_id) and is_pid(worker_pid) do
+    {:noreply, monitor_adapter_workers(state, issue_id, [worker_pid], reason, :stop)}
+  end
+
+  def handle_info({:retry_issue_cleanup, issue_id, reason}, %State{} = state) do
+    case Cympho.AdapterSessions.cancel_for_issue(issue_id, reason) do
+      {:ok, []} ->
+        case safe_stop_issue_for_retry(issue_id, reason) do
+          {:ok, %{deferred_issue_ids: deferred}} ->
+            running_issue_ids =
+              if issue_id in deferred,
+                do: MapSet.put(state.running_issue_ids, issue_id),
+                else: MapSet.delete(state.running_issue_ids, issue_id)
+
+            {:noreply, %{state | running_issue_ids: running_issue_ids}}
+
+          {:error, :retry} ->
+            Process.send_after(
+              self(),
+              {:retry_issue_cleanup, issue_id, reason},
+              @adapter_ledger_retry_ms
+            )
+
+            {:noreply,
+             %{state | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id)}}
+
+          _completed ->
+            {:noreply,
+             %{state | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)}}
+        end
+
+      {:ok, workers} ->
+        {:noreply, monitor_adapter_workers(state, issue_id, workers, reason, :stop)}
+
+      {:error, :not_started} ->
+        Process.send_after(
+          self(),
+          {:retry_issue_cleanup, issue_id, reason},
+          @adapter_ledger_retry_ms
+        )
+
+        {:noreply, %{state | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id)}}
+    end
+  end
+
+  def handle_info({:retry_controller_cleanup, issue_id, controller_pid, reason}, %State{} = state) do
+    case Cympho.AdapterSessions.owners_for_controller(controller_pid) do
+      {:ok, []} ->
+        if live_orchestrator?(issue_id) do
+          {:noreply, %{state | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id)}}
+        else
+          unless graceful_down_reason?(reason),
+            do: release_crashed_session_issue(issue_id, reason)
+
+          {:noreply,
+           %{state | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)}}
+        end
+
+      {:ok, workers} ->
+        action = if(graceful_down_reason?(reason), do: :stop, else: :crash)
+        {:noreply, monitor_adapter_workers(state, issue_id, workers, reason, action)}
+
+      {:error, :not_started} ->
+        Process.send_after(
+          self(),
+          {:retry_controller_cleanup, issue_id, controller_pid, reason},
+          @adapter_ledger_retry_ms
+        )
+
+        {:noreply, %{state | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id)}}
+    end
   end
 
   # Orchestrator process went down. Normal terminations already sent
@@ -579,22 +714,49 @@ defmodule Cympho.Orchestrator.Dispatcher do
   # :in_progress issue is released for re-dispatch instead of waiting for
   # the next watchdog sweep.
   @impl true
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %State{} = state) do
+  def handle_info({:DOWN, ref, :process, pid, reason}, %State{} = state) do
     case Map.pop(state.monitors, ref) do
       {nil, monitors} ->
         {:noreply, %{state | monitors: monitors}}
 
-      {issue_id, monitors} ->
-        unless graceful_down_reason?(reason) do
-          release_crashed_session_issue(issue_id, reason)
+      {{:adapter_cleanup, issue_id, orchestrator_reason, action}, monitors} ->
+        if adapter_cleanup_pending?(monitors, issue_id) do
+          {:noreply, %{state | monitors: monitors}}
+        else
+          finish_adapter_cleanup(state, monitors, issue_id, orchestrator_reason, action)
         end
 
-        {:noreply,
-         %{
-           state
-           | monitors: monitors,
-             running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)
-         }}
+      {issue_id, monitors} ->
+        state = %{state | monitors: monitors}
+
+        case Cympho.AdapterSessions.owners_for_controller(pid) do
+          {:ok, [_ | _] = workers} ->
+            action = if(graceful_down_reason?(reason), do: :stop, else: :crash)
+            {:noreply, monitor_adapter_workers(state, issue_id, workers, reason, action)}
+
+          {:ok, []} ->
+            if live_orchestrator?(issue_id) do
+              {:noreply,
+               %{state | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id)}}
+            else
+              unless graceful_down_reason?(reason) do
+                release_crashed_session_issue(issue_id, reason)
+              end
+
+              {:noreply,
+               %{state | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)}}
+            end
+
+          {:error, :not_started} ->
+            Process.send_after(
+              self(),
+              {:retry_controller_cleanup, issue_id, pid, reason},
+              @adapter_ledger_retry_ms
+            )
+
+            {:noreply,
+             %{state | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id)}}
+        end
     end
   end
 
@@ -603,31 +765,16 @@ defmodule Cympho.Orchestrator.Dispatcher do
     {:noreply, state}
   end
 
-  # Graceful shutdown: release issues stranded by dead sessions back to
-  # :todo so this node on next boot can pick them up cleanly. Orchestrators
-  # are deliberately not linked to the dispatcher, so a session may still be
-  # live here — releasing its issue out from under it would double-dispatch
-  # the same work, so those are skipped (boot-time orphan recovery catches
-  # them if the whole node is going down).
+  # Orchestrators are deliberately unlinked and may register a worker at any
+  # point while this process terminates. There is no atomic snapshot spanning
+  # the Orchestrator registry, adapter ledger, and database, so releasing here
+  # has an unavoidable check/use race. Fail closed and let the replacement
+  # Dispatcher's authoritative boot reconciliation release only proven orphans.
   @impl true
   def terminate(reason, %State{running_issue_ids: running}) do
     Logger.info(
-      "[Dispatcher] terminating (reason=#{inspect(reason)}); reconciling #{MapSet.size(running)} in-flight issues"
+      "[Dispatcher] terminating (reason=#{inspect(reason)}); preserving #{MapSet.size(running)} in-flight issue fence(s) for restart reconciliation"
     )
-
-    Enum.each(MapSet.to_list(running), fn issue_id ->
-      try do
-        with nil <- Orchestrator.whereis(issue_id),
-             {:ok, %{status: :in_progress} = issue} <- Cympho.Issues.get_issue(issue_id) do
-          _ = Cympho.Issues.force_release_issue(issue, :todo)
-        else
-          _ -> :ok
-        end
-      rescue
-        # Best-effort: never raise from terminate or we delay supervisor shutdown.
-        _ -> :ok
-      end
-    end)
 
     :ok
   end
@@ -654,6 +801,120 @@ defmodule Cympho.Orchestrator.Dispatcher do
   defp graceful_down_reason?(:issue_terminal), do: true
   defp graceful_down_reason?(:issue_deleted), do: true
   defp graceful_down_reason?(_reason), do: false
+
+  defp monitor_adapter_workers(state, issue_id, workers, reason, action) do
+    {reason, action} = cleanup_precedence(state.monitors, issue_id, reason, action)
+
+    monitors =
+      Enum.into(state.monitors, %{}, fn
+        {ref, {:adapter_cleanup, ^issue_id, _old_reason, _old_action}} ->
+          {ref, {:adapter_cleanup, issue_id, reason, action}}
+
+        entry ->
+          entry
+      end)
+
+    monitors =
+      workers
+      |> Enum.uniq()
+      |> Enum.reduce(monitors, fn worker, monitors ->
+        Map.put(monitors, Process.monitor(worker), {:adapter_cleanup, issue_id, reason, action})
+      end)
+
+    %{
+      state
+      | running_issue_ids: MapSet.put(state.running_issue_ids, issue_id),
+        monitors: monitors
+    }
+  end
+
+  defp cleanup_precedence(monitors, issue_id, reason, :crash) do
+    Enum.find_value(monitors, {reason, :crash}, fn
+      {_ref, {:adapter_cleanup, ^issue_id, stop_reason, :stop}} -> {stop_reason, :stop}
+      _ -> nil
+    end)
+  end
+
+  defp cleanup_precedence(_monitors, _issue_id, reason, :stop), do: {reason, :stop}
+
+  defp adapter_cleanup_pending?(monitors, issue_id) do
+    Enum.any?(monitors, fn
+      {_ref, {:adapter_cleanup, ^issue_id, _reason, _action}} -> true
+      _ -> false
+    end)
+  end
+
+  defp finish_adapter_cleanup(state, monitors, issue_id, reason, :stop) do
+    case safe_stop_issue_for_retry(issue_id, reason) do
+      {:ok, %{deferred_issue_ids: deferred}} ->
+        running_issue_ids =
+          if issue_id in deferred,
+            do: MapSet.put(state.running_issue_ids, issue_id),
+            else: MapSet.delete(state.running_issue_ids, issue_id)
+
+        {:noreply, %{state | monitors: monitors, running_issue_ids: running_issue_ids}}
+
+      {:error, :retry} ->
+        Process.send_after(
+          self(),
+          {:retry_issue_cleanup, issue_id, reason},
+          @adapter_ledger_retry_ms
+        )
+
+        {:noreply,
+         %{
+           state
+           | monitors: monitors,
+             running_issue_ids: MapSet.put(state.running_issue_ids, issue_id)
+         }}
+
+      _completed ->
+        {:noreply,
+         %{
+           state
+           | monitors: monitors,
+             running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)
+         }}
+    end
+  end
+
+  defp finish_adapter_cleanup(state, monitors, issue_id, reason, :crash) do
+    release_crashed_session_issue(issue_id, reason)
+
+    running_issue_ids =
+      if live_orchestrator?(issue_id),
+        do: MapSet.put(state.running_issue_ids, issue_id),
+        else: MapSet.delete(state.running_issue_ids, issue_id)
+
+    {:noreply,
+     %{
+       state
+       | monitors: monitors,
+         running_issue_ids: running_issue_ids
+     }}
+  end
+
+  defp safe_stop_issue_for_retry(issue_id, reason) do
+    stop_issue(issue_id, reason)
+  rescue
+    error ->
+      Logger.warning("[Dispatcher] deferred issue cleanup will retry",
+        component: "dispatcher",
+        issue_id: issue_id,
+        error: Exception.message(error)
+      )
+
+      {:error, :retry}
+  catch
+    :exit, exit_reason ->
+      Logger.warning("[Dispatcher] deferred issue cleanup exited and will retry",
+        component: "dispatcher",
+        issue_id: issue_id,
+        error: inspect(exit_reason)
+      )
+
+      {:error, :retry}
+  end
 
   defp release_crashed_session_issue(issue_id, reason) do
     Logger.warning(
@@ -783,12 +1044,11 @@ defmodule Cympho.Orchestrator.Dispatcher do
         result
 
       {:exit, exit_reason} ->
-        empty_stop_result(reason, requester)
+        defer_company_stop_retry(issues, reason, requester)
         |> add_stop_error(nil, {:company_stop_worker_failed, exit_reason})
 
       nil ->
-        empty_stop_result(reason, requester)
-        |> Map.put(:issue_ids, Enum.map(issues, & &1.id))
+        defer_company_stop_retry(issues, reason, requester)
         |> add_stop_error(nil, {:company_stop_deadline_exceeded, deadline_ms})
     end
   end
@@ -811,6 +1071,20 @@ defmodule Cympho.Orchestrator.Dispatcher do
       {:ok, result}, acc -> merge_stop_results(acc, result)
       {:exit, task_reason}, acc -> add_stop_error(acc, nil, {:issue_stop_failed, task_reason})
     end)
+  end
+
+  defp defer_company_stop_retry(issues, reason, requester) do
+    issue_ids = Enum.map(issues, & &1.id)
+
+    if dispatcher = Process.whereis(__MODULE__) do
+      Enum.each(issue_ids, &send(dispatcher, {:retry_issue_cleanup, &1, reason}))
+    end
+
+    %{
+      empty_stop_result(reason, requester)
+      | issue_ids: issue_ids,
+        deferred_issue_ids: issue_ids
+    }
   end
 
   defp company_stop_deadline_ms do
@@ -849,6 +1123,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     %{
       acc
       | issue_ids: acc.issue_ids ++ result.issue_ids,
+        deferred_issue_ids: acc.deferred_issue_ids ++ result.deferred_issue_ids,
         errors: acc.errors ++ result.errors
     }
   end
@@ -882,7 +1157,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
       issues_released: 0,
       runs_cancelled: 0,
       agents_idled: 0,
-      errors: []
+      errors: [],
+      deferred_issue_ids: []
     }
   end
 
@@ -914,13 +1190,27 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp stop_runtime_issue(%Issue{} = issue, acc) do
-    acc
-    |> track_issue(issue.id)
-    |> maybe_stop_orchestrator(issue.id, {:runtime_stop, acc.reason})
-    |> maybe_release_issue(issue)
-    |> cancel_issue_runs(issue.id)
-    |> release_issue_environment(issue)
-    |> idle_agent(issue.assignee_id)
+    acc =
+      acc
+      |> track_issue(issue.id)
+      |> maybe_stop_orchestrator(issue.id, {:runtime_stop, acc.reason})
+
+    acc =
+      if issue.id not in acc.deferred_issue_ids do
+        defer_issue_adapter_workers(acc, issue.id, {:runtime_stop, acc.reason})
+      else
+        acc
+      end
+
+    if issue.id in acc.deferred_issue_ids do
+      acc
+    else
+      acc
+      |> maybe_release_issue(issue)
+      |> cancel_issue_runs(issue.id)
+      |> release_issue_environment(issue)
+      |> idle_agent(issue.assignee_id)
+    end
   end
 
   defp release_issue_environment(acc, %Issue{} = issue) do
@@ -962,7 +1252,10 @@ defmodule Cympho.Orchestrator.Dispatcher do
         # orchestrator handles `{:stop_orchestrator, reason}` as soon as its call
         # returns, which is the same shutdown path with no mutual wait.
         send(pid, {:stop_orchestrator, reason})
-        Map.update!(acc, :orchestrators_stopped, &(&1 + 1))
+
+        acc
+        |> Map.update!(:orchestrators_stopped, &(&1 + 1))
+        |> defer_issue_adapter_workers(issue_id, reason)
 
       _pid ->
         session_id = issue_id |> Orchestrator.get_session_state() |> adapter_session_id()
@@ -971,9 +1264,14 @@ defmodule Cympho.Orchestrator.Dispatcher do
         try do
           :ok = Orchestrator.stop(issue_id, reason)
 
-          acc
-          |> Map.update!(:orchestrators_stopped, &(&1 + 1))
-          |> record_adapter_session_stop(issue_id, session_id, registered_before_stop?)
+          acc =
+            acc
+            |> Map.update!(:orchestrators_stopped, &(&1 + 1))
+            |> record_adapter_session_stop(issue_id, session_id, registered_before_stop?)
+
+          if issue_id in acc.deferred_issue_ids,
+            do: acc,
+            else: defer_issue_adapter_workers(acc, issue_id, reason)
         catch
           :exit, reason ->
             add_stop_error(acc, issue_id, {:orchestrator_stop_failed, reason})
@@ -990,13 +1288,12 @@ defmodule Cympho.Orchestrator.Dispatcher do
   defp record_adapter_session_stop(acc, _issue_id, _session_id, false), do: acc
 
   defp record_adapter_session_stop(acc, issue_id, session_id, true) do
-    acc = Map.update!(acc, :adapter_sessions_cancel_requested, &(&1 + 1))
-
     if adapter_session_cleared?(session_id) do
-      Map.update!(acc, :adapter_sessions_cancel_confirmed, &(&1 + 1))
-    else
       acc
-      |> Map.update!(:adapter_sessions_still_registered, &(&1 + 1))
+      |> Map.update!(:adapter_sessions_cancel_requested, &(&1 + 1))
+      |> Map.update!(:adapter_sessions_cancel_confirmed, &(&1 + 1))
+    else
+      defer_issue_adapter_workers(acc, issue_id, {:runtime_stop, acc.reason})
       |> add_stop_error(issue_id, {:adapter_session_still_registered, inspect(session_id)})
     end
   end
@@ -1012,6 +1309,36 @@ defmodule Cympho.Orchestrator.Dispatcher do
       adapter_session_cleared?(session_id, attempts - 1)
     else
       true
+    end
+  end
+
+  defp maybe_defer_adapter_cleanup_for_worker(issue_id, worker_pid, reason) do
+    if dispatcher = Process.whereis(__MODULE__) do
+      send(dispatcher, {:defer_adapter_cleanup, issue_id, worker_pid, reason})
+    end
+
+    :ok
+  end
+
+  defp defer_issue_adapter_workers(acc, issue_id, reason) do
+    case Cympho.AdapterSessions.cancel_for_issue(issue_id, reason) do
+      {:ok, []} ->
+        acc
+
+      {:ok, workers} ->
+        Enum.each(workers, &maybe_defer_adapter_cleanup_for_worker(issue_id, &1, reason))
+
+        acc
+        |> Map.update!(:adapter_sessions_cancel_requested, &(&1 + length(workers)))
+        |> Map.update!(:adapter_sessions_still_registered, &(&1 + length(workers)))
+        |> Map.update!(:deferred_issue_ids, fn ids -> Enum.uniq([issue_id | ids]) end)
+
+      {:error, :not_started} ->
+        if dispatcher = Process.whereis(__MODULE__) do
+          send(dispatcher, {:retry_issue_cleanup, issue_id, reason})
+        end
+
+        Map.update!(acc, :deferred_issue_ids, fn ids -> Enum.uniq([issue_id | ids]) end)
     end
   end
 

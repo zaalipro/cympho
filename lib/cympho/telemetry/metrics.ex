@@ -39,6 +39,7 @@ defmodule Cympho.Telemetry.Metrics do
   # growing mailbox here means the whole install is falling behind.
   @singletons [
     {Cympho.Orchestrator.Dispatcher, :dispatcher},
+    {Cympho.RuntimeAdmission, :runtime_admission},
     {Cympho.EventStore, :event_store},
     {Cympho.RateLimiting.BroadcastDedup, :broadcast_dedup},
     {Cympho.RateLimiting.IpRateLimiter, :ip_rate_limiter},
@@ -119,7 +120,25 @@ defmodule Cympho.Telemetry.Metrics do
       last_value("cympho.runtime.supervisor.saturation_pct",
         tags: [:supervisor],
         description: "How close this supervisor is to refusing new children"
-      )
+      ),
+      counter("cympho.runtime_admission.checkout.count",
+        tags: [:execution_class, :outcome, :reason]
+      ),
+      counter("cympho.runtime_admission.available.count",
+        tags: [:execution_class, :outcome, :reason]
+      ),
+      counter("cympho.runtime_admission.release.count",
+        tags: [:execution_class, :outcome, :reason]
+      ),
+      last_value("cympho.runtime_admission.checkout.local_running"),
+      last_value("cympho.runtime_admission.checkout.total_running"),
+      last_value("cympho.runtime_admission.checkout.gateway_running"),
+      last_value("cympho.runtime_admission.available.local_running"),
+      last_value("cympho.runtime_admission.available.total_running"),
+      last_value("cympho.runtime_admission.available.gateway_running"),
+      last_value("cympho.runtime_admission.release.local_running"),
+      last_value("cympho.runtime_admission.release.total_running"),
+      last_value("cympho.runtime_admission.release.gateway_running")
     ]
   end
 
