@@ -476,7 +476,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       paperclip:
         "Stable 2026.824 persists verified company-transfer parts and resumes interrupted imports",
       cympho:
-        "Company import is a single 50 MB JSON upload decoded into memory, without a durable part ledger",
+        "Durable actor-owned parts resume through bounded raw I/O and an exactly-once apply receipt; V1 still materializes one decoded map",
       check: &__MODULE__.check_latest_resumable_bounded_imports/0
     },
     %{
@@ -2293,18 +2293,30 @@ defmodule Mix.Tasks.Cympho.Compare do
   end
 
   def check_latest_resumable_bounded_imports do
-    transfer_module = Module.concat(Cympho.Companies, TransferRun)
-    import_source = source_for(CymphoWeb.CompanyImportLive)
+    modules = [
+      Cympho.Companies.ImportTransfer,
+      Cympho.Companies.ImportTransferPart,
+      Cympho.Companies.ImportTransferSpool,
+      Cympho.Companies.ImportTransfers
+    ]
 
-    if Code.ensure_loaded?(transfer_module) and
-         String.contains?(import_source, "consume_uploaded_entry") and
-         String.contains?(import_source, "completed_parts") and
-         String.contains?(import_source, "resume") do
+    transfer_source = source_for(Cympho.Companies.ImportTransfers)
+    spool_source = source_for(Cympho.Companies.ImportTransferSpool)
+    controller_source = source_for(CymphoWeb.CompanyImportTransferController)
+
+    if Enum.all?(modules, &Code.ensure_loaded?/1) and
+         String.contains?(transfer_source, "apply_claim_token") and
+         String.contains?(transfer_source, "admission_limits") and
+         String.contains?(transfer_source, "complete_in_transaction") and
+         String.contains?(spool_source, "64 * 1024") and
+         String.contains?(spool_source, "hash_parts") and
+         String.contains?(spool_source, "decode_json") and
+         String.contains?(controller_source, "application/octet-stream") do
       {:parity,
-       "Company import has a durable transfer ledger, bounded part consumption, verification, and resume path"}
+       "Company import has actor-owned durable part ledgers, 64 KiB raw reads, per-part and whole-file verification, missing-part resume, admission limits, and a leased exactly-once apply receipt; the V1 decoder still returns one bounded full map"}
     else
       {:gap,
-       "company import lacks a durable verified-part ledger and bounded-memory restart-safe resume path; the current LiveView reads one uploaded JSON package"}
+       "company import lacks the complete durable-ledger, bounded raw-I/O, verified resume, admission, and exactly-once apply path"}
     end
   end
 

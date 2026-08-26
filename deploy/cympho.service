@@ -1,9 +1,9 @@
 [Unit]
 Description=Cympho (Phoenix release)
-After=network-online.target docker.service cympho-git-agent.service
+After=network-online.target cympho-git-agent.service
 Wants=network-online.target cympho-git-agent.service
-# Postgres runs as a docker container; wait for docker but don't hard-require it.
-After=docker.service
+# PostgreSQL runs natively on the host. Docker is build-only and is not a
+# runtime dependency of the release service.
 
 [Service]
 Type=simple

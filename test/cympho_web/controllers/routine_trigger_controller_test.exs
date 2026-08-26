@@ -72,6 +72,17 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
       assert %{"error" => "invalid webhook secret"} = json_response(conn, 401)
     end
 
+    test "rejects malformed legacy body secrets without crashing", %{conn: conn, trigger: trigger} do
+      for malformed <- [%{"nested" => "value"}, ["value"], 42, true] do
+        response =
+          post(conn, ~p"/api/routine-triggers/#{trigger.public_id}/fire", %{
+            "secret" => malformed
+          })
+
+        assert %{"error" => "invalid webhook secret"} = json_response(response, 401)
+      end
+    end
+
     test "returns 404 for unknown public_id", %{conn: conn} do
       conn =
         conn
@@ -79,6 +90,106 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
         |> post(~p"/api/routine-triggers/nonexistent/fire")
 
       assert %{"error" => "trigger not found"} = json_response(conn, 404)
+    end
+
+    test "HMAC mode requires signature headers and rejects a body secret", %{
+      conn: conn,
+      routine: routine
+    } do
+      {:ok, trigger, secret} =
+        RoutineTriggers.create_webhook_trigger(%{
+          "routine_id" => routine.id,
+          "signing_mode" => "hmac_sha256"
+        })
+
+      conn =
+        post(conn, ~p"/api/routine-triggers/#{trigger.public_id}/fire", %{"secret" => secret})
+
+      assert %{"error" => "invalid webhook signature"} = json_response(conn, 401)
+    end
+
+    test "fires a signed request once and rejects its replay", %{conn: conn, routine: routine} do
+      {:ok, trigger, secret} =
+        RoutineTriggers.create_webhook_trigger(%{
+          "routine_id" => routine.id,
+          "signing_mode" => "hmac_sha256"
+        })
+
+      body = Jason.encode!(%{"event" => "deploy", "variables" => %{"sha" => "abc"}})
+      timestamp = Integer.to_string(DateTime.to_unix(DateTime.utc_now()))
+      signature = signed_header(secret, timestamp, body)
+
+      request = fn conn ->
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-cympho-timestamp", timestamp)
+        |> put_req_header("x-cympho-signature", signature)
+        |> post(~p"/api/routine-triggers/#{trigger.public_id}/fire", body)
+      end
+
+      assert %{"message" => "trigger fired"} = conn |> request.() |> json_response(200)
+      assert %{"error" => "webhook replay detected"} = conn |> request.() |> json_response(409)
+    end
+
+    test "rejects a tampered body and a stale timestamp", %{conn: conn, routine: routine} do
+      {:ok, trigger, secret} =
+        RoutineTriggers.create_webhook_trigger(%{
+          "routine_id" => routine.id,
+          "signing_mode" => "hmac_sha256",
+          "replay_window_seconds" => 30
+        })
+
+      body = Jason.encode!(%{"event" => "original"})
+      timestamp = Integer.to_string(DateTime.to_unix(DateTime.utc_now()))
+
+      tampered =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-cympho-timestamp", timestamp)
+        |> put_req_header("x-cympho-signature", signed_header(secret, timestamp, body))
+        |> post(~p"/api/routine-triggers/#{trigger.public_id}/fire", ~s({"event":"tampered"}))
+
+      assert %{"error" => "invalid webhook signature"} = json_response(tampered, 401)
+
+      stale_timestamp = Integer.to_string(DateTime.to_unix(DateTime.utc_now()) - 31)
+
+      stale =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-cympho-timestamp", stale_timestamp)
+        |> put_req_header(
+          "x-cympho-signature",
+          signed_header(secret, stale_timestamp, body)
+        )
+        |> post(~p"/api/routine-triggers/#{trigger.public_id}/fire", body)
+
+      assert %{"error" => "invalid webhook signature"} = json_response(stale, 401)
+
+      future_timestamp = Integer.to_string(DateTime.to_unix(DateTime.utc_now()) + 31)
+
+      future =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-cympho-timestamp", future_timestamp)
+        |> put_req_header(
+          "x-cympho-signature",
+          signed_header(secret, future_timestamp, body)
+        )
+        |> post(~p"/api/routine-triggers/#{trigger.public_id}/fire", body)
+
+      assert %{"error" => "invalid webhook signature"} = json_response(future, 401)
+
+      uppercase =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-cympho-timestamp", timestamp)
+        |> put_req_header(
+          "x-cympho-signature",
+          String.upcase(signed_header(secret, timestamp, body))
+        )
+        |> post(~p"/api/routine-triggers/#{trigger.public_id}/fire", body)
+
+      assert %{"error" => "invalid webhook signature"} = json_response(uppercase, 401)
     end
   end
 
@@ -188,11 +299,43 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
       params = %{"type" => "webhook"}
 
       conn = post(conn, ~p"/api/routines/#{routine.id}/triggers", params)
-      assert %{"data" => data, "secret" => secret} = json_response(conn, 201)
+
+      assert %{
+               "data" => data,
+               "secret" => secret,
+               "authentication" => authentication
+             } = json_response(conn, 201)
+
       assert data["type"] == "webhook"
       assert data["public_id"] != nil
+      assert data["signing_mode"] == "hmac_sha256"
+      assert data["replay_window_seconds"] == 300
+      assert authentication["mode"] == "hmac_sha256"
+      assert authentication["secret_returned_once"]
       assert is_binary(secret)
     end
+
+    test "rejects an unknown signing mode without exposing internals", %{
+      conn: conn,
+      routine: routine
+    } do
+      conn =
+        post(conn, ~p"/api/routines/#{routine.id}/triggers", %{
+          "type" => "webhook",
+          "signing_mode" => "unknown"
+        })
+
+      assert %{"error" => "invalid webhook trigger settings"} = json_response(conn, 422)
+      refute conn.resp_body =~ "invalid_signing_mode"
+    end
+  end
+
+  defp signed_header(secret, timestamp, body) do
+    digest =
+      :crypto.mac(:hmac, :sha256, secret, [timestamp, ".", body])
+      |> Base.encode16(case: :lower)
+
+    "sha256=#{digest}"
   end
 
   describe "update trigger" do

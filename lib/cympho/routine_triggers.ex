@@ -18,6 +18,12 @@ defmodule Cympho.RoutineTriggers do
   alias Cympho.RoutineTriggers.RoutineTrigger
   alias Cympho.RoutineTriggers.RoutineRun
   alias Cympho.Routines.Routine
+  alias Cympho.Secrets
+
+  # Direct/context callers retain the pre-existing reusable-secret contract.
+  # The authenticated HTTP creation endpoint opts new integrations into HMAC.
+  @default_signing_mode "legacy_bearer"
+  @default_replay_window_seconds 300
 
   # --- Trigger CRUD ---
 
@@ -40,7 +46,7 @@ defmodule Cympho.RoutineTriggers do
   end
 
   def get_trigger_by_public_id(public_id) do
-    case Repo.get_by(RoutineTrigger, public_id: public_id) do
+    case Repo.get_by(RoutineTrigger, public_id: public_id, type: "webhook") do
       nil -> {:error, :not_found}
       trigger -> {:ok, Repo.preload(trigger, :routine)}
     end
@@ -60,20 +66,96 @@ defmodule Cympho.RoutineTriggers do
     public_id = generate_public_id()
     secret_hash = hash_secret(secret)
 
+    signing_mode =
+      Map.get(attrs, "signing_mode", Map.get(attrs, :signing_mode, @default_signing_mode))
+
+    replay_window_seconds =
+      Map.get(
+        attrs,
+        "replay_window_seconds",
+        Map.get(attrs, :replay_window_seconds, @default_replay_window_seconds)
+      )
+
+    Repo.transaction(fn ->
+      with {:ok, _routine, company_id} <- webhook_routine(attrs),
+           {:ok, stored_secret} <-
+             maybe_store_webhook_secret(company_id, public_id, secret, signing_mode),
+           {:ok, trigger} <-
+             insert_webhook_trigger(
+               attrs,
+               public_id,
+               secret_hash,
+               signing_mode,
+               replay_window_seconds,
+               stored_secret
+             ) do
+        {trigger, secret}
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, {trigger, secret}} -> {:ok, trigger, secret}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp webhook_routine(attrs) do
+    routine_id = Map.get(attrs, "routine_id") || Map.get(attrs, :routine_id)
+
+    case Repo.get(Routine, routine_id) do
+      nil ->
+        {:error, :routine_not_found}
+
+      %Routine{} = routine ->
+        routine = Repo.preload(routine, [:agent, :project])
+
+        case resolve_routine_company_id(routine) do
+          {:ok, company_id} -> {:ok, routine, company_id}
+          {:error, :missing_company_id} -> {:ok, routine, nil}
+        end
+    end
+  end
+
+  defp maybe_store_webhook_secret(company_id, public_id, secret, "hmac_sha256")
+       when is_binary(company_id) do
+    Secrets.create_secret(%{
+      company_id: company_id,
+      scope: "company",
+      key: "routine_webhook_#{public_id}",
+      value: secret,
+      description: "Signing key for a routine webhook"
+    })
+  end
+
+  defp maybe_store_webhook_secret(nil, _public_id, _secret, "hmac_sha256"),
+    do: {:error, :missing_company_id}
+
+  defp maybe_store_webhook_secret(_routine, _public_id, _secret, "legacy_bearer"), do: {:ok, nil}
+
+  defp maybe_store_webhook_secret(_routine, _public_id, _secret, mode),
+    do: {:error, {:invalid_signing_mode, mode}}
+
+  defp insert_webhook_trigger(
+         attrs,
+         public_id,
+         secret_hash,
+         signing_mode,
+         replay_window_seconds,
+         stored_secret
+       ) do
     attrs =
       attrs
       |> Map.put("type", "webhook")
       |> Map.put("public_id", public_id)
       |> Map.put("secret_hash", secret_hash)
+      |> Map.put("signing_mode", signing_mode)
+      |> Map.put("replay_window_seconds", replay_window_seconds)
+      |> Map.put("secret_id", stored_secret && stored_secret.id)
 
     %RoutineTrigger{}
     |> RoutineTrigger.changeset(attrs)
     |> Repo.insert()
-    |> tap_ok(fn _ -> {:ok, secret} end)
-    |> then(fn
-      {:ok, trigger} -> {:ok, trigger, secret}
-      error -> error
-    end)
   end
 
   def update_trigger(%RoutineTrigger{} = trigger, attrs) do
@@ -104,11 +186,47 @@ defmodule Cympho.RoutineTriggers do
   end
 
   def delete_trigger(%RoutineTrigger{} = trigger) do
-    if trigger.type == "schedule" and trigger.enabled do
-      unschedule_quantum_job(trigger)
-    end
+    result =
+      Repo.transaction(fn ->
+        with {:ok, deleted} <- Repo.delete(trigger),
+             :ok <- deactivate_webhook_secret(trigger) do
+          deleted
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
 
-    Repo.delete(trigger)
+    case result do
+      {:ok, deleted} ->
+        if trigger.type == "schedule" and trigger.enabled, do: unschedule_quantum_job(trigger)
+        {:ok, deleted}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp deactivate_webhook_secret(%RoutineTrigger{secret_id: nil}), do: :ok
+
+  defp deactivate_webhook_secret(%RoutineTrigger{} = trigger) do
+    trigger = Repo.preload(trigger, routine: [:agent, :project])
+
+    with {:ok, company_id} <- resolve_routine_company_id(trigger.routine) do
+      deactivate_company_webhook_secret(company_id, trigger.secret_id)
+    end
+  end
+
+  defp deactivate_company_webhook_secret(company_id, secret_id) do
+    case Secrets.get_company_secret(company_id, secret_id) do
+      {:ok, secret} ->
+        case Secrets.delete_secret(secret) do
+          {:ok, _} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, :not_found} ->
+        :ok
+    end
   end
 
   def enable_trigger(%RoutineTrigger{} = trigger) do
@@ -124,7 +242,8 @@ defmodule Cympho.RoutineTriggers do
   @doc """
   Fires a trigger: creates a RoutineRun, an Issue, and wakes the agent.
 
-  For webhook triggers, validates the provided secret against the stored hash.
+  Public webhook entry points validate their bearer secret or HMAC before
+  calling this function.
   """
   def fire_trigger(%RoutineTrigger{} = trigger, opts \\ []) do
     trigger = Repo.preload(trigger, routine: [:agent, :project])
@@ -147,8 +266,39 @@ defmodule Cympho.RoutineTriggers do
 
   def fire_trigger_by_public_id(public_id, secret, opts \\ []) do
     with {:ok, trigger} <- get_trigger_by_public_id(public_id),
+         :legacy_bearer <- signing_kind(trigger),
          :ok <- verify_webhook_secret(trigger, secret) do
       fire_trigger(trigger, opts)
+    else
+      :hmac_sha256 -> {:error, :signature_required}
+      error -> error
+    end
+  end
+
+  @doc """
+  Verifies and fires an HMAC webhook over the exact request bytes.
+
+  The replay key is claimed in the same transaction that creates the run and
+  issue, so concurrent delivery of one signed request can produce only one.
+  """
+  def fire_signed_webhook(public_id, timestamp, signature, raw_body, opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+
+    with {:ok, trigger} <- get_trigger_by_public_id(public_id),
+         :hmac_sha256 <- signing_kind(trigger),
+         {:ok, secret} <- signed_webhook_secret(trigger),
+         {:ok, timestamp_seconds} <- parse_webhook_timestamp(timestamp),
+         :ok <- validate_replay_window(trigger, timestamp_seconds, now),
+         {:ok, expected_signature} <-
+           verify_hmac_signature(secret, timestamp, signature, raw_body) do
+      replay_key =
+        :crypto.hash(:sha256, "#{trigger.id}:#{timestamp}:#{expected_signature}")
+        |> Base.encode16(case: :lower)
+
+      fire_trigger(trigger, Keyword.put(opts, :idempotency_key, replay_key))
+    else
+      :legacy_bearer -> {:error, :legacy_bearer_required}
+      error -> error
     end
   end
 
@@ -161,7 +311,8 @@ defmodule Cympho.RoutineTriggers do
       trigger,
       trigger_type,
       variables,
-      Keyword.get(opts, :scheduled_for)
+      Keyword.get(opts, :scheduled_for),
+      Keyword.get(opts, :idempotency_key)
     )
   end
 
@@ -251,18 +402,33 @@ defmodule Cympho.RoutineTriggers do
     secret = generate_secret()
     secret_hash = hash_secret(secret)
 
-    trigger
-    |> RoutineTrigger.changeset(%{"secret_hash" => secret_hash})
-    |> Repo.update()
-    |> then(fn
-      {:ok, updated} -> {:ok, updated, secret}
-      error -> error
+    Repo.transaction(fn ->
+      with {:ok, stored_secret} <- rotate_stored_webhook_secret(trigger, secret),
+           {:ok, updated} <-
+             trigger
+             |> RoutineTrigger.changeset(%{
+               "secret_hash" => secret_hash,
+               "secret_id" => stored_secret && stored_secret.id
+             })
+             |> Repo.update() do
+        {updated, secret}
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
     end)
+    |> case do
+      {:ok, {updated, secret}} -> {:ok, updated, secret}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   def rotate_webhook_secret(%RoutineTrigger{}), do: {:error, :not_webhook_trigger}
 
-  def verify_webhook_secret(%RoutineTrigger{secret_hash: stored_hash}, secret) do
+  def verify_webhook_secret(
+        %RoutineTrigger{secret_hash: stored_hash},
+        secret
+      )
+      when is_binary(stored_hash) and byte_size(stored_hash) == 64 and is_binary(secret) do
     computed_hash = hash_secret(secret)
 
     if Plug.Crypto.secure_compare(computed_hash, stored_hash) do
@@ -271,6 +437,85 @@ defmodule Cympho.RoutineTriggers do
       {:error, :invalid_secret}
     end
   end
+
+  def verify_webhook_secret(%RoutineTrigger{}, _secret), do: {:error, :invalid_secret}
+
+  defp rotate_stored_webhook_secret(
+         %RoutineTrigger{signing_mode: "hmac_sha256"} = trigger,
+         secret
+       ) do
+    trigger = Repo.preload(trigger, routine: [:agent, :project])
+
+    with {:ok, company_id} <- resolve_routine_company_id(trigger.routine),
+         {:ok, stored} <- Secrets.get_company_secret(company_id, trigger.secret_id),
+         {:ok, %{create_new: rotated}} <- Secrets.rotate_secret(stored, secret) do
+      {:ok, rotated}
+    end
+  end
+
+  defp rotate_stored_webhook_secret(_trigger, _secret), do: {:ok, nil}
+
+  defp signing_kind(%RoutineTrigger{signing_mode: "hmac_sha256"}), do: :hmac_sha256
+
+  defp signing_kind(%RoutineTrigger{signing_mode: mode}) when mode in [nil, "legacy_bearer"],
+    do: :legacy_bearer
+
+  defp signing_kind(%RoutineTrigger{}), do: {:error, :invalid_signing_mode}
+
+  defp signed_webhook_secret(%RoutineTrigger{secret_id: nil}),
+    do: {:error, :missing_signing_secret}
+
+  defp signed_webhook_secret(%RoutineTrigger{} = trigger) do
+    routine = trigger.routine && Repo.preload(trigger.routine, [:agent, :project])
+
+    with %Routine{} <- routine,
+         {:ok, company_id} <- resolve_routine_company_id(routine),
+         {:ok, stored} <- Secrets.get_company_secret(company_id, trigger.secret_id),
+         {:ok, secret} <- Secrets.get_secret_value(stored.id) do
+      {:ok, secret}
+    else
+      _ -> {:error, :missing_signing_secret}
+    end
+  end
+
+  defp parse_webhook_timestamp(timestamp) when is_binary(timestamp) do
+    case Integer.parse(timestamp) do
+      {seconds, ""} when seconds >= 0 -> {:ok, seconds}
+      _ -> {:error, :invalid_signature}
+    end
+  end
+
+  defp parse_webhook_timestamp(_), do: {:error, :invalid_signature}
+
+  defp validate_replay_window(trigger, timestamp_seconds, now) do
+    window = trigger.replay_window_seconds || @default_replay_window_seconds
+
+    if abs(DateTime.to_unix(now) - timestamp_seconds) <= window,
+      do: :ok,
+      else: {:error, :stale_signature}
+  end
+
+  defp verify_hmac_signature(secret, timestamp, "sha256=" <> provided, raw_body)
+       when is_binary(raw_body) do
+    expected =
+      :crypto.mac(:hmac, :sha256, secret, [timestamp, ".", raw_body])
+      |> Base.encode16(case: :lower)
+
+    if safe_compare_hex(expected, provided),
+      do: {:ok, expected},
+      else: {:error, :invalid_signature}
+  end
+
+  defp verify_hmac_signature(_secret, _timestamp, _signature, _body),
+    do: {:error, :invalid_signature}
+
+  defp safe_compare_hex(expected, provided) when byte_size(expected) == byte_size(provided) do
+    if Regex.match?(~r/^[0-9a-f]{64}$/, provided),
+      do: Plug.Crypto.secure_compare(expected, provided),
+      else: false
+  end
+
+  defp safe_compare_hex(_expected, _provided), do: false
 
   defp generate_secret do
     :crypto.strong_rand_bytes(32) |> Base.encode64(padding: false)
@@ -411,7 +656,7 @@ defmodule Cympho.RoutineTriggers do
   defp do_manual_run(routine, opts) do
     variables = Keyword.get(opts, :variables, %{})
 
-    enqueue_run(routine.id, nil, "manual", variables, nil)
+    enqueue_run(routine.id, nil, "manual", variables, nil, nil)
   end
 
   defp create_manual_run_issue(repo, _run, routine, company_id, now) do
@@ -484,7 +729,7 @@ defmodule Cympho.RoutineTriggers do
 
   defp tap_ok(error, _fun), do: error
 
-  defp enqueue_run(routine_id, trigger, trigger_type, variables, scheduled_for) do
+  defp enqueue_run(routine_id, trigger, trigger_type, variables, scheduled_for, idempotency_key) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     result =
@@ -493,6 +738,7 @@ defmodule Cympho.RoutineTriggers do
         # runs, so a manual, webhook, or cron fire cannot pass the check while
         # another fire is still creating its run and issue.
         with {:ok, context} <- lock_run_context(Repo, routine_id),
+             :fresh <- claim_webhook_delivery(Repo, trigger, idempotency_key),
              :claimed <-
                claim_scheduled_occurrence(
                  Repo,
@@ -502,16 +748,40 @@ defmodule Cympho.RoutineTriggers do
                  now
                ) do
           case context.decision do
-            :enqueue -> insert_run_and_issue(Repo, context, trigger, trigger_type, variables, now)
-            {:skip, policy} -> {:skip, policy}
+            :enqueue ->
+              insert_run_and_issue(
+                Repo,
+                context,
+                trigger,
+                trigger_type,
+                variables,
+                now,
+                idempotency_key
+              )
+
+            {:skip, policy} ->
+              {:skip, policy}
           end
         else
           {:skip, _reason} = skip -> skip
+          {:error, :webhook_replay} -> Repo.rollback(:webhook_replay)
           {:error, reason} -> Repo.rollback({:run_context, reason})
         end
       end)
 
     finish_run_transaction(result)
+  end
+
+  defp claim_webhook_delivery(_repo, _trigger, nil), do: :fresh
+
+  defp claim_webhook_delivery(repo, %RoutineTrigger{id: trigger_id}, idempotency_key) do
+    if repo.exists?(
+         from(r in RoutineRun,
+           where: r.trigger_id == ^trigger_id and r.idempotency_key == ^idempotency_key
+         )
+       ),
+       do: {:error, :webhook_replay},
+       else: :fresh
   end
 
   defp lock_run_context(repo, routine_id) do
@@ -555,7 +825,15 @@ defmodule Cympho.RoutineTriggers do
     )
   end
 
-  defp insert_run_and_issue(repo, context, trigger, trigger_type, variables, now) do
+  defp insert_run_and_issue(
+         repo,
+         context,
+         trigger,
+         trigger_type,
+         variables,
+         now,
+         idempotency_key
+       ) do
     attrs = %{
       "trigger_type" => trigger_type,
       "triggered_at" => now,
@@ -563,7 +841,8 @@ defmodule Cympho.RoutineTriggers do
       "trigger_id" => trigger && trigger.id,
       "status" => "pending",
       "variables" => variables,
-      "concurrency_guarded" => context.concurrency_guarded
+      "concurrency_guarded" => context.concurrency_guarded,
+      "idempotency_key" => idempotency_key
     }
 
     case %RoutineRun{} |> RoutineRun.changeset(attrs) |> repo.insert() do
@@ -571,10 +850,15 @@ defmodule Cympho.RoutineTriggers do
         insert_run_issue(repo, context, trigger, run, now)
 
       {:error, changeset} ->
-        if context.concurrency_guarded and guarded_active_constraint?(changeset) do
-          repo.rollback({:guarded_conflict, context.policy})
-        else
-          repo.rollback({:run, changeset})
+        cond do
+          idempotency_constraint?(changeset) ->
+            repo.rollback(:webhook_replay)
+
+          context.concurrency_guarded and guarded_active_constraint?(changeset) ->
+            repo.rollback({:guarded_conflict, context.policy})
+
+          true ->
+            repo.rollback({:run, changeset})
         end
     end
   end
@@ -605,6 +889,7 @@ defmodule Cympho.RoutineTriggers do
 
   defp finish_run_transaction({:ok, {:skip, reason}}), do: {:skip, reason}
   defp finish_run_transaction({:error, {:guarded_conflict, policy}}), do: {:skip, policy}
+  defp finish_run_transaction({:error, :webhook_replay}), do: {:error, :webhook_replay}
   defp finish_run_transaction({:error, {:run_context, reason}}), do: {:error, reason}
 
   defp finish_run_transaction({:error, {step, reason}}) do
@@ -616,6 +901,16 @@ defmodule Cympho.RoutineTriggers do
     Enum.any?(changeset.errors, fn
       {:routine_id, {_message, opts}} ->
         opts[:constraint_name] == "routine_runs_one_guarded_active_index"
+
+      _ ->
+        false
+    end)
+  end
+
+  defp idempotency_constraint?(changeset) do
+    Enum.any?(changeset.errors, fn
+      {field, {_message, opts}} when field in [:trigger_id, :idempotency_key] ->
+        opts[:constraint_name] == "routine_runs_trigger_idempotency_index"
 
       _ ->
         false

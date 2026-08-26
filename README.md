@@ -502,6 +502,8 @@ Background execution should be enabled deliberately in production, with adapter 
 - [`docs/QUICKSTART.md`](docs/QUICKSTART.md): safe local bootstrap and first controlled autonomy smoke
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md): production configuration, runtime controls, backup, and incident response
 - [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md): opt-in OTLP tracing, correlation fields, and redaction contract
+- [`docs/PORTABLE_PACKAGES.md`](docs/PORTABLE_PACKAGES.md): resumable company import and portable package safety
+- [`docs/ROUTINE_WEBHOOKS.md`](docs/ROUTINE_WEBHOOKS.md): replay-safe signed routine webhook contract
 - [`SECURITY.md`](SECURITY.md): vulnerability reporting and deployment baseline
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): contribution and verification workflow
 - [`ROADMAP.md`](ROADMAP.md): current direction and evidence-backed priorities

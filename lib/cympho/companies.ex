@@ -4,6 +4,7 @@ defmodule Cympho.Companies do
   alias Cympho.Companies.Company
   alias Cympho.Companies.CompanyMembership
   alias Cympho.Companies.CompanyInvite
+  alias Cympho.Companies.ImportTransfers
   alias Cympho.Companies.Portability
   alias Cympho.Companies.JoinRequest
   alias Cympho.Agents.{Agent, RolePlaybook}
@@ -3362,11 +3363,13 @@ defmodule Cympho.Companies do
 
   defp do_import_company(data, owner_user_id, opts) do
     slug_strategy = Keyword.get(opts, :slug_strategy, :suffix)
+    after_import = Keyword.get(opts, :after_import)
 
     with {:ok, owner} <- import_owner(owner_user_id),
          {:ok, preview} <- Portability.preview_import(data, slug_strategy: slug_strategy),
+         :ok <- ImportTransfers.validate_apply_capacity(preview, opts),
          :ok <- import_preview_ready(preview) do
-      import_company!(data, slug_strategy, preview.target.slug, owner)
+      import_company!(data, slug_strategy, preview.target.slug, owner, after_import)
     else
       {:error, %{errors: errors}} when is_list(errors) ->
         {:error, Enum.map_join(errors, " ", & &1.message)}
@@ -3393,7 +3396,8 @@ defmodule Cympho.Companies do
     {:error, "Company slug #{slug} already exists and the fail strategy blocks import."}
   end
 
-  defp import_company!(data, slug_strategy, target_slug, owner) when is_map(data) do
+  defp import_company!(data, slug_strategy, target_slug, owner, after_import)
+       when is_map(data) do
     company_data = get_export_field(data, :company, %{})
 
     Repo.transaction(fn ->
@@ -3403,11 +3407,11 @@ defmodule Cympho.Companies do
         |> create_company_with_retry(slug_strategy, target_slug)
         |> import_record!("Company")
 
-      # Import users first (memberships reference them)
-      user_id_map = import_users(get_export_field(data, :users, []), company.id)
+      source_users = get_export_field(data, :users, [])
+      source_memberships = get_export_field(data, :memberships, [])
+      user_id_map = import_user_id_map(source_users, owner)
 
-      # Import memberships
-      import_memberships(get_export_field(data, :memberships, []), company.id, user_id_map)
+      import_user_invitations!(source_users, source_memberships, company.id, owner, user_id_map)
 
       ensure_import_owner!(owner, company)
 
@@ -3450,12 +3454,26 @@ defmodule Cympho.Companies do
         users: user_id_map
       }
 
-      %{
+      result = %{
         company: company,
         id_maps: id_maps,
         secrets_to_restore: secrets_to_restore(data, id_maps)
       }
+
+      run_after_import!(after_import, result)
+      result
     end)
+  end
+
+  defp run_after_import!(nil, _result), do: :ok
+
+  defp run_after_import!(callback, result) when is_function(callback, 1) do
+    case callback.(result) do
+      :ok -> :ok
+      {:ok, _value} -> :ok
+      {:error, reason} -> Repo.rollback(reason)
+      other -> Repo.rollback({:invalid_after_import_result, other})
+    end
   end
 
   defp ensure_import_owner!(nil, _company), do: :ok
@@ -3480,10 +3498,11 @@ defmodule Cympho.Companies do
         |> import_record!("Import owner membership")
     end
 
-    owner
-    |> Ecto.Changeset.change(company_id: company.id)
-    |> Repo.update()
-    |> import_record!("Import owner")
+    # Import grants access to the new company without silently switching the
+    # user's global/default company. The caller can offer an explicit switch
+    # after success; retries and background imports must not mutate navigation
+    # context as a side effect.
+    :ok
   end
 
   defp secrets_to_restore(data, id_maps) do
@@ -3567,64 +3586,60 @@ defmodule Cympho.Companies do
     String.slice(original_slug, 0, 50 - String.length(suffix)) <> suffix
   end
 
-  # Returns map of old_user_id -> new_user_id
-  defp import_users(users, company_id) do
+  # Portable identities are not authority to look up, create, or mutate global
+  # user accounts. Only the authenticated importer may retain human attribution,
+  # and only when their normalized email is present in the package.
+  defp import_user_id_map(users, %User{} = owner) do
     Enum.reduce(users, %{}, fn user_data, acc ->
-      source_id = source_id!(user_data, "user")
-
-      # Check if user with this email already exists
-      existing_user =
-        case Cympho.Users.get_user_by_email(get_export_field(user_data, :email)) do
-          {:ok, user} -> user
-          {:error, :not_found} -> nil
-        end
-
-      if existing_user do
-        # Link to existing user - the membership will use the existing user
-        Map.put(acc, source_id, existing_user.id)
+      if imported_owner?(user_data, owner) do
+        Map.put(acc, source_id!(user_data, "user"), owner.id)
       else
-        # Create new user with a random password they must reset
-        random_password = :crypto.strong_rand_bytes(16) |> Base.encode64()
-
-        attrs = %{
-          email: get_export_field(user_data, :email),
-          name: get_export_field(user_data, :name),
-          password: random_password,
-          company_id: company_id
-        }
-
-        user =
-          %Cympho.Users.User{}
-          |> Cympho.Users.User.registration_changeset(attrs)
-          |> Repo.insert()
-          |> import_record!("User")
-
-        Map.put(acc, source_id, user.id)
+        acc
       end
     end)
   end
 
-  defp import_memberships(memberships, company_id, user_id_map) do
-    Enum.each(memberships, fn membership_data ->
-      new_user_id =
-        remap_id!(
-          user_id_map,
-          get_export_field(membership_data, :user_id),
-          "membership user"
-        )
+  defp import_user_id_map(_users, nil), do: %{}
 
-      attrs = %{
-        user_id: new_user_id,
-        company_id: company_id,
-        role: get_export_field(membership_data, :role, "member"),
-        is_board_member: get_export_field(membership_data, :is_board_member, false)
-      }
+  defp import_user_invitations!(_users, _memberships, _company_id, nil, _user_id_map),
+    do: :ok
 
-      %CompanyMembership{}
-      |> CompanyMembership.changeset(attrs)
-      |> Repo.insert()
-      |> import_record!("Membership")
+  defp import_user_invitations!(users, memberships, company_id, %User{} = owner, user_id_map) do
+    membership_roles =
+      Map.new(memberships, fn membership ->
+        {get_export_field(membership, :user_id), imported_invite_role(membership)}
+      end)
+
+    Enum.each(users, fn user_data ->
+      source_id = source_id!(user_data, "user")
+
+      unless Map.has_key?(user_id_map, source_id) do
+        create_invite(%{
+          company_id: company_id,
+          inviter_id: owner.id,
+          email: get_export_field(user_data, :email),
+          role: Map.get(membership_roles, source_id, "member")
+        })
+        |> import_record!("User invitation")
+      end
     end)
+  end
+
+  defp imported_owner?(user_data, %User{} = owner) do
+    case get_export_field(user_data, :email) do
+      email when is_binary(email) ->
+        User.normalize_email(email) == User.normalize_email(owner.email)
+
+      _email ->
+        false
+    end
+  end
+
+  defp imported_invite_role(membership) do
+    case get_export_field(membership, :role, "member") do
+      role when role in ["viewer", :viewer] -> "viewer"
+      _role -> "member"
+    end
   end
 
   defp import_labels(labels, company_id) do
@@ -3991,11 +4006,7 @@ defmodule Cympho.Companies do
               "issue assignee"
             ),
           assignee_user_id:
-            remap_optional_id!(
-              user_id_map,
-              get_export_field(issue_data, :assignee_user_id),
-              "issue user assignee"
-            ),
+            remap_imported_user(user_id_map, get_export_field(issue_data, :assignee_user_id)),
           goal_id:
             remap_optional_id!(
               goal_id_map,
@@ -4009,11 +4020,7 @@ defmodule Cympho.Companies do
               "issue agent creator"
             ),
           created_by_user_id:
-            remap_optional_id!(
-              user_id_map,
-              get_export_field(issue_data, :created_by_user_id),
-              "issue user creator"
-            ),
+            remap_imported_user(user_id_map, get_export_field(issue_data, :created_by_user_id)),
           last_reviewer_id:
             remap_optional_id!(
               agent_id_map,
@@ -4107,7 +4114,10 @@ defmodule Cympho.Companies do
         {"agent", remap_id!(agent_id_map, author_id, "comment agent author")}
 
       author_type when author_type in ["user", :user] ->
-        {"user", remap_id!(user_id_map, author_id, "comment user author")}
+        case remap_imported_user(user_id_map, author_id) do
+          nil -> {"system", "imported-user"}
+          owner_id -> {"user", owner_id}
+        end
 
       author_type when author_type in ["system", :system] ->
         {"system", author_id}
@@ -4129,6 +4139,9 @@ defmodule Cympho.Companies do
 
   defp remap_optional_id!(_map, nil, _association), do: nil
   defp remap_optional_id!(map, old_id, association), do: remap_id!(map, old_id, association)
+
+  defp remap_imported_user(_map, nil), do: nil
+  defp remap_imported_user(map, old_id), do: Map.get(map, old_id)
 
   defp remap_id!(map, old_id, association) do
     case Map.fetch(map, old_id) do

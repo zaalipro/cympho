@@ -22,6 +22,7 @@ git clone https://github.com/zaalipro/cympho.git
 cd cympho
 mix setup
 mix assets.build
+mix cympho.doctor
 mix phx.server
 ```
 
@@ -71,9 +72,28 @@ file. Never paste them into an issue, comment, screenshot, URL, or commit.
 ## Verify the checkout
 
 ```bash
+mix cympho.doctor
+mix compile >/dev/null && mix cympho.doctor --json > cympho-doctor.json
 mix test
 mix cympho.compare
 ```
+
+The doctor is non-destructive: it does not change application, database, or
+configuration state and does not start the application supervisor, agents, or
+providers. It checks PostgreSQL with read-only queries. Its filesystem writes
+are exclusive zero-byte probes in configured local attachment and import-spool
+directories, each immediately removed; it never touches records or payloads.
+Failures exit non-zero; warnings remain successful unless `--strict` is supplied. Add
+`--probe-endpoint` only when you want a bounded TCP listener check; that probe
+does not claim application readiness.
+
+Compile first for JSON automation so Mix's own first-build progress lines
+cannot precede the one JSON document.
+
+Production must set `CYMPHO_IMPORT_SPOOL_DIR` to an absolute persistent,
+service-owned directory even when attachments use S3. Development and test
+retain their temporary local default; `deploy.sh` provisions the production
+directory outside the release payload.
 
 For deployment, backups, runtime controls, and incident handling, continue with
 the [operator guide](OPERATIONS.md). For trace export, see

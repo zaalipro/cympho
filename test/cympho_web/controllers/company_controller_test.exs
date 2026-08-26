@@ -1,7 +1,8 @@
 defmodule CymphoWeb.CompanyControllerTest do
-  use CymphoWeb.ConnCase, async: true
+  use CymphoWeb.ConnCase, async: false
 
   alias Cympho.Companies
+  alias Cympho.Companies.ImportDecodeAdmission
 
   test "creating a company atomically grants owner and board membership", %{conn: conn} do
     {conn, user, _company} = register_and_log_in_user(conn, %{role: "member"})
@@ -19,8 +20,11 @@ defmodule CymphoWeb.CompanyControllerTest do
     assert Cympho.Users.get_user!(user.id).company_id == company_id
   end
 
-  test "importing a company atomically grants the importer ownership", %{conn: conn} do
-    {conn, user, source_company} = register_and_log_in_user(conn, %{role: "admin"})
+  test "importing grants ownership without silently switching the default company", %{conn: conn} do
+    {conn, user, source_company} =
+      register_and_log_in_user(conn, %{role: "admin", is_board_member: true})
+
+    default_company_id = Cympho.Users.get_user!(user.id).company_id
 
     package =
       source_company.id |> Companies.export_company() |> Jason.encode!() |> Jason.decode!()
@@ -32,7 +36,37 @@ defmodule CymphoWeb.CompanyControllerTest do
     membership = Companies.get_membership(user.id, imported_company_id)
     assert membership.role == "owner"
     assert membership.is_board_member
-    assert Cympho.Users.get_user!(user.id).company_id == imported_company_id
+    assert Cympho.Users.get_user!(user.id).company_id == default_company_id
+  end
+
+  test "legacy whole-body import rejects a writable non-board member", %{conn: conn} do
+    {conn, _user, source_company} = register_and_log_in_user(conn, %{role: "admin"})
+
+    package =
+      source_company.id |> Companies.export_company() |> Jason.encode!() |> Jason.decode!()
+
+    conn = post(conn, "/api/companies/import", %{"company" => package})
+
+    assert %{"errors" => [%{"detail" => "No board members configured for this company"}]} =
+             json_response(conn, 403)
+  end
+
+  test "legacy whole-body import fails fast while decoded import capacity is busy", %{conn: conn} do
+    {conn, _user, source_company} =
+      register_and_log_in_user(conn, %{role: "admin", is_board_member: true})
+
+    package =
+      source_company.id |> Companies.export_company() |> Jason.encode!() |> Jason.decode!()
+
+    {:ok, token} = ImportDecodeAdmission.checkout()
+
+    try do
+      response = post(conn, "/api/companies/import", %{"company" => package})
+      assert get_resp_header(response, "retry-after") == ["5"]
+      assert %{"error" => "Import processing is currently busy"} = json_response(response, 429)
+    after
+      ImportDecodeAdmission.release(token)
+    end
   end
 
   test "regular members cannot export a company", %{conn: conn} do

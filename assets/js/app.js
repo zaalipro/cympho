@@ -1936,6 +1936,485 @@ const CopyToClipboard = {
   }
 };
 
+// Company imports are content-addressed and uploaded sequentially in bounded
+// parts. The hook deliberately uses the browser session + CSRF token rather
+// than exposing a reusable API bearer token to page JavaScript.
+const COMPANY_IMPORT_PART_BYTES = 4 * 1024 * 1024;
+const COMPANY_IMPORT_MAX_BYTES = 50_000_000;
+
+const SHA256_K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+  0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+  0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+  0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+  0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+  0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+  0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+  0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+]);
+
+function rotateRight(value, amount) {
+  return (value >>> amount) | (value << (32 - amount));
+}
+
+class IncrementalSha256 {
+  constructor() {
+    this.state = new Uint32Array([
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+    ]);
+    this.buffer = new Uint8Array(64);
+    this.bufferLength = 0;
+    this.bytesHashed = 0;
+    this.words = new Uint32Array(64);
+  }
+
+  update(input) {
+    const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+    this.bytesHashed += bytes.length;
+    let offset = 0;
+
+    if (this.bufferLength > 0) {
+      const take = Math.min(64 - this.bufferLength, bytes.length);
+      this.buffer.set(bytes.subarray(0, take), this.bufferLength);
+      this.bufferLength += take;
+      offset += take;
+      if (this.bufferLength === 64) {
+        this._compress(this.buffer);
+        this.bufferLength = 0;
+      }
+    }
+
+    while (offset + 64 <= bytes.length) {
+      this._compress(bytes.subarray(offset, offset + 64));
+      offset += 64;
+    }
+
+    if (offset < bytes.length) {
+      this.buffer.set(bytes.subarray(offset), 0);
+      this.bufferLength = bytes.length - offset;
+    }
+    return this;
+  }
+
+  hexDigest() {
+    const bitLength = this.bytesHashed * 8;
+    const finalLength = this.bufferLength < 56 ? 64 : 128;
+    const tail = new Uint8Array(finalLength);
+    tail.set(this.buffer.subarray(0, this.bufferLength));
+    tail[this.bufferLength] = 0x80;
+
+    const view = new DataView(tail.buffer);
+    view.setUint32(finalLength - 8, Math.floor(bitLength / 0x100000000), false);
+    view.setUint32(finalLength - 4, bitLength >>> 0, false);
+    for (let offset = 0; offset < finalLength; offset += 64) {
+      this._compress(tail.subarray(offset, offset + 64));
+    }
+
+    return Array.from(this.state)
+      .map((word) => word.toString(16).padStart(8, "0"))
+      .join("");
+  }
+
+  _compress(block) {
+    const words = this.words;
+    const view = new DataView(block.buffer, block.byteOffset, block.byteLength);
+    for (let index = 0; index < 16; index += 1) {
+      words[index] = view.getUint32(index * 4, false);
+    }
+    for (let index = 16; index < 64; index += 1) {
+      const x = words[index - 15];
+      const y = words[index - 2];
+      const sigma0 = rotateRight(x, 7) ^ rotateRight(x, 18) ^ (x >>> 3);
+      const sigma1 = rotateRight(y, 17) ^ rotateRight(y, 19) ^ (y >>> 10);
+      words[index] = (words[index - 16] + sigma0 + words[index - 7] + sigma1) >>> 0;
+    }
+
+    let [a, b, c, d, e, f, g, h] = this.state;
+    for (let index = 0; index < 64; index += 1) {
+      const sum1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+      const choice = (e & f) ^ (~e & g);
+      const temp1 = (h + sum1 + choice + SHA256_K[index] + words[index]) >>> 0;
+      const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+      const majority = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (sum0 + majority) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+
+    this.state[0] = (this.state[0] + a) >>> 0;
+    this.state[1] = (this.state[1] + b) >>> 0;
+    this.state[2] = (this.state[2] + c) >>> 0;
+    this.state[3] = (this.state[3] + d) >>> 0;
+    this.state[4] = (this.state[4] + e) >>> 0;
+    this.state[5] = (this.state[5] + f) >>> 0;
+    this.state[6] = (this.state[6] + g) >>> 0;
+    this.state[7] = (this.state[7] + h) >>> 0;
+  }
+}
+
+function bytesToHex(buffer) {
+  return Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+const CompanyImportTransfer = {
+  mounted() {
+    this.transferId = this.el.dataset.transferId || null;
+    this.cancelled = false;
+    this.requestController = null;
+    this.workflowGeneration = 0;
+
+    this.onChange = (event) => {
+      if (!event.target.matches("[data-transfer-file]")) return;
+      const file = event.target.files && event.target.files[0];
+      if (file) {
+        // Browsers do not fire another change event when the same file remains
+        // selected. Clear only the native control; the File object stays valid
+        // for this workflow and the progress UI keeps the filename visible.
+        event.target.value = "";
+        this.start(file);
+      }
+    };
+    this.onClick = (event) => {
+      if (!event.target.closest("[data-transfer-cancel]")) return;
+      event.preventDefault();
+      this.cancel();
+    };
+    this.el.addEventListener("change", this.onChange);
+    this.el.addEventListener("click", this.onClick);
+
+    this.handleEvent("company-import:preview", ({transfer_id, slug_strategy}) => {
+      this.transferId = transfer_id;
+      this.preview(slug_strategy);
+    });
+    this.handleEvent("company-import:apply", ({transfer_id, slug_strategy}) => {
+      this.transferId = transfer_id;
+      this.apply(slug_strategy);
+    });
+    this.handleEvent("company-import:reset", ({transfer_id}) => {
+      this.invalidateWorkflow();
+      this.deleteTransfer(transfer_id);
+      this.transferId = null;
+      this.resetProgress();
+    });
+  },
+
+  updated() {
+    if (this.el.dataset.transferId) this.transferId = this.el.dataset.transferId;
+  },
+
+  destroyed() {
+    this.invalidateWorkflow();
+    this.el.removeEventListener("change", this.onChange);
+    this.el.removeEventListener("click", this.onClick);
+  },
+
+  async start(file) {
+    const workflow = this.beginWorkflow();
+
+    if (file.size <= 0 || file.size > COMPANY_IMPORT_MAX_BYTES) {
+      this.fail("Choose a non-empty JSON export no larger than 50 MB.");
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".json")) {
+      this.fail("Choose a JSON export file.");
+      return;
+    }
+    if (!window.crypto || !window.crypto.subtle) {
+      this.fail("Secure file hashing is unavailable in this browser.");
+      return;
+    }
+
+    this.showProgress(file.name, "Verifying file…", 0);
+
+    try {
+      const partCount = Math.ceil(file.size / COMPANY_IMPORT_PART_BYTES);
+      const parts = [];
+      const wholeHash = new IncrementalSha256();
+
+      for (let position = 0; position < partCount; position += 1) {
+        this.throwIfSuperseded(workflow);
+        const start = position * COMPANY_IMPORT_PART_BYTES;
+        const end = Math.min(start + COMPANY_IMPORT_PART_BYTES, file.size);
+        const bytes = new Uint8Array(await file.slice(start, end).arrayBuffer());
+        this.throwIfSuperseded(workflow);
+        wholeHash.update(bytes);
+        const partHash = await window.crypto.subtle.digest("SHA-256", bytes);
+        this.throwIfSuperseded(workflow);
+        parts.push({position, byte_size: bytes.byteLength, sha256: bytesToHex(partHash)});
+        this.showProgress(file.name, `Verifying part ${position + 1} of ${partCount}…`,
+          Math.round(((position + 1) / partCount) * 30));
+      }
+
+      const fileSha256 = wholeHash.hexDigest();
+      const slugStrategy =
+        this.el.querySelector("[data-transfer-strategy]:checked")?.value === "fail" ?
+          "fail" : "suffix";
+      const declaration = await this.request(this.basePath(), {
+        method: "POST",
+        json: {
+          idempotency_key: `cympho_${fileSha256}_${slugStrategy}`,
+          total_bytes: file.size,
+          part_size_bytes: COMPANY_IMPORT_PART_BYTES,
+          file_sha256: fileSha256,
+          import_options: {slug_strategy: slugStrategy},
+          parts
+        }
+      }, workflow);
+      this.throwIfSuperseded(workflow);
+
+      const transferId = declaration.transfer_id;
+      this.transferId = transferId;
+      this.pushEvent("transfer_declared", {
+        transfer_id: transferId,
+        slug_strategy: slugStrategy
+      });
+      if (declaration.already_completed === true) {
+        this.showProgress(file.name, "This export was already imported.", 100);
+        this.pushEvent("transfer_completed", {
+          transfer_id: transferId,
+          imported_company_id: declaration.imported_company_id,
+          secrets_to_restore: declaration.secrets_to_restore,
+          restore_receipt_available: declaration.restore_receipt_available
+        });
+        return;
+      }
+      const missing = Array.isArray(declaration.missing_parts) ? declaration.missing_parts : [];
+      const missingSet = new Set(missing);
+      let uploadedMissing = 0;
+
+      for (let position = 0; position < partCount; position += 1) {
+        if (!missingSet.has(position)) continue;
+        this.throwIfSuperseded(workflow);
+        const start = position * COMPANY_IMPORT_PART_BYTES;
+        const end = Math.min(start + COMPANY_IMPORT_PART_BYTES, file.size);
+        const bytes = new Uint8Array(await file.slice(start, end).arrayBuffer());
+        this.throwIfSuperseded(workflow);
+        await this.request(`${this.basePath()}/${transferId}/parts/${position}`, {
+          method: "PUT",
+          body: bytes,
+          contentType: "application/octet-stream"
+        }, workflow);
+        uploadedMissing += 1;
+        const uploaded = declaration.uploaded_parts + uploadedMissing;
+        this.showProgress(file.name, `Uploaded ${uploaded} of ${partCount} parts…`,
+          30 + Math.round((uploaded / partCount) * 60));
+      }
+
+      this.showProgress(file.name, "Building import preview…", 94);
+      await this.previewTransfer(slugStrategy, file.name, transferId, workflow);
+    } catch (error) {
+      if (this.isWorkflowSuperseded(workflow) || (error && error.name === "AbortError")) return;
+      this.fail(error instanceof Error ? error.message : "The transfer could not be completed.");
+    }
+  },
+
+  async preview(slugStrategy, filename = "Company export") {
+    if (!this.transferId) return;
+    const transferId = this.transferId;
+    const workflow = this.beginWorkflow();
+    await this.previewTransfer(slugStrategy, filename, transferId, workflow);
+  },
+
+  async previewTransfer(slugStrategy, filename, transferId, workflow) {
+    try {
+      const response = await this.request(`${this.basePath()}/${transferId}/preview`, {
+        method: "POST",
+        json: {slug_strategy: slugStrategy}
+      }, workflow);
+      this.throwIfSuperseded(workflow);
+      this.showProgress(filename, "Ready to review.", 100);
+      this.pushEvent("transfer_previewed", {
+        transfer_id: transferId,
+        slug_strategy: slugStrategy,
+        preview: response.data
+      });
+    } catch (error) {
+      if (this.isWorkflowSuperseded(workflow) || (error && error.name === "AbortError")) return;
+      const message = error instanceof Error ? error.message : "The preview could not be created.";
+      this.showProgress(filename, message, 0);
+      this.pushEvent("transfer_preview_failed", {error: message});
+    }
+  },
+
+  async apply(slugStrategy) {
+    if (!this.transferId) return;
+    const transferId = this.transferId;
+    const workflow = this.beginWorkflow();
+    try {
+      // Applying changes data, so do not automatically replay an ambiguous
+      // network failure. The backend's claim prevents concurrent applies.
+      const response = await this.request(`${this.basePath()}/${transferId}/apply`, {
+        method: "POST",
+        json: {slug_strategy: slugStrategy},
+        attempts: 1
+      }, workflow);
+      this.throwIfSuperseded(workflow);
+      this.pushEvent("transfer_applied", {transfer_id: transferId, result: response});
+    } catch (error) {
+      if (this.isWorkflowSuperseded(workflow) || (error && error.name === "AbortError")) return;
+      this.pushEvent("transfer_apply_failed", {
+        error: error instanceof Error ? error.message : "The import could not be completed."
+      });
+    }
+  },
+
+  async cancel() {
+    this.invalidateWorkflow();
+    this.transferId = null;
+    this.resetProgress();
+    this.pushEvent("transfer_cancelled", {});
+  },
+
+  async deleteTransfer(transferId) {
+    if (!transferId) return;
+    try {
+      await fetch(`${this.basePath()}/${transferId}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: this.headers()
+      });
+    } catch (_error) {
+      // The transfer sweeper handles abandoned ledgers if the browser is gone.
+    }
+  },
+
+  async request(url, options, workflow) {
+    const attempts = options.attempts || 4;
+    let lastError;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      this.throwIfSuperseded(workflow);
+      try {
+        const headers = this.headers(options.contentType);
+        const fetchOptions = {
+          method: options.method,
+          credentials: "same-origin",
+          signal: workflow.controller.signal,
+          headers
+        };
+        if (options.json !== undefined) {
+          headers["content-type"] = "application/json";
+          fetchOptions.body = JSON.stringify(options.json);
+        } else if (options.body !== undefined) {
+          fetchOptions.body = options.body;
+        }
+
+        const response = await fetch(url, fetchOptions);
+        this.throwIfSuperseded(workflow);
+        const payload = response.status === 204 ? {} : await this.responsePayload(response);
+        this.throwIfSuperseded(workflow);
+        if (response.ok) return payload;
+
+        const message = payload.error || `Transfer request failed (${response.status}).`;
+        const error = new Error(message);
+        error.retryable = response.status === 408 || response.status === 425 ||
+          response.status === 429 || response.status >= 500;
+        throw error;
+      } catch (error) {
+        if (error && error.name === "AbortError") throw error;
+        this.throwIfSuperseded(workflow);
+        lastError = error;
+        if ((error && error.retryable === false) || attempt === attempts - 1) throw error;
+        await this.delay(300 * (2 ** attempt) + Math.floor(Math.random() * 150), workflow);
+      }
+    }
+    throw lastError;
+  },
+
+  async responsePayload(response) {
+    const type = response.headers.get("content-type") || "";
+    if (type.includes("application/json")) return response.json();
+    return {error: `Transfer request failed (${response.status}).`};
+  },
+
+  headers(contentType) {
+    const headers = {accept: "application/json"};
+    const token = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
+    if (token) headers["x-csrf-token"] = token;
+    if (contentType) headers["content-type"] = contentType;
+    return headers;
+  },
+
+  basePath() {
+    return this.el.dataset.basePath;
+  },
+
+  delay(milliseconds, workflow) {
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(resolve, milliseconds);
+      workflow.controller.signal.addEventListener("abort", () => {
+        window.clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      }, {once: true});
+    });
+  },
+
+  beginWorkflow() {
+    if (this.requestController) this.requestController.abort();
+    this.cancelled = false;
+    this.workflowGeneration = (this.workflowGeneration || 0) + 1;
+    const controller = new AbortController();
+    this.requestController = controller;
+    return {generation: this.workflowGeneration, controller};
+  },
+
+  invalidateWorkflow() {
+    this.cancelled = true;
+    this.workflowGeneration = (this.workflowGeneration || 0) + 1;
+    if (this.requestController) this.requestController.abort();
+    this.requestController = null;
+  },
+
+  throwIfSuperseded(workflow) {
+    if (this.isWorkflowSuperseded(workflow)) {
+      throw new DOMException("Aborted", "AbortError");
+    }
+  },
+
+  isWorkflowSuperseded(workflow) {
+    return this.cancelled || !workflow || workflow.generation !== this.workflowGeneration ||
+      workflow.controller.signal.aborted;
+  },
+
+  fail(message) {
+    this.showProgress("Company export", message, 0);
+    this.pushEvent("transfer_failed", {error: message});
+  },
+
+  showProgress(filename, status, percent) {
+    const container = this.el.querySelector("[data-transfer-progress]");
+    if (!container) return;
+    const bounded = Math.max(0, Math.min(100, percent));
+    container.classList.remove("hidden");
+    const filenameElement = container.querySelector("[data-transfer-filename]");
+    const percentElement = container.querySelector("[data-transfer-percent]");
+    const statusElement = container.querySelector("[data-transfer-status]");
+    const bar = container.querySelector("[data-transfer-progressbar]");
+    const fill = container.querySelector("[data-transfer-progressfill]");
+    if (filenameElement) filenameElement.textContent = filename;
+    if (percentElement) percentElement.textContent = `${bounded}%`;
+    if (statusElement) statusElement.textContent = status;
+    if (bar) bar.setAttribute("aria-valuenow", String(bounded));
+    if (fill) fill.style.transform = `scaleX(${bounded / 100})`;
+  },
+
+  resetProgress() {
+    const input = this.el.querySelector("[data-transfer-file]");
+    if (input) input.value = "";
+    const progress = this.el.querySelector("[data-transfer-progress]");
+    if (progress) progress.classList.add("hidden");
+  }
+};
+
 // Boot
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
@@ -1952,7 +2431,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
     DatePicker,
     IssueGateCleanup,
     InfiniteScroll,
-    CopyToClipboard
+    CopyToClipboard,
+    CompanyImportTransfer
   }
 });
 

@@ -23,6 +23,8 @@ defmodule Cympho.Application do
       Cympho.Repo,
       {Phoenix.PubSub, name: Cympho.PubSub},
       {Task.Supervisor, name: Cympho.TaskSupervisor},
+      Cympho.Companies.ImportDecodeAdmission,
+      import_transfer_sweeper_child(),
       {Registry, keys: :unique, name: Cympho.OrchestratorRegistry},
       {Registry, keys: :unique, name: Cympho.AgentHeartbeat.Registry},
       Cympho.AgentHeartbeat.Supervisor,
@@ -103,6 +105,12 @@ defmodule Cympho.Application do
   defp board_approval_executor_child do
     if Application.get_env(:cympho, :start_board_approval_executor?, true) do
       Cympho.BoardApprovals.BoardApprovalActionExecutor
+    end
+  end
+
+  defp import_transfer_sweeper_child do
+    if Application.get_env(:cympho, :start_import_transfer_sweeper?, true) do
+      Cympho.Companies.ImportTransferSweeper
     end
   end
 

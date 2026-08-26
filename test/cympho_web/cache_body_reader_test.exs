@@ -64,6 +64,64 @@ defmodule CymphoWeb.CacheBodyReaderTest do
       refute Map.has_key?(conn.assigns, :raw_body)
     end
 
+    test "retains one exact binary for a chunked routine webhook" do
+      payload = ~s({"event":") <> String.duplicate("r", 8_000) <> ~s("})
+      path = "/api/routine-triggers/public-id/fire"
+
+      assert {:ok, ^payload, conn} = conn_with_body(payload, [length: 127], path)
+      assert conn.assigns.routine_webhook_raw_body == payload
+      refute Map.has_key?(conn.assigns, :raw_body)
+    end
+
+    test "routine webhook byte order remains exact across parser chunks" do
+      payload = Jason.encode!(%{"first" => String.duplicate("a", 333), "last" => "omega"})
+      path = "/api/routine-triggers/public-id/fire"
+
+      assert {:ok, ^payload, conn} = conn_with_body(payload, [length: 17], path)
+
+      assert :crypto.hash(:sha256, conn.assigns.routine_webhook_raw_body) ==
+               :crypto.hash(:sha256, payload)
+    end
+
+    test "a second exhausted-body probe cannot erase retained routine bytes" do
+      payload = ~s({"event":"once"})
+      path = "/api/routine-triggers/public-id/fire"
+
+      assert {:ok, ^payload, conn} = conn_with_body(payload, [length: 3], path)
+      assert {:ok, "", conn} = CacheBodyReader.read_body(conn, [])
+      assert conn.assigns.routine_webhook_raw_body == payload
+    end
+
+    test "routine webhook cumulative limit becomes an HTTP 413 parser error" do
+      old = Application.get_env(:cympho, :routine_webhook_max_body_bytes)
+      Application.put_env(:cympho, :routine_webhook_max_body_bytes, 128)
+
+      on_exit(fn ->
+        if old,
+          do: Application.put_env(:cympho, :routine_webhook_max_body_bytes, old),
+          else: Application.delete_env(:cympho, :routine_webhook_max_body_bytes)
+      end)
+
+      conn =
+        Plug.Test.conn(
+          :post,
+          "/api/routine-triggers/public-id/fire",
+          Jason.encode!(%{"data" => String.duplicate("x", 256)})
+        )
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+
+      opts =
+        Plug.Parsers.init(
+          parsers: [:json],
+          pass: ["*/*"],
+          json_decoder: Jason,
+          length: 32,
+          body_reader: {CacheBodyReader, :read_body, []}
+        )
+
+      assert_raise Plug.Parsers.RequestTooLargeError, fn -> Plug.Parsers.call(conn, opts) end
+    end
+
     test "stops once the cumulative webhook body limit is exceeded" do
       body = String.duplicate("x", 4_097)
 

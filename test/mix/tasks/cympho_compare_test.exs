@@ -433,9 +433,15 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert portability_evidence =~ "documented directory format"
     assert portability_evidence =~ "ref-pinned"
 
+    assert %{"verdict" => "parity", "evidence" => transfer_evidence} =
+             Enum.find(rows, &(&1["slug"] == "latest_resumable_bounded_imports"))
+
+    assert transfer_evidence =~ "64 KiB raw reads"
+    assert transfer_evidence =~ "exactly-once apply receipt"
+    assert transfer_evidence =~ "full map"
+
     latest_gap_slugs = ~w(
       latest_low_resource_benchmark
-      latest_resumable_bounded_imports
       latest_managed_operator_lifecycle
       latest_vendor_sandbox_capability_contract
       latest_provider_in_product_auth

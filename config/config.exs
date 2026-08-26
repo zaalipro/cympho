@@ -37,6 +37,10 @@ config :cympho, :session_options,
 config :cympho, :transport_security, force_ssl: false, trusted_proxy_ips: []
 config :cympho, :bootstrap_protection, required: false, secret: nil
 
+# Raw bytes are retained only for signed routine webhook verification and are
+# rejected before JSON decoding once this strict per-request bound is crossed.
+config :cympho, :routine_webhook_max_body_bytes, 1_000_000
+
 config :esbuild,
   version: "0.17.11",
   cympho: [

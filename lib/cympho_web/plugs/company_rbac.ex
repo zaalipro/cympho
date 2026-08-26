@@ -21,8 +21,7 @@ defmodule CymphoWeb.Plugs.CompanyRBAC do
                       {CymphoWeb.IssueReadStateController, :mark_read},
                       {CymphoWeb.IssueReadStateController, :mark_all_read},
                       {CymphoWeb.CompanyController, :accept_invite},
-                      {CymphoWeb.CompanyController, :create},
-                      {CymphoWeb.CompanyController, :import_company}
+                      {CymphoWeb.CompanyController, :create}
                     ])
 
   # CompanyController resolves the company named in the path itself. Skipping

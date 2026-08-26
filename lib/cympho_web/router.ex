@@ -13,6 +13,16 @@ defmodule CymphoWeb.Router do
     plug :put_secure_browser_headers
   end
 
+  # Session-authenticated JSON actions used by first-party browser code. This
+  # keeps the user's API JWT out of the DOM while retaining CSRF protection.
+  pipeline :browser_json do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+  end
+
   pipeline :authenticated_browser do
     plug :require_authenticated_user
   end
@@ -207,6 +217,17 @@ defmodule CymphoWeb.Router do
     get "/companies/:id/secrets", LegacyRedirectController, :secrets
   end
 
+  scope "/companies/import", CymphoWeb do
+    pipe_through [:browser_json, :authenticated_browser, :company_scoped, :board]
+
+    post "/transfers", CompanyImportTransferController, :declare
+    get "/transfers/:id", CompanyImportTransferController, :status
+    put "/transfers/:id/parts/:position", CompanyImportTransferController, :put_part
+    post "/transfers/:id/preview", CompanyImportTransferController, :preview
+    post "/transfers/:id/apply", CompanyImportTransferController, :apply
+    delete "/transfers/:id", CompanyImportTransferController, :cancel
+  end
+
   defp require_authenticated_user(conn, opts) do
     CymphoWeb.UserAuth.require_authenticated_user(conn, opts)
   end
@@ -340,7 +361,6 @@ defmodule CymphoWeb.Router do
          :reject_join_request
 
     get "/companies/:company_id/export", CompanyController, :export
-    post "/companies/import", CompanyController, :import_company
 
     # Workspace & Runtime Services
     resources "/workspaces", WorkspaceController, only: [:index, :show, :create, :update, :delete]
@@ -399,6 +419,21 @@ defmodule CymphoWeb.Router do
     patch "/agents/:id/role", AgentController, :update_role
     resources "/budgets", BudgetController, only: [:create, :update, :delete]
     patch "/companies/:id/governance-config", CompanyController, :update_governance_config
+
+    # Legacy whole-body import remains for API compatibility, but company
+    # creation through portability is board-governed just like chunked import.
+    post "/companies/import", CompanyController, :import_company
+
+    post "/companies/import/transfers", CompanyImportTransferController, :declare
+    get "/companies/import/transfers/:id", CompanyImportTransferController, :status
+
+    put "/companies/import/transfers/:id/parts/:position",
+        CompanyImportTransferController,
+        :put_part
+
+    post "/companies/import/transfers/:id/preview", CompanyImportTransferController, :preview
+    post "/companies/import/transfers/:id/apply", CompanyImportTransferController, :apply
+    delete "/companies/import/transfers/:id", CompanyImportTransferController, :cancel
   end
 
   # ── BEAM introspection (instance operator) ──

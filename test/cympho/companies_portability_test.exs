@@ -6,7 +6,7 @@ defmodule Cympho.CompaniesPortabilityTest do
   alias Cympho.Authentication
   alias Cympho.Comments.Comment
   alias Cympho.Companies
-  alias Cympho.Companies.{Company, CompanyMembership, PortablePackage, Portability}
+  alias Cympho.Companies.{Company, CompanyInvite, CompanyMembership, PortablePackage, Portability}
   alias Cympho.Goals
   alias Cympho.Goals.Goal
   alias Cympho.Issues.Issue
@@ -52,7 +52,7 @@ defmodule Cympho.CompaniesPortabilityTest do
                companies: 1,
                users: 1,
                users_to_create: 0,
-               users_to_reuse: 1,
+               users_to_reuse: 0,
                memberships: 1,
                projects: 1,
                agents: 1,
@@ -78,7 +78,49 @@ defmodule Cympho.CompaniesPortabilityTest do
 
       warning_codes = Enum.map(plan.warnings, & &1.code)
       assert :slug_collision_resolved in warning_codes
-      assert :existing_users_reused in warning_codes
+      refute :existing_users_reused in warning_codes
+    end
+
+    test "does not reveal whether a package email belongs to an existing global user" do
+      existing_email = unique_email()
+
+      {:ok, _existing_user} =
+        Authentication.register_user(%{
+          email: existing_email,
+          name: "Canary account",
+          password: "password123"
+        })
+
+      assert {:ok, existing_plan} =
+               Companies.preview_import(
+                 valid_package(unique_slug("existing-email"), existing_email)
+               )
+
+      assert {:ok, absent_plan} =
+               Companies.preview_import(
+                 valid_package(unique_slug("absent-email"), unique_email())
+               )
+
+      for plan <- [existing_plan, absent_plan] do
+        assert plan.inventory.users == 1
+        assert plan.inventory.users_to_create == 0
+        assert plan.inventory.users_to_reuse == 0
+        assert plan.inventory.planned_writes == 9
+        refute Enum.any?(plan.warnings, &(&1.code == :existing_users_reused))
+      end
+    end
+
+    test "rejects missing or invalid portable recipient emails without writes" do
+      for invalid_email <- [nil, "", "not-an-email", String.duplicate("a", 250) <> "@x.test"] do
+        package = valid_package(unique_slug("invalid-recipient"), invalid_email)
+        before_counts = record_counts()
+
+        assert {:error, %{errors: errors}} = Companies.preview_import(package)
+        assert Enum.any?(errors, &(&1.code == :invalid_user_email))
+        assert {:error, message} = Companies.import_company(package)
+        assert message =~ "must be a valid email address"
+        assert record_counts() == before_counts
+      end
     end
 
     test "records selective includes on the plan without changing V1 whole-package default" do
@@ -552,13 +594,14 @@ defmodule Cympho.CompaniesPortabilityTest do
       package = company.id |> Companies.export_company() |> Jason.encode!() |> Jason.decode!()
       refute inspect(package) =~ "never-export-agent-key"
       refute inspect(package) =~ "never-export-project-token"
+      default_company_id = Repo.get!(User, user.id).company_id
 
       before_counts = record_counts()
       assert {:ok, preview} = Companies.preview_import(package)
       assert preview.inventory.package_records == 11
       assert preview.inventory.planned_writes == 10
 
-      assert {:ok, result} = Companies.import_company(package)
+      assert {:ok, result} = Companies.import_company_for_owner(package, user.id)
       imported_company = result.company
       after_counts = record_counts()
 
@@ -614,6 +657,8 @@ defmodule Cympho.CompaniesPortabilityTest do
                )
              )
 
+      assert Repo.get!(User, user.id).company_id == default_company_id
+
       assert Secrets.list_secrets(imported_company.id) == []
 
       assert [restore] = result.secrets_to_restore
@@ -621,6 +666,147 @@ defmodule Cympho.CompaniesPortabilityTest do
       assert restore.original_scope_id == project.id
       assert restore.scope_id == imported_project.id
       refute Map.has_key?(restore, :value)
+    end
+
+    test "imports only the initiating owner and turns other portable users into safe invites" do
+      {:ok, owner} =
+        Authentication.register_user(%{
+          email: unique_email(),
+          name: "Import owner",
+          password: "password123"
+        })
+
+      {:ok, canary_company} =
+        Companies.create_company(%{
+          name: "Canary Existing Company",
+          slug: unique_slug("canary-existing")
+        })
+
+      canary_email = unique_email()
+
+      {:ok, canary_user} =
+        Authentication.register_user(%{
+          email: canary_email,
+          name: "Unrelated existing user",
+          password: "password123",
+          company_id: canary_company.id
+        })
+
+      {:ok, _canary_membership} =
+        %CompanyMembership{}
+        |> CompanyMembership.changeset(%{
+          company_id: canary_company.id,
+          user_id: canary_user.id,
+          role: "admin",
+          is_board_member: true
+        })
+        |> Repo.insert()
+
+      viewer_email = unique_email()
+      owner_before = Repo.get!(User, owner.id)
+      canary_before = Repo.get!(User, canary_user.id)
+      memberships_before = Repo.aggregate(CompanyMembership, :count, :id)
+      users_before = Repo.aggregate(User, :count, :id)
+
+      package =
+        valid_package(unique_slug("safe-recipient-import"), owner.email)
+        |> update_in(["users"], fn users ->
+          users ++
+            [
+              %{"id" => "user-2", "email" => canary_email, "name" => "Forged name"},
+              %{"id" => "user-3", "email" => viewer_email, "name" => "Viewer recipient"}
+            ]
+        end)
+        |> update_in(["memberships"], fn memberships ->
+          memberships ++
+            [
+              %{
+                "id" => "membership-2",
+                "user_id" => "user-2",
+                "role" => "admin",
+                "is_board_member" => true
+              },
+              %{
+                "id" => "membership-3",
+                "user_id" => "user-3",
+                "role" => "viewer",
+                "is_board_member" => true
+              }
+            ]
+        end)
+        |> put_in(["issues", Access.at(0), "assignee_user_id"], "user-2")
+        |> put_in(["issues", Access.at(0), "created_by_user_id"], "user-2")
+        |> put_in(
+          ["issues", Access.at(0), "comments"],
+          [
+            %{
+              "id" => "comment-1",
+              "body" => "Portable narrative remains intact",
+              "author_type" => "user",
+              "author_id" => "user-2"
+            }
+          ]
+        )
+
+      assert {:ok, result} = Companies.import_company_for_owner(package, owner.id)
+
+      owner_membership = Companies.get_membership(owner.id, result.company.id)
+      assert owner_membership.role == "owner"
+      assert owner_membership.is_board_member
+      assert Companies.get_membership(canary_user.id, result.company.id) == nil
+      assert Repo.aggregate(User, :count, :id) == users_before
+      assert Repo.aggregate(CompanyMembership, :count, :id) == memberships_before + 1
+
+      canary_after = Repo.get!(User, canary_user.id)
+      owner_after = Repo.get!(User, owner.id)
+      assert owner_after.company_id == owner_before.company_id
+      assert canary_after.name == canary_before.name
+      assert canary_after.email == canary_before.email
+      assert canary_after.company_id == canary_before.company_id
+
+      invites = Companies.list_pending_invites(result.company.id)
+      assert length(invites) == 2
+
+      assert %CompanyInvite{role: "member", inviter_id: owner_id, status: "pending"} =
+               Enum.find(invites, &(&1.email == User.normalize_email(canary_email)))
+
+      assert owner_id == owner.id
+
+      assert %CompanyInvite{role: "viewer", inviter_id: owner_id, status: "pending"} =
+               Enum.find(invites, &(&1.email == User.normalize_email(viewer_email)))
+
+      assert owner_id == owner.id
+      assert Cympho.Users.get_user_by_email(viewer_email) == {:error, :not_found}
+      assert result.id_maps.users == %{"user-1" => owner.id}
+
+      imported_issue =
+        Issue
+        |> Repo.get!(Map.fetch!(result.id_maps.issues, "issue-1"))
+        |> Repo.preload(:comments)
+
+      assert imported_issue.assignee_user_id == nil
+      assert imported_issue.created_by_user_id == nil
+
+      assert [%Comment{author_type: "system", author_id: "imported-user"} = comment] =
+               imported_issue.comments
+
+      assert comment.body == "Portable narrative remains intact"
+      refute inspect(comment) =~ canary_email
+    end
+
+    test "ownerless compatibility import creates no user authority" do
+      package = valid_package(unique_slug("ownerless-import"), unique_email())
+      users_before = Repo.aggregate(User, :count, :id)
+      memberships_before = Repo.aggregate(CompanyMembership, :count, :id)
+      invites_before = Repo.aggregate(CompanyInvite, :count, :id)
+
+      assert {:ok, result} = Companies.import_company(package)
+
+      assert result.id_maps.users == %{}
+      assert Companies.list_memberships(result.company.id) == []
+      assert Repo.aggregate(User, :count, :id) == users_before
+      assert Repo.aggregate(CompanyMembership, :count, :id) == memberships_before
+      assert Repo.aggregate(CompanyInvite, :count, :id) == invites_before
     end
 
     test "rejects every unmapped relationship before it can cross company boundaries" do

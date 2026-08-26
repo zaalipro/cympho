@@ -9,45 +9,98 @@ defmodule CymphoWeb.RoutineTriggerController do
 
   # ── Public webhook fire (no user auth; secret-checked) ──
   def fire(conn, %{"public_id" => public_id} = params) do
+    case RoutineTriggers.get_trigger_by_public_id(public_id) do
+      {:ok, %{signing_mode: "hmac_sha256"}} ->
+        fire_signed(conn, public_id)
+
+      {:ok, _legacy_trigger} ->
+        fire_legacy(conn, public_id, params)
+
+      {:error, :not_found} ->
+        conn |> put_status(:not_found) |> json(%{error: "trigger not found"})
+    end
+  end
+
+  defp fire_signed(conn, public_id) do
+    timestamp = get_req_header(conn, "x-cympho-timestamp") |> List.first()
+    signature = get_req_header(conn, "x-cympho-signature") |> List.first()
+
+    case RoutineTriggers.fire_signed_webhook(
+           public_id,
+           timestamp,
+           signature,
+           raw_body(conn)
+         ) do
+      {:ok, result} ->
+        webhook_success(conn, result)
+
+      {:skip, policy} ->
+        webhook_skip(conn, policy)
+
+      {:error, :webhook_replay} ->
+        conn |> put_status(:conflict) |> json(%{error: "webhook replay detected"})
+
+      {:error, reason}
+      when reason in [:invalid_signature, :stale_signature, :missing_signing_secret] ->
+        conn |> put_status(:unauthorized) |> json(%{error: "invalid webhook signature"})
+
+      {:error, reason} ->
+        webhook_error(conn, reason)
+    end
+  end
+
+  defp fire_legacy(conn, public_id, params) do
     secret = get_req_header(conn, "x-webhook-secret") |> List.first() || params["secret"]
 
     if is_nil(secret) do
-      conn
-      |> put_status(:unauthorized)
-      |> json(%{error: "missing webhook secret"})
+      conn |> put_status(:unauthorized) |> json(%{error: "missing webhook secret"})
     else
       case RoutineTriggers.fire_trigger_by_public_id(public_id, secret) do
-        {:ok, %{issue: issue, run: run}} ->
-          json(conn, %{
-            message: "trigger fired",
-            run_id: run.id,
-            issue_id: issue.id,
-            issue_title: issue.title
-          })
-
-        {:skip, _policy} ->
-          conn
-          |> put_status(:conflict)
-          |> json(%{message: "run skipped — a run is already active for this routine"})
-
-        {:error, :not_found} ->
-          conn |> put_status(:not_found) |> json(%{error: "trigger not found"})
-
-        {:error, :invalid_secret} ->
-          conn |> put_status(:unauthorized) |> json(%{error: "invalid webhook secret"})
-
-        {:error, :routine_paused} ->
-          conn |> put_status(:conflict) |> json(%{error: "routine is paused"})
-
-        {:error, :trigger_disabled} ->
-          conn |> put_status(:conflict) |> json(%{error: "trigger is disabled"})
-
-        {:error, reason} ->
-          conn
-          |> put_status(:internal_server_error)
-          |> json(%{error: "trigger fire failed", reason: inspect(reason)})
+        {:ok, result} -> webhook_success(conn, result)
+        {:skip, policy} -> webhook_skip(conn, policy)
+        {:error, reason} -> webhook_error(conn, reason)
       end
     end
+  end
+
+  defp webhook_success(conn, %{issue: issue, run: run}) do
+    json(conn, %{
+      message: "trigger fired",
+      run_id: run.id,
+      issue_id: issue.id,
+      issue_title: issue.title
+    })
+  end
+
+  defp webhook_skip(conn, _policy) do
+    conn
+    |> put_status(:conflict)
+    |> json(%{message: "run skipped — a run is already active for this routine"})
+  end
+
+  defp webhook_error(conn, reason) do
+    case reason do
+      :not_found ->
+        conn |> put_status(:not_found) |> json(%{error: "trigger not found"})
+
+      :invalid_secret ->
+        conn |> put_status(:unauthorized) |> json(%{error: "invalid webhook secret"})
+
+      :routine_paused ->
+        conn |> put_status(:conflict) |> json(%{error: "routine is paused"})
+
+      :trigger_disabled ->
+        conn |> put_status(:conflict) |> json(%{error: "trigger is disabled"})
+
+      _ ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: "trigger fire failed"})
+    end
+  end
+
+  defp raw_body(conn) do
+    conn.assigns[:routine_webhook_raw_body]
   end
 
   # ── Authenticated trigger management ──
@@ -88,18 +141,32 @@ defmodule CymphoWeb.RoutineTriggerController do
 
   def create(conn, %{"routine_id" => routine_id, "type" => "webhook"} = params) do
     with {:ok, routine} <- scoped_routine(conn, routine_id) do
-      attrs = %{"routine_id" => routine.id, "enabled" => Map.get(params, "enabled", true)}
+      attrs = %{
+        "routine_id" => routine.id,
+        "enabled" => Map.get(params, "enabled", true),
+        "signing_mode" => Map.get(params, "signing_mode", "hmac_sha256"),
+        "replay_window_seconds" => Map.get(params, "replay_window_seconds", 300)
+      }
 
       case RoutineTriggers.create_webhook_trigger(attrs) do
         {:ok, trigger, secret} ->
           conn
           |> put_status(:created)
-          |> json(%{data: serialize_trigger(trigger), secret: secret})
+          |> json(%{
+            data: serialize_trigger(trigger),
+            secret: secret,
+            authentication: authentication_instructions(trigger)
+          })
 
-        {:error, changeset} ->
+        {:error, %Ecto.Changeset{} = changeset} ->
           conn
           |> put_status(:unprocessable_entity)
           |> json(%{errors: translate_errors(changeset)})
+
+        {:error, _reason} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{error: "invalid webhook trigger settings"})
       end
     end
   end
@@ -143,10 +210,15 @@ defmodule CymphoWeb.RoutineTriggerController do
         {:error, :not_webhook_trigger} ->
           conn |> put_status(:bad_request) |> json(%{error: "not a webhook trigger"})
 
-        {:error, changeset} ->
+        {:error, %Ecto.Changeset{} = changeset} ->
           conn
           |> put_status(:unprocessable_entity)
           |> json(%{error: "failed to rotate secret", changeset: translate_errors(changeset)})
+
+        {:error, _reason} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{error: "failed to rotate secret"})
       end
     end
   end
@@ -168,10 +240,32 @@ defmodule CymphoWeb.RoutineTriggerController do
       type: trigger.type,
       cron_expression: trigger.cron_expression,
       public_id: trigger.public_id,
+      signing_mode: trigger.signing_mode,
+      replay_window_seconds: trigger.replay_window_seconds,
       enabled: trigger.enabled,
       routine_id: trigger.routine_id,
       inserted_at: trigger.inserted_at,
       updated_at: trigger.updated_at
+    }
+  end
+
+  defp authentication_instructions(%{signing_mode: "hmac_sha256"} = trigger) do
+    %{
+      mode: "hmac_sha256",
+      timestamp_header: "x-cympho-timestamp",
+      signature_header: "x-cympho-signature",
+      signature_format: "sha256=HMAC_SHA256(secret, timestamp + '.' + raw_body)",
+      replay_window_seconds: trigger.replay_window_seconds,
+      secret_returned_once: true
+    }
+  end
+
+  defp authentication_instructions(_trigger) do
+    %{
+      mode: "legacy_bearer",
+      secret_header: "x-webhook-secret",
+      replay_protection: false,
+      secret_returned_once: true
     }
   end
 

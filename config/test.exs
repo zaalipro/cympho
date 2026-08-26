@@ -50,6 +50,7 @@ config :cympho, :start_board_approval_executor?, false
 config :cympho, :start_heartbeat_watchdog?, false
 config :cympho, :start_health_checker?, false
 config :cympho, :start_scheduler?, false
+config :cympho, :start_import_transfer_sweeper?, false
 config :cympho, :schedule_routine_triggers?, false
 config :cympho, :restore_catalog_plugins?, false
 config :cympho, :start_backlog_planner?, false

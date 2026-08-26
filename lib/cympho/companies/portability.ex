@@ -146,6 +146,7 @@ defmodule Cympho.Companies.Portability do
     |> validate_collections(data)
     |> validate_nested_collections(data)
     |> validate_record_ids(data)
+    |> validate_user_emails(data)
     |> validate_reference_integrity(data)
     |> validate_unredacted_secrets(data)
     |> Enum.sort_by(&{&1.field, &1.code})
@@ -301,6 +302,24 @@ defmodule Cympho.Companies.Portability do
         | errors
       ]
     end
+  end
+
+  defp validate_user_emails(errors, data) do
+    data
+    |> collection(:users)
+    |> Enum.with_index()
+    |> Enum.reduce(errors, fn {user, index}, acc ->
+      email = field(user, :email)
+      normalized = User.normalize_email(email)
+
+      if is_binary(normalized) and normalized != "" and byte_size(normalized) <= 255 and
+           String.contains?(normalized, "@") do
+        acc
+      else
+        path = "users.#{index}.email"
+        [error(path, :invalid_user_email, "#{path} must be a valid email address.") | acc]
+      end
+    end)
   end
 
   defp duplicate_values(values) do
@@ -607,13 +626,12 @@ defmodule Cympho.Companies.Portability do
   defp inventory(data) do
     issues = collection(data, :issues)
     users = collection(data, :users)
-    existing_user_count = existing_user_count(users)
 
     inventory = %{
       companies: 1,
       users: length(users),
-      users_to_create: max(length(users) - existing_user_count, 0),
-      users_to_reuse: existing_user_count,
+      users_to_create: 0,
+      users_to_reuse: 0,
       memberships: count(data, :memberships),
       projects: count(data, :projects),
       agents: count(data, :agents),
@@ -632,26 +650,10 @@ defmodule Cympho.Companies.Portability do
 
     inventory
     |> Map.put(:package_records, package_records)
-    |> Map.put(:planned_writes, package_records - existing_user_count)
-  end
-
-  defp existing_user_count(users) do
-    emails =
-      users
-      |> Enum.map(&field(&1, :email))
-      |> Enum.filter(&(is_binary(&1) and &1 != ""))
-      |> Enum.map(&User.normalize_email/1)
-      |> Enum.uniq()
-
-    case emails do
-      [] ->
-        0
-
-      values ->
-        User
-        |> where([user], user.email in ^values)
-        |> Repo.aggregate(:count, :id)
-    end
+    # Portable user rows are never written as accounts. Each source user becomes
+    # either the authenticated owner's membership or one pending invite; source
+    # memberships supply a safe role but do not add a second write.
+    |> Map.put(:planned_writes, package_records - inventory.memberships)
   end
 
   defp slug_plan(source_slug, strategy) do
@@ -745,11 +747,6 @@ defmodule Cympho.Companies.Portability do
       target.status == :blocked,
       :slug_collision_blocked,
       "Company slug #{target.requested_slug} already exists and the fail strategy blocks import."
-    )
-    |> maybe_warn(
-      inventory.users_to_reuse > 0,
-      :existing_users_reused,
-      "#{inventory.users_to_reuse} existing user account(s) will be linked instead of recreated."
     )
     |> maybe_warn(
       inventory.ignored_documents > 0,

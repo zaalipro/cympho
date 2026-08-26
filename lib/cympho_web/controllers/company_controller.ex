@@ -2,6 +2,7 @@ defmodule CymphoWeb.CompanyController do
   use CymphoWeb, :controller
 
   alias Cympho.Companies
+  alias Cympho.Companies.ImportDecodeAdmission
 
   action_fallback CymphoWeb.FallbackController
 
@@ -201,6 +202,23 @@ defmodule CymphoWeb.CompanyController do
   end
 
   def import_company(conn, %{"company" => company_data}) do
+    case ImportDecodeAdmission.checkout() do
+      {:ok, token} ->
+        try do
+          run_whole_company_import(conn, company_data)
+        after
+          ImportDecodeAdmission.release(token)
+        end
+
+      {:error, :busy} ->
+        conn
+        |> put_resp_header("retry-after", "5")
+        |> put_status(:too_many_requests)
+        |> json(%{error: "Import processing is currently busy"})
+    end
+  end
+
+  defp run_whole_company_import(conn, company_data) do
     slug_strategy =
       case conn.params["slug_strategy"] do
         "fail" -> :fail
@@ -219,6 +237,11 @@ defmodule CymphoWeb.CompanyController do
 
       {:error, changeset} when is_struct(changeset) ->
         error_changeset(conn, changeset)
+
+      {:error, :package_capacity_exceeded} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: "Import package exceeds configured record capacity"})
 
       {:error, reason} ->
         conn |> put_status(:unprocessable_entity) |> json(%{error: to_string(reason)})

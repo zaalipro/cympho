@@ -235,6 +235,46 @@ config :cympho, CymphoWeb.Endpoint,
   live_view: [signing_salt: System.get_env("LIVE_VIEW_SALT") || "cympho_live_view_signing_salt"],
   check_origin: ["//" <> (System.get_env("APP_HOST") || "localhost")]
 
+if uploads_dir = System.get_env("CYMPHO_UPLOADS_DIR") do
+  config :cympho, uploads_dir: uploads_dir
+end
+
+import_spool_dir = System.get_env("CYMPHO_IMPORT_SPOOL_DIR")
+
+if config_env() == :prod and import_spool_dir in [nil, ""] do
+  raise "CYMPHO_IMPORT_SPOOL_DIR must be set to an absolute persistent directory in production"
+end
+
+if import_spool_dir not in [nil, ""] do
+  import_spool_dir = String.trim(import_spool_dir)
+
+  if config_env() == :prod and Path.type(import_spool_dir) != :absolute do
+    raise "CYMPHO_IMPORT_SPOOL_DIR must be an absolute path in production"
+  end
+
+  expanded_import_spool_dir = Path.expand(import_spool_dir)
+  import_spool_components = Path.split(expanded_import_spool_dir)
+
+  unsafe_import_spool_root? =
+    Enum.any?([System.tmp_dir!(), "/tmp", "/var/tmp", "/run", "/dev/shm"], fn root ->
+      root = Path.expand(root)
+
+      expanded_import_spool_dir == root or
+        String.starts_with?(expanded_import_spool_dir, root <> "/")
+    end)
+
+  unsafe_import_spool_payload? =
+    Enum.any?(["_build", "releases", "current"], &(&1 in import_spool_components)) or
+      String.contains?(expanded_import_spool_dir, "/priv/static/")
+
+  if config_env() == :prod and
+       (unsafe_import_spool_root? or unsafe_import_spool_payload?) do
+    raise "CYMPHO_IMPORT_SPOOL_DIR must stay outside temporary and release payload paths"
+  end
+
+  config :cympho, company_import_transfer_spool_root: expanded_import_spool_dir
+end
+
 if s3_bucket = System.get_env("S3_BUCKET") do
   config :cympho,
     storage_backend: Cympho.Attachments.Storage.S3Storage,

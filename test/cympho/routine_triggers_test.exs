@@ -405,6 +405,154 @@ defmodule Cympho.RoutineTriggersTest do
     end
   end
 
+  describe "signed webhook secret storage" do
+    setup do
+      u = System.unique_integer([:positive])
+
+      {:ok, company} =
+        Cympho.Companies.create_company(%{name: "Signed Co #{u}", slug: "signed-co-#{u}"})
+
+      {:ok, routine} =
+        Routines.create_routine(%{name: "Signed Webhook", company_id: company.id})
+
+      %{company: company, routine: routine}
+    end
+
+    test "stores HMAC material encrypted and returns it only at creation", %{
+      company: company,
+      routine: routine
+    } do
+      assert {:ok, trigger, secret} =
+               RoutineTriggers.create_webhook_trigger(%{
+                 "routine_id" => routine.id,
+                 "signing_mode" => "hmac_sha256"
+               })
+
+      assert trigger.secret_id
+      assert {:ok, stored} = Cympho.Secrets.get_company_secret(company.id, trigger.secret_id)
+      refute stored.encrypted_value == secret
+      assert {:ok, ^secret} = Cympho.Secrets.get_secret_value(stored.id)
+      refute inspect(trigger) =~ secret
+    end
+
+    test "company hard deletion removes HMAC triggers without breaking the secret invariant", %{
+      company: company,
+      routine: routine
+    } do
+      assert {:ok, trigger, _secret} =
+               RoutineTriggers.create_webhook_trigger(%{
+                 "routine_id" => routine.id,
+                 "signing_mode" => "hmac_sha256"
+               })
+
+      secret_id = trigger.secret_id
+      assert Repo.delete(company)
+      refute Repo.get(RoutineTrigger, trigger.id)
+      refute Repo.get(Cympho.Secrets.Secret, secret_id)
+    end
+
+    test "legacy mode preserves reusable-secret callers", %{routine: routine} do
+      assert {:ok, trigger, secret} =
+               RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
+      assert trigger.signing_mode == "legacy_bearer"
+      assert is_nil(trigger.secret_id)
+
+      assert {:ok, %{run: _run}} =
+               RoutineTriggers.fire_trigger_by_public_id(trigger.public_id, secret)
+    end
+
+    test "a migrated nil signing mode remains legacy instead of crashing", %{routine: routine} do
+      {:ok, trigger, secret} =
+        RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
+      {:ok, trigger} = trigger |> Ecto.Changeset.change(signing_mode: nil) |> Repo.update()
+
+      assert {:ok, %{run: _run}} =
+               RoutineTriggers.fire_trigger_by_public_id(trigger.public_id, secret)
+    end
+
+    test "rotation keeps HMAC material inside the trigger company", %{
+      company: company,
+      routine: routine
+    } do
+      {:ok, trigger, old_value} =
+        RoutineTriggers.create_webhook_trigger(%{
+          "routine_id" => routine.id,
+          "signing_mode" => "hmac_sha256"
+        })
+
+      old_secret_id = trigger.secret_id
+      assert {:ok, rotated, new_value} = RoutineTriggers.rotate_webhook_secret(trigger)
+      refute new_value == old_value
+      refute rotated.secret_id == old_secret_id
+      assert {:error, :not_found} = Cympho.Secrets.get_company_secret(company.id, old_secret_id)
+      assert {:ok, stored} = Cympho.Secrets.get_company_secret(company.id, rotated.secret_id)
+      assert stored.company_id == company.id
+      assert {:ok, ^new_value} = Cympho.Secrets.get_secret_value(stored.id)
+    end
+
+    test "rejects a signing secret from another company", %{routine: routine} do
+      u = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{name: "Other Signed #{u}", slug: "other-signed-#{u}"})
+
+      {:ok, other_secret} =
+        Cympho.Secrets.create_secret(%{
+          company_id: other_company.id,
+          scope: "company",
+          key: "foreign_webhook_key",
+          value: "not-for-this-routine"
+        })
+
+      changeset =
+        Cympho.RoutineTriggers.RoutineTrigger.changeset(
+          %Cympho.RoutineTriggers.RoutineTrigger{},
+          %{
+            type: "webhook",
+            routine_id: routine.id,
+            public_id: "foreign-public-id",
+            secret_hash: String.duplicate("a", 64),
+            secret_id: other_secret.id,
+            signing_mode: "hmac_sha256",
+            replay_window_seconds: 300
+          }
+        )
+
+      assert %{secret_id: ["is not in the routine company"]} = errors_on(changeset)
+    end
+
+    test "malformed signed request fields fail closed", %{routine: routine} do
+      {:ok, trigger, _secret} =
+        RoutineTriggers.create_webhook_trigger(%{
+          "routine_id" => routine.id,
+          "signing_mode" => "hmac_sha256"
+        })
+
+      now = Integer.to_string(DateTime.to_unix(DateTime.utc_now()))
+
+      for {timestamp, signature, raw_body} <- [
+            {%{}, "sha256=" <> String.duplicate("a", 64), "{}"},
+            {now, %{}, "{}"},
+            {now, "sha256=" <> String.duplicate("a", 64), %{}},
+            {"1.5", "sha256=" <> String.duplicate("a", 64), "{}"},
+            {now, "SHA256=" <> String.duplicate("a", 64), "{}"},
+            {now, "sha256=short", "{}"}
+          ] do
+        assert {:error, reason} =
+                 RoutineTriggers.fire_signed_webhook(
+                   trigger.public_id,
+                   timestamp,
+                   signature,
+                   raw_body
+                 )
+
+        assert reason in [:invalid_signature, :stale_signature]
+      end
+    end
+  end
+
   describe "rotate_webhook_secret/1" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Test"})
@@ -471,6 +619,18 @@ defmodule Cympho.RoutineTriggersTest do
 
     test "returns error for wrong secret", %{trigger: trigger} do
       assert {:error, :invalid_secret} = RoutineTriggers.verify_webhook_secret(trigger, "wrong")
+    end
+
+    test "returns invalid for malformed secret values and stored hashes", %{trigger: trigger} do
+      for malformed <- [%{}, [], 42, true, nil] do
+        assert {:error, :invalid_secret} =
+                 RoutineTriggers.verify_webhook_secret(trigger, malformed)
+      end
+
+      malformed_trigger = %{trigger | secret_hash: nil}
+
+      assert {:error, :invalid_secret} =
+               RoutineTriggers.verify_webhook_secret(malformed_trigger, "anything")
     end
   end
 

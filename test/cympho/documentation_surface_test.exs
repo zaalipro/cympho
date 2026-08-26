@@ -70,6 +70,31 @@ defmodule Cympho.DocumentationSurfaceTest do
     refute installer =~ "password: \"$ADMIN_PASSWORD\""
   end
 
+  test "release deploy generates isolated origins and durable upload storage" do
+    assert {"", 0} = System.cmd("bash", ["-n", "deploy.sh"], stderr_to_stdout: true)
+
+    deploy = File.read!("deploy.sh")
+    service = File.read!("deploy/cympho.service")
+
+    assert deploy =~ "PREVIEW_HOST=${PREVIEW_DOMAIN}"
+    assert deploy =~ "CYMPHO_UPLOADS_DIR=${UPLOADS_DIR}"
+    assert deploy =~ "CYMPHO_IMPORT_SPOOL_DIR=${IMPORT_SPOOL_DIR}"
+    assert deploy =~ "UPLOADS_DIR=\"${DEPLOY_ROOT}/data/uploads\""
+    assert deploy =~ "IMPORT_SPOOL_DIR=\"${DEPLOY_ROOT}/data/import-transfers\""
+    assert deploy =~ "install -d -m 0750 -o ${APP_USER} -g ${APP_USER} ${UPLOADS_DIR}"
+    assert deploy =~ "install -d -m 0700 -o ${APP_USER} -g ${APP_USER} ${IMPORT_SPOOL_DIR}"
+    assert deploy =~ "reconcile_env_key PREVIEW_HOST ${PREVIEW_DOMAIN}"
+    assert deploy =~ "reconcile_env_key CYMPHO_UPLOADS_DIR ${UPLOADS_DIR}"
+    assert deploy =~ "reconcile_env_key CYMPHO_IMPORT_SPOOL_DIR ${IMPORT_SPOOL_DIR}"
+    assert deploy =~ "preview_site_avail=/etc/nginx/sites-available/${PREVIEW_DOMAIN}"
+    assert deploy =~ "cympho-preview-access.log"
+    refute deploy =~ "cp \"\$site_avail\" \"\$tmp\""
+    assert deploy =~ "grep -Fq \"DNS:${PREVIEW_DOMAIN}\""
+    assert deploy =~ "certbot_args=\"--cert-name ${DOMAIN} --expand\""
+    assert deploy =~ ~S(certbot --nginx \$certbot_args -d ${DOMAIN} -d ${PREVIEW_DOMAIN})
+    refute service =~ "After=docker.service"
+  end
+
   test "operator and security docs preserve the credential boundary" do
     combined =
       ["docs/OPERATIONS.md", "docs/OBSERVABILITY.md", "SECURITY.md"]

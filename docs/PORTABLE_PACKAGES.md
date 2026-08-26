@@ -14,6 +14,54 @@ Packages never contain secret values. Export redacts every secret-shaped field,
 and `secret_manifest` carries only the restore checklist an operator works
 through afterwards.
 
+## Resumable whole-company import
+
+The board-governed `/companies/import` screen uploads a single-file company
+export through a durable transfer ledger. The browser hashes at most one 4 MiB
+slice at a time, uploads only missing parts, and can resume after a reconnect by
+reselecting the same file. It uses the signed browser session and CSRF token; no
+API bearer token or package body is stored in LiveView or browser storage.
+
+JWT clients use the equivalent `/api/companies/import/transfers` endpoints:
+
+1. `POST /api/companies/import/transfers` with a declaration containing
+   `idempotency_key`, `total_bytes`, `part_size_bytes`, `file_sha256`, immutable
+   `import_options.slug_strategy`, and contiguous part descriptors
+   (`position`, `byte_size`, `sha256`).
+2. `PUT .../:id/parts/:position` as `application/octet-stream`.
+3. `POST .../:id/preview` to validate without consuming the transfer.
+4. `POST .../:id/apply` once the preview is ready, or `DELETE .../:id` to
+   cancel. `GET .../:id` returns actor-scoped progress.
+
+Both route families require a writable board member in the current company.
+Declarations are bound to that company, foreign/malformed transfer identifiers
+return the same 404, and raw reads are capped at 64 KiB. Parts are installed by
+fsync plus atomic rename only after exact size and SHA-256 verification. Apply
+uses a leased claim token; the imported graph and completed receipt commit in
+the same database transaction. Conservative per-actor/global byte and transfer
+admission plus one applying transfer by default bound disk and concurrent apply
+pressure.
+
+Production must set `CYMPHO_IMPORT_SPOOL_DIR` to an absolute persistent path
+owned by the service user. This requirement also applies when attachment
+storage uses S3 because resumable import parts remain local. `deploy.sh` uses
+`/opt/cympho/data/import-transfers`; paths under a checkout, temporary
+directory, timestamped release, or the `current` release symlink are not safe
+for resumable production transfers. Doctor reports only path-posture booleans,
+not the configured path.
+
+This is an import-transport milestone, not full L6 closure. Raw assembly and
+verification are bounded and resumable, but the V1 validator/importer still
+materializes one decoded map (within the 50 MB input cap). Export is not yet a
+resumable transfer, and V1 still omits document history, routines, and skills.
+True constant-memory apply requires a staged record-stream package version.
+
+Portable user rows are not authority to discover or enroll global accounts.
+Only the authenticated importer becomes the new company's owner/board member;
+other recipients become pending invites with privileged roles reduced to
+`member` (or preserved as `viewer`). Import does not change the importer's
+default company.
+
 ## Sources
 
 `Cympho.Companies.PortablePackage.load_source/2` accepts:

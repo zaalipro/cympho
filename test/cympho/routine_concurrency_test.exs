@@ -95,6 +95,39 @@ defmodule Cympho.RoutineConcurrencyTest do
     assert Repo.aggregate(issues_for_routine(routine), :count) == 8
   end
 
+  test "one signed webhook delivery is durable across concurrent replays", context do
+    {:ok, routine} = create_routine(context, :always_enqueue)
+
+    {:ok, webhook, secret} =
+      RoutineTriggers.create_webhook_trigger(%{
+        "routine_id" => routine.id,
+        "signing_mode" => "hmac_sha256"
+      })
+
+    body = Jason.encode!(%{"event" => "same-delivery"})
+    timestamp = Integer.to_string(DateTime.to_unix(DateTime.utc_now()))
+    signature = signed_header(secret, timestamp, body)
+
+    results =
+      race(
+        for _ <- 1..8 do
+          fn ->
+            RoutineTriggers.fire_signed_webhook(
+              webhook.public_id,
+              timestamp,
+              signature,
+              body
+            )
+          end
+        end
+      )
+
+    assert Enum.count(results, &match?({:ok, _}, &1)) == 1
+    assert Enum.count(results, &(&1 == {:error, :webhook_replay})) == 7
+    assert_single_run_and_issue(routine, false)
+    assert Repo.one(runs_for(routine.id)).idempotency_key =~ ~r/^[0-9a-f]{64}$/
+  end
+
   test "a scheduled occurrence is claimed once even for always_enqueue", context do
     {:ok, routine} = create_routine(context, :always_enqueue)
     {:ok, schedule} = create_schedule_trigger(routine)
@@ -220,5 +253,13 @@ defmodule Cympho.RoutineConcurrencyTest do
   defp current_minute do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     %{now | second: 0}
+  end
+
+  defp signed_header(secret, timestamp, body) do
+    digest =
+      :crypto.mac(:hmac, :sha256, secret, [timestamp, ".", body])
+      |> Base.encode16(case: :lower)
+
+    "sha256=#{digest}"
   end
 end

@@ -174,10 +174,53 @@ secret store or the deployment platform's encrypted environment facility.
 
 ```bash
 mix format --check-formatted
+mix cympho.doctor
 mix test
 mix assets.deploy
 mix cympho.compare
 ```
+
+### Operator doctor
+
+Run `mix cympho.doctor` before starting a new install and after configuration,
+database, or storage changes. After `mix compile`, `mix cympho.doctor --json`
+emits one versioned machine-readable
+report; a failed check exits non-zero. `--strict` also makes warnings fail.
+`--probe-endpoint` performs a one-second TCP connection to the configured
+listener and is explicitly transport-only, not proof that Cympho, PostgreSQL,
+or migrations are ready.
+
+The doctor is non-destructive rather than literally filesystem read-only. It
+does not change application, database, or configuration state and does not
+start `Cympho.Application`, Dispatcher, Endpoint, agent
+providers, or any provider network call. It starts only a two-connection Repo
+when needed, executes `SELECT 1`, reads `schema_migrations` using SELECTs, and
+then stops that Repo if it started it. Each configured local attachment or
+import-transfer directory is checked with an exclusive zero-byte probe that is
+always removed. It rejects known temporary, checkout, and release-payload
+paths, but cannot prove the durability or backup policy of an arbitrary
+filesystem mount. Reports contain aggregate
+adapter type/health counts and allowlisted runtime facts; they never include
+database URLs, environment values, adapter configuration, agent identities,
+provider responses, or raw exceptions.
+
+This is a source-checkout diagnostic, not a service manager. It cannot inspect
+another BEAM VM's process tree, and malformed production variables rejected
+while `config/runtime.exs` loads can prevent Mix itself from reaching the task;
+the boot error is then the authoritative diagnosis. Service status/logs,
+managed update, and backup commands remain separate roadmap work.
+
+For release deployments using local attachment storage, set
+`CYMPHO_UPLOADS_DIR` to an absolute persistent directory owned by the service
+user. `deploy.sh` uses `/opt/cympho/data/uploads`; never store durable uploads
+inside a timestamped release or the `/opt/cympho/current` symlink.
+
+Production also requires `CYMPHO_IMPORT_SPOOL_DIR`, even when attachments use
+S3. This local spool holds integrity-checked parts for active resumable company
+imports and must survive service restarts and release replacement. `deploy.sh`
+creates `/opt/cympho/data/import-transfers` with service-user-only permissions
+and reconciles the variable into existing environment files without replacing
+credentials. The spool is not a substitute for a database or company backup.
 
 Use `mix cympho.compare --strict` to fail when any selected comparison check is
 open. The command is a local regression audit, not a latest-Paperclip parity or
