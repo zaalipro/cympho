@@ -231,21 +231,117 @@ defmodule Cympho.Orchestrator.Dispatcher do
     # scan would fail on every boot and log an ownership error that buries real
     # failures. Recovery tests call handle_continue/2 and the recover_* helpers
     # directly, which is the same code path.
-    if recover_on_boot?() do
-      {:ok, state, {:continue, :recover_orphans}}
-    else
-      {:ok, state}
-    end
+    # Orchestrators are deliberately unlinked and survive a Dispatcher crash.
+    # Rebuild their slot accounting in a continue before the first mailbox
+    # message can dispatch more work. This must run even when orphan recovery
+    # is disabled (notably in tests), because it is normal restart state rather
+    # than repair work.
+    {:ok, state, {:continue, :rebuild_live_sessions}}
   end
 
   defp recover_on_boot?, do: Application.get_env(:cympho, :dispatcher_recover_on_boot?, true)
 
   @impl true
+  def handle_continue(:rebuild_live_sessions, %State{} = state) do
+    state = rebuild_live_sessions(state)
+
+    if recover_on_boot?() do
+      recover_orphans()
+    end
+
+    {:noreply, state}
+  end
+
+  # Backward-compatible direct entry used by recovery tests and operators.
   def handle_continue(:recover_orphans, %State{} = state) do
+    state = rebuild_live_sessions(state)
+    recover_orphans()
+    {:noreply, state}
+  end
+
+  defp recover_orphans do
     recover_orphaned_runs()
     _ = recover_orphaned_in_progress()
     _ = recover_stale_checkouts()
-    {:noreply, state}
+    :ok
+  end
+
+  @doc false
+  @spec rebuild_live_sessions(State.t()) :: State.t()
+  def rebuild_live_sessions(%State{} = state) do
+    # This is normally called once with a fresh State after Dispatcher restart.
+    # Clearing any supplied monitors makes the helper idempotent in tests and
+    # prevents a second rebuild from accumulating duplicate DOWN messages.
+    Enum.each(Map.keys(state.monitors), &Process.demonitor(&1, [:flush]))
+
+    entries = live_registry_entries()
+    valid_issue_ids = valid_live_session_issue_ids(entries)
+
+    {running_issue_ids, monitors} =
+      Enum.reduce(entries, {MapSet.new(), %{}}, fn {issue_id, pid}, {running, monitors} ->
+        if MapSet.member?(valid_issue_ids, issue_id) do
+          ref = Process.monitor(pid)
+          {MapSet.put(running, issue_id), Map.put(monitors, ref, issue_id)}
+        else
+          {running, monitors}
+        end
+      end)
+
+    if MapSet.size(running_issue_ids) > 0 do
+      Logger.info(
+        "[Dispatcher] restored #{MapSet.size(running_issue_ids)} live orchestrator slot(s) after restart"
+      )
+    end
+
+    %{state | running_issue_ids: running_issue_ids, monitors: monitors}
+  end
+
+  defp live_registry_entries do
+    Cympho.OrchestratorRegistry
+    |> Registry.select([
+      {{:"$1", :"$2", :"$3"}, [], [{{:"$1", :"$2"}}]}
+    ])
+    |> Enum.filter(fn
+      {issue_id, pid} when is_binary(issue_id) and is_pid(pid) -> Process.alive?(pid)
+      _ -> false
+    end)
+    |> Enum.uniq_by(fn {issue_id, _pid} -> issue_id end)
+  rescue
+    error ->
+      Logger.error("[Dispatcher] failed to enumerate live orchestrators: #{inspect(error)}")
+      []
+  end
+
+  defp valid_live_session_issue_ids([]), do: MapSet.new()
+
+  defp valid_live_session_issue_ids(entries) do
+    issue_ids = Enum.map(entries, &elem(&1, 0))
+
+    # Registry cleanup is asynchronous relative to process death. Requiring an
+    # authoritative in-progress issue prevents a stale key (or a process that
+    # registered but failed before checkout) from pinning capacity forever.
+    from(i in Issue,
+      left_join: r in Run,
+      on: r.id == i.checkout_run_id,
+      where:
+        i.id in ^issue_ids and i.status == :in_progress and
+          (is_nil(i.checkout_run_id) or
+             (r.status in ["pending", "queued", "running"] and r.issue_id == i.id and
+                r.agent_id == i.assignee_id)),
+      select: i.id
+    )
+    |> Cympho.Repo.all()
+    |> MapSet.new()
+  rescue
+    error ->
+      # DB-backed dispatch cannot safely proceed during the same outage. Keep
+      # live registry entries counted conservatively rather than reopening all
+      # slots and oversubscribing the host as connectivity returns.
+      Logger.error(
+        "[Dispatcher] failed to validate live orchestrators; retaining their slots: #{inspect(error)}"
+      )
+
+      entries |> Enum.map(&elem(&1, 0)) |> MapSet.new()
   end
 
   defp recover_orphaned_runs do

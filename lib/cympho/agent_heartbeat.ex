@@ -2,12 +2,14 @@ defmodule Cympho.AgentHeartbeat do
   @moduledoc """
   Per-agent GenServer that manages heartbeat lifecycle.
 
-  The heartbeat cycle:
-    1. On `:heartbeat` message: query for `todo` issues assigned to this agent
-    2. Call `Cympho.Issues.checkout_issue/2` to claim the first available issue
-    3. On success: start `Cympho.Orchestrator` for the issue
-    4. On Orchestrator completion (via `handle_info`): update agent to `:idle`
-    5. Schedule next heartbeat via `Process.send_after`
+  With the default `delegate_to_dispatcher: true`, heartbeat processes are
+  event-driven: a durable wake or explicit trigger stamps agent liveness,
+  heals a transient `:error`, and nudges the central Dispatcher. They do not
+  keep one periodic timer (and its database traffic) per agent.
+
+  The legacy direct-dispatch mode (`delegate_to_dispatcher: false`) retains the
+  periodic cycle: query assigned work, claim it, start an Orchestrator, then
+  schedule the next heartbeat with `Process.send_after/3`.
   """
 
   use GenServer
@@ -214,9 +216,16 @@ defmodule Cympho.AgentHeartbeat do
 
   @impl true
   def init(agent_id) do
-    # Use default interval in init to avoid DB queries during startup.
-    # Tests often exit before init completes, causing sandbox disconnect errors.
-    timer_ref = Process.send_after(self(), {:heartbeat, :timer}, @default_heartbeat_interval)
+    # Delegated heartbeats are wake-driven. The Dispatcher already owns a
+    # periodic poll, so arming one timer per agent only adds idle DB churn.
+    # Legacy direct-dispatch mode keeps its original timer. Use the default
+    # interval here so init never queries the DB in either mode.
+    timer_ref =
+      if delegate_to_dispatcher?() do
+        nil
+      else
+        Process.send_after(self(), {:heartbeat, :timer}, @default_heartbeat_interval)
+      end
 
     Phoenix.PubSub.subscribe(
       Cympho.PubSub,
@@ -250,10 +259,13 @@ defmodule Cympho.AgentHeartbeat do
 
   @impl true
   def handle_info({:heartbeat, :timer}, state) do
-    # Periodic tick: the dispatcher already self-polls on its own interval,
-    # so nudging it from every agent's timer tick just multiplies dispatcher
-    # poll load by the fleet size for no added liveness.
-    run_heartbeat(state, _event_triggered? = false)
+    if delegate_to_dispatcher?() do
+      # A timer may already be in the mailbox when configuration switches from
+      # legacy mode. Drop it without touching the DB or arming a replacement.
+      {:noreply, %{state | timer_ref: nil, wake_pending: false}}
+    else
+      run_heartbeat(state, _event_triggered? = false)
+    end
   end
 
   @impl true
@@ -283,14 +295,17 @@ defmodule Cympho.AgentHeartbeat do
     agent_id = state.agent_id
 
     cond do
-      delegate_to_dispatcher?() and Process.whereis(Dispatcher) ->
-        # Dispatcher owns checkout, but idle ticks must still stamp
-        # last_heartbeat_at and self-heal transient :error status — both
-        # used to live only in do_heartbeat, which this branch skips.
-        _ = recover_and_touch(agent_id)
-        if event_triggered?, do: _ = Dispatcher.poll_now()
-        timer_ref = schedule_heartbeat(agent_id)
-        {:noreply, %{state | timer_ref: timer_ref}}
+      delegate_to_dispatcher?() ->
+        # This branch only handles real external events. Periodic timer messages
+        # are discarded above, so idle agents do not generate background DB
+        # traffic. One event performs one liveness action and one Dispatcher
+        # nudge; no replacement timer is armed.
+        if event_triggered? do
+          _ = recover_and_touch(agent_id)
+          _ = Dispatcher.poll_now()
+        end
+
+        {:noreply, state}
 
       Agents.is_agent_at_capacity?(agent_id) ->
         _ = Agents.touch_heartbeat(agent_id)
@@ -521,8 +536,14 @@ defmodule Cympho.AgentHeartbeat do
   # ---------------------------------------------------------------------------
 
   defp schedule_heartbeat(agent_id) do
-    interval = heartbeat_interval(agent_id)
-    Process.send_after(self(), {:heartbeat, :timer}, interval)
+    if delegate_to_dispatcher?() do
+      # Defensive guard for mode changes while a direct heartbeat is running:
+      # delegated scheduling must not query the agent row for its interval.
+      nil
+    else
+      interval = heartbeat_interval(agent_id)
+      Process.send_after(self(), {:heartbeat, :timer}, interval)
+    end
   end
 
   defp delegate_to_dispatcher? do

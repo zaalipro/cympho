@@ -1,8 +1,11 @@
 defmodule Cympho.Notifications.DispatcherTest do
   use Cympho.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Cympho.Notifications.Dispatcher
   alias Cympho.Notifications.Message
+  alias Cympho.Notifications.NotificationPreference
   alias Cympho.Users
 
   describe "dispatch/1" do
@@ -24,6 +27,45 @@ defmodule Cympho.Notifications.DispatcherTest do
       Dispatcher.invalidate_cache(user.id)
 
       assert :ok = Dispatcher.dispatch(Message.new("Hello", "Body", user.id))
+    end
+
+    test "a corrupt persisted channel does not block a valid channel" do
+      unique = System.unique_integer([:positive])
+
+      {:ok, user} =
+        Users.create_user(%{
+          email: "corrupt-pref-#{unique}@example.com",
+          name: "Corrupt Pref User #{unique}"
+        })
+
+      Users.ensure_default_prefs(user.id)
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      Repo.insert_all(NotificationPreference, [
+        %{
+          id: Ecto.UUID.generate(),
+          user_id: user.id,
+          channel_type: "unsupported-#{unique}",
+          enabled: true,
+          config: %{},
+          inserted_at: now,
+          updated_at: now
+        }
+      ])
+
+      Dispatcher.invalidate_cache(user.id)
+
+      log =
+        capture_log(fn ->
+          assert :ok = Dispatcher.dispatch(Message.new("Hello", "Body", user.id))
+        end)
+
+      assert log =~ "Skipping unsupported notification channel"
+      assert log =~ "unsupported-#{unique}"
+      assert_receive {:email, email}
+      assert [{"", recipient}] = email.to
+      assert recipient == user.email
     end
   end
 

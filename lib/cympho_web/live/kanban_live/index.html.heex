@@ -48,22 +48,14 @@
         data-testid="kanban-header-actions"
         class="grid w-full min-w-0 max-w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-start xl:justify-end"
       >
-        <%!-- Simple mode keeps only "New Issue": list/swimlane/density toggles
-             and the project picker are ways of re-cutting the board, which is
-             exactly the choice simple mode is meant to remove. --%>
+        <.task_view_switch current="board" class="order-1 sm:order-none" />
+
+        <%!-- Simple mode keeps task view choice and "New Issue": swimlane/density
+             toggles and the project picker are advanced ways of re-cutting the board. --%>
         <div
           data-testid="kanban-view-controls"
           class="ui-advanced-only order-2 col-span-2 grid min-w-0 grid-cols-2 gap-2 sm:order-none sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-start xl:justify-end"
         >
-          <.app_link
-            navigate={~p"/issues"}
-            title="List view"
-            class="hidden h-10 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-panel px-3 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary sm:inline-flex"
-          >
-            <span class="hero-queue-list-mini h-4 w-4"></span>
-            <span class="sr-only">List</span>
-          </.app_link>
-
           <.combobox
             id="kanban-filter-project"
             class="col-span-2 min-w-0 max-w-full shrink-0 sm:min-w-[220px] sm:max-w-[280px]"

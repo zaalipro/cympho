@@ -35,8 +35,13 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert adapter_evidence =~ "broader adapter package catalog"
 
     assert Enum.all?(rows, fn row ->
-             row["paperclip_revision"] == "c62fa8d6a03377370c3a08ac49320cbba1c44227" and
-               row["paperclip_inspected_on"] == "2026-07-30"
+             row["paperclip_revision"] == "821573ede850441d5043ecd4860ee70a2a0374b1" and
+               row["paperclip_inspected_on"] == "2026-08-26" and
+               row["paperclip_stable_version"] == "v2026.824.1" and
+               row["paperclip_stable_revision"] ==
+                 "8e6edcdfa911151adba26be49a41cf5017b3aade" and
+               row["claim_set_baseline_revision"] ==
+                 "c62fa8d6a03377370c3a08ac49320cbba1c44227"
            end)
 
     assert %{"verdict" => "parity", "evidence" => evidence} =
@@ -427,6 +432,25 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert portability_evidence =~ "skip/replace/rename"
     assert portability_evidence =~ "documented directory format"
     assert portability_evidence =~ "ref-pinned"
+
+    latest_gap_slugs = ~w(
+      latest_low_resource_benchmark
+      latest_resumable_bounded_imports
+      latest_managed_operator_lifecycle
+      latest_vendor_sandbox_capability_contract
+      latest_provider_in_product_auth
+      latest_document_annotations
+      latest_cli_api_breadth
+    )
+
+    assert Enum.all?(latest_gap_slugs, fn slug ->
+             match?(
+               %{"verdict" => "gap"},
+               Enum.find(rows, &(&1["slug"] == slug))
+             )
+           end)
+
+    assert Enum.count(rows, &(&1["verdict"] == "gap")) >= length(latest_gap_slugs)
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "secrets"))

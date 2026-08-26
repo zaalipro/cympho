@@ -1634,44 +1634,46 @@ defmodule Cympho.Issues do
   defp maybe_generate_identifier(attrs), do: attrs
 
   def update_issue(%Issue{} = issue, attrs) do
-    old_issue = issue
-
     with {:ok, updated} <- do_update_issue(issue, attrs) do
-      updated =
-        if goal_id_changed?(attrs, issue) do
-          maybe_backfill_lineage(updated)
-        else
-          updated
-        end
-
-      updated =
-        Repo.preload(updated, [:comments, :blocked_by, :blocks, :assignee, :labels], force: true)
-
-      Activities.log_issue_changes(old_issue, updated, attrs)
-
-      Cympho.PubSubGuard.company_broadcast(
-        updated.company_id,
-        "issues",
-        {:issue_updated, updated}
-      )
-
-      event_type = determine_update_event_type(old_issue, updated, attrs)
-
-      CymphoWeb.Events.broadcast_issue_update(
-        updated,
-        event_type,
-        build_update_metadata(old_issue, updated, attrs)
-      )
-
-      _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(old_issue, updated)
-
-      _ = Cympho.ReviewNudges.reconcile_issue(updated)
-
-      _ = maybe_reclassify_role(old_issue, updated, attrs)
-      _ = cleanup_terminal_issue_runtime(old_issue, updated)
-
-      {:ok, updated}
+      finalize_issue_update(issue, updated, attrs)
     end
+  end
+
+  defp finalize_issue_update(old_issue, updated, attrs) do
+    updated =
+      if goal_id_changed?(attrs, old_issue) do
+        maybe_backfill_lineage(updated)
+      else
+        updated
+      end
+
+    updated =
+      Repo.preload(updated, [:comments, :blocked_by, :blocks, :assignee, :labels], force: true)
+
+    Activities.log_issue_changes(old_issue, updated, attrs)
+
+    Cympho.PubSubGuard.company_broadcast(
+      updated.company_id,
+      "issues",
+      {:issue_updated, updated}
+    )
+
+    event_type = determine_update_event_type(old_issue, updated, attrs)
+
+    CymphoWeb.Events.broadcast_issue_update(
+      updated,
+      event_type,
+      build_update_metadata(old_issue, updated, attrs)
+    )
+
+    _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(old_issue, updated)
+
+    _ = Cympho.ReviewNudges.reconcile_issue(updated)
+
+    _ = maybe_reclassify_role(old_issue, updated, attrs)
+    _ = cleanup_terminal_issue_runtime(old_issue, updated)
+
+    {:ok, updated}
   end
 
   @doc "Updates an issue's agent work contract using the supported mode whitelist."
@@ -2498,8 +2500,32 @@ defmodule Cympho.Issues do
   end
 
   def checkout_issue(%Issue{} = issue, agent_id, required_role) do
-    agent = Agents.get_agent!(agent_id)
-    current_issue = Repo.get!(Issue, issue.id)
+    Repo.transaction(fn ->
+      # The agent row is the durable capacity mutex. The capacity count and
+      # issue transition must share this lock or concurrent checkouts of two
+      # different issues can both observe a free slot and exceed
+      # max_concurrent_jobs. Lock the issue too so every eligibility decision
+      # below is made from one authoritative snapshot.
+      agent =
+        Agent
+        |> where([a], a.id == ^agent_id)
+        |> lock("FOR UPDATE")
+        |> Repo.one!()
+
+      current_issue =
+        Issue
+        |> where([i], i.id == ^issue.id)
+        |> lock("FOR UPDATE")
+        |> Repo.one!()
+
+      current_issue = Repo.preload(current_issue, :blocked_by)
+      checkout_locked(current_issue, agent, required_role)
+    end)
+    |> unwrap_checkout_transaction()
+  end
+
+  defp checkout_locked(%Issue{} = current_issue, %Agent{} = agent, required_role) do
+    agent_id = agent.id
 
     cond do
       not same_company?(current_issue, agent) ->
@@ -2514,11 +2540,11 @@ defmodule Cympho.Issues do
       company_runtime_paused?(current_issue) ->
         {:error, :company_paused}
 
-      current_issue.assignee_id == agent_id ->
-        refresh_existing_checkout(current_issue, agent, required_role)
-
       current_issue.status in [:done, :cancelled] ->
         {:error, :terminal_issue}
+
+      current_issue.assignee_id == agent_id ->
+        refresh_existing_checkout(current_issue, agent, required_role)
 
       Agents.is_agent_at_capacity?(agent) ->
         {:error, :agent_at_capacity}
@@ -2526,10 +2552,46 @@ defmodule Cympho.Issues do
       not Issue.role_authorized?(agent.role, required_role) ->
         {:error, :chain_of_command_violation}
 
+      is_blocked?(current_issue) ->
+        {:error, :blocked_by_active_issues}
+
       true ->
         atomic_checkout(current_issue, agent_id, required_role)
     end
   end
+
+  defp unwrap_checkout_transaction({:ok, {:ok, {:assigned, old_issue, checked_out}}}) do
+    checked_out = preload_issue(checked_out)
+
+    Activities.log_activity(%{
+      issue_id: checked_out.id,
+      company_id: checked_out.company_id,
+      actor_type: "agent",
+      actor_id: checked_out.assignee_id,
+      action: "assigned",
+      metadata: %{assignee_id: checked_out.assignee_id, atomic: true}
+    })
+
+    broadcast_issue_update(checked_out, :issue_updated, %{
+      checkout_agent_id: checked_out.assignee_id,
+      status: :in_progress
+    })
+
+    _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(old_issue, checked_out)
+
+    {:ok, checked_out}
+  end
+
+  defp unwrap_checkout_transaction({:ok, {:ok, {:updated, old_issue, updated, attrs}}}) do
+    finalize_issue_update(old_issue, updated, attrs)
+  end
+
+  defp unwrap_checkout_transaction({:ok, {:ok, {:unchanged, issue}}}) do
+    {:ok, preload_issue(issue)}
+  end
+
+  defp unwrap_checkout_transaction({:ok, {:error, _reason} = error}), do: error
+  defp unwrap_checkout_transaction({:error, reason}), do: {:error, reason}
 
   def release_issue(%Issue{} = issue, target_status \\ :todo) do
     atomic_release(issue, target_status, require_owner?: true)
@@ -2715,23 +2777,7 @@ defmodule Cympho.Issues do
     case count do
       1 ->
         with {:ok, checked_out} <- get_issue(issue.id) do
-          Activities.log_activity(%{
-            issue_id: checked_out.id,
-            company_id: checked_out.company_id,
-            actor_type: "agent",
-            actor_id: agent_id,
-            action: "assigned",
-            metadata: %{assignee_id: agent_id, atomic: true}
-          })
-
-          broadcast_issue_update(checked_out, :issue_updated, %{
-            checkout_agent_id: agent_id,
-            status: :in_progress
-          })
-
-          _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(issue, checked_out)
-
-          {:ok, checked_out}
+          {:ok, {:assigned, issue, checked_out}}
         end
 
       _ ->
@@ -2772,6 +2818,9 @@ defmodule Cympho.Issues do
       not Issue.role_authorized?(agent.role, required_role) ->
         {:error, :chain_of_command_violation}
 
+      issue.status != :in_progress and is_blocked?(issue) ->
+        {:error, :blocked_by_active_issues}
+
       issue.status in [:todo, :in_review, :backlog, :blocked] ->
         now = DateTime.utc_now() |> DateTime.truncate(:second)
 
@@ -2785,10 +2834,13 @@ defmodule Cympho.Issues do
           }
           |> maybe_put_assigned_role_map(required_role)
 
-        update_issue(issue, attrs)
+        case do_update_issue(issue, attrs) do
+          {:ok, updated} -> {:ok, {:updated, issue, updated, attrs}}
+          {:error, _reason} = error -> error
+        end
 
       true ->
-        {:ok, preload_issue(issue)}
+        {:ok, {:unchanged, issue}}
     end
   end
 

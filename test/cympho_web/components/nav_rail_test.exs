@@ -81,10 +81,26 @@ defmodule CymphoWeb.Components.NavRailTest do
 
     refute html =~ ~s(data-ui-mode-toggle)
     assert html =~ "Home"
-    assert html =~ "Board"
+    assert html =~ "Tasks"
     assert html =~ "Team"
     assert html =~ "ui-advanced-only"
     assert html =~ "focus-visible:ring-2"
+  end
+
+  test "uses one simple Tasks item for both list and board routes" do
+    for current_path <- ["/issues", "/kanban"] do
+      html = render_rail(current_path: current_path)
+      document = Floki.parse_document!(html)
+      [tasks_link] = Floki.find(document, "a[href='/issues']")
+
+      assert Floki.text(tasks_link) =~ "Tasks"
+      refute Floki.attribute(tasks_link, "class") |> Enum.join(" ") =~ "ui-advanced-only"
+      assert Floki.attribute(tasks_link, "data-nav-matches") == ["/kanban"]
+      assert Floki.attribute(tasks_link, "data-active") == ["true"]
+      assert Floki.attribute(tasks_link, "aria-current") == ["page"]
+      assert Floki.find(document, "a[href='/kanban']") == []
+      refute html =~ ">Issues<"
+    end
   end
 
   test "does not duplicate runtime controls in navigation" do

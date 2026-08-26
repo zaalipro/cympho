@@ -321,6 +321,179 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
     %{company: company, agent: agent, issue: issue}
   end
 
+  describe "restart live-session accounting" do
+    test "rebuilds and monitors a surviving registered orchestrator", %{
+      company: company
+    } do
+      {:ok, survivor_agent} =
+        Agents.create_agent(%{
+          name: "Restart survivor",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id,
+          adapter: :claude_code
+        })
+
+      {:ok, survivor_issue} =
+        Issues.create_issue(%{
+          title: "Surviving in-progress session",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: survivor_agent.id
+        })
+
+      {:ok, checked_out} = Issues.checkout_issue(survivor_issue, survivor_agent)
+      survivor = start_registered_orchestrator(checked_out.id)
+
+      state = Dispatcher.rebuild_live_sessions(State.new())
+
+      assert state.running_issue_ids == MapSet.new([checked_out.id])
+      assert [{monitor_ref, checked_out_id}] = Map.to_list(state.monitors)
+      assert checked_out_id == checked_out.id
+
+      Process.exit(survivor, :kill)
+      assert_receive {:DOWN, ^monitor_ref, :process, ^survivor, :killed}, 2_000
+    end
+
+    test "ignores dead registry entries and live entries without an in-progress issue", %{
+      agent: agent,
+      company: company,
+      issue: todo_issue
+    } do
+      stale_live = start_registered_orchestrator(todo_issue.id)
+
+      {:ok, stale_bound_issue} =
+        Issues.create_issue(%{
+          title: "Stale terminal checkout owner",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, terminal_run} =
+        Cympho.HeartbeatEngine.create_run(%{
+          company_id: company.id,
+          agent_id: agent.id,
+          issue_id: stale_bound_issue.id,
+          adapter: "claude_code"
+        })
+
+      {:ok, terminal_run} = Cympho.HeartbeatEngine.cancel_run(terminal_run)
+
+      stale_bound_issue =
+        stale_bound_issue
+        |> Ecto.Changeset.change(%{
+          status: :in_progress,
+          checked_out_at: DateTime.utc_now() |> DateTime.truncate(:second),
+          checkout_run_id: terminal_run.id
+        })
+        |> Cympho.Repo.update!()
+
+      stale_bound = start_registered_orchestrator(stale_bound_issue.id)
+
+      dead_issue_id = Ecto.UUID.generate()
+      dead = start_registered_orchestrator(dead_issue_id)
+      dead_ref = Process.monitor(dead)
+      Process.exit(dead, :kill)
+      assert_receive {:DOWN, ^dead_ref, :process, ^dead, :killed}, 2_000
+
+      state = Dispatcher.rebuild_live_sessions(State.new())
+
+      assert state.running_issue_ids == MapSet.new()
+      assert state.monitors == %{}
+      Process.exit(stale_live, :kill)
+      Process.exit(stale_bound, :kill)
+    end
+
+    test "a surviving session consumes the rebuilt global slot", %{
+      company: company,
+      issue: candidate
+    } do
+      {survivor, survivor_issue} = create_registered_survivor(company)
+      original = Application.get_env(:cympho, :orchestrator, [])
+
+      Application.put_env(
+        :cympho,
+        :orchestrator,
+        Keyword.put(original, :max_concurrent_agents, 1)
+      )
+
+      on_exit(fn -> Application.put_env(:cympho, :orchestrator, original) end)
+      state = Dispatcher.rebuild_live_sessions(State.new())
+      test_pid = self()
+
+      with_mocks([
+        {Runtime, [], [dispatchable?: fn _issue, _agent -> :ok end]},
+        {Orchestrator, [],
+         [
+           start_and_run: fn issue, _agent_id ->
+             send(test_pid, {:unexpected_dispatch, issue.id})
+             {:ok, spawn(fn -> Process.sleep(:infinity) end)}
+           end,
+           whereis: fn
+             id when id == survivor_issue.id -> survivor
+             _id -> nil
+           end,
+           stop: fn _issue_id, _reason -> :ok end
+         ]}
+      ]) do
+        assert {:noreply, %State{} = after_poll} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state)
+
+        assert MapSet.member?(after_poll.running_issue_ids, survivor_issue.id)
+        refute_received {:unexpected_dispatch, _issue_id}
+        assert Issues.get_issue!(candidate.id).status == :todo
+      end
+    end
+
+    test "a surviving session consumes its rebuilt company slot", %{
+      company: company,
+      issue: candidate
+    } do
+      {survivor, survivor_issue} = create_registered_survivor(company)
+      original = Application.get_env(:cympho, :orchestrator, [])
+
+      Application.put_env(
+        :cympho,
+        :orchestrator,
+        Keyword.put(original, :max_concurrent_agents, 2)
+      )
+
+      on_exit(fn -> Application.put_env(:cympho, :orchestrator, original) end)
+
+      {:ok, _company} =
+        Companies.execute_company_update(company, %{
+          governance_config: %{"limits" => %{"max_concurrent_runs" => 1}}
+        })
+
+      state = Dispatcher.rebuild_live_sessions(State.new())
+      test_pid = self()
+
+      with_mocks([
+        {Runtime, [], [dispatchable?: fn _issue, _agent -> :ok end]},
+        {Orchestrator, [],
+         [
+           start_and_run: fn issue, _agent_id ->
+             send(test_pid, {:unexpected_dispatch, issue.id})
+             {:ok, spawn(fn -> Process.sleep(:infinity) end)}
+           end,
+           whereis: fn
+             id when id == survivor_issue.id -> survivor
+             _id -> nil
+           end,
+           stop: fn _issue_id, _reason -> :ok end
+         ]}
+      ]) do
+        assert {:noreply, %State{} = after_poll} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state)
+
+        assert MapSet.member?(after_poll.running_issue_ids, survivor_issue.id)
+        refute_received {:unexpected_dispatch, _issue_id}
+        assert Issues.get_issue!(candidate.id).status == :todo
+      end
+    end
+  end
+
   test "admits blocked issue with pending issue_children_completed wake", %{
     company: company,
     agent: agent
@@ -1001,6 +1174,52 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
     after
       0 -> Enum.reverse(acc)
     end
+  end
+
+  defp create_registered_survivor(company) do
+    unique = System.unique_integer([:positive])
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Restart slot agent #{unique}",
+        role: :engineer,
+        status: :idle,
+        company_id: company.id,
+        adapter: :claude_code
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Restart slot issue #{unique}",
+        status: :todo,
+        company_id: company.id,
+        assignee_id: agent.id
+      })
+
+    {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+    {start_registered_orchestrator(checked_out.id), checked_out}
+  end
+
+  defp start_registered_orchestrator(issue_id) do
+    parent = self()
+
+    pid =
+      spawn(fn ->
+        {:ok, _} = Registry.register(Cympho.OrchestratorRegistry, issue_id, nil)
+        send(parent, {:orchestrator_registered, self(), issue_id})
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive {:orchestrator_registered, ^pid, ^issue_id}, 2_000
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+    end)
+
+    pid
   end
 
   defp ensure_dispatcher_for_db_tests do

@@ -209,6 +209,9 @@ LIVE_VIEW_SALT=$LIVE_VIEW_SALT
 CYMPHO_ENCRYPTION_KEY=$CYMPHO_ENCRYPTION_KEY
 CYMPHO_USER_JWT_SECRET=$CYMPHO_USER_JWT_SECRET
 CYMPHO_AGENT_JWT_SECRET=$CYMPHO_AGENT_JWT_SECRET
+# Safe general-purpose defaults. Change to "low" on a 1–2 GB VPS; measured
+# high-throughput hosts can opt into "throughput".
+CYMPHO_RESOURCE_PROFILE=balanced
 # Caddy is the only process allowed to assert the browser-facing HTTPS scheme.
 CYMPHO_TRUSTED_PROXY_IPS=127.0.0.1,::1
 DATABASE_URL=ecto://cympho_user:$DB_PASS@localhost/cympho_prod

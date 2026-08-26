@@ -392,7 +392,8 @@ function highlightActiveNav() {
   // Sidebar nav items
   document.querySelectorAll('.nav-item[data-nav-path]').forEach(el => {
     const navPath = el.dataset.navPath;
-    const isActive = path === navPath || path.startsWith(navPath + '/');
+    const navPaths = [navPath, ...(el.dataset.navMatches || '').split(',').filter(Boolean)];
+    const isActive = navPaths.some(candidate => path === candidate || path.startsWith(candidate + '/'));
     el.setAttribute('data-active', isActive ? 'true' : 'false');
     if (isActive) {
       el.setAttribute('aria-current', 'page');
@@ -404,7 +405,8 @@ function highlightActiveNav() {
   // Mobile bottom nav
   document.querySelectorAll('.mobile-nav-item[data-mobile-nav-path]').forEach(el => {
     const navPath = el.dataset.mobileNavPath;
-    const isActive = path === navPath || path.startsWith(navPath + '/');
+    const navPaths = [navPath, ...(el.dataset.navMatches || '').split(',').filter(Boolean)];
+    const isActive = navPaths.some(candidate => path === candidate || path.startsWith(candidate + '/'));
     el.setAttribute('data-active', isActive ? 'true' : 'false');
   });
 }

@@ -73,6 +73,7 @@ defmodule CymphoWeb.KanbanLiveTest do
 
       toolbar_text = Floki.text(toolbar)
       view_controls = Floki.find(toolbar, "[data-testid='kanban-view-controls']")
+      task_view_switch = Floki.find(toolbar, "[data-testid='task-view-switch']")
       view_controls_text = Floki.text(view_controls)
       toolbar_class = toolbar |> Floki.attribute("class") |> List.first()
       view_controls_class = view_controls |> Floki.attribute("class") |> List.first()
@@ -85,17 +86,19 @@ defmodule CymphoWeb.KanbanLiveTest do
 
       assert toolbar != []
       assert view_controls != []
+      assert task_view_switch != []
       assert toolbar_class =~ "grid-cols-2"
       assert toolbar_class =~ "sm:flex"
       assert view_controls_class =~ "order-2"
       assert view_controls_class =~ "sm:flex"
       assert toolbar_text =~ "List"
+      assert toolbar_text =~ "Board"
       assert toolbar_text =~ "Project:"
       assert toolbar_text =~ "Swimlanes"
       assert toolbar_text =~ "Compact"
       assert toolbar_text =~ "Detailed"
       assert toolbar_text =~ "New Issue"
-      assert view_controls_text =~ "List"
+      refute view_controls_text =~ "List"
       assert view_controls_text =~ "Project:"
       assert view_controls_text =~ "Swimlanes"
       assert view_controls_text =~ "Compact"
@@ -105,6 +108,22 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert new_issue_class =~ "order-1"
       assert new_issue_class =~ "w-full"
       assert new_issue_class =~ "sm:w-auto"
+    end
+
+    test "renders the accessible task view switch with board selected" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      document = Floki.parse_document!(html)
+      [switch] = Floki.find(document, "[data-testid='task-view-switch']")
+      [list_link] = Floki.find(switch, "a[href='/issues']")
+      [board_link] = Floki.find(switch, "a[href='/kanban']")
+
+      assert Floki.attribute(switch, "aria-label") == ["Task view"]
+      assert Floki.attribute(list_link, "aria-label") == ["List view"]
+      assert Floki.attribute(list_link, "aria-current") == []
+      assert Floki.attribute(list_link, "aria-pressed") == ["false"]
+      assert Floki.attribute(board_link, "aria-label") == ["Board view"]
+      assert Floki.attribute(board_link, "aria-current") == ["page"]
+      assert Floki.attribute(board_link, "aria-pressed") == ["true"]
     end
 
     test "renders launch checklist action for assigned todo digest cards" do

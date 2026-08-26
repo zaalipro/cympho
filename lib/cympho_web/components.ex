@@ -108,6 +108,61 @@ defmodule CymphoWeb.Components do
     end
   end
 
+  attr :current, :string, required: true, values: ~w(list board)
+  attr :class, :any, default: nil
+
+  def task_view_switch(assigns) do
+    ~H"""
+    <nav
+      class={[
+        "inline-flex shrink-0 overflow-hidden rounded-xl border border-hairline bg-surface p-1",
+        @class
+      ]}
+      data-testid="task-view-switch"
+      aria-label="Task view"
+    >
+      <.task_view_link
+        to="/issues"
+        label="List"
+        icon="hero-queue-list-mini"
+        active={@current == "list"}
+      />
+      <.task_view_link
+        to="/kanban"
+        label="Board"
+        icon="hero-view-columns-mini"
+        active={@current == "board"}
+      />
+    </nav>
+    """
+  end
+
+  attr :to, :string, required: true
+  attr :label, :string, required: true
+  attr :icon, :string, required: true
+  attr :active, :boolean, required: true
+
+  defp task_view_link(assigns) do
+    ~H"""
+    <.link
+      navigate={@to}
+      role="button"
+      aria-label={"#{@label} view"}
+      aria-current={if @active, do: "page", else: nil}
+      aria-pressed={to_string(@active)}
+      title={"#{@label} view"}
+      class={[
+        "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-510 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
+        @active && "bg-surface-2 text-text-primary shadow-card",
+        !@active && "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+      ]}
+    >
+      <span class={[@icon, "h-4 w-4"]}></span>
+      <span class="hidden sm:inline">{@label}</span>
+    </.link>
+    """
+  end
+
   @doc """
   Renders an accessible icon-only action. The visible icon is always paired
   with a required accessible label and native tooltip.

@@ -221,6 +221,29 @@ defmodule Cympho.AgentHeartbeatTest do
   end
 
   describe "heartbeat timer hygiene" do
+    setup do
+      original = Application.get_env(:cympho, :agent_heartbeat, [])
+
+      Application.put_env(
+        :cympho,
+        :agent_heartbeat,
+        Keyword.put(original, :delegate_to_dispatcher, false)
+      )
+
+      on_exit(fn -> Application.put_env(:cympho, :agent_heartbeat, original) end)
+      :ok
+    end
+
+    test "legacy direct-dispatch mode schedules its initial periodic heartbeat" do
+      {:ok, pid} = AgentHeartbeat.start_for_agent(Ecto.UUID.generate())
+
+      state = :sys.get_state(pid)
+      assert is_reference(state.timer_ref)
+      assert is_integer(Process.read_timer(state.timer_ref))
+
+      AgentHeartbeat.stop_for_agent(state.agent_id)
+    end
+
     test "an out-of-band heartbeat cancels the pending timer instead of stacking loops" do
       stale_timer = Process.send_after(self(), :never_fires, 600_000)
 
@@ -376,11 +399,10 @@ defmodule Cympho.AgentHeartbeatTest do
     end
   end
 
-  describe "dispatcher delegation still heals and stamps" do
+  describe "dispatcher-delegated event-driven heartbeat" do
+    import Mock
+
     setup do
-      # Default production path: delegate_to_dispatcher true. Previously this
-      # skipped do_heartbeat entirely so :error stuck and last_heartbeat_at
-      # never advanced.
       original = Application.get_env(:cympho, :agent_heartbeat, [])
 
       Application.put_env(
@@ -393,7 +415,18 @@ defmodule Cympho.AgentHeartbeatTest do
       :ok
     end
 
-    test "delegated idle tick recovers :error and stamps last_heartbeat_at" do
+    test "starts without a periodic timer or queued timer tick" do
+      agent_id = Ecto.UUID.generate()
+      {:ok, pid} = AgentHeartbeat.start_for_agent(agent_id)
+
+      assert %{timer_ref: nil} = :sys.get_state(pid)
+      assert {:messages, messages} = Process.info(pid, :messages)
+      refute {:heartbeat, :timer} in messages
+
+      AgentHeartbeat.stop_for_agent(agent_id)
+    end
+
+    test "an explicit event recovers :error, stamps liveness, polls, and remains timer-free" do
       {:ok, company} =
         Companies.create_company(%{
           name: "Delegated Recovery",
@@ -410,33 +443,29 @@ defmodule Cympho.AgentHeartbeatTest do
 
       assert is_nil(agent.last_heartbeat_at)
 
-      # Ensure a Dispatcher process exists so the delegate branch is taken.
-      dispatcher_pid =
-        case Process.whereis(Cympho.Orchestrator.Dispatcher) do
-          nil ->
-            {:ok, pid} = start_supervised({Cympho.Orchestrator.Dispatcher, []})
-            pid
+      test_pid = self()
 
-          pid ->
-            pid
-        end
+      with_mock Cympho.Orchestrator.Dispatcher, [:passthrough],
+        poll_now: fn ->
+          send(test_pid, :dispatcher_polled)
+          :ok
+        end do
+        {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
 
-      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, dispatcher_pid, self())
+        send(pid, :heartbeat)
+        assert %{timer_ref: nil, wake_pending: false} = :sys.get_state(pid)
+        assert_received :dispatcher_polled
 
-      {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
-      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+        reloaded = Repo.get!(Agents.Agent, agent.id)
+        assert reloaded.status == :idle
+        assert reloaded.last_heartbeat_at != nil
 
-      send(pid, {:heartbeat, :timer})
-      :sys.get_state(pid)
-
-      reloaded = Repo.get!(Agents.Agent, agent.id)
-      assert reloaded.status == :idle
-      assert reloaded.last_heartbeat_at != nil
-
-      AgentHeartbeat.stop_for_agent(agent.id)
+        AgentHeartbeat.stop_for_agent(agent.id)
+      end
     end
 
-    test "delegated idle tick stamps last_heartbeat_at for already-idle agents" do
+    test "a wakeup event remains functional and does not arm a timer" do
       {:ok, company} =
         Companies.create_company(%{
           name: "Delegated Idle Stamp",
@@ -451,27 +480,46 @@ defmodule Cympho.AgentHeartbeatTest do
           company_id: company.id
         })
 
-      dispatcher_pid =
-        case Process.whereis(Cympho.Orchestrator.Dispatcher) do
-          nil ->
-            {:ok, pid} = start_supervised({Cympho.Orchestrator.Dispatcher, []})
-            pid
+      test_pid = self()
 
-          pid ->
-            pid
-        end
+      with_mock Cympho.Orchestrator.Dispatcher, [:passthrough],
+        poll_now: fn ->
+          send(test_pid, :dispatcher_polled)
+          :ok
+        end do
+        {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
 
-      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, dispatcher_pid, self())
+        send(pid, {:wakeup_enqueued, agent.id, nil})
+        assert_receive :dispatcher_polled, 1_000
+        assert %{timer_ref: nil, wake_pending: false} = :sys.get_state(pid)
+        assert Repo.get!(Agents.Agent, agent.id).last_heartbeat_at != nil
+
+        AgentHeartbeat.stop_for_agent(agent.id)
+      end
+    end
+
+    test "a stale legacy timer message is ignored without DB churn or replacement" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Delegated Stale Timer",
+          slug: "delegated-stale-timer-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Delegated Timerless",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
 
       {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
       Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
 
       send(pid, {:heartbeat, :timer})
-      :sys.get_state(pid)
-
-      reloaded = Repo.get!(Agents.Agent, agent.id)
-      assert reloaded.status == :idle
-      assert reloaded.last_heartbeat_at != nil
+      assert %{timer_ref: nil} = :sys.get_state(pid)
+      assert is_nil(Repo.get!(Agents.Agent, agent.id).last_heartbeat_at)
 
       AgentHeartbeat.stop_for_agent(agent.id)
     end

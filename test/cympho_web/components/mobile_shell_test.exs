@@ -39,6 +39,16 @@ defmodule CymphoWeb.MobileShellTest do
     assert css =~ "scroll-padding-bottom: var(--mobile-shell-bottom)"
   end
 
+  test "mobile navigation uses one Tasks destination for list and board" do
+    layout = File.read!(@root_layout)
+
+    assert layout =~ ~s(href="/issues")
+    assert layout =~ ~s(data-mobile-nav-path="/issues")
+    assert layout =~ ~s(data-nav-matches="/kanban")
+    assert layout =~ ">Tasks</span>"
+    refute layout =~ ~s(data-mobile-nav-path="/kanban")
+  end
+
   test "board height uses dvh and accounts for mobile header + nav shell bottom" do
     board = File.read!(@kanban_board)
     css = File.read!(@app_css)

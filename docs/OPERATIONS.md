@@ -61,6 +61,27 @@ CYMPHO_USER_JWT_SECRET
 CYMPHO_AGENT_JWT_SECRET
 ```
 
+### Resource profiles
+
+Set one instance profile instead of independently guessing safe process and
+connection limits:
+
+| `CYMPHO_RESOURCE_PROFILE` | Concurrent agent runs | PostgreSQL pool | Finch pool | Use case |
+| --- | ---: | ---: | ---: | --- |
+| `low` | 1 | 5 | 2 | 1–2 vCPU / 1–2 GB VPS, many registered agents but one active local CLI |
+| `balanced` (default) | 3 | 10 | 5 | General self-hosting |
+| `throughput` | scheduler-derived | 25 | 10 | Measured hosts with remote/gateway-heavy execution |
+
+Registered idle agents are not the same as simultaneous OS-backed jobs. Keep
+the profile at `low` to host a large roster cheaply; Cympho queues their work
+and admits one run at a time. Raise concurrency only after checking app,
+PostgreSQL, and child CLI RSS in `/beam` and at the OS level.
+
+`CYMPHO_MAX_CONCURRENT_AGENTS`, `POOL_SIZE`, and
+`CYMPHO_FINCH_POOL_SIZE` are positive-integer overrides. Explicit overrides win
+over the profile. Avoid setting a large DB pool as a substitute for fixing slow
+queries: each PostgreSQL connection has a real server-side memory cost.
+
 ### Isolated runtime-preview origin
 
 `PREVIEW_HOST` is mandatory in production and must be an exact hostname that
@@ -158,9 +179,10 @@ mix assets.deploy
 mix cympho.compare
 ```
 
-Use `mix cympho.compare --strict` for a zero-open-gap audit. The normal release
-check keeps known, documented gaps visible without making every incremental
-release fail until the entire roadmap is complete.
+Use `mix cympho.compare --strict` to fail when any selected comparison check is
+open. The command is a local regression audit, not a latest-Paperclip parity or
+resource certificate; the current upstream register and stronger exit evidence
+remain in [`paperclip_gap.md`](../paperclip_gap.md).
 
 Run UI smoke tests in Ego Lite at desktop and 390x844 before a UI release.
 Confirm login, company switching, Inbox/Decisions, issue creation, Operations,

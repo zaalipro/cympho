@@ -13,6 +13,8 @@ defmodule Cympho.Notifications.Dispatcher do
   use GenServer
 
   import Ecto.Query, warn: false
+  require Logger
+
   alias Cympho.Notifications.{EmailChannel, Message, TelegramChannel, WebhookChannel}
   alias Cympho.Notifications.NotificationPreference
   alias Cympho.Users
@@ -94,16 +96,24 @@ defmodule Cympho.Notifications.Dispatcher do
       |> Enum.filter(&event_allowed?(&1, event))
 
     tasks =
-      Enum.map(channel_configs, fn pref ->
-        type = String.to_existing_atom(pref.channel_type)
-        channel_module = Map.fetch!(@channels, type)
+      Enum.flat_map(channel_configs, fn pref ->
+        case channel_for(pref.channel_type) do
+          {:ok, type, channel_module} ->
+            task =
+              Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
+                {type, deliver_via(channel_module, message, pref.config, user)}
+              end)
 
-        task =
-          Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
-            {type, deliver_via(channel_module, message, pref.config, user)}
-          end)
+            [{type, task}]
 
-        {type, task}
+          :error ->
+            Logger.warning(
+              "Skipping unsupported notification channel #{inspect(pref.channel_type)}",
+              user_id: user.id
+            )
+
+            []
+        end
       end)
 
     results =
@@ -138,6 +148,15 @@ defmodule Cympho.Notifications.Dispatcher do
     |> Map.get("events", %{})
     |> Map.get(event, true)
   end
+
+  defp channel_for(channel_type) when is_binary(channel_type) do
+    case Enum.find(@channels, fn {type, _module} -> Atom.to_string(type) == channel_type end) do
+      {type, channel_module} -> {:ok, type, channel_module}
+      nil -> :error
+    end
+  end
+
+  defp channel_for(_channel_type), do: :error
 
   defp deliver_via(EmailChannel, message, config, user) do
     config =

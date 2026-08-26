@@ -1355,6 +1355,38 @@ defmodule Cympho.IssuesTest do
       assert checked_out2.assignee_id == agent.id
     end
 
+    test "reloads blockers and rejects checkout behind an active dependency", %{
+      company: company
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Blocked Checkout Agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Blocked checkout",
+          status: :todo,
+          company_id: company.id
+        })
+
+      {:ok, blocker} =
+        Issues.create_issue(%{
+          title: "Active checkout blocker",
+          status: :in_progress,
+          company_id: company.id
+        })
+
+      # Keep the pre-blocker struct to prove checkout does not trust a stale
+      # caller preload when deciding whether work is eligible.
+      {:ok, _blocked} = Issues.add_blocker(issue, blocker)
+
+      assert {:error, :blocked_by_active_issues} = Issues.checkout_issue(issue, agent)
+      assert Issues.get_issue!(issue.id).status == :todo
+    end
+
     test "rejects when either side company_id is nil or unequal", %{company: company} do
       {:ok, other} =
         Companies.create_company(%{

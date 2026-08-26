@@ -1,0 +1,107 @@
+{
+  "runtime": {
+    "schedulers_online": 8,
+    "otp_release": "28",
+    "elixir": "1.19.5"
+  },
+  "config": {
+    "mode": "delegated",
+    "agents": 100,
+    "duration_ms": 5100,
+    "sample_ms": 1000,
+    "heartbeat_interval_ms": 5000
+  },
+  "started_at": "2026-08-26T08:31:43.780415Z",
+  "database": {
+    "query_count": 0,
+    "queries_per_second": 0.0,
+    "query_time_ms": 0.0
+  },
+  "benchmark": "cympho_idle_agents",
+  "correctness": {
+    "workers_alive": 100,
+    "workers_idle": 100,
+    "workers_started": 100
+  },
+  "elapsed_ms": 5102,
+  "samples": [
+    {
+      "heartbeat_workers_alive": 100,
+      "elapsed_ms": 0,
+      "beam_memory_total_bytes": 77264314,
+      "beam_memory_processes_bytes": 23054104,
+      "beam_process_count": 454,
+      "heartbeat_timer_count": 0,
+      "beam_memory_processes_used_bytes": 23030216,
+      "beam_reductions": 33186483,
+      "heartbeat_memory_bytes": 280000
+    },
+    {
+      "heartbeat_workers_alive": 100,
+      "elapsed_ms": 1003,
+      "beam_memory_total_bytes": 76677209,
+      "beam_memory_processes_bytes": 22426256,
+      "beam_process_count": 454,
+      "heartbeat_timer_count": 0,
+      "beam_memory_processes_used_bytes": 22397208,
+      "beam_reductions": 33197738,
+      "heartbeat_memory_bytes": 280104
+    },
+    {
+      "heartbeat_workers_alive": 100,
+      "elapsed_ms": 2005,
+      "beam_memory_total_bytes": 70127185,
+      "beam_memory_processes_bytes": 22408480,
+      "beam_process_count": 454,
+      "heartbeat_timer_count": 0,
+      "beam_memory_processes_used_bytes": 22386536,
+      "beam_reductions": 33213567,
+      "heartbeat_memory_bytes": 283320
+    },
+    {
+      "heartbeat_workers_alive": 100,
+      "elapsed_ms": 3007,
+      "beam_memory_total_bytes": 70144129,
+      "beam_memory_processes_bytes": 22425424,
+      "beam_process_count": 454,
+      "heartbeat_timer_count": 0,
+      "beam_memory_processes_used_bytes": 22403480,
+      "beam_reductions": 33223092,
+      "heartbeat_memory_bytes": 283320
+    },
+    {
+      "heartbeat_workers_alive": 100,
+      "elapsed_ms": 4009,
+      "beam_memory_total_bytes": 70018217,
+      "beam_memory_processes_bytes": 22707600,
+      "beam_process_count": 454,
+      "heartbeat_timer_count": 0,
+      "beam_memory_processes_used_bytes": 22685952,
+      "beam_reductions": 33238924,
+      "heartbeat_memory_bytes": 584232
+    },
+    {
+      "heartbeat_workers_alive": 100,
+      "elapsed_ms": 5010,
+      "beam_memory_total_bytes": 70054777,
+      "beam_memory_processes_bytes": 22745192,
+      "beam_process_count": 454,
+      "heartbeat_timer_count": 0,
+      "beam_memory_processes_used_bytes": 22729832,
+      "beam_reductions": 33250746,
+      "heartbeat_memory_bytes": 584232
+    },
+    {
+      "heartbeat_workers_alive": 100,
+      "elapsed_ms": 5101,
+      "beam_memory_total_bytes": 70053793,
+      "beam_memory_processes_bytes": 22744192,
+      "beam_process_count": 454,
+      "heartbeat_timer_count": 0,
+      "beam_memory_processes_used_bytes": 22728544,
+      "beam_reductions": 33259206,
+      "heartbeat_memory_bytes": 584232
+    }
+  ],
+  "schema_version": 1
+}

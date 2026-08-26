@@ -74,6 +74,22 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ issue.title
     end
 
+    test "renders the accessible task view switch with list selected" do
+      {:ok, _view, html} = live(conn(), "/issues")
+      document = Floki.parse_document!(html)
+      [switch] = Floki.find(document, "[data-testid='task-view-switch']")
+      [list_link] = Floki.find(switch, "a[href='/issues']")
+      [board_link] = Floki.find(switch, "a[href='/kanban']")
+
+      assert Floki.attribute(switch, "aria-label") == ["Task view"]
+      assert Floki.attribute(list_link, "aria-label") == ["List view"]
+      assert Floki.attribute(list_link, "aria-current") == ["page"]
+      assert Floki.attribute(list_link, "aria-pressed") == ["true"]
+      assert Floki.attribute(board_link, "aria-label") == ["Board view"]
+      assert Floki.attribute(board_link, "aria-current") == []
+      assert Floki.attribute(board_link, "aria-pressed") == ["false"]
+    end
+
     test "shows mission context on issue rows" do
       {:ok, mission} =
         create_goal(%{

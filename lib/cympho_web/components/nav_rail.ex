@@ -4,8 +4,8 @@ defmodule CymphoWeb.Components.NavRail do
 
   Sections:
     1. Primary action  — New issue
-    2. Owner navigation — Home, Board, Inbox, Projects, Team, Settings
-    3. Advanced work    — Issues, Reviews, Operations, Goals, Routines
+    2. Owner navigation — Home, Tasks, Inbox, Projects, Team, Settings
+    3. Advanced work    — Reviews, Operations, Goals, Routines
     4. PROJECTS         — recent project rows, advanced only
     5. AGENTS           — recent agent rows, visible in both modes
 
@@ -53,9 +53,10 @@ defmodule CymphoWeb.Components.NavRail do
         current_path={@current_path}
       />
       <.nav_link
-        to={~p"/kanban"}
-        label="Board"
-        icon="hero-view-columns-mini"
+        to={~p"/issues"}
+        matches={[~p"/kanban"]}
+        label="Tasks"
+        icon="hero-clipboard-document-list-mini"
         current_path={@current_path}
       />
       <.nav_link
@@ -106,13 +107,6 @@ defmodule CymphoWeb.Components.NavRail do
         to={~p"/operations"}
         label="Operations"
         icon="hero-command-line-mini"
-        current_path={@current_path}
-        advanced_only
-      />
-      <.nav_link
-        to={~p"/issues"}
-        label="Issues"
-        icon="hero-clipboard-document-list-mini"
         current_path={@current_path}
         advanced_only
       />
@@ -304,11 +298,15 @@ defmodule CymphoWeb.Components.NavRail do
   # can navigate to one route (e.g. /settings/profile) yet stay highlighted
   # across a whole section (e.g. any /settings/*).
   attr :match, :string, default: nil
+  # Extra route roots represented by this item (for example Tasks owns both
+  # the list and board routes).
+  attr :matches, :list, default: []
   # Hidden while the UI is in simple mode.
   attr :advanced_only, :boolean, default: false
 
   defp nav_link(assigns) do
-    active? = active?(assigns.match || assigns.to, assigns.current_path)
+    paths = [assigns.match || assigns.to | assigns.matches]
+    active? = Enum.any?(paths, &active?(&1, assigns.current_path))
     badge_key = badge_key(assigns.label)
     badge_count = assigns.badge || 0
 
@@ -328,6 +326,7 @@ defmodule CymphoWeb.Components.NavRail do
         @advanced_only && "ui-advanced-only"
       ]}
       data-nav-path={@to}
+      data-nav-matches={Enum.join(@matches, ",")}
       data-active={if @active?, do: "true", else: "false"}
       aria-current={if @active?, do: "page", else: nil}
     >

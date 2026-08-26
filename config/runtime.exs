@@ -2,6 +2,52 @@ import Config
 
 host = System.get_env("APP_HOST") || "localhost"
 
+positive_env = fn name, default ->
+  case System.get_env(name) do
+    value when value in [nil, ""] ->
+      default
+
+    value ->
+      case Integer.parse(value) do
+        {parsed, ""} when parsed > 0 -> parsed
+        _ -> raise "#{name} must be a positive integer"
+      end
+  end
+end
+
+# One named instance profile keeps a small VPS safe without asking operators to
+# discover and tune three independent concurrency/pool knobs. Every individual
+# knob remains overridable for measured deployments.
+resource_profile =
+  System.get_env("CYMPHO_RESOURCE_PROFILE", "balanced")
+  |> String.trim()
+  |> String.downcase()
+  |> case do
+    profile when profile in ["low", "balanced", "throughput"] -> profile
+    _ -> raise "CYMPHO_RESOURCE_PROFILE must be low, balanced, or throughput"
+  end
+
+resource_defaults =
+  case resource_profile do
+    "low" -> %{repo_pool: 5, finch_pool: 2, max_agents: 1}
+    "balanced" -> %{repo_pool: 10, finch_pool: 5, max_agents: 3}
+    "throughput" -> %{repo_pool: 25, finch_pool: 10, max_agents: nil}
+  end
+
+max_concurrent_agents =
+  positive_env.("CYMPHO_MAX_CONCURRENT_AGENTS", resource_defaults.max_agents)
+
+config :cympho, resource_profile: resource_profile
+
+if max_concurrent_agents do
+  config :cympho, :orchestrator, max_concurrent_agents: max_concurrent_agents
+end
+
+config :cympho, Cympho.Finch,
+  pools: [
+    default: [size: positive_env.("CYMPHO_FINCH_POOL_SIZE", resource_defaults.finch_pool)]
+  ]
+
 preview_host =
   case System.get_env("PREVIEW_HOST") do
     value when value in [nil, ""] ->
@@ -146,13 +192,11 @@ endpoint_config =
 config :cympho, CymphoWeb.Endpoint, endpoint_config
 
 if (database_url = System.get_env("DATABASE_URL")) && config_env() != :test do
-  # Default sized for: 3 concurrent orchestrators (each can hold a tx during
-  # streaming/external HTTP) + dispatcher poll + heartbeat watchdog + health
-  # checker stream + LiveView pubsub fan-out + headroom for spikes. Bump
-  # POOL_SIZE explicitly when running more concurrent agents.
+  # The named resource profile supplies a safe default. POOL_SIZE remains an
+  # explicit escape hatch after operators measure checkout latency and DB load.
   config :cympho, Cympho.Repo,
     url: database_url,
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "25")
+    pool_size: positive_env.("POOL_SIZE", resource_defaults.repo_pool)
 
   # Enable verified TLS to the database only when DATABASE_SSL=true (e.g. a
   # managed Postgres). The default deployment co-locates Postgres on loopback

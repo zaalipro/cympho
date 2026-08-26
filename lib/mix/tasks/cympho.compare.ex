@@ -1,25 +1,32 @@
 defmodule Mix.Tasks.Cympho.Compare do
-  @shortdoc "Print a two-sided Paperclip comparison with local runtime evidence"
+  @shortdoc "Audit selected Cympho comparison claims with local runtime evidence"
 
   @moduledoc """
-  Prints a feature comparison of Cympho vs Paperclip (github.com/paperclipai/paperclip).
+  Audits a selected set of Cympho comparison claims against local code and
+  runtime evidence.
 
   Each Cympho row is grounded in the codebase via a runtime check — a
   module/function exists, an Ecto schema is loaded, an OTP child is supervised.
-  Known gaps are part of the report instead of being omitted from the selected
-  feature list. Use `--strict` when a non-zero exit is useful in an audit; the
-  default report remains usable while planned gaps are open.
+  Use `--strict` when a non-zero exit is useful if one of these selected local
+  checks regresses. The command does not enumerate every feature in current
+  Paperclip and a zero selected-gap count is not proof of latest feature parity.
 
-  Paperclip descriptions are source-review snapshots, not runtime checks. This
-  task is not an independent production benchmark of either application.
-  The Paperclip side is pinned to public revision
-  `c62fa8d6a03377370c3a08ac49320cbba1c44227`, inspected 2026-07-30.
+  Paperclip descriptions are source-review snapshots, not runtime checks. Most
+  rows originated in the historical 2026-07-30 claim set; metadata records the
+  newer upstream audit so consumers do not mistake that claim set for a current
+  exhaustive comparison. See `paperclip_gap.md` for the maintained latest-gap
+  register. This task is not an independent production or resource benchmark.
+
+  Latest upstream audit: public `master`
+  `821573ede850441d5043ecd4860ee70a2a0374b1` (2026-08-25), with latest stable
+  `v2026.824.1` at `8e6edcdfa911151adba26be49a41cf5017b3aade`.
 
       mix cympho.compare             # text table
       mix cympho.compare --json      # machine-readable
-      mix cympho.compare --strict    # exit non-zero when any gap is open
+      mix cympho.compare --strict    # exit non-zero when a selected check is open
 
-  Use this in CI to assert Cympho's claimed comparison surface stays intact.
+  Use this in CI to assert the selected Cympho claim surface stays intact, not
+  to certify complete parity with the latest Paperclip release.
   """
 
   use Mix.Task
@@ -27,8 +34,11 @@ defmodule Mix.Tasks.Cympho.Compare do
   @switches [json: :boolean, strict: :boolean]
   @json_log_level :emergency
   @table_log_level :warning
-  @paperclip_revision "c62fa8d6a03377370c3a08ac49320cbba1c44227"
-  @paperclip_inspected_on "2026-07-30"
+  @paperclip_revision "821573ede850441d5043ecd4860ee70a2a0374b1"
+  @paperclip_inspected_on "2026-08-26"
+  @paperclip_stable_version "v2026.824.1"
+  @paperclip_stable_revision "8e6edcdfa911151adba26be49a41cf5017b3aade"
+  @claim_set_baseline_revision "c62fa8d6a03377370c3a08ac49320cbba1c44227"
 
   # Each feature row:
   #   :slug, :paperclip — the claim from their README
@@ -375,7 +385,7 @@ defmodule Mix.Tasks.Cympho.Compare do
         "Executable onboarding/CLI company blueprints that create agents, goals, projects, and seed issues",
       check: &__MODULE__.check_company_blueprints/0
     },
-    # ---- Current Paperclip capabilities that must remain visible as open gaps ----
+    # ---- Historical Paperclip capability slices retained as local regressions ----
     %{
       slug: "runtime_budget_enforcement",
       paperclip:
@@ -451,6 +461,61 @@ defmodule Mix.Tasks.Cympho.Compare do
       paperclip: "Optional OpenTelemetry trace export is documented and fail-open",
       cympho: "Optional fail-open OTLP export with allowlisted spans and durable correlation IDs",
       check: &__MODULE__.check_external_otlp_tracing/0
+    },
+    # ---- Latest 2026.824 audit gaps. These keep --strict honest even when the
+    # historical selected claim set remains green. ----
+    %{
+      slug: "latest_low_resource_benchmark",
+      paperclip: "Latest parity and a 10x low-resource claim require measured evidence",
+      cympho:
+        "No reproducible low-VPS fleet workload and committed resource-result artifact exists yet",
+      check: &__MODULE__.check_latest_low_resource_benchmark/0
+    },
+    %{
+      slug: "latest_resumable_bounded_imports",
+      paperclip:
+        "Stable 2026.824 persists verified company-transfer parts and resumes interrupted imports",
+      cympho:
+        "Company import is a single 50 MB JSON upload decoded into memory, without a durable part ledger",
+      check: &__MODULE__.check_latest_resumable_bounded_imports/0
+    },
+    %{
+      slug: "latest_managed_operator_lifecycle",
+      paperclip:
+        "Stable v2026.824.1 has onboard/install/service/doctor readiness and repair flows",
+      cympho:
+        "Install and systemd assets exist, but the managed operator CLI lifecycle is incomplete",
+      check: &__MODULE__.check_latest_managed_operator_lifecycle/0
+    },
+    %{
+      slug: "latest_vendor_sandbox_capability_contract",
+      paperclip:
+        "Vendor sandbox plugins resolve effective capabilities from declared and live-verified support",
+      cympho:
+        "The environment contract has Fake and SSH providers but no vendor capability handshake",
+      check: &__MODULE__.check_latest_vendor_sandbox_capability_contract/0
+    },
+    %{
+      slug: "latest_provider_in_product_auth",
+      paperclip:
+        "Claude setup-token and Codex device-login sessions are owner-bound and promoted in-product",
+      cympho:
+        "Provider credentials are configured by operators; no durable one-time login session exists",
+      check: &__MODULE__.check_latest_provider_in_product_auth/0
+    },
+    %{
+      slug: "latest_document_annotations",
+      paperclip:
+        "Document annotation threads, comments, revision anchors, and agent review context are first-class",
+      cympho: "Issue documents are revisioned but do not have anchored annotation thread records",
+      check: &__MODULE__.check_latest_document_annotations/0
+    },
+    %{
+      slug: "latest_cli_api_breadth",
+      paperclip:
+        "The CLI covers core company, agent, issue, project, routine, secret, workspace, cost, and auth operations",
+      cympho: "Only bootstrap, comparison, and one smoke Mix task are currently shipped",
+      check: &__MODULE__.check_latest_cli_api_breadth/0
     },
     # ---- Cympho differentiators ----
     %{
@@ -528,7 +593,10 @@ defmodule Mix.Tasks.Cympho.Compare do
               verdict: verdict,
               evidence: evidence,
               paperclip_revision: @paperclip_revision,
-              paperclip_inspected_on: @paperclip_inspected_on
+              paperclip_inspected_on: @paperclip_inspected_on,
+              paperclip_stable_version: @paperclip_stable_version,
+              paperclip_stable_revision: @paperclip_stable_revision,
+              claim_set_baseline_revision: @claim_set_baseline_revision
             })
           end)
 
@@ -578,8 +646,17 @@ defmodule Mix.Tasks.Cympho.Compare do
     gaps = Map.get(counts, :gap, 0)
 
     IO.puts("")
-    IO.puts(IO.ANSI.bright() <> "Cympho vs Paperclip — feature comparison" <> IO.ANSI.reset())
-    IO.puts("Paperclip #{@paperclip_revision} (inspected #{@paperclip_inspected_on})")
+    IO.puts(IO.ANSI.bright() <> "Cympho selected-claim audit" <> IO.ANSI.reset())
+
+    IO.puts(
+      "Upstream audit: Paperclip master #{@paperclip_revision} (inspected #{@paperclip_inspected_on}); " <>
+        "stable #{@paperclip_stable_version} #{@paperclip_stable_revision}"
+    )
+
+    IO.puts(
+      "Claim set baseline: #{@claim_set_baseline_revision}; this is not an exhaustive latest-parity check"
+    )
+
     IO.puts(String.duplicate("─", 78))
 
     Enum.each(results, fn row ->
@@ -600,7 +677,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     IO.puts(String.duplicate("─", 78))
 
     IO.puts(
-      "Summary: " <>
+      "Selected-check summary: " <>
         IO.ANSI.green() <>
         "#{exceeds} Cympho-specific advantages" <>
         IO.ANSI.reset() <>
@@ -617,11 +694,11 @@ defmodule Mix.Tasks.Cympho.Compare do
     if gaps == 0 do
       IO.puts(
         IO.ANSI.green() <>
-          "✓ No Cympho-side gaps detected against the selected Paperclip claims." <>
+          "✓ No regressions detected in the selected local claims. Latest parity is not certified; see paperclip_gap.md." <>
           IO.ANSI.reset()
       )
     else
-      IO.puts(IO.ANSI.red() <> "✗ Gaps detected." <> IO.ANSI.reset())
+      IO.puts(IO.ANSI.red() <> "✗ Selected local claim gaps detected." <> IO.ANSI.reset())
     end
 
     IO.puts("")
@@ -2192,6 +2269,116 @@ defmodule Mix.Tasks.Cympho.Compare do
        "Process output UTF-8 integrity preserves valid multilingual CLI output and replaces malformed subprocess bytes before provider-failure detection, JSON parsing, error tuples, comments, or LiveView display consume the output"}
     else
       {:gap, "process adapter output is not normalized before parsing/display paths"}
+    end
+  end
+
+  # These checks intentionally look for concrete, bounded artifacts rather than
+  # inferring latest parity from adjacent modules. They remain :gap until the
+  # corresponding end-to-end surface is present and maintainable.
+  def check_latest_low_resource_benchmark do
+    harness = "lib/mix/tasks/cympho.benchmark_idle_agents.ex"
+
+    local_results =
+      Path.wildcard("benchmarks/results/*idle*json")
+
+    comparative_results = "benchmarks/results/paperclip-cympho-low-vps.json"
+
+    if File.regular?(harness) and File.regular?(comparative_results) do
+      {:parity,
+       "A benchmark harness and a machine-readable matched low-VPS Cympho/Paperclip result artifact exist; review its correctness matrix before making a comparative claim"}
+    else
+      {:gap,
+       "idle-agent harness and #{length(local_results)} local result artifact(s) exist, but matched Cympho/Paperclip low-VPS results covering host RSS, CPU, DB query rate, latency, throughput, and correctness are still missing"}
+    end
+  end
+
+  def check_latest_resumable_bounded_imports do
+    transfer_module = Module.concat(Cympho.Companies, TransferRun)
+    import_source = source_for(CymphoWeb.CompanyImportLive)
+
+    if Code.ensure_loaded?(transfer_module) and
+         String.contains?(import_source, "consume_uploaded_entry") and
+         String.contains?(import_source, "completed_parts") and
+         String.contains?(import_source, "resume") do
+      {:parity,
+       "Company import has a durable transfer ledger, bounded part consumption, verification, and resume path"}
+    else
+      {:gap,
+       "company import lacks a durable verified-part ledger and bounded-memory restart-safe resume path; the current LiveView reads one uploaded JSON package"}
+    end
+  end
+
+  def check_latest_managed_operator_lifecycle do
+    required = ~w(onboard install service doctor update backup)
+    present = Enum.filter(required, &File.regular?("lib/mix/tasks/cympho.#{&1}.ex"))
+
+    if length(present) == length(required) do
+      {:parity,
+       "Managed operator tasks cover onboard, install, service, doctor, update, and backup lifecycle"}
+    else
+      {:gap,
+       "managed operator lifecycle is missing #{Enum.join(required -- present, ", ")} tasks with readiness and repair contracts"}
+    end
+  end
+
+  def check_latest_vendor_sandbox_capability_contract do
+    providers = Cympho.Workspaces.EnvironmentDrivers.known_providers()
+    source = source_for(Cympho.Workspaces.EnvironmentDriver)
+    vendor? = Enum.any?(providers, &(&1 in [:e2b, :daytona, :modal, :kubernetes, :novita]))
+
+    if vendor? and String.contains?(source, "capabilities") and
+         String.contains?(source, "verified") do
+      {:parity,
+       "A vendor sandbox is registered behind a declared and live-verified effective capability contract"}
+    else
+      {:gap,
+       "no vendor sandbox provider is registered behind a declared∩verified capability contract; known providers are #{inspect(providers)}"}
+    end
+  end
+
+  def check_latest_provider_in_product_auth do
+    auth_session = Module.concat(Cympho.Adapters, AuthSession)
+    router_source = File.read!("lib/cympho_web/router.ex")
+
+    if Code.ensure_loaded?(auth_session) and
+         String.contains?(router_source, "adapter-login") and
+         String.contains?(router_source, "setup-token") do
+      {:parity,
+       "Provider login uses durable owner-bound setup-token/device sessions and in-product routes"}
+    else
+      {:gap,
+       "no durable owner-bound in-product Claude setup-token and Codex device-login session surface is present"}
+    end
+  end
+
+  def check_latest_document_annotations do
+    thread = Module.concat(Cympho.Documents, AnnotationThread)
+    comment = Module.concat(Cympho.Documents, AnnotationComment)
+
+    if Code.ensure_loaded?(thread) and Code.ensure_loaded?(comment) do
+      {:parity,
+       "Document annotation threads and comments are first-class records; revision-anchor and agent-context coverage must remain tested"}
+    else
+      {:gap,
+       "revisioned issue documents lack first-class anchored annotation thread/comment records and agent review-context delivery"}
+    end
+  end
+
+  def check_latest_cli_api_breadth do
+    tasks = Path.wildcard("lib/mix/tasks/cympho.*.ex") |> Enum.map(&Path.basename/1)
+    required = ~w(company agent issue project routine secret workspace cost auth)
+
+    present =
+      Enum.filter(required, fn domain ->
+        Enum.any?(tasks, &String.starts_with?(&1, "cympho.#{domain}."))
+      end)
+
+    if length(present) == length(required) do
+      {:parity,
+       "Operator CLI has bounded, tested command coverage for the core control-plane domains"}
+    else
+      {:gap,
+       "operator CLI/API command coverage is missing first-class #{Enum.join(required -- present, ", ")} domains"}
     end
   end
 

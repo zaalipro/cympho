@@ -2,6 +2,20 @@
 
 This checklist records the repeatable mobile shell smoke test for Cympho. It complements the markup assertions in `test/cympho_web/components/mobile_shell_test.exs`; it does not replace physical-device testing.
 
+## Tasks navigation smoke (2026-08-26)
+
+- Browser: Ego Lite only; task space closed after verification (sessions were
+  never wiped).
+- Desktop 1440x900: `/issues` rendered one active **Tasks** sidebar item and an
+  accessible List/Board switch. Navigating with **Board view** reached
+  `/kanban`; the same Tasks item remained active and Board exposed
+  `aria-current="page"` / `aria-pressed="true"`.
+- Mobile 390x844: the bottom navigation exposed **Tasks** at `/issues` (not a
+  second Board destination), the List side of the switch was active, and
+  `document.documentElement.scrollWidth == 390 == window.innerWidth`.
+- Visual screenshots confirmed the switch and Tasks highlight remained clear
+  in the desktop Board and mobile issue-list layouts.
+
 ## Recorded run
 
 - Date: 2026-07-30
@@ -19,7 +33,7 @@ At 1440x900, `/onboarding` showed both plain-language choices: **Start a company
 The test used a 390x844 Ego Lite viewport.
 
 - `/onboarding` kept both choices within the 390px content width. The Start card occupied x=41..341 and the Improve card occupied x=41..341.
-- The fixed mobile navigation occupied x=0..390 and y=787..844. Home, Board, New, Inbox, and Team remained available.
+- The fixed mobile navigation occupied x=0..390 and y=787..844. Home, Tasks, New, Inbox, and Team remained available. (The original 2026-07-30 run called this destination Board; the 2026-08-26 Tasks IA refresh preserved the same route through the List/Board switch.)
 - Opening the navigation drawer placed it at x=0..256 without creating document-level horizontal overflow.
 - The Improve form kept its title input, context field, and both actions inside x=41..341. The primary action was above the mobile navigation in the full portrait viewport.
 - `/inbox?agent_id=all&density=detailed` kept the budget-warning action reachable. Simple mode hid `[data-testid="owner-attention-diagnostic"]`; Advanced mode displayed it. The diagnostic wrapped in its 265px content box (`scrollWidth == clientWidth`) and no actionable control extended beyond the viewport.

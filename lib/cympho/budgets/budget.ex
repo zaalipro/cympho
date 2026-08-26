@@ -178,18 +178,9 @@ defmodule Cympho.Budgets.Budget do
   end
 
   defp validate_amounts(changeset) do
-    limit = get_change(changeset, :limit_amount)
-    spent = get_change(changeset, :spent_amount)
-
-    if limit && spent do
-      if Decimal.lt?(limit, Decimal.new(0)) do
-        add_error(changeset, :limit_amount, "must be positive")
-      else
-        changeset
-      end
-    else
-      changeset
-    end
+    changeset
+    |> validate_number(:limit_amount, greater_than_or_equal_to: 0)
+    |> validate_number(:spent_amount, greater_than_or_equal_to: 0)
   end
 
   defp maybe_mark_exhausted(changeset) do

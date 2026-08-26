@@ -1,10 +1,12 @@
 # Closing the Paperclip gap
 
-Status: active; all thirteen defined gaps closed
+Status: active; historical G1-G13 delivered, latest-upstream gaps remain open
 Created: 2026-07-30
-Last hardened: 2026-08-14 (G6 and G13 closed with live provider and merge coverage)
-Cympho baseline: `44ed6c3`
-Paperclip baseline: `c62fa8d6a03377370c3a08ac49320cbba1c44227`, public `master` inspected on 2026-07-30
+Latest upstream refresh: 2026-08-26
+Historical Cympho baseline: `44ed6c3`
+Historical Paperclip baseline: `c62fa8d6a03377370c3a08ac49320cbba1c44227`, public `master` inspected on 2026-07-30
+Current Paperclip master audit: `821573ede850441d5043ecd4860ee70a2a0374b1` (commit date 2026-08-25)
+Current Paperclip stable audit: `v2026.824.1`, `8e6edcdfa911151adba26be49a41cf5017b3aade`
 
 ## Goal
 
@@ -23,6 +25,7 @@ This is not a plan to copy every Paperclip screen or match community size throug
 - Add one focused regression test for every claimed gap closure, then run the relevant suite and the full suite before release.
 - Update this document when a tranche lands. A checked box must link to code/tests or name the verification command.
 - Do not mark a gap closed from a shallow `mix cympho.compare` shell alone. Close only when the register target outcome and verification column are met by code plus focused tests.
+- Treat `mix cympho.compare` as a selected local regression audit. A zero count there is not proof of latest Paperclip parity or low-resource performance.
 
 ## What Cympho should preserve
 
@@ -42,7 +45,48 @@ These are not rebuild targets:
 - **P1:** material product parity or trust gap with a bounded implementation path.
 - **P2:** ecosystem/adoption work whose value grows after the control plane is correct.
 
-## Gap register
+## Latest-upstream gap register (2026.824)
+
+Upstream paths below are relative to the canonical
+[`paperclipai/paperclip`](https://github.com/paperclipai/paperclip) checkout at
+`~/dev/research/paperclip`. Stable behavior is summarized by
+`releases/v2026.824.0.md` and the `v2026.824.1` release note; feature-flagged
+master surfaces are evidence of implementation, not claims that every install
+enables them by default.
+
+| ID | Priority | Status | Gap and authoritative evidence | Exit evidence |
+| --- | --- | --- | --- | --- |
+| L1 | P0 | **In progress** | **Benchmark truth.** `mix cympho.benchmark_idle_agents` now provides a rollback-safe idle-fleet workload, and `benchmarks/results/` retains matched delegated/direct development artifacts. No reproducible side-by-side low-VPS Paperclip workload exists yet; local structure checks do not prove RAM, CPU, latency, or production reliability. | A pinned workload reports app + Postgres + child-process RSS/CPU, DB query rate, throughput, p95 latency, and correctness for idle 100/500/1,000-agent fleets and bounded active-run levels on a documented low-resource VPS. |
+| L2 | P0 | **Delivered for dispatcher-delegated agents** | **Event-driven idle heartbeats.** Delegated heartbeat processes start without timers, ignore stale timer messages, and touch/poll only on durable/explicit events (`lib/cympho/agent_heartbeat.ex`; `test/cympho/agent_heartbeat_test.exs`). The retained 100-agent development workload observed 0 idle queries/timers versus 800 queries and 100 timers in legacy direct mode over the same 5.1-second window. | Keep wake/recovery coverage green and reproduce the zero-idle-query result at 100/500/1,000 agents in L1. Legacy direct-dispatch mode intentionally retains timers. |
+| L3 | P0 | **In progress** | **Capacity admission.** Checkout now serializes capacity on the agent row, so concurrent issues cannot exceed `max_concurrent_jobs`. Named `low`/`balanced`/`throughput` resource profiles jointly bound global runs, Repo, and Finch pools. Host-memory-aware separation of local CLI and gateway capacity is not yet implemented. | One fail-closed admission path budgets local-process slots from configured limits and measured pressure, keeps gateway work available when safe, exposes the reason to operators, and passes concurrency/resource tests under L1. |
+| L4 | P0 | **Delivered for the navigation/entry-point slice** | **Reliability and Tasks information architecture.** One Simple-visible Tasks item now owns List (`/issues`) and Board (`/kanban`), both views share an accessible switch, and mobile uses the same Tasks destination. Focused tests and Ego Lite desktop/390×844 smoke are recorded in `docs/MOBILE_QA.md`; the task space was closed without wiping sessions. Conversation/document completeness remains honestly open as L8. | Preserve one Tasks entry point and its browser/accessibility coverage while L8 brings live conversation and anchored review into the same owner workflow. |
+| L5 | P1 | Open | **Install, service, and repair UX.** Paperclip stable supplies onboard/install/update/service/doctor flows (`cli/src/commands/`; `git show v2026.824.1:releases/v2026.824.1.md`). Cympho has `install.sh`, systemd assets, and three Mix tasks, but no equivalent operator CLI/doctor contract. | A versioned Cympho CLI performs install/onboard/status/logs/doctor/update/backup with truthful readiness and repair output on local and VPS installs. |
+| L6 | P1 | Open | **Large, resumable portability.** Paperclip persists verified chunk progress (`packages/db/src/schema/company_transfer_runs.ts`) and stable 2026.824 streams roughly 32 MB parts. Cympho accepts one 50 MB JSON upload, then reads/decodes it in memory (`lib/cympho_web/live/company_import_live.ex:20-64`); V1 omits documents and does not include routines or skills (`lib/cympho/companies/portability.ex`). | Bounded-memory, restart-safe, idempotent import/export resumes verified parts and round-trips every supported company object with explicit version compatibility. |
+| L7 | P1 | Open | **Managed execution and provider login.** Paperclip ships multiple sandbox-provider plugins (`packages/plugins/sandbox-providers/`), a verified capability contract, in-product Claude/Codex login sessions, and Tailscale HTTPS runtime exposure. Cympho intentionally registers only Fake and SSH (`lib/cympho/workspaces/environment_drivers.ex`). | Preserve SSH, then prove one vendor provider against the same fail-closed capability/lifecycle contract; add owner-bound, one-time provider login and a durable secure remote-preview lifecycle. |
+| L8 | P1 | Open | **Conversation and document review completeness.** Cympho has Simple thread, Plan/Ask interactions, revisioned documents, review gates, and artifacts. Paperclip additionally persists document annotation threads/comments/anchors and injects them into review context (`packages/db/src/schema/document_annotation_*`; `releases/v2026.824.0.md`). | Live task conversation and anchored document/artifact feedback share one auditable thread, survive revision changes, reach the acting agent, and keep raw diagnostics out of Simple mode. |
+| L9 | P1 | Open | **Apps, skills, and secret lifecycle.** Paperclip implements governed application connections/gateways (`packages/db/src/schema/tool_access.ts`), Skill Studio/release policy (`ui/src/pages/SkillStudio.tsx`), provider vaults, proposals, access events, and user-secret declarations (`packages/db/src/schema/*secret*`). Cympho has useful MCP grants, skill CRUD, and scoped encrypted secrets, but not those complete operator lifecycles. | Deliver the smallest coherent connection/profile approval flow, skill create-test-pin-fork flow, and audited secret proposal/version/access flow without weakening tenant boundaries. |
+| L10 | P2 | Open | **Breadth and mobile installability.** Paperclip packages Gemini, Grok, Hermes, Kimi, OpenCode, Pi and additional adapters (`packages/adapters/`) and ships a web manifest/service worker (`ui/public/site.webmanifest`, `ui/public/sw.js`). Cympho lacks those first-class adapters and is responsive but not a PWA. | Prioritize adapters by verified demand and contract tests; ship installable/offline-safe shell behavior only with update/recovery tests. |
+
+### Current first tranche
+
+- [ ] **L1 benchmark truth — in progress.** Do not publish a “10x,” low-RAM, or
+  high-agent-count claim until the workload and results are reproducible.
+- [x] **L2 event-driven heartbeats — delivered for the default delegated path.**
+  Focused tests are green and retained local artifacts show zero idle queries
+  and timers for the matched 100-agent window. Cross-product/VPS proof remains
+  L1, and legacy direct mode remains available for compatibility.
+- [ ] **L3 capacity admission — in progress.** Completion requires enforcement
+  and resource evidence, not a pressure label in the UI.
+- [x] **L4 reliability and Tasks IA — delivered for the entry-point slice.**
+  Desktop/mobile tests and Ego Lite smoke are green, and the Ego Lite task
+  space was closed without wiping sessions. Deeper task conversation and
+  document review remain L8 rather than being hidden under this closure.
+
+## Historical 2026-07-30 gap register
+
+G1-G13 below record work delivered against the older pinned baseline. Their
+focused evidence remains useful, but their closure does **not** establish parity
+with Paperclip 2026.824 or current master.
 
 | ID | Priority | Gap | Current evidence | Target outcome | Verification |
 | --- | --- | --- | --- | --- | --- |
@@ -266,9 +310,12 @@ missed one:
 - Tool-call traces, a hash-chained governance surface, had no production
   producer at all. MCP calls now feed it.
 
-## Open residuals (2026-08-14)
+## Historical residuals recorded on 2026-08-14
 
-No register gap remains open. `mix cympho.compare` reports zero gaps.
+The older G1-G13 register was considered closed at that time. The current L1-L10
+register above supersedes any inference that the historical closure meant
+current Paperclip parity. `mix cympho.compare --strict` now includes bounded
+latest-audit checks and must remain non-zero while those checks are open.
 
 Known scope limits that are deliberate, not hidden:
 
@@ -287,9 +334,10 @@ Open items from the runtime audit, deliberately not attempted here:
    recording what the agent CLI does inside a run needs `--output-format
    stream-json` and a parser for envelopes that cannot be verified without the
    real binary.
-3. **`Dispatcher.stop_company` still tears down issues serially** inside its own
-   `handle_call`. The unbounded wait is gone, but a company with many live
-   sessions still stops one at a time.
+3. **Company stop changed after this residual was written.** Current code moves
+   cleanup out of the dispatcher GenServer and uses bounded parallel tasks with
+   a deadline (`lib/cympho/orchestrator/dispatcher.ex:672-731`). Retain focused
+   stop/recovery tests; do not cite the old serial-teardown note as current.
 
 Re-verify with:
 
