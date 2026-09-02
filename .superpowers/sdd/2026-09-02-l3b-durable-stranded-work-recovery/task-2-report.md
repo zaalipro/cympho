@@ -32,3 +32,6 @@ Addressed reviewer findings in commit `6adffbd` (plus test adjustment): callback
 
 ## Review fix round 2
 Commit `ca43931` hardens callback result normalization, custom retry delay/cap handling, string-key source maps, malformed run validation, strict affected-attempt checks, and lease expiry guards. Focused suites: 12 passing tests.
+
+## Review fix round 3
+Hardened completion CAS to require exactly one matching claimed attempt before transitioning a case, and validated heartbeat source maps (atom/string keys, required IDs/status and tenant linkage) with structured errors. Command: `ERL_COMPILER_OPTIONS='[nowarn_deprecated_catch]' MIX_ENV=test mix test test/cympho/recovery/fingerprint_test.exs test/cympho/recovery_test.exs --max-cases 1`; output: **12 tests, 0 failures**. Formatting check passes.

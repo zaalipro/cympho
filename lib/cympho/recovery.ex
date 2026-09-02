@@ -254,14 +254,17 @@ defmodule Cympho.Recovery do
             Repo.rollback(:stale_claim)
 
           _case_row ->
-            Repo.update_all(
-              from(a in RecoveryAttempt,
-                where:
-                  a.id == ^attempt.id and a.recovery_case_id == ^id and
-                    a.attempt_no == ^attempt.attempt_no and a.status == "claimed"
-              ),
-              set: [status: status, completed_at: now, error_reason: error]
-            )
+            {attempt_count, _} =
+              Repo.update_all(
+                from(a in RecoveryAttempt,
+                  where:
+                    a.id == ^attempt.id and a.recovery_case_id == ^id and
+                      a.attempt_no == ^attempt.attempt_no and a.status == "claimed"
+                ),
+                set: [status: status, completed_at: now, error_reason: error]
+              )
+
+            if attempt_count != 1, do: Repo.rollback(:stale_claim)
 
             updates = [
               state: state,
@@ -359,13 +362,31 @@ defmodule Cympho.Recovery do
   end
 
   defp source_details("heartbeat_run", issue, run) when is_map(run) do
-    {fingerprint, snapshot} = Fingerprint.for_run(run, issue)
-
     run_id = field(run, :id)
-    source_run_id = if match?(%Run{}, run), do: run_id, else: nil
+    run_status = field(run, :status)
+    issue_id = field(run, :issue_id)
+    company_id = field(run, :company_id)
 
-    {:ok, fingerprint, snapshot, run_id, to_string(field(run, :status)), field(run, :agent_id),
-     source_run_id}
+    cond do
+      not is_binary(run_id) or run_id == "" ->
+        {:error, :invalid_run_source}
+
+      is_nil(run_status) or run_status == "" ->
+        {:error, :invalid_run_source}
+
+      issue_id != field(issue, :id) ->
+        {:error, :company_scope_required}
+
+      company_id != field(issue, :company_id) ->
+        {:error, :company_scope_required}
+
+      true ->
+        {fingerprint, snapshot} = Fingerprint.for_run(run, issue)
+        source_run_id = if match?(%Run{}, run), do: run_id, else: nil
+
+        {:ok, fingerprint, snapshot, run_id, to_string(run_status), field(run, :agent_id),
+         source_run_id}
+    end
   end
 
   defp source_details("heartbeat_run", _issue, _), do: {:error, :run_required}
