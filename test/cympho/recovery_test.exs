@@ -25,7 +25,9 @@ defmodule Cympho.RecoveryTest do
     assert row.company_id == company.id
 
     assert {:error, changeset} =
-             %RecoveryCase{} |> RecoveryCase.changeset(%{attrs | state: "bogus"}) |> Repo.insert()
+             %RecoveryCase{}
+             |> RecoveryCase.changeset(Map.put(attrs, :state, "bogus"))
+             |> Repo.insert()
 
     assert "is invalid" in errors_on(changeset).state
   end
@@ -50,7 +52,7 @@ defmodule Cympho.RecoveryTest do
 
     assert {:ok, _} =
              %RecoveryCase{}
-             |> RecoveryCase.changeset(%{attrs | state: "superseded"})
+             |> RecoveryCase.changeset(Map.put(attrs, :state, "superseded"))
              |> Repo.insert()
   end
 
@@ -89,7 +91,7 @@ defmodule Cympho.RecoveryTest do
     assert {:error, dup} =
              RecoveryAttempt.changeset(%RecoveryAttempt{}, attempt_attrs) |> Repo.insert()
 
-    assert "has already been taken" in errors_on(dup).attempt_no
+    assert "has already been taken" in Map.get(errors_on(dup), :recovery_case_id, [])
 
     assert {:error, invalid} =
              RecoveryAttempt.changeset(%RecoveryAttempt{}, %{attempt_attrs | status: "bogus"})
@@ -149,5 +151,63 @@ defmodule Cympho.RecoveryTest do
     refute Map.has_key?(changeset.changes, :lease_expires_at)
     refute Map.has_key?(changeset.changes, :exhausted_at)
     refute Map.has_key?(changeset.changes, :resolved_at)
+  end
+end
+
+# Lifecycle facade coverage
+
+defmodule Cympho.RecoveryLifecycleTest do
+  use Cympho.DataCase, async: false
+  alias Cympho.Repo
+  alias Cympho.Companies.Company
+  alias Cympho.Issues.Issue
+  alias Cympho.Recovery
+
+  test "ensure_case deduplicates and leases a checkout" do
+    company = Repo.insert!(%Company{name: "Lifecycle Co", slug: "lifecycle-co"})
+
+    issue =
+      Repo.insert!(%Issue{
+        title: "Stranded",
+        company_id: company.id,
+        status: :in_progress,
+        lock_version: 0
+      })
+
+    assert {:ok, first} = Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+    assert {:ok, same} = Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+    assert same.id == first.id
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    assert {:ok, lease} = Recovery.claim_case(first, now: now)
+    assert {:error, :already_claimed} = Recovery.claim_case(first, now: now)
+    assert {:ok, failed} = Recovery.record_failure(lease, "temporary", now: now)
+    assert failed.state == "scheduled"
+  end
+
+  test "changed lock version supersedes prior lineage and tenant scope is required" do
+    company = Repo.insert!(%Company{name: "Lineage Co", slug: "lineage-co"})
+
+    issue =
+      Repo.insert!(%Issue{
+        title: "Lineage",
+        company_id: company.id,
+        status: :in_progress,
+        lock_version: 1
+      })
+
+    assert {:ok, first} = Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+    Repo.update_all(Ecto.Query.from(i in Issue, where: i.id == ^issue.id), set: [lock_version: 2])
+    changed = Repo.get!(Issue, issue.id)
+    assert {:ok, child} = Recovery.ensure_case(%{source_type: "issue_checkout", issue: changed})
+    assert child.id != first.id
+    assert child.parent_case_id == first.id
+    assert child.root_case_id == first.id
+    assert Repo.get!(Cympho.Recovery.RecoveryCase, first.id).state == "superseded"
+
+    assert {:error, :company_scope_required} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: %{changed | company_id: nil}
+             })
   end
 end

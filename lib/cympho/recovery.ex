@@ -1,0 +1,422 @@
+defmodule Cympho.Recovery do
+  @moduledoc "Durable case and lease lifecycle for stranded work recovery."
+  import Ecto.Query
+  alias Cympho.Repo
+  alias Cympho.Issues.Issue
+  alias Cympho.HeartbeatEngine.Run
+  alias Cympho.Recovery.{Fingerprint, RecoveryAttempt, RecoveryCase}
+
+  @lease_seconds 300
+  @backoff_seconds %{1 => 60, 2 => 120}
+
+  @spec ensure_case(map()) :: {:ok, RecoveryCase.t()} | {:error, term()}
+  def ensure_case(attrs) when is_map(attrs) do
+    source_type = attrs[:source_type] || attrs["source_type"]
+    issue_input = attrs[:issue] || attrs["issue"]
+    run = attrs[:run] || attrs[:source_run] || attrs["run"] || attrs["source_run"]
+
+    with {:ok, issue} <- load_issue(issue_input),
+         :ok <- validate_input_scope(issue_input, issue),
+         :ok <- validate_scope(issue, attrs, run),
+         {:ok, fingerprint, snapshot, source_id, source_status, agent_id, source_run_id} <-
+           source_details(source_type, issue, run) do
+      do_ensure_case(%{
+        company_id: issue.company_id,
+        issue_id: issue.id,
+        agent_id: agent_id,
+        source_run_id: source_run_id,
+        source_type: source_type,
+        source_id: source_id,
+        source_status: source_status,
+        source_fingerprint: fingerprint,
+        source_snapshot: snapshot
+      })
+    end
+  rescue
+    e in Ecto.ConstraintError ->
+      if e.constraint == "recovery_cases_active_source_index" do
+        attrs
+        |> reload_active_case()
+        |> case do
+          {:ok, row} -> {:ok, row}
+          _ -> {:error, e}
+        end
+      else
+        {:error, e}
+      end
+  end
+
+  @spec claim_case(RecoveryCase.t() | binary(), keyword()) ::
+          {:ok, %{case: RecoveryCase.t(), attempt: RecoveryAttempt.t(), token: String.t()}}
+          | {:error, atom()}
+  def claim_case(%RecoveryCase{id: id}, opts), do: claim_case(id, opts)
+
+  def claim_case(id, opts) when is_binary(id) do
+    now = option_now(opts)
+    lease_seconds = Keyword.get(opts, :lease_seconds, @lease_seconds)
+    claimed_by = Keyword.get(opts, :claimed_by, node() |> to_string())
+
+    Repo.transaction(fn ->
+      case Repo.one(from c in RecoveryCase, where: c.id == ^id, lock: "FOR UPDATE") do
+        nil ->
+          Repo.rollback(:not_found)
+
+        case_row ->
+          cond do
+            case_row.state == "claimed" and expired?(case_row.lease_expires_at, now) == false ->
+              Repo.rollback(:already_claimed)
+
+            case_row.state not in ["detected", "scheduled", "claimed"] ->
+              Repo.rollback(:not_claimable)
+
+            (case_row.state == "scheduled" and case_row.next_attempt_at) &&
+                DateTime.compare(case_row.next_attempt_at, now) == :gt ->
+              Repo.rollback(:not_due)
+
+            true ->
+              attempt_no = case_row.attempt_count + 1
+
+              if attempt_no > case_row.max_attempts do
+                Repo.rollback(:exhausted)
+              end
+
+              token = Ecto.UUID.generate()
+              claimed_at = now
+              expires = DateTime.add(now, lease_seconds, :second)
+
+              {1, _} =
+                Repo.update_all(
+                  from(c in RecoveryCase, where: c.id == ^id),
+                  set: [
+                    state: "claimed",
+                    attempt_count: attempt_no,
+                    claim_token: token,
+                    claimed_at: claimed_at,
+                    lease_expires_at: expires,
+                    claimed_by: claimed_by,
+                    last_attempt_at: now
+                  ]
+                )
+
+              attempt =
+                %RecoveryAttempt{}
+                |> RecoveryAttempt.changeset(%{
+                  recovery_case_id: id,
+                  attempt_no: attempt_no,
+                  status: "claimed",
+                  action: "retry",
+                  source_fingerprint: case_row.source_fingerprint,
+                  started_at: now,
+                  node: claimed_by
+                })
+                |> Repo.insert!()
+
+              updated = Repo.get!(RecoveryCase, id)
+              %{case: updated, attempt: attempt, token: token}
+          end
+      end
+    end)
+  end
+
+  @spec record_success(map(), term()) :: {:ok, RecoveryCase.t()} | {:error, atom()}
+  def record_success(lease, opts_or_result \\ %{}) do
+    now = option_now(opts_or_result)
+    complete_attempt(lease, "succeeded", nil, "recovered", now)
+  end
+
+  @spec record_superseded(map(), term()) :: {:ok, RecoveryCase.t()} | {:error, atom()}
+  def record_superseded(lease, opts_or_result \\ %{}) do
+    now = option_now(opts_or_result)
+    complete_attempt(lease, "skipped", nil, "superseded", now)
+  end
+
+  @spec record_failure(map(), term(), keyword()) :: {:ok, RecoveryCase.t()} | {:error, atom()}
+  def record_failure(lease, reason, opts \\ []) do
+    now = option_now(opts)
+
+    with {:ok, id, token, attempt} <- lease_parts(lease) do
+      Repo.transaction(fn ->
+        case Repo.one(
+               from c in RecoveryCase,
+                 where: c.id == ^id and c.claim_token == ^token and c.state == "claimed",
+                 lock: "FOR UPDATE"
+             ) do
+          nil ->
+            Repo.rollback(:stale_claim)
+
+          case_row ->
+            attempt_no = attempt.attempt_no
+            exhausted = attempt_no >= case_row.max_attempts
+
+            {state, next_retry_at} =
+              if exhausted,
+                do: {"exhausted", nil},
+                else:
+                  {"scheduled",
+                   DateTime.add(now, Map.get(@backoff_seconds, attempt_no, 600), :second)}
+
+            error = bounded_error(reason)
+
+            Repo.update_all(from(a in RecoveryAttempt, where: a.id == ^attempt.id),
+              set: [
+                status: "failed",
+                completed_at: now,
+                error_reason: error,
+                next_retry_at: next_retry_at
+              ]
+            )
+
+            updates = [
+              state: state,
+              claim_token: nil,
+              claimed_at: nil,
+              lease_expires_at: nil,
+              claimed_by: nil,
+              last_error: error,
+              next_attempt_at: next_retry_at
+            ]
+
+            updates = if exhausted, do: [{:exhausted_at, now} | updates], else: updates
+
+            Repo.update_all(
+              from(c in RecoveryCase, where: c.id == ^id and c.claim_token == ^token),
+              set: updates
+            )
+
+            Repo.get!(RecoveryCase, id)
+        end
+      end)
+    end
+  end
+
+  @spec with_attempt(map() | RecoveryCase.t(), keyword(), (map() -> term())) ::
+          {:ok, map()} | {:error, term()}
+  def with_attempt(source, opts, callback) when is_function(callback, 1) do
+    with {:ok, case_row} <- ensure_source(source),
+         {:ok, lease} <- claim_case(case_row, opts) do
+      result = callback.(lease)
+
+      outcome_result =
+        case result do
+          {:ok, value} ->
+            {:ok, record_success(lease, opts), value, :recovered}
+
+          {:error, :superseded} ->
+            {:ok, record_superseded(lease, opts), result, :superseded}
+
+          {:error, reason} ->
+            {:ok, record_failure(lease, reason, opts), result, outcome_for_failure(lease)}
+
+          value ->
+            {:ok, record_success(lease, opts), value, :recovered}
+        end
+
+      case outcome_result do
+        {:ok, {:ok, updated}, value, outcome} ->
+          {:ok, %{result: value, outcome: outcome, case: updated}}
+
+        {:ok, {:error, reason}, _value, _outcome} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp ensure_source(%RecoveryCase{} = row), do: {:ok, row}
+  defp ensure_source(source), do: ensure_case(source)
+
+  defp complete_attempt(lease, status, error, state, now) do
+    with {:ok, id, token, attempt} <- lease_parts(lease) do
+      Repo.transaction(fn ->
+        case Repo.one(
+               from c in RecoveryCase,
+                 where: c.id == ^id and c.claim_token == ^token and c.state == "claimed",
+                 lock: "FOR UPDATE"
+             ) do
+          nil ->
+            Repo.rollback(:stale_claim)
+
+          _case_row ->
+            Repo.update_all(from(a in RecoveryAttempt, where: a.id == ^attempt.id),
+              set: [status: status, completed_at: now, error_reason: error]
+            )
+
+            updates = [
+              state: state,
+              claim_token: nil,
+              claimed_at: nil,
+              lease_expires_at: nil,
+              claimed_by: nil,
+              next_attempt_at: nil
+            ]
+
+            updates = if state == "recovered", do: [{:recovered_at, now} | updates], else: updates
+
+            Repo.update_all(
+              from(c in RecoveryCase, where: c.id == ^id and c.claim_token == ^token),
+              set: updates
+            )
+
+            Repo.get!(RecoveryCase, id)
+        end
+      end)
+    end
+  end
+
+  defp lease_parts(%{
+         case: %RecoveryCase{id: id},
+         token: token,
+         attempt: %RecoveryAttempt{} = attempt
+       }),
+       do: {:ok, id, token, attempt}
+
+  defp lease_parts(_), do: {:error, :invalid_lease}
+
+  defp outcome_for_failure(%{
+         case: %RecoveryCase{max_attempts: max},
+         attempt: %RecoveryAttempt{attempt_no: no}
+       })
+       when no >= max, do: :exhausted
+
+  defp outcome_for_failure(_), do: :scheduled
+
+  defp load_issue(%Issue{id: id}) when is_binary(id) do
+    case Repo.get(Issue, id) do
+      nil -> {:error, :issue_not_found}
+      issue -> {:ok, issue}
+    end
+  end
+
+  defp load_issue(%{id: id}) when is_binary(id),
+    do: if(issue = Repo.get(Issue, id), do: {:ok, issue}, else: {:error, :issue_not_found})
+
+  defp load_issue(_), do: {:error, :issue_required}
+
+  defp validate_input_scope(input, %Issue{company_id: company_id}) do
+    case Map.get(input, :company_id) || Map.get(input, "company_id") do
+      ^company_id when is_binary(company_id) and byte_size(company_id) > 0 -> :ok
+      _ -> {:error, :company_scope_required}
+    end
+  end
+
+  defp validate_scope(%Issue{company_id: company_id}, attrs, run)
+       when is_binary(company_id) and byte_size(company_id) > 0 do
+    requested = attrs[:company_id] || attrs["company_id"]
+
+    cond do
+      requested && requested != company_id ->
+        {:error, :company_scope_required}
+
+      run &&
+          (run_field(run, :issue_id) != attrs_issue_id(attrs) ||
+             run_field(run, :company_id) != company_id) ->
+        {:error, :company_scope_required}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_scope(_, _, _), do: {:error, :company_scope_required}
+
+  defp attrs_issue_id(attrs),
+    do:
+      get_in(attrs, [:issue, :id]) || get_in(attrs, ["issue", :id]) ||
+        get_in(attrs, ["issue", "id"])
+
+  defp run_field(run, key), do: Map.get(run, key) || Map.get(run, Atom.to_string(key))
+
+  defp source_details("issue_checkout", issue, _run) do
+    {fingerprint, snapshot} = Fingerprint.for_issue_checkout(issue)
+
+    {:ok, fingerprint, snapshot, issue.id, to_string(issue.status), issue.assignee_id,
+     issue.checkout_run_id}
+  end
+
+  defp source_details("heartbeat_run", issue, %Run{} = run) do
+    {fingerprint, snapshot} = Fingerprint.for_run(run, issue)
+    {:ok, fingerprint, snapshot, run.id, to_string(run.status), run.agent_id, run.id}
+  end
+
+  defp source_details("heartbeat_run", _issue, _), do: {:error, :run_required}
+  defp source_details(_, _, _), do: {:error, :invalid_source_type}
+
+  defp do_ensure_case(attrs) do
+    Repo.transaction(fn ->
+      active =
+        Repo.one(
+          from c in RecoveryCase,
+            where:
+              c.company_id == ^attrs.company_id and c.source_type == ^attrs.source_type and
+                c.source_id == ^attrs.source_id and c.state in ^RecoveryCase.active_states(),
+            order_by: [desc: c.inserted_at],
+            lock: "FOR UPDATE"
+        )
+
+      cond do
+        active && active.source_fingerprint == attrs.source_fingerprint ->
+          active
+
+        active ->
+          Repo.update_all(from(c in RecoveryCase, where: c.id == ^active.id),
+            set: [state: "superseded"]
+          )
+
+          insert_case(attrs, active)
+
+        true ->
+          insert_case(attrs, nil)
+      end
+    end)
+  end
+
+  defp insert_case(attrs, parent) do
+    root_id = if parent, do: parent.root_case_id || parent.id
+
+    {:ok, row} =
+      %RecoveryCase{}
+      |> RecoveryCase.changeset(
+        Map.merge(attrs, %{parent_case_id: parent && parent.id, root_case_id: root_id})
+      )
+      |> Repo.insert()
+
+    if is_nil(root_id),
+      do:
+        Repo.update_all(from(c in RecoveryCase, where: c.id == ^row.id),
+          set: [root_case_id: row.id]
+        )
+
+    Repo.get!(RecoveryCase, row.id)
+  end
+
+  defp reload_active_case(attrs) do
+    source_type = attrs[:source_type] || attrs["source_type"]
+
+    with {:ok, issue} <- load_issue(attrs[:issue] || attrs["issue"]) do
+      source_id =
+        if source_type == "heartbeat_run",
+          do: (attrs[:run] || attrs[:source_run]).id,
+          else: issue.id
+
+      case Repo.one(
+             from c in RecoveryCase,
+               where:
+                 c.company_id == ^issue.company_id and c.source_type == ^source_type and
+                   c.source_id == ^source_id and c.state in ^RecoveryCase.active_states()
+           ) do
+        nil -> {:error, :not_found}
+        row -> {:ok, row}
+      end
+    end
+  end
+
+  defp expired?(nil, _), do: true
+  defp expired?(expires, now), do: DateTime.compare(expires, now) != :gt
+
+  defp option_now(opts) when is_list(opts),
+    do: Keyword.get(opts, :now, DateTime.utc_now() |> DateTime.truncate(:second))
+
+  defp option_now(%{now: now}), do: now
+  defp option_now(_), do: DateTime.utc_now() |> DateTime.truncate(:second)
+  defp bounded_error(nil), do: nil
+  defp bounded_error(reason), do: reason |> inspect(limit: 20) |> String.slice(0, 500)
+end
