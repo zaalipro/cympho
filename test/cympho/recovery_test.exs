@@ -413,3 +413,151 @@ defmodule Cympho.RecoveryMalformedRunTest do
     end
   end
 end
+
+defmodule Cympho.RecoveryAdapterTest do
+  use Cympho.DataCase, async: false
+
+  alias Cympho.Agents.Agent
+  alias Cympho.Companies.Company
+  alias Cympho.HeartbeatEngine
+  alias Cympho.HeartbeatEngine.Run
+  alias Cympho.Issues
+  alias Cympho.Issues.Issue
+  alias Cympho.Recovery
+  alias Cympho.Recovery.RecoveryCase
+  alias Cympho.Repo
+
+  test "stale run recovery creates a durable recovered case" do
+    {company, agent, issue} = recovery_source("stale-run")
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    assert {:ok, %{run: recovered, outcome: :recovered, case: case_row}} =
+             Recovery.recover_stale_run(started)
+
+    assert recovered.status == "failed"
+    assert case_row.state == "recovered"
+    assert case_row.source_run_id == run.id
+  end
+
+  test "a terminal run race is recorded as superseded" do
+    {company, agent, issue} = recovery_source("run-race")
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, stale_snapshot} = HeartbeatEngine.start_run(run)
+    assert {:ok, completed} = HeartbeatEngine.complete_run(stale_snapshot, %{})
+
+    assert {:ok, %{outcome: :superseded, case: case_row}} =
+             Recovery.recover_stale_run(stale_snapshot)
+
+    assert case_row.state == "superseded"
+    assert Repo.get!(Run, run.id).status == completed.status
+  end
+
+  test "a successor checkout is never cleared by an old issue snapshot" do
+    {company, agent, issue} = recovery_source("checkout-race")
+    assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+    assert {:ok, successor} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, bound} = Issues.bind_checkout_run(issue.id, agent.id, successor.id)
+    assert bound.checkout_run_id == successor.id
+
+    assert {:ok, %{outcome: :superseded, case: case_row}} =
+             Recovery.recover_orphaned_issue(checked_out)
+
+    reloaded = Issues.get_issue!(issue.id)
+    assert case_row.state == "superseded"
+    assert reloaded.status == :in_progress
+    assert reloaded.checkout_run_id == successor.id
+    assert Repo.get!(Run, successor.id).status == "pending"
+  end
+
+  test "an active database run blocks checkout recovery without a live owner" do
+    {company, agent, issue} = recovery_source("active-run")
+    assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, %{outcome: :superseded, case: case_row}} =
+             Recovery.recover_orphaned_issue(checked_out)
+
+    assert case_row.state == "superseded"
+    reloaded = Issues.get_issue!(issue.id)
+    assert reloaded.status == :in_progress
+    assert reloaded.checkout_run_id == checked_out.checkout_run_id
+    assert Repo.get!(Run, run.id).status == "pending"
+  end
+
+  test "three callback failures schedule twice and then exhaust without escalation" do
+    {_, _, issue} = recovery_source("exhaustion")
+    source = %{source_type: "issue_checkout", issue: issue}
+    now = ~U[2026-02-01 00:00:00Z]
+
+    assert {:ok, %{outcome: :scheduled, case: first}} =
+             Recovery.with_attempt(source, [now: now, base_delay: 1], fn _ ->
+               {:error, :network_failure}
+             end)
+
+    assert {:ok, %{outcome: :scheduled, case: second}} =
+             Recovery.with_attempt(source, [now: first.next_attempt_at, base_delay: 1], fn _ ->
+               raise "temporary callback failure"
+             end)
+
+    assert {:ok, %{outcome: :exhausted, case: exhausted}} =
+             Recovery.with_attempt(source, [now: second.next_attempt_at, base_delay: 1], fn _ ->
+               {:error, :timeout}
+             end)
+
+    assert exhausted.state == "exhausted"
+    assert exhausted.attempt_count == 3
+    assert exhausted.last_error == "timeout"
+    assert is_nil(exhausted.escalated_at)
+  end
+
+  defp recovery_source(suffix) do
+    company =
+      Repo.insert!(%Company{
+        name: "Recovery adapter #{suffix}",
+        slug: "recovery-adapter-#{suffix}-#{System.unique_integer([:positive])}"
+      })
+
+    agent =
+      Repo.insert!(%Agent{
+        name: "agent-#{suffix}",
+        role: :engineer,
+        status: :idle,
+        company_id: company.id
+      })
+
+    issue = Repo.insert!(%Issue{title: "Issue #{suffix}", company_id: company.id})
+    {company, agent, issue}
+  end
+end

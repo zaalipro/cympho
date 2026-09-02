@@ -1536,6 +1536,15 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       result = Dispatcher.recover_stale_checkouts()
 
       assert result.released >= 1
+      assert result.exhausted == 0
+
+      assert Cympho.Repo.exists?(
+               Ecto.Query.from(c in Cympho.Recovery.RecoveryCase,
+                 where:
+                   c.issue_id == ^issue.id and c.source_type == "issue_checkout" and
+                     c.state == "recovered"
+               )
+             )
 
       reloaded = Issues.get_issue!(issue.id)
       assert reloaded.status == :todo

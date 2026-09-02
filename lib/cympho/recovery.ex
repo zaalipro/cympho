@@ -2,8 +2,13 @@ defmodule Cympho.Recovery do
   @moduledoc "Durable case and lease lifecycle for stranded work recovery."
   import Ecto.Query
   alias Cympho.Repo
+  alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.HeartbeatEngine.Run
+  alias Cympho.HeartbeatEngine
+  alias Cympho.Workspaces
+  alias Cympho.Orchestrator
+  alias Cympho.RuntimeOperations
   alias Cympho.Recovery.{Fingerprint, RecoveryAttempt, RecoveryCase}
 
   @lease_seconds 300
@@ -234,6 +239,218 @@ defmodule Cympho.Recovery do
         {:ok, {:error, reason}, _value, _outcome} ->
           {:error, reason}
       end
+    end
+  end
+
+  @doc "Routes stale heartbeat-run recovery through a durable case and lease."
+  @spec recover_stale_run(Run.t(), keyword()) ::
+          {:ok, %{run: Run.t(), outcome: atom(), case: RecoveryCase.t()}} | {:error, term()}
+  def recover_stale_run(%Run{} = run, opts \\ []) do
+    recover_run(run, :stale, opts)
+  end
+
+  @doc "Routes orphaned heartbeat-run recovery through a durable case and lease."
+  @spec recover_orphaned_run(Run.t(), keyword()) ::
+          {:ok, %{run: Run.t(), outcome: atom(), case: RecoveryCase.t()}} | {:error, term()}
+  def recover_orphaned_run(%Run{} = run, opts \\ []) do
+    recover_run(run, :orphaned, opts)
+  end
+
+  @doc "Routes stale checkout recovery through durable cases and leases."
+  @spec recover_orphaned_issue(Issue.t(), keyword()) ::
+          {:ok, %{issue: Issue.t(), outcome: atom(), case: RecoveryCase.t()}} | {:error, term()}
+  def recover_orphaned_issue(issue, opts \\ [])
+
+  def recover_orphaned_issue(%Issue{} = issue, opts) do
+    recovery_opts = Keyword.get(opts, :recovery_opts, opts)
+
+    source =
+      %{source_type: "issue_checkout", issue: issue}
+      |> maybe_put_option(:max_attempts, opts)
+
+    with {:ok, result} <-
+           with_attempt(
+             source,
+             recovery_opts,
+             fn _lease ->
+               recover_checkout(issue)
+             end
+           ) do
+      {:ok,
+       %{
+         issue: checkout_result_issue(result.result, issue),
+         outcome: result.outcome,
+         case: result.case
+       }}
+    end
+  end
+
+  def recover_orphaned_issue(_issue, _opts), do: {:error, :issue_required}
+
+  @doc "Recovers all stale checked-out issues and returns stable aggregate counts."
+  @spec recover_stale_checkouts(keyword()) :: %{
+          checked: non_neg_integer(),
+          released: non_neg_integer(),
+          failed: non_neg_integer(),
+          exhausted: non_neg_integer()
+        }
+  def recover_stale_checkouts(opts \\ []) do
+    issues = RuntimeOperations.stale_checked_out_issues_all(opts)
+
+    Enum.reduce(issues, %{checked: 0, released: 0, failed: 0, exhausted: 0}, fn issue, acc ->
+      acc = %{acc | checked: acc.checked + 1}
+
+      case recover_orphaned_issue(issue, opts) do
+        {:ok, %{outcome: :recovered}} -> %{acc | released: acc.released + 1}
+        {:ok, %{outcome: :exhausted}} -> %{acc | exhausted: acc.exhausted + 1}
+        {:ok, %{outcome: :superseded}} -> acc
+        {:ok, %{outcome: :scheduled}} -> %{acc | failed: acc.failed + 1}
+        {:error, _reason} -> %{acc | failed: acc.failed + 1}
+      end
+    end)
+  rescue
+    _error -> %{checked: 0, released: 0, failed: 0, exhausted: 0}
+  end
+
+  defp recover_run(%Run{} = run, kind, opts) do
+    source =
+      %{source_type: "heartbeat_run", issue: nil, run: run}
+      |> maybe_put_option(:max_attempts, opts)
+
+    with {:ok, issue} <- Issues.get_issue(run.issue_id),
+         {:ok, result} <-
+           with_attempt(
+             %{source | issue: issue},
+             Keyword.get(opts, :recovery_opts, opts),
+             fn _lease ->
+               callback =
+                 if kind == :stale,
+                   do: &HeartbeatEngine.recover_stale_run/1,
+                   else: &HeartbeatEngine.recover_orphaned_run/1
+
+               case callback.(run) do
+                 {:error, {:invalid_status, _status}} -> {:error, :superseded}
+                 {:ok, updated} -> {:ok, updated}
+                 {:error, reason} -> {:error, reason}
+               end
+             end
+           ) do
+      {:ok,
+       %{
+         run: run_result(result.result, run),
+         outcome: result.outcome,
+         case: result.case
+       }}
+    end
+  end
+
+  defp maybe_put_option(source, key, opts) do
+    case Keyword.fetch(opts, key) do
+      {:ok, value} -> Map.put(source, key, value)
+      :error -> source
+    end
+  end
+
+  defp run_result(%Run{} = run, _fallback), do: run
+  defp run_result(_, fallback), do: fallback
+
+  defp checkout_result_issue(%Issue{} = issue, _fallback), do: issue
+  defp checkout_result_issue(_, fallback), do: fallback
+
+  defp recover_checkout(%Issue{} = issue) do
+    cond do
+      issue.status not in [:in_progress, "in_progress"] ->
+        {:error, :superseded}
+
+      live_runtime?(issue.id) ->
+        {:error, :superseded}
+
+      active_checkout_run?(issue.id) ->
+        {:error, :superseded}
+
+      true ->
+        with {:ok, current} <- checkout_snapshot(issue),
+             :ok <- ensure_no_active_checkout_run(issue.id),
+             :ok <- ensure_no_live_runtime(issue.id) do
+          release_result =
+            Workspaces.cancel_and_release_for_issue(current, %{
+              reason: "orphan_issue_reclaim",
+              company_id: current.company_id
+            })
+
+          case release_result do
+            {:error, reason} ->
+              {:error, reason}
+
+            :ok ->
+              with :ok <- ensure_no_active_checkout_run(issue.id),
+                   {:ok, current_after} <- checkout_snapshot(issue),
+                   :ok <- ensure_no_live_runtime(issue.id) do
+                case Issues.clear_checkout_lock(current_after, :todo) do
+                  {:ok, cleared} -> {:ok, cleared}
+                  {:error, _reason} -> {:error, :superseded}
+                end
+              else
+                _ -> {:error, :superseded}
+              end
+          end
+        else
+          _ -> {:error, :superseded}
+        end
+    end
+  end
+
+  defp checkout_snapshot(%Issue{} = issue) do
+    case Issues.get_issue(issue.id) do
+      {:ok, current} ->
+        if current.status in [:in_progress, "in_progress"] and
+             current.lock_version == issue.lock_version and
+             current.checkout_run_id == issue.checkout_run_id and
+             current.checked_out_at == issue.checked_out_at do
+          {:ok, current}
+        else
+          :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp ensure_no_active_checkout_run(issue_id),
+    do: if(active_checkout_run?(issue_id), do: {:error, :active_run}, else: :ok)
+
+  defp ensure_no_live_runtime(issue_id),
+    do: if(live_runtime?(issue_id), do: {:error, :live_runtime}, else: :ok)
+
+  defp active_checkout_run?(issue_id) do
+    Repo.exists?(
+      from r in Run,
+        where: r.issue_id == ^issue_id and r.status in ["pending", "queued", "running"]
+    )
+  rescue
+    _error -> true
+  end
+
+  defp live_runtime?(issue_id) do
+    case Orchestrator.whereis(issue_id) do
+      nil ->
+        case Cympho.AdapterSessions.owners_for_issue(issue_id) do
+          {:ok, []} -> false
+          {:ok, [_ | _]} -> true
+          {:error, :not_started} -> true
+        end
+
+      pid ->
+        Process.alive?(pid) or live_adapter_worker?(issue_id)
+    end
+  end
+
+  defp live_adapter_worker?(issue_id) do
+    case Cympho.AdapterSessions.owners_for_issue(issue_id) do
+      {:ok, []} -> false
+      {:ok, [_ | _]} -> true
+      {:error, :not_started} -> true
     end
   end
 
