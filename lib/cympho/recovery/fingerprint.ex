@@ -19,6 +19,7 @@ defmodule Cympho.Recovery.Fingerprint do
       "run_status" => value(Map.get(run, :status) || Map.get(run, "status")),
       "issue_status" => value(Map.get(issue, :status) || Map.get(issue, "status")),
       "issue_lock_version" => Map.get(issue, :lock_version) || Map.get(issue, "lock_version"),
+      "lock_version" => Map.get(issue, :lock_version) || Map.get(issue, "lock_version"),
       "checkout_run_id" =>
         id(Map.get(issue, :checkout_run_id) || Map.get(issue, "checkout_run_id")),
       "error_family" => error_family
