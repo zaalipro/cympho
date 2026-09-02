@@ -18,3 +18,10 @@ Verification:
 - Added focused coverage for attempt status/attempt-number uniqueness, BoardApproval recovery association/category casting, and rejection of lease/result timestamps during ordinary RecoveryCase creation.
 - `mix format` passed for changed files.
 - `mix test test/cympho/recovery_test.exs --max-cases 1` and `MIX_ENV=test mix ecto.migrate` remain blocked before test execution by the existing `:meck` dependency compile failure under the installed Erlang toolchain.
+
+## Fix round 2
+
+- Moved all added tests inside `Cympho.RecoveryTest`, restoring DataCase aliases/imports and valid `test/2` expansion.
+- Expanded creation-casting coverage to assert all requested lease/result fields are ignored: `claim_token`, `claimed_at`, `lease_expires_at`, `recovered_at`, `exhausted_at`, and `resolved_at`.
+- `mix format test/cympho/recovery_test.exs` passed.
+- Focused test command was retried; it still stops before application test compilation because dependency `:meck` fails to compile on the installed Erlang toolchain (`catch ... is deprecated`).
