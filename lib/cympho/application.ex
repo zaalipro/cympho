@@ -23,6 +23,7 @@ defmodule Cympho.Application do
       Cympho.Repo,
       {Phoenix.PubSub, name: Cympho.PubSub},
       {Task.Supervisor, name: Cympho.TaskSupervisor},
+      Cympho.Readiness.Cache,
       Cympho.Companies.ImportDecodeAdmission,
       import_transfer_sweeper_child(),
       {Registry, keys: :unique, name: Cympho.OrchestratorRegistry},

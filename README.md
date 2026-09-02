@@ -46,19 +46,27 @@ When one agent is not enough, **swarm mode** can fan a single owner issue into t
 
 ## Installation (Local & VPS)
 
-Cympho includes a robust, automated installation script (`install.sh`) that sets up the entire application on both **macOS (Local)** and **Ubuntu/Linux (VPS)**. 
+Cympho includes an interactive installation helper (`install.sh`) for macOS development and Ubuntu/Linux deployments. Production builds are staged from an exact Git archive into an immutable release payload; persistent uploads/import data live outside that payload. The helper installs dependencies and configures a basic application, database, proxy, and service path; it is not a managed production lifecycle.
 
-To install Cympho on an empty VPS or your local machine, run the following command:
+The installer is interactive, so download the repository first and run it from a terminal. Do not pipe it into a shell:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/zaalipro/cympho/main/install.sh | bash
+git clone https://github.com/zaalipro/cympho.git
+cd cympho
+./install.sh
 ```
-*(Or simply execute `./install.sh` if you have already cloned the repository).*
+
+Production installation is **first-bootstrap-only** once the managed `cympho`
+systemd unit exists. Only a bootstrap interrupted before the managed systemd unit was published
+may be rerun with its existing `.env` in place; the installer validates and reuses
+those credentials without rotating the database password. There is no managed
+in-place updater in `install.sh`; `deploy.sh` is a separate fixed-layout workflow,
+not an upgrade continuation.
 
 ### What the script does:
 1. **Interactive Onboarding:** Prompts for your Admin details and Company setup.
 2. **OS Auto-Detection & Dependencies:** Installs `asdf`, Node.js, PostgreSQL, and other necessary build tools via `apt` or `brew`.
-3. **VPS Production Ready:** If installing on a VPS, it automatically creates a secure Postgres user, provisions a Let's Encrypt SSL certificate via Caddy, generates production secrets (`.env`), and sets up a `systemd` service so Cympho stays running reliably.
+3. **Ubuntu/VPS bootstrap:** On a supported Ubuntu/Linux host, the script creates a PostgreSQL role only for a new matching configuration, generates production secrets, configures Caddy/Let's Encrypt, and installs an immutable Git-archive release under `systemd`. Persistent uploads/import data are kept outside the release payload. This is a bootstrap foundation, not proof of production readiness; managed update, backup/restore, repair, uninstall, and interrupted recovery remain open.
 
 ## What Is New
 
@@ -343,8 +351,8 @@ This comparison is intentionally not a trophy wall. Paperclip is the more mature
 
 | Dimension | Paperclip today | Cympho today | Honest winner |
 | --- | --- | --- | --- |
-| Public trust and maturity | Stronger public story: docs, website, Discord/community links, roadmap, quickstart, and polished positioning. | Active Phoenix app with screenshots, local/VPS installer, and repo-local comparison checks. | **Paperclip.** Easier to evaluate from the outside. |
-| Setup and first-run onboarding | Public quickstart centers on `npx paperclipai onboard --yes`, interactive setup, docs, and a clearer external path for new users. | `install.sh` covers macOS/local and Ubuntu/VPS setup, with production-oriented Postgres, Caddy, secrets, and systemd support. | **Mixed.** Paperclip is friendlier for first impressions; Cympho is stronger for a VPS production bootstrap. |
+| Public trust and maturity | Stronger public story: docs, website, Discord/community links, roadmap, quickstart, and polished positioning. | Active Phoenix app with screenshots, an interactive local/VPS bootstrap helper, and repo-local comparison checks. | **Paperclip.** Easier to evaluate from the outside. |
+| Setup and first-run onboarding | Public quickstart centers on `npx paperclipai onboard --yes`, interactive setup, docs, and a clearer external path for new users. | `install.sh` provides a source-checkout first bootstrap for macOS/local and Ubuntu/VPS; interrupted pre-publication runs can reuse validated credentials. It has no managed in-place updater; `deploy.sh` is a separate fixed-layout workflow, not an upgrade continuation. | **Paperclip is friendlier and has the broader managed lifecycle.** Cympho has a narrower, tested bootstrap/readiness foundation, not demonstrated production-readiness superiority. |
 | Interrupted or existing-company onboarding | Setup state and improvement workflows recover from interrupted onboarding and work with an existing company. | Allowlisted non-secret drafts restore after refresh; Improve drafts are company-pinned and carry a durable submission ID. One locked transaction rechecks membership, reuses the same goal/CEO issue on replay, and clears the matching draft without creating another company. | **Tie on this workflow.** Paperclip still presents the friendlier public quickstart; Cympho now has a narrow, tested draft/tenant/idempotency contract. |
 | Prebuilt company ecosystem | `paperclipai/companies` advertises 16 companies, 440+ specialized agents, and 500+ skills. | Default company roster, role playbooks, executable blueprints, and Agrenting remote-agent hiring. | **Paperclip.** Cympho has useful defaults; Paperclip has the larger public catalog. |
 | Blueprint launch verifiability | Stronger public catalog scale, but public metadata is mostly catalog/skill oriented. | Cympho blueprints are executable, smoke-tested, searchable by role/capability/seed work, and persist a launch manifest with roster, capability tags, and seed-work provenance on the created company. | **Cympho.** Better proof of what the launch actually created; Paperclip remains ahead on catalog breadth. |

@@ -1,8 +1,9 @@
 # Continuous Integration for Cympho (Elixir/Phoenix).
 #
-# Runs on every push to main and on every pull request. A single job keeps
-# things fast: deps are cached, then we lint-check formatting, compile with
-# warnings-as-errors, and run the full test suite against a Postgres service.
+# Runs on every push to main and on every pull request. The main job caches
+# dependencies, checks formatting, compiles with warnings-as-errors, and runs
+# the full suite; a separate Docker job verifies the shipped image topology and
+# readiness contract.
 #
 # Tool versions are pinned to match .tool-versions:
 #   elixir 1.19.5-otp-28
@@ -28,6 +29,18 @@ permissions:
   contents: read
 
 jobs:
+  container-init:
+    name: Container PID 1 reaping
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image and verify orphan reaping
+        run: scripts/docker-build-test.sh
+
   test:
     name: Format, compile & test
     runs-on: ubuntu-latest

@@ -253,6 +253,7 @@ defmodule CymphoWeb.Router do
   scope "/api", CymphoWeb do
     pipe_through :api
 
+    get "/health", HealthController, :show
     post "/register", RegistrationController, :create
     post "/login", LoginController, :create
     post "/telegram/webhook", TelegramController, :webhook

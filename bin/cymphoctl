@@ -1,0 +1,605 @@
+#!/usr/bin/env bash
+# Read-only operator CLI for a single Cympho systemd service.
+
+set -euo pipefail
+umask 077
+
+readonly CYMPHOCTL_CLI_VERSION="1.0.0"
+readonly CYMPHOCTL_SCHEMA_VERSION=1
+readonly DEFAULT_LOG_LINES=100
+readonly MAX_LOG_LINES=10000
+readonly MAX_HEALTH_BYTES=65536
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SERVICE_NAME="${CYMPHOCTL_SERVICE_NAME:-${CYMPHO_SERVICE_NAME:-cympho}}"
+HEALTH_PORT="${CYMPHOCTL_HEALTH_PORT:-${CYMPHO_APP_PORT:-4000}}"
+APP_HOST="${CYMPHOCTL_APP_HOST:-${APP_HOST:-localhost}}"
+CONNECT_TIMEOUT="${CYMPHOCTL_CONNECT_TIMEOUT_SECONDS:-1}"
+MAX_TIME="${CYMPHOCTL_MAX_TIME_SECONDS:-3}"
+RELEASE_INFO_FILE="${CYMPHOCTL_RELEASE_INFO_FILE:-${SCRIPT_DIR}/../release-info.json}"
+HEALTH_VALIDATOR="${CYMPHOCTL_HEALTH_VALIDATOR:-${SCRIPT_DIR}/cympho-health-validator}"
+
+TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cymphoctl.XXXXXX")"
+HEALTH_BODY_FILE=""
+HEALTH_CANONICAL_FILE=""
+HEALTH_HTTP_STATUS=""
+HEALTH_CONTENT_TYPE=""
+HEALTH_STATE="not_run"
+HEALTH_ACTUAL_REVISION=""
+LOCAL_IDENTITY_STATE="absent"
+LOCAL_EXPECTED_REVISION=""
+
+cleanup() {
+  rm -rf -- "$TEMP_DIR"
+}
+
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+usage() {
+  cat <<'EOF'
+Usage:
+  cymphoctl version [--json]
+  cymphoctl readiness [--json] [--expect-revision REV]
+  cymphoctl service status [--json]
+  cymphoctl service logs [-n N|--lines N] [-f|--follow]
+
+Read-only environment overrides:
+  CYMPHOCTL_SERVICE_NAME             systemd service name (default: cympho)
+  CYMPHOCTL_HEALTH_PORT              loopback HTTP port (default: 4000)
+  CYMPHOCTL_APP_HOST                 Host header (default: APP_HOST or localhost)
+  CYMPHOCTL_RELEASE_INFO_FILE        local release identity manifest
+  CYMPHOCTL_CONNECT_TIMEOUT_SECONDS  curl connect timeout, 1-10 (default: 1)
+  CYMPHOCTL_MAX_TIME_SECONDS         curl total timeout, 1-30 (default: 3)
+EOF
+}
+
+die_usage() {
+  printf 'cymphoctl: %s\n' "$1" >&2
+  usage >&2
+  exit 64
+}
+
+diagnose() {
+  printf 'cymphoctl: %s\n' "$1" >&2
+}
+
+json_error() {
+  local command="$1"
+  local error="$2"
+
+  printf '{"schema_version":%d,"service":"cympho","command":"%s","status":"error","error":"%s"}\n' \
+    "$CYMPHOCTL_SCHEMA_VERSION" "$command" "$error"
+}
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    diagnose "required command is unavailable: $1"
+    return 1
+  fi
+}
+
+make_temp_file() {
+  local variable_name="$1"
+  local path
+  path="$(mktemp "${TEMP_DIR}/file.XXXXXX")"
+  printf -v "$variable_name" '%s' "$path"
+}
+
+valid_positive_integer() {
+  local value="$1"
+  local maximum="$2"
+
+  [[ "$value" =~ ^[0-9]{1,9}$ ]] && ((10#$value >= 1 && 10#$value <= maximum))
+}
+
+validate_runtime_configuration() {
+  if [[ ! "$SERVICE_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$ ]]; then
+    diagnose "CYMPHOCTL_SERVICE_NAME must be a simple systemd service name"
+    return 1
+  fi
+
+  if ! valid_positive_integer "$HEALTH_PORT" 65535; then
+    diagnose "CYMPHOCTL_HEALTH_PORT must be an integer from 1 to 65535"
+    return 1
+  fi
+
+  if [[ ! "$APP_HOST" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]]; then
+    diagnose "CYMPHOCTL_APP_HOST must be a bare hostname"
+    return 1
+  fi
+
+  if ! valid_positive_integer "$CONNECT_TIMEOUT" 10; then
+    diagnose "CYMPHOCTL_CONNECT_TIMEOUT_SECONDS must be an integer from 1 to 10"
+    return 1
+  fi
+
+  if ! valid_positive_integer "$MAX_TIME" 30; then
+    diagnose "CYMPHOCTL_MAX_TIME_SECONDS must be an integer from 1 to 30"
+    return 1
+  fi
+}
+
+service_unit() {
+  case "$SERVICE_NAME" in
+    *.service) printf '%s\n' "$SERVICE_NAME" ;;
+    *) printf '%s.service\n' "$SERVICE_NAME" ;;
+  esac
+}
+
+validate_revision() {
+  [[ "$1" =~ ^([0-9a-fA-F]{7,64}|development|unknown)$ ]]
+}
+
+fetch_health() {
+  local url="http://127.0.0.1:${HEALTH_PORT}/api/health"
+  local curl_metadata
+  local curl_status
+
+  make_temp_file HEALTH_BODY_FILE
+  HEALTH_HTTP_STATUS=""
+  HEALTH_CONTENT_TYPE=""
+
+  set +e
+  curl_metadata="$(
+    curl \
+      --disable \
+      --silent \
+      --request GET \
+      --proto '=http' \
+      --connect-timeout "$CONNECT_TIMEOUT" \
+      --max-time "$MAX_TIME" \
+      --max-redirs 0 \
+      --max-filesize "$MAX_HEALTH_BYTES" \
+      --noproxy '*' \
+      --header "Host: ${APP_HOST}" \
+      --header 'Accept: application/json' \
+      --header 'X-Forwarded-Proto: https' \
+      --output "$HEALTH_BODY_FILE" \
+      --write-out $'%{http_code}\n%{content_type}' \
+      "$url" 2>/dev/null
+  )"
+  curl_status=$?
+  set -e
+
+  if ((curl_status != 0)); then
+    HEALTH_STATE="transport_error"
+    return 1
+  fi
+
+  HEALTH_HTTP_STATUS="${curl_metadata%%$'\n'*}"
+  if [[ "$curl_metadata" == *$'\n'* ]]; then
+    HEALTH_CONTENT_TYPE="${curl_metadata#*$'\n'}"
+  fi
+
+  if [[ ! "$HEALTH_HTTP_STATUS" =~ ^[0-9]{3}$ ]]; then
+    HEALTH_STATE="invalid_http_status"
+    return 1
+  fi
+
+  if [[ ! "$HEALTH_CONTENT_TYPE" =~ ^[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn]/[Jj][Ss][Oo][Nn]([[:space:]]*\;.*)?$ ]]; then
+    HEALTH_STATE="invalid_content_type"
+    return 1
+  fi
+
+  return 0
+}
+
+validate_health_document() {
+  local expected_revision="$1"
+  local validator_status
+  local reserved_output
+
+  make_temp_file reserved_output
+  rm -f -- "$reserved_output"
+  HEALTH_CANONICAL_FILE="$reserved_output"
+
+  set +e
+  python3 "$HEALTH_VALIDATOR" health \
+    "$HEALTH_BODY_FILE" "$HEALTH_CANONICAL_FILE" "$expected_revision"
+  validator_status=$?
+  set -e
+
+  case "$validator_status" in
+    0) HEALTH_STATE="ready" ;;
+    10) HEALTH_STATE="not_ready" ;;
+    11) HEALTH_STATE="revision_mismatch" ;;
+    *) HEALTH_STATE="invalid_document" ;;
+  esac
+
+  if [[ -s "$HEALTH_CANONICAL_FILE" ]]; then
+    HEALTH_ACTUAL_REVISION="$(
+      python3 - "$HEALTH_CANONICAL_FILE" <<'PYTHON'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    print(json.load(source)["release"]["revision"])
+PYTHON
+    )"
+  fi
+
+  ((validator_status == 0))
+}
+
+probe_health() {
+  local expected_revision="$1"
+
+  HEALTH_STATE="not_run"
+  HEALTH_ACTUAL_REVISION=""
+
+  if ! require_command curl || ! require_command python3; then
+    HEALTH_STATE="dependency_unavailable"
+    return 1
+  fi
+
+  if [[ ! -f "$HEALTH_VALIDATOR" ]]; then
+    diagnose "readiness validator is unavailable"
+    HEALTH_STATE="dependency_unavailable"
+    return 1
+  fi
+
+  if ! fetch_health; then
+    return 1
+  fi
+
+  validate_health_document "$expected_revision" || true
+
+  case "$HEALTH_STATE:$HEALTH_HTTP_STATUS" in
+    ready:200) return 0 ;;
+    not_ready:503) return 1 ;;
+    revision_mismatch:200|revision_mismatch:503) return 1 ;;
+    ready:*|not_ready:*) HEALTH_STATE="unexpected_http_status"; return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+print_health() {
+  local mode="$1"
+  local expected_revision="$2"
+
+  if [[ -s "$HEALTH_CANONICAL_FILE" ]]; then
+    python3 "$HEALTH_VALIDATOR" health-output \
+      "$HEALTH_CANONICAL_FILE" "$HEALTH_STATE" "$expected_revision" \
+      "${HEALTH_HTTP_STATUS:-0}" "$mode"
+  elif [[ "$mode" == "json" ]]; then
+    json_error "readiness" "$HEALTH_STATE"
+  fi
+}
+
+command_version() {
+  local mode="human"
+  local identity_file
+
+  while (($# > 0)); do
+    case "$1" in
+      --json) mode="json" ;;
+      -h|--help) usage; return 0 ;;
+      *) die_usage "unknown version option: $1" ;;
+    esac
+    shift
+  done
+
+  if ! require_command python3 || [[ ! -f "$HEALTH_VALIDATOR" ]]; then
+    if [[ ! -f "$HEALTH_VALIDATOR" ]]; then diagnose "readiness validator is unavailable"; fi
+    if [[ "$mode" == "json" ]]; then json_error "version" "dependency_unavailable"; fi
+    return 1
+  fi
+  if [[ ! -f "$RELEASE_INFO_FILE" ]]; then
+    diagnose "local release identity manifest is unavailable"
+    if [[ "$mode" == "json" ]]; then json_error "version" "release_identity_unavailable"; fi
+    return 1
+  fi
+
+  make_temp_file identity_file
+  rm -f -- "$identity_file"
+  if ! python3 "$HEALTH_VALIDATOR" release "$RELEASE_INFO_FILE" "$identity_file"; then
+    diagnose "local release identity manifest is invalid"
+    if [[ "$mode" == "json" ]]; then json_error "version" "release_identity_invalid"; fi
+    return 1
+  fi
+
+  python3 "$HEALTH_VALIDATOR" version-output \
+    "$identity_file" release_manifest "$CYMPHOCTL_CLI_VERSION" "$mode"
+}
+
+command_readiness() {
+  local json=false
+  local expected_revision=""
+  local option
+
+  while (($# > 0)); do
+    option="$1"
+    case "$option" in
+      --json)
+        json=true
+        shift
+        ;;
+      --expect-revision)
+        (($# >= 2)) || die_usage "--expect-revision requires a value"
+        [[ -z "$expected_revision" ]] || die_usage "--expect-revision may be supplied only once"
+        expected_revision="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        die_usage "unknown readiness option: $option"
+        ;;
+    esac
+  done
+
+  if [[ -n "$expected_revision" ]] && ! validate_revision "$expected_revision"; then
+    die_usage "--expect-revision must be a 7-64 character hexadecimal revision, development, or unknown"
+  fi
+
+  if probe_health "$expected_revision"; then
+    if [[ "$json" == true ]]; then print_health json "$expected_revision"; else print_health human "$expected_revision"; fi
+    return 0
+  fi
+
+  case "$HEALTH_STATE" in
+    revision_mismatch)
+      diagnose "running revision ${HEALTH_ACTUAL_REVISION} does not match expected revision ${expected_revision}"
+      ;;
+    not_ready)
+      diagnose "service reported that it is not ready"
+      ;;
+    unexpected_http_status)
+      diagnose "readiness endpoint returned unexpected HTTP status ${HEALTH_HTTP_STATUS}"
+      ;;
+    invalid_document)
+      diagnose "readiness endpoint returned an invalid schema"
+      ;;
+    invalid_content_type)
+      diagnose "readiness endpoint did not return application/json"
+      ;;
+    transport_error)
+      diagnose "readiness endpoint could not be reached within the configured timeout"
+      ;;
+    dependency_unavailable)
+      ;;
+    *)
+      diagnose "readiness probe failed"
+      ;;
+  esac
+
+  if [[ "$json" == true ]]; then print_health json "$expected_revision"; else print_health human "$expected_revision"; fi
+  return 1
+}
+
+read_service_status() {
+  local unit="$1"
+  local output_file="$2"
+
+  systemctl show \
+    --no-pager \
+    --property=LoadState,ActiveState,UnitFileState,MainPID \
+    -- "$unit" >"$output_file" 2>/dev/null
+}
+
+parse_service_status() {
+  local input_file="$1"
+  local key value
+
+  LOAD_STATE="unknown"
+  ACTIVE_STATE="unknown"
+  UNIT_FILE_STATE="unknown"
+  MAIN_PID="0"
+
+  while IFS='=' read -r key value; do
+    case "$key" in
+      LoadState) [[ "$value" =~ ^[a-z-]+$ ]] && LOAD_STATE="$value" ;;
+      ActiveState) [[ "$value" =~ ^[a-z-]+$ ]] && ACTIVE_STATE="$value" ;;
+      UnitFileState) [[ "$value" =~ ^[a-z-]+$ ]] && UNIT_FILE_STATE="$value" ;;
+      MainPID) [[ "$value" =~ ^([1-9][0-9]{0,18}|0)$ ]] && MAIN_PID="$value" ;;
+    esac
+  done <"$input_file"
+}
+
+resolve_local_expected_revision() {
+  LOCAL_IDENTITY_STATE="absent"
+  LOCAL_EXPECTED_REVISION=""
+
+  if [[ ! -f "$RELEASE_INFO_FILE" ]]; then return 0; fi
+  if ! require_command python3; then LOCAL_IDENTITY_STATE="invalid"; return 0; fi
+
+  if LOCAL_EXPECTED_REVISION="$(
+    python3 "$HEALTH_VALIDATOR" release-revision "$RELEASE_INFO_FILE"
+  )"; then
+    LOCAL_IDENTITY_STATE="valid"
+  else
+    LOCAL_IDENTITY_STATE="invalid"
+    LOCAL_EXPECTED_REVISION=""
+  fi
+}
+
+print_service_status_json() {
+  local unit="$1"
+  local supervisor_available="$2"
+  local installed="$3"
+  local active="$4"
+  local enabled="$5"
+  local expected_revision="$6"
+  local health_file="-"
+
+  if [[ -s "$HEALTH_CANONICAL_FILE" ]]; then health_file="$HEALTH_CANONICAL_FILE"; fi
+  python3 "$HEALTH_VALIDATOR" status-output \
+    "$unit" "$supervisor_available" "$installed" "$active" "$enabled" "$MAIN_PID" \
+    "$LOAD_STATE" "$ACTIVE_STATE" "$UNIT_FILE_STATE" "$HEALTH_STATE" "$health_file" \
+    "$expected_revision"
+}
+
+command_service_status() {
+  local json=false
+  local unit
+  local status_file
+  local supervisor_available=true
+  local installed=false
+  local active=false
+  local enabled=false
+  local expected_revision=""
+  local service_ready=false
+
+  LOAD_STATE="unknown"
+  ACTIVE_STATE="unknown"
+  UNIT_FILE_STATE="unknown"
+  MAIN_PID="0"
+
+  while (($# > 0)); do
+    case "$1" in
+      --json) json=true ;;
+      -h|--help) usage; return 0 ;;
+      *) die_usage "unknown service status option: $1" ;;
+    esac
+    shift
+  done
+
+  unit="$(service_unit)"
+  make_temp_file status_file
+
+  if ! require_command systemctl; then
+    supervisor_available=false
+  elif read_service_status "$unit" "$status_file"; then
+    parse_service_status "$status_file"
+    [[ "$LOAD_STATE" == "loaded" ]] && installed=true
+    [[ "$ACTIVE_STATE" == "active" ]] && active=true
+    case "$UNIT_FILE_STATE" in enabled|enabled-runtime) enabled=true ;; esac
+  else
+    supervisor_available=false
+  fi
+
+  resolve_local_expected_revision
+  expected_revision="$LOCAL_EXPECTED_REVISION"
+  if probe_health "$expected_revision"; then
+    if [[ "$installed" == true && "$active" == true && "$LOCAL_IDENTITY_STATE" == "valid" ]]; then
+      service_ready=true
+    fi
+  fi
+
+  if [[ "$LOCAL_IDENTITY_STATE" != "valid" ]]; then
+    HEALTH_STATE="release_identity_${LOCAL_IDENTITY_STATE}"
+  fi
+
+  if [[ "$json" == true ]]; then
+    if require_command python3; then
+      print_service_status_json \
+        "$unit" "$supervisor_available" "$installed" "$active" "$enabled" "$expected_revision"
+    else
+      json_error "service.status" "dependency_unavailable"
+    fi
+  else
+    printf 'Service %s: %s, %s' "$unit" "$ACTIVE_STATE" "$UNIT_FILE_STATE"
+    if [[ "$MAIN_PID" != "0" ]]; then printf ', pid %s' "$MAIN_PID"; fi
+    printf '.\n'
+    print_health human "$expected_revision"
+  fi
+
+  if [[ "$service_ready" == true ]]; then
+    return 0
+  fi
+
+  if [[ "$LOCAL_IDENTITY_STATE" != "valid" ]]; then
+    diagnose "the local release identity manifest is ${LOCAL_IDENTITY_STATE}"
+  elif [[ "$active" != true && "$HEALTH_STATE" == "ready" ]]; then
+    diagnose "the managed service is inactive even though a Cympho responder is ready on the loopback port"
+  elif [[ "$supervisor_available" != true ]]; then
+    diagnose "systemd service status is unavailable"
+  elif [[ "$installed" != true ]]; then
+    diagnose "the managed service is not installed"
+  elif [[ "$active" != true ]]; then
+    diagnose "the managed service is not active"
+  else
+    diagnose "the managed service is active but not ready"
+  fi
+
+  return 1
+}
+
+command_service_logs() {
+  local lines="$DEFAULT_LOG_LINES"
+  local follow=false
+  local unit
+  local option
+
+  while (($# > 0)); do
+    option="$1"
+    case "$option" in
+      -n|--lines)
+        (($# >= 2)) || die_usage "$option requires a value"
+        lines="$2"
+        shift 2
+        ;;
+      -f|--follow)
+        follow=true
+        shift
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        die_usage "unknown service logs option: $option"
+        ;;
+    esac
+  done
+
+  if ! valid_positive_integer "$lines" "$MAX_LOG_LINES"; then
+    die_usage "log line count must be an integer from 1 to ${MAX_LOG_LINES}"
+  fi
+
+  require_command journalctl || return 1
+  unit="$(service_unit)"
+
+  if [[ "$follow" == true ]]; then
+    exec env SYSTEMD_PAGER=cat PAGER=cat journalctl \
+      --no-pager --output=short-iso --unit "$unit" --lines "$lines" --follow
+  else
+    exec env SYSTEMD_PAGER=cat PAGER=cat journalctl \
+      --no-pager --output=short-iso --unit "$unit" --lines "$lines"
+  fi
+}
+
+main() {
+  local command="${1:-}"
+
+  case "$command" in
+    -h|--help|help)
+      usage
+      return 0
+      ;;
+    "")
+      die_usage "a command is required"
+      ;;
+  esac
+
+  validate_runtime_configuration || exit 64
+
+  shift
+  case "$command" in
+    version)
+      command_version "$@"
+      ;;
+    readiness)
+      command_readiness "$@"
+      ;;
+    service)
+      local service_command="${1:-}"
+      [[ -n "$service_command" ]] || die_usage "a service command is required"
+      shift
+      case "$service_command" in
+        status) command_service_status "$@" ;;
+        logs) command_service_logs "$@" ;;
+        *) die_usage "unknown service command: $service_command" ;;
+      esac
+      ;;
+    *)
+      die_usage "unknown command: $command"
+      ;;
+  esac
+}
+
+main "$@"

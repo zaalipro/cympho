@@ -257,8 +257,48 @@ provider responses, or raw exceptions.
 This is a source-checkout diagnostic, not a service manager. It cannot inspect
 another BEAM VM's process tree, and malformed production variables rejected
 while `config/runtime.exs` loads can prevent Mix itself from reaching the task;
-the boot error is then the authoritative diagnosis. Service status/logs,
-managed update, and backup commands remain separate roadmap work.
+the boot error is then the authoritative diagnosis. Release service status/logs
+are available through the read-only `cymphoctl` described below; managed update
+and backup commands remain roadmap work.
+
+### Read-only release operator CLI
+
+Native releases and the shipped container include `bin/cymphoctl`, a versioned,
+read-only operator CLI:
+
+```bash
+bin/cymphoctl version --json
+bin/cymphoctl readiness --json --expect-revision <git-sha>
+bin/cymphoctl service status --json
+bin/cymphoctl service logs --lines 100
+bin/cymphoctl service logs --lines 100 --follow
+```
+
+The CLI requires Bash, curl, and Python 3. Service status and logs additionally
+require systemd and journal access. Readiness connects only to the configured
+loopback port, does not follow redirects or use proxy configuration, bounds
+connect time, total time, and response size, requires `application/json`, and
+validates the exact schema before emitting allowlisted JSON. With
+`--expect-revision`, success means the running endpoint reported that exact
+build revision and that its application, database, and packaged-migration
+checks were ready. It is not a cryptographic remote-attestation protocol.
+
+`service status` combines fixed-unit systemd state with the same readiness
+contract; `service logs` accepts only a capped positive line count and passes
+fixed arguments directly to `journalctl` without a pager or shell evaluation.
+JSON documents go to stdout and operator diagnostics go to stderr.
+
+`deploy.sh` builds from an exact clean Git archive, embeds its revision into the
+release and identity manifest, keeps release and validation files root-owned,
+and gates cutover on exact-revision readiness. A rollback re-probes the retained
+release revision, but it does **not** reverse database migrations. That probe
+proves only that the old binary booted against the current schema. Use
+expand/contract migrations when a release must remain rollback-compatible;
+restore a verified database backup when a migration is not backward compatible.
+
+This foundation does not provide managed install, onboard, update, uninstall,
+database-backup, or restore commands. Those remain explicit L5 roadmap work;
+do not treat `cymphoctl` as an updater or a backup substitute.
 
 `runtime.local_capacity` validates the total/local relationship and reports
 only boolean configuration, probe-availability, and headroom posture. In

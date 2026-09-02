@@ -159,7 +159,7 @@ defmodule Cympho.Plugins.Runtime do
 
   def whereis(%Plugin{id: plugin_id}) when is_binary(plugin_id) do
     case Registry.lookup(ProcessRegistry, plugin_id) do
-      [{pid, _value}] when is_pid(pid) -> pid
+      [{pid, _value}] when is_pid(pid) -> if(Process.alive?(pid), do: pid)
       [] -> nil
     end
   end

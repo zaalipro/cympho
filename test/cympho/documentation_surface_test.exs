@@ -70,6 +70,17 @@ defmodule Cympho.DocumentationSurfaceTest do
     refute installer =~ "password: \"$ADMIN_PASSWORD\""
   end
 
+  test "production installer is documented as bootstrap-only" do
+    readme = File.read!("README.md")
+
+    assert readme =~ "first-bootstrap-only"
+    assert readme =~ "interrupted before the managed systemd unit was published"
+    assert readme =~ "no managed in-place updater"
+    assert readme =~ "separate fixed-layout workflow"
+    refute readme =~ "`deploy.sh` for managed release updates"
+    refute readme =~ "guarded production reruns"
+  end
+
   test "release deploy generates isolated origins and durable upload storage" do
     assert {"", 0} = System.cmd("bash", ["-n", "deploy.sh"], stderr_to_stdout: true)
 
@@ -83,9 +94,9 @@ defmodule Cympho.DocumentationSurfaceTest do
     assert deploy =~ "IMPORT_SPOOL_DIR=\"${DEPLOY_ROOT}/data/import-transfers\""
     assert deploy =~ "install -d -m 0750 -o ${APP_USER} -g ${APP_USER} ${UPLOADS_DIR}"
     assert deploy =~ "install -d -m 0700 -o ${APP_USER} -g ${APP_USER} ${IMPORT_SPOOL_DIR}"
-    assert deploy =~ "reconcile_env_key PREVIEW_HOST ${PREVIEW_DOMAIN}"
-    assert deploy =~ "reconcile_env_key CYMPHO_UPLOADS_DIR ${UPLOADS_DIR}"
-    assert deploy =~ "reconcile_env_key CYMPHO_IMPORT_SPOOL_DIR ${IMPORT_SPOOL_DIR}"
+    assert deploy =~ "-v preview_host='${PREVIEW_DOMAIN}'"
+    assert deploy =~ "-v uploads='${UPLOADS_DIR}'"
+    assert deploy =~ "-v spool='${IMPORT_SPOOL_DIR}'"
     refute deploy =~ "CYMPHO_MAX_LOCAL_AGENT_RUNS="
     refute deploy =~ "CYMPHO_LOCAL_AGENT_MEMORY_RESERVE_MB="
     assert deploy =~ "preview_site_avail=/etc/nginx/sites-available/${PREVIEW_DOMAIN}"

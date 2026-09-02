@@ -66,13 +66,13 @@ defmodule Cympho.Skills.HotReloader do
         ensure_manifest_dir_exists!(manifest_dir)
 
         # Start the file system watcher
-        case FileSystem.start_link(dirs: [manifest_dir], name: {:global, :skill_hot_reloader}) do
+        case file_system_start_link(dirs: [manifest_dir], name: {:global, :skill_hot_reloader}) do
           {:ok, pid} ->
-            FileSystem.subscribe(pid)
+            file_system_subscribe(pid)
             {:ok, %__MODULE__{watcher_pid: pid, manifest_dir: manifest_dir}}
 
           {:error, {:already_started, pid}} ->
-            FileSystem.subscribe(pid)
+            file_system_subscribe(pid)
             {:ok, %__MODULE__{watcher_pid: pid, manifest_dir: manifest_dir}}
 
           error ->
@@ -151,6 +151,9 @@ defmodule Cympho.Skills.HotReloader do
   defp get_manifest_dir do
     Application.get_env(:cympho, :skill_manifest_dir, "priv/skill_manifests")
   end
+
+  defp file_system_start_link(opts), do: apply(FileSystem, :start_link, [opts])
+  defp file_system_subscribe(pid), do: apply(FileSystem, :subscribe, [pid])
 
   defp ensure_manifest_dir_exists!(dir) do
     unless File.exists?(dir) do

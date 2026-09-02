@@ -7,18 +7,31 @@ defmodule Mix.Tasks.CymphoCompareTest do
   test "json mode emits decodable JSON without routine app logs" do
     previous_level = Logger.level()
     previous_repo_config = Application.get_env(:cympho, Cympho.Repo)
+    dispatcher = Process.whereis(Cympho.Orchestrator.Dispatcher)
+
+    # CaptureLog is process-global. Keep the application's Dispatcher from
+    # delivering an unrelated deferred-cleanup warning into this assertion.
+    # The compare task only inspects Dispatcher availability, so suspending it
+    # for this test window does not alter the behavior under test.
+    if is_pid(dispatcher), do: :sys.suspend(dispatcher)
+    Logger.flush()
+
     parent = self()
 
     log =
-      capture_log(fn ->
-        output =
-          capture_io(fn ->
-            Mix.Task.reenable("app.start")
-            Mix.Tasks.Cympho.Compare.run(["--json"])
-          end)
+      try do
+        capture_log(fn ->
+          output =
+            capture_io(fn ->
+              Mix.Task.reenable("app.start")
+              Mix.Tasks.Cympho.Compare.run(["--json"])
+            end)
 
-        send(parent, {:compare_output, output})
-      end)
+          send(parent, {:compare_output, output})
+        end)
+      after
+        if is_pid(dispatcher) and Process.alive?(dispatcher), do: :sys.resume(dispatcher)
+      end
 
     assert_receive {:compare_output, output}
 

@@ -83,6 +83,45 @@ Only matched repetitions with correctness intact should feed later comparative
 claims. Publish medians and dispersion across multiple runs rather than a
 single best result.
 
+`mix cympho.compare` does not accept a comparative filename as evidence by
+itself. The reserved artifact
+`benchmarks/results/paperclip-cympho-low-vps.json` must use schema
+`cympho.paperclip.low-vps-comparison` version 1 and validate all of the
+following before it can even become a candidate for matched evidence:
+
+- exact Cympho and audited Paperclip Git revisions, both marked `dirty: false`,
+  plus product runtime-config hashes;
+- a Linux cgroup-v2 host with explicit CPU, memory, swap, and PID limits,
+  distinct measured cgroup IDs, and identical limits recorded for each product;
+- a low-VPS ceiling of at most 2 CPU cores, 2 GiB memory, 2 GiB swap, and 4,096
+  PIDs for the total measured host slice, with app and database child limits
+  fitting inside that total;
+- one shared PostgreSQL engine/version, pool size, and configuration hash, plus
+  one shared benchmark-runner hash, helper hash, duration, warmup, and randomized
+  ABBA repetition-order policy;
+- matched `idle-100`, `idle-500`, `idle-1000`, `active-10`, `active-25`,
+  `active-50`, burst/sustained 100-agent wake-storm, and 25-agent restart
+  recovery cells, each with an exact hashed scenario whose operation, wake,
+  restart, recovery, and completion counts agree with every retained trial.
+  Scenario hashes use compact UTF-8 JSON with object keys sorted
+  lexicographically;
+- at least five repetitions per product and cell, matched by trial ID;
+- app, database, and child-process memory/CPU metrics, database query count and
+  rate, throughput, and p95 latency;
+- zero lost, duplicate, stranded, OOM, and recovery-failure events with
+  `correctness.pass: true`;
+- three distinct, confined raw references per repetition (`samples`, `events`,
+  and `database`) whose SHA-256 checksums match files beside the manifest; and
+- top-level `claim_eligible: true`.
+
+Missing, empty, malformed, stale, incomplete, checksum-invalid, or
+correctness-failing artifacts remain an open gap. Passing this structural gate
+also remains a gap today: raw samples, events, and database files are
+checksum-bound but their contents are not yet schema-validated and recomputed
+against every declared metric and correctness result. That reconciliation is
+required before the comparator may report evidence-contract parity. Neither
+state asserts that Cympho won a metric or achieved any multiplier.
+
 ## 2026-08-26 development measurement: delegated vs direct
 
 A matched local run on the project toolchain (Elixir 1.19.5, OTP 28, eight

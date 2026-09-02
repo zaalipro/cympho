@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""Strict JSON boundary and render helpers for cymphoctl."""
+
+import json
+import os
+import re
+import sys
+
+MAX_BYTES = 65_536
+VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}")
+REVISION = re.compile(r"(?:[0-9a-fA-F]{7,64}|development|unknown)")
+HEALTH_KEYS = {"schema_version", "status", "service", "release", "checks"}
+RELEASE_KEYS = {"schema_version", "service", "release"}
+
+
+def invalid(code=20):
+    raise SystemExit(code)
+
+
+def reject_constant(value):
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def load(path):
+    try:
+        if os.path.getsize(path) > MAX_BYTES:
+            invalid()
+        with open(path, "rb") as source:
+            return json.load(
+                source,
+                parse_constant=reject_constant,
+                object_pairs_hook=unique_object,
+            )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        invalid()
+
+
+def write(path, document):
+    try:
+        with open(path, "x", encoding="utf-8") as output:
+            json.dump(document, output, separators=(",", ":"))
+            output.write("\n")
+    except OSError:
+        invalid()
+
+
+def emit(document):
+    json.dump(document, sys.stdout, separators=(",", ":"))
+    sys.stdout.write("\n")
+
+
+def valid_release(release):
+    return (
+        isinstance(release, dict)
+        and set(release) == {"version", "revision"}
+        and isinstance(release.get("version"), str)
+        and VERSION.fullmatch(release["version"])
+        and isinstance(release.get("revision"), str)
+        and REVISION.fullmatch(release["revision"])
+    )
+
+
+def validate_health(source_path, output_path, expected_revision):
+    document = load(source_path)
+    release = document.get("release") if isinstance(document, dict) else None
+    checks = document.get("checks") if isinstance(document, dict) else None
+    if (
+        not isinstance(document, dict)
+        or set(document) != HEALTH_KEYS
+        or document.get("schema_version") != 1
+        or isinstance(document.get("schema_version"), bool)
+        or document.get("status") not in {"ready", "not_ready"}
+        or document.get("service") != "cympho"
+        or not valid_release(release)
+        or not isinstance(checks, dict)
+        or set(checks) != {"application", "database", "migrations"}
+        or checks.get("application") not in {"ready", "unavailable"}
+        or checks.get("database") not in {"ready", "unavailable", "timeout"}
+        or checks.get("migrations") not in {"ready", "pending", "unavailable", "timeout"}
+    ):
+        invalid()
+
+    all_ready = checks["application"] == checks["database"] == checks["migrations"] == "ready"
+    if (document["status"] == "ready") != all_ready:
+        invalid()
+
+    canonical = {
+        "schema_version": 1,
+        "status": document["status"],
+        "service": "cympho",
+        "release": release,
+        "checks": checks,
+    }
+    write(output_path, canonical)
+    if expected_revision and release["revision"] != expected_revision:
+        raise SystemExit(11)
+    if document["status"] == "not_ready":
+        raise SystemExit(10)
+
+
+def validate_release(source_path, output_path=None):
+    document = load(source_path)
+    release = document.get("release") if isinstance(document, dict) else None
+    if (
+        not isinstance(document, dict)
+        or set(document) != RELEASE_KEYS
+        or document.get("schema_version") != 1
+        or isinstance(document.get("schema_version"), bool)
+        or document.get("service") != "cympho"
+        or not valid_release(release)
+    ):
+        invalid(1)
+    if output_path:
+        write(output_path, release)
+    return release
+
+
+def render_health(path, state, expected_revision, http_status, mode):
+    document = load(path)
+    if mode == "human":
+        release, checks = document["release"], document["checks"]
+        if state == "revision_mismatch":
+            print(
+                "Cympho is not ready "
+                f"(revision {release['revision']} does not match expected {expected_revision})."
+            )
+        elif state == "unexpected_http_status":
+            print(f"Cympho is not ready (unexpected HTTP status {http_status}).")
+        elif state == "ready" and document["status"] == "ready":
+            print(f"Cympho is ready (version {release['version']}, revision {release['revision']}).")
+        else:
+            print(
+                "Cympho is not ready "
+                f"(application={checks['application']}, database={checks['database']}, "
+                f"migrations={checks['migrations']}; "
+                f"version {release['version']}, revision {release['revision']})."
+            )
+        return
+    if state == "revision_mismatch":
+        document.update(status="not_ready", error=state, expected_revision=expected_revision)
+    elif state == "unexpected_http_status":
+        document.update(status="not_ready", error=state, http_status=int(http_status))
+    emit(document)
+
+
+def render_version(path, source_name, cli_version, mode):
+    with open(path, encoding="utf-8") as source:
+        release = json.load(source)
+    if mode == "json":
+        emit({
+            "schema_version": 1,
+            "service": "cympho",
+            "command": "version",
+            "cli_version": cli_version,
+            "release": release,
+            "source": source_name,
+        })
+    else:
+        print(f"cymphoctl {cli_version}")
+        print(f"Cympho {release['version']} (revision {release['revision']}; {source_name}).")
+
+
+def render_status(args):
+    (
+        unit, supervisor_available, installed, active, enabled, pid,
+        load_state, active_state, unit_file_state, health_state,
+        health_file, expected_revision,
+    ) = args
+    health = load(health_file) if health_file != "-" else None
+    ready = installed == active == "true" and health_state == "ready"
+    document = {
+        "schema_version": 1,
+        "service": "cympho",
+        "command": "service.status",
+        "status": "ready" if ready else "not_ready",
+        "unit": unit,
+        "supervisor": {
+            "available": supervisor_available == "true",
+            "installed": installed == "true",
+            "active": active == "true",
+            "enabled": enabled == "true",
+            "pid": int(pid) if pid.isdigit() and int(pid) > 0 else None,
+            "load_state": load_state,
+            "active_state": active_state,
+            "unit_file_state": unit_file_state,
+        },
+        "health": health,
+    }
+    if expected_revision:
+        document["expected_revision"] = expected_revision
+    if health is None or health_state not in {"ready", "not_ready"}:
+        document["health_error"] = health_state
+    emit(document)
+
+
+def main():
+    if len(sys.argv) < 2:
+        invalid(64)
+    command, args = sys.argv[1], sys.argv[2:]
+    if command == "health" and len(args) == 3:
+        validate_health(*args)
+    elif command == "release" and len(args) == 2:
+        validate_release(*args)
+    elif command == "release-revision" and len(args) == 1:
+        print(validate_release(args[0])["revision"])
+    elif command == "health-output" and len(args) == 5:
+        render_health(*args)
+    elif command == "version-output" and len(args) == 4:
+        render_version(*args)
+    elif command == "status-output" and len(args) == 12:
+        render_status(args)
+    else:
+        invalid(64)
+
+
+if __name__ == "__main__":
+    main()

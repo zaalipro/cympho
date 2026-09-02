@@ -192,10 +192,15 @@ defmodule Cympho.PortKillerTest do
 
     assert_receive {^port, {:data, "ready\n"}}, 5_000
 
+    # This exercises the fixed-point barrier, not its latency. On a loaded
+    # macOS host each identity/state check spawns `ps`, and the first custom
+    # STOP helper also waits for Python to service USR1 before it can return.
+    # Leave enough end-to-end and per-helper budget for those scheduled OS
+    # processes while retaining hard bounds on a real failure.
     assert :ok =
              PortKiller.close(port,
-               cleanup_timeout_ms: 2_000,
-               helper_timeout_ms: 1_000,
+               cleanup_timeout_ms: 5_000,
+               helper_timeout_ms: 2_000,
                helper_paths: %{"kill" => kill_helper, "pgrep" => real_pgrep}
              )
 
@@ -319,7 +324,7 @@ defmodule Cympho.PortKillerTest do
         {:error, :original_terminal_reason}
       end)
 
-    wait_until(fn -> assert File.exists?(helper_started) end)
+    wait_until(fn -> assert File.exists?(helper_started) end, 10_000)
     assert process_alive?(os_pid)
     File.write!(gate, "ready")
 
@@ -436,7 +441,9 @@ defmodule Cympho.PortKillerTest do
         :stderr_to_stdout
       ])
 
-    assert_receive {^port, {:data, "ready\n"}}, 5_000
+    # Under full-suite load the fixture shell may take several seconds to
+    # publish readiness; this bound does not alter the cleanup deadline.
+    assert_receive {^port, {:data, "ready\n"}}, 10_000
     started = System.monotonic_time(:millisecond)
 
     task =
@@ -444,11 +451,15 @@ defmodule Cympho.PortKillerTest do
         PortKiller.close(port,
           cleanup_timeout_ms: 1_200,
           helper_timeout_ms: 1_000,
-          helper_paths: %{"pgrep" => helper}
+          helper_paths: %{"pgrep" => helper},
+          # This test targets timed-out helper-tree cleanup, not portable PID
+          # identity. Avoid spending its short deadline on macOS `ps` helpers
+          # before the deliberately hung helper can publish its child PID.
+          identity_reader: fn _pid -> {:ok, :stable} end
         )
       end)
 
-    wait_until(fn -> assert File.exists?(helper_child_pid_file) end)
+    wait_until(fn -> assert File.exists?(helper_child_pid_file) end, 10_000)
 
     assert {:error, {:cleanup_timeout, %PortKiller.Cleanup{phase: :snapshot}}} =
              Task.await(task, 2_000)
@@ -478,7 +489,6 @@ defmodule Cympho.PortKillerTest do
     command = Path.join(tmp_dir, "single-process.py")
     pgrep_helper = Path.join(tmp_dir, "no-children-pgrep")
     kill_helper = Path.join(tmp_dir, "slow-stop-hung-kill")
-    first_scan = Path.join(tmp_dir, "first-scan")
     real_kill = System.find_executable("kill")
 
     File.write!(command, """
@@ -489,18 +499,11 @@ defmodule Cympho.PortKillerTest do
         time.sleep(1)
     """)
 
-    File.write!(pgrep_helper, """
-    #!/bin/sh
-    if [ ! -f '#{first_scan}' ]; then
-      : > '#{first_scan}'
-      sleep 1.2
-    fi
-    exit 1
-    """)
+    File.write!(pgrep_helper, "#!/bin/sh\nexit 1\n")
 
     # Spend half the attempt on initial discovery, then make the KILL helper
     # hang. Before the deadline was threaded through, the kill phase got a
-    # second full cleanup_timeout_ms and this call took roughly 4.2 seconds.
+    # second full cleanup_timeout_ms and this call would take roughly 5 seconds.
     File.write!(kill_helper, """
     #!/bin/sh
     if [ "$1" = "-STOP" ]; then
@@ -526,16 +529,27 @@ defmodule Cympho.PortKillerTest do
       ])
 
     assert_receive {^port, {:data, "ready\n"}}, 5_000
+    identity_calls = :atomics.new(1, [])
+
+    identity_reader = fn _pid ->
+      # The third read is `collect/4` validating the root inside the snapshot
+      # attempt. Delay there instead of sleeping in an OS helper: process
+      # launch latency must not decide whether the test reaches the KILL phase.
+      if :atomics.add_get(identity_calls, 1, 1) == 3, do: Process.sleep(1_200)
+      {:ok, :stable}
+    end
+
     started = System.monotonic_time(:millisecond)
 
     assert {:error, {:cleanup_timeout, %PortKiller.Cleanup{phase: :kill} = cleanup}} =
              PortKiller.close(port,
-               cleanup_timeout_ms: 3_000,
+               cleanup_timeout_ms: 4_000,
                helper_timeout_ms: 5_000,
-               helper_paths: %{"kill" => kill_helper, "pgrep" => pgrep_helper}
+               helper_paths: %{"kill" => kill_helper, "pgrep" => pgrep_helper},
+               identity_reader: identity_reader
              )
 
-    assert System.monotonic_time(:millisecond) - started < 3_500
+    assert System.monotonic_time(:millisecond) - started < 4_500
 
     # The custom KILL was deliberately broken; use the trusted helper on the
     # retained cleanup so this test does not leak the stopped target.
@@ -554,7 +568,18 @@ defmodule Cympho.PortKillerTest do
     pgrep_helper = Path.join(tmp_dir, "replacement-pgrep")
     kill_helper = Path.join(tmp_dir, "record-kill")
     signal_log = Path.join(tmp_dir, "signals")
-    File.write!(command, "#!/bin/sh\nprintf 'ready\\n'\nwhile true; do sleep 1; done\n")
+    real_kill = System.find_executable("kill")
+
+    # Keep the fixture single-process so fail-safe cleanup only needs the
+    # captured PID and cannot leave a reparented `sleep` child behind.
+    File.write!(command, """
+    #!#{System.find_executable("python3")}
+    import time
+    print("ready", flush=True)
+    while True:
+        time.sleep(1)
+    """)
+
     File.write!(pgrep_helper, "#!/bin/sh\nprintf '999999\\n'\n")
     File.write!(kill_helper, "#!/bin/sh\nprintf '%s|%s\\n' \"$1\" \"$2\" >> '#{signal_log}'\n")
     File.chmod!(command, 0o755)
@@ -569,8 +594,17 @@ defmodule Cympho.PortKillerTest do
         :stderr_to_stdout
       ])
 
-    assert_receive {^port, {:data, "ready\n"}}, 5_000
     assert {:os_pid, root_pid} = Port.info(port, :os_pid)
+
+    # Register cleanup before readiness assertions so a fixture that fails to
+    # start cannot survive a test failure. Capture the PID now because the
+    # identity-reuse path closes the port before on_exit runs.
+    on_exit(fn ->
+      System.cmd(real_kill, ["-KILL", Integer.to_string(root_pid)], stderr_to_stdout: true)
+    end)
+
+    assert_receive {^port, {:data, "ready\n"}}, 5_000
+
     {:ok, identity_calls} = Agent.start_link(fn -> 0 end)
 
     identity_reader = fn

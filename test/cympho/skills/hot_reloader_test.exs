@@ -58,6 +58,35 @@ defmodule Cympho.Skills.HotReloaderTest do
   end
 
   describe "start_link/1" do
+    test "compiles when the optional file watcher dependency is absent" do
+      output_dir =
+        Path.join(System.tmp_dir!(), "cympho-hot-reloader-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(output_dir)
+      on_exit(fn -> File.rm_rf!(output_dir) end)
+
+      code_paths =
+        :code.get_path()
+        |> Enum.map(&List.to_string/1)
+        |> Enum.reject(&String.contains?(&1, "/file_system/ebin"))
+
+      args =
+        Enum.flat_map(code_paths, &["-pa", &1]) ++
+          [
+            "--warnings-as-errors",
+            "-o",
+            output_dir,
+            Path.expand("lib/cympho/skills/hot_reloader.ex")
+          ]
+
+      {output, status} =
+        System.cmd(System.find_executable("elixirc"), args, stderr_to_stdout: true)
+
+      assert status == 0, output
+      refute output =~ "FileSystem.start_link/1 is undefined", output
+      refute output =~ "FileSystem.subscribe/1 is undefined", output
+    end
+
     test "starts the HotReloader server in test environment" do
       # HotReloader may already be started by the app supervision tree
       if Process.whereis(HotReloader) == nil do

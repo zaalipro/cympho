@@ -16,7 +16,8 @@ Environment=PORT=4000
 # regardless of ProtectSystem restrictions on /opt.
 Environment=RELEASE_TMP=/tmp
 # Agent runtime (Claude Code CLI). ProtectHome=true hides /home, so the CLI and
-# its config home live under /opt/cympho (covered by ReadWritePaths). The
+# its mutable config home lives under /opt/cympho/claude-home. The command and
+# release payload remain root-owned and read-only to this service. The
 # provider base URL + auth token come from /etc/cympho.env (ANTHROPIC_*).
 Environment=HOME=/opt/cympho/claude-home
 Environment=CYMPHO_CLAUDE_COMMAND=/opt/cympho/bin/claude
@@ -33,12 +34,13 @@ Restart=on-failure
 RestartSec=10
 LimitNOFILE=65536
 
-# Hardening — the release tree and its runtime tmp live under /opt/cympho.
+# Hardening — only explicit persistent runtime state is writable. Release
+# payloads, the current symlink, and /opt/cympho/bin stay root-owned/read-only.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/cympho
+ReadWritePaths=/opt/cympho/data/uploads /opt/cympho/data/import-transfers /opt/cympho/claude-home
 
 StandardOutput=journal
 StandardError=journal

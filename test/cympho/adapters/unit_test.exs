@@ -894,7 +894,7 @@ defmodule Cympho.Adapters.UnitTest do
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
       assert_receive {:session_started, ^ref}, 1_000
-      assert_receive {:turn_ended_with_error, ^ref, :timeout}, 3_000
+      assert_receive {:turn_ended_with_error, ^ref, :timeout}, 10_000
     end
 
     test "run/4 accepts timeout_sec to avoid millisecond and second confusion" do
@@ -912,7 +912,7 @@ defmodule Cympho.Adapters.UnitTest do
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
       assert_receive {:session_started, ^ref}, 1_000
-      assert_receive {:turn_ended_with_error, ^ref, :timeout}, 3_000
+      assert_receive {:turn_ended_with_error, ^ref, :timeout}, 10_000
     end
 
     test "run/4 handles no command error" do

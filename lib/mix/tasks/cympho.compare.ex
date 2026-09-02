@@ -39,6 +39,7 @@ defmodule Mix.Tasks.Cympho.Compare do
   @paperclip_stable_version "v2026.824.1"
   @paperclip_stable_revision "8e6edcdfa911151adba26be49a41cf5017b3aade"
   @claim_set_baseline_revision "c62fa8d6a03377370c3a08ac49320cbba1c44227"
+  @comparative_benchmark_path "benchmarks/results/paperclip-cympho-low-vps.json"
 
   # Each feature row:
   #   :slug, :paperclip — the claim from their README
@@ -2275,21 +2276,32 @@ defmodule Mix.Tasks.Cympho.Compare do
   # These checks intentionally look for concrete, bounded artifacts rather than
   # inferring latest parity from adjacent modules. They remain :gap until the
   # corresponding end-to-end surface is present and maintainable.
-  def check_latest_low_resource_benchmark do
-    harness = "lib/mix/tasks/cympho.benchmark_idle_agents.ex"
+  def check_latest_low_resource_benchmark(
+        artifact_path \\ @comparative_benchmark_path,
+        cympho_revision \\ current_cympho_revision()
+      ) do
+    expected_revisions = %{cympho: cympho_revision, paperclip: @paperclip_revision}
 
-    local_results =
-      Path.wildcard("benchmarks/results/*idle*json")
+    case Cympho.Benchmarks.ComparativeArtifact.validate(artifact_path, expected_revisions) do
+      {:ok, %{cell_count: cell_count, repetition_count: repetition_count}} ->
+        {:gap,
+         "The comparative manifest structurally validates #{cell_count} required workload cells and #{repetition_count} product repetitions, but its checksum-bound raw samples, events, and database files are not yet schema-validated and recomputed against the declared metrics/correctness. Matched low-VPS evidence therefore remains open; no favorable result or performance multiplier is claimed."}
 
-    comparative_results = "benchmarks/results/paperclip-cympho-low-vps.json"
-
-    if File.regular?(harness) and File.regular?(comparative_results) do
-      {:parity,
-       "A benchmark harness and a machine-readable matched low-VPS Cympho/Paperclip result artifact exist; review its correctness matrix before making a comparative claim"}
-    else
-      {:gap,
-       "idle-agent harness and #{length(local_results)} local result artifact(s) exist, but matched Cympho/Paperclip low-VPS results covering host RSS, CPU, DB query rate, latency, throughput, and correctness are still missing"}
+      {:error, reason} ->
+        {:gap,
+         "Matched low-VPS evidence is not claim-eligible: #{Cympho.Benchmarks.ComparativeArtifact.reason_label(reason)}. Existing local idle artifacts remain non-comparative."}
     end
+  end
+
+  defp current_cympho_revision do
+    project_root = Mix.Project.project_file() |> Path.dirname()
+
+    case System.cmd("git", ["rev-parse", "HEAD"], cd: project_root, stderr_to_stdout: true) do
+      {revision, 0} -> String.trim(revision)
+      _ -> "unavailable"
+    end
+  rescue
+    _ -> "unavailable"
   end
 
   def check_latest_resumable_bounded_imports do
