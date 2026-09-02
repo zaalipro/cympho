@@ -9,6 +9,7 @@ defmodule Cympho.BoardApprovals.BoardApproval do
   alias Cympho.BoardApprovals.BoardApprovalVote
   alias Cympho.Agents.Agent
   alias Cympho.Companies.Company
+  alias Cympho.Recovery.RecoveryCase
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -32,6 +33,7 @@ defmodule Cympho.BoardApprovals.BoardApproval do
 
     belongs_to :requested_by, Agent, foreign_key: :requested_by_agent_id
     belongs_to :company, Company
+    belongs_to :recovery_case, RecoveryCase
 
     has_many :votes, BoardApprovalVote, foreign_key: :board_approval_id
 
@@ -48,6 +50,7 @@ defmodule Cympho.BoardApprovals.BoardApproval do
       "security_exception",
       "principal_permission",
       "strategic_initiative",
+      "stranded_work_recovery",
       "other"
     ]
 
@@ -62,11 +65,15 @@ defmodule Cympho.BoardApprovals.BoardApproval do
       :decision_reasoning,
       :review_deadline,
       :requested_by_agent_id,
-      :company_id
+      :company_id,
+      :recovery_case_id
     ])
     |> validate_required([:title, :category, :company_id])
     |> validate_inclusion(:category, categories())
     |> validate_inclusion(:status, ["pending", "approved", "denied", "cancelled", "expired"])
+    |> foreign_key_constraint(:company_id)
+    |> foreign_key_constraint(:requested_by_agent_id)
+    |> foreign_key_constraint(:recovery_case_id)
     |> validate_deadline()
   end
 
