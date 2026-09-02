@@ -29,7 +29,8 @@ defmodule Cympho.Recovery do
         source_id: source_id,
         source_status: source_status,
         source_fingerprint: fingerprint,
-        source_snapshot: snapshot
+        source_snapshot: snapshot,
+        max_attempts: attrs[:max_attempts] || attrs["max_attempts"] || 3
       })
     end
   rescue
@@ -138,7 +139,9 @@ defmodule Cympho.Recovery do
       Repo.transaction(fn ->
         case Repo.one(
                from c in RecoveryCase,
-                 where: c.id == ^id and c.claim_token == ^token and c.state == "claimed",
+                 where:
+                   c.id == ^id and c.claim_token == ^token and c.state == "claimed" and
+                     (is_nil(c.lease_expires_at) or c.lease_expires_at > ^now),
                  lock: "FOR UPDATE"
              ) do
           nil ->
@@ -157,7 +160,12 @@ defmodule Cympho.Recovery do
 
             error = bounded_error(reason)
 
-            Repo.update_all(from(a in RecoveryAttempt, where: a.id == ^attempt.id),
+            Repo.update_all(
+              from(a in RecoveryAttempt,
+                where:
+                  a.id == ^attempt.id and a.recovery_case_id == ^id and
+                    a.attempt_no == ^attempt.attempt_no and a.status == "claimed"
+              ),
               set: [
                 status: "failed",
                 completed_at: now,
@@ -194,7 +202,14 @@ defmodule Cympho.Recovery do
   def with_attempt(source, opts, callback) when is_function(callback, 1) do
     with {:ok, case_row} <- ensure_source(source),
          {:ok, lease} <- claim_case(case_row, opts) do
-      result = callback.(lease)
+      result =
+        try do
+          {:ok, callback.(lease)}
+        rescue
+          exception -> {:error, {:exception, exception}}
+        catch
+          kind, reason -> {:error, {kind, reason}}
+        end
 
       outcome_result =
         case result do
@@ -229,14 +244,21 @@ defmodule Cympho.Recovery do
       Repo.transaction(fn ->
         case Repo.one(
                from c in RecoveryCase,
-                 where: c.id == ^id and c.claim_token == ^token and c.state == "claimed",
+                 where:
+                   c.id == ^id and c.claim_token == ^token and c.state == "claimed" and
+                     (is_nil(c.lease_expires_at) or c.lease_expires_at > ^now),
                  lock: "FOR UPDATE"
              ) do
           nil ->
             Repo.rollback(:stale_claim)
 
           _case_row ->
-            Repo.update_all(from(a in RecoveryAttempt, where: a.id == ^attempt.id),
+            Repo.update_all(
+              from(a in RecoveryAttempt,
+                where:
+                  a.id == ^attempt.id and a.recovery_case_id == ^id and
+                    a.attempt_no == ^attempt.attempt_no and a.status == "claimed"
+              ),
               set: [status: status, completed_at: now, error_reason: error]
             )
 
@@ -328,17 +350,24 @@ defmodule Cympho.Recovery do
   defp source_details("issue_checkout", issue, _run) do
     {fingerprint, snapshot} = Fingerprint.for_issue_checkout(issue)
 
-    {:ok, fingerprint, snapshot, issue.id, to_string(issue.status), issue.assignee_id,
-     issue.checkout_run_id}
+    {:ok, fingerprint, snapshot, field(issue, :id), to_string(field(issue, :status)),
+     field(issue, :assignee_id), field(issue, :checkout_run_id)}
   end
 
-  defp source_details("heartbeat_run", issue, %Run{} = run) do
+  defp source_details("heartbeat_run", issue, run) when is_map(run) do
     {fingerprint, snapshot} = Fingerprint.for_run(run, issue)
-    {:ok, fingerprint, snapshot, run.id, to_string(run.status), run.agent_id, run.id}
+
+    {:ok, fingerprint, snapshot, field(run, :id), to_string(field(run, :status)),
+     field(run, :agent_id), field(run, :id)}
   end
 
   defp source_details("heartbeat_run", _issue, _), do: {:error, :run_required}
   defp source_details(_, _, _), do: {:error, :invalid_source_type}
+
+  defp field(map, key) when is_map(map),
+    do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
+
+  defp field(_, _), do: nil
 
   defp do_ensure_case(attrs) do
     Repo.transaction(fn ->
@@ -414,11 +443,29 @@ defmodule Cympho.Recovery do
   defp expired?(nil, _), do: true
   defp expired?(expires, now), do: DateTime.compare(expires, now) != :gt
 
+  defp retry_delay(attempt_no, opts) do
+    base = Keyword.get(opts, :base_delay, 60)
+    cap = Keyword.get(opts, :max_delay, 600)
+    min(base * Integer.pow(2, max(attempt_no - 1, 0)), cap)
+  end
+
   defp option_now(opts) when is_list(opts),
     do: Keyword.get(opts, :now, DateTime.utc_now() |> DateTime.truncate(:second))
 
   defp option_now(%{now: now}), do: now
   defp option_now(_), do: DateTime.utc_now() |> DateTime.truncate(:second)
   defp bounded_error(nil), do: nil
-  defp bounded_error(reason), do: reason |> inspect(limit: 20) |> String.slice(0, 500)
+
+  defp bounded_error(reason) do
+    text = inspect(reason, limit: 20) |> String.downcase()
+
+    cond do
+      String.contains?(text, ["timeout", "timed out"]) -> "timeout"
+      String.contains?(text, ["auth", "credential", "token", "secret"]) -> "authentication"
+      String.contains?(text, ["rate", "429", "thrott"]) -> "rate_limited"
+      String.contains?(text, ["network", "connect", "econn"]) -> "network"
+      String.contains?(text, ["cancel"]) -> "cancelled"
+      true -> "unknown"
+    end
+  end
 end

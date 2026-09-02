@@ -5,23 +5,20 @@ defmodule Cympho.Recovery.Fingerprint do
 
   @spec for_run(map(), map()) :: {String.t(), map()}
   def for_run(run, issue) do
-    error_family = error_family(Map.get(run, :error_reason) || Map.get(run, "error_reason"))
+    error_family = error_family(field(run, :error_reason))
 
     snapshot = %{
       "version" => @version,
       "source_type" => "heartbeat_run",
-      "company_id" =>
-        id(Map.get(run, :company_id) || Map.get(run, "company_id") || Map.get(issue, :company_id)),
-      "run_id" => id(Map.get(run, :id) || Map.get(run, "id")),
-      "issue_id" =>
-        id(Map.get(run, :issue_id) || Map.get(run, "issue_id") || Map.get(issue, :id)),
-      "agent_id" => id(Map.get(run, :agent_id) || Map.get(run, "agent_id")),
-      "run_status" => value(Map.get(run, :status) || Map.get(run, "status")),
-      "issue_status" => value(Map.get(issue, :status) || Map.get(issue, "status")),
-      "issue_lock_version" => Map.get(issue, :lock_version) || Map.get(issue, "lock_version"),
-      "lock_version" => Map.get(issue, :lock_version) || Map.get(issue, "lock_version"),
-      "checkout_run_id" =>
-        id(Map.get(issue, :checkout_run_id) || Map.get(issue, "checkout_run_id")),
+      "company_id" => id(field(run, :company_id) || field(issue, :company_id)),
+      "run_id" => id(field(run, :id)),
+      "issue_id" => id(field(run, :issue_id) || field(issue, :id)),
+      "agent_id" => id(field(run, :agent_id)),
+      "run_status" => value(field(run, :status)),
+      "issue_status" => value(field(issue, :status)),
+      "issue_lock_version" => field(issue, :lock_version),
+      "lock_version" => field(issue, :lock_version),
+      "checkout_run_id" => id(field(issue, :checkout_run_id)),
       "error_family" => error_family
     }
 
@@ -33,15 +30,12 @@ defmodule Cympho.Recovery.Fingerprint do
     snapshot = %{
       "version" => @version,
       "source_type" => "issue_checkout",
-      "issue_id" => id(Map.get(issue, :id) || Map.get(issue, "id")),
-      "company_id" => id(Map.get(issue, :company_id) || Map.get(issue, "company_id")),
-      "assignee_id" => id(Map.get(issue, :assignee_id) || Map.get(issue, "assignee_id")),
-      "issue_status" => value(Map.get(issue, :status) || Map.get(issue, "status")),
-      "checkout_run_id" =>
-        id(Map.get(issue, :checkout_run_id) || Map.get(issue, "checkout_run_id")),
-      "checked_out_at" =>
-        truncate_datetime(Map.get(issue, :checked_out_at) || Map.get(issue, "checked_out_at")),
-      "lock_version" => Map.get(issue, :lock_version) || Map.get(issue, "lock_version")
+      "issue_id" => id(field(issue, :id)),
+      "company_id" => id(field(issue, :company_id)),
+      "assignee_id" => id(field(issue, :assignee_id)),
+      "issue_status" => value(field(issue, :status)),
+      "checkout_run_id" => id(field(issue, :checkout_run_id)),
+      "lock_version" => field(issue, :lock_version)
     }
 
     hash(snapshot)
@@ -69,6 +63,11 @@ defmodule Cympho.Recovery.Fingerprint do
 
   defp value(value) when is_atom(value), do: Atom.to_string(value)
   defp value(value), do: value
+
+  defp field(map, key) when is_map(map),
+    do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
+
+  defp field(_, _), do: nil
 
   defp truncate_datetime(nil), do: nil
 

@@ -211,3 +211,59 @@ defmodule Cympho.RecoveryLifecycleTest do
              })
   end
 end
+
+defmodule Cympho.RecoveryReviewFixTest do
+  use Cympho.DataCase, async: false
+  alias Cympho.Repo
+  alias Cympho.Companies.Company
+  alias Cympho.Issues.Issue
+  alias Cympho.Recovery
+  alias Cympho.Recovery.RecoveryCase
+
+  test "callback exceptions are recorded without leaking lease" do
+    company = Repo.insert!(%Company{name: "Exception Co", slug: "exception-co"})
+    issue = Repo.insert!(%Issue{title: "Oops", company_id: company.id})
+    source = %{source_type: "issue_checkout", issue: issue}
+
+    assert {:ok, %{outcome: :scheduled}} =
+             Recovery.with_attempt(source, [base_delay: 1], fn _ -> raise "password=secret" end)
+
+    row = Repo.one!(Ecto.Query.from(c in RecoveryCase, where: c.issue_id == ^issue.id))
+    assert row.state == "scheduled"
+    refute row.last_error =~ "secret"
+  end
+
+  test "string-key source maps and custom max attempts work" do
+    company = Repo.insert!(%Company{name: "Map Co", slug: "map-co"})
+    issue = Repo.insert!(%Issue{title: "Map", company_id: company.id})
+
+    run = %{
+      "id" => Ecto.UUID.generate(),
+      "company_id" => company.id,
+      "issue_id" => issue.id,
+      "agent_id" => nil,
+      "status" => "failed",
+      "error_reason" => "temporary"
+    }
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               "source_type" => "heartbeat_run",
+               "issue" => Map.from_struct(issue),
+               "run" => run,
+               "max_attempts" => 2
+             })
+
+    assert {:ok, lease} =
+             Recovery.claim_case(case_row, now: DateTime.utc_now() |> DateTime.truncate(:second))
+
+    assert {:ok, failed} =
+             Recovery.record_failure(lease, {:provider, "secret-token"},
+               base_delay: 1,
+               max_delay: 2
+             )
+
+    assert failed.state == "scheduled"
+    assert failed.next_attempt_at != nil
+  end
+end
