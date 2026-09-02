@@ -69,13 +69,6 @@ defmodule Cympho.Recovery.Fingerprint do
 
   defp field(_, _), do: nil
 
-  defp truncate_datetime(nil), do: nil
-
-  defp truncate_datetime(%DateTime{} = dt),
-    do: dt |> DateTime.truncate(:second) |> DateTime.to_iso8601()
-
-  defp truncate_datetime(value), do: value
-
   defp error_family(nil), do: nil
 
   defp error_family(reason) do
