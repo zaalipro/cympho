@@ -357,8 +357,11 @@ defmodule Cympho.Recovery do
   defp source_details("heartbeat_run", issue, run) when is_map(run) do
     {fingerprint, snapshot} = Fingerprint.for_run(run, issue)
 
-    {:ok, fingerprint, snapshot, field(run, :id), to_string(field(run, :status)),
-     field(run, :agent_id), field(run, :id)}
+    run_id = field(run, :id)
+    source_run_id = if match?(%Run{}, run), do: run_id, else: nil
+
+    {:ok, fingerprint, snapshot, run_id, to_string(field(run, :status)), field(run, :agent_id),
+     source_run_id}
   end
 
   defp source_details("heartbeat_run", _issue, _), do: {:error, :run_required}

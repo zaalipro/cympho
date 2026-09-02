@@ -219,6 +219,7 @@ defmodule Cympho.RecoveryReviewFixTest do
   alias Cympho.Issues.Issue
   alias Cympho.Recovery
   alias Cympho.Recovery.RecoveryCase
+  alias Cympho.HeartbeatEngine.Run
 
   test "callback exceptions are recorded without leaking lease" do
     company = Repo.insert!(%Company{name: "Exception Co", slug: "exception-co"})

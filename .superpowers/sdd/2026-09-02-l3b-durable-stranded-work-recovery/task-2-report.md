@@ -26,3 +26,6 @@ Implemented canonical source fingerprints and the durable recovery case/lease li
 ## Concerns
 - The repository's stock test command requires `ERL_COMPILER_OPTIONS='[nowarn_deprecated_catch]'` on this OTP toolchain because `meck` emits a deprecated catch warning treated as an error.
 - Board escalation, issue blocking, scanner integration and approval execution remain Task 3 scope.
+
+## Review fix round 1
+Addressed reviewer findings in commit `6adffbd` (plus test adjustment): callback exceptions/exits now finalize failed attempts; mutable checkout timestamps were removed from fingerprints; error persistence is bounded to safe families; retry delay is configurable/deterministic with cap; atom/string-key source maps are supported; result updates validate case/attempt/token and unexpired leases. Focused suites now report 12 passing tests.
