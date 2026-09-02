@@ -154,25 +154,26 @@ defmodule Cympho.Recovery do
             {state, next_retry_at} =
               if exhausted,
                 do: {"exhausted", nil},
-                else:
-                  {"scheduled",
-                   DateTime.add(now, Map.get(@backoff_seconds, attempt_no, 600), :second)}
+                else: {"scheduled", DateTime.add(now, retry_delay(attempt_no, opts), :second)}
 
             error = bounded_error(reason)
 
-            Repo.update_all(
-              from(a in RecoveryAttempt,
-                where:
-                  a.id == ^attempt.id and a.recovery_case_id == ^id and
-                    a.attempt_no == ^attempt.attempt_no and a.status == "claimed"
-              ),
-              set: [
-                status: "failed",
-                completed_at: now,
-                error_reason: error,
-                next_retry_at: next_retry_at
-              ]
-            )
+            {attempt_count, _} =
+              Repo.update_all(
+                from(a in RecoveryAttempt,
+                  where:
+                    a.id == ^attempt.id and a.recovery_case_id == ^id and
+                      a.attempt_no == ^attempt.attempt_no and a.status == "claimed"
+                ),
+                set: [
+                  status: "failed",
+                  completed_at: now,
+                  error_reason: error,
+                  next_retry_at: next_retry_at
+                ]
+              )
+
+            if attempt_count == 0, do: Repo.rollback(:stale_claim)
 
             updates = [
               state: state,
@@ -204,7 +205,7 @@ defmodule Cympho.Recovery do
          {:ok, lease} <- claim_case(case_row, opts) do
       result =
         try do
-          {:ok, callback.(lease)}
+          callback.(lease)
         rescue
           exception -> {:error, {:exception, exception}}
         catch
@@ -309,6 +310,9 @@ defmodule Cympho.Recovery do
   end
 
   defp load_issue(%{id: id}) when is_binary(id),
+    do: if(issue = Repo.get(Issue, id), do: {:ok, issue}, else: {:error, :issue_not_found})
+
+  defp load_issue(%{"id" => id}) when is_binary(id),
     do: if(issue = Repo.get(Issue, id), do: {:ok, issue}, else: {:error, :issue_not_found})
 
   defp load_issue(_), do: {:error, :issue_required}
@@ -447,8 +451,8 @@ defmodule Cympho.Recovery do
   defp expired?(expires, now), do: DateTime.compare(expires, now) != :gt
 
   defp retry_delay(attempt_no, opts) do
-    base = Keyword.get(opts, :base_delay, 60)
-    cap = Keyword.get(opts, :max_delay, 600)
+    base = max(Keyword.get(opts, :base_delay, 60), 1)
+    cap = max(Keyword.get(opts, :max_delay, 600), base)
     min(base * Integer.pow(2, max(attempt_no - 1, 0)), cap)
   end
 
