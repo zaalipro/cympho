@@ -304,11 +304,22 @@ defmodule Cympho.BoardApprovals do
           {:board_approval_created, approval}
         )
 
+        _ = Cympho.OwnerAttention.notify_changed(approval.company_id)
+
         {:ok, approval}
 
       error ->
         error
     end
+  end
+
+  @doc "Inserts a stranded-work recovery approval inside an existing transaction."
+  def create_recovery_approval(attrs, _opts \\ []) when is_map(attrs) do
+    attrs = Map.put_new(attrs, :category, "stranded_work_recovery")
+
+    %BoardApproval{}
+    |> BoardApproval.changeset(attrs)
+    |> Repo.insert()
   end
 
   @doc """
@@ -458,6 +469,8 @@ defmodule Cympho.BoardApprovals do
           "system:board_approvals",
           {:board_approval_cancelled, updated}
         )
+
+        _ = Cympho.OwnerAttention.notify_changed(updated.company_id)
 
         {:ok, updated}
 
@@ -801,6 +814,8 @@ defmodule Cympho.BoardApprovals do
       {:board_approval_resolved, updated}
     )
 
+    _ = Cympho.OwnerAttention.notify_changed(updated.company_id)
+
     updated
   end
 
@@ -894,6 +909,9 @@ defmodule Cympho.BoardApprovals do
 
       "strategic_initiative" ->
         trigger_strategic_initiative(board_approval)
+
+      "stranded_work_recovery" ->
+        Cympho.Recovery.apply_board_action(board_approval)
 
       _ ->
         :ok

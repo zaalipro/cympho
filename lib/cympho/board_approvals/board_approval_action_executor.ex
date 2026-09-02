@@ -83,11 +83,13 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
   def handle_info({:board_approval_resolved, %{status: status} = approval}, state)
       when status in ["denied", "expired"] do
     audit_non_executed(approval, status)
+    _ = Cympho.Recovery.handle_approval_resolution(approval)
     {:noreply, state}
   end
 
   def handle_info({:board_approval_cancelled, approval}, state) do
     audit_non_executed(approval, "cancelled")
+    _ = Cympho.Recovery.handle_approval_resolution(approval)
     {:noreply, state}
   end
 
