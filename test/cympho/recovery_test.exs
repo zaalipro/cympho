@@ -219,7 +219,7 @@ defmodule Cympho.RecoveryReviewFixTest do
   alias Cympho.Issues.Issue
   alias Cympho.Recovery
   alias Cympho.Recovery.RecoveryCase
-  alias Cympho.HeartbeatEngine.Run
+  alias Cympho.Recovery.RecoveryAttempt
 
   test "callback exceptions are recorded without leaking lease" do
     company = Repo.insert!(%Company{name: "Exception Co", slug: "exception-co"})
@@ -266,5 +266,150 @@ defmodule Cympho.RecoveryReviewFixTest do
 
     assert failed.state == "scheduled"
     assert failed.next_attempt_at != nil
+  end
+
+  test "completion rejects forged or mismatched leases without changing durable rows" do
+    company = Repo.insert!(%Company{name: "CAS Co", slug: "cas-co"})
+    issue = Repo.insert!(%Issue{title: "CAS", company_id: company.id})
+    now = ~U[2026-01-01 00:00:00Z]
+
+    assert {:ok, case_row} = Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+    assert {:ok, lease} = Recovery.claim_case(case_row, now: now)
+
+    case_struct = %RecoveryCase{} = lease.case
+    attempt_struct = %RecoveryAttempt{} = lease.attempt
+
+    scenarios = [
+      {:forged_token, %{lease | token: Ecto.UUID.generate()}},
+      {:mismatched_case, %{lease | case: %{case_struct | id: Ecto.UUID.generate()}}},
+      {:nonexistent_attempt, %{lease | attempt: %{attempt_struct | id: Ecto.UUID.generate()}}},
+      {:mismatched_attempt_number,
+       %{
+         lease
+         | attempt: %{attempt_struct | attempt_no: attempt_struct.attempt_no + 1}
+       }}
+    ]
+
+    for complete <- [&Recovery.record_success/2, &Recovery.record_superseded/2],
+        {_label, forged_lease} <- scenarios do
+      assert {:error, :stale_claim} = complete.(forged_lease, now: now)
+      unchanged_case = Repo.get!(RecoveryCase, case_row.id)
+      unchanged_attempt = Repo.get!(RecoveryAttempt, lease.attempt.id)
+      assert unchanged_case.state == "claimed"
+      assert unchanged_case.claim_token == lease.token
+      assert unchanged_attempt.status == "claimed"
+      assert unchanged_attempt.completed_at == nil
+    end
+  end
+
+  test "with_attempt normalizes callback return values" do
+    company = Repo.insert!(%Company{name: "Normalization Co", slug: "normalization-co"})
+    now = ~U[2026-01-02 00:00:00Z]
+
+    issue_ok = Repo.insert!(%Issue{title: "Tuple", company_id: company.id})
+
+    assert {:ok, %{result: %{value: 1}, outcome: :recovered, case: %{state: "recovered"}}} =
+             Recovery.with_attempt(
+               %{source_type: "issue_checkout", issue: issue_ok},
+               [now: now],
+               fn _ -> {:ok, %{value: 1}} end
+             )
+
+    issue_bare = Repo.insert!(%Issue{title: "Bare", company_id: company.id})
+
+    assert {:ok, %{result: :done, outcome: :recovered, case: %{state: "recovered"}}} =
+             Recovery.with_attempt(
+               %{source_type: "issue_checkout", issue: issue_bare},
+               [now: now],
+               fn _ -> :done end
+             )
+
+    issue_superseded = Repo.insert!(%Issue{title: "Superseded", company_id: company.id})
+
+    assert {:ok,
+            %{result: {:error, :superseded}, outcome: :superseded, case: %{state: "superseded"}}} =
+             Recovery.with_attempt(
+               %{source_type: "issue_checkout", issue: issue_superseded},
+               [now: now],
+               fn _ -> {:error, :superseded} end
+             )
+  end
+
+  test "failure retry delay is deterministic and capped" do
+    company = Repo.insert!(%Company{name: "Delay Co", slug: "delay-co"})
+    issue = Repo.insert!(%Issue{title: "Delay", company_id: company.id, lock_version: 0})
+    now = ~U[2026-01-03 00:00:00Z]
+
+    assert {:ok, case_row} = Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+    assert {:ok, lease_one} = Recovery.claim_case(case_row, now: now)
+
+    assert {:ok, scheduled} =
+             Recovery.record_failure(lease_one, :temporary,
+               now: now,
+               base_delay: 7,
+               max_delay: 9
+             )
+
+    assert scheduled.next_attempt_at == DateTime.add(now, 7, :second)
+
+    due = scheduled.next_attempt_at
+    assert {:ok, lease_two} = Recovery.claim_case(scheduled, now: due)
+
+    assert {:ok, capped} =
+             Recovery.record_failure(lease_two, :temporary,
+               now: due,
+               base_delay: 7,
+               max_delay: 9
+             )
+
+    assert capped.next_attempt_at == DateTime.add(due, 9, :second)
+  end
+end
+
+defmodule Cympho.RecoveryMalformedRunTest do
+  use Cympho.DataCase, async: false
+  alias Cympho.Repo
+  alias Cympho.Companies.Company
+  alias Cympho.Issues.Issue
+  alias Cympho.Recovery
+  alias Cympho.Recovery.RecoveryCase
+
+  test "malformed heartbeat run maps return stable errors without inserts" do
+    company = Repo.insert!(%Company{name: "Malformed Co", slug: "malformed-co"})
+    issue = Repo.insert!(%Issue{title: "Malformed", company_id: company.id})
+    run_id = Ecto.UUID.generate()
+
+    atom_run = %{id: run_id, status: "failed", issue_id: issue.id, company_id: company.id}
+
+    string_run = %{
+      "id" => run_id,
+      "status" => "failed",
+      "issue_id" => issue.id,
+      "company_id" => company.id
+    }
+
+    variants = [
+      {Map.delete(atom_run, :id), :invalid_run_source},
+      {%{atom_run | id: ""}, :invalid_run_source},
+      {Map.delete(atom_run, :status), :invalid_run_source},
+      {%{atom_run | status: ""}, :invalid_run_source},
+      {Map.delete(atom_run, :issue_id), :company_scope_required},
+      {Map.delete(atom_run, :company_id), :company_scope_required},
+      {Map.delete(string_run, "id"), :invalid_run_source},
+      {%{string_run | "id" => ""}, :invalid_run_source},
+      {Map.delete(string_run, "status"), :invalid_run_source},
+      {%{string_run | "status" => ""}, :invalid_run_source},
+      {Map.delete(string_run, "issue_id"), :company_scope_required},
+      {Map.delete(string_run, "company_id"), :company_scope_required}
+    ]
+
+    for {run, expected} <- variants do
+      before = Repo.aggregate(RecoveryCase, :count, :id)
+
+      assert {:error, ^expected} =
+               Recovery.ensure_case(%{source_type: "heartbeat_run", issue: issue, run: run})
+
+      assert Repo.aggregate(RecoveryCase, :count, :id) == before
+    end
   end
 end

@@ -35,3 +35,20 @@ Commit `ca43931` hardens callback result normalization, custom retry delay/cap h
 
 ## Review fix round 3
 Hardened completion CAS to require exactly one matching claimed attempt before transitioning a case, and validated heartbeat source maps (atom/string keys, required IDs/status and tenant linkage) with structured errors. Command: `ERL_COMPILER_OPTIONS='[nowarn_deprecated_catch]' MIX_ENV=test mix test test/cympho/recovery/fingerprint_test.exs test/cympho/recovery_test.exs --max-cases 1`; output: **12 tests, 0 failures**. Formatting check passes.
+
+## Review fix round 4
+Added focused regression coverage for round-3 CAS hardening and malformed heartbeat source validation, plus round-2 callback normalization and deterministic retry delay/cap behavior.
+
+- `test/cympho/recovery_test.exs`
+  - forged token, mismatched case, nonexistent attempt, and mismatched attempt-number completions are rejected by both `record_success/2` and `record_superseded/2`; durable case/attempt rows remain claimed/unchanged;
+  - callback return normalization covers `{:ok, value}`, bare values, and `{:error, :superseded}`;
+  - retry delay assertions use explicit timestamps and verify the configured cap on the second attempt;
+  - atom- and string-key heartbeat run maps with missing/empty required fields return stable structured errors and do not insert rows.
+- `lib/cympho/recovery.ex`
+  - fixed `attrs_issue_id/1` to safely read issue IDs from Ecto structs and maps; malformed run validation no longer raises `UndefinedFunctionError` when the issue is a struct.
+
+Focused command:
+`ERL_COMPILER_OPTIONS='[nowarn_deprecated_catch]' MIX_ENV=test mise x -- mix test test/cympho/recovery_test.exs test/cympho/recovery/fingerprint_test.exs --max-cases 1`
+
+Result: **16 tests, 0 failures**.
+Formatting: `mise x -- mix format test/cympho/recovery_test.exs lib/cympho/recovery.ex`.

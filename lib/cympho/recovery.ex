@@ -347,10 +347,10 @@ defmodule Cympho.Recovery do
 
   defp validate_scope(_, _, _), do: {:error, :company_scope_required}
 
-  defp attrs_issue_id(attrs),
-    do:
-      get_in(attrs, [:issue, :id]) || get_in(attrs, ["issue", :id]) ||
-        get_in(attrs, ["issue", "id"])
+  defp attrs_issue_id(attrs) do
+    issue = attrs[:issue] || attrs["issue"]
+    field(issue, :id)
+  end
 
   defp run_field(run, key), do: Map.get(run, key) || Map.get(run, Atom.to_string(key))
 
