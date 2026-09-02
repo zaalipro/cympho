@@ -136,7 +136,9 @@ defmodule Cympho.RecoveryTest do
         lease_expires_at: now,
         recovered_at: now,
         exhausted_at: now,
-        resolved_at: now
+        escalated_at: now,
+        resolved_at: now,
+        last_attempt_at: now
       })
 
     refute Map.has_key?(changeset.changes, :claim_token)

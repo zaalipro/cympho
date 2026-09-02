@@ -30,3 +30,8 @@ Verification:
 
 - Extended creation-casting coverage to include and assert omission of `escalated_at` and `last_attempt_at`, alongside the previously covered lifecycle timestamps.
 - `mix format test/cympho/recovery_test.exs` passed.
+
+## Fix round 4
+
+- Added `escalated_at` and `last_attempt_at` to the timestamp test input so their omission assertions exercise caller-supplied values.
+- `mix format test/cympho/recovery_test.exs` passed.
