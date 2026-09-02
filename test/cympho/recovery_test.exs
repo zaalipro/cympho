@@ -142,6 +142,8 @@ defmodule Cympho.RecoveryTest do
     refute Map.has_key?(changeset.changes, :claim_token)
     refute Map.has_key?(changeset.changes, :claimed_at)
     refute Map.has_key?(changeset.changes, :recovered_at)
+    refute Map.has_key?(changeset.changes, :escalated_at)
+    refute Map.has_key?(changeset.changes, :last_attempt_at)
     refute Map.has_key?(changeset.changes, :lease_expires_at)
     refute Map.has_key?(changeset.changes, :exhausted_at)
     refute Map.has_key?(changeset.changes, :resolved_at)

@@ -25,3 +25,8 @@ Verification:
 - Expanded creation-casting coverage to assert all requested lease/result fields are ignored: `claim_token`, `claimed_at`, `lease_expires_at`, `recovered_at`, `exhausted_at`, and `resolved_at`.
 - `mix format test/cympho/recovery_test.exs` passed.
 - Focused test command was retried; it still stops before application test compilation because dependency `:meck` fails to compile on the installed Erlang toolchain (`catch ... is deprecated`).
+
+## Fix round 3
+
+- Extended creation-casting coverage to include and assert omission of `escalated_at` and `last_attempt_at`, alongside the previously covered lifecycle timestamps.
+- `mix format test/cympho/recovery_test.exs` passed.
