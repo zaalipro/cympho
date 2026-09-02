@@ -31,4 +31,4 @@ Implemented canonical source fingerprints and the durable recovery case/lease li
 Addressed reviewer findings in commit `6adffbd` (plus test adjustment): callback exceptions/exits now finalize failed attempts; mutable checkout timestamps were removed from fingerprints; error persistence is bounded to safe families; retry delay is configurable/deterministic with cap; atom/string-key source maps are supported; result updates validate case/attempt/token and unexpired leases. Focused suites now report 12 passing tests.
 
 ## Review fix round 2
-Commit pending hardens callback result normalization, custom retry delay/cap handling, string-key source maps, malformed run validation, strict affected-attempt checks, and lease expiry guards. Focused suites: 12 passing tests.
+Commit `ca43931` hardens callback result normalization, custom retry delay/cap handling, string-key source maps, malformed run validation, strict affected-attempt checks, and lease expiry guards. Focused suites: 12 passing tests.
