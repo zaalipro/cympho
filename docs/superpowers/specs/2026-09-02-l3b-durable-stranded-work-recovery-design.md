@@ -27,9 +27,9 @@ preserving the existing conservative source CAS operations.
 3. Ensure concurrent scanners claim at most one recovery attempt for the same
    unchanged source state. A source state change starts a new child lineage
    rather than resetting an exhausted lineage.
-4. Use a deterministic bounded policy: three automatic attempts by default,
-   exponential delays of 0, 60, and 120 seconds (capped at ten minutes), then
-   no further automatic recovery.
+4. Use a deterministic bounded policy: one immediate automatic attempt followed
+   by 60- and 120-second exponential delays (three attempts total, capped at
+   ten minutes), then no further automatic recovery.
 5. When the cap is reached, transition the issue to visible `:blocked` (without
    removing its intended assignee), persist one pending board approval, and
    include a safe restart packet in the proposal. Approval executes only the
