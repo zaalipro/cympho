@@ -250,12 +250,11 @@ mise x -- git commit -m "feat: route orphan recovery through durable cases"
 
 ---
 
-### Task 4: Integrate Watchdog/Dispatcher and durable exhaustion policy
+### Task 4: Integrate Watchdog/Dispatcher recovery outcomes
 
 **Files:**
 - Modify: `lib/cympho/orchestrator/dispatcher.ex`
 - Modify: `lib/cympho/heartbeat_engine/watchdog.ex`
-- Modify: `lib/cympho/recovery.ex`
 - Modify: `test/cympho/heartbeat_engine/watchdog_test.exs`
 - Modify: `test/cympho/orchestrator/dispatcher_test.exs`
 
@@ -266,7 +265,7 @@ mise x -- git commit -m "feat: route orphan recovery through durable cases"
 
 - [ ] **Step 1: Write failing integration tests**
 
-Add tests that run the same stale row through Watchdog then Dispatcher and assert one case/attempt and one source transition. Add a restart-style test that reloads the case and verifies a future `next_attempt_at` is not claimed. Add an exhaustion test that leaves the issue `:blocked`, keeps the assignee, and does not trigger a heartbeat.
+Add tests that run the same stale row through Watchdog then Dispatcher and assert one case/attempt and one source transition. Add a restart-style test that reloads the case and verifies a future `next_attempt_at` is not claimed. Keep exhaustion assertions in Task 5, where the board escalation transaction is implemented.
 
 - [ ] **Step 2: Run integration tests to verify failure**
 
@@ -284,19 +283,15 @@ In Dispatcher and Watchdog, handle `Recovery` outcomes explicitly: re-wake only 
 
 Have `recover_orphaned_in_progress/0` and stale-checkout aggregation call the Recovery adapter. Preserve all existing live-session and successor checks; a case claim must be acquired before environment cancellation or checkout clearing.
 
-- [ ] **Step 5: Implement exhaustion transition**
-
-Within the final `record_failure/3` transaction, lock the issue, verify its current fingerprint still matches and its status is non-terminal, update status to `:blocked` with `lock_version` increment, and create the board approval through the changeset insert described in Task 5. If the source changed, mark the case superseded instead. Do not clear assignee or runtime data.
-
-- [ ] **Step 6: Run integration tests and commit**
+- [ ] **Step 5: Run integration tests and commit**
 
 ```bash
 TEST_DB_NAME=cympho_recovery_integration_green MIX_BUILD_PATH=_build/recovery_integration_green MIX_ENV=test mise x -- mix test test/cympho/heartbeat_engine/watchdog_test.exs test/cympho/orchestrator/dispatcher_test.exs --max-cases 1
 ```
 
 ```bash
-mise x -- git add lib/cympho/orchestrator/dispatcher.ex lib/cympho/heartbeat_engine/watchdog.ex lib/cympho/recovery.ex test/cympho/heartbeat_engine/watchdog_test.exs test/cympho/orchestrator/dispatcher_test.exs
-mise x -- git commit -m "feat: bound watchdog recovery and park exhausted work"
+mise x -- git add lib/cympho/orchestrator/dispatcher.ex lib/cympho/heartbeat_engine/watchdog.ex test/cympho/heartbeat_engine/watchdog_test.exs test/cympho/orchestrator/dispatcher_test.exs
+mise x -- git commit -m "feat: route watchdog recovery through durable cases"
 ```
 
 ---
@@ -311,6 +306,7 @@ mise x -- git commit -m "feat: bound watchdog recovery and park exhausted work"
 
 **Interfaces:**
 - `BoardApprovals.create_recovery_approval/2` inserts a pending approval inside the caller transaction and returns the row; publication/audit occurs after commit.
+- `Recovery.exhaust_case/2` locks a claimed case, blocks a still-matching non-terminal issue, and returns the linked approval exactly once.
 - `Recovery.apply_board_action/1` accepts an approved recovery approval and returns `:ok`, `{:ok, child_case}`, or `{:error, :stale_recovery_proposal}`.
 - `Recovery.handle_approval_resolution/1` marks denied/expired/cancelled cases resolved without reopening the issue.
 
@@ -345,22 +341,26 @@ Expected: category/association/action functions are missing.
 
 Add `BoardApprovals.create_recovery_approval/2` as an insert-only helper usable inside an existing `Repo.transaction`; do not call the standalone broadcasting `create_board_approval/2` from the recovery transaction. Store proposal data with `action: "retry"`, case ID, issue/run IDs, fingerprint, attempt count, max attempts, last error, and a bounded restart packet. After the outer transaction commits, log `recovery_exhausted`, broadcast the normal approval events, and call `OwnerAttention.notify_changed/1`.
 
-- [ ] **Step 4: Implement resolution and retry**
+- [ ] **Step 4: Implement exhaustion transition**
+
+Within `Recovery.exhaust_case/2`, lock the claimed case and issue, verify the source fingerprint and non-terminal status, update the issue to `:blocked` with `lock_version` increment while preserving its assignee, insert one recovery approval, and transition the case to `escalated`. If the source changed, mark the case superseded instead. Do not clear runtime data or create a wake.
+
+- [ ] **Step 5: Implement resolution and retry**
 
 On denial/expiration/cancellation, lock the linked case, set `resolved`, and leave the issue blocked. On approved retry, lock the case and issue, verify category/action/company/fingerprint/state, mark the old case resolved, insert a child scheduled case with the same root, transition only a still-blocked matching issue to `:todo`, and dispatch one company poll. A second execution sees the durable `BoardApprovalEffect` or stale case and performs no work.
 
-- [ ] **Step 5: Wire the executor and notifications**
+- [ ] **Step 6: Wire the executor and notifications**
 
 Add the recovery category to `BoardApprovals.dispatch_approved_action/1` and route it through `Recovery.apply_board_action/1` in `BoardApprovalActionExecutor`. Add `OwnerAttention.notify_changed/1` alongside create, resolve, cancel, and recovery-resolution broadcasts; do not add raw diagnostics to Simple-mode item text.
 
-- [ ] **Step 6: Run board tests and commit**
+- [ ] **Step 7: Run board tests and commit**
 
 ```bash
 TEST_DB_NAME=cympho_recovery_board_green MIX_BUILD_PATH=_build/recovery_board_green MIX_ENV=test mise x -- mix test test/cympho/board_approvals/recovery_action_test.exs test/cympho/owner_attention_test.exs --max-cases 1
 ```
 
 ```bash
-mise x -- git add lib/cympho/board_approvals.ex lib/cympho/board_approvals/board_approval_action_executor.ex lib/cympho/owner_attention.ex test/cympho/board_approvals/recovery_action_test.exs test/cympho/owner_attention_test.exs
+mise x -- git add lib/cympho/board_approvals.ex lib/cympho/board_approvals/board_approval_action_executor.ex test/cympho/board_approvals/recovery_action_test.exs test/cympho/owner_attention_test.exs
 mise x -- git commit -m "feat: escalate exhausted recovery to the board"
 ```
 
@@ -370,7 +370,7 @@ mise x -- git commit -m "feat: escalate exhausted recovery to the board"
 
 **Files:**
 - Modify: `paperclip_gap.md`
-- Modify: `docs/OPERATIONS.md` if operator recovery instructions are absent
+- Modify: `docs/OPERATIONS.md`: add the durable recovery/escalation operator procedure.
 - Test: all recovery-focused tests and the full repository suite
 
 - [ ] **Step 1: Update the roadmap honestly**
