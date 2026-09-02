@@ -69,12 +69,6 @@ defmodule Cympho.Repo.Migrations.CreateRecoveryCases do
              name: :recovery_cases_active_source_index
            )
 
-    create unique_index(
-             :recovery_cases,
-             [:company_id, :source_type, :source_id, :source_fingerprint],
-             name: :recovery_cases_source_fingerprint_index
-           )
-
     create unique_index(:board_approvals, [:recovery_case_id],
              where: "recovery_case_id IS NOT NULL",
              name: :board_approvals_recovery_case_index
