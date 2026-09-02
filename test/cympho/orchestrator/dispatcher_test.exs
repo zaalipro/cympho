@@ -1329,6 +1329,7 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       result = Dispatcher.recover_orphaned_in_progress()
 
       assert result.recovered >= 1
+      assert result.exhausted == 0
 
       reloaded = Issues.get_issue!(issue.id)
       assert reloaded.status == :todo

@@ -8,6 +8,9 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.HeartbeatEngine.Watchdog
   alias Cympho.Issues
+  alias Cympho.Orchestrator.Dispatcher
+  alias Cympho.Recovery.RecoveryAttempt
+  alias Cympho.Recovery.RecoveryCase
 
   setup do
     pid =
@@ -40,7 +43,7 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
       _ = :sys.get_state(Process.whereis(Watchdog))
     end
 
-    test "cancels never-started orphaned runs instead of failing them" do
+    test "skips never-started orphaned runs without a company scope" do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Watchdog Orphan Agent",
@@ -70,8 +73,197 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
       _ = :sys.get_state(Process.whereis(Watchdog))
 
       reloaded = Repo.get!(Run, run.id)
-      assert reloaded.status == "cancelled"
+      assert reloaded.status == "pending"
       assert is_nil(reloaded.error_reason)
+    end
+
+    test "counts durable checkout recovery once across Watchdog and Dispatcher" do
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Watchdog Checkout Co #{System.unique_integer([:positive])}",
+          slug: "wd-checkout-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Watchdog Checkout Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Watchdog durable checkout",
+          status: :todo,
+          assignee_id: agent.id,
+          company_id: company.id
+        })
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      old = DateTime.utc_now() |> DateTime.add(-16 * 60, :second) |> DateTime.truncate(:second)
+      checked_out |> Ecto.Changeset.change(checked_out_at: old) |> Repo.update!()
+
+      assert :ok = Watchdog.check_now()
+      _ = :sys.get_state(Process.whereis(Watchdog))
+
+      results = Watchdog.last_results()
+      assert results.recovery_cases_created == 1
+      assert results.recovery_attempts == 1
+      assert results.orphaned_issues_recovered >= 1
+
+      recovery_case =
+        Repo.one!(
+          Ecto.Query.from(c in RecoveryCase,
+            where: c.source_type == "issue_checkout" and c.source_id == ^issue.id
+          )
+        )
+
+      assert Repo.aggregate(
+               Ecto.Query.from(a in RecoveryAttempt,
+                 where: a.recovery_case_id == ^recovery_case.id
+               ),
+               :count
+             ) == 1
+
+      # A duplicate dispatcher sweep sees no stale source and cannot claim a
+      # second attempt or mutate the recovered checkout.
+      _ = Dispatcher.recover_orphaned_in_progress()
+      _ = Dispatcher.recover_stale_checkouts()
+
+      assert Repo.aggregate(
+               Ecto.Query.from(a in RecoveryAttempt,
+                 where: a.recovery_case_id == ^recovery_case.id
+               ),
+               :count
+             ) == 1
+    end
+
+    test "skips stale runs whose company does not match the issue" do
+      {:ok, issue_company} =
+        Cympho.Companies.create_company(%{
+          name: "Watchdog Issue Scope Co #{System.unique_integer([:positive])}",
+          slug: "wd-issue-scope-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, run_company} =
+        Cympho.Companies.create_company(%{
+          name: "Watchdog Run Scope Co #{System.unique_integer([:positive])}",
+          slug: "wd-run-scope-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Watchdog Scope Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: issue_company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Watchdog mismatched stale run",
+          status: :todo,
+          assignee_id: agent.id,
+          company_id: issue_company.id
+        })
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          company_id: issue_company.id,
+          agent_id: agent.id,
+          issue_id: issue.id,
+          adapter: "process"
+        })
+
+      # Simulate a corrupted cross-tenant source row at rest; create_run/1
+      # correctly rejects this combination at the API boundary.
+      run = run |> Ecto.Changeset.change(company_id: run_company.id) |> Repo.update!()
+
+      old = DateTime.utc_now() |> DateTime.add(-16 * 60, :second) |> DateTime.truncate(:second)
+      run |> Ecto.Changeset.change(inserted_at: old) |> Repo.update!()
+
+      assert :ok = Watchdog.check_now()
+      _ = :sys.get_state(Process.whereis(Watchdog))
+
+      assert Repo.get!(Run, run.id).status == "pending"
+
+      refute Repo.exists?(
+               Ecto.Query.from(c in RecoveryCase,
+                 where: c.source_type == "heartbeat_run" and c.source_id == ^run.id
+               )
+             )
+    end
+
+    test "records durable recovery counters for a scoped stale run" do
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Watchdog Recovery Co #{System.unique_integer([:positive])}",
+          slug: "wd-recovery-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Watchdog Recovery Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Watchdog durable stale run",
+          status: :todo,
+          assignee_id: agent.id,
+          company_id: company.id
+        })
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          company_id: company.id,
+          agent_id: agent.id,
+          issue_id: issue.id,
+          adapter: "process"
+        })
+
+      old = DateTime.utc_now() |> DateTime.add(-16 * 60, :second) |> DateTime.truncate(:second)
+      run |> Ecto.Changeset.change(inserted_at: old) |> Repo.update!()
+
+      assert :ok = Watchdog.check_now()
+      _ = :sys.get_state(Process.whereis(Watchdog))
+
+      results = Watchdog.last_results()
+      assert results.recovery_cases_created == 1
+      assert results.recovery_attempts == 1
+      assert results.recovery_exhausted == 0
+
+      recovery_case =
+        Repo.one!(
+          Ecto.Query.from(c in RecoveryCase,
+            where: c.source_type == "heartbeat_run" and c.source_id == ^run.id
+          )
+        )
+
+      assert recovery_case.state == "recovered"
+
+      assert Repo.aggregate(
+               Ecto.Query.from(a in RecoveryAttempt,
+                 where: a.recovery_case_id == ^recovery_case.id
+               ),
+               :count
+             ) == 1
+
+      # The dispatcher scanner sees the same source after Watchdog has
+      # terminalized it; durable source CAS prevents a duplicate attempt.
+      _ = Dispatcher.recover_orphaned_in_progress()
+      _ = Dispatcher.recover_stale_checkouts()
+
+      assert Repo.aggregate(
+               Ecto.Query.from(a in RecoveryAttempt,
+                 where: a.recovery_case_id == ^recovery_case.id
+               ),
+               :count
+             ) == 1
     end
 
     test "reclaims orphaned :in_progress issues and records results" do

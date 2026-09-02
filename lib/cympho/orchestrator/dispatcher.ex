@@ -418,14 +418,28 @@ defmodule Cympho.Orchestrator.Dispatcher do
   for the next dispatch. Safe to call from boot, dispatcher poll, and the
   heartbeat watchdog tick.
 
-  Returns `%{checked: n, recovered: n, skipped: n}`.
+  Returns `%{checked: n, recovered: n, skipped: n, exhausted: n}`.
   """
   @spec recover_orphaned_in_progress() :: %{
           checked: non_neg_integer(),
           recovered: non_neg_integer(),
-          skipped: non_neg_integer()
+          skipped: non_neg_integer(),
+          exhausted: non_neg_integer()
         }
   def recover_orphaned_in_progress do
+    {result, _telemetry} = recover_orphaned_in_progress_with_telemetry()
+    result
+  end
+
+  @doc false
+  @spec recover_orphaned_in_progress_with_telemetry() ::
+          {%{
+             checked: non_neg_integer(),
+             recovered: non_neg_integer(),
+             skipped: non_neg_integer(),
+             exhausted: non_neg_integer()
+           }, %{cases_created: non_neg_integer(), attempts: non_neg_integer()}}
+  def recover_orphaned_in_progress_with_telemetry do
     stale_before =
       DateTime.utc_now()
       |> DateTime.add(-@orphan_checkout_grace_seconds, :second)
@@ -441,56 +455,98 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
     issue_ids = Enum.map(in_progress, & &1.id)
     active_run_issue_ids = issue_ids_with_active_runs(issue_ids)
+    existing_sources = recovery_source_keys("issue_checkout")
 
-    Enum.reduce(in_progress, %{checked: 0, recovered: 0, skipped: 0}, fn
-      %{id: issue_id, assignee_id: assignee_id}, acc ->
-        acc = %{acc | checked: acc.checked + 1}
+    {result, telemetry, _seen_sources} =
+      Enum.reduce(
+        in_progress,
+        {%{checked: 0, recovered: 0, skipped: 0, exhausted: 0}, %{cases_created: 0, attempts: 0},
+         existing_sources},
+        fn %{id: issue_id, assignee_id: assignee_id}, {acc, telemetry, seen_sources} ->
+          acc = %{acc | checked: acc.checked + 1}
 
-        cond do
-          live_orchestrator?(issue_id) ->
-            %{acc | skipped: acc.skipped + 1}
+          cond do
+            live_orchestrator?(issue_id) ->
+              {Map.update!(acc, :skipped, &(&1 + 1)), telemetry, seen_sources}
 
-          MapSet.member?(active_run_issue_ids, issue_id) ->
-            %{acc | skipped: acc.skipped + 1}
+            MapSet.member?(active_run_issue_ids, issue_id) ->
+              {Map.update!(acc, :skipped, &(&1 + 1)), telemetry, seen_sources}
 
-          true ->
-            case reclaim_orphaned_issue(issue_id, assignee_id) do
-              :recovered -> %{acc | recovered: acc.recovered + 1}
-              :skipped -> %{acc | skipped: acc.skipped + 1}
-            end
+            true ->
+              {status, recovery_case} = reclaim_orphaned_issue_with_case(issue_id, assignee_id)
+              acc = update_orphan_result(acc, status)
+
+              {telemetry, seen_sources} =
+                update_recovery_telemetry(telemetry, seen_sources, recovery_case)
+
+              {acc, telemetry, seen_sources}
+          end
         end
-    end)
+      )
+
+    {result, telemetry}
   rescue
     # Recovery is best-effort; never let a transient DB issue block boot/poll.
     error ->
       Logger.error("[Dispatcher] orphan recovery failed: #{inspect(error)}")
-      %{checked: 0, recovered: 0, skipped: 0}
+      {%{checked: 0, recovered: 0, skipped: 0, exhausted: 0}, %{cases_created: 0, attempts: 0}}
   end
 
-  defp reclaim_orphaned_issue(issue_id, assignee_id) do
+  defp update_orphan_result(acc, :recovered), do: %{acc | recovered: acc.recovered + 1}
+  defp update_orphan_result(acc, :exhausted), do: %{acc | exhausted: acc.exhausted + 1}
+  defp update_orphan_result(acc, _), do: %{acc | skipped: acc.skipped + 1}
+
+  defp reclaim_orphaned_issue_with_case(issue_id, assignee_id) do
     case Issues.get_issue(issue_id) do
       {:ok, %Issue{} = issue} ->
         case Cympho.Recovery.recover_orphaned_issue(issue) do
-          {:ok, %{outcome: :recovered}} ->
+          {:ok, %{outcome: :recovered, case: recovery_case}} ->
             Logger.warning(
               "[Dispatcher] recovered orphaned issue #{issue_id} (assignee=#{assignee_id || "none"}) → :todo"
             )
 
-            :recovered
+            {:recovered, recovery_case}
 
-          {:ok, %{outcome: _outcome}} ->
-            :skipped
+          {:ok, %{outcome: :exhausted, case: recovery_case}} ->
+            {:exhausted, recovery_case}
+
+          {:ok, %{outcome: _outcome, case: recovery_case}} ->
+            {:skipped, recovery_case}
 
           {:error, reason} ->
             Logger.error(
               "[Dispatcher] failed to release orphaned issue #{issue_id}: #{inspect(reason)}"
             )
 
-            :skipped
+            {:skipped, nil}
         end
 
       _ ->
-        :skipped
+        {:skipped, nil}
+    end
+  end
+
+  defp recovery_source_keys(source_type) do
+    from(c in Cympho.Recovery.RecoveryCase,
+      where:
+        c.source_type == ^source_type and c.state in ^Cympho.Recovery.RecoveryCase.active_states(),
+      select: {c.source_type, c.source_id}
+    )
+    |> Cympho.Repo.all()
+    |> MapSet.new()
+  end
+
+  defp update_recovery_telemetry(telemetry, seen_sources, nil), do: {telemetry, seen_sources}
+
+  defp update_recovery_telemetry(telemetry, seen_sources, %{source_type: type, source_id: id}) do
+    source = {type, id}
+    attempts = telemetry.attempts + 1
+
+    if MapSet.member?(seen_sources, source) do
+      {%{telemetry | attempts: attempts}, seen_sources}
+    else
+      {%{telemetry | attempts: attempts, cases_created: telemetry.cases_created + 1},
+       MapSet.put(seen_sources, source)}
     end
   end
 
@@ -532,11 +588,17 @@ defmodule Cympho.Orchestrator.Dispatcher do
           exhausted: non_neg_integer()
         }
   def recover_stale_checkouts do
-    Cympho.Recovery.recover_stale_checkouts()
+    {result, _telemetry} = recover_stale_checkouts_with_telemetry()
+    result
+  end
+
+  @doc false
+  def recover_stale_checkouts_with_telemetry do
+    Cympho.Recovery.recover_stale_checkouts_with_telemetry()
   rescue
     error ->
       Logger.error("[Dispatcher] stale checkout recovery failed: #{inspect(error)}")
-      %{checked: 0, released: 0, failed: 0, exhausted: 0}
+      {%{checked: 0, released: 0, failed: 0, exhausted: 0}, %{cases_created: 0, attempts: 0}}
   end
 
   @impl true
@@ -975,10 +1037,21 @@ defmodule Cympho.Orchestrator.Dispatcher do
         :ok
 
       true ->
-        case HeartbeatEngine.recover_orphaned_run(run) do
-          {:ok, recovered} ->
+        case Cympho.Recovery.recover_orphaned_run(run) do
+          {:ok, %{run: recovered, outcome: :recovered}} ->
             Logger.warning(
               "[Dispatcher] recovered crashed-session run #{run.id} (issue=#{issue_id}) → #{recovered.status}"
+            )
+
+          {:ok, %{outcome: :superseded}} ->
+            Logger.info("[Dispatcher] crashed-session run #{run.id} superseded before recovery")
+
+          {:ok, %{outcome: outcome}} when outcome in [:scheduled, :exhausted] ->
+            Logger.info("[Dispatcher] crashed-session run #{run.id} recovery #{outcome}")
+
+          {:error, :company_scope_required} ->
+            Logger.warning(
+              "[Dispatcher] skipped crashed-session run #{run.id} due to company scope validation"
             )
 
           {:error, recover_reason} ->

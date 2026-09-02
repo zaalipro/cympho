@@ -16,7 +16,10 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
   alias Cympho.HeartbeatEngine
   alias Cympho.HeartbeatEngine.WakeupQueue
   alias Cympho.Orchestrator.Dispatcher
+  alias Cympho.Recovery
+  alias Cympho.Recovery.RecoveryCase
   require Logger
+  import Ecto.Query
 
   @default_check_interval :timer.minutes(5)
   @default_stale_threshold 15
@@ -122,6 +125,7 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
 
   defp run_check(state) do
     usage_reconciliation = reconcile_terminal_usage()
+    recovery_stats = recovery_stats()
     stale_runs = HeartbeatEngine.find_stale_runs(@stale_threshold)
     stale_run_ids = MapSet.new(stale_runs, & &1.id)
 
@@ -129,58 +133,8 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
       HeartbeatEngine.find_orphaned_runs()
       |> Enum.reject(&MapSet.member?(stale_run_ids, &1.id))
 
-    stale_recovered =
-      Enum.flat_map(stale_runs, fn run ->
-        case HeartbeatEngine.recover_stale_run(run) do
-          {:ok, recovered} ->
-            Logger.warning("Watchdog: recovered stale run #{run.id} for agent #{run.agent_id}")
-            maybe_requeue_issue(recovered)
-            [recovered]
-
-          {:error, {:invalid_status, status}} ->
-            # Benign race: the run reached a terminal state between the scan
-            # and the recovery write. Nothing to fix.
-            Logger.info("Watchdog: stale run finished before recovery",
-              component: "watchdog",
-              agent_id: run.agent_id,
-              issue_id: run.issue_id,
-              run_id: run.id,
-              status: status
-            )
-
-            []
-
-          {:error, reason} ->
-            Logger.error("Watchdog: failed to recover stale run #{run.id}: #{inspect(reason)}")
-            []
-        end
-      end)
-
-    orphaned_recovered =
-      Enum.flat_map(orphaned_runs, fn run ->
-        case HeartbeatEngine.recover_orphaned_run(run) do
-          {:ok, recovered} ->
-            Logger.warning("Watchdog: recovered orphaned run #{run.id} for agent #{run.agent_id}")
-            maybe_requeue_issue(recovered)
-            [recovered]
-
-          {:error, {:invalid_status, status}} ->
-            Logger.info("Watchdog: orphaned run finished before recovery",
-              component: "watchdog",
-              agent_id: run.agent_id,
-              issue_id: run.issue_id,
-              run_id: run.id,
-              status: status
-            )
-
-            []
-
-          {:error, reason} ->
-            Logger.error("Watchdog: failed to recover orphaned run #{run.id}: #{inspect(reason)}")
-
-            []
-        end
-      end)
+    {stale_recovered, recovery_stats} = recover_runs(stale_runs, :stale, recovery_stats)
+    {orphaned_recovered, recovery_stats} = recover_runs(orphaned_runs, :orphaned, recovery_stats)
 
     stale_wake_claims = WakeupQueue.recover_stale_running(@stale_threshold)
     stranded_wake_agents = rewake_stranded_agents(stale_wake_claims.agent_ids)
@@ -189,8 +143,11 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
     # hold capacity without a live orchestrator/run. Same helpers the
     # dispatcher poll uses so either cadence covers the other (including
     # when autonomous dispatch is disabled).
-    orphaned_issues = Dispatcher.recover_orphaned_in_progress()
-    stale_checkouts = Dispatcher.recover_stale_checkouts()
+    {orphaned_issues, orphaned_issue_telemetry} =
+      Dispatcher.recover_orphaned_in_progress_with_telemetry()
+
+    {stale_checkouts, stale_checkout_telemetry} =
+      Dispatcher.recover_stale_checkouts_with_telemetry()
 
     # Budget hard-stop cleanup runs after the finance ledger commit. A crash
     # between commit and stop/cancel/pause leaves incomplete incidents; re-drive
@@ -211,6 +168,15 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
       stale_checkouts_checked: stale_checkouts.checked,
       stale_checkouts_released: stale_checkouts.released,
       hard_stops_completed: hard_stops_completed,
+      recovery_cases_created:
+        recovery_stats.cases_created + orphaned_issue_telemetry.cases_created +
+          stale_checkout_telemetry.cases_created,
+      recovery_attempts:
+        recovery_stats.attempts + orphaned_issue_telemetry.attempts +
+          stale_checkout_telemetry.attempts,
+      recovery_exhausted:
+        recovery_stats.exhausted + Map.get(orphaned_issues, :exhausted, 0) +
+          Map.get(stale_checkouts, :exhausted, 0),
       checked_at: DateTime.utc_now()
     }
 
@@ -218,11 +184,123 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
          results.stale_found > 0 or results.orphaned_found > 0 or
          results.stale_wake_claims_recovered > 0 or results.stranded_wake_agents > 0 or
          results.orphaned_issues_recovered > 0 or
-         results.stale_checkouts_released > 0 or results.hard_stops_completed > 0 do
+         results.stale_checkouts_released > 0 or results.hard_stops_completed > 0 or
+         results.recovery_cases_created > 0 or results.recovery_attempts > 0 or
+         results.recovery_exhausted > 0 do
       Logger.info("Watchdog: #{inspect(results)}")
     end
 
     %{state | last_results: results, check_count: state.check_count + 1}
+  end
+
+  defp recovery_stats do
+    existing_sources =
+      from(c in RecoveryCase,
+        where: c.state in ^RecoveryCase.active_states(),
+        select: {c.source_type, c.source_id}
+      )
+      |> Cympho.Repo.all()
+      |> MapSet.new()
+
+    %{cases_created: 0, attempts: 0, exhausted: 0, existing_sources: existing_sources}
+  end
+
+  defp recover_runs(runs, kind, stats) do
+    Enum.reduce(runs, {[], stats}, fn run, {recovered_runs, stats} ->
+      result =
+        case kind do
+          :stale -> Recovery.recover_stale_run(run)
+          :orphaned -> Recovery.recover_orphaned_run(run)
+        end
+
+      case result do
+        {:ok, %{run: recovered, outcome: :recovered, case: recovery_case}} ->
+          Logger.warning("Watchdog: recovered #{kind} run #{run.id} for agent #{run.agent_id}")
+
+          maybe_requeue_issue(recovered)
+          {[recovered | recovered_runs], record_recovery(stats, recovery_case, :recovered)}
+
+        {:ok, %{run: _recovered, outcome: :superseded, case: recovery_case}} ->
+          Logger.info(
+            "Watchdog: #{kind} run #{run.id} finished before recovery (superseded)",
+            component: "watchdog",
+            agent_id: run.agent_id,
+            issue_id: run.issue_id,
+            run_id: run.id
+          )
+
+          {recovered_runs, record_recovery(stats, recovery_case, :superseded)}
+
+        {:ok, %{outcome: outcome, case: recovery_case}}
+        when outcome in [:scheduled, :exhausted] ->
+          Logger.info(
+            "Watchdog: #{kind} run #{run.id} recovery #{outcome}",
+            component: "watchdog",
+            agent_id: run.agent_id,
+            issue_id: run.issue_id,
+            run_id: run.id
+          )
+
+          {recovered_runs, record_recovery(stats, recovery_case, outcome)}
+
+        {:error, :company_scope_required} ->
+          # Recovery is fail-closed for unscoped or mismatched-tenant rows.
+          # Leave the source untouched and never deliver a wake.
+          Logger.warning(
+            "Watchdog: skipped #{kind} run #{run.id} due to company scope validation"
+          )
+
+          {recovered_runs, stats}
+
+        {:error, :already_claimed} ->
+          {recovered_runs, stats}
+
+        {:error, :not_due} ->
+          {recovered_runs, stats}
+
+        {:error, :exhausted} ->
+          {recovered_runs, %{stats | exhausted: stats.exhausted + 1}}
+
+        {:error, {:invalid_status, status}} ->
+          Logger.info("Watchdog: #{kind} run finished before recovery",
+            component: "watchdog",
+            agent_id: run.agent_id,
+            issue_id: run.issue_id,
+            run_id: run.id,
+            status: status
+          )
+
+          {recovered_runs, stats}
+
+        {:error, reason} ->
+          Logger.error("Watchdog: failed to recover #{kind} run #{run.id}: #{inspect(reason)}")
+          {recovered_runs, stats}
+      end
+    end)
+    |> then(fn {runs, stats} -> {Enum.reverse(runs), stats} end)
+  end
+
+  defp record_recovery(stats, recovery_case, outcome) do
+    stats = %{stats | attempts: stats.attempts + 1}
+    stats = if outcome == :exhausted, do: %{stats | exhausted: stats.exhausted + 1}, else: stats
+
+    case recovery_case do
+      %{source_type: source_type, source_id: source_id} = _case ->
+        source = {source_type, source_id}
+
+        if MapSet.member?(stats.existing_sources, source) do
+          stats
+        else
+          %{
+            stats
+            | cases_created: stats.cases_created + 1,
+              existing_sources: MapSet.put(stats.existing_sources, source)
+          }
+        end
+
+      _ ->
+        stats
+    end
   end
 
   defp reconcile_terminal_usage do

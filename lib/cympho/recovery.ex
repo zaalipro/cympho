@@ -295,21 +295,77 @@ defmodule Cympho.Recovery do
           exhausted: non_neg_integer()
         }
   def recover_stale_checkouts(opts \\ []) do
+    {result, _telemetry} = recover_stale_checkouts_with_telemetry(opts)
+    result
+  end
+
+  @doc false
+  def recover_stale_checkouts_with_telemetry(opts \\ []) do
     issues = RuntimeOperations.stale_checked_out_issues_all(opts)
+    existing_sources = recovery_source_keys("issue_checkout")
 
-    Enum.reduce(issues, %{checked: 0, released: 0, failed: 0, exhausted: 0}, fn issue, acc ->
-      acc = %{acc | checked: acc.checked + 1}
+    {result, telemetry, _seen_sources} =
+      Enum.reduce(
+        issues,
+        {%{checked: 0, released: 0, failed: 0, exhausted: 0}, %{cases_created: 0, attempts: 0},
+         existing_sources},
+        fn issue, {acc, telemetry, seen_sources} ->
+          acc = %{acc | checked: acc.checked + 1}
 
-      case recover_orphaned_issue(issue, opts) do
-        {:ok, %{outcome: :recovered}} -> %{acc | released: acc.released + 1}
-        {:ok, %{outcome: :exhausted}} -> %{acc | exhausted: acc.exhausted + 1}
-        {:ok, %{outcome: :superseded}} -> acc
-        {:ok, %{outcome: :scheduled}} -> %{acc | failed: acc.failed + 1}
-        {:error, _reason} -> %{acc | failed: acc.failed + 1}
-      end
-    end)
+          case recover_orphaned_issue(issue, opts) do
+            {:ok, %{outcome: :recovered, case: recovery_case}} ->
+              {telemetry, seen_sources} =
+                update_recovery_telemetry(telemetry, seen_sources, recovery_case)
+
+              {%{acc | released: acc.released + 1}, telemetry, seen_sources}
+
+            {:ok, %{outcome: :exhausted, case: recovery_case}} ->
+              {telemetry, seen_sources} =
+                update_recovery_telemetry(telemetry, seen_sources, recovery_case)
+
+              {%{acc | exhausted: acc.exhausted + 1}, telemetry, seen_sources}
+
+            {:ok, %{outcome: outcome, case: recovery_case}}
+            when outcome in [:superseded, :scheduled] ->
+              {telemetry, seen_sources} =
+                update_recovery_telemetry(telemetry, seen_sources, recovery_case)
+
+              {if(outcome == :scheduled, do: %{acc | failed: acc.failed + 1}, else: acc),
+               telemetry, seen_sources}
+
+            {:error, _reason} ->
+              {%{acc | failed: acc.failed + 1}, telemetry, seen_sources}
+          end
+        end
+      )
+
+    {result, telemetry}
   rescue
-    _error -> %{checked: 0, released: 0, failed: 0, exhausted: 0}
+    _error ->
+      {%{checked: 0, released: 0, failed: 0, exhausted: 0}, %{cases_created: 0, attempts: 0}}
+  end
+
+  defp recovery_source_keys(source_type) do
+    Repo.all(
+      from c in RecoveryCase,
+        where: c.source_type == ^source_type and c.state in ^RecoveryCase.active_states(),
+        select: {c.source_type, c.source_id}
+    )
+    |> MapSet.new()
+  end
+
+  defp update_recovery_telemetry(telemetry, seen_sources, nil), do: {telemetry, seen_sources}
+
+  defp update_recovery_telemetry(telemetry, seen_sources, %{source_type: type, source_id: id}) do
+    source = {type, id}
+    telemetry = %{telemetry | attempts: telemetry.attempts + 1}
+
+    if MapSet.member?(seen_sources, source) do
+      {telemetry, seen_sources}
+    else
+      {%{telemetry | cases_created: telemetry.cases_created + 1},
+       MapSet.put(seen_sources, source)}
+    end
   end
 
   defp recover_run(%Run{} = run, kind, opts) do
