@@ -392,9 +392,11 @@ defmodule Cympho.Recovery do
     source_type = attrs[:source_type] || attrs["source_type"]
 
     with {:ok, issue} <- load_issue(attrs[:issue] || attrs["issue"]) do
+      run = attrs[:run] || attrs[:source_run] || attrs["run"] || attrs["source_run"]
+
       source_id =
         if source_type == "heartbeat_run",
-          do: (attrs[:run] || attrs[:source_run]).id,
+          do: run_field(run, :id),
           else: issue.id
 
       case Repo.one(
