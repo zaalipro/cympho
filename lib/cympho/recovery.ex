@@ -390,7 +390,8 @@ defmodule Cympho.Recovery do
              :ok <- valid_case_linkage(persisted, case_row, data),
              %Issue{} = issue <-
                Repo.one(from i in Issue, where: i.id == ^case_row.issue_id, lock: "FOR UPDATE"),
-             :ok <- valid_retry_issue(case_row, issue, data) do
+             :ok <- valid_retry_issue(case_row, issue, data),
+             {:ok, policy} <- policy_for_case(case_row, []) do
           # Clear any failed checkout binding and the runtime pause using the
           # exact source snapshot before changing the visible status.  The
           # update is one CAS on lock_version/binding, so a successor wins.
@@ -433,9 +434,8 @@ defmodule Cympho.Recovery do
             source_fingerprint: child_fp,
             fingerprint_version: Fingerprint.version(),
             source_snapshot: child_snapshot,
-            policy_snapshot:
-              case_row.policy_snapshot || policy_snapshot(case_row.max_attempts, []),
-            max_attempts: case_row.max_attempts,
+            policy_snapshot: policy.snapshot,
+            max_attempts: policy.max_attempts,
             state: "scheduled",
             next_attempt_at: now
           }
@@ -1250,9 +1250,11 @@ defmodule Cympho.Recovery do
   @spec with_attempt(map() | RecoveryCase.t(), keyword(), (map() -> term())) ::
           {:ok, map()} | {:error, term()}
   def with_attempt(source, opts, callback) when is_function(callback, 1) do
-    with {:ok, _policy} <- normalize_policy(opts),
+    with {:ok, policy} <- policy_for_source(source, opts),
+         source <- source_with_policy(source, policy),
+         policy_opts <- put_policy_options(opts, policy),
          {:ok, case_row} <- ensure_source(source),
-         {:ok, lease} <- claim_case(case_row, opts) do
+         {:ok, lease} <- claim_case(case_row, policy_opts) do
       result =
         try do
           callback.(lease)
@@ -1265,18 +1267,18 @@ defmodule Cympho.Recovery do
       outcome_result =
         case result do
           {:ok, value} ->
-            {:ok, record_success(lease, opts), value, :recovered}
+            {:ok, record_success(lease, policy_opts), value, :recovered}
 
           {:error, :superseded} ->
-            {:ok, record_superseded(lease, opts), result, :superseded}
+            {:ok, record_superseded(lease, policy_opts), result, :superseded}
 
           {:error, reason} ->
-            failure = record_failure(lease, reason, opts)
+            failure = record_failure(lease, reason, policy_opts)
             outcome = outcome_for_failure(lease)
 
             case {failure, outcome} do
               {{:ok, exhausted_case}, :exhausted} ->
-                case exhaust_case(exhausted_case, Keyword.put(opts, :reason, reason)) do
+                case exhaust_case(exhausted_case, Keyword.put(policy_opts, :reason, reason)) do
                   {:ok, _approval} ->
                     final_case = Repo.get!(RecoveryCase, exhausted_case.id)
 
@@ -1300,7 +1302,7 @@ defmodule Cympho.Recovery do
             end
 
           value ->
-            {:ok, record_success(lease, opts), value, :recovered}
+            {:ok, record_success(lease, policy_opts), value, :recovered}
         end
 
       case outcome_result do
@@ -1336,13 +1338,10 @@ defmodule Cympho.Recovery do
   def recover_orphaned_issue(issue, opts \\ [])
 
   def recover_orphaned_issue(%Issue{} = issue, opts) do
-    recovery_opts = Keyword.get(opts, :recovery_opts, opts)
+    source = %{source_type: "issue_checkout", issue: issue}
 
-    source =
-      %{source_type: "issue_checkout", issue: issue}
-      |> maybe_put_option(:max_attempts, opts)
-
-    with {:ok, result} <-
+    with {:ok, recovery_opts} <- adapter_recovery_options(opts),
+         {:ok, result} <-
            with_attempt(
              source,
              recovery_opts,
@@ -1718,15 +1717,14 @@ defmodule Cympho.Recovery do
   end
 
   defp recover_run(%Run{} = run, kind, opts) do
-    source =
-      %{source_type: "heartbeat_run", issue: nil, run: run}
-      |> maybe_put_option(:max_attempts, opts)
+    source = %{source_type: "heartbeat_run", issue: nil, run: run}
 
-    with {:ok, issue} <- Issues.get_issue(run.issue_id),
+    with {:ok, recovery_opts} <- adapter_recovery_options(opts),
+         {:ok, issue} <- Issues.get_issue(run.issue_id),
          {:ok, result} <-
            with_attempt(
              %{source | issue: issue},
-             Keyword.get(opts, :recovery_opts, opts),
+             recovery_opts,
              fn lease ->
                current = Repo.get(Run, run.id)
 
@@ -1760,13 +1758,6 @@ defmodule Cympho.Recovery do
          outcome: result.outcome,
          case: result.case
        }}
-    end
-  end
-
-  defp maybe_put_option(source, key, opts) do
-    case Keyword.fetch(opts, key) do
-      {:ok, value} -> Map.put(source, key, value)
-      :error -> source
     end
   end
 
@@ -2135,8 +2126,12 @@ defmodule Cympho.Recovery do
           )
 
         cond do
-          active && active.source_fingerprint == attrs.source_fingerprint ->
+          active && active.source_fingerprint == attrs.source_fingerprint &&
+              case_policy_matches?(active, attrs) ->
             active
+
+          active && active.source_fingerprint == attrs.source_fingerprint ->
+            Repo.rollback(:invalid_policy)
 
           active ->
             Repo.update_all(from(c in RecoveryCase, where: c.id == ^active.id),
@@ -2187,10 +2182,13 @@ defmodule Cympho.Recovery do
       {:error, {:unique_conflict, _changeset}} ->
         case reload_active_case(attrs) do
           {:ok, row} ->
-            if row.source_fingerprint == attrs.source_fingerprint do
+            if row.source_fingerprint == attrs.source_fingerprint &&
+                 case_policy_matches?(row, attrs) do
               {:ok, row}
             else
-              do_ensure_case(attrs, attempt + 1)
+              if row.source_fingerprint == attrs.source_fingerprint,
+                do: {:error, :invalid_policy},
+                else: do_ensure_case(attrs, attempt + 1)
             end
 
           _ ->
@@ -2207,8 +2205,13 @@ defmodule Cympho.Recovery do
                          c.source_fingerprint == ^attrs.source_fingerprint,
                      order_by: [desc: c.inserted_at]
                  ) do
-              %RecoveryCase{} = row -> {:ok, row}
-              _ -> do_ensure_case(attrs, attempt + 1)
+              %RecoveryCase{} = row ->
+                if case_policy_matches?(row, attrs),
+                  do: {:ok, row},
+                  else: {:error, :invalid_policy}
+
+              _ ->
+                do_ensure_case(attrs, attempt + 1)
             end
         end
 
@@ -2302,6 +2305,60 @@ defmodule Cympho.Recovery do
   @max_policy_attempts 3
   @max_policy_delay_seconds 600
   @max_policy_lease_seconds 600
+  @policy_option_keys [:max_attempts, :base_delay, :max_delay, :lease_seconds]
+
+  defp adapter_recovery_options(opts) when is_list(opts) do
+    outer = Keyword.delete(opts, :recovery_opts)
+
+    nested =
+      case Keyword.fetch(opts, :recovery_opts) do
+        :error -> []
+        {:ok, value} when is_list(value) -> value
+        {:ok, _value} -> :invalid
+      end
+
+    cond do
+      nested == :invalid ->
+        {:error, :invalid_policy}
+
+      Enum.any?(@policy_option_keys, fn key ->
+        Keyword.has_key?(outer, key) and Keyword.has_key?(nested, key) and
+            Keyword.get(outer, key) != Keyword.get(nested, key)
+      end) ->
+        {:error, :invalid_policy}
+
+      true ->
+        merged = Keyword.merge(outer, nested)
+
+        case normalize_policy(merged) do
+          {:ok, _policy} -> {:ok, merged}
+          {:error, :invalid_policy} = error -> error
+        end
+    end
+  end
+
+  defp adapter_recovery_options(_opts), do: {:error, :invalid_policy}
+
+  defp source_with_policy(%RecoveryCase{} = source, _policy), do: source
+
+  defp source_with_policy(source, policy) when is_map(source) do
+    Map.merge(source, %{
+      max_attempts: policy.max_attempts,
+      base_delay: policy.base_delay,
+      max_delay: policy.max_delay,
+      lease_seconds: policy.lease_seconds
+    })
+  end
+
+  defp put_policy_options(opts, policy) when is_list(opts) do
+    Enum.reduce(@policy_option_keys, opts, fn key, acc ->
+      Keyword.put(acc, key, Map.fetch!(policy, key))
+    end)
+  end
+
+  defp policy_for_source(%RecoveryCase{} = source, opts), do: policy_for_case(source, opts)
+  defp policy_for_source(source, opts) when is_map(source), do: normalize_policy(opts)
+  defp policy_for_source(_source, _opts), do: {:error, :invalid_policy}
 
   defp normalize_policy(opts) when is_list(opts) do
     max_attempts = Keyword.get(opts, :max_attempts, @max_policy_attempts)
@@ -2348,43 +2405,27 @@ defmodule Cympho.Recovery do
   defp normalize_policy(_), do: {:error, :invalid_policy}
 
   # A case snapshots its effective policy at detection time. Later calls may
-  # supply bounded overrides (used by deterministic tests), but omitted values
-  # must come from that snapshot rather than silently reverting to process
-  # defaults after a restart.
+  # omit policy values or repeat the persisted values, but cannot replace them.
   defp policy_for_case(%RecoveryCase{} = case_row, opts) do
     snapshot = normalize_policy_snapshot(case_row.policy_snapshot)
 
-    snapshot_max = Map.get(snapshot, :max_attempts, case_row.max_attempts || @max_policy_attempts)
-
-    if snapshot_max != case_row.max_attempts do
-      {:error, :invalid_policy}
+    with true <- map_size(snapshot) == length(@policy_option_keys),
+         {:ok, policy} <- normalize_policy(snapshot),
+         true <- policy.max_attempts == case_row.max_attempts,
+         true <-
+           Enum.all?(@policy_option_keys, fn key ->
+             is_nil(option_value(opts, key)) or option_value(opts, key) == Map.fetch!(policy, key)
+           end) do
+      {:ok, policy}
     else
-      policy_for_case_values(case_row, snapshot, opts)
+      _ -> {:error, :invalid_policy}
     end
   end
 
-  defp policy_for_case_values(%RecoveryCase{} = case_row, snapshot, opts) do
-    explicit_max = option_value(opts, :max_attempts)
-
-    if not is_nil(explicit_max) and explicit_max != case_row.max_attempts do
-      {:error, :invalid_policy}
-    else
-      values = %{
-        max_attempts: case_row.max_attempts || @max_policy_attempts,
-        base_delay: Map.get(snapshot, :base_delay, 60),
-        max_delay: Map.get(snapshot, :max_delay, @max_policy_delay_seconds),
-        lease_seconds: Map.get(snapshot, :lease_seconds, @lease_seconds)
-      }
-
-      values =
-        Enum.reduce([:base_delay, :max_delay, :lease_seconds], values, fn key, acc ->
-          case option_value(opts, key) do
-            nil -> acc
-            value -> Map.put(acc, key, value)
-          end
-        end)
-
-      normalize_policy(values)
+  defp case_policy_matches?(%RecoveryCase{} = case_row, attrs) do
+    case policy_for_case(case_row, Map.get(attrs, :policy_snapshot, %{})) do
+      {:ok, persisted} -> persisted.snapshot == attrs.policy_snapshot
+      {:error, :invalid_policy} -> false
     end
   end
 
@@ -2407,13 +2448,6 @@ defmodule Cympho.Recovery do
   end
 
   defp normalize_policy_snapshot(_), do: %{}
-
-  defp policy_snapshot(max_attempts, opts) do
-    case normalize_policy(Keyword.put(opts, :max_attempts, max_attempts)) do
-      {:ok, policy} -> policy.snapshot
-      _ -> %{"max_attempts" => max_attempts}
-    end
-  end
 
   defp bounded_limit(value) when is_integer(value) and value > 0, do: min(value, 100)
   defp bounded_limit(_), do: 50

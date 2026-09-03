@@ -264,10 +264,7 @@ defmodule Cympho.RecoveryReviewFixTest do
              Recovery.claim_case(case_row, now: DateTime.utc_now() |> DateTime.truncate(:second))
 
     assert {:ok, failed} =
-             Recovery.record_failure(lease, {:provider, "secret-token"},
-               base_delay: 1,
-               max_delay: 2
-             )
+             Recovery.record_failure(lease, {:provider, "secret-token"})
 
     assert failed.state == "scheduled"
     assert failed.next_attempt_at != nil
@@ -345,7 +342,14 @@ defmodule Cympho.RecoveryReviewFixTest do
     issue = Repo.insert!(%Issue{title: "Delay", company_id: company.id, lock_version: 0})
     now = ~U[2026-01-03 00:00:00Z]
 
-    assert {:ok, case_row} = Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: issue,
+               base_delay: 7,
+               max_delay: 9
+             })
+
     assert {:ok, lease_one} = Recovery.claim_case(case_row, now: now)
 
     assert {:ok, scheduled} =
@@ -368,6 +372,44 @@ defmodule Cympho.RecoveryReviewFixTest do
              )
 
     assert capped.next_attempt_at == DateTime.add(due, 9, :second)
+  end
+
+  test "active cases reject conflicting claim and attempt policies without mutation" do
+    company = Repo.insert!(%Company{name: "Immutable policy", slug: "immutable-policy"})
+    issue = Repo.insert!(%Issue{title: "Immutable", company_id: company.id})
+    now = ~U[2026-01-04 00:00:00Z]
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: issue,
+               max_attempts: 3,
+               base_delay: 7,
+               max_delay: 9,
+               lease_seconds: 11
+             })
+
+    assert {:error, :invalid_policy} =
+             Recovery.claim_due_case(case_row, now: now, lease_seconds: 12)
+
+    assert {:error, :invalid_policy} =
+             Recovery.with_attempt(
+               %{source_type: "issue_checkout", issue: issue},
+               [now: now, max_attempts: 3, base_delay: 8, max_delay: 9, lease_seconds: 11],
+               fn _lease -> flunk("conflicting policy must not invoke the callback") end
+             )
+
+    unchanged = Repo.get!(RecoveryCase, case_row.id)
+
+    assert unchanged.policy_snapshot == %{
+             "max_attempts" => 3,
+             "base_delay_seconds" => 7,
+             "max_delay_seconds" => 9,
+             "lease_seconds" => 11
+           }
+
+    assert unchanged.state == "detected"
+    refute Repo.exists?(from(a in RecoveryAttempt, where: a.recovery_case_id == ^case_row.id))
   end
 end
 
@@ -422,6 +464,8 @@ end
 defmodule Cympho.RecoveryAdapterTest do
   use Cympho.DataCase, async: false
 
+  import Mock
+
   alias Cympho.Agents.Agent
   alias Cympho.Companies.Company
   alias Cympho.HeartbeatEngine
@@ -429,8 +473,153 @@ defmodule Cympho.RecoveryAdapterTest do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.Recovery
+  alias Cympho.Recovery.RecoveryAttempt
   alias Cympho.Recovery.RecoveryCase
   alias Cympho.Repo
+
+  @policy [max_attempts: 3, base_delay: 7, max_delay: 9, lease_seconds: 11]
+  @policy_snapshot %{
+    "max_attempts" => 3,
+    "base_delay_seconds" => 7,
+    "max_delay_seconds" => 9,
+    "lease_seconds" => 11
+  }
+
+  test "run adapter persists nested policy for restart claims and backoff" do
+    {company, agent, issue} = recovery_source("run-policy-restart")
+    now = ~U[2026-03-01 00:00:00Z]
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    Repo.update_all(from(r in Run, where: r.id == ^started.id),
+      set: [last_heartbeat_at: DateTime.add(now, -20, :minute)]
+    )
+
+    stale = Repo.get!(Run, started.id)
+
+    with_mock HeartbeatEngine, [:passthrough],
+      recover_run_if_current: fn _run, _guard, _kind, _opts -> {:error, :temporary} end do
+      assert {:ok, %{outcome: :scheduled, case: first}} =
+               Recovery.recover_stale_run(stale, now: now, recovery_opts: @policy)
+
+      assert first.policy_snapshot == @policy_snapshot
+      assert first.next_attempt_at == DateTime.add(now, 7, :second)
+
+      due = first.next_attempt_at
+      reloaded = Repo.get!(RecoveryCase, first.id)
+      assert {:ok, lease} = Recovery.claim_due_case(reloaded, now: due)
+      assert lease.case.lease_expires_at == DateTime.add(due, 11, :second)
+
+      assert {:ok, second} = Recovery.record_failure(lease, :temporary, now: due)
+      assert second.next_attempt_at == DateTime.add(due, 9, :second)
+    end
+  end
+
+  test "checkout adapter persists nested policy for restart claims and backoff" do
+    {_company, agent, issue} = recovery_source("checkout-policy-restart")
+    assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+    now = ~U[2026-03-02 00:00:00Z]
+
+    with_mock Cympho.Workspaces, [:passthrough],
+      cancel_and_release_for_issue: fn _issue, _opts -> {:error, :temporary} end do
+      assert {:ok, %{outcome: :scheduled, case: first}} =
+               Recovery.recover_orphaned_issue(checked_out,
+                 now: now,
+                 base_delay: 7,
+                 recovery_opts: @policy
+               )
+
+      assert first.policy_snapshot == @policy_snapshot
+      assert first.next_attempt_at == DateTime.add(now, 7, :second)
+
+      due = first.next_attempt_at
+      reloaded = Repo.get!(RecoveryCase, first.id)
+      assert {:ok, lease} = Recovery.claim_due_case(reloaded, now: due)
+      assert lease.case.lease_expires_at == DateTime.add(due, 11, :second)
+
+      assert {:ok, second} = Recovery.record_failure(lease, :temporary, now: due)
+      assert second.next_attempt_at == DateTime.add(due, 9, :second)
+    end
+  end
+
+  test "adapter policy conflicts and invalid nested values insert no recovery rows" do
+    {company, agent, issue} = recovery_source("invalid-policy")
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    assert {:error, :invalid_policy} =
+             Recovery.recover_stale_run(started,
+               base_delay: 8,
+               recovery_opts: @policy
+             )
+
+    assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+    assert {:error, :invalid_policy} =
+             Recovery.recover_orphaned_issue(checked_out,
+               recovery_opts: Keyword.put(@policy, :max_attempts, 4)
+             )
+
+    refute Repo.exists?(from(c in RecoveryCase, where: c.company_id == ^company.id))
+
+    refute Repo.exists?(
+             from(a in RecoveryAttempt,
+               join: c in assoc(a, :recovery_case),
+               where: c.company_id == ^company.id
+             )
+           )
+  end
+
+  test "approved retry child inherits its parent's complete policy snapshot" do
+    {_company, agent, issue} = recovery_source("retry-child-policy")
+    assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+    policy = [max_attempts: 1, base_delay: 7, max_delay: 9, lease_seconds: 11]
+    snapshot = Map.put(@policy_snapshot, "max_attempts", 1)
+    now = ~U[2026-03-03 00:00:00Z]
+
+    assert {:ok, parent} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: checked_out,
+               max_attempts: 1,
+               base_delay: 7,
+               max_delay: 9,
+               lease_seconds: 11
+             })
+
+    assert {:ok, lease} = Recovery.claim_case(parent, Keyword.put(policy, :now, now))
+    assert {:ok, exhausted} = Recovery.record_failure(lease, :temporary, now: now)
+    assert {:ok, approval} = Recovery.exhaust_case(exhausted, now: now)
+
+    Repo.update_all(from(a in Cympho.BoardApprovals.BoardApproval, where: a.id == ^approval.id),
+      set: [status: "approved"]
+    )
+
+    assert {:ok, child} =
+             Recovery.apply_board_action(
+               Repo.get!(Cympho.BoardApprovals.BoardApproval, approval.id),
+               now: DateTime.add(now, 1, :second)
+             )
+
+    assert child.policy_snapshot == snapshot
+    assert child.max_attempts == 1
+  end
 
   test "stale run recovery creates a durable recovered case" do
     {company, agent, issue} = recovery_source("stale-run")
@@ -1221,7 +1410,7 @@ defmodule Cympho.RecoveryDueTest do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     [{bad_issue, bad_case}, {_healthy_issue, healthy_case}] =
-      ordered_due_cases("raised-source", 2, now)
+      ordered_due_cases("raised-source", 2, now, %{base_delay: 1})
 
     with_mock Cympho.Workspaces, [:passthrough],
       cancel_and_release_for_issue: fn issue, _opts ->
@@ -1240,7 +1429,7 @@ defmodule Cympho.RecoveryDueTest do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     [{bad_issue, bad_case}, {_healthy_issue, healthy_case}] =
-      ordered_due_cases("exited-source", 2, now)
+      ordered_due_cases("exited-source", 2, now, %{base_delay: 1})
 
     with_mock Cympho.Workspaces, [:passthrough],
       cancel_and_release_for_issue: fn issue, _opts ->
