@@ -60,10 +60,13 @@ review the approval in the board/Owner Decisions queue and choose the explicit
 **Retry** action. An approved retry verifies the company, issue status, source
 fingerprint, and lineage, resolves the exhausted case, reopens the
 still-matching issue to `todo`, and creates a child scheduled case. Denial,
-expiry, or cancellation locks case → approval → issue and commits the linked
-case and governance outcome in one transaction while leaving the issue
-blocked. Audit, company/recovery events, PubSub, and OwnerAttention publication
-happen best-effort after commit; there is no durable notification outbox.
+expiry, or cancellation locks case → approval and commits the approval outcome
+plus linked case resolution in one transaction. It does not lock or mutate the
+issue; the issue remains blocked from the earlier exhaustion transaction.
+Approved retry and exhaustion acquire the issue after case/approval when their
+mutation requires it. Audit, company/recovery events, PubSub, and OwnerAttention
+publication happen best-effort after commit; there is no durable notification
+outbox.
 
 Dispatcher crash cleanup snapshots and recovers the exact pre-crash run first,
 then considers an unbound checkout. A durably stale run cohort can be recovered
