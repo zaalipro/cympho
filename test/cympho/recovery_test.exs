@@ -853,6 +853,8 @@ end
 defmodule Cympho.RecoveryDueTest do
   use Cympho.DataCase, async: false
 
+  import Mock
+
   alias Cympho.Agents.Agent
   alias Cympho.BoardApprovals.BoardApproval
   alias Cympho.Companies.Company
@@ -1186,6 +1188,119 @@ defmodule Cympho.RecoveryDueTest do
     assert Repo.get!(RecoveryCase, third.id).state == "recovered"
   end
 
+  test "each due iteration starts a fresh lease clock" do
+    base = DateTime.utc_now() |> DateTime.truncate(:second)
+    rows = ordered_due_cases("advancing-clock", 2, base, %{lease_seconds: 5})
+    {:ok, clock_state} = Elixir.Agent.start_link(fn -> 0 end)
+
+    clock = fn ->
+      Elixir.Agent.get_and_update(clock_state, fn offset ->
+        {DateTime.add(base, offset, :second), offset + 1}
+      end)
+    end
+
+    assert %{checked: 2, claimed: 2, recovered: 2, failed: 0} =
+             Recovery.process_due(clock: clock, limit: 2)
+
+    [first_attempt, second_attempt] =
+      rows
+      |> Enum.map(fn {_issue, case_row} ->
+        Repo.get_by!(RecoveryAttempt, recovery_case_id: case_row.id)
+      end)
+      |> Enum.sort_by(& &1.started_at, DateTime)
+
+    assert DateTime.after?(second_attempt.started_at, first_attempt.started_at)
+
+    for attempt <- [first_attempt, second_attempt] do
+      assert DateTime.compare(attempt.completed_at, attempt.started_at) in [:eq, :gt]
+      assert DateTime.before?(attempt.completed_at, DateTime.add(attempt.started_at, 5, :second))
+    end
+  end
+
+  test "a raised source mutation schedules its attempt and continues later rows" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    [{bad_issue, bad_case}, {_healthy_issue, healthy_case}] =
+      ordered_due_cases("raised-source", 2, now)
+
+    with_mock Cympho.Workspaces, [:passthrough],
+      cancel_and_release_for_issue: fn issue, _opts ->
+        if issue.id == bad_issue.id, do: raise("injected recovery failure"), else: :ok
+      end do
+      assert %{checked: 2, claimed: 2, scheduled: 1, recovered: 1, failed: 0} =
+               Recovery.process_due(now: now, limit: 2, base_delay: 1)
+    end
+
+    assert Repo.get!(RecoveryCase, bad_case.id).state == "scheduled"
+    assert Repo.get!(RecoveryCase, healthy_case.id).state == "recovered"
+    assert Repo.get_by!(RecoveryAttempt, recovery_case_id: bad_case.id).status == "failed"
+  end
+
+  test "an exited source mutation schedules its attempt and continues later rows" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    [{bad_issue, bad_case}, {_healthy_issue, healthy_case}] =
+      ordered_due_cases("exited-source", 2, now)
+
+    with_mock Cympho.Workspaces, [:passthrough],
+      cancel_and_release_for_issue: fn issue, _opts ->
+        if issue.id == bad_issue.id, do: exit(:injected_recovery_exit), else: :ok
+      end do
+      assert %{checked: 2, claimed: 2, scheduled: 1, recovered: 1, failed: 0} =
+               Recovery.process_due(now: now, limit: 2, base_delay: 1)
+    end
+
+    assert Repo.get!(RecoveryCase, bad_case.id).state == "scheduled"
+    assert Repo.get!(RecoveryCase, healthy_case.id).state == "recovered"
+    assert Repo.get_by!(RecoveryAttempt, recovery_case_id: bad_case.id).status == "failed"
+  end
+
+  test "an escalation exception preserves progress and continues later rows" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    [{_bad_issue, bad_case}, {_healthy_issue, healthy_case}] =
+      ordered_due_cases("raised-escalation", 2, now)
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^bad_case.id),
+      set: [state: "exhausted", exhausted_at: now]
+    )
+
+    with_mock Cympho.BoardApprovals, [:passthrough],
+      create_recovery_approval: fn _attrs -> raise "injected escalation failure" end do
+      assert %{checked: 2, failed: 1, recovered: 1} =
+               Recovery.process_due(now: now, limit: 2)
+    end
+
+    assert Repo.get!(RecoveryCase, bad_case.id).state == "exhausted"
+    assert Repo.get!(RecoveryCase, healthy_case.id).state == "recovered"
+  end
+
+  test "an expired nonfinal lease closes its old attempt and claims one successor" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    [{_issue, case_row}] =
+      ordered_due_cases("expired-nonfinal", 1, now, %{max_attempts: 3, lease_seconds: 1})
+
+    assert {:ok, first_lease} = Recovery.claim_case(case_row, now: now, lease_seconds: 1)
+    takeover_at = DateTime.add(now, 2, :second)
+
+    assert {:ok, second_lease} =
+             Recovery.claim_next_due_case(MapSet.new(), now: takeover_at, lease_seconds: 1)
+
+    assert second_lease.case.id == case_row.id
+    assert second_lease.attempt.attempt_no == 2
+
+    first_attempt = Repo.get!(RecoveryAttempt, first_lease.attempt.id)
+    assert first_attempt.status == "failed"
+    assert first_attempt.error_reason == "lease_expired"
+    assert first_attempt.completed_at == takeover_at
+
+    assert Repo.aggregate(
+             from(a in RecoveryAttempt, where: a.recovery_case_id == ^case_row.id),
+             :count
+           ) == 2
+  end
+
   test "policy and bounded schema inputs fail closed" do
     {company, _agent, issue} = due_source("bounds")
 
@@ -1264,6 +1379,26 @@ defmodule Cympho.RecoveryDueTest do
     {company, agent, issue}
   end
 
+  defp ordered_due_cases(suffix, count, now, case_attrs \\ %{}) do
+    for index <- 1..count do
+      {_company, _agent, issue} = due_source("#{suffix}-#{index}")
+
+      attrs =
+        Map.merge(
+          %{source_type: "issue_checkout", issue: issue},
+          case_attrs
+        )
+
+      assert {:ok, case_row} = Recovery.ensure_case(attrs)
+
+      Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id),
+        set: [next_attempt_at: DateTime.add(now, -100 + index, :second)]
+      )
+
+      {issue, Repo.get!(RecoveryCase, case_row.id)}
+    end
+  end
+
   defp unique, do: System.unique_integer([:positive])
 end
 
@@ -1306,25 +1441,27 @@ defmodule Cympho.RecoveryConcurrencyTest do
     workers =
       for _ <- 1..2 do
         spawn_monitor(fn ->
-          Process.delete(:"$callers")
-          :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo, sandbox: false)
-          send(caller, {:ready, self()})
-          receive do: (:go -> :ok)
-
           result =
-            Recovery.ensure_case(%{
-              company_id: company.id,
-              source_type: "issue_checkout",
-              issue: issue
-            })
+            with_unboxed_connection(fn ->
+              send(caller, {:ready, self()})
+              receive do: (:go -> :ok)
 
-          :ok = Ecto.Adapters.SQL.Sandbox.checkin(Repo)
+              Recovery.ensure_case(%{
+                company_id: company.id,
+                source_type: "issue_checkout",
+                issue: issue
+              })
+            end)
+
           send(caller, {:result, self(), result})
         end)
       end
 
-    Enum.each(workers, fn {pid, _ref} -> assert_receive {:ready, ^pid}, 5_000 end)
-    Enum.each(workers, fn {pid, _ref} -> send(pid, :go) end)
+    try do
+      Enum.each(workers, fn {pid, _ref} -> assert_receive {:ready, ^pid}, 5_000 end)
+    after
+      Enum.each(workers, fn {pid, _ref} -> send(pid, :go) end)
+    end
 
     ids =
       Enum.map(workers, fn {pid, ref} ->
@@ -1353,19 +1490,22 @@ defmodule Cympho.RecoveryConcurrencyTest do
     workers =
       for _ <- 1..2 do
         spawn_monitor(fn ->
-          Process.delete(:"$callers")
-          :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo, sandbox: false)
-          send(caller, {:ready, self()})
-          receive do: (:go -> :ok)
+          result =
+            with_unboxed_connection(fn ->
+              send(caller, {:ready, self()})
+              receive do: (:go -> :ok)
+              Recovery.claim_next_due_case(MapSet.new(), now: now)
+            end)
 
-          result = Recovery.claim_next_due_case(MapSet.new(), now: now)
-          :ok = Ecto.Adapters.SQL.Sandbox.checkin(Repo)
           send(caller, {:claim_result, self(), result})
         end)
       end
 
-    Enum.each(workers, fn {pid, _ref} -> assert_receive {:ready, ^pid}, 5_000 end)
-    Enum.each(workers, fn {pid, _ref} -> send(pid, :go) end)
+    try do
+      Enum.each(workers, fn {pid, _ref} -> assert_receive {:ready, ^pid}, 5_000 end)
+    after
+      Enum.each(workers, fn {pid, _ref} -> send(pid, :go) end)
+    end
 
     claimed_ids =
       Enum.map(workers, fn {pid, ref} ->
@@ -1397,6 +1537,52 @@ defmodule Cympho.RecoveryConcurrencyTest do
            ) == 0
   end
 
+  test "two simultaneous direct claims produce one token and attempt winner", %{
+    company: company
+  } do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    [case_row] = insert_ordered_due_cases(company, now, 1)
+    caller = self()
+
+    workers =
+      for _ <- 1..2 do
+        spawn_monitor(fn ->
+          result =
+            with_unboxed_connection(fn ->
+              send(caller, {:direct_claim_ready, self()})
+              receive do: (:claim_direct -> :ok)
+              Recovery.claim_case(case_row.id, now: now)
+            end)
+
+          send(caller, {:direct_claim_result, self(), result})
+        end)
+      end
+
+    try do
+      Enum.each(workers, fn {pid, _ref} ->
+        assert_receive {:direct_claim_ready, ^pid}, 5_000
+      end)
+    after
+      Enum.each(workers, fn {pid, _ref} -> send(pid, :claim_direct) end)
+    end
+
+    results =
+      Enum.map(workers, fn {pid, ref} ->
+        assert_receive {:direct_claim_result, ^pid, result}, 10_000
+        assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
+        result
+      end)
+
+    assert [{:ok, winner}] = Enum.filter(results, &match?({:ok, _}, &1))
+    assert [{:error, :already_claimed}] = Enum.filter(results, &match?({:error, _}, &1))
+    assert winner.token == Repo.get!(RecoveryCase, case_row.id).claim_token
+
+    assert Repo.aggregate(
+             from(a in RecoveryAttempt, where: a.recovery_case_id == ^case_row.id),
+             :count
+           ) == 1
+  end
+
   test "a due claim skips the locked oldest row without blocking", %{company: company} do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     [oldest, next | _] = insert_ordered_due_cases(company, now, 3)
@@ -1404,37 +1590,40 @@ defmodule Cympho.RecoveryConcurrencyTest do
 
     {locker, locker_ref} =
       spawn_monitor(fn ->
-        Process.delete(:"$callers")
-        :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo, sandbox: false)
-
-        Repo.transaction(fn ->
-          Repo.one!(from(c in RecoveryCase, where: c.id == ^oldest.id, lock: "FOR UPDATE"))
-          send(caller, {:oldest_locked, self()})
-          receive do: (:release_oldest -> :ok)
+        with_unboxed_connection(fn ->
+          Repo.transaction(fn ->
+            Repo.one!(from(c in RecoveryCase, where: c.id == ^oldest.id, lock: "FOR UPDATE"))
+            send(caller, {:oldest_locked, self()})
+            receive do: (:release_oldest -> :ok)
+          end)
         end)
-
-        :ok = Ecto.Adapters.SQL.Sandbox.checkin(Repo)
       end)
+
+    on_exit(fn -> send(locker, :release_oldest) end)
 
     assert_receive {:oldest_locked, ^locker}, 5_000
 
     {claimer, claimer_ref} =
       spawn_monitor(fn ->
-        Process.delete(:"$callers")
-        :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo, sandbox: false)
-        result = Recovery.claim_next_due_case(MapSet.new(), now: now)
-        :ok = Ecto.Adapters.SQL.Sandbox.checkin(Repo)
+        result =
+          with_unboxed_connection(fn ->
+            Recovery.claim_next_due_case(MapSet.new(), now: now)
+          end)
+
         send(caller, {:skip_locked_result, self(), result})
       end)
 
     claim_result =
-      receive do
-        {:skip_locked_result, ^claimer, result} -> result
+      try do
+        receive do
+          {:skip_locked_result, ^claimer, result} -> result
+        after
+          1_000 -> :blocked
+        end
       after
-        1_000 -> :blocked
+        send(locker, :release_oldest)
       end
 
-    send(locker, :release_oldest)
     assert_receive {:DOWN, ^locker_ref, :process, ^locker, :normal}, 5_000
     assert_receive {:DOWN, ^claimer_ref, :process, ^claimer, :normal}, 5_000
 
@@ -1471,6 +1660,17 @@ defmodule Cympho.RecoveryConcurrencyTest do
       )
 
       Repo.get!(RecoveryCase, case_row.id)
+    end
+  end
+
+  defp with_unboxed_connection(callback) do
+    Process.delete(:"$callers")
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo, sandbox: false)
+
+    try do
+      callback.()
+    after
+      Ecto.Adapters.SQL.Sandbox.checkin(Repo)
     end
   end
 end

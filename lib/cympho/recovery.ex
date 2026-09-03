@@ -1377,11 +1377,11 @@ defmodule Cympho.Recovery do
   def process_due(opts \\ [])
 
   def process_due(opts) when is_list(opts) do
-    with {:ok, _policy} <- normalize_policy(opts) do
-      now = option_now(opts)
+    with {:ok, _policy} <- normalize_policy(opts),
+         :ok <- validate_due_clock(opts) do
       limit = bounded_limit(Keyword.get(opts, :limit, 50))
 
-      process_due_loop(opts, now, limit, MapSet.new(), empty_due_stats())
+      process_due_loop(opts, limit, MapSet.new(), empty_due_stats())
     else
       {:error, reason} ->
         Map.merge(empty_due_stats(), %{error: reason, errors: [reason]})
@@ -1419,56 +1419,61 @@ defmodule Cympho.Recovery do
     }
   end
 
-  defp process_due_loop(_opts, _now, 0, _visited_ids, stats), do: stats
+  defp process_due_loop(_opts, 0, _visited_ids, stats), do: stats
 
-  defp process_due_loop(opts, now, remaining, visited_ids, stats) do
-    claim_opts = Keyword.put(opts, :now, now)
+  defp process_due_loop(opts, remaining, visited_ids, stats) do
+    with {:ok, reservation_now} <- due_time(opts) do
+      claim_opts = Keyword.put(opts, :now, reservation_now)
 
-    case claim_next_due_case(visited_ids, claim_opts) do
-      :none ->
-        stats
-
-      {:ok, %{case: %RecoveryCase{} = case_row} = lease} ->
-        stats =
+      case claim_next_due_case(visited_ids, claim_opts) do
+        :none ->
           stats
-          |> increment_due_checked()
-          |> Map.update!(:claimed, &(&1 + 1))
-          |> then(&process_due_lease(lease, claim_opts, &1))
 
-        process_due_loop(
-          opts,
-          now,
-          remaining - 1,
-          MapSet.put(visited_ids, case_row.id),
-          stats
-        )
+        {:ok, %{case: %RecoveryCase{} = case_row} = lease} ->
+          stats =
+            stats
+            |> increment_due_checked()
+            |> Map.update!(:claimed, &(&1 + 1))
+            |> then(&process_due_lease_safely(lease, claim_opts, opts, &1))
 
-      {:ok, {:needs_escalation, %RecoveryCase{} = case_row}} ->
-        stats =
-          stats
-          |> increment_due_checked()
-          |> process_due_escalation(case_row, claim_opts)
+          process_due_loop(
+            opts,
+            remaining - 1,
+            MapSet.put(visited_ids, case_row.id),
+            stats
+          )
 
-        process_due_loop(
-          opts,
-          now,
-          remaining - 1,
-          MapSet.put(visited_ids, case_row.id),
-          stats
-        )
+        {:ok, {:needs_escalation, %RecoveryCase{} = case_row}} ->
+          stats =
+            stats
+            |> increment_due_checked()
+            |> process_due_escalation_safely(case_row, opts)
 
-      {:error, {:case, id, reason}} ->
-        stats =
+          process_due_loop(
+            opts,
+            remaining - 1,
+            MapSet.put(visited_ids, case_row.id),
+            stats
+          )
+
+        {:error, {:case, id, reason}} ->
+          stats =
+            stats
+            |> increment_due_checked()
+            |> Map.update!(:failed, &(&1 + 1))
+            |> Map.update!(:errors, &[reason | &1])
+
+          process_due_loop(opts, remaining - 1, MapSet.put(visited_ids, id), stats)
+
+        {:error, reason} ->
           stats
-          |> increment_due_checked()
-          |> Map.update!(:failed, &(&1 + 1))
+          |> Map.put(:error, :database_unavailable)
           |> Map.update!(:errors, &[reason | &1])
-
-        process_due_loop(opts, now, remaining - 1, MapSet.put(visited_ids, id), stats)
-
+      end
+    else
       {:error, reason} ->
         stats
-        |> Map.put(:error, :database_unavailable)
+        |> Map.put(:error, reason)
         |> Map.update!(:errors, &[reason | &1])
     end
   end
@@ -1477,72 +1482,102 @@ defmodule Cympho.Recovery do
     %{stats | checked: stats.checked + 1, due: stats.due + 1}
   end
 
-  defp process_due_escalation(stats, %RecoveryCase{} = case_row, opts) do
-    case exhaust_case(case_row, reason: case_row.last_error, now: option_now(opts)) do
-      {:ok, %BoardApproval{}} ->
-        %{stats | exhausted: stats.exhausted + 1}
+  defp process_due_escalation_safely(stats, %RecoveryCase{} = case_row, opts) do
+    with {:ok, escalation_now} <- due_time(opts) do
+      result =
+        protected_call(fn ->
+          exhaust_case(case_row, reason: case_row.last_error, now: escalation_now)
+        end)
 
-      {:ok, %RecoveryCase{state: "superseded"}} ->
-        %{stats | superseded: stats.superseded + 1}
+      case result do
+        {:ok, {:ok, %BoardApproval{}}} ->
+          %{stats | exhausted: stats.exhausted + 1}
 
+        {:ok, {:ok, %RecoveryCase{state: "superseded"}}} ->
+          %{stats | superseded: stats.superseded + 1}
+
+        {:ok, {:error, reason}} ->
+          %{stats | failed: stats.failed + 1, errors: [reason | stats.errors]}
+
+        {:caught, reason} ->
+          %{stats | failed: stats.failed + 1, errors: [bounded_error(reason) | stats.errors]}
+      end
+    else
       {:error, reason} ->
         %{stats | failed: stats.failed + 1, errors: [reason | stats.errors]}
     end
   end
 
-  defp process_due_lease(
-         %{case: %RecoveryCase{source_type: "heartbeat_run"} = case_row} = lease,
-         opts,
-         stats
-       ) do
-    result =
-      with %Run{} = run <- Repo.get(Run, case_row.source_run_id),
-           %Issue{} = issue <- Repo.get(Issue, case_row.issue_id),
-           true <- current_source_matches?(case_row, run, issue),
-           false <- source_live?(issue.id) do
-        kind = if case_row.source_status in ["pending", "queued"], do: :orphaned, else: :stale
-
-        HeartbeatEngine.recover_run_if_current(
-          run,
-          run_source_guard(case_row, kind),
-          kind,
-          now: option_now(opts)
-        )
-      else
-        _ -> {:error, :superseded}
+  defp process_due_lease_safely(lease, callback_opts, opts, stats) do
+    callback_result =
+      case protected_call(fn -> process_due_callback(lease, callback_opts) end) do
+        {:ok, result} -> result
+        {:caught, reason} -> {:error, reason}
       end
 
-    finish_due_result(lease, result, opts, stats)
+    with {:ok, completion_now} <- due_time(opts) do
+      completion_opts = Keyword.put(opts, :now, completion_now)
+
+      case protected_call(fn ->
+             finish_due_result(lease, callback_result, completion_opts, stats)
+           end) do
+        {:ok, updated_stats} ->
+          updated_stats
+
+        {:caught, reason} ->
+          %{stats | failed: stats.failed + 1, errors: [bounded_error(reason) | stats.errors]}
+      end
+    else
+      {:error, reason} ->
+        %{stats | failed: stats.failed + 1, errors: [reason | stats.errors]}
+    end
   end
 
-  defp process_due_lease(
-         %{case: %RecoveryCase{source_type: "issue_checkout"} = case_row} = lease,
-         opts,
-         stats
+  defp process_due_callback(
+         %{case: %RecoveryCase{source_type: "heartbeat_run"} = case_row},
+         opts
        ) do
-    result =
-      case Repo.get(Issue, case_row.issue_id) do
-        %Issue{status: status} = issue
-        when status in [:todo, "todo"] and not is_nil(case_row.parent_case_id) ->
-          # Approved retry children are durable markers for the dispatcher
-          # wake.  Once the issue is reopened, consume the marker without
-          # attempting a second destructive checkout clear.
-          {:ok, issue}
+    with %Run{} = run <- Repo.get(Run, case_row.source_run_id),
+         %Issue{} = issue <- Repo.get(Issue, case_row.issue_id),
+         true <- current_source_matches?(case_row, run, issue),
+         false <- source_live?(issue.id) do
+      kind = if case_row.source_status in ["pending", "queued"], do: :orphaned, else: :stale
 
-        %Issue{} = issue ->
-          with true <- current_source_matches?(case_row, issue, nil),
-               false <- source_live?(issue.id),
-               false <- active_checkout_run?(issue.id) do
-            recover_checkout(issue)
-          else
-            _ -> {:error, :superseded}
-          end
+      HeartbeatEngine.recover_run_if_current(
+        run,
+        run_source_guard(case_row, kind),
+        kind,
+        now: option_now(opts)
+      )
+    else
+      _ -> {:error, :superseded}
+    end
+  end
 
-        _ ->
-          {:error, :superseded}
-      end
+  defp process_due_callback(
+         %{case: %RecoveryCase{source_type: "issue_checkout"} = case_row},
+         _opts
+       ) do
+    case Repo.get(Issue, case_row.issue_id) do
+      %Issue{status: status} = issue
+      when status in [:todo, "todo"] and not is_nil(case_row.parent_case_id) ->
+        # Approved retry children are durable markers for the dispatcher
+        # wake. Once the issue is reopened, consume the marker without
+        # attempting a second destructive checkout clear.
+        {:ok, issue}
 
-    finish_due_result(lease, result, opts, stats)
+      %Issue{} = issue ->
+        with true <- current_source_matches?(case_row, issue, nil),
+             false <- source_live?(issue.id),
+             false <- active_checkout_run?(issue.id) do
+          recover_checkout(issue)
+        else
+          _ -> {:error, :superseded}
+        end
+
+      _ ->
+        {:error, :superseded}
+    end
   end
 
   defp finish_due_result(lease, {:ok, _value}, opts, stats) do
@@ -2431,6 +2466,49 @@ defmodule Cympho.Recovery do
   defp option_now(%{now: now}), do: now
   defp option_now(%{"now" => now}), do: now
   defp option_now(_), do: DateTime.utc_now() |> DateTime.truncate(:second)
+
+  defp validate_due_clock(opts) do
+    case Keyword.get(opts, :clock) do
+      nil -> :ok
+      clock when is_function(clock, 0) -> :ok
+      _ -> {:error, :invalid_clock}
+    end
+  end
+
+  defp due_time(opts) do
+    case Keyword.fetch(opts, :now) do
+      {:ok, %DateTime{} = now} ->
+        {:ok, now}
+
+      {:ok, _invalid} ->
+        {:error, :invalid_clock}
+
+      :error ->
+        case Keyword.get(opts, :clock) do
+          nil ->
+            {:ok, DateTime.utc_now() |> DateTime.truncate(:second)}
+
+          clock when is_function(clock, 0) ->
+            case protected_call(clock) do
+              {:ok, %DateTime{} = now} -> {:ok, DateTime.truncate(now, :second)}
+              _ -> {:error, :invalid_clock}
+            end
+
+          _ ->
+            {:error, :invalid_clock}
+        end
+    end
+  end
+
+  defp protected_call(callback) do
+    try do
+      {:ok, callback.()}
+    rescue
+      exception -> {:caught, {:exception, exception}}
+    catch
+      kind, reason -> {:caught, {kind, reason}}
+    end
+  end
 
   defp review_deadline(now) do
     wall_now = DateTime.utc_now() |> DateTime.truncate(:second)
