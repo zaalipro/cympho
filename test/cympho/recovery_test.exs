@@ -1098,6 +1098,94 @@ defmodule Cympho.RecoveryDueTest do
            ).status == "failed"
   end
 
+  test "an expired final lease supersedes when its source became fresh" do
+    {_company, _agent, issue} = due_source("expired-final-fresh")
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: issue,
+               max_attempts: 1,
+               lease_seconds: 1
+             })
+
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    assert {:ok, _lease} = Recovery.claim_case(case_row, now: now, lease_seconds: 1)
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id),
+      set: [lease_expires_at: DateTime.add(now, -1, :second)]
+    )
+
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id),
+      set: [checked_out_at: DateTime.add(now, 1, :second)]
+    )
+
+    assert %{superseded: 1, exhausted: 0, failed: 0} =
+             Recovery.process_due(now: now, limit: 1)
+
+    assert Repo.get!(RecoveryCase, case_row.id).state == "superseded"
+    assert Repo.get!(Issue, issue.id).status == :in_progress
+    refute Repo.get_by(BoardApproval, recovery_case_id: case_row.id)
+
+    assert Repo.get_by!(RecoveryAttempt,
+             recovery_case_id: case_row.id,
+             attempt_no: 1
+           ).status == "failed"
+  end
+
+  test "an escalation failure is visited once so later due rows still process" do
+    {company, _agent, first_issue} = due_source("failed-escalation")
+    {_company, _agent, second_issue} = due_source("after-failed-escalation-one")
+    {_company, _agent, third_issue} = due_source("after-failed-escalation-two")
+
+    assert {:ok, first} =
+             Recovery.ensure_case(%{source_type: "issue_checkout", issue: first_issue})
+
+    assert {:ok, second} =
+             Recovery.ensure_case(%{source_type: "issue_checkout", issue: second_issue})
+
+    assert {:ok, third} =
+             Recovery.ensure_case(%{source_type: "issue_checkout", issue: third_issue})
+
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    for {case_row, offset} <- [{first, -30}, {second, -20}, {third, -10}] do
+      updates = [next_attempt_at: DateTime.add(now, offset, :second)]
+
+      updates =
+        if case_row.id == first.id,
+          do: [state: "exhausted", exhausted_at: now] ++ updates,
+          else: updates
+
+      Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id), set: updates)
+    end
+
+    assert {:ok, approval} =
+             Cympho.BoardApprovals.create_recovery_approval(%{
+               title: "Invalid recovery scope",
+               company_id: company.id,
+               recovery_case_id: first.id,
+               review_deadline: DateTime.add(DateTime.utc_now(), 3_600, :second)
+             })
+
+    other_company =
+      Repo.insert!(%Company{
+        name: "Wrong approval company",
+        slug: "wrong-approval-company-#{unique()}"
+      })
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [company_id: other_company.id]
+    )
+
+    assert %{checked: 3, due: 3, failed: 1, recovered: 2} =
+             Recovery.process_due(now: now, limit: 3)
+
+    assert Repo.get!(RecoveryCase, first.id).state == "exhausted"
+    assert Repo.get!(RecoveryCase, second.id).state == "recovered"
+    assert Repo.get!(RecoveryCase, third.id).state == "recovered"
+  end
+
   test "policy and bounded schema inputs fail closed" do
     {company, _agent, issue} = due_source("bounds")
 
@@ -1187,7 +1275,7 @@ defmodule Cympho.RecoveryConcurrencyTest do
   alias Cympho.Companies.Company
   alias Cympho.Issues.Issue
   alias Cympho.Recovery
-  alias Cympho.Recovery.RecoveryCase
+  alias Cympho.Recovery.{RecoveryAttempt, RecoveryCase}
   alias Cympho.Repo
 
   setup do
@@ -1255,5 +1343,134 @@ defmodule Cympho.RecoveryConcurrencyTest do
              ),
              :count
            ) == 1
+  end
+
+  test "two connections atomically reserve different due rows", %{company: company} do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    cases = insert_ordered_due_cases(company, now, 3)
+    caller = self()
+
+    workers =
+      for _ <- 1..2 do
+        spawn_monitor(fn ->
+          Process.delete(:"$callers")
+          :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo, sandbox: false)
+          send(caller, {:ready, self()})
+          receive do: (:go -> :ok)
+
+          result = Recovery.claim_next_due_case(MapSet.new(), now: now)
+          :ok = Ecto.Adapters.SQL.Sandbox.checkin(Repo)
+          send(caller, {:claim_result, self(), result})
+        end)
+      end
+
+    Enum.each(workers, fn {pid, _ref} -> assert_receive {:ready, ^pid}, 5_000 end)
+    Enum.each(workers, fn {pid, _ref} -> send(pid, :go) end)
+
+    claimed_ids =
+      Enum.map(workers, fn {pid, ref} ->
+        assert_receive {:claim_result, ^pid, {:ok, %{case: claimed_case}}}, 10_000
+        assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
+        claimed_case.id
+      end)
+
+    assert Enum.uniq(claimed_ids) |> length() == 2
+    assert Enum.all?(claimed_ids, &(&1 in Enum.map(cases, fn row -> row.id end)))
+
+    assert MapSet.new(claimed_ids) ==
+             cases |> Enum.take(2) |> Enum.map(& &1.id) |> MapSet.new()
+
+    for case_id <- claimed_ids do
+      assert Repo.aggregate(
+               from(a in RecoveryAttempt, where: a.recovery_case_id == ^case_id),
+               :count
+             ) == 1
+
+      assert Repo.get_by!(RecoveryAttempt, recovery_case_id: case_id).status == "claimed"
+    end
+
+    unclaimed_id = (Enum.map(cases, fn row -> row.id end) -- claimed_ids) |> List.first()
+
+    assert Repo.aggregate(
+             from(a in RecoveryAttempt, where: a.recovery_case_id == ^unclaimed_id),
+             :count
+           ) == 0
+  end
+
+  test "a due claim skips the locked oldest row without blocking", %{company: company} do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    [oldest, next | _] = insert_ordered_due_cases(company, now, 3)
+    caller = self()
+
+    {locker, locker_ref} =
+      spawn_monitor(fn ->
+        Process.delete(:"$callers")
+        :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo, sandbox: false)
+
+        Repo.transaction(fn ->
+          Repo.one!(from(c in RecoveryCase, where: c.id == ^oldest.id, lock: "FOR UPDATE"))
+          send(caller, {:oldest_locked, self()})
+          receive do: (:release_oldest -> :ok)
+        end)
+
+        :ok = Ecto.Adapters.SQL.Sandbox.checkin(Repo)
+      end)
+
+    assert_receive {:oldest_locked, ^locker}, 5_000
+
+    {claimer, claimer_ref} =
+      spawn_monitor(fn ->
+        Process.delete(:"$callers")
+        :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo, sandbox: false)
+        result = Recovery.claim_next_due_case(MapSet.new(), now: now)
+        :ok = Ecto.Adapters.SQL.Sandbox.checkin(Repo)
+        send(caller, {:skip_locked_result, self(), result})
+      end)
+
+    claim_result =
+      receive do
+        {:skip_locked_result, ^claimer, result} -> result
+      after
+        1_000 -> :blocked
+      end
+
+    send(locker, :release_oldest)
+    assert_receive {:DOWN, ^locker_ref, :process, ^locker, :normal}, 5_000
+    assert_receive {:DOWN, ^claimer_ref, :process, ^claimer, :normal}, 5_000
+
+    assert {:ok, %{case: %{id: claimed_id}}} = claim_result
+    assert claimed_id == next.id
+
+    assert Repo.aggregate(
+             from(a in RecoveryAttempt, where: a.recovery_case_id == ^oldest.id),
+             :count
+           ) == 0
+
+    assert Repo.aggregate(
+             from(a in RecoveryAttempt, where: a.recovery_case_id == ^next.id),
+             :count
+           ) == 1
+  end
+
+  defp insert_ordered_due_cases(company, now, count) do
+    for index <- 1..count do
+      issue =
+        Repo.insert!(%Issue{
+          title: "Atomic due #{index}",
+          company_id: company.id,
+          status: :in_progress
+        })
+
+      assert {:ok, case_row} =
+               Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+
+      due_at = DateTime.add(now, -100 + index, :second)
+
+      Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id),
+        set: [next_attempt_at: due_at]
+      )
+
+      Repo.get!(RecoveryCase, case_row.id)
+    end
   end
 end

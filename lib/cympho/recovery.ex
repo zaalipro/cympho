@@ -966,6 +966,60 @@ defmodule Cympho.Recovery do
     claim_case(case_or_id, Keyword.put(opts, :due_only, true))
   end
 
+  @doc false
+  @spec claim_next_due_case(MapSet.t(binary()) | [binary()], keyword()) ::
+          {:ok,
+           %{case: RecoveryCase.t(), attempt: RecoveryAttempt.t(), token: String.t()}
+           | {:needs_escalation, RecoveryCase.t()}}
+          | :none
+          | {:error, term()}
+  def claim_next_due_case(visited_ids, opts) when is_list(opts) do
+    with {:ok, _requested_policy} <- normalize_policy(opts),
+         {:ok, visited_ids} <- normalize_visited_ids(visited_ids) do
+      now = option_now(opts)
+      claimed_by = option_value(opts, :claimed_by) || node() |> to_string()
+
+      result =
+        Repo.transaction(fn ->
+          query =
+            from c in RecoveryCase,
+              where:
+                ((c.state == "detected" and
+                    (is_nil(c.next_attempt_at) or c.next_attempt_at <= ^now)) or
+                   (c.state == "scheduled" and
+                      (is_nil(c.next_attempt_at) or c.next_attempt_at <= ^now)) or
+                   (c.state == "claimed" and
+                      not is_nil(c.lease_expires_at) and c.lease_expires_at <= ^now) or
+                   c.state == "exhausted") and c.id not in ^visited_ids,
+              order_by: [asc: c.next_attempt_at, asc: c.inserted_at, asc: c.id],
+              limit: 1,
+              lock: "FOR UPDATE SKIP LOCKED"
+
+          case Repo.one(query) do
+            nil ->
+              :none
+
+            %RecoveryCase{} = case_row ->
+              case claim_locked_case(case_row, opts, now, claimed_by) do
+                {:ok, lease} -> {:claimed, lease}
+                {:needs_escalation, exhausted_case} -> {:needs_escalation, exhausted_case}
+                {:error, reason} -> {:claim_error, case_row.id, reason}
+              end
+          end
+        end)
+
+      case result do
+        {:ok, :none} -> :none
+        {:ok, {:claimed, lease}} -> {:ok, lease}
+        {:ok, {:needs_escalation, case_row}} -> {:ok, {:needs_escalation, case_row}}
+        {:ok, {:claim_error, id, reason}} -> {:error, {:case, id, reason}}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  def claim_next_due_case(_visited_ids, _opts), do: {:error, :invalid_options}
+
   @spec claim_case(RecoveryCase.t() | binary(), keyword()) ::
           {:ok, %{case: RecoveryCase.t(), attempt: RecoveryAttempt.t(), token: String.t()}}
           | {:error, atom()}
@@ -979,115 +1033,15 @@ defmodule Cympho.Recovery do
       result =
         Repo.transaction(fn ->
           case Repo.one(from c in RecoveryCase, where: c.id == ^id, lock: "FOR UPDATE") do
-            nil ->
-              Repo.rollback(:not_found)
-
-            case_row ->
-              with {:ok, policy} <- policy_for_case(case_row, opts) do
-                lease_seconds = policy.lease_seconds
-
-                cond do
-                  case_row.state == "claimed" and
-                      expired?(case_row.lease_expires_at, now) == false ->
-                    Repo.rollback(:already_claimed)
-
-                  case_row.state == "claimed" and case_row.attempt_count >= case_row.max_attempts ->
-                    # A worker died after claiming the final attempt.  Do not
-                    # leave this row forever in a rollback-only exhausted loop;
-                    # hand it to the durable escalation pass.
-                    expire_claimed_attempt(case_row, now)
-
-                    Repo.update_all(
-                      from(c in RecoveryCase, where: c.id == ^id),
-                      set: [
-                        state: "exhausted",
-                        exhausted_at: case_row.exhausted_at || now,
-                        claim_token: nil,
-                        claimed_at: nil,
-                        lease_expires_at: nil,
-                        claimed_by: nil,
-                        next_attempt_at: nil
-                      ]
-                    )
-
-                    {:needs_escalation, Repo.get!(RecoveryCase, id)}
-
-                  case_row.state == "exhausted" ->
-                    {:needs_escalation, case_row}
-
-                  case_row.state not in ["detected", "scheduled", "claimed"] ->
-                    Repo.rollback(:not_claimable)
-
-                  (option_value(opts, :due_only) == true and case_row.state == "detected" and
-                     case_row.next_attempt_at) &&
-                      DateTime.compare(case_row.next_attempt_at, now) == :gt ->
-                    Repo.rollback(:not_due)
-
-                  (case_row.state in ["detected", "scheduled"] and case_row.next_attempt_at) &&
-                      DateTime.compare(case_row.next_attempt_at, now) == :gt ->
-                    Repo.rollback(:not_due)
-
-                  true ->
-                    if case_row.state == "claimed" and expired?(case_row.lease_expires_at, now) do
-                      # A lease takeover closes the previous attempt before a
-                      # new attempt number is claimed. This keeps append-only
-                      # history truthful after a worker crash.
-                      expire_claimed_attempt(case_row, now)
-                    end
-
-                    attempt_no = case_row.attempt_count + 1
-
-                    if attempt_no > case_row.max_attempts do
-                      Repo.update_all(
-                        from(c in RecoveryCase, where: c.id == ^id),
-                        set: [state: "exhausted", exhausted_at: case_row.exhausted_at || now]
-                      )
-
-                      {:needs_escalation, Repo.get!(RecoveryCase, id)}
-                    else
-                      token = Ecto.UUID.generate()
-                      claimed_at = now
-                      expires = DateTime.add(now, lease_seconds, :second)
-
-                      {1, _} =
-                        Repo.update_all(
-                          from(c in RecoveryCase, where: c.id == ^id),
-                          set: [
-                            state: "claimed",
-                            attempt_count: attempt_no,
-                            claim_token: token,
-                            claimed_at: claimed_at,
-                            lease_expires_at: expires,
-                            claimed_by: claimed_by,
-                            last_attempt_at: now
-                          ]
-                        )
-
-                      attempt =
-                        %RecoveryAttempt{}
-                        |> RecoveryAttempt.changeset(%{
-                          recovery_case_id: id,
-                          attempt_no: attempt_no,
-                          status: "claimed",
-                          action: "retry",
-                          source_fingerprint: case_row.source_fingerprint,
-                          started_at: now,
-                          node: claimed_by,
-                          metadata: %{policy: policy.snapshot}
-                        })
-                        |> Repo.insert!()
-
-                      updated = Repo.get!(RecoveryCase, id)
-                      %{case: updated, attempt: attempt, token: token}
-                    end
-                end
-              else
-                _ -> Repo.rollback(:invalid_policy)
-              end
+            nil -> {:error, :not_found}
+            case_row -> claim_locked_case(case_row, opts, now, claimed_by)
           end
         end)
 
       case result do
+        {:ok, {:ok, lease}} ->
+          {:ok, lease}
+
         {:ok, {:needs_escalation, exhausted_case}} ->
           case exhaust_case(exhausted_case, reason: exhausted_case.last_error, now: now) do
             {:ok, %BoardApproval{}} -> {:error, :exhausted}
@@ -1095,9 +1049,113 @@ defmodule Cympho.Recovery do
             {:error, reason} -> {:error, {:exhaustion_failed, reason}}
           end
 
+        {:ok, {:error, reason}} ->
+          {:error, reason}
+
         other ->
           other
       end
+    end
+  end
+
+  defp claim_locked_case(%RecoveryCase{} = case_row, opts, now, claimed_by) do
+    with {:ok, policy} <- policy_for_case(case_row, opts) do
+      lease_seconds = policy.lease_seconds
+
+      cond do
+        case_row.state == "claimed" and expired?(case_row.lease_expires_at, now) == false ->
+          {:error, :already_claimed}
+
+        case_row.state == "claimed" and case_row.attempt_count >= case_row.max_attempts ->
+          # A worker died after claiming the final attempt. Close its history
+          # and persist exhaustion before handing it to the post-commit
+          # escalation path.
+          expire_claimed_attempt(case_row, now)
+
+          Repo.update_all(
+            from(c in RecoveryCase, where: c.id == ^case_row.id),
+            set: [
+              state: "exhausted",
+              exhausted_at: case_row.exhausted_at || now,
+              claim_token: nil,
+              claimed_at: nil,
+              lease_expires_at: nil,
+              claimed_by: nil,
+              next_attempt_at: nil
+            ]
+          )
+
+          {:needs_escalation, Repo.get!(RecoveryCase, case_row.id)}
+
+        case_row.state == "exhausted" ->
+          {:needs_escalation, case_row}
+
+        case_row.state not in ["detected", "scheduled", "claimed"] ->
+          {:error, :not_claimable}
+
+        (option_value(opts, :due_only) == true and case_row.state == "detected" and
+           case_row.next_attempt_at) &&
+            DateTime.compare(case_row.next_attempt_at, now) == :gt ->
+          {:error, :not_due}
+
+        (case_row.state in ["detected", "scheduled"] and case_row.next_attempt_at) &&
+            DateTime.compare(case_row.next_attempt_at, now) == :gt ->
+          {:error, :not_due}
+
+        true ->
+          if case_row.state == "claimed" and expired?(case_row.lease_expires_at, now) do
+            # A lease takeover closes the previous attempt before a new
+            # attempt number is claimed.
+            expire_claimed_attempt(case_row, now)
+          end
+
+          attempt_no = case_row.attempt_count + 1
+
+          if attempt_no > case_row.max_attempts do
+            Repo.update_all(
+              from(c in RecoveryCase, where: c.id == ^case_row.id),
+              set: [state: "exhausted", exhausted_at: case_row.exhausted_at || now]
+            )
+
+            {:needs_escalation, Repo.get!(RecoveryCase, case_row.id)}
+          else
+            token = Ecto.UUID.generate()
+            expires = DateTime.add(now, lease_seconds, :second)
+
+            {1, _} =
+              Repo.update_all(
+                from(c in RecoveryCase, where: c.id == ^case_row.id),
+                set: [
+                  state: "claimed",
+                  attempt_count: attempt_no,
+                  claim_token: token,
+                  claimed_at: now,
+                  lease_expires_at: expires,
+                  claimed_by: claimed_by,
+                  last_attempt_at: now
+                ]
+              )
+
+            attempt =
+              %RecoveryAttempt{}
+              |> RecoveryAttempt.changeset(%{
+                recovery_case_id: case_row.id,
+                attempt_no: attempt_no,
+                status: "claimed",
+                action: "retry",
+                source_fingerprint: case_row.source_fingerprint,
+                started_at: now,
+                node: claimed_by,
+                metadata: %{policy: policy.snapshot}
+              })
+              |> Repo.insert!()
+
+            updated = Repo.get!(RecoveryCase, case_row.id)
+            {:ok, %{case: updated, attempt: attempt, token: token}}
+          end
+      end
+    else
+      _ -> {:error, :invalid_policy}
     end
   end
 
@@ -1319,45 +1377,11 @@ defmodule Cympho.Recovery do
   def process_due(opts \\ [])
 
   def process_due(opts) when is_list(opts) do
-    with {:ok, policy} <- normalize_policy(opts) do
+    with {:ok, _policy} <- normalize_policy(opts) do
       now = option_now(opts)
       limit = bounded_limit(Keyword.get(opts, :limit, 50))
 
-      {ids, scan_error} =
-        case Repo.transaction(fn ->
-               Repo.all(
-                 from c in RecoveryCase,
-                   where:
-                     (c.state == "detected" and
-                        (is_nil(c.next_attempt_at) or c.next_attempt_at <= ^now)) or
-                       (c.state == "scheduled" and
-                          (is_nil(c.next_attempt_at) or c.next_attempt_at <= ^now)) or
-                       (c.state == "claimed" and
-                          not is_nil(c.lease_expires_at) and c.lease_expires_at <= ^now) or
-                       c.state == "exhausted",
-                   order_by: [asc: c.next_attempt_at, asc: c.inserted_at],
-                   limit: ^limit,
-                   select: c.id,
-                   lock: "FOR UPDATE SKIP LOCKED"
-               )
-             end) do
-          {:ok, ids} -> {ids, nil}
-          {:error, reason} -> {[], reason}
-        end
-
-      stats =
-        Enum.reduce(ids, empty_due_stats(), fn id, stats ->
-          process_due_case(id, opts, policy, now, stats)
-        end)
-
-      result = Map.merge(stats, %{checked: length(ids), due: length(ids)})
-
-      if scan_error do
-        Map.put(result, :error, :database_unavailable)
-        |> Map.update!(:errors, &[scan_error | &1])
-      else
-        result
-      end
+      process_due_loop(opts, now, limit, MapSet.new(), empty_due_stats())
     else
       {:error, reason} ->
         Map.merge(empty_due_stats(), %{error: reason, errors: [reason]})
@@ -1395,31 +1419,71 @@ defmodule Cympho.Recovery do
     }
   end
 
-  defp process_due_case(id, opts, policy, now, stats) do
-    claim_opts =
-      opts
-      |> Keyword.put(:now, now)
+  defp process_due_loop(_opts, _now, 0, _visited_ids, stats), do: stats
 
-    # Let claim_case use the row's persisted lease snapshot after restart;
-    # only an explicit bounded test/operator override should replace it.
-    claim_opts =
-      if option_value(opts, :lease_seconds),
-        do: Keyword.put(claim_opts, :lease_seconds, policy.lease_seconds),
-        else: claim_opts
+  defp process_due_loop(opts, now, remaining, visited_ids, stats) do
+    claim_opts = Keyword.put(opts, :now, now)
 
-    case claim_due_case(id, claim_opts) do
-      {:ok, lease} ->
-        stats = %{stats | claimed: stats.claimed + 1}
-        process_due_lease(lease, Keyword.put(opts, :now, now), stats)
+    case claim_next_due_case(visited_ids, claim_opts) do
+      :none ->
+        stats
 
-      {:error, :exhausted} ->
+      {:ok, %{case: %RecoveryCase{} = case_row} = lease} ->
+        stats =
+          stats
+          |> increment_due_checked()
+          |> Map.update!(:claimed, &(&1 + 1))
+          |> then(&process_due_lease(lease, claim_opts, &1))
+
+        process_due_loop(
+          opts,
+          now,
+          remaining - 1,
+          MapSet.put(visited_ids, case_row.id),
+          stats
+        )
+
+      {:ok, {:needs_escalation, %RecoveryCase{} = case_row}} ->
+        stats =
+          stats
+          |> increment_due_checked()
+          |> process_due_escalation(case_row, claim_opts)
+
+        process_due_loop(
+          opts,
+          now,
+          remaining - 1,
+          MapSet.put(visited_ids, case_row.id),
+          stats
+        )
+
+      {:error, {:case, id, reason}} ->
+        stats =
+          stats
+          |> increment_due_checked()
+          |> Map.update!(:failed, &(&1 + 1))
+          |> Map.update!(:errors, &[reason | &1])
+
+        process_due_loop(opts, now, remaining - 1, MapSet.put(visited_ids, id), stats)
+
+      {:error, reason} ->
+        stats
+        |> Map.put(:error, :database_unavailable)
+        |> Map.update!(:errors, &[reason | &1])
+    end
+  end
+
+  defp increment_due_checked(stats) do
+    %{stats | checked: stats.checked + 1, due: stats.due + 1}
+  end
+
+  defp process_due_escalation(stats, %RecoveryCase{} = case_row, opts) do
+    case exhaust_case(case_row, reason: case_row.last_error, now: option_now(opts)) do
+      {:ok, %BoardApproval{}} ->
         %{stats | exhausted: stats.exhausted + 1}
 
-      {:error, {:exhaustion_failed, reason}} ->
-        %{stats | failed: stats.failed + 1, errors: [reason | stats.errors]}
-
-      {:error, reason} when reason in [:already_claimed, :not_due, :not_claimable, :not_found] ->
-        stats
+      {:ok, %RecoveryCase{state: "superseded"}} ->
+        %{stats | superseded: stats.superseded + 1}
 
       {:error, reason} ->
         %{stats | failed: stats.failed + 1, errors: [reason | stats.errors]}
@@ -2318,6 +2382,18 @@ defmodule Cympho.Recovery do
 
   defp bounded_limit(value) when is_integer(value) and value > 0, do: min(value, 100)
   defp bounded_limit(_), do: 50
+
+  defp normalize_visited_ids(%MapSet{} = visited_ids) do
+    normalize_visited_ids(MapSet.to_list(visited_ids))
+  end
+
+  defp normalize_visited_ids(visited_ids) when is_list(visited_ids) do
+    if Enum.all?(visited_ids, &(is_binary(&1) and &1 != "")),
+      do: {:ok, Enum.uniq(visited_ids)},
+      else: {:error, :invalid_options}
+  end
+
+  defp normalize_visited_ids(_), do: {:error, :invalid_options}
 
   defp bounded_attempt_history(case_id) do
     Repo.all(
