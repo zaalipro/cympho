@@ -133,6 +133,45 @@ defmodule Cympho.OwnerAttentionTest do
     assert OwnerAttention.unresolved_count(company.id, context.user) == length(items)
   end
 
+  test "pending stranded-work recovery is a company-scoped board attention item", context do
+    :ok = OwnerAttention.subscribe(context.company.id)
+    :ok = OwnerAttention.subscribe(context.other_company.id)
+
+    {:ok, recovery_approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Retry stranded work",
+        description: "The board must decide whether to retry this work.",
+        category: "stranded_work_recovery",
+        company_id: context.company.id,
+        proposal_data: %{
+          "action" => "retry",
+          "last_error" => "authentication",
+          "secret" => "must-not-render"
+        }
+      })
+
+    company_id = context.company.id
+    other_company_id = context.other_company.id
+    assert_receive {:owner_attention_changed, ^company_id}
+    refute_receive {:owner_attention_changed, ^other_company_id}, 50
+
+    items = OwnerAttention.list_items(context.company.id, context.user)
+
+    assert [%{kind: :board_approval, source_id: source_id} = item] =
+             Enum.filter(items, &(&1.source_id == recovery_approval.id))
+
+    assert source_id == recovery_approval.id
+    assert item.title == "Retry stranded work"
+    assert item.summary == "The board must decide whether to retry this work."
+    assert item.diagnostic == "Stranded work recovery governance request"
+    refute inspect(item) =~ "must-not-render"
+
+    refute Enum.any?(
+             OwnerAttention.list_items(context.other_company.id, context.user),
+             &(&1.source_id == recovery_approval.id)
+           )
+  end
+
   test "agent-filtered review items remain scoped to the current company", context do
     foreign_issue = issue!(context.other_company.id, "Foreign review")
 

@@ -516,7 +516,7 @@ defmodule Cympho.RecoveryAdapterTest do
     assert Repo.get!(Run, run.id).status == "pending"
   end
 
-  test "three callback failures schedule twice and then exhaust without escalation" do
+  test "three callback failures schedule twice and then escalate for board review" do
     {_, _, issue} = recovery_source("exhaustion")
     source = %{source_type: "issue_checkout", issue: issue}
     now = ~U[2026-02-01 00:00:00Z]
@@ -536,10 +536,17 @@ defmodule Cympho.RecoveryAdapterTest do
                {:error, :timeout}
              end)
 
-    assert exhausted.state == "exhausted"
+    assert exhausted.state == "escalated"
     assert exhausted.attempt_count == 3
     assert exhausted.last_error == "timeout"
-    assert is_nil(exhausted.escalated_at)
+    assert exhausted.escalated_at != nil
+
+    assert Repo.aggregate(
+             from(a in Cympho.BoardApprovals.BoardApproval,
+               where: a.recovery_case_id == ^exhausted.id
+             ),
+             :count
+           ) == 1
   end
 
   defp recovery_source(suffix) do

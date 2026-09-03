@@ -28,78 +28,31 @@ defmodule Cympho.Recovery do
         locked = Repo.one!(from c in RecoveryCase, where: c.id == ^id, lock: "FOR UPDATE")
         issue = Repo.one!(from i in Issue, where: i.id == ^locked.issue_id, lock: "FOR UPDATE")
 
-        if locked.company_id == issue.company_id and source_matches?(locked, issue) and
-             issue.status not in [:done, :cancelled, "done", "cancelled"] do
-          if issue.status not in [:blocked, "blocked"] do
-            Repo.update_all(from(i in Issue, where: i.id == ^issue.id),
-              set: [status: :blocked, updated_at: now],
-              inc: [lock_version: 1]
-            )
-          end
-
-          approval =
-            case Repo.one(
-                   from a in BoardApproval,
-                     where: a.recovery_case_id == ^locked.id,
-                     lock: "FOR UPDATE"
-                 ) do
-              nil ->
-                packet = %{
-                  "issue_id" => issue.id,
-                  "case_id" => locked.id,
-                  "source_type" => locked.source_type
-                }
-
-                {:ok, row} =
-                  BoardApprovals.create_recovery_approval(%{
-                    title: "Retry stranded work: #{issue.title}",
-                    description:
-                      "A recovery case exhausted its automatic attempts and requires board approval to retry.",
-                    company_id: locked.company_id,
-                    recovery_case_id: locked.id,
-                    proposal_data: %{
-                      "action" => "retry",
-                      "case_id" => locked.id,
-                      "issue_id" => issue.id,
-                      "source_run_id" => locked.source_run_id,
-                      "fingerprint" => locked.source_fingerprint,
-                      "attempt_count" => locked.attempt_count,
-                      "max_attempts" => locked.max_attempts,
-                      "last_error" => bounded_error(reason),
-                      "restart_packet" => packet
-                    },
-                    review_deadline: DateTime.add(now, 7 * 24 * 3600, :second)
-                  })
-
-                row
-
-              row ->
-                row
-            end
-
-          Repo.update_all(from(c in RecoveryCase, where: c.id == ^locked.id),
-            set: [
-              state: "escalated",
-              escalated_at: now,
-              claim_token: nil,
-              claimed_at: nil,
-              lease_expires_at: nil,
-              claimed_by: nil
-            ]
+        existing_approval =
+          Repo.one(
+            from a in BoardApproval,
+              where: a.recovery_case_id == ^locked.id,
+              lock: "FOR UPDATE"
           )
 
-          Repo.preload(approval, [:company, :recovery_case])
+        # Blocking the issue updates the checkout fingerprint. Once an
+        # approval has been persisted, a repeated exhaustion callback must
+        # return that durable proposal rather than treating its own block as
+        # a stale source and superseding the case.
+        if approval_scope_matches?(existing_approval, locked) and
+             locked.company_id == issue.company_id and
+             idempotent_escalation?(locked, issue) do
+          {:existing, Repo.preload(existing_approval, [:company, :recovery_case])}
         else
-          Repo.update_all(from(c in RecoveryCase, where: c.id == ^locked.id),
-            set: [state: "superseded", resolved_at: now]
-          )
-
-          Repo.get!(RecoveryCase, locked.id)
+          {:new, do_exhaust_case(locked, issue, existing_approval, reason, now)}
         end
       end)
 
     case result do
-      {:ok, %BoardApproval{} = approval} ->
+      {:ok, {:existing, %BoardApproval{} = approval}} ->
+        {:ok, approval}
+
+      {:ok, {:new, %BoardApproval{} = approval}} ->
         Cympho.PubSubGuard.company_broadcast(
           approval.company_id,
           "approvals",
@@ -122,13 +75,117 @@ defmodule Cympho.Recovery do
 
         {:ok, approval}
 
-      {:ok, %RecoveryCase{} = superseded} ->
+      {:ok, {:new, %RecoveryCase{} = superseded}} ->
         {:ok, superseded}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
+
+  defp do_exhaust_case(locked, issue, existing_approval, reason, now) do
+    if locked.company_id == issue.company_id and
+         approval_scope_matches?(existing_approval, locked) and
+         source_matches?(locked, issue) and
+         issue.status not in [:done, :cancelled, "done", "cancelled"] do
+      if issue.status not in [:blocked, "blocked"] do
+        Repo.update_all(from(i in Issue, where: i.id == ^issue.id),
+          set: [status: :blocked, updated_at: now],
+          inc: [lock_version: 1]
+        )
+      end
+
+      approval =
+        case existing_approval do
+          nil ->
+            packet = %{
+              "issue_id" => issue.id,
+              "case_id" => locked.id,
+              "source_type" => locked.source_type
+            }
+
+            {:ok, row} =
+              BoardApprovals.create_recovery_approval(%{
+                title: "Retry stranded work: #{issue.title}",
+                description:
+                  "A recovery case exhausted its automatic attempts and requires board approval to retry.",
+                company_id: locked.company_id,
+                recovery_case_id: locked.id,
+                proposal_data: %{
+                  "action" => "retry",
+                  "case_id" => locked.id,
+                  "issue_id" => issue.id,
+                  "source_run_id" => locked.source_run_id,
+                  "fingerprint" => locked.source_fingerprint,
+                  "attempt_count" => locked.attempt_count,
+                  "max_attempts" => locked.max_attempts,
+                  "last_error" => bounded_error(reason),
+                  "restart_packet" => packet
+                },
+                # `now` may be supplied by deterministic recovery scans and
+                # can legitimately predate wall-clock time. Board approval
+                # validation requires a deadline in the future, so derive
+                # this human-review deadline from the current clock rather
+                # than allowing a historical scan timestamp to invalidate
+                # the escalation transaction.
+                review_deadline: review_deadline(now)
+              })
+
+            row
+
+          row ->
+            row
+        end
+
+      Repo.update_all(from(c in RecoveryCase, where: c.id == ^locked.id),
+        set: [
+          state: "escalated",
+          escalated_at: now,
+          claim_token: nil,
+          claimed_at: nil,
+          lease_expires_at: nil,
+          claimed_by: nil
+        ]
+      )
+
+      Repo.preload(approval, [:company, :recovery_case])
+    else
+      Repo.update_all(from(c in RecoveryCase, where: c.id == ^locked.id),
+        set: [state: "superseded", resolved_at: now]
+      )
+
+      Repo.get!(RecoveryCase, locked.id)
+    end
+  end
+
+  defp idempotent_escalation?(
+         %RecoveryCase{state: state, source_status: source_status, source_snapshot: snapshot},
+         %Issue{status: status, lock_version: lock_version}
+       )
+       when state in ["escalated", "exhausted"] and status in [:blocked, "blocked"] do
+    # A first escalation changes a non-terminal issue to blocked and bumps its
+    # optimistic-lock version. Accept that exact durable transition on a
+    # repeated callback, but do not let a later terminal/owner mutation reuse
+    # an old approval as though it were still the same source.
+    source_status in [:blocked, "blocked"] or
+      snapshot_lock_version(snapshot) in [nil, lock_version - 1]
+  end
+
+  defp idempotent_escalation?(_, _), do: false
+
+  defp approval_scope_matches?(nil, _case_row), do: true
+
+  defp approval_scope_matches?(
+         %BoardApproval{company_id: company_id},
+         %RecoveryCase{company_id: case_company_id}
+       ),
+       do: company_id == case_company_id
+
+  defp snapshot_lock_version(snapshot) when is_map(snapshot) do
+    snapshot["lock_version"] || snapshot["issue_lock_version"]
+  end
+
+  defp snapshot_lock_version(_), do: nil
 
   @doc "Resolves a recovery case when its board approval is denied or cancelled."
   def handle_approval_resolution(%BoardApproval{
@@ -145,19 +202,22 @@ defmodule Cympho.Recovery do
                lock: "FOR UPDATE"
            ) do
         nil ->
-          :ok
+          :unchanged
 
         c ->
           Repo.update_all(from(c2 in RecoveryCase, where: c2.id == ^c.id),
             set: [state: "resolved", resolved_at: DateTime.utc_now()]
           )
 
-          :ok
+          :changed
       end
     end)
     |> case do
-      {:ok, :ok} ->
+      {:ok, :changed} ->
         _ = Cympho.OwnerAttention.notify_changed(company_id)
+        :ok
+
+      {:ok, :unchanged} ->
         :ok
 
       {:error, reason} ->
@@ -192,7 +252,8 @@ defmodule Cympho.Recovery do
 
           if issue.company_id != approval.company_id or
                (data["issue_id"] && data["issue_id"] != issue.id) or
-               issue.status not in [:blocked, "blocked"] do
+               issue.status not in [:blocked, "blocked"] or
+               not retry_source_matches?(c, issue) do
             Repo.rollback(:stale_recovery_proposal)
           end
 
@@ -211,8 +272,17 @@ defmodule Cympho.Recovery do
 
           {child_fp, child_snapshot} =
             case c.source_type do
-              "issue_checkout" -> Fingerprint.for_issue_checkout(issue_after)
-              _ -> {c.source_fingerprint, c.source_snapshot}
+              "issue_checkout" ->
+                Fingerprint.for_issue_checkout(issue_after)
+
+              "heartbeat_run" ->
+                case Repo.get(Run, c.source_run_id) do
+                  %Run{} = run -> Fingerprint.for_run(run, issue_after)
+                  _ -> {c.source_fingerprint, c.source_snapshot}
+                end
+
+              _ ->
+                {c.source_fingerprint, c.source_snapshot}
             end
 
           child =
@@ -226,7 +296,7 @@ defmodule Cympho.Recovery do
               root_case_id: c.root_case_id || c.id,
               source_type: c.source_type,
               source_id: "#{c.source_id}:retry:#{Ecto.UUID.generate()}",
-              source_status: c.source_status,
+              source_status: to_string(issue_after.status),
               source_fingerprint: child_fp,
               source_snapshot: child_snapshot,
               max_attempts: c.max_attempts,
@@ -241,7 +311,7 @@ defmodule Cympho.Recovery do
     |> case do
       {:ok, child} ->
         _ = Cympho.OwnerAttention.notify_changed(approval.company_id)
-        _ = Cympho.Orchestrator.Dispatcher.poll_now()
+        _ = Cympho.Orchestrator.Dispatcher.poll_company(approval.company_id)
         {:ok, child}
 
       {:error, :stale_recovery_proposal} ->
@@ -289,6 +359,74 @@ defmodule Cympho.Recovery do
   end
 
   defp source_matches?(_, _), do: false
+
+  # The escalation itself moves the issue to `:blocked` and increments its
+  # lock version. Retry therefore validates the durable pre-escalation
+  # snapshot against that one expected transition, rather than comparing the
+  # original source fingerprint to a deliberately changed issue status.
+  defp retry_source_matches?(
+         %RecoveryCase{source_type: "issue_checkout", source_snapshot: snapshot},
+         %Issue{} = issue
+       )
+       when is_map(snapshot) do
+    retry_issue_snapshot_matches?(snapshot, issue, "issue_checkout")
+  end
+
+  defp retry_source_matches?(
+         %RecoveryCase{
+           source_type: "heartbeat_run",
+           source_run_id: run_id,
+           source_snapshot: snapshot
+         },
+         %Issue{} = issue
+       )
+       when is_binary(run_id) and is_map(snapshot) do
+    with %Run{} = run <- Repo.get(Run, run_id),
+         true <- run.company_id == issue.company_id,
+         true <- run.issue_id == issue.id,
+         true <- to_string(run.status) not in @terminal_run_statuses,
+         true <- to_string(run.status) == snapshot["run_status"],
+         true <- run.agent_id == snapshot["agent_id"],
+         true <- retry_issue_snapshot_matches?(snapshot, issue, "heartbeat_run") do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  defp retry_source_matches?(_, _), do: false
+
+  defp retry_issue_snapshot_matches?(snapshot, %Issue{} = issue, source_type) do
+    snapshot_id_matches?(snapshot, "source_type", source_type) and
+      snapshot["issue_id"] == issue.id and
+      snapshot["company_id"] == issue.company_id and
+      snapshot_id_matches?(snapshot, "assignee_id", id_value(issue.assignee_id)) and
+      snapshot_id_matches?(snapshot, "checkout_run_id", id_value(issue.checkout_run_id)) and
+      retry_lock_version_matches?(snapshot, issue)
+  end
+
+  defp snapshot_id_matches?(snapshot, key, current) do
+    not Map.has_key?(snapshot, key) or snapshot[key] == current
+  end
+
+  defp retry_lock_version_matches?(snapshot, %Issue{status: status, lock_version: lock_version})
+       when status in [:blocked, "blocked"] do
+    source_status = snapshot["issue_status"]
+    source_lock = snapshot["lock_version"] || snapshot["issue_lock_version"]
+
+    expected_lock =
+      if source_status in ["blocked", :blocked], do: source_lock, else: increment(source_lock)
+
+    lock_version == expected_lock
+  end
+
+  defp retry_lock_version_matches?(_, _), do: false
+
+  defp increment(value) when is_integer(value), do: value + 1
+  defp increment(_), do: nil
+
+  defp id_value(nil), do: nil
+  defp id_value(value) when is_binary(value), do: value
 
   @spec ensure_case(map()) :: {:ok, RecoveryCase.t()} | {:error, term()}
   def ensure_case(attrs) when is_map(attrs) do
@@ -514,13 +652,13 @@ defmodule Cympho.Recovery do
                     outcome =
                       if final_case.state == "superseded", do: :superseded, else: :exhausted
 
-                    {:ok, final_case, result, outcome}
+                    {:ok, {:ok, final_case}, result, outcome}
 
                   {:error, :stale_recovery_proposal} ->
-                    {:ok, Repo.get!(RecoveryCase, exhausted_case.id), result, :superseded}
+                    {:ok, {:ok, Repo.get!(RecoveryCase, exhausted_case.id)}, result, :superseded}
 
                   {:error, _} ->
-                    {:ok, exhausted_case, result, :exhausted}
+                    {:ok, {:ok, exhausted_case}, result, :exhausted}
                 end
 
               _ ->
@@ -1054,6 +1192,13 @@ defmodule Cympho.Recovery do
 
   defp option_now(%{now: now}), do: now
   defp option_now(_), do: DateTime.utc_now() |> DateTime.truncate(:second)
+
+  defp review_deadline(now) do
+    wall_now = DateTime.utc_now() |> DateTime.truncate(:second)
+    base = if DateTime.compare(now, wall_now) == :gt, do: now, else: wall_now
+    DateTime.add(base, 7 * 24 * 3600, :second)
+  end
+
   defp bounded_error(nil), do: nil
 
   defp bounded_error(reason) do
