@@ -411,6 +411,93 @@ defmodule Cympho.RecoveryReviewFixTest do
     assert unchanged.state == "detected"
     refute Repo.exists?(from(a in RecoveryAttempt, where: a.recovery_case_id == ^case_row.id))
   end
+
+  test "policy normalization rejects conflicting duplicate representations" do
+    policy_values = [
+      {:max_attempts, "max_attempts", 2, 3},
+      {:base_delay, "base_delay", 7, 8},
+      {:max_delay, "max_delay", 100, 101},
+      {:lease_seconds, "lease_seconds", 11, 12}
+    ]
+
+    for {atom_key, string_key, first, second} <- policy_values do
+      company =
+        Repo.insert!(%Company{
+          name: "Map duplicate #{atom_key}",
+          slug: "map-duplicate-#{atom_key}"
+        })
+
+      issue = Repo.insert!(%Issue{title: "Map duplicate", company_id: company.id})
+
+      attrs =
+        %{source_type: "issue_checkout", issue: issue}
+        |> Map.put(atom_key, first)
+        |> Map.put(string_key, second)
+
+      assert {:error, :invalid_policy} = Recovery.ensure_case(attrs)
+      refute Repo.exists?(from(c in RecoveryCase, where: c.issue_id == ^issue.id))
+
+      keyword_company =
+        Repo.insert!(%Company{
+          name: "Keyword duplicate #{atom_key}",
+          slug: "keyword-duplicate-#{atom_key}"
+        })
+
+      keyword_issue =
+        Repo.insert!(%Issue{title: "Keyword duplicate", company_id: keyword_company.id})
+
+      opts = [{atom_key, first}, {atom_key, second}]
+
+      assert {:error, :invalid_policy} =
+               Recovery.with_attempt(
+                 %{source_type: "issue_checkout", issue: keyword_issue},
+                 opts,
+                 fn _lease -> flunk("conflicting duplicates must not invoke the callback") end
+               )
+
+      refute Repo.exists?(from(c in RecoveryCase, where: c.issue_id == ^keyword_issue.id))
+    end
+  end
+
+  test "policy normalization accepts exactly equal duplicate representations" do
+    company = Repo.insert!(%Company{name: "Equal duplicates", slug: "equal-duplicates"})
+    issue = Repo.insert!(%Issue{title: "Equal duplicates", company_id: company.id})
+
+    attrs = %{
+      "max_attempts" => 2,
+      "base_delay" => 7,
+      "max_delay" => 9,
+      "lease_seconds" => 11,
+      source_type: "issue_checkout",
+      issue: issue,
+      max_attempts: 2,
+      base_delay: 7,
+      max_delay: 9,
+      lease_seconds: 11
+    }
+
+    assert {:ok, case_row} = Recovery.ensure_case(attrs)
+    assert case_row.max_attempts == 2
+    assert case_row.policy_snapshot["base_delay_seconds"] == 7
+
+    other = Repo.insert!(%Issue{title: "Equal keyword duplicates", company_id: company.id})
+
+    assert {:ok, %{outcome: :recovered}} =
+             Recovery.with_attempt(
+               %{source_type: "issue_checkout", issue: other},
+               [
+                 max_attempts: 2,
+                 max_attempts: 2,
+                 base_delay: 7,
+                 base_delay: 7,
+                 max_delay: 9,
+                 max_delay: 9,
+                 lease_seconds: 11,
+                 lease_seconds: 11
+               ],
+               fn _lease -> :ok end
+             )
+  end
 end
 
 defmodule Cympho.RecoveryMalformedRunTest do
@@ -473,6 +560,7 @@ defmodule Cympho.RecoveryAdapterTest do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.Recovery
+  alias Cympho.Recovery.Fingerprint
   alias Cympho.Recovery.RecoveryAttempt
   alias Cympho.Recovery.RecoveryCase
   alias Cympho.Repo
@@ -619,6 +707,100 @@ defmodule Cympho.RecoveryAdapterTest do
 
     assert child.policy_snapshot == snapshot
     assert child.max_attempts == 1
+  end
+
+  test "approved retry rejects a preinserted child with a conflicting policy" do
+    {company, agent, issue} = recovery_source("retry-child-conflict")
+
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id),
+      set: [assignee_id: agent.id, status: :in_progress]
+    )
+
+    issue = Repo.get!(Issue, issue.id)
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    now = ~U[2026-03-04 00:00:00Z]
+
+    assert {:ok, parent} =
+             Recovery.ensure_case(%{
+               source_type: "heartbeat_run",
+               issue: issue,
+               run: run,
+               max_attempts: 1,
+               base_delay: 7,
+               max_delay: 9,
+               lease_seconds: 11
+             })
+
+    assert {:ok, lease} = Recovery.claim_case(parent, now: now)
+    assert {:ok, exhausted} = Recovery.record_failure(lease, :temporary, now: now)
+    assert {:ok, approval} = Recovery.exhaust_case(exhausted, now: now)
+
+    Repo.update_all(from(a in Cympho.BoardApprovals.BoardApproval, where: a.id == ^approval.id),
+      set: [status: "approved"]
+    )
+
+    blocked = Repo.get!(Issue, issue.id)
+
+    expected_issue = %{
+      blocked
+      | status: :todo,
+        lock_version: blocked.lock_version + 1,
+        checkout_run_id: nil,
+        checked_out_at: nil
+    }
+
+    {child_fingerprint, child_snapshot} = Fingerprint.for_run(run, expected_issue)
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^parent.id),
+      set: [source_id: "parent-#{parent.id}"]
+    )
+
+    conflicting_child =
+      Repo.insert!(
+        RecoveryCase.changeset(%RecoveryCase{}, %{
+          company_id: company.id,
+          issue_id: issue.id,
+          agent_id: agent.id,
+          source_run_id: run.id,
+          parent_case_id: parent.id,
+          root_case_id: parent.root_case_id,
+          source_type: "heartbeat_run",
+          source_id: run.id,
+          source_status: "todo",
+          source_fingerprint: child_fingerprint,
+          fingerprint_version: Fingerprint.version(),
+          source_snapshot: child_snapshot,
+          state: "scheduled",
+          max_attempts: 1,
+          policy_snapshot: %{
+            "max_attempts" => 1,
+            "base_delay_seconds" => 8,
+            "max_delay_seconds" => 9,
+            "lease_seconds" => 11
+          },
+          next_attempt_at: now
+        })
+      )
+
+    assert {:error, :stale_recovery_proposal} =
+             Recovery.apply_board_action(
+               Repo.get!(Cympho.BoardApprovals.BoardApproval, approval.id),
+               now: DateTime.add(now, 1, :second)
+             )
+
+    assert Repo.get!(RecoveryCase, conflicting_child.id).policy_snapshot["base_delay_seconds"] ==
+             8
+
+    assert Repo.get!(RecoveryCase, parent.id).state == "escalated"
+    assert Repo.get!(Issue, issue.id).status == :blocked
   end
 
   test "stale run recovery creates a durable recovered case" do
@@ -1191,6 +1373,66 @@ defmodule Cympho.RecoveryDueTest do
     assert superseded.state == "superseded"
     assert Repo.get!(Issue, issue.id).status == :in_progress
     refute Repo.get_by(BoardApproval, recovery_case_id: case_row.id)
+  end
+
+  test "exhaustion rejects invalid persisted policies before blocking or approval" do
+    variants = [
+      empty: fn _snapshot -> %{} end,
+      incomplete: &Map.delete(&1, "lease_seconds"),
+      inconsistent: &Map.put(&1, "max_attempts", 2)
+    ]
+
+    for {variant, corrupt_policy} <- variants do
+      {_company, _agent, issue} = due_source("exhaust-policy-#{variant}")
+
+      assert {:ok, case_row} =
+               Recovery.ensure_case(%{
+                 source_type: "issue_checkout",
+                 issue: issue,
+                 max_attempts: 3,
+                 base_delay: 7,
+                 max_delay: 9,
+                 lease_seconds: 11
+               })
+
+      Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id),
+        set: [state: "exhausted", policy_snapshot: corrupt_policy.(case_row.policy_snapshot)]
+      )
+
+      assert {:error, :invalid_policy} =
+               Recovery.exhaust_case(Repo.get!(RecoveryCase, case_row.id),
+                 now: DateTime.utc_now()
+               )
+
+      assert Repo.get!(RecoveryCase, case_row.id).state == "exhausted"
+      assert Repo.get!(Issue, issue.id).status == :in_progress
+      refute Repo.get_by(BoardApproval, recovery_case_id: case_row.id)
+    end
+  end
+
+  test "exhaustion accepts a complete internally consistent persisted policy" do
+    {_company, _agent, issue} = due_source("exhaust-policy-valid")
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: issue,
+               max_attempts: 3,
+               base_delay: 7,
+               max_delay: 9,
+               lease_seconds: 11
+             })
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id),
+      set: [state: "exhausted"]
+    )
+
+    assert {:ok, %BoardApproval{} = approval} =
+             Recovery.exhaust_case(Repo.get!(RecoveryCase, case_row.id), now: DateTime.utc_now())
+
+    assert approval.recovery_case_id == case_row.id
+    assert Repo.get!(RecoveryCase, case_row.id).state == "escalated"
+    assert Repo.get!(Issue, issue.id).status == :blocked
   end
 
   test "process_due fails closed for each corrupted run case identity field" do

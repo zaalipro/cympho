@@ -286,10 +286,12 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
           source_id: run.id,
           source_status: status,
           source_fingerprint: fingerprint,
+          fingerprint_version: Fingerprint.version(),
           source_snapshot: snapshot,
           state: "exhausted",
           attempt_count: 1,
-          max_attempts: 1
+          max_attempts: 1,
+          policy_snapshot: complete_policy(1)
         })
 
       assert {:ok, %RecoveryCase{state: "superseded"}} =
@@ -331,10 +333,12 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
         source_id: run.id,
         source_status: "running",
         source_fingerprint: fingerprint,
+        fingerprint_version: Fingerprint.version(),
         source_snapshot: snapshot,
         state: "exhausted",
         attempt_count: 1,
-        max_attempts: 1
+        max_attempts: 1,
+        policy_snapshot: complete_policy(1)
       })
 
     Repo.update_all(from(r in Run, where: r.id == ^run.id),
@@ -571,10 +575,12 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
         source_id: run.id,
         source_status: "running",
         source_fingerprint: fingerprint,
+        fingerprint_version: Fingerprint.version(),
         source_snapshot: snapshot,
         state: "exhausted",
         attempt_count: 1,
-        max_attempts: 1
+        max_attempts: 1,
+        policy_snapshot: complete_policy(1)
       })
 
     {:ok, approval} = Recovery.exhaust_case(case_row, reason: "network")
@@ -813,10 +819,12 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
           source_id: issue.id,
           source_status: "in_progress",
           source_fingerprint: fingerprint,
+          fingerprint_version: Fingerprint.version(),
           source_snapshot: snapshot,
           state: "exhausted",
           attempt_count: 1,
-          max_attempts: 1
+          max_attempts: 1,
+          policy_snapshot: complete_policy(1)
         },
         Map.new(attrs)
       )
@@ -831,6 +839,15 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
 
     Repo.update_all(from(c in RecoveryCase, where: c.id == ^row.id), set: [root_case_id: row.id])
     Repo.get!(RecoveryCase, row.id)
+  end
+
+  defp complete_policy(max_attempts) do
+    %{
+      "max_attempts" => max_attempts,
+      "base_delay_seconds" => 60,
+      "max_delay_seconds" => 600,
+      "lease_seconds" => 300
+    }
   end
 
   defp flush_dispatcher_traces(dispatcher) do

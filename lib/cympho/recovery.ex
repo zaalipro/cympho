@@ -17,6 +17,7 @@ defmodule Cympho.Recovery do
 
   @lease_seconds 300
   @terminal_run_statuses ~w(completed succeeded failed cancelled timed_out done)
+  @policy_option_keys [:max_attempts, :base_delay, :max_delay, :lease_seconds]
 
   @doc "Escalates an exhausted recovery case to a single board retry proposal."
   def exhaust_case(%RecoveryCase{id: id} = case_row, opts \\ []) do
@@ -30,6 +31,11 @@ defmodule Cympho.Recovery do
             %RecoveryCase{} = row -> row
             nil -> Repo.rollback(:not_found)
           end
+
+        case policy_for_case(locked, []) do
+          {:ok, _policy} -> :ok
+          {:error, :invalid_policy} -> Repo.rollback(:invalid_policy)
+        end
 
         issue =
           case Repo.one(from i in Issue, where: i.id == ^locked.issue_id, lock: "FOR UPDATE") do
@@ -679,7 +685,7 @@ defmodule Cympho.Recovery do
   defp canonical_source_id(%RecoveryCase{source_id: source_id}, _), do: source_id
 
   defp insert_retry_child!(attrs) do
-    case %RecoveryCase{} |> RecoveryCase.changeset(attrs) |> Repo.insert() do
+    case %RecoveryCase{} |> RecoveryCase.changeset(attrs) |> Repo.insert(mode: :savepoint) do
       {:ok, child} ->
         child
 
@@ -698,7 +704,9 @@ defmodule Cympho.Recovery do
 
           if existing && existing.parent_case_id == attrs.parent_case_id &&
                existing.root_case_id == attrs.root_case_id &&
-               existing.source_fingerprint == attrs.source_fingerprint do
+               existing.source_fingerprint == attrs.source_fingerprint &&
+               existing.max_attempts == attrs.max_attempts &&
+               retry_child_policy_matches?(existing, attrs) do
             existing
           else
             Repo.rollback(:stale_recovery_proposal)
@@ -706,6 +714,17 @@ defmodule Cympho.Recovery do
         else
           Repo.rollback({:invalid_retry_child, changeset})
         end
+    end
+  end
+
+  defp retry_child_policy_matches?(%RecoveryCase{} = existing, attrs) do
+    with {:ok, existing_policy} <- policy_for_case(existing, []),
+         requested <- normalize_policy_snapshot(attrs.policy_snapshot),
+         true <- map_size(requested) == length(@policy_option_keys),
+         {:ok, requested_policy} <- normalize_policy(requested) do
+      existing_policy.snapshot == requested_policy.snapshot
+    else
+      _ -> false
     end
   end
 
@@ -2305,7 +2324,6 @@ defmodule Cympho.Recovery do
   @max_policy_attempts 3
   @max_policy_delay_seconds 600
   @max_policy_lease_seconds 600
-  @policy_option_keys [:max_attempts, :base_delay, :max_delay, :lease_seconds]
 
   defp adapter_recovery_options(opts) when is_list(opts) do
     outer = Keyword.delete(opts, :recovery_opts)
@@ -2321,9 +2339,15 @@ defmodule Cympho.Recovery do
       nested == :invalid ->
         {:error, :invalid_policy}
 
+      not duplicate_policy_values_valid?(outer) or not duplicate_policy_values_valid?(nested) ->
+        {:error, :invalid_policy}
+
       Enum.any?(@policy_option_keys, fn key ->
-        Keyword.has_key?(outer, key) and Keyword.has_key?(nested, key) and
-            Keyword.get(outer, key) != Keyword.get(nested, key)
+        outer_values = Keyword.get_values(outer, key)
+        nested_values = Keyword.get_values(nested, key)
+
+        outer_values != [] and nested_values != [] and
+            List.first(outer_values) != List.first(nested_values)
       end) ->
         {:error, :invalid_policy}
 
@@ -2361,11 +2385,32 @@ defmodule Cympho.Recovery do
   defp policy_for_source(_source, _opts), do: {:error, :invalid_policy}
 
   defp normalize_policy(opts) when is_list(opts) do
-    max_attempts = Keyword.get(opts, :max_attempts, @max_policy_attempts)
-    base_delay = Keyword.get(opts, :base_delay, 60)
-    max_delay = Keyword.get(opts, :max_delay, @max_policy_delay_seconds)
-    lease_seconds = Keyword.get(opts, :lease_seconds, @lease_seconds)
+    with {:ok, max_attempts} <-
+           duplicate_safe_value(Keyword.get_values(opts, :max_attempts), @max_policy_attempts),
+         {:ok, base_delay} <- duplicate_safe_value(Keyword.get_values(opts, :base_delay), 60),
+         {:ok, max_delay} <-
+           duplicate_safe_value(Keyword.get_values(opts, :max_delay), @max_policy_delay_seconds),
+         {:ok, lease_seconds} <-
+           duplicate_safe_value(Keyword.get_values(opts, :lease_seconds), @lease_seconds) do
+      normalize_policy_values(max_attempts, base_delay, max_delay, lease_seconds)
+    end
+  end
 
+  defp normalize_policy(opts) when is_map(opts) do
+    with {:ok, max_attempts} <-
+           map_policy_value(opts, :max_attempts, "max_attempts", @max_policy_attempts),
+         {:ok, base_delay} <- map_policy_value(opts, :base_delay, "base_delay", 60),
+         {:ok, max_delay} <-
+           map_policy_value(opts, :max_delay, "max_delay", @max_policy_delay_seconds),
+         {:ok, lease_seconds} <-
+           map_policy_value(opts, :lease_seconds, "lease_seconds", @lease_seconds) do
+      normalize_policy_values(max_attempts, base_delay, max_delay, lease_seconds)
+    end
+  end
+
+  defp normalize_policy(_), do: {:error, :invalid_policy}
+
+  defp normalize_policy_values(max_attempts, base_delay, max_delay, lease_seconds) do
     valid? =
       is_integer(max_attempts) and max_attempts > 0 and max_attempts <= @max_policy_attempts and
         is_integer(base_delay) and base_delay > 0 and base_delay <= @max_policy_delay_seconds and
@@ -2392,17 +2437,31 @@ defmodule Cympho.Recovery do
     end
   end
 
-  defp normalize_policy(opts) when is_map(opts) do
-    normalize_policy(
-      max_attempts:
-        Map.get(opts, :max_attempts, Map.get(opts, "max_attempts", @max_policy_attempts)),
-      base_delay: Map.get(opts, :base_delay, Map.get(opts, "base_delay", 60)),
-      max_delay: Map.get(opts, :max_delay, Map.get(opts, "max_delay", @max_policy_delay_seconds)),
-      lease_seconds: Map.get(opts, :lease_seconds, Map.get(opts, "lease_seconds", @lease_seconds))
-    )
+  defp duplicate_policy_values_valid?(opts) do
+    Enum.all?(@policy_option_keys, fn key ->
+      case duplicate_safe_value(Keyword.get_values(opts, key), nil) do
+        {:ok, _value} -> true
+        {:error, :invalid_policy} -> false
+      end
+    end)
   end
 
-  defp normalize_policy(_), do: {:error, :invalid_policy}
+  defp map_policy_value(opts, atom_key, string_key, default) do
+    values =
+      [atom_key, string_key]
+      |> Enum.filter(&Map.has_key?(opts, &1))
+      |> Enum.map(&Map.fetch!(opts, &1))
+
+    duplicate_safe_value(values, default)
+  end
+
+  defp duplicate_safe_value([], default), do: {:ok, default}
+
+  defp duplicate_safe_value([value | rest], _default) do
+    if Enum.all?(rest, &(&1 == value)),
+      do: {:ok, value},
+      else: {:error, :invalid_policy}
+  end
 
   # A case snapshots its effective policy at detection time. Later calls may
   # omit policy values or repeat the persisted values, but cannot replace them.
