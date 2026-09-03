@@ -171,6 +171,58 @@ defmodule Cympho.RuntimeOperations do
     {:ok, %{checked: 0, released: 0, failed: 0}}
   end
 
+  @doc "Recovers a company's stale runtime sources through the durable recovery facade."
+  @spec recover_company_stale_runs(String.t() | nil) :: {:ok, map()} | {:error, :no_company}
+  def recover_company_stale_runs(nil), do: {:error, :no_company}
+
+  def recover_company_stale_runs(company_id) when is_binary(company_id) do
+    stale_runs = Cympho.HeartbeatEngine.find_stale_runs_for_company(company_id)
+    orphaned_runs = Cympho.HeartbeatEngine.find_orphaned_runs_for_company(company_id)
+    waiting_runs = Cympho.HeartbeatEngine.find_stale_waiting_runs_for_company(company_id)
+
+    stale_ids = MapSet.new(stale_runs, & &1.id)
+    orphan_ids = MapSet.new(orphaned_runs, & &1.id)
+    waiting_runs = Enum.reject(waiting_runs, &MapSet.member?(orphan_ids, &1.id))
+
+    recovery_results =
+      (stale_runs ++ orphaned_runs)
+      |> Map.new(&{&1.id, &1})
+      |> Map.values()
+      |> Enum.map(fn run ->
+        if MapSet.member?(stale_ids, run.id),
+          do: Cympho.Recovery.recover_stale_run(run),
+          else: Cympho.Recovery.recover_orphaned_run(run)
+      end)
+
+    cancel_results = Enum.map(waiting_runs, &Cympho.Recovery.recover_orphaned_run/1)
+    checkout_results = Cympho.Recovery.recover_stale_checkouts_for_company(company_id)
+    results = recovery_results ++ cancel_results
+
+    recovered =
+      Enum.count(recovery_results, fn
+        {:ok, %{outcome: :recovered}} -> true
+        _ -> false
+      end)
+
+    cancelled =
+      Enum.count(cancel_results, fn
+        {:ok, %{outcome: :recovered}} -> true
+        _ -> false
+      end)
+
+    {:ok,
+     %{
+       recovered: recovered,
+       cancelled: cancelled,
+       released: checkout_results.released,
+       failed: Enum.count(results, &match?({:error, _}, &1)) + checkout_results.failed,
+       stale: length(stale_runs),
+       orphaned: length(orphaned_runs),
+       waiting: length(waiting_runs),
+       stale_checkouts: checkout_results.checked
+     }}
+  end
+
   @doc """
   Returns stale checked-out issues across all companies.
 

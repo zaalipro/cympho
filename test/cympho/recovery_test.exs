@@ -701,6 +701,109 @@ defmodule Cympho.RecoveryAdapterTest do
     end
   end
 
+  test "a scheduled run recovery clears its unbound checkout after the due attempt succeeds" do
+    {company, agent, issue} = recovery_source("run-due-checkout-follow-up")
+    assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [inserted_at: DateTime.add(now, -20, :minute)]
+    )
+
+    stale = Repo.get!(Run, run.id)
+
+    scheduled =
+      with_mock HeartbeatEngine, [:passthrough],
+        recover_run_if_current: fn _run, _guard, _kind, _opts -> {:error, :temporary} end do
+        assert {:ok, %{outcome: :scheduled, case: scheduled}} =
+                 Recovery.recover_orphaned_run(stale,
+                   now: now,
+                   max_attempts: 2,
+                   base_delay: 1,
+                   max_delay: 1
+                 )
+
+        scheduled
+      end
+
+    still_locked = Issues.get_issue!(checked_out.id)
+    assert still_locked.status == :in_progress
+    assert is_nil(still_locked.checkout_run_id)
+
+    assert %{checked: 1, recovered: 1, failed: 0} =
+             Recovery.process_due(now: scheduled.next_attempt_at, limit: 1)
+
+    assert Repo.get!(Run, run.id).status == "cancelled"
+    recovered_issue = Issues.get_issue!(issue.id)
+    assert recovered_issue.status == :todo
+    assert is_nil(recovered_issue.checked_out_at)
+    assert is_nil(recovered_issue.checkout_run_id)
+
+    run_case = Repo.get_by!(RecoveryCase, source_type: "heartbeat_run", source_id: run.id)
+    checkout_case = Repo.get_by!(RecoveryCase, source_type: "issue_checkout", source_id: issue.id)
+    assert run_case.state == "recovered"
+    assert run_case.attempt_count == 2
+    assert checkout_case.state == "recovered"
+    assert checkout_case.attempt_count == 1
+  end
+
+  test "a successor binding created during run follow-up is preserved" do
+    {company, agent, issue} = recovery_source("run-successor-follow-up")
+    assert {:ok, _checked_out} = Issues.checkout_issue(issue, agent)
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    old = DateTime.utc_now() |> DateTime.add(-20, :minute) |> DateTime.truncate(:second)
+    Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [inserted_at: old])
+    stale = Repo.get!(Run, run.id)
+    test_pid = self()
+    release_calls = :atomics.new(1, signed: false)
+
+    with_mock Cympho.Workspaces, [:passthrough],
+      cancel_and_release_for_issue: fn _issue, _opts ->
+        if :atomics.add_get(release_calls, 1, 1) == 2 do
+          {:ok, successor} =
+            HeartbeatEngine.create_run(%{
+              company_id: company.id,
+              agent_id: agent.id,
+              issue_id: issue.id,
+              adapter: "claude_code",
+              bind_checkout: true
+            })
+
+          send(test_pid, {:successor_bound, successor.id})
+        end
+
+        :ok
+      end do
+      assert {:ok, %{outcome: :recovered}} = Recovery.recover_orphaned_run(stale)
+    end
+
+    assert_received {:successor_bound, successor_id}
+    assert Repo.get!(Run, run.id).status == "cancelled"
+    assert Repo.get!(Run, successor_id).status == "pending"
+
+    successor_issue = Issues.get_issue!(issue.id)
+    assert successor_issue.status == :in_progress
+    assert successor_issue.checkout_run_id == successor_id
+    assert successor_issue.checked_out_at
+  end
+
   test "checkout adapter persists nested policy for restart claims and backoff" do
     {_company, agent, issue} = recovery_source("checkout-policy-restart")
     assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)

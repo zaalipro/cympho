@@ -4,12 +4,10 @@ defmodule CymphoWeb.OperationsLive.Index do
   alias Cympho.AgentInstructionTuner
   alias Cympho.Agents
   alias Cympho.Agents.Agent
-  alias Cympho.HeartbeatEngine
   alias Cympho.Inbox
   alias Cympho.Issues
   alias Cympho.Issues.SwarmEvents
   alias Cympho.ReviewNudges
-  alias Cympho.Recovery
   alias Cympho.RuntimeOperations
   alias Cympho.Wakes
 
@@ -109,7 +107,7 @@ defmodule CymphoWeb.OperationsLive.Index do
   def handle_event("recover_stale_runs", _params, socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
-    case recover_company_stale_runs(company_id) do
+    case RuntimeOperations.recover_company_stale_runs(company_id) do
       {:ok,
        %{
          recovered: recovered,
@@ -961,57 +959,6 @@ defmodule CymphoWeb.OperationsLive.Index do
       %{id: id} -> id
       _ -> nil
     end
-  end
-
-  defp recover_company_stale_runs(nil), do: {:error, :no_company}
-
-  defp recover_company_stale_runs(company_id) do
-    stale_runs = HeartbeatEngine.find_stale_runs_for_company(company_id)
-    orphaned_runs = HeartbeatEngine.find_orphaned_runs_for_company(company_id)
-    waiting_runs = HeartbeatEngine.find_stale_waiting_runs_for_company(company_id)
-
-    stale_ids = MapSet.new(stale_runs, & &1.id)
-
-    recovery_results =
-      (stale_runs ++ orphaned_runs)
-      |> Map.new(&{&1.id, &1})
-      |> Map.values()
-      |> Enum.map(fn run ->
-        if MapSet.member?(stale_ids, run.id),
-          do: Recovery.recover_stale_run(run),
-          else: Recovery.recover_orphaned_run(run)
-      end)
-
-    cancel_results = Enum.map(waiting_runs, &Recovery.recover_orphaned_run/1)
-    checkout_results = Recovery.recover_stale_checkouts_for_company(company_id)
-    results = recovery_results ++ cancel_results
-
-    recovered =
-      Enum.count(recovery_results, fn
-        {:ok, %{outcome: :recovered}} -> true
-        _ -> false
-      end)
-
-    cancelled =
-      Enum.count(cancel_results, fn
-        {:ok, %{outcome: :recovered}} -> true
-        _ -> false
-      end)
-
-    released = checkout_results.released
-    failed = Enum.count(results, &match?({:error, _}, &1)) + checkout_results.failed
-
-    {:ok,
-     %{
-       recovered: recovered,
-       cancelled: cancelled,
-       released: released,
-       failed: failed,
-       stale: length(stale_runs),
-       orphaned: length(orphaned_runs),
-       waiting: length(waiting_runs),
-       stale_checkouts: checkout_results.checked
-     }}
   end
 
   attr :label, :string, required: true

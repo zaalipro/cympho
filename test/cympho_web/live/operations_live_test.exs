@@ -2235,11 +2235,15 @@ end
 defmodule CymphoWeb.OperationsAdmissionLiveTest do
   use CymphoWeb.LiveCase, async: false
 
+  import Ecto.Query, warn: false
   import Mock
   import Phoenix.LiveViewTest
 
   alias Cympho.Agents
+  alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues
+  alias Cympho.Recovery.{RecoveryAttempt, RecoveryCase}
+  alias Cympho.Repo
   alias CymphoWeb.ConnCase
 
   test "board members receive tenant-neutral capacity status, not node diagnostics", %{conn: conn} do
@@ -2381,6 +2385,68 @@ defmodule CymphoWeb.OperationsAdmissionLiveTest do
       refute html =~ "denial_counts"
       refute html =~ "Runtime will take up to"
     end
+  end
+
+  test "stale-run recovery counts a pending orphan/waiting run once", %{conn: conn} do
+    {conn, user, company} = ConnCase.register_and_log_in_user(conn, %{role: "admin"})
+
+    conn =
+      conn
+      |> Plug.Test.init_test_session(%{})
+      |> Plug.Conn.put_session("user_id", user.id)
+      |> Plug.Conn.put_session("company_id", company.id)
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Operations recovery dedupe",
+        role: :engineer,
+        status: :idle,
+        adapter: :claude_code,
+        company_id: company.id
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Operations duplicate recovery source",
+        status: :todo,
+        company_id: company.id,
+        assignee_id: agent.id
+      })
+
+    assert {:ok, run} =
+             Cympho.HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    old = DateTime.utc_now() |> DateTime.add(-20, :minute) |> DateTime.truncate(:second)
+    Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [inserted_at: old])
+
+    {:ok, view, _html} = live(conn, "/operations")
+    html = render_click(view, "recover_stale_runs")
+
+    assert html =~ "Checked 0 stale, 1 orphaned, 0 waiting"
+    assert Repo.get!(Run, run.id).status == "cancelled"
+
+    assert Repo.aggregate(
+             from(c in RecoveryCase,
+               where:
+                 c.company_id == ^company.id and c.source_type == "heartbeat_run" and
+                   c.source_id == ^run.id
+             ),
+             :count
+           ) == 1
+
+    assert Repo.aggregate(
+             from(a in RecoveryAttempt,
+               join: c in RecoveryCase,
+               on: c.id == a.recovery_case_id,
+               where: c.company_id == ^company.id and c.source_id == ^run.id
+             ),
+             :count
+           ) == 1
   end
 
   test "company owners are not treated as instance operators", %{conn: conn} do

@@ -1176,7 +1176,11 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
   end
 
   describe "crash reclaim (orchestrator DOWN)" do
-    test "preserves assignee like orphan reclaim", %{agent: agent, issue: issue} do
+    test "recovers an old run before releasing its unbound checkout", %{
+      agent: agent,
+      company: company,
+      issue: issue
+    } do
       ensure_dispatcher_for_db_tests()
       dispatcher = Process.whereis(Dispatcher)
       # Shared sandbox covers most cases; allow is belt-and-suspenders when
@@ -1189,6 +1193,16 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       assert is_nil(Orchestrator.whereis(checked_out.id))
 
       checked_out = backdate_checkout(checked_out)
+
+      assert {:ok, run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: checked_out.id,
+                 adapter: "claude_code"
+               })
+
+      run = backdate_run(run)
 
       # Simulate a monitored fake orchestrator that dies non-gracefully so
       # release_crashed_session_issue runs (brutal kill skips terminate/2).
@@ -1213,6 +1227,90 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
         assert is_nil(reloaded.checked_out_at)
         assert reloaded.assignee_id == agent.id
       end)
+
+      assert {:ok, %{status: "cancelled"}} = Cympho.HeartbeatEngine.get_run(run.id)
+
+      for source_type <- ["heartbeat_run", "issue_checkout"] do
+        assert Cympho.Repo.aggregate(
+                 Ecto.Query.from(c in Cympho.Recovery.RecoveryCase,
+                   where: c.issue_id == ^issue.id and c.source_type == ^source_type
+                 ),
+                 :count
+               ) == 1
+      end
+
+      assert Cympho.Repo.aggregate(
+               Ecto.Query.from(a in Cympho.Recovery.RecoveryAttempt,
+                 join: c in Cympho.Recovery.RecoveryCase,
+                 on: c.id == a.recovery_case_id,
+                 where: c.issue_id == ^issue.id
+               ),
+               :count
+             ) == 2
+    end
+
+    test "a fresh crash run is deferred and remains recoverable after becoming stale", %{
+      agent: agent,
+      company: company,
+      issue: issue
+    } do
+      ensure_dispatcher_for_db_tests()
+      dispatcher = Process.whereis(Dispatcher)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), dispatcher)
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+      assert {:ok, run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: checked_out.id,
+                 adapter: "claude_code"
+               })
+
+      fake_orchestrator = spawn(fn -> Process.sleep(:infinity) end)
+
+      :sys.replace_state(dispatcher, fn %State{} = state ->
+        ref = Process.monitor(fake_orchestrator)
+
+        %{
+          state
+          | running_issue_ids: MapSet.put(state.running_issue_ids, checked_out.id),
+            monitors: Map.put(state.monitors, ref, checked_out.id)
+        }
+      end)
+
+      Process.exit(fake_orchestrator, :kill)
+
+      wait_until(fn ->
+        refute MapSet.member?(Dispatcher.state().running_issue_ids, checked_out.id)
+      end)
+
+      assert Issues.get_issue!(issue.id).status == :in_progress
+      assert {:ok, %{status: "pending"}} = Cympho.HeartbeatEngine.get_run(run.id)
+
+      refute Cympho.Repo.exists?(
+               Ecto.Query.from(c in Cympho.Recovery.RecoveryCase,
+                 where: c.issue_id == ^issue.id
+               )
+             )
+
+      stale = backdate_run(run)
+
+      assert {:ok, %{outcome: :recovered}} = Cympho.Recovery.recover_orphaned_run(stale)
+      assert {:ok, %{status: "cancelled"}} = Cympho.HeartbeatEngine.get_run(run.id)
+
+      recovered_issue = Issues.get_issue!(issue.id)
+      assert recovered_issue.status == :todo
+      assert is_nil(recovered_issue.checkout_run_id)
+      assert is_nil(recovered_issue.checked_out_at)
+
+      assert Cympho.Repo.aggregate(
+               Ecto.Query.from(c in Cympho.Recovery.RecoveryCase,
+                 where: c.issue_id == ^issue.id
+               ),
+               :count
+             ) == 2
     end
 
     test "does not clear a successor-bound checkout_run_id", %{

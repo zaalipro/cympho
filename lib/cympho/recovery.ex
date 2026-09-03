@@ -1764,6 +1764,17 @@ defmodule Cympho.Recovery do
     end
   end
 
+  defp finish_due_result(lease, {:ok, %Run{} = run}, opts, stats) do
+    case record_success(lease, opts) do
+      {:ok, _case} ->
+        log_checkout_follow_up(run, recover_unbound_checkout_after_run(run, opts))
+        %{stats | processed: stats.processed + 1, recovered: stats.recovered + 1}
+
+      {:error, reason} ->
+        %{stats | failed: stats.failed + 1, errors: [reason | stats.errors]}
+    end
+  end
+
   defp finish_due_result(lease, {:ok, _value}, opts, stats) do
     case record_success(lease, opts) do
       {:ok, _case} -> %{stats | processed: stats.processed + 1, recovered: stats.recovered + 1}
@@ -1937,12 +1948,16 @@ defmodule Cympho.Recovery do
                end
              end
            ) do
-      {:ok,
-       %{
-         run: run_result(result.result, run),
-         outcome: result.outcome,
-         case: result.case
-       }}
+      recovered_run = run_result(result.result, run)
+
+      if result.outcome == :recovered do
+        log_checkout_follow_up(
+          recovered_run,
+          recover_unbound_checkout_after_run(recovered_run, opts)
+        )
+      end
+
+      {:ok, %{run: recovered_run, outcome: result.outcome, case: result.case}}
     end
   end
 
@@ -2022,6 +2037,59 @@ defmodule Cympho.Recovery do
 
   defp run_result(%Run{} = run, _fallback), do: run
   defp run_result(_, fallback), do: fallback
+
+  @doc false
+  @spec recover_unbound_checkout_after_run(Run.t(), keyword()) :: :ok | {:error, term()}
+  def recover_unbound_checkout_after_run(%Run{} = run, opts) when is_list(opts) do
+    current_run = Repo.get(Run, run.id)
+
+    cond do
+      not matching_terminal_run?(current_run, run) ->
+        :ok
+
+      source_live?(run.issue_id) or active_checkout_run?(run.issue_id) ->
+        :ok
+
+      true ->
+        case Issues.get_issue(run.issue_id) do
+          {:ok, %Issue{status: status, checkout_run_id: nil} = issue}
+          when status in [:in_progress, "in_progress"] ->
+            case recover_orphaned_issue(issue, opts) do
+              {:ok, %{outcome: outcome}} when outcome in [:recovered, :superseded] -> :ok
+              {:ok, %{outcome: outcome}} -> {:error, outcome}
+              {:error, reason} -> {:error, reason}
+            end
+
+          _ ->
+            :ok
+        end
+    end
+  rescue
+    error -> {:error, error}
+  end
+
+  def recover_unbound_checkout_after_run(_run, _opts), do: {:error, :invalid_run_source}
+
+  defp matching_terminal_run?(%Run{} = current, %Run{} = recovered) do
+    current.id == recovered.id and current.company_id == recovered.company_id and
+      current.issue_id == recovered.issue_id and current.agent_id == recovered.agent_id and
+      to_string(current.status) in @terminal_run_statuses
+  end
+
+  defp matching_terminal_run?(_, _), do: false
+
+  defp log_checkout_follow_up(_run, :ok), do: :ok
+
+  defp log_checkout_follow_up(%Run{} = run, {:error, reason}) do
+    Logger.warning("Recovery left an unbound checkout for a later durable attempt",
+      component: "recovery",
+      run_id: run.id,
+      issue_id: run.issue_id,
+      error: inspect(reason)
+    )
+
+    :ok
+  end
 
   defp checkout_result_issue(%Issue{} = issue, _fallback), do: issue
   defp checkout_result_issue(_, fallback), do: fallback

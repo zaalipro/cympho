@@ -985,49 +985,14 @@ defmodule Cympho.Orchestrator.Dispatcher do
       # fresh clear_checkout_lock would load that bind and wipe it. Bound
       # dead-session runs are terminalized by recover_orphaned_runs (poll/boot)
       # which clears via clear_checkout_lock_for_run.
-      unless live_orchestrator?(issue_id) do
-        case Issues.get_issue(issue_id) do
-          {:ok, %Issue{status: :in_progress, checkout_run_id: nil} = issue} ->
-            case Cympho.Recovery.recover_orphaned_issue(issue,
-                   allow_unbound_active_runs: true
-                 ) do
-              {:ok, %{outcome: :recovered}} ->
-                Logger.warning(
-                  "[Dispatcher] released issue #{issue_id} after orchestrator crash (assignee preserved)"
-                )
-
-              {:ok, %{outcome: :superseded}} ->
-                Logger.info(
-                  "[Dispatcher] skipped crash release for issue #{issue_id}: checkout already claimed by successor"
-                )
-
-              {:ok, %{outcome: outcome}} when outcome in [:scheduled, :exhausted] ->
-                Logger.info(
-                  "[Dispatcher] crash checkout recovery for issue #{issue_id} #{outcome}"
-                )
-
-              {:error, release_reason} ->
-                Logger.error(
-                  "[Dispatcher] failed to release issue #{issue_id} after orchestrator crash: #{inspect(release_reason)}"
-                )
-            end
-
-          {:ok, %Issue{status: :in_progress, checkout_run_id: bound}} when is_binary(bound) ->
-            Logger.info(
-              "[Dispatcher] skipped crash checkout clear for issue #{issue_id}: run #{bound} still bound (successor or in-flight session)"
-            )
-
-          _ ->
-            :ok
-        end
-      end
-
       # Recover only runs that cannot belong to a successor: re-check live orch
       # before each cancel, and never terminalize the currently-bound checkout
       # run (cancel_run → clear_checkout_lock_for_run would unlock it).
       Enum.each(pre_crash_runs, fn run ->
         recover_crashed_session_run(issue_id, run)
       end)
+
+      recover_crashed_session_checkout(issue_id)
     end
   rescue
     error ->
@@ -1043,6 +1008,11 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
       current_checkout_run?(issue_id, run) ->
         :ok
+
+      not durably_stale_run?(run) ->
+        Logger.info(
+          "[Dispatcher] deferred crashed-session run #{run.id}: durable stale cutoff not reached"
+        )
 
       true ->
         case Cympho.Recovery.recover_orphaned_run(run) do
@@ -1069,6 +1039,55 @@ defmodule Cympho.Orchestrator.Dispatcher do
         end
     end
   end
+
+  defp recover_crashed_session_checkout(issue_id) do
+    unless live_orchestrator?(issue_id) or
+             MapSet.member?(issue_ids_with_active_runs([issue_id]), issue_id) do
+      case Issues.get_issue(issue_id) do
+        {:ok, %Issue{status: :in_progress, checkout_run_id: nil} = issue} ->
+          case Cympho.Recovery.recover_orphaned_issue(issue) do
+            {:ok, %{outcome: :recovered}} ->
+              Logger.warning(
+                "[Dispatcher] released issue #{issue_id} after orchestrator crash (assignee preserved)"
+              )
+
+            {:ok, %{outcome: :superseded}} ->
+              Logger.info(
+                "[Dispatcher] skipped crash release for issue #{issue_id}: checkout already claimed by successor"
+              )
+
+            {:ok, %{outcome: outcome}} when outcome in [:scheduled, :exhausted] ->
+              Logger.info("[Dispatcher] crash checkout recovery for issue #{issue_id} #{outcome}")
+
+            {:error, release_reason} ->
+              Logger.error(
+                "[Dispatcher] failed to release issue #{issue_id} after orchestrator crash: #{inspect(release_reason)}"
+              )
+          end
+
+        {:ok, %Issue{status: :in_progress, checkout_run_id: bound}} when is_binary(bound) ->
+          Logger.info(
+            "[Dispatcher] skipped crash checkout clear for issue #{issue_id}: run #{bound} still bound (successor or in-flight session)"
+          )
+
+        _ ->
+          :ok
+      end
+    end
+  end
+
+  defp durably_stale_run?(%Run{status: status} = run)
+       when status in ["pending", "queued", "running"] do
+    liveness_at =
+      if status in ["pending", "queued"],
+        do: run.inserted_at,
+        else: run.last_heartbeat_at || run.inserted_at
+
+    cutoff = DateTime.add(DateTime.utc_now(), -@orphan_checkout_grace_seconds, :second)
+    match?(%DateTime{}, liveness_at) and DateTime.compare(liveness_at, cutoff) == :lt
+  end
+
+  defp durably_stale_run?(_run), do: false
 
   defp current_checkout_run?(issue_id, run) do
     case Issues.get_issue(issue_id) do
