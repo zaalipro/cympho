@@ -1483,8 +1483,10 @@ defmodule Cympho.Recovery do
                 {:error, _} -> Repo.rollback(:invalid_policy)
               end
 
+            retained_budget_count = max(case_row.attempt_count - 1, 0)
+
             next_attempt_at =
-              DateTime.add(now, retry_delay(case_row.attempt_count, policy, opts), :second)
+              DateTime.add(now, retry_delay(retained_budget_count, policy, opts), :second)
 
             {attempt_count, _} =
               Repo.update_all(
@@ -1508,7 +1510,7 @@ defmodule Cympho.Recovery do
                 from(c in RecoveryCase, where: c.id == ^id and c.claim_token == ^token),
                 set: [
                   state: "scheduled",
-                  attempt_count: max(case_row.attempt_count - 1, 0),
+                  attempt_count: retained_budget_count,
                   claim_token: nil,
                   claimed_at: nil,
                   lease_expires_at: nil,

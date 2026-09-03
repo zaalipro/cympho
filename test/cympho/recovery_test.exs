@@ -1069,6 +1069,44 @@ defmodule Cympho.RecoveryAdapterTest do
              )
   end
 
+  test "a deferral after a failure keeps the retained budget backoff tier" do
+    {_company, _agent, issue} = recovery_source("deferred-retained-backoff")
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id), set: [status: :in_progress])
+    issue = Repo.get!(Issue, issue.id)
+    source = %{source_type: "issue_checkout", issue: issue}
+    policy = [max_attempts: 3, base_delay: 7, max_delay: 30]
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    assert {:ok, %{outcome: :scheduled, case: failed}} =
+             Recovery.with_attempt(source, [now: now] ++ policy, fn _lease ->
+               {:error, :temporary}
+             end)
+
+    assert failed.attempt_count == 1
+    assert failed.next_attempt_at == DateTime.add(now, 7, :second)
+
+    assert {:ok, %{outcome: :deferred, case: deferred}} =
+             Recovery.with_attempt(source, [now: failed.next_attempt_at] ++ policy, fn _lease ->
+               {:error, :recovery_deferred}
+             end)
+
+    retained_due = DateTime.add(failed.next_attempt_at, 7, :second)
+    assert deferred.attempt_count == 1
+    assert deferred.next_attempt_at == retained_due
+
+    deferred_attempt =
+      Repo.get_by!(RecoveryAttempt, recovery_case_id: deferred.id, attempt_no: 2)
+
+    assert deferred_attempt.status == "skipped"
+    assert deferred_attempt.next_retry_at == retained_due
+
+    assert {:ok, retry} =
+             Recovery.claim_due_case(deferred, [now: retained_due] ++ policy)
+
+    assert retry.attempt.attempt_no == 3
+    assert retry.case.attempt_count == 2
+  end
+
   test "expired claim closes the current audit ordinal after a deferred claim" do
     {_company, _agent, issue} = recovery_source("deferred-expired-claim")
     Repo.update_all(from(i in Issue, where: i.id == ^issue.id), set: [status: :in_progress])
