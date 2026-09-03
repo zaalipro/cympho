@@ -756,6 +756,25 @@ defmodule Cympho.RecoveryAdapterTest do
     assert checkout_case.attempt_count == 1
   end
 
+  test "recover_unbound_checkout_after_run/2 preserves its :ok contract" do
+    {company, agent, issue} = recovery_source("checkout-follow-up-contract")
+    assert {:ok, _checked_out} = Issues.checkout_issue(issue, agent)
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, cancelled} = HeartbeatEngine.cancel_run(run)
+    assert Issues.get_issue!(issue.id).status == :in_progress
+
+    assert :ok = Recovery.recover_unbound_checkout_after_run(cancelled, [])
+    assert Issues.get_issue!(issue.id).status == :todo
+  end
+
   test "a successor binding created during run follow-up is preserved" do
     {company, agent, issue} = recovery_source("run-successor-follow-up")
     assert {:ok, _checked_out} = Issues.checkout_issue(issue, agent)
@@ -953,7 +972,7 @@ defmodule Cympho.RecoveryAdapterTest do
     Registry.unregister(Cympho.OrchestratorRegistry, issue.id)
   end
 
-  test "a successor race releases its claim without consuming the final attempt" do
+  test "a deferred successor race retains history and can retry the final attempt" do
     {company, agent, issue} = recovery_source("successor-claim-race")
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
@@ -971,20 +990,154 @@ defmodule Cympho.RecoveryAdapterTest do
 
     stale = Repo.get!(Run, run.id)
 
-    with_mock HeartbeatEngine, [:passthrough],
-      recover_run_if_current: fn _run, _guard, _kind, _opts ->
-        {:error, :recovery_deferred}
-      end do
-      assert {:ok, %{outcome: :deferred, case: recovery_case}} =
-               Recovery.recover_orphaned_run(stale, now: now, max_attempts: 1)
+    recovery_case =
+      with_mock HeartbeatEngine, [:passthrough],
+        recover_run_if_current: fn _run, _guard, _kind, _opts ->
+          {:error, :recovery_deferred}
+        end do
+        assert {:ok, %{outcome: :deferred, case: recovery_case}} =
+                 Recovery.recover_orphaned_run(stale, now: now, max_attempts: 1)
 
-      assert recovery_case.state == "scheduled"
-      assert recovery_case.attempt_count == 0
-    end
+        assert recovery_case.state == "scheduled"
+        assert recovery_case.attempt_count == 0
+        recovery_case
+      end
 
-    assert Repo.aggregate(RecoveryAttempt, :count) == 0
+    deferred_attempt = Repo.get_by!(RecoveryAttempt, recovery_case_id: recovery_case.id)
+    assert deferred_attempt.attempt_no == 1
+    assert deferred_attempt.status == "skipped"
+    assert deferred_attempt.error_reason == "recovery_deferred"
     assert Repo.get!(Run, run.id).status == "pending"
     assert Repo.get!(Issue, issue.id).status != :blocked
+
+    assert {:ok, %{outcome: :recovered, case: recovered_case}} =
+             Recovery.recover_orphaned_run(stale,
+               now: recovery_case.next_attempt_at,
+               max_attempts: 1
+             )
+
+    assert recovered_case.state == "recovered"
+    assert recovered_case.attempt_count == 1
+    assert Repo.get!(Run, run.id).status == "cancelled"
+    refute Repo.get_by(Cympho.BoardApprovals.BoardApproval, recovery_case_id: recovery_case.id)
+
+    assert [first, second] =
+             Repo.all(
+               from(a in RecoveryAttempt,
+                 where: a.recovery_case_id == ^recovery_case.id,
+                 order_by: [asc: a.attempt_no]
+               )
+             )
+
+    assert {first.attempt_no, first.status} == {1, "skipped"}
+    assert {second.attempt_no, second.status} == {2, "succeeded"}
+  end
+
+  test "deferred claims keep audit ordinals without consuming failure backoff" do
+    {_company, _agent, issue} = recovery_source("deferred-audit-ordinals")
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id), set: [status: :in_progress])
+    issue = Repo.get!(Issue, issue.id)
+    source = %{source_type: "issue_checkout", issue: issue}
+    policy = [max_attempts: 2, base_delay: 7, max_delay: 9]
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    assert {:ok, %{outcome: :deferred, case: first}} =
+             Recovery.with_attempt(source, [now: now] ++ policy, fn _lease ->
+               {:error, :recovery_deferred}
+             end)
+
+    assert {:ok, %{outcome: :deferred, case: second}} =
+             Recovery.with_attempt(source, [now: first.next_attempt_at] ++ policy, fn _lease ->
+               {:error, :recovery_deferred}
+             end)
+
+    assert {:ok, %{outcome: :scheduled, case: failed}} =
+             Recovery.with_attempt(source, [now: second.next_attempt_at] ++ policy, fn _lease ->
+               {:error, :temporary}
+             end)
+
+    assert failed.attempt_count == 1
+    assert failed.next_attempt_at == DateTime.add(second.next_attempt_at, 7, :second)
+
+    assert [{1, "skipped"}, {2, "skipped"}, {3, "failed"}] ==
+             Repo.all(
+               from(a in RecoveryAttempt,
+                 where: a.recovery_case_id == ^failed.id,
+                 order_by: [asc: a.attempt_no],
+                 select: {a.attempt_no, a.status}
+               )
+             )
+  end
+
+  test "expired claim closes the current audit ordinal after a deferred claim" do
+    {_company, _agent, issue} = recovery_source("deferred-expired-claim")
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id), set: [status: :in_progress])
+    issue = Repo.get!(Issue, issue.id)
+    source = %{source_type: "issue_checkout", issue: issue}
+    policy = [max_attempts: 2, base_delay: 1, max_delay: 2, lease_seconds: 1]
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    assert {:ok, %{outcome: :deferred, case: deferred}} =
+             Recovery.with_attempt(source, [now: now] ++ policy, fn _lease ->
+               {:error, :recovery_deferred}
+             end)
+
+    assert {:ok, claimed} =
+             Recovery.claim_case(deferred, [now: deferred.next_attempt_at] ++ policy)
+
+    assert claimed.attempt.attempt_no == 2
+
+    takeover_at = DateTime.add(claimed.case.lease_expires_at, 1, :second)
+    assert {:ok, takeover} = Recovery.claim_case(claimed.case, [now: takeover_at] ++ policy)
+    assert takeover.attempt.attempt_no == 3
+    assert takeover.case.attempt_count == 2
+
+    assert Repo.get!(RecoveryAttempt, claimed.attempt.id).status == "failed"
+    assert Repo.get!(RecoveryAttempt, claimed.attempt.id).error_reason == "lease_expired"
+    assert Repo.get!(RecoveryAttempt, takeover.attempt.id).status == "claimed"
+
+    assert Repo.aggregate(
+             from(a in RecoveryAttempt,
+               where: a.recovery_case_id == ^deferred.id and a.status == "claimed"
+             ),
+             :count
+           ) == 1
+  end
+
+  test "bounded escalation history keeps the latest result after deferred claims" do
+    {_company, _agent, issue} = recovery_source("deferred-bounded-history")
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id), set: [status: :in_progress])
+    issue = Repo.get!(Issue, issue.id)
+    source = %{source_type: "issue_checkout", issue: issue}
+    policy = [max_attempts: 1, base_delay: 1, max_delay: 1]
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    deferred =
+      Enum.reduce(1..11, %{next_attempt_at: now}, fn _, previous ->
+        assert {:ok, %{outcome: :deferred, case: current}} =
+                 Recovery.with_attempt(
+                   source,
+                   [now: previous.next_attempt_at] ++ policy,
+                   fn _lease -> {:error, :recovery_deferred} end
+                 )
+
+        current
+      end)
+
+    assert {:ok, %{outcome: :exhausted, case: exhausted}} =
+             Recovery.with_attempt(
+               source,
+               [now: deferred.next_attempt_at] ++ policy,
+               fn _lease -> {:error, :temporary} end
+             )
+
+    approval =
+      Repo.get_by!(Cympho.BoardApprovals.BoardApproval, recovery_case_id: exhausted.id)
+
+    history = approval.proposal_data["attempt_history"]
+    assert length(history) == 10
+    assert {List.first(history)["attempt_no"], List.first(history)["status"]} == {3, "skipped"}
+    assert {List.last(history)["attempt_no"], List.last(history)["status"]} == {12, "failed"}
   end
 
   test "checkout adapter persists nested policy for restart claims and backoff" do

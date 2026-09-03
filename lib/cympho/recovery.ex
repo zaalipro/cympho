@@ -1314,9 +1314,10 @@ defmodule Cympho.Recovery do
             expire_claimed_attempt(case_row, now)
           end
 
-          attempt_no = case_row.attempt_count + 1
+          budget_attempt_count = case_row.attempt_count + 1
+          attempt_no = next_attempt_no(case_row.id)
 
-          if attempt_no > case_row.max_attempts do
+          if budget_attempt_count > case_row.max_attempts do
             Repo.update_all(
               from(c in RecoveryCase, where: c.id == ^case_row.id),
               set: [state: "exhausted", exhausted_at: case_row.exhausted_at || now]
@@ -1332,7 +1333,7 @@ defmodule Cympho.Recovery do
                 from(c in RecoveryCase, where: c.id == ^case_row.id),
                 set: [
                   state: "claimed",
-                  attempt_count: attempt_no,
+                  attempt_count: budget_attempt_count,
                   claim_token: token,
                   claimed_at: now,
                   lease_expires_at: expires,
@@ -1362,6 +1363,14 @@ defmodule Cympho.Recovery do
     else
       _ -> {:error, :invalid_policy}
     end
+  end
+
+  defp next_attempt_no(case_id) do
+    RecoveryAttempt
+    |> where([a], a.recovery_case_id == ^case_id)
+    |> select([a], coalesce(max(a.attempt_no), 0))
+    |> Repo.one()
+    |> Kernel.+(1)
   end
 
   @spec record_success(map(), term()) :: {:ok, RecoveryCase.t()} | {:error, atom()}
@@ -1399,14 +1408,15 @@ defmodule Cympho.Recovery do
                 {:error, _} -> Repo.rollback(:invalid_policy)
               end
 
-            attempt_no = attempt.attempt_no
-            exhausted = attempt_no >= case_row.max_attempts
+            budget_attempt_count = case_row.attempt_count
+            exhausted = budget_attempt_count >= case_row.max_attempts
 
             {state, next_retry_at} =
               if exhausted,
                 do: {"exhausted", nil},
                 else:
-                  {"scheduled", DateTime.add(now, retry_delay(attempt_no, policy, opts), :second)}
+                  {"scheduled",
+                   DateTime.add(now, retry_delay(budget_attempt_count, policy, opts), :second)}
 
             error = bounded_error(reason)
 
@@ -1473,13 +1483,22 @@ defmodule Cympho.Recovery do
                 {:error, _} -> Repo.rollback(:invalid_policy)
               end
 
+            next_attempt_at =
+              DateTime.add(now, retry_delay(case_row.attempt_count, policy, opts), :second)
+
             {attempt_count, _} =
-              Repo.delete_all(
+              Repo.update_all(
                 from(a in RecoveryAttempt,
                   where:
                     a.id == ^attempt.id and a.recovery_case_id == ^id and
                       a.attempt_no == ^attempt.attempt_no and a.status == "claimed"
-                )
+                ),
+                set: [
+                  status: "skipped",
+                  completed_at: now,
+                  error_reason: "recovery_deferred",
+                  next_retry_at: next_attempt_at
+                ]
               )
 
             if attempt_count != 1, do: Repo.rollback(:stale_claim)
@@ -1494,7 +1513,7 @@ defmodule Cympho.Recovery do
                   claimed_at: nil,
                   lease_expires_at: nil,
                   claimed_by: nil,
-                  next_attempt_at: DateTime.add(now, retry_delay(1, policy, opts), :second)
+                  next_attempt_at: next_attempt_at
                 ]
               )
 
@@ -2185,8 +2204,17 @@ defmodule Cympho.Recovery do
 
   @doc false
   @spec recover_unbound_checkout_after_run(Run.t(), keyword()) ::
-          {:ok, map()} | {:error, term()}
+          :ok | {:error, term()}
   def recover_unbound_checkout_after_run(%Run{} = run, opts) when is_list(opts) do
+    case recover_unbound_checkout_after_run_detailed(run, opts) do
+      {:ok, _metadata} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def recover_unbound_checkout_after_run(_run, _opts), do: {:error, :invalid_run_source}
+
+  defp recover_unbound_checkout_after_run_detailed(%Run{} = run, opts) do
     current_run = Repo.get(Run, run.id)
 
     cond do
@@ -2218,8 +2246,6 @@ defmodule Cympho.Recovery do
     error -> {:error, error}
   end
 
-  def recover_unbound_checkout_after_run(_run, _opts), do: {:error, :invalid_run_source}
-
   defp matching_terminal_run?(%Run{} = current, %Run{} = recovered) do
     current.id == recovered.id and current.company_id == recovered.company_id and
       current.issue_id == recovered.issue_id and current.agent_id == recovered.agent_id and
@@ -2233,7 +2259,7 @@ defmodule Cympho.Recovery do
   end
 
   defp protected_checkout_follow_up(%Run{} = run, opts) do
-    case recover_unbound_checkout_after_run(run, opts) do
+    case recover_unbound_checkout_after_run_detailed(run, opts) do
       {:ok, metadata} ->
         metadata
 
@@ -2488,10 +2514,9 @@ defmodule Cympho.Recovery do
   defp lease_parts(_), do: {:error, :invalid_lease}
 
   defp outcome_for_failure(%{
-         case: %RecoveryCase{max_attempts: max},
-         attempt: %RecoveryAttempt{attempt_no: no}
+         case: %RecoveryCase{attempt_count: count, max_attempts: max}
        })
-       when no >= max, do: :exhausted
+       when count >= max, do: :exhausted
 
   defp outcome_for_failure(_), do: :scheduled
 
@@ -2755,16 +2780,14 @@ defmodule Cympho.Recovery do
   defp expired?(nil, _), do: true
   defp expired?(expires, now), do: DateTime.compare(expires, now) != :gt
 
-  defp expire_claimed_attempt(%RecoveryCase{id: case_id, attempt_count: attempt_no}, now) do
-    # Only the currently numbered attempt can be leased for this case. If a
-    # previous callback already completed it, the update is intentionally a
-    # no-op; otherwise close the abandoned lease as a failed attempt so a
-    # takeover cannot leave an immortal `claimed` history row.
+  defp expire_claimed_attempt(%RecoveryCase{id: case_id}, now) do
+    # The case-row lock admits only one current claim. Audit ordinals remain
+    # monotonic even when a deferred claim returned its retry-budget slot, so
+    # close the sole claimed row rather than deriving its ordinal from the
+    # budget counter.
     Repo.update_all(
       from(a in RecoveryAttempt,
-        where:
-          a.recovery_case_id == ^case_id and a.attempt_no == ^attempt_no and
-            a.status == "claimed"
+        where: a.recovery_case_id == ^case_id and a.status == "claimed"
       ),
       set: [
         status: "failed",
@@ -3041,7 +3064,7 @@ defmodule Cympho.Recovery do
     Repo.all(
       from a in RecoveryAttempt,
         where: a.recovery_case_id == ^case_id,
-        order_by: [asc: a.attempt_no],
+        order_by: [desc: a.attempt_no],
         limit: 10,
         select: %{
           "attempt_no" => a.attempt_no,
@@ -3052,6 +3075,7 @@ defmodule Cympho.Recovery do
           "completed_at" => a.completed_at
         }
     )
+    |> Enum.reverse()
     |> Enum.map(fn row ->
       Enum.map(row, fn {key, value} -> {key, safe_history_value(value)} end)
       |> Map.new()
