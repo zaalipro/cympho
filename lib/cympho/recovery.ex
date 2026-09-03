@@ -1635,11 +1635,13 @@ defmodule Cympho.Recovery do
                     {:ok, current_issue} <- Issues.get_issue(current.issue_id),
                     true <- current_source_matches?(lease.case, current, current_issue),
                     false <- source_live?(current.issue_id) do
+                 effective_kind = effective_run_recovery_kind(kind, current.status)
+
                  callback_result =
                    HeartbeatEngine.recover_run_if_current(
                      current,
-                     run_source_guard(lease.case, kind),
-                     kind,
+                     run_source_guard(lease.case, effective_kind),
+                     effective_kind,
                      now: option_now(opts)
                    )
 
@@ -1676,13 +1678,12 @@ defmodule Cympho.Recovery do
        ) do
     {current_fp, snapshot} = Fingerprint.for_run(run, issue)
 
-    complete_v2_snapshot?(case_row, "liveness_at") and
+    exact_v2_snapshot?(case_row, snapshot, heartbeat_snapshot_keys()) and
       case_row.company_id == issue.company_id and case_row.company_id == run.company_id and
       case_row.issue_id == issue.id and case_row.issue_id == run.issue_id and
       case_row.source_id == run.id and case_row.source_run_id == run.id and
       case_row.agent_id == run.agent_id and case_row.source_status == to_string(run.status) and
       to_string(run.status) not in @terminal_run_statuses and
-      case_row.source_snapshot["liveness_at"] == snapshot["liveness_at"] and
       case_row.source_fingerprint == current_fp
   end
 
@@ -1693,25 +1694,29 @@ defmodule Cympho.Recovery do
        ) do
     {current_fp, snapshot} = Fingerprint.for_issue_checkout(issue)
 
-    complete_v2_snapshot?(case_row, "checkout_liveness_at") and
+    exact_v2_snapshot?(case_row, snapshot, issue_checkout_snapshot_keys()) and
       case_row.company_id == issue.company_id and case_row.issue_id == issue.id and
       case_row.source_id == issue.id and case_row.agent_id == issue.assignee_id and
       case_row.source_run_id == issue.checkout_run_id and
       case_row.source_status == to_string(issue.status) and
       issue.status in [:in_progress, "in_progress"] and
-      case_row.source_snapshot["checkout_liveness_at"] == snapshot["checkout_liveness_at"] and
       case_row.source_fingerprint == current_fp
   end
 
   defp current_source_matches?(_, _, _), do: false
 
-  defp complete_v2_snapshot?(%RecoveryCase{} = case_row, liveness_key) do
-    is_map(case_row.source_snapshot) and
-      case_row.fingerprint_version == Fingerprint.version() and
-      case_row.source_snapshot["version"] == Fingerprint.version() and
-      is_binary(case_row.source_snapshot[liveness_key]) and
-      case_row.source_snapshot[liveness_key] != ""
+  defp exact_v2_snapshot?(%RecoveryCase{} = case_row, current_snapshot, keys) do
+    persisted = case_row.source_snapshot
+
+    is_map(persisted) and case_row.fingerprint_version == Fingerprint.version() and
+      map_size(persisted) == length(keys) and
+      Enum.all?(keys, fn key ->
+        Map.has_key?(persisted, key) and Map.get(persisted, key) == Map.get(current_snapshot, key)
+      end)
   end
+
+  defp effective_run_recovery_kind(:orphaned, "running"), do: :stale
+  defp effective_run_recovery_kind(kind, _status), do: kind
 
   defp run_source_guard(%RecoveryCase{} = case_row, kind) do
     %{

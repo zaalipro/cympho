@@ -24,6 +24,18 @@ defmodule Cympho.Recovery.FingerprintTest do
     assert first_snapshot["version"] == 2
     assert first_snapshot["issue_id"] == issue.id
     assert first_snapshot["checkout_liveness_at"] == DateTime.to_iso8601(issue.updated_at)
+
+    checked_out_at = ~U[2026-07-01 10:00:00Z]
+    later_update = ~U[2026-07-01 11:00:00Z]
+
+    {_hash, checkout_snapshot} =
+      Fingerprint.for_issue_checkout(%{
+        issue
+        | checked_out_at: checked_out_at,
+          updated_at: later_update
+      })
+
+    assert checkout_snapshot["checkout_liveness_at"] == DateTime.to_iso8601(checked_out_at)
   end
 
   test "run fingerprint changes with durable source state and excludes prompt metadata" do
@@ -70,5 +82,28 @@ defmodule Cympho.Recovery.FingerprintTest do
 
     refute fresh_fingerprint == old_fingerprint
     assert fresh_snapshot["liveness_at"] == DateTime.to_iso8601(fresh.last_heartbeat_at)
+  end
+
+  test "pending and queued run fingerprints use insertion time for liveness" do
+    inserted_at = ~U[2026-07-02 10:00:00Z]
+    heartbeat_at = ~U[2026-07-02 11:00:00Z]
+
+    for status <- ["pending", "queued"] do
+      {_hash, snapshot} =
+        Fingerprint.for_run(
+          %{
+            id: Ecto.UUID.generate(),
+            company_id: Ecto.UUID.generate(),
+            issue_id: Ecto.UUID.generate(),
+            agent_id: Ecto.UUID.generate(),
+            status: status,
+            inserted_at: inserted_at,
+            last_heartbeat_at: heartbeat_at
+          },
+          %{id: Ecto.UUID.generate(), status: :backlog, lock_version: 0}
+        )
+
+      assert snapshot["liveness_at"] == DateTime.to_iso8601(inserted_at)
+    end
   end
 end

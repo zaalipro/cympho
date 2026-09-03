@@ -545,6 +545,40 @@ defmodule Cympho.RecoveryAdapterTest do
            )
   end
 
+  test "direct recovery fails closed when a v2 run snapshot is incomplete" do
+    {company, agent, issue} = recovery_source("run-incomplete-v2")
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+    stale_at = DateTime.add(DateTime.utc_now(), -20, :minute) |> DateTime.truncate(:second)
+
+    Repo.update_all(from(r in Run, where: r.id == ^started.id),
+      set: [last_heartbeat_at: stale_at]
+    )
+
+    stale = Repo.get!(Run, started.id)
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{source_type: "heartbeat_run", issue: issue, run: stale})
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id),
+      set: [source_snapshot: Map.delete(case_row.source_snapshot, "issue_status")]
+    )
+
+    assert {:ok, %{outcome: :superseded, case: superseded}} =
+             Recovery.recover_stale_run(stale, now: DateTime.utc_now())
+
+    assert superseded.state == "superseded"
+    assert Repo.get!(Run, run.id).status == "running"
+  end
+
   test "the final run CAS refuses a newly live orchestrator" do
     {company, agent, issue} = recovery_source("run-live-race")
 
@@ -607,6 +641,95 @@ defmodule Cympho.RecoveryAdapterTest do
              )
 
     assert Repo.get!(Run, run.id).status == "running"
+  end
+
+  test "the public final run CAS rejects complete guards with mismatched kind and status" do
+    {company, agent, issue} = recovery_source("run-kind-status")
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    stale_at = DateTime.add(now, -20, :minute)
+
+    assert {:ok, pending} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    Repo.update_all(from(r in Run, where: r.id == ^pending.id),
+      set: [inserted_at: stale_at, updated_at: stale_at]
+    )
+
+    pending = Repo.get!(Run, pending.id)
+
+    assert {:ok, pending_case} =
+             Recovery.ensure_case(%{source_type: "heartbeat_run", issue: issue, run: pending})
+
+    assert {:error, :superseded} =
+             HeartbeatEngine.recover_run_if_current(
+               pending,
+               run_guard(pending_case, :stale),
+               :stale,
+               now: now
+             )
+
+    assert Repo.get!(Run, pending.id).status == "pending"
+
+    assert {:ok, running} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, running} = HeartbeatEngine.start_run(running)
+
+    Repo.update_all(from(r in Run, where: r.id == ^running.id),
+      set: [last_heartbeat_at: stale_at]
+    )
+
+    running = Repo.get!(Run, running.id)
+
+    assert {:ok, running_case} =
+             Recovery.ensure_case(%{source_type: "heartbeat_run", issue: issue, run: running})
+
+    assert {:error, :superseded} =
+             HeartbeatEngine.recover_run_if_current(
+               running,
+               run_guard(running_case, :orphaned),
+               :orphaned,
+               now: now
+             )
+
+    assert Repo.get!(Run, running.id).status == "running"
+  end
+
+  test "orphan recovery routes a running source through stale recovery" do
+    {company, agent, issue} = recovery_source("running-orphan-kind")
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    Repo.update_all(from(r in Run, where: r.id == ^started.id),
+      set: [last_heartbeat_at: DateTime.add(now, -20, :minute)]
+    )
+
+    stale = Repo.get!(Run, started.id)
+
+    assert {:ok, %{outcome: :recovered, run: recovered}} =
+             Recovery.recover_orphaned_run(stale, now: now)
+
+    assert recovered.status == "failed"
+    assert recovered.error_reason == "stale_run_recovered"
   end
 
   test "a successor checkout is never cleared by an old issue snapshot" do
@@ -827,6 +950,55 @@ defmodule Cympho.RecoveryDueTest do
 
     assert Repo.get!(Issue, issue.id).status == :in_progress
     assert Repo.get!(RecoveryCase, case_row.id).state == "superseded"
+    refute Repo.get_by(BoardApproval, recovery_case_id: case_row.id)
+  end
+
+  test "process_due fails closed for version 1 and wrong v2 checkout snapshots" do
+    for variant <- [:version_1, :wrong_v2] do
+      {_company, _agent, issue} = due_source("snapshot-#{variant}")
+
+      assert {:ok, case_row} =
+               Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+
+      {fingerprint_version, snapshot} =
+        case variant do
+          :version_1 ->
+            {1, Map.put(case_row.source_snapshot, "version", 1)}
+
+          :wrong_v2 ->
+            {2, Map.put(case_row.source_snapshot, "issue_status", "blocked")}
+        end
+
+      Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id),
+        set: [fingerprint_version: fingerprint_version, source_snapshot: snapshot]
+      )
+
+      assert %{superseded: 1, recovered: 0, failed: 0} =
+               Recovery.process_due(now: DateTime.utc_now(), limit: 1)
+
+      assert Repo.get!(Issue, issue.id).status == :in_progress
+      assert Repo.get!(RecoveryCase, case_row.id).state == "superseded"
+      refute Repo.get_by(BoardApproval, recovery_case_id: case_row.id)
+    end
+  end
+
+  test "exhaustion fails closed when a v2 checkout snapshot is incomplete" do
+    {_company, _agent, issue} = due_source("exhaustion-incomplete-v2")
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id),
+      set: [
+        state: "exhausted",
+        source_snapshot: Map.delete(case_row.source_snapshot, "lock_version")
+      ]
+    )
+
+    exhausted = Repo.get!(RecoveryCase, case_row.id)
+    assert {:ok, superseded} = Recovery.exhaust_case(exhausted, now: DateTime.utc_now())
+    assert superseded.state == "superseded"
+    assert Repo.get!(Issue, issue.id).status == :in_progress
     refute Repo.get_by(BoardApproval, recovery_case_id: case_row.id)
   end
 

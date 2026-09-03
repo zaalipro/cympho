@@ -773,7 +773,8 @@ defmodule Cympho.HeartbeatEngine do
   defp recovery_guard_matches?(guard, %Run{} = run, %Issue{} = issue, kind) do
     {fingerprint, snapshot} = Fingerprint.for_run(run, issue)
 
-    run.status in @active_run_statuses and Map.get(guard, :source_type) == "heartbeat_run" and
+    valid_recovery_kind_status?(kind, run.status) and
+      Map.get(guard, :source_type) == "heartbeat_run" and
       Map.get(guard, :recovery_kind) == kind and
       Map.get(guard, :company_id) == issue.company_id and
       Map.get(guard, :company_id) == run.company_id and Map.get(guard, :issue_id) == issue.id and
@@ -783,6 +784,13 @@ defmodule Cympho.HeartbeatEngine do
       Map.get(guard, :source_fingerprint) == fingerprint and
       Map.get(guard, :liveness_at) == snapshot["liveness_at"]
   end
+
+  defp valid_recovery_kind_status?(:stale, "running"), do: true
+
+  defp valid_recovery_kind_status?(:orphaned, status) when status in ["pending", "queued"],
+    do: true
+
+  defp valid_recovery_kind_status?(_kind, _status), do: false
 
   defp recovery_source_stale?(%Run{} = run, %DateTime{} = now) do
     liveness_at =
