@@ -682,7 +682,11 @@ defmodule Cympho.RecoveryAdapterTest do
     with_mock HeartbeatEngine, [:passthrough],
       recover_run_if_current: fn _run, _guard, _kind, _opts -> {:error, :temporary} end do
       assert {:ok, %{outcome: :scheduled, case: first}} =
-               Recovery.recover_stale_run(stale, now: now, recovery_opts: @policy)
+               Recovery.recover_stale_run(stale,
+                 now: now,
+                 now: now,
+                 recovery_opts: @policy
+               )
 
       assert first.policy_snapshot == @policy_snapshot
       assert first.next_attempt_at == DateTime.add(now, 7, :second)
@@ -758,6 +762,46 @@ defmodule Cympho.RecoveryAdapterTest do
                where: c.company_id == ^company.id
              )
            )
+  end
+
+  test "run and checkout adapters reject repeated recovery option containers before insert" do
+    {run_company, agent, issue} = recovery_source("repeated-run-policy")
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: run_company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:error, :invalid_policy} =
+             Recovery.recover_stale_run(run,
+               recovery_opts: @policy,
+               recovery_opts: Keyword.put(@policy, :base_delay, 8)
+             )
+
+    {checkout_company, checkout_agent, checkout_issue} =
+      recovery_source("repeated-checkout-policy")
+
+    assert {:ok, checked_out} = Issues.checkout_issue(checkout_issue, checkout_agent)
+
+    assert {:error, :invalid_policy} =
+             Recovery.recover_orphaned_issue(checked_out,
+               recovery_opts: @policy,
+               recovery_opts: @policy
+             )
+
+    for company_id <- [run_company.id, checkout_company.id] do
+      refute Repo.exists?(from(c in RecoveryCase, where: c.company_id == ^company_id))
+
+      refute Repo.exists?(
+               from(a in RecoveryAttempt,
+                 join: c in assoc(a, :recovery_case),
+                 where: c.company_id == ^company_id
+               )
+             )
+    end
   end
 
   test "approved retry child inherits its parent's complete policy snapshot" do

@@ -2330,10 +2330,12 @@ defmodule Cympho.Recovery do
     outer = Keyword.delete(opts, :recovery_opts)
 
     nested =
-      case Keyword.fetch(opts, :recovery_opts) do
-        :error -> []
-        {:ok, value} when is_list(value) -> value
-        {:ok, _value} -> :invalid
+      case Keyword.get_values(opts, :recovery_opts) do
+        [] -> []
+        [value] when is_list(value) -> value
+        # Multiple nested containers have no unambiguous precedence, even
+        # when their current values happen to match.
+        [_ | _] -> :invalid
       end
 
     cond do
