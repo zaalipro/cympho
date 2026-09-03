@@ -24,24 +24,55 @@ queue.
 
 The Dispatcher and Heartbeat Watchdog persist recovery for two source types:
 `heartbeat_run` (a stale or orphaned heartbeat run) and `issue_checkout` (a
-checked-out issue with no live owner). Each case records a versioned,
-redacted source fingerprint and snapshot, company/issue scope, parent/root
-lineage, attempt rows, a lease, and a bounded retry deadline. The active-source
-uniqueness fence and claim token make concurrent scans idempotent. Source or
-tenant mismatches fail closed and supersede the case without changing the
-issue or run; recovery payloads and errors are bounded and redacted rather
-than copies of prompts, credentials, or provider logs.
+checked-out issue with no live owner). Each case records a versioned, redacted
+source fingerprint and snapshot, company/issue scope, parent/root lineage, a
+lease, and a bounded retry deadline. Fingerprint version 2 adds only the
+source's bounded durable liveness timestamp as a CAS token: a running run's
+`last_heartbeat_at` (falling back to `inserted_at`), a pending/queued run's
+`inserted_at`, or a checkout's `checked_out_at` (falling back to `updated_at`).
+No prompt, credential, provider log, arbitrary metadata, or other timestamp is
+part of that addition.
+
+Direct, due, and exhaustion paths lock and re-read the durable source before a
+destructive change. They require an exact match across company, issue, source
+type and ID, run, agent, active status, fingerprint/liveness token, and the
+applicable final freshness cutoff; a live owner or fresh successor also wins.
+Any stale, incomplete, cross-tenant, or mismatched case is superseded without
+changing the issue or run. Each due row is selected and reserved in one short
+`FOR UPDATE SKIP LOCKED LIMIT 1` transaction. The claim/attempt write commits
+before its callback runs, so concurrent nodes reserve different rows without
+holding database locks across source mutation.
 
 The default policy is one immediate attempt followed by two bounded retries
-(three attempts total, with 60- and 120-second backoff). When the cap is
-exhausted, the non-terminal issue is set to **Blocked** and one auditable board
-approval with category `stranded_work_recovery` is created. Automatic recovery
-does not wake or dispatch exhausted work. An owner must review the approval in
-the board/Owner Decisions queue and choose the explicit **Retry** action. An
-approved retry verifies the company, issue status, source fingerprint, and
-lineage, resolves the exhausted case, reopens the still-matching issue to
-`todo`, and creates a child scheduled case. Denial, expiry, or cancellation
-resolves the approval/case but intentionally leaves the issue blocked.
+(three attempts total, with 60- and 120-second backoff). All four effective
+values — maximum attempts, base delay, maximum delay, and lease seconds — are
+validated and persisted once. The snapshot is immutable for the active
+lineage, later conflicting overrides fail closed, and retry children inherit
+the complete policy. Durable attempt rows are append-only with stable ordinals.
+A deferred claim is closed as skipped and returns its provisional retry-budget
+slot, so audit history remains distinct from the retained budget count used for
+exhaustion and backoff.
+
+When the cap is exhausted, the non-terminal issue is set to **Blocked** and one
+auditable board approval with category `stranded_work_recovery` is created.
+Automatic recovery does not wake or dispatch exhausted work. An owner must
+review the approval in the board/Owner Decisions queue and choose the explicit
+**Retry** action. An approved retry verifies the company, issue status, source
+fingerprint, and lineage, resolves the exhausted case, reopens the
+still-matching issue to `todo`, and creates a child scheduled case. Denial,
+expiry, or cancellation locks case → approval → issue and commits the linked
+case and governance outcome in one transaction while leaving the issue
+blocked. Audit, company/recovery events, PubSub, and OwnerAttention publication
+happen best-effort after commit; there is no durable notification outbox.
+
+Dispatcher crash cleanup snapshots and recovers the exact pre-crash run first,
+then considers an unbound checkout. A durably stale run cohort can be recovered
+together, but a fresh or live successor defers cleanup without consuming the
+returned retry-budget slot. Successful run recovery performs conservative
+checkout follow-up before its case is closed, and a newly bound successor makes
+that checkout CAS lose. The Operations recovery aggregate removes orphan run
+IDs from its waiting-run set so an overlapping pending/queued run is counted
+and routed through Recovery only once.
 
 ### Operator procedure
 
@@ -68,11 +99,12 @@ resolves the approval/case but intentionally leaves the issue blocked.
    separately justified decision. Never bypass the company scope or mutate
    recovery tables directly in production.
 
-This recovery foundation is durable across the persisted case/attempt records,
-but it is not a claim of Paperclip parity, low-resource performance, or
-crash/restart guarantees. In particular, downstream dispatch/wake retry
-lineage and broad restart evidence remain open; the procedure above is the
-documented, fail-closed escalation path while that work is pending.
+This recovery safety pass is durable across the persisted case/attempt records,
+but ordinary dispatch-failure and wake-delivery lineage remains open. It also
+does not provide cluster-wide owner fencing, durable PubSub/outbox delivery,
+measured low-resource RAM/CPU/VPS evidence, managed workspace-service adoption,
+or full/latest Paperclip parity. The procedure above is the documented,
+fail-closed escalation path while those residuals remain open.
 
 ## BEAM dashboard
 
