@@ -399,6 +399,33 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
     refute_receive {:owner_attention_changed, ^company_id}, 50
   end
 
+  test "a decomposed Unicode resolution reason is truncated to 1000 database characters", %{
+    company: company,
+    agent: agent
+  } do
+    issue = issue!(company, agent, "Unicode recovery denial")
+    case_row = exhausted_case!(issue, max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(case_row, reason: "provider timeout")
+    decomposed_reason = String.duplicate("e\u0301", 1_000)
+
+    assert {:ok, %BoardApproval{status: "denied"}} =
+             BoardApprovals.resolve_board_approval(
+               approval.id,
+               "denied",
+               %{decision_reasoning: decomposed_reason},
+               {"system", company.id}
+             )
+
+    resolved = Repo.get!(RecoveryCase, case_row.id)
+    assert length(String.codepoints(resolved.resolution_note)) == 1_000
+
+    assert %Postgrex.Result{rows: [[1_000]]} =
+             Repo.query!(
+               "SELECT char_length(resolution_note) FROM recovery_cases WHERE id = $1",
+               [Ecto.UUID.dump!(case_row.id)]
+             )
+  end
+
   test "cancellation commits the approval and resolved case before publishing", %{
     company: company,
     agent: agent
@@ -429,12 +456,64 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
   end
 
   test "recovery resolution notes are bounded by the case schema" do
+    decomposed_note = String.duplicate("e\u0301", 501)
+
     changeset =
       RecoveryCase.changeset(%RecoveryCase{}, %{
-        resolution_note: String.duplicate("x", 1_001)
+        resolution_note: decomposed_note
       })
 
     assert "should be at most 1000 character(s)" in errors_on(changeset).resolution_note
+  end
+
+  test "repeated executor delivery does not duplicate terminal governance audits", %{
+    company: company,
+    agent: agent
+  } do
+    issue = issue!(company, agent, "Terminal audit dedupe")
+    case_row = exhausted_case!(issue, max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(case_row, reason: "provider timeout")
+
+    assert {:ok, denied} =
+             BoardApprovals.resolve_board_approval(
+               approval.id,
+               "denied",
+               %{decision_reasoning: "leave paused"},
+               {"system", company.id}
+             )
+
+    state = %{initial_recovery?: false}
+
+    for _ <- 1..3 do
+      assert {:noreply, ^state} =
+               Cympho.BoardApprovals.BoardApprovalActionExecutor.handle_info(
+                 {:board_approval_resolved, denied},
+                 state
+               )
+    end
+
+    normal_audits =
+      Repo.aggregate(
+        from(log in Cympho.GovernanceAuditLogs.GovernanceAuditLog,
+          where:
+            log.action_type == "board_decision" and log.resource_type == "boardapproval" and
+              log.resource_id == ^approval.id
+        ),
+        :count
+      )
+
+    recovery_audits =
+      Repo.aggregate(
+        from(log in Cympho.GovernanceAuditLogs.GovernanceAuditLog,
+          where:
+            log.action_type == "recovery_resolved" and
+              log.resource_type == "boardapproval" and log.resource_id == ^approval.id
+        ),
+        :count
+      )
+
+    assert normal_audits == 1
+    assert recovery_audits == 1
   end
 
   test "a cross-tenant recovery link rolls the public denial transaction back", %{

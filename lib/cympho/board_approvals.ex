@@ -414,7 +414,7 @@ defmodule Cympho.BoardApprovals do
 
     transaction_result =
       Repo.transaction(fn ->
-        board_approval = lock_pending_board_approval!(board_approval_id)
+        board_approval = lock_pending_board_approval_for_transition!(board_approval_id)
 
         vote_record =
           %BoardApprovalVote{}
@@ -479,7 +479,7 @@ defmodule Cympho.BoardApprovals do
   def resolve_board_approval(board_approval_id, status, attrs, actor) do
     transaction_result =
       Repo.transaction(fn ->
-        board_approval = lock_pending_board_approval!(board_approval_id)
+        board_approval = lock_pending_board_approval_for_transition!(board_approval_id)
 
         if status == "approved" and BoardApproval.expired?(board_approval) do
           {:ok, expired} =
@@ -538,7 +538,7 @@ defmodule Cympho.BoardApprovals do
     transaction_result =
       Repo.transaction(fn ->
         board_approval_id
-        |> lock_pending_board_approval!()
+        |> lock_pending_board_approval_for_transition!()
         |> Ecto.Changeset.change(%{status: "cancelled"})
         |> Repo.update()
         |> case do
@@ -606,13 +606,9 @@ defmodule Cympho.BoardApprovals do
     expired =
       Enum.flat_map(ids, fn id ->
         case Repo.transaction(fn ->
-               approval =
-                 BoardApproval
-                 |> where([ba], ba.id == ^id)
-                 |> lock("FOR UPDATE")
-                 |> Repo.one()
+               approval = lock_pending_board_approval_for_transition!(id)
 
-               if approval && approval.status == "pending" && approval.review_deadline &&
+               if approval.review_deadline &&
                     DateTime.compare(approval.review_deadline, now) != :gt do
                  {:ok, updated} =
                    approval
@@ -974,6 +970,35 @@ defmodule Cympho.BoardApprovals do
       board_approval
     else
       Repo.rollback(:not_pending)
+    end
+  end
+
+  defp lock_pending_board_approval_for_transition!(board_approval_id) do
+    case Repo.get(BoardApproval, board_approval_id) do
+      %BoardApproval{
+        category: "stranded_work_recovery",
+        recovery_case_id: recovery_case_id
+      } = locator
+      when is_binary(recovery_case_id) ->
+        _ =
+          Repo.one(
+            from case_row in RecoveryCase,
+              where: case_row.id == ^recovery_case_id,
+              lock: "FOR UPDATE"
+          )
+
+        locked = lock_pending_board_approval!(board_approval_id)
+
+        if locked.category == locator.category and
+             locked.recovery_case_id == recovery_case_id and
+             locked.company_id == locator.company_id do
+          locked
+        else
+          Repo.rollback(:approval_changed)
+        end
+
+      _non_recovery_or_malformed ->
+        lock_pending_board_approval!(board_approval_id)
     end
   end
 

@@ -85,14 +85,12 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     {:noreply, state}
   end
 
-  def handle_info({:board_approval_resolved, %{status: status} = approval}, state)
+  def handle_info({:board_approval_resolved, %{status: status}}, state)
       when status in ["denied", "expired"] do
-    audit_non_executed(approval, status)
     {:noreply, state}
   end
 
-  def handle_info({:board_approval_cancelled, approval}, state) do
-    audit_non_executed(approval, "cancelled")
+  def handle_info({:board_approval_cancelled, _approval}, state) do
     {:noreply, state}
   end
 
@@ -327,20 +325,6 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     else
       {:error, :invalid_proposal_data}
     end
-  end
-
-  defp audit_non_executed(approval, status) do
-    GovernanceAuditLogs.log_action(
-      "board_decision",
-      {"system", approval.company_id},
-      "Board approval #{status}, action not executed: #{approval.title}",
-      resource: approval,
-      metadata: %{
-        board_approval_id: approval.id,
-        category: approval.category,
-        status: status
-      }
-    )
   end
 
   # Safe atom conversion - returns error tuple instead of crashing

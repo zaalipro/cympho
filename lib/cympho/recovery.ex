@@ -38,18 +38,18 @@ defmodule Cympho.Recovery do
           {:error, :invalid_policy} -> Repo.rollback(:invalid_policy)
         end
 
-        issue =
-          case Repo.one(from i in Issue, where: i.id == ^locked.issue_id, lock: "FOR UPDATE") do
-            %Issue{} = row -> row
-            nil -> Repo.rollback(:not_found)
-          end
-
         existing_approval =
           Repo.one(
             from a in BoardApproval,
               where: a.recovery_case_id == ^locked.id,
               lock: "FOR UPDATE"
           )
+
+        issue =
+          case Repo.one(from i in Issue, where: i.id == ^locked.issue_id, lock: "FOR UPDATE") do
+            %Issue{} = row -> row
+            nil -> Repo.rollback(:not_found)
+          end
 
         cond do
           not approval_scope_matches?(existing_approval, locked) ->
@@ -305,6 +305,7 @@ defmodule Cympho.Recovery do
             next_attempt_at: nil
           })
           |> Ecto.Changeset.validate_length(:resolution_note,
+            count: :codepoints,
             max: RecoveryCase.resolution_note_max_length()
           )
           |> Ecto.Changeset.check_constraint(:resolution_note,
@@ -374,19 +375,48 @@ defmodule Cympho.Recovery do
   def handle_approval_resolution(%BoardApproval{id: approval_id}) when is_binary(approval_id) do
     result =
       Repo.transaction(fn ->
-        case Repo.one(
-               from a in BoardApproval,
-                 where: a.id == ^approval_id,
-                 lock: "FOR UPDATE"
-             ) do
+        case Repo.get(BoardApproval, approval_id) do
           %BoardApproval{
             category: "stranded_work_recovery",
-            status: status
-          } = persisted
-          when status in @terminal_recovery_approval_statuses ->
-            case resolve_approval_case_locked(persisted, persisted.decision_reasoning) do
-              {:error, reason} -> Repo.rollback(reason)
-              effect -> effect
+            status: status,
+            recovery_case_id: recovery_case_id
+          }
+          when status in @terminal_recovery_approval_statuses and
+                 is_binary(recovery_case_id) ->
+            _ = lock_linked_recovery_case(recovery_case_id)
+
+            persisted =
+              Repo.one(
+                from a in BoardApproval,
+                  where: a.id == ^approval_id,
+                  lock: "FOR UPDATE"
+              )
+
+            case persisted do
+              %BoardApproval{
+                category: "stranded_work_recovery",
+                status: locked_status,
+                recovery_case_id: ^recovery_case_id
+              }
+              when locked_status in @terminal_recovery_approval_statuses ->
+                case resolve_approval_case_locked(persisted, persisted.decision_reasoning) do
+                  {:error, reason} -> Repo.rollback(reason)
+                  effect -> effect
+                end
+
+              %BoardApproval{status: locked_status}
+              when locked_status not in @terminal_recovery_approval_statuses ->
+                :unchanged
+
+              %BoardApproval{} ->
+                rollback_resolution_scope(
+                  persisted,
+                  :recovery_case_id,
+                  "changed while locking the approval"
+                )
+
+              nil ->
+                :unchanged
             end
 
           _ ->
@@ -471,12 +501,23 @@ defmodule Cympho.Recovery do
      |> Ecto.Changeset.add_error(field, message)}
   end
 
+  defp rollback_resolution_scope(%BoardApproval{} = approval, field, message) do
+    {:error, changeset} = resolution_scope_error(approval, field, message)
+    Repo.rollback(changeset)
+  end
+
   defp bounded_resolution_note(nil), do: nil
 
   defp bounded_resolution_note(reason) when is_binary(reason) do
     case String.trim(reason) do
-      "" -> nil
-      note -> String.slice(note, 0, RecoveryCase.resolution_note_max_length())
+      "" ->
+        nil
+
+      note ->
+        note
+        |> String.codepoints()
+        |> Enum.take(RecoveryCase.resolution_note_max_length())
+        |> Enum.join()
     end
   end
 
@@ -492,9 +533,20 @@ defmodule Cympho.Recovery do
 
     result =
       Repo.transaction(fn ->
-        # The caller struct is only an address.  Never trust status/category,
-        # company, linkage, or proposal fields from an unsaved/forged struct;
-        # the locked database row is the authority.
+        # The caller struct is only an address. Read the persisted approval
+        # without a lock to locate its case, then acquire the canonical
+        # case -> approval -> issue lock order and revalidate the locked row.
+        locator = Repo.get(BoardApproval, approval_id)
+
+        case_id =
+          case locator do
+            %BoardApproval{recovery_case_id: id} when is_binary(id) -> id
+            _ -> Repo.rollback(:stale_recovery_proposal)
+          end
+
+        case_row =
+          Repo.one(from c in RecoveryCase, where: c.id == ^case_id, lock: "FOR UPDATE")
+
         persisted =
           Repo.one(
             from a in BoardApproval,
@@ -502,11 +554,10 @@ defmodule Cympho.Recovery do
               lock: "FOR UPDATE"
           )
 
-        with %BoardApproval{} = persisted <- persisted,
+        with %RecoveryCase{} = case_row <- case_row,
+             %BoardApproval{recovery_case_id: ^case_id} = persisted <- persisted,
              :ok <- valid_persisted_retry_approval(persisted, now),
-             {:ok, case_id, data} <- persisted_retry_payload(persisted),
-             %RecoveryCase{} = case_row <-
-               Repo.one(from c in RecoveryCase, where: c.id == ^case_id, lock: "FOR UPDATE"),
+             {:ok, ^case_id, data} <- persisted_retry_payload(persisted),
              :ok <- valid_case_linkage(persisted, case_row, data),
              %Issue{} = issue <-
                Repo.one(from i in Issue, where: i.id == ^case_row.issue_id, lock: "FOR UPDATE"),

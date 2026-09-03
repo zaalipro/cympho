@@ -102,7 +102,10 @@ defmodule Cympho.Recovery.RecoveryCase do
     |> validate_length(:source_fingerprint, is: 64)
     |> validate_format(:source_fingerprint, ~r/\A[0-9a-f]{64}\z/)
     |> validate_length(:source_id, max: 255)
-    |> validate_length(:resolution_note, max: @resolution_note_max_length)
+    |> validate_length(:resolution_note,
+      count: :codepoints,
+      max: @resolution_note_max_length
+    )
     |> validate_snapshot(:source_snapshot, 16_384)
     |> validate_snapshot(:policy_snapshot, 4_096)
     |> foreign_key_constraint(:company_id)
