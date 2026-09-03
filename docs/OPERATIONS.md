@@ -20,6 +20,60 @@ Development enables autonomous dispatch only when
 `CYMPHO_DISPATCH_ONLY_ISSUE_ID` for a one-issue smoke before opening the full
 queue.
 
+## Durable stranded-work recovery and escalation
+
+The Dispatcher and Heartbeat Watchdog persist recovery for two source types:
+`heartbeat_run` (a stale or orphaned heartbeat run) and `issue_checkout` (a
+checked-out issue with no live owner). Each case records a versioned,
+redacted source fingerprint and snapshot, company/issue scope, parent/root
+lineage, attempt rows, a lease, and a bounded retry deadline. The active-source
+uniqueness fence and claim token make concurrent scans idempotent. Source or
+tenant mismatches fail closed and supersede the case without changing the
+issue or run; recovery payloads and errors are bounded and redacted rather
+than copies of prompts, credentials, or provider logs.
+
+The default policy is one immediate attempt followed by two bounded retries
+(three attempts total, with 60- and 120-second backoff). When the cap is
+exhausted, the non-terminal issue is set to **Blocked** and one auditable board
+approval with category `stranded_work_recovery` is created. Automatic recovery
+does not wake or dispatch exhausted work. An owner must review the approval in
+the board/Owner Decisions queue and choose the explicit **Retry** action. An
+approved retry verifies the company, issue status, source fingerprint, and
+lineage, resolves the exhausted case, reopens the still-matching issue to
+`todo`, and creates a child scheduled case. Denial, expiry, or cancellation
+resolves the approval/case but intentionally leaves the issue blocked.
+
+### Operator procedure
+
+1. Open the company-scoped Owner Decisions/board approvals queue and locate the
+   `stranded_work_recovery` item. Confirm the issue, agent, source type,
+   attempt count/max, last bounded error, and the case's source snapshot; do
+   not paste secrets or raw provider output into the approval.
+2. Check instance health before retrying: run `mix cympho.doctor` from the
+   release checkout, inspect readiness/database status, and use the separately
+   authenticated `/beam` dashboard plus host tools for node pressure and child
+   process state. Keep the issue blocked while investigating.
+3. If the source is still valid and the underlying failure is understood,
+   approve **Retry** once. Verify that the old case is resolved, a child case
+   is scheduled, the issue is `todo`, and a new attempt/run is visible. If the
+   source changed, the issue is terminal, or tenant ownership is uncertain,
+   do not retry; deny or cancel the approval instead.
+4. If the retry does not reach dispatch or wake the agent, treat that as the
+   known dispatch/wake-lineage residual: preserve the blocked state, capture
+   the case/attempt IDs and bounded timestamps, and investigate Dispatcher,
+   Watchdog, adapter, and host logs before taking any further action. Do not
+   create ad-hoc duplicate recovery rows or manually signal a provider process.
+5. For denial, expiry, or cancellation, record the human reason in the normal
+   governance workflow and leave the issue blocked until an owner makes a new,
+   separately justified decision. Never bypass the company scope or mutate
+   recovery tables directly in production.
+
+This recovery foundation is durable across the persisted case/attempt records,
+but it is not a claim of Paperclip parity, low-resource performance, or
+crash/restart guarantees. In particular, downstream dispatch/wake retry
+lineage and broad restart evidence remain open; the procedure above is the
+documented, fail-closed escalation path while that work is pending.
+
 ## BEAM dashboard
 
 `/beam` exposes live process, memory, ETS, socket, request-log, and metric
