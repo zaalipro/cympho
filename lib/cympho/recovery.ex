@@ -722,7 +722,7 @@ defmodule Cympho.Recovery do
          requested <- normalize_policy_snapshot(attrs.policy_snapshot),
          true <- map_size(requested) == length(@policy_option_keys),
          {:ok, requested_policy} <- normalize_policy(requested) do
-      existing_policy.snapshot == requested_policy.snapshot
+      existing_policy.snapshot === requested_policy.snapshot
     else
       _ -> false
     end
@@ -1192,7 +1192,8 @@ defmodule Cympho.Recovery do
 
   @spec record_failure(map(), term(), keyword()) :: {:ok, RecoveryCase.t()} | {:error, atom()}
   def record_failure(lease, reason, opts \\ []) do
-    with now <- option_now(opts),
+    with :ok <- validate_supplied_policy_options(opts),
+         now <- option_now(opts),
          {:ok, id, token, attempt} <- lease_parts(lease) do
       Repo.transaction(fn ->
         case Repo.one(
@@ -2347,7 +2348,7 @@ defmodule Cympho.Recovery do
         nested_values = Keyword.get_values(nested, key)
 
         outer_values != [] and nested_values != [] and
-            List.first(outer_values) != List.first(nested_values)
+            not (List.first(outer_values) === List.first(nested_values))
       end) ->
         {:error, :invalid_policy}
 
@@ -2386,12 +2387,25 @@ defmodule Cympho.Recovery do
 
   defp normalize_policy(opts) when is_list(opts) do
     with {:ok, max_attempts} <-
-           duplicate_safe_value(Keyword.get_values(opts, :max_attempts), @max_policy_attempts),
-         {:ok, base_delay} <- duplicate_safe_value(Keyword.get_values(opts, :base_delay), 60),
+           duplicate_safe_value(
+             Keyword.get_values(opts, :max_attempts),
+             :max_attempts,
+             @max_policy_attempts
+           ),
+         {:ok, base_delay} <-
+           duplicate_safe_value(Keyword.get_values(opts, :base_delay), :base_delay, 60),
          {:ok, max_delay} <-
-           duplicate_safe_value(Keyword.get_values(opts, :max_delay), @max_policy_delay_seconds),
+           duplicate_safe_value(
+             Keyword.get_values(opts, :max_delay),
+             :max_delay,
+             @max_policy_delay_seconds
+           ),
          {:ok, lease_seconds} <-
-           duplicate_safe_value(Keyword.get_values(opts, :lease_seconds), @lease_seconds) do
+           duplicate_safe_value(
+             Keyword.get_values(opts, :lease_seconds),
+             :lease_seconds,
+             @lease_seconds
+           ) do
       normalize_policy_values(max_attempts, base_delay, max_delay, lease_seconds)
     end
   end
@@ -2439,7 +2453,7 @@ defmodule Cympho.Recovery do
 
   defp duplicate_policy_values_valid?(opts) do
     Enum.all?(@policy_option_keys, fn key ->
-      case duplicate_safe_value(Keyword.get_values(opts, key), nil) do
+      case duplicate_safe_value(Keyword.get_values(opts, key), key, nil) do
         {:ok, _value} -> true
         {:error, :invalid_policy} -> false
       end
@@ -2452,15 +2466,46 @@ defmodule Cympho.Recovery do
       |> Enum.filter(&Map.has_key?(opts, &1))
       |> Enum.map(&Map.fetch!(opts, &1))
 
-    duplicate_safe_value(values, default)
+    duplicate_safe_value(values, atom_key, default)
   end
 
-  defp duplicate_safe_value([], default), do: {:ok, default}
+  defp duplicate_safe_value([], _key, default), do: {:ok, default}
 
-  defp duplicate_safe_value([value | rest], _default) do
-    if Enum.all?(rest, &(&1 == value)),
-      do: {:ok, value},
-      else: {:error, :invalid_policy}
+  defp duplicate_safe_value([value | rest] = values, key, _default) do
+    if Enum.all?(values, &valid_policy_option_value?(key, &1)) and
+         Enum.all?(rest, &(&1 === value)),
+       do: {:ok, value},
+       else: {:error, :invalid_policy}
+  end
+
+  defp valid_policy_option_value?(:max_attempts, value),
+    do: is_integer(value) and value > 0 and value <= @max_policy_attempts
+
+  defp valid_policy_option_value?(key, value) when key in [:base_delay, :max_delay],
+    do: is_integer(value) and value > 0 and value <= @max_policy_delay_seconds
+
+  defp valid_policy_option_value?(:lease_seconds, value),
+    do: is_integer(value) and value > 0 and value <= @max_policy_lease_seconds
+
+  defp validate_supplied_policy_options(opts) when is_list(opts) or is_map(opts) do
+    if Enum.all?(@policy_option_keys, fn key ->
+         case duplicate_safe_value(supplied_policy_values(opts, key), key, :absent) do
+           {:ok, _value} -> true
+           {:error, :invalid_policy} -> false
+         end
+       end),
+       do: :ok,
+       else: {:error, :invalid_policy}
+  end
+
+  defp validate_supplied_policy_options(_opts), do: {:error, :invalid_policy}
+
+  defp supplied_policy_values(opts, key) when is_list(opts), do: Keyword.get_values(opts, key)
+
+  defp supplied_policy_values(opts, key) when is_map(opts) do
+    [key, Atom.to_string(key)]
+    |> Enum.filter(&Map.has_key?(opts, &1))
+    |> Enum.map(&Map.fetch!(opts, &1))
   end
 
   # A case snapshots its effective policy at detection time. Later calls may
@@ -2468,12 +2513,14 @@ defmodule Cympho.Recovery do
   defp policy_for_case(%RecoveryCase{} = case_row, opts) do
     snapshot = normalize_policy_snapshot(case_row.policy_snapshot)
 
-    with true <- map_size(snapshot) == length(@policy_option_keys),
+    with :ok <- validate_supplied_policy_options(opts),
+         true <- map_size(snapshot) == length(@policy_option_keys),
          {:ok, policy} <- normalize_policy(snapshot),
-         true <- policy.max_attempts == case_row.max_attempts,
+         true <- policy.max_attempts === case_row.max_attempts,
          true <-
            Enum.all?(@policy_option_keys, fn key ->
-             is_nil(option_value(opts, key)) or option_value(opts, key) == Map.fetch!(policy, key)
+             is_nil(option_value(opts, key)) or
+               option_value(opts, key) === Map.fetch!(policy, key)
            end) do
       {:ok, policy}
     else
@@ -2483,7 +2530,7 @@ defmodule Cympho.Recovery do
 
   defp case_policy_matches?(%RecoveryCase{} = case_row, attrs) do
     case policy_for_case(case_row, Map.get(attrs, :policy_snapshot, %{})) do
-      {:ok, persisted} -> persisted.snapshot == attrs.policy_snapshot
+      {:ok, persisted} -> persisted.snapshot === attrs.policy_snapshot
       {:error, :invalid_policy} -> false
     end
   end

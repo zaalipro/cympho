@@ -498,6 +498,92 @@ defmodule Cympho.RecoveryReviewFixTest do
                fn _lease -> :ok end
              )
   end
+
+  test "policy normalization rejects numerically equal duplicates with different types" do
+    policy_values = [
+      {:max_attempts, "max_attempts", 1},
+      {:base_delay, "base_delay", 7},
+      {:max_delay, "max_delay", 100},
+      {:lease_seconds, "lease_seconds", 11}
+    ]
+
+    for {atom_key, string_key, integer} <- policy_values do
+      company =
+        Repo.insert!(%Company{
+          name: "Typed map duplicate #{atom_key}",
+          slug: "typed-map-duplicate-#{atom_key}"
+        })
+
+      issue = Repo.insert!(%Issue{title: "Typed map duplicate", company_id: company.id})
+
+      attrs =
+        %{source_type: "issue_checkout", issue: issue}
+        |> Map.put(atom_key, integer)
+        |> Map.put(string_key, integer / 1)
+
+      assert {:error, :invalid_policy} = Recovery.ensure_case(attrs)
+      refute Repo.exists?(from(c in RecoveryCase, where: c.issue_id == ^issue.id))
+
+      keyword_company =
+        Repo.insert!(%Company{
+          name: "Typed keyword duplicate #{atom_key}",
+          slug: "typed-keyword-duplicate-#{atom_key}"
+        })
+
+      keyword_issue =
+        Repo.insert!(%Issue{title: "Typed keyword duplicate", company_id: keyword_company.id})
+
+      assert {:error, :invalid_policy} =
+               Recovery.with_attempt(
+                 %{source_type: "issue_checkout", issue: keyword_issue},
+                 [{atom_key, integer}, {atom_key, integer / 1}],
+                 fn _lease -> flunk("typed duplicates must not invoke the callback") end
+               )
+
+      refute Repo.exists?(from(c in RecoveryCase, where: c.issue_id == ^keyword_issue.id))
+    end
+  end
+
+  test "record_failure rejects duplicate policy options without completing its claim" do
+    company = Repo.insert!(%Company{name: "Failure duplicates", slug: "failure-duplicates"})
+    issue = Repo.insert!(%Issue{title: "Failure duplicates", company_id: company.id})
+    now = ~U[2026-01-05 00:00:00Z]
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: issue,
+               max_attempts: 3,
+               base_delay: 7,
+               max_delay: 9,
+               lease_seconds: 11
+             })
+
+    assert {:ok, lease} = Recovery.claim_case(case_row, now: now)
+
+    assert {:error, :invalid_policy} =
+             Recovery.record_failure(lease, :temporary,
+               now: now,
+               base_delay: 7,
+               base_delay: 8
+             )
+
+    assert {:error, :invalid_policy} =
+             Recovery.record_failure(lease, :temporary, %{
+               "base_delay" => 8,
+               now: now,
+               base_delay: 7
+             })
+
+    unchanged_case = Repo.get!(RecoveryCase, case_row.id)
+    unchanged_attempt = Repo.get!(RecoveryAttempt, lease.attempt.id)
+    assert unchanged_case.state == "claimed"
+    assert unchanged_case.claim_token == lease.token
+    assert unchanged_case.attempt_count == 1
+    assert unchanged_attempt.status == "claimed"
+    assert unchanged_attempt.completed_at == nil
+    assert unchanged_attempt.error_reason == nil
+  end
 end
 
 defmodule Cympho.RecoveryMalformedRunTest do
