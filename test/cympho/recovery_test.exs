@@ -804,6 +804,189 @@ defmodule Cympho.RecoveryAdapterTest do
     assert successor_issue.checked_out_at
   end
 
+  test "two durably stale runs on one issue recover as one stale cohort" do
+    {company, agent, issue} = recovery_source("stale-run-cohort")
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    runs =
+      for index <- 1..2 do
+        assert {:ok, run} =
+                 HeartbeatEngine.create_run(%{
+                   company_id: company.id,
+                   agent_id: agent.id,
+                   issue_id: issue.id,
+                   adapter: "claude_code"
+                 })
+
+        Repo.update_all(from(r in Run, where: r.id == ^run.id),
+          set: [inserted_at: DateTime.add(now, -20 - index, :minute)]
+        )
+
+        Repo.get!(Run, run.id)
+      end
+
+    for run <- runs do
+      assert {:ok, %{outcome: :recovered, case: recovery_case}} =
+               Recovery.recover_orphaned_run(run, now: now)
+
+      assert recovery_case.state == "recovered"
+      assert Repo.get!(Run, run.id).status == "cancelled"
+    end
+  end
+
+  test "a fresh successor defers an old run without creating recovery history" do
+    {company, agent, issue} = recovery_source("fresh-run-successor")
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    assert {:ok, old_run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    Repo.update_all(from(r in Run, where: r.id == ^old_run.id),
+      set: [inserted_at: DateTime.add(now, -20, :minute)]
+    )
+
+    old_run = Repo.get!(Run, old_run.id)
+
+    assert {:ok, fresh_run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, %{outcome: :deferred, case: nil}} =
+             Recovery.recover_orphaned_run(old_run, now: now, max_attempts: 1)
+
+    assert Repo.get!(Run, old_run.id).status == "pending"
+    assert Repo.get!(Run, fresh_run.id).status == "pending"
+
+    refute Repo.exists?(
+             from(c in RecoveryCase,
+               where: c.source_type == "heartbeat_run" and c.source_id == ^old_run.id
+             )
+           )
+
+    assert Repo.get!(Issue, issue.id).status != :blocked
+  end
+
+  test "an exhausted old run cannot block an issue with a fresh successor" do
+    {company, agent, issue} = recovery_source("exhausted-fresh-successor")
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    assert {:ok, old_run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    Repo.update_all(from(r in Run, where: r.id == ^old_run.id),
+      set: [inserted_at: DateTime.add(now, -20, :minute)]
+    )
+
+    old_run = Repo.get!(Run, old_run.id)
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "heartbeat_run",
+               issue: issue,
+               run: old_run,
+               max_attempts: 1
+             })
+
+    assert {:ok, lease} = Recovery.claim_case(case_row, now: now)
+    assert {:ok, exhausted} = Recovery.record_failure(lease, :temporary, now: now)
+    assert exhausted.state == "exhausted"
+
+    assert {:ok, fresh_run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:error, :recovery_deferred} = Recovery.exhaust_case(exhausted, now: now)
+    assert Repo.get!(Run, fresh_run.id).status == "pending"
+    assert Repo.get!(Issue, issue.id).status != :blocked
+    assert Repo.get!(RecoveryCase, case_row.id).state == "exhausted"
+    refute Repo.get_by(Cympho.BoardApprovals.BoardApproval, recovery_case_id: case_row.id)
+  end
+
+  test "a live owner defers an old run without creating recovery history" do
+    {company, agent, issue} = recovery_source("live-run-owner")
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [inserted_at: DateTime.add(now, -20, :minute)]
+    )
+
+    stale = Repo.get!(Run, run.id)
+    assert {:ok, _} = Registry.register(Cympho.OrchestratorRegistry, issue.id, nil)
+
+    assert {:ok, %{outcome: :deferred, case: nil}} =
+             Recovery.recover_orphaned_run(stale, now: now, max_attempts: 1)
+
+    assert Repo.get!(Run, run.id).status == "pending"
+
+    refute Repo.exists?(
+             from(c in RecoveryCase,
+               where: c.source_type == "heartbeat_run" and c.source_id == ^run.id
+             )
+           )
+
+    Registry.unregister(Cympho.OrchestratorRegistry, issue.id)
+  end
+
+  test "a successor race releases its claim without consuming the final attempt" do
+    {company, agent, issue} = recovery_source("successor-claim-race")
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [inserted_at: DateTime.add(now, -20, :minute)]
+    )
+
+    stale = Repo.get!(Run, run.id)
+
+    with_mock HeartbeatEngine, [:passthrough],
+      recover_run_if_current: fn _run, _guard, _kind, _opts ->
+        {:error, :recovery_deferred}
+      end do
+      assert {:ok, %{outcome: :deferred, case: recovery_case}} =
+               Recovery.recover_orphaned_run(stale, now: now, max_attempts: 1)
+
+      assert recovery_case.state == "scheduled"
+      assert recovery_case.attempt_count == 0
+    end
+
+    assert Repo.aggregate(RecoveryAttempt, :count) == 0
+    assert Repo.get!(Run, run.id).status == "pending"
+    assert Repo.get!(Issue, issue.id).status != :blocked
+  end
+
   test "checkout adapter persists nested policy for restart claims and backoff" do
     {_company, agent, issue} = recovery_source("checkout-policy-restart")
     assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
@@ -1208,7 +1391,7 @@ defmodule Cympho.RecoveryAdapterTest do
 
     assert {:ok, _} = Registry.register(Cympho.OrchestratorRegistry, issue.id, nil)
 
-    assert {:error, :superseded} =
+    assert {:error, :recovery_deferred} =
              HeartbeatEngine.recover_run_if_current(
                started,
                run_guard(case_row, :stale),
@@ -1479,6 +1662,62 @@ defmodule Cympho.RecoveryDueTest do
 
     assert Repo.get!(Issue, issue.id).status == :todo
     assert Repo.get!(RecoveryCase, case_row.id).state == "recovered"
+  end
+
+  test "due run cleanup survives a stale run-case completion clock" do
+    {company, agent, issue} = due_source("run-stale-completion-clock")
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [inserted_at: DateTime.add(now, -20, :minute)]
+    )
+
+    stale = Repo.get!(Run, run.id)
+
+    assert {:ok, run_case} =
+             Recovery.ensure_case(%{
+               source_type: "heartbeat_run",
+               issue: issue,
+               run: stale,
+               lease_seconds: 1
+             })
+
+    calls = :atomics.new(1, signed: false)
+
+    clock = fn ->
+      case :atomics.add_get(calls, 1, 1) do
+        1 -> now
+        _ -> DateTime.add(now, 2, :second)
+      end
+    end
+
+    assert %{
+             checked: 1,
+             claimed: 1,
+             recovered: 0,
+             failed: 1,
+             follow_up_cases_created: 1,
+             follow_up_attempts: 1
+           } =
+             Recovery.process_due(clock: clock, limit: 1)
+
+    assert Repo.get!(Run, run.id).status == "cancelled"
+    assert Repo.get!(Issue, issue.id).status == :todo
+    assert Repo.get!(RecoveryCase, run_case.id).state == "claimed"
+
+    checkout_case =
+      Repo.get_by!(RecoveryCase, source_type: "issue_checkout", source_id: issue.id)
+
+    assert checkout_case.state == "recovered"
+    assert checkout_case.attempt_count == 1
   end
 
   test "process_due resumes a persisted scheduled case with its policy snapshot" do

@@ -985,9 +985,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
       # fresh clear_checkout_lock would load that bind and wipe it. Bound
       # dead-session runs are terminalized by recover_orphaned_runs (poll/boot)
       # which clears via clear_checkout_lock_for_run.
-      # Recover only runs that cannot belong to a successor: re-check live orch
-      # before each cancel, and never terminalize the currently-bound checkout
-      # run (cancel_run → clear_checkout_lock_for_run would unlock it).
+      # Recover the exact pre-crash snapshots before considering an unbound
+      # checkout. Durable age and Recovery's final source/cohort guard decide
+      # whether even a currently-bound pre-crash run is safe to terminalize.
       Enum.each(pre_crash_runs, fn run ->
         recover_crashed_session_run(issue_id, run)
       end)
@@ -1006,9 +1006,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
       live_orchestrator?(issue_id) ->
         :ok
 
-      current_checkout_run?(issue_id, run) ->
-        :ok
-
       not durably_stale_run?(run) ->
         Logger.info(
           "[Dispatcher] deferred crashed-session run #{run.id}: durable stale cutoff not reached"
@@ -1023,6 +1020,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
           {:ok, %{outcome: :superseded}} ->
             Logger.info("[Dispatcher] crashed-session run #{run.id} superseded before recovery")
+
+          {:ok, %{outcome: :deferred}} ->
+            Logger.info("[Dispatcher] crashed-session run #{run.id} recovery deferred")
 
           {:ok, %{outcome: outcome}} when outcome in [:scheduled, :exhausted] ->
             Logger.info("[Dispatcher] crashed-session run #{run.id} recovery #{outcome}")
@@ -1088,16 +1088,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp durably_stale_run?(_run), do: false
-
-  defp current_checkout_run?(issue_id, run) do
-    case Issues.get_issue(issue_id) do
-      {:ok, %Issue{checkout_run_id: bound}} when is_binary(bound) and bound == run.id ->
-        true
-
-      _ ->
-        false
-    end
-  end
 
   defp active_runs_for_issue(issue_id) when is_binary(issue_id) do
     from(r in Run,

@@ -195,7 +195,7 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
              )
     end
 
-    test "records durable recovery counters for a scoped stale run" do
+    test "counts run and unbound-checkout recovery cases and attempts" do
       {:ok, company} =
         Cympho.Companies.create_company(%{
           name: "Watchdog Recovery Co #{System.unique_integer([:positive])}",
@@ -218,11 +218,13 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
           company_id: company.id
         })
 
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           company_id: company.id,
           agent_id: agent.id,
-          issue_id: issue.id,
+          issue_id: checked_out.id,
           adapter: "process"
         })
 
@@ -233,8 +235,8 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
       _ = :sys.get_state(Process.whereis(Watchdog))
 
       results = Watchdog.last_results()
-      assert results.recovery_cases_created == 1
-      assert results.recovery_attempts == 1
+      assert results.recovery_cases_created == 2
+      assert results.recovery_attempts == 2
       assert results.recovery_exhausted == 0
 
       recovery_case =
@@ -252,6 +254,16 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
                ),
                :count
              ) == 1
+
+      checkout_case =
+        Repo.one!(
+          Ecto.Query.from(c in RecoveryCase,
+            where: c.source_type == "issue_checkout" and c.source_id == ^issue.id
+          )
+        )
+
+      assert checkout_case.state == "recovered"
+      assert Repo.get!(Cympho.Issues.Issue, issue.id).status == :todo
 
       # The dispatcher scanner sees the same source after Watchdog has
       # terminalized it; durable source CAS prevents a duplicate attempt.

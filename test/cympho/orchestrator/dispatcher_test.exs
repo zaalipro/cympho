@@ -1313,6 +1313,61 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
              ) == 2
     end
 
+    test "recovers the durably stale pre-crash run that owns the checkout", %{
+      agent: agent,
+      company: company,
+      issue: issue
+    } do
+      ensure_dispatcher_for_db_tests()
+      dispatcher = Process.whereis(Dispatcher)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), dispatcher)
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+
+      assert {:ok, run} =
+               Cympho.HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: checked_out.id,
+                 adapter: "claude_code",
+                 bind_checkout: true
+               })
+
+      run = backdate_run(run)
+      assert Issues.get_issue!(issue.id).checkout_run_id == run.id
+
+      fake_orchestrator = spawn(fn -> Process.sleep(:infinity) end)
+
+      :sys.replace_state(dispatcher, fn %State{} = state ->
+        ref = Process.monitor(fake_orchestrator)
+
+        %{
+          state
+          | running_issue_ids: MapSet.put(state.running_issue_ids, issue.id),
+            monitors: Map.put(state.monitors, ref, issue.id)
+        }
+      end)
+
+      Process.exit(fake_orchestrator, :kill)
+
+      wait_until(fn ->
+        assert {:ok, %{status: "cancelled"}} = Cympho.HeartbeatEngine.get_run(run.id)
+        recovered_issue = Issues.get_issue!(issue.id)
+        assert recovered_issue.status == :todo
+        assert is_nil(recovered_issue.checkout_run_id)
+        assert is_nil(recovered_issue.checked_out_at)
+      end)
+
+      assert Cympho.Repo.aggregate(
+               Ecto.Query.from(c in Cympho.Recovery.RecoveryCase,
+                 where:
+                   c.source_type == "heartbeat_run" and c.source_id == ^run.id and
+                     c.state == "recovered"
+               ),
+               :count
+             ) == 1
+    end
+
     test "does not clear a successor-bound checkout_run_id", %{
       agent: agent,
       company: company,

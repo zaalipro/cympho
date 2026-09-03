@@ -699,8 +699,8 @@ defmodule Cympho.HeartbeatEngine do
           not recovery_source_stale?(current, now) ->
             {:error, :superseded}
 
-          live_run_owner?(issue.id) or successor_run_exists?(current, issue.id) ->
-            {:error, :superseded}
+          recovery_deferred?(current, now) ->
+            {:error, :recovery_deferred}
 
           true ->
             changeset =
@@ -719,13 +719,16 @@ defmodule Cympho.HeartbeatEngine do
             # second predicate closes the common callback race where a
             # successor starts after the initial check.
             if not recovery_guard_matches?(expected_guard, current, issue, kind) or
-                 not recovery_source_stale?(current, now) or live_run_owner?(issue.id) or
-                 successor_run_exists?(current, issue.id) do
+                 not recovery_source_stale?(current, now) do
               {:error, :superseded}
             else
-              case Repo.update(changeset) do
-                {:ok, updated} -> {:ok, updated}
-                {:error, changeset} -> {:error, changeset}
+              if recovery_deferred?(current, now) do
+                {:error, :recovery_deferred}
+              else
+                case Repo.update(changeset) do
+                  {:ok, updated} -> {:ok, updated}
+                  {:error, changeset} -> {:error, changeset}
+                end
               end
             end
         end
@@ -828,18 +831,37 @@ defmodule Cympho.HeartbeatEngine do
     _ -> true
   end
 
-  defp successor_run_exists?(%Run{id: run_id}, issue_id) when is_binary(issue_id) do
-    Repo.exists?(
-      from r in Run,
-        where:
-          r.issue_id == ^issue_id and r.id != ^run_id and
-            r.status in ^@active_run_statuses
-    )
+  @doc false
+  @spec recovery_deferred?(Run.t(), DateTime.t()) :: boolean()
+  def recovery_deferred?(%Run{} = run, %DateTime{} = now) do
+    case Repo.get(Run, run.id) do
+      %Run{status: status} = current when status in @active_run_statuses ->
+        live_run_owner?(current.issue_id) or
+          blocking_successor_run_exists?(current, current.issue_id, now)
+
+      _ ->
+        false
+    end
   rescue
     _ -> true
   end
 
-  defp successor_run_exists?(_, _), do: true
+  def recovery_deferred?(_run, _now), do: true
+
+  defp blocking_successor_run_exists?(%Run{id: run_id}, issue_id, now)
+       when is_binary(issue_id) do
+    Run
+    |> where(
+      [r],
+      r.issue_id == ^issue_id and r.id != ^run_id and r.status in ^@active_run_statuses
+    )
+    |> Repo.all()
+    |> Enum.any?(&(not recovery_source_stale?(&1, now)))
+  rescue
+    _ -> true
+  end
+
+  defp blocking_successor_run_exists?(_, _, _), do: true
 
   @doc """
   Recovers a run that has no live orchestrator.

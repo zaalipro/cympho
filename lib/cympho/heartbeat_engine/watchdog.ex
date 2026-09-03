@@ -171,10 +171,12 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
       hard_stops_completed: hard_stops_completed,
       recovery_cases_created:
         recovery_stats.cases_created + orphaned_issue_telemetry.cases_created +
-          stale_checkout_telemetry.cases_created,
+          stale_checkout_telemetry.cases_created +
+          Map.get(due_recovery, :follow_up_cases_created, 0),
       recovery_attempts:
         recovery_stats.attempts + orphaned_issue_telemetry.attempts +
-          stale_checkout_telemetry.attempts + Map.get(due_recovery, :claimed, 0),
+          stale_checkout_telemetry.attempts + Map.get(due_recovery, :claimed, 0) +
+          Map.get(due_recovery, :follow_up_attempts, 0),
       recovery_exhausted:
         recovery_stats.exhausted + Map.get(orphaned_issues, :exhausted, 0) +
           Map.get(stale_checkouts, :exhausted, 0) + Map.get(due_recovery, :exhausted, 0),
@@ -217,13 +219,21 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
         end
 
       case result do
-        {:ok, %{run: recovered, outcome: :recovered, case: recovery_case}} ->
+        {:ok,
+         %{
+           run: recovered,
+           outcome: :recovered,
+           case: recovery_case,
+           recovery: follow_up
+         }} ->
           Logger.warning("Watchdog: recovered #{kind} run #{run.id} for agent #{run.agent_id}")
 
           maybe_requeue_issue(recovered)
-          {[recovered | recovered_runs], record_recovery(stats, recovery_case, :recovered)}
 
-        {:ok, %{run: _recovered, outcome: :superseded, case: recovery_case}} ->
+          {[recovered | recovered_runs],
+           record_recovery(stats, recovery_case, :recovered, follow_up)}
+
+        {:ok, %{run: _recovered, outcome: :superseded, case: recovery_case} = result} ->
           Logger.info(
             "Watchdog: #{kind} run #{run.id} finished before recovery (superseded)",
             component: "watchdog",
@@ -232,7 +242,8 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
             run_id: run.id
           )
 
-          {recovered_runs, record_recovery(stats, recovery_case, :superseded)}
+          {recovered_runs,
+           record_recovery(stats, recovery_case, :superseded, Map.get(result, :recovery, %{}))}
 
         {:ok, %{outcome: outcome, case: recovery_case}}
         when outcome in [:scheduled, :exhausted] ->
@@ -245,6 +256,16 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
           )
 
           {recovered_runs, record_recovery(stats, recovery_case, outcome)}
+
+        {:ok, %{outcome: :deferred}} ->
+          Logger.info("Watchdog: #{kind} run #{run.id} recovery deferred",
+            component: "watchdog",
+            agent_id: run.agent_id,
+            issue_id: run.issue_id,
+            run_id: run.id
+          )
+
+          {recovered_runs, stats}
 
         {:error, :company_scope_required} ->
           # Recovery is fail-closed for unscoped or mismatched-tenant rows.
@@ -283,9 +304,15 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
     |> then(fn {runs, stats} -> {Enum.reverse(runs), stats} end)
   end
 
-  defp record_recovery(stats, recovery_case, outcome) do
+  defp record_recovery(stats, recovery_case, outcome, follow_up \\ %{}) do
     stats = %{stats | attempts: stats.attempts + 1}
     stats = if outcome == :exhausted, do: %{stats | exhausted: stats.exhausted + 1}, else: stats
+
+    stats = %{
+      stats
+      | cases_created: stats.cases_created + Map.get(follow_up, :cases_created, 0),
+        attempts: stats.attempts + Map.get(follow_up, :attempts, 0)
+    }
 
     case recovery_case do
       %{source_type: source_type, source_id: source_id} = _case ->

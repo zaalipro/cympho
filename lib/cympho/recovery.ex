@@ -61,6 +61,9 @@ defmodule Cympho.Recovery do
           locked.state not in ["exhausted", "escalated"] ->
             Repo.rollback(:case_not_exhausted)
 
+          recovery_source_deferred?(locked, issue, now) ->
+            Repo.rollback(:recovery_deferred)
+
           # Blocking the issue updates the checkout fingerprint. Once an
           # approval has been persisted, a repeated exhaustion callback must
           # return that durable proposal rather than treating its own block as
@@ -923,6 +926,24 @@ defmodule Cympho.Recovery do
 
   defp source_matches?(_, _), do: false
 
+  defp recovery_source_deferred?(
+         %RecoveryCase{source_type: "heartbeat_run", source_run_id: run_id},
+         %Issue{} = issue,
+         now
+       )
+       when is_binary(run_id) and is_struct(now, DateTime) do
+    case Repo.get(Run, run_id) do
+      %Run{} = run when run.issue_id == issue.id -> HeartbeatEngine.recovery_deferred?(run, now)
+      _ -> false
+    end
+  end
+
+  defp recovery_source_deferred?(%RecoveryCase{source_type: "issue_checkout"}, issue, _now) do
+    source_live?(issue.id) or active_checkout_run?(issue.id)
+  end
+
+  defp recovery_source_deferred?(_, _, _), do: false
+
   # The escalation itself moves the issue to `:blocked` and increments its
   # lock version. Retry therefore validates the durable pre-escalation
   # snapshot against that one expected transition, rather than comparing the
@@ -1432,6 +1453,59 @@ defmodule Cympho.Recovery do
     end
   end
 
+  defp release_deferred_claim(lease, opts) do
+    with :ok <- validate_supplied_policy_options(opts),
+         now <- option_now(opts),
+         {:ok, id, token, attempt} <- lease_parts(lease) do
+      Repo.transaction(fn ->
+        case Repo.one(
+               from c in RecoveryCase,
+                 where: c.id == ^id and c.claim_token == ^token and c.state == "claimed",
+                 lock: "FOR UPDATE"
+             ) do
+          nil ->
+            Repo.rollback(:stale_claim)
+
+          case_row ->
+            policy =
+              case policy_for_case(case_row, opts) do
+                {:ok, value} -> value
+                {:error, _} -> Repo.rollback(:invalid_policy)
+              end
+
+            {attempt_count, _} =
+              Repo.delete_all(
+                from(a in RecoveryAttempt,
+                  where:
+                    a.id == ^attempt.id and a.recovery_case_id == ^id and
+                      a.attempt_no == ^attempt.attempt_no and a.status == "claimed"
+                )
+              )
+
+            if attempt_count != 1, do: Repo.rollback(:stale_claim)
+
+            {case_count, _} =
+              Repo.update_all(
+                from(c in RecoveryCase, where: c.id == ^id and c.claim_token == ^token),
+                set: [
+                  state: "scheduled",
+                  attempt_count: max(case_row.attempt_count - 1, 0),
+                  claim_token: nil,
+                  claimed_at: nil,
+                  lease_expires_at: nil,
+                  claimed_by: nil,
+                  next_attempt_at: DateTime.add(now, retry_delay(1, policy, opts), :second)
+                ]
+              )
+
+            if case_count != 1, do: Repo.rollback(:stale_claim)
+
+            Repo.get!(RecoveryCase, id)
+        end
+      end)
+    end
+  end
+
   @spec with_attempt(map() | RecoveryCase.t(), keyword(), (map() -> term())) ::
           {:ok, map()} | {:error, term()}
   def with_attempt(source, opts, callback) when is_function(callback, 1) do
@@ -1453,6 +1527,9 @@ defmodule Cympho.Recovery do
         case result do
           {:ok, value} ->
             {:ok, record_success(lease, policy_opts), value, :recovered}
+
+          {:error, :recovery_deferred} ->
+            {:ok, release_deferred_claim(lease, policy_opts), result, :deferred}
 
           {:error, :superseded} ->
             {:ok, record_superseded(lease, policy_opts), result, :superseded}
@@ -1599,7 +1676,9 @@ defmodule Cympho.Recovery do
       scheduled: 0,
       exhausted: 0,
       failed: 0,
-      errors: []
+      errors: [],
+      follow_up_cases_created: 0,
+      follow_up_attempts: 0
     }
   end
 
@@ -1721,20 +1800,35 @@ defmodule Cympho.Recovery do
          %{case: %RecoveryCase{source_type: "heartbeat_run"} = case_row},
          opts
        ) do
-    with %Run{} = run <- Repo.get(Run, case_row.source_run_id),
-         %Issue{} = issue <- Repo.get(Issue, case_row.issue_id),
-         true <- current_source_matches?(case_row, run, issue),
-         false <- source_live?(issue.id) do
-      kind = if case_row.source_status in ["pending", "queued"], do: :orphaned, else: :stale
+    case {Repo.get(Run, case_row.source_run_id), Repo.get(Issue, case_row.issue_id)} do
+      {%Run{} = run, %Issue{} = issue} ->
+        cond do
+          current_source_matches?(case_row, run, issue) and source_live?(issue.id) ->
+            {:error, :recovery_deferred}
 
-      HeartbeatEngine.recover_run_if_current(
-        run,
-        run_source_guard(case_row, kind),
-        kind,
-        now: option_now(opts)
-      )
-    else
-      _ -> {:error, :superseded}
+          current_source_matches?(case_row, run, issue) ->
+            kind =
+              if case_row.source_status in ["pending", "queued"], do: :orphaned, else: :stale
+
+            case HeartbeatEngine.recover_run_if_current(
+                   run,
+                   run_source_guard(case_row, kind),
+                   kind,
+                   now: option_now(opts)
+                 ) do
+              {:ok, recovered} -> {:ok, run_recovery_result(recovered, opts)}
+              error -> error
+            end
+
+          terminal_case_run?(case_row, run, issue) ->
+            {:error, {:terminal_run, run}}
+
+          true ->
+            {:error, :superseded}
+        end
+
+      _ ->
+        {:error, :superseded}
     end
   end
 
@@ -1764,14 +1858,37 @@ defmodule Cympho.Recovery do
     end
   end
 
-  defp finish_due_result(lease, {:ok, %Run{} = run}, opts, stats) do
+  defp finish_due_result(
+         lease,
+         {:ok, %{run: %Run{}, follow_up: follow_up}},
+         opts,
+         stats
+       ) do
+    stats = add_follow_up_stats(stats, follow_up)
+
     case record_success(lease, opts) do
       {:ok, _case} ->
-        log_checkout_follow_up(run, recover_unbound_checkout_after_run(run, opts))
         %{stats | processed: stats.processed + 1, recovered: stats.recovered + 1}
 
       {:error, reason} ->
         %{stats | failed: stats.failed + 1, errors: [reason | stats.errors]}
+    end
+  end
+
+  defp finish_due_result(lease, {:error, {:terminal_run, %Run{} = run}}, opts, stats) do
+    follow_up = protected_checkout_follow_up(run, opts)
+    stats = add_follow_up_stats(stats, follow_up)
+
+    case record_superseded(lease, opts) do
+      {:ok, _case} -> %{stats | processed: stats.processed + 1, superseded: stats.superseded + 1}
+      {:error, reason} -> %{stats | failed: stats.failed + 1, errors: [reason | stats.errors]}
+    end
+  end
+
+  defp finish_due_result(lease, {:error, :recovery_deferred}, opts, stats) do
+    case release_deferred_claim(lease, opts) do
+      {:ok, _case} -> %{stats | processed: stats.processed + 1, scheduled: stats.scheduled + 1}
+      {:error, reason} -> %{stats | failed: stats.failed + 1, errors: [reason | stats.errors]}
     end
   end
 
@@ -1916,8 +2033,24 @@ defmodule Cympho.Recovery do
     source = %{source_type: "heartbeat_run", issue: nil, run: run}
 
     with {:ok, recovery_opts} <- adapter_recovery_options(opts),
-         {:ok, issue} <- Issues.get_issue(run.issue_id),
-         {:ok, result} <-
+         {:ok, issue} <- Issues.get_issue(run.issue_id) do
+      if run_scope_matches?(run, issue) and
+           HeartbeatEngine.recovery_deferred?(run, option_now(opts)) do
+        {:ok,
+         %{
+           run: run,
+           outcome: :deferred,
+           case: nil,
+           recovery: empty_follow_up(:deferred)
+         }}
+      else
+        recover_run_with_attempt(source, issue, kind, run, recovery_opts, opts)
+      end
+    end
+  end
+
+  defp recover_run_with_attempt(source, issue, kind, run, recovery_opts, opts) do
+    with {:ok, result} <-
            with_attempt(
              %{source | issue: issue},
              recovery_opts,
@@ -1926,22 +2059,22 @@ defmodule Cympho.Recovery do
 
                with %Run{} = current <- current,
                     {:ok, current_issue} <- Issues.get_issue(current.issue_id),
-                    true <- current_source_matches?(lease.case, current, current_issue),
-                    false <- source_live?(current.issue_id) do
-                 effective_kind = effective_run_recovery_kind(kind, current.status)
+                    true <- current_source_matches?(lease.case, current, current_issue) do
+                 if source_live?(current.issue_id) do
+                   {:error, :recovery_deferred}
+                 else
+                   effective_kind = effective_run_recovery_kind(kind, current.status)
 
-                 callback_result =
-                   HeartbeatEngine.recover_run_if_current(
-                     current,
-                     run_source_guard(lease.case, effective_kind),
-                     effective_kind,
-                     now: option_now(opts)
-                   )
-
-                 case callback_result do
-                   {:error, {:invalid_status, _status}} -> {:error, :superseded}
-                   {:ok, updated} -> {:ok, updated}
-                   {:error, reason} -> {:error, reason}
+                   case HeartbeatEngine.recover_run_if_current(
+                          current,
+                          run_source_guard(lease.case, effective_kind),
+                          effective_kind,
+                          now: option_now(opts)
+                        ) do
+                     {:error, {:invalid_status, _status}} -> {:error, :superseded}
+                     {:ok, updated} -> {:ok, run_recovery_result(updated, opts)}
+                     {:error, reason} -> {:error, reason}
+                   end
                  end
                else
                  _ -> {:error, :superseded}
@@ -1950,14 +2083,25 @@ defmodule Cympho.Recovery do
            ) do
       recovered_run = run_result(result.result, run)
 
-      if result.outcome == :recovered do
-        log_checkout_follow_up(
-          recovered_run,
-          recover_unbound_checkout_after_run(recovered_run, opts)
-        )
-      end
+      follow_up =
+        case result do
+          %{result: %{follow_up: follow_up}} ->
+            follow_up
 
-      {:ok, %{run: recovered_run, outcome: result.outcome, case: result.case}}
+          %{outcome: :superseded} ->
+            terminal_checkout_follow_up(run, opts)
+
+          _ ->
+            empty_follow_up(result.outcome)
+        end
+
+      {:ok,
+       %{
+         run: recovered_run,
+         outcome: result.outcome,
+         case: result.case,
+         recovery: follow_up
+       }}
     end
   end
 
@@ -2035,33 +2179,39 @@ defmodule Cympho.Recovery do
 
   defp source_live?(_), do: true
 
+  defp run_result(%{run: %Run{} = run}, _fallback), do: run
   defp run_result(%Run{} = run, _fallback), do: run
   defp run_result(_, fallback), do: fallback
 
   @doc false
-  @spec recover_unbound_checkout_after_run(Run.t(), keyword()) :: :ok | {:error, term()}
+  @spec recover_unbound_checkout_after_run(Run.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
   def recover_unbound_checkout_after_run(%Run{} = run, opts) when is_list(opts) do
     current_run = Repo.get(Run, run.id)
 
     cond do
       not matching_terminal_run?(current_run, run) ->
-        :ok
+        {:ok, empty_follow_up(:not_terminal)}
 
       source_live?(run.issue_id) or active_checkout_run?(run.issue_id) ->
-        :ok
+        {:ok, empty_follow_up(:deferred)}
 
       true ->
         case Issues.get_issue(run.issue_id) do
           {:ok, %Issue{status: status, checkout_run_id: nil} = issue}
           when status in [:in_progress, "in_progress"] ->
+            previous = active_checkout_case(issue.id)
+
             case recover_orphaned_issue(issue, opts) do
-              {:ok, %{outcome: outcome}} when outcome in [:recovered, :superseded] -> :ok
-              {:ok, %{outcome: outcome}} -> {:error, outcome}
-              {:error, reason} -> {:error, reason}
+              {:ok, %{outcome: outcome, case: recovery_case}} ->
+                {:ok, follow_up_metadata(previous, recovery_case, outcome)}
+
+              {:error, reason} ->
+                {:error, reason}
             end
 
           _ ->
-            :ok
+            {:ok, empty_follow_up(:not_applicable)}
         end
     end
   rescue
@@ -2073,23 +2223,105 @@ defmodule Cympho.Recovery do
   defp matching_terminal_run?(%Run{} = current, %Run{} = recovered) do
     current.id == recovered.id and current.company_id == recovered.company_id and
       current.issue_id == recovered.issue_id and current.agent_id == recovered.agent_id and
-      to_string(current.status) in @terminal_run_statuses
+      to_string(current.status) in @terminal_run_statuses and current.status == recovered.status
   end
 
   defp matching_terminal_run?(_, _), do: false
 
-  defp log_checkout_follow_up(_run, :ok), do: :ok
-
-  defp log_checkout_follow_up(%Run{} = run, {:error, reason}) do
-    Logger.warning("Recovery left an unbound checkout for a later durable attempt",
-      component: "recovery",
-      run_id: run.id,
-      issue_id: run.issue_id,
-      error: inspect(reason)
-    )
-
-    :ok
+  defp run_recovery_result(%Run{} = run, opts) do
+    %{run: run, follow_up: protected_checkout_follow_up(run, opts)}
   end
+
+  defp protected_checkout_follow_up(%Run{} = run, opts) do
+    case recover_unbound_checkout_after_run(run, opts) do
+      {:ok, metadata} ->
+        metadata
+
+      {:error, reason} ->
+        Logger.warning("Recovery left an unbound checkout for a later durable attempt",
+          component: "recovery",
+          run_id: run.id,
+          issue_id: run.issue_id,
+          error: bounded_error(reason)
+        )
+
+        empty_follow_up(:failed)
+    end
+  rescue
+    error ->
+      Logger.warning("Recovery checkout follow-up raised",
+        component: "recovery",
+        run_id: run.id,
+        issue_id: run.issue_id,
+        error: bounded_error(error)
+      )
+
+      empty_follow_up(:failed)
+  end
+
+  defp terminal_checkout_follow_up(%Run{} = source_run, opts) do
+    case Repo.get(Run, source_run.id) do
+      %Run{} = current when current.status in @terminal_run_statuses ->
+        if current.company_id == source_run.company_id and current.issue_id == source_run.issue_id and
+             current.agent_id == source_run.agent_id do
+          protected_checkout_follow_up(current, opts)
+        else
+          empty_follow_up(:superseded)
+        end
+
+      _ ->
+        empty_follow_up(:superseded)
+    end
+  end
+
+  defp active_checkout_case(issue_id) do
+    Repo.one(
+      from c in RecoveryCase,
+        where:
+          c.source_type == "issue_checkout" and c.source_id == ^issue_id and
+            c.state in ^RecoveryCase.active_states(),
+        order_by: [desc: c.inserted_at],
+        limit: 1,
+        select: %{id: c.id, attempt_count: c.attempt_count}
+    )
+  end
+
+  defp follow_up_metadata(previous, %RecoveryCase{} = recovery_case, outcome) do
+    previous_attempts =
+      if previous && previous.id == recovery_case.id, do: previous.attempt_count, else: 0
+
+    %{
+      cases_created: if(previous && previous.id == recovery_case.id, do: 0, else: 1),
+      attempts: max(recovery_case.attempt_count - previous_attempts, 0),
+      outcome: outcome
+    }
+  end
+
+  defp empty_follow_up(outcome), do: %{cases_created: 0, attempts: 0, outcome: outcome}
+
+  defp add_follow_up_stats(stats, %{cases_created: cases, attempts: attempts}) do
+    %{
+      stats
+      | follow_up_cases_created: stats.follow_up_cases_created + cases,
+        follow_up_attempts: stats.follow_up_attempts + attempts
+    }
+  end
+
+  defp add_follow_up_stats(stats, _metadata), do: stats
+
+  defp terminal_case_run?(%RecoveryCase{} = case_row, %Run{} = run, %Issue{} = issue) do
+    case_row.source_type == "heartbeat_run" and case_row.company_id == issue.company_id and
+      case_row.company_id == run.company_id and case_row.issue_id == issue.id and
+      case_row.issue_id == run.issue_id and case_row.source_id == run.id and
+      case_row.source_run_id == run.id and case_row.agent_id == run.agent_id and
+      run.status in @terminal_run_statuses
+  end
+
+  defp run_scope_matches?(%Run{} = run, %Issue{} = issue) do
+    is_binary(run.company_id) and run.company_id == issue.company_id and run.issue_id == issue.id
+  end
+
+  defp run_scope_matches?(_, _), do: false
 
   defp checkout_result_issue(%Issue{} = issue, _fallback), do: issue
   defp checkout_result_issue(_, fallback), do: fallback
