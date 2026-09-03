@@ -356,30 +356,121 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
            ) == 0
   end
 
-  test "denied, expired, and cancelled approvals resolve their cases and keep issues blocked", %{
+  test "manual denial commits the approval and resolved case before publishing", %{
     company: company,
     agent: agent
   } do
-    for status <- ~w(denied expired cancelled) do
-      issue = issue!(company, agent, "Resolution #{status}")
-      case_row = exhausted_case!(issue, max_attempts: 1)
-      {:ok, approval} = Recovery.exhaust_case(case_row, reason: "provider timeout")
+    issue = issue!(company, agent, "Denied recovery")
+    case_row = exhausted_case!(issue, max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(case_row, reason: "provider timeout")
 
-      Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
-        set: [status: status]
-      )
+    :ok = OwnerAttention.subscribe(company.id)
+    :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:approvals")
 
-      approval = Repo.get!(BoardApproval, approval.id)
+    assert {:ok, %BoardApproval{status: "denied"}} =
+             BoardApprovals.resolve_board_approval(
+               approval.id,
+               "denied",
+               %{decision_reasoning: "Leave this issue paused"},
+               {"system", company.id}
+             )
 
-      assert :ok = Recovery.handle_approval_resolution(approval)
+    resolved = Repo.get!(RecoveryCase, case_row.id)
+    persisted_issue = Repo.get!(Issue, issue.id)
+    assert Repo.get!(BoardApproval, approval.id).status == "denied"
+    assert resolved.state == "resolved"
+    assert resolved.resolved_at != nil
+    assert resolved.resolution_note == "Leave this issue paused"
+    assert persisted_issue.status == :blocked
+    assert persisted_issue.assignee_id == agent.id
 
-      resolved = Repo.get!(RecoveryCase, case_row.id)
-      persisted_issue = Repo.get!(Issue, issue.id)
-      assert resolved.state == "resolved"
-      assert resolved.resolved_at != nil
-      assert persisted_issue.status == :blocked
-      assert persisted_issue.assignee_id == agent.id
-    end
+    approval_id = approval.id
+    case_id = case_row.id
+    company_id = company.id
+
+    assert_receive {:recovery_case_resolved, %BoardApproval{id: ^approval_id},
+                    %RecoveryCase{id: ^case_id, state: "resolved"}},
+                   1_000
+
+    assert_receive {:board_approval_resolved, %BoardApproval{id: ^approval_id, status: "denied"}},
+                   1_000
+
+    assert_receive {:owner_attention_changed, ^company_id}, 1_000
+    refute_receive {:owner_attention_changed, ^company_id}, 50
+  end
+
+  test "cancellation commits the approval and resolved case before publishing", %{
+    company: company,
+    agent: agent
+  } do
+    issue = issue!(company, agent, "Cancelled recovery")
+    case_row = exhausted_case!(issue, max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(case_row, reason: "provider timeout")
+
+    :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:approvals")
+
+    assert {:ok, %BoardApproval{status: "cancelled"}} =
+             BoardApprovals.cancel_board_approval(approval.id, {"system", company.id})
+
+    assert Repo.get!(BoardApproval, approval.id).status == "cancelled"
+    assert Repo.get!(RecoveryCase, case_row.id).state == "resolved"
+    assert Repo.get!(Issue, issue.id).status == :blocked
+
+    approval_id = approval.id
+    case_id = case_row.id
+
+    assert_receive {:recovery_case_resolved, %BoardApproval{id: ^approval_id},
+                    %RecoveryCase{id: ^case_id, state: "resolved"}},
+                   1_000
+
+    assert_receive {:board_approval_cancelled,
+                    %BoardApproval{id: ^approval_id, status: "cancelled"}},
+                   1_000
+  end
+
+  test "recovery resolution notes are bounded by the case schema" do
+    changeset =
+      RecoveryCase.changeset(%RecoveryCase{}, %{
+        resolution_note: String.duplicate("x", 1_001)
+      })
+
+    assert "should be at most 1000 character(s)" in errors_on(changeset).resolution_note
+  end
+
+  test "a cross-tenant recovery link rolls the public denial transaction back", %{
+    company: company,
+    other_company: other_company,
+    agent: agent
+  } do
+    issue = issue!(company, agent, "Corrupt recovery scope")
+    case_row = exhausted_case!(issue, max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(case_row, reason: "provider timeout")
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id),
+      set: [company_id: other_company.id]
+    )
+
+    :ok = OwnerAttention.subscribe(company.id)
+    :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:approvals")
+
+    assert {:error, %Ecto.Changeset{} = changeset} =
+             BoardApprovals.resolve_board_approval(
+               approval.id,
+               "denied",
+               %{decision_reasoning: "leave paused"},
+               {"system", company.id}
+             )
+
+    assert "must belong to the approval company" in errors_on(changeset).recovery_case_id
+    assert Repo.get!(BoardApproval, approval.id).status == "pending"
+    assert Repo.get!(RecoveryCase, case_row.id).state == "escalated"
+    assert Repo.get!(Issue, issue.id).status == :blocked
+
+    approval_id = approval.id
+    company_id = company.id
+    refute_receive {:board_approval_resolved, %BoardApproval{id: ^approval_id}}, 50
+    refute_receive {:recovery_case_resolved, %BoardApproval{id: ^approval_id}, _case}, 50
+    refute_receive {:owner_attention_changed, ^company_id}, 50
   end
 
   test "cross-company resolution and retry proposals fail closed", %{
@@ -518,6 +609,28 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
              ),
              :count
            ) == 1
+  end
+
+  test "explicit approval leaves recovery resolution to the durable board effect", %{
+    company: company,
+    agent: agent
+  } do
+    issue = issue!(company, agent, "Explicit retry approval")
+    case_row = exhausted_case!(issue, max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(case_row, reason: "timeout")
+
+    assert {:ok, %BoardApproval{status: "approved"} = approved} =
+             BoardApprovals.resolve_board_approval(
+               approval.id,
+               "approved",
+               %{decision_reasoning: "retry once"},
+               {"system", company.id}
+             )
+
+    assert Repo.get!(RecoveryCase, case_row.id).state == "escalated"
+
+    assert {:ok, %RecoveryCase{state: "scheduled"}} =
+             BoardApprovals.execute_approved_action(approved)
   end
 
   test "an approved retry cannot reopen a blocked issue after its source lock changes", %{
@@ -670,6 +783,8 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
       set: [review_deadline: expired_at]
     )
 
+    :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:approvals")
+
     assert {:error, :approval_expired} =
              BoardApprovals.resolve_board_approval(
                approval.id,
@@ -679,25 +794,92 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
              )
 
     assert Repo.get!(BoardApproval, approval.id).status == "expired"
-    assert Repo.get!(RecoveryCase, case_row.id).state == "resolved"
+    resolved = Repo.get!(RecoveryCase, case_row.id)
+    assert resolved.state == "resolved"
+    assert resolved.resolution_note == "Review deadline passed"
     assert Repo.get!(Issue, issue.id).status == :blocked
+
+    approval_id = approval.id
+    case_id = case_row.id
+
+    assert_receive {:recovery_case_resolved, %BoardApproval{id: ^approval_id},
+                    %RecoveryCase{id: ^case_id, state: "resolved"}},
+                   1_000
   end
 
-  test "startup reconciliation resolves already denied recovery approvals", %{
+  test "expiry sweep commits the approval and resolved case before publishing", %{
     company: company,
     agent: agent
   } do
-    issue = issue!(company, agent, "Denied while executor down")
+    issue = issue!(company, agent, "Expired by sweep")
     case_row = exhausted_case!(issue, max_attempts: 1)
     {:ok, approval} = Recovery.exhaust_case(case_row, reason: "timeout")
+    expired_at = DateTime.utc_now() |> DateTime.add(-1, :second) |> DateTime.truncate(:second)
 
     Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
-      set: [status: "denied", decision_reasoning: "leave paused"]
+      set: [review_deadline: expired_at]
     )
 
-    assert BoardApprovals.reconcile_recovery_resolutions() >= 1
+    :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:approvals")
+
+    assert {1, nil} = BoardApprovals.check_expired_approvals()
+    assert Repo.get!(BoardApproval, approval.id).status == "expired"
     assert Repo.get!(RecoveryCase, case_row.id).state == "resolved"
     assert Repo.get!(Issue, issue.id).status == :blocked
+
+    approval_id = approval.id
+    case_id = case_row.id
+
+    assert_receive {:recovery_case_resolved, %BoardApproval{id: ^approval_id},
+                    %RecoveryCase{id: ^case_id, state: "resolved"}},
+                   1_000
+  end
+
+  test "startup reconciliation is bounded and a repeated pass publishes nothing", %{
+    company: company,
+    agent: agent
+  } do
+    approvals_and_cases =
+      for suffix <- ["first", "second"] do
+        issue = issue!(company, agent, "Denied while executor down #{suffix}")
+        case_row = exhausted_case!(issue, max_attempts: 1)
+        {:ok, approval} = Recovery.exhaust_case(case_row, reason: "timeout")
+
+        Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+          set: [status: "denied", decision_reasoning: "leave paused"]
+        )
+
+        {approval, case_row, issue}
+      end
+
+    :ok = OwnerAttention.subscribe(company.id)
+    :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:approvals")
+
+    assert BoardApprovals.reconcile_recovery_resolutions(limit: 1) == 1
+
+    assert Enum.count(approvals_and_cases, fn {_approval, case_row, _issue} ->
+             Repo.get!(RecoveryCase, case_row.id).state == "resolved"
+           end) == 1
+
+    assert BoardApprovals.reconcile_recovery_resolutions(limit: 2) == 1
+
+    for {_approval, case_row, issue} <- approvals_and_cases do
+      assert Repo.get!(RecoveryCase, case_row.id).state == "resolved"
+      assert Repo.get!(Issue, issue.id).status == :blocked
+    end
+
+    for _ <- 1..2 do
+      assert_receive {:recovery_case_resolved, %BoardApproval{},
+                      %RecoveryCase{state: "resolved"}},
+                     1_000
+
+      company_id = company.id
+      assert_receive {:owner_attention_changed, ^company_id}, 1_000
+    end
+
+    assert BoardApprovals.reconcile_recovery_resolutions(limit: 2) == 0
+    refute_receive {:recovery_case_resolved, _, _}, 50
+    refute_receive {:owner_attention_changed, _}, 50
   end
 
   test "the durable board effect makes executor retry idempotent", %{
@@ -730,16 +912,24 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
            ) == 1
   end
 
-  test "the executor resolves non-approved recovery proposals", %{company: company, agent: agent} do
+  test "the executor does not repeat an already committed recovery resolution", %{
+    company: company,
+    agent: agent
+  } do
     issue = issue!(company, agent, "Executor resolution")
     case_row = exhausted_case!(issue, max_attempts: 1)
     {:ok, approval} = Recovery.exhaust_case(case_row, reason: "timeout")
 
-    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
-      set: [status: "denied"]
-    )
+    assert {:ok, approval} =
+             BoardApprovals.resolve_board_approval(
+               approval.id,
+               "denied",
+               %{decision_reasoning: "leave blocked"},
+               {"system", company.id}
+             )
 
-    approval = Repo.get!(BoardApproval, approval.id)
+    :ok = OwnerAttention.subscribe(company.id)
+    :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:approvals")
     state = %{initial_recovery?: false}
 
     assert {:noreply, ^state} =
@@ -750,6 +940,8 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
 
     assert Repo.get!(RecoveryCase, case_row.id).state == "resolved"
     assert Repo.get!(Issue, issue.id).status == :blocked
+    refute_receive {:recovery_case_resolved, _, _}, 50
+    refute_receive {:owner_attention_changed, _}, 50
   end
 
   defp company!(slug, prefix) do

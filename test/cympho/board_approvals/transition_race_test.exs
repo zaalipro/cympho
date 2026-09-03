@@ -5,6 +5,9 @@ defmodule Cympho.BoardApprovals.TransitionRaceTest do
   alias Cympho.BoardApprovals.{BoardApproval, BoardApprovalVote}
   alias Cympho.Companies
   alias Cympho.Decisions.Decision
+  alias Cympho.Issues.Issue
+  alias Cympho.Recovery
+  alias Cympho.Recovery.RecoveryCase
 
   setup do
     unique = System.unique_integer([:positive])
@@ -23,7 +26,7 @@ defmodule Cympho.BoardApprovals.TransitionRaceTest do
         company_id: company.id
       })
 
-    %{approval: approval, user_id: Ecto.UUID.generate()}
+    %{approval: approval, company: company, user_id: Ecto.UUID.generate()}
   end
 
   test "concurrent approve, deny, and cancel commit exactly one terminal transition", %{
@@ -107,6 +110,52 @@ defmodule Cympho.BoardApprovals.TransitionRaceTest do
              ),
              :count
            ) == 1
+  end
+
+  test "concurrent denial and cancellation resolve a linked recovery case once", %{
+    company: company,
+    user_id: user_id
+  } do
+    issue =
+      %Issue{}
+      |> Issue.changeset(%{
+        title: "Recovery transition race",
+        company_id: company.id,
+        status: :in_progress
+      })
+      |> Repo.insert!()
+
+    {:ok, case_row} =
+      Recovery.ensure_case(%{
+        company_id: company.id,
+        source_type: "issue_checkout",
+        issue: issue,
+        max_attempts: 1
+      })
+
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    {:ok, lease} = Recovery.claim_case(case_row, now: now)
+    {:ok, exhausted} = Recovery.record_failure(lease, "provider timeout", now: now)
+    {:ok, approval} = Recovery.exhaust_case(exhausted, now: now)
+
+    results =
+      race([
+        fn ->
+          BoardApprovals.resolve_board_approval(
+            approval.id,
+            "denied",
+            %{decision_reasoning: "deny won"},
+            {"user", user_id}
+          )
+        end,
+        fn -> BoardApprovals.cancel_board_approval(approval.id, {"user", user_id}) end
+      ])
+
+    assert Enum.count(results, &match?({:ok, _}, &1)) == 1
+    assert Enum.count(results, &(&1 == {:error, :not_pending})) == 1
+    assert Repo.get!(BoardApproval, approval.id).status in ~w(denied cancelled)
+    assert Repo.get!(RecoveryCase, case_row.id).state == "resolved"
+    assert Repo.get!(Issue, issue.id).status == :blocked
   end
 
   defp race(functions) do

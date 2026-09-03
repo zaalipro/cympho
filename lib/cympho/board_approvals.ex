@@ -9,9 +9,12 @@ defmodule Cympho.BoardApprovals do
   alias Cympho.GovernanceAuditLogs
   alias Cympho.Decisions
   alias Cympho.AuditTrail.Instrumenter
+  alias Cympho.Recovery
+  alias Cympho.Recovery.RecoveryCase
 
   @nil_uuid "00000000-0000-0000-0000-000000000000"
   @execution_lease_seconds 300
+  @resolution_batch_limit 100
 
   @doc """
   Atomically claims an approved approval for execution. A claim has a unique
@@ -460,7 +463,7 @@ defmodule Cympho.BoardApprovals do
         )
 
         if resolved do
-          publish_resolution(resolved, {"system", @nil_uuid}, decision)
+          publish_resolution(resolved, {"system", @nil_uuid}, decision, :unchanged)
         end
 
         {:ok, vote_record}
@@ -487,7 +490,8 @@ defmodule Cympho.BoardApprovals do
             })
             |> Repo.update()
 
-          {:expired, expired}
+          recovery_effect = resolve_recovery_case_locked!(expired, expired.decision_reasoning)
+          {:expired, expired, recovery_effect}
         else
           updated =
             board_approval
@@ -499,17 +503,18 @@ defmodule Cympho.BoardApprovals do
             end
 
           decision = insert_board_decision!(updated, actor)
-          {:resolved, updated, decision}
+          recovery_effect = resolve_recovery_case_locked!(updated, updated.decision_reasoning)
+          {:resolved, updated, decision, recovery_effect}
         end
       end)
 
     case transaction_result do
-      {:ok, {:expired, expired}} ->
-        publish_expiration(expired)
+      {:ok, {:expired, expired, recovery_effect}} ->
+        publish_expiration(expired, recovery_effect)
         {:error, :approval_expired}
 
-      {:ok, {:resolved, updated, decision}} ->
-        {:ok, publish_resolution(updated, actor, decision)}
+      {:ok, {:resolved, updated, decision, recovery_effect}} ->
+        {:ok, publish_resolution(updated, actor, decision, recovery_effect)}
 
       {:error, reason} ->
         {:error, reason}
@@ -537,14 +542,20 @@ defmodule Cympho.BoardApprovals do
         |> Ecto.Changeset.change(%{status: "cancelled"})
         |> Repo.update()
         |> case do
-          {:ok, updated} -> updated
-          {:error, changeset} -> Repo.rollback(changeset)
+          {:ok, updated} ->
+            recovery_effect =
+              resolve_recovery_case_locked!(updated, updated.decision_reasoning)
+
+            {updated, recovery_effect}
+
+          {:error, changeset} ->
+            Repo.rollback(changeset)
         end
       end)
 
     case transaction_result do
-      {:ok, updated} ->
-        _ = Cympho.Recovery.handle_approval_resolution(updated)
+      {:ok, {updated, recovery_effect}} ->
+        recovery_published? = publish_recovery_resolution(recovery_effect)
 
         GovernanceAuditLogs.log_action(
           "board_proposal_cancelled",
@@ -564,7 +575,9 @@ defmodule Cympho.BoardApprovals do
           {:board_approval_cancelled, updated}
         )
 
-        _ = Cympho.OwnerAttention.notify_changed(updated.company_id)
+        unless recovery_published? do
+          _ = Cympho.OwnerAttention.notify_changed(updated.company_id)
+        end
 
         {:ok, updated}
 
@@ -586,7 +599,8 @@ defmodule Cympho.BoardApprovals do
             ba.status == "pending" and not is_nil(ba.review_deadline) and
               ba.review_deadline <= ^now,
           order_by: [asc: ba.review_deadline],
-          select: ba.id
+          select: ba.id,
+          limit: @resolution_batch_limit
       )
 
     expired =
@@ -602,50 +616,63 @@ defmodule Cympho.BoardApprovals do
                     DateTime.compare(approval.review_deadline, now) != :gt do
                  {:ok, updated} =
                    approval
-                   |> Ecto.Changeset.change(%{status: "expired"})
+                   |> Ecto.Changeset.change(%{
+                     status: "expired",
+                     decision_reasoning: "Review deadline passed"
+                   })
                    |> Repo.update()
 
-                 updated
+                 recovery_effect =
+                   resolve_recovery_case_locked!(updated, updated.decision_reasoning)
+
+                 {updated, recovery_effect}
                else
                  nil
                end
              end) do
-          {:ok, %BoardApproval{} = approval} -> [approval]
-          _ -> []
+          {:ok, {%BoardApproval{} = approval, recovery_effect}} ->
+            [{approval, recovery_effect}]
+
+          _ ->
+            []
         end
       end)
 
-    Enum.each(expired, &publish_expiration/1)
-    _ = reconcile_recovery_resolutions()
+    Enum.each(expired, fn {approval, recovery_effect} ->
+      publish_expiration(approval, recovery_effect)
+    end)
+
     {length(expired), nil}
   end
 
-  @doc "Reconciles persisted non-pending recovery approvals after a restart."
-  def reconcile_recovery_resolutions do
+  @doc "Reconciles persisted terminal recovery approvals after a restart."
+  def reconcile_recovery_resolutions(opts \\ []) when is_list(opts) do
+    limit = reconciliation_limit(opts)
+
     approvals =
       Repo.all(
         from ba in BoardApproval,
+          join: recovery_case in RecoveryCase,
+          on: recovery_case.id == ba.recovery_case_id,
           where:
             ba.category == "stranded_work_recovery" and
-              ba.status in ["denied", "expired", "cancelled"]
+              ba.status in ["denied", "expired", "cancelled"] and
+              ba.company_id == recovery_case.company_id and
+              recovery_case.state in ^RecoveryCase.active_states(),
+          order_by: [asc: ba.inserted_at, asc: ba.id],
+          limit: ^limit
       )
 
-    Enum.each(approvals, fn approval ->
-      _ = Cympho.Recovery.handle_approval_resolution(approval)
+    Enum.count(approvals, fn approval ->
+      Recovery.handle_approval_resolution(approval) == :ok
     end)
-
-    length(approvals)
   rescue
     _ -> 0
   end
 
-  defp publish_expiration(%BoardApproval{} = approval) do
+  defp publish_expiration(%BoardApproval{} = approval, recovery_effect) do
     approval = Repo.preload(approval, [:requested_by, :company])
-
-    # Resolution of a linked recovery case is durable and happens only after
-    # the approval update transaction has committed. The handler is idempotent
-    # so startup replay and explicit expiry can safely converge.
-    _ = Cympho.Recovery.handle_approval_resolution(approval)
+    recovery_published? = publish_recovery_resolution(recovery_effect)
 
     GovernanceAuditLogs.log_action(
       "board_decision",
@@ -666,7 +693,10 @@ defmodule Cympho.BoardApprovals do
       {:board_approval_resolved, approval}
     )
 
-    _ = Cympho.OwnerAttention.notify_changed(approval.company_id)
+    unless recovery_published? do
+      _ = Cympho.OwnerAttention.notify_changed(approval.company_id)
+    end
+
     :ok
   end
 
@@ -947,6 +977,36 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
+  defp resolve_recovery_case_locked!(
+         %BoardApproval{
+           category: "stranded_work_recovery",
+           status: status
+         } = approval,
+         reason
+       )
+       when status in ["denied", "expired", "cancelled"] do
+    case Recovery.resolve_approval_case_locked(approval, reason) do
+      {:error, error} -> Repo.rollback(error)
+      effect -> effect
+    end
+  end
+
+  defp resolve_recovery_case_locked!(%BoardApproval{}, _reason), do: :unchanged
+
+  defp publish_recovery_resolution(:unchanged), do: false
+
+  defp publish_recovery_resolution({:changed, _descriptor} = effect) do
+    :ok = Recovery.publish_approval_resolution(effect)
+    true
+  end
+
+  defp reconciliation_limit(opts) do
+    case Keyword.get(opts, :limit, @resolution_batch_limit) do
+      limit when is_integer(limit) and limit > 0 -> min(limit, @resolution_batch_limit)
+      _ -> @resolution_batch_limit
+    end
+  end
+
   defp maybe_auto_approve_locked(%BoardApproval{} = board_approval) do
     threshold_opts = load_threshold_opts(board_approval.company_id)
 
@@ -966,11 +1026,10 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
-  defp publish_resolution(%BoardApproval{} = updated, actor, decision) do
+  defp publish_resolution(%BoardApproval{} = updated, actor, decision, recovery_effect) do
     updated = Repo.preload(updated, [:requested_by, :company])
     decision = Repo.preload(decision, :company)
-
-    _ = Cympho.Recovery.handle_approval_resolution(updated)
+    recovery_published? = publish_recovery_resolution(recovery_effect)
 
     GovernanceAuditLogs.log_action(
       "board_decision",
@@ -997,7 +1056,9 @@ defmodule Cympho.BoardApprovals do
       {:board_approval_resolved, updated}
     )
 
-    _ = Cympho.OwnerAttention.notify_changed(updated.company_id)
+    unless recovery_published? do
+      _ = Cympho.OwnerAttention.notify_changed(updated.company_id)
+    end
 
     updated
   end

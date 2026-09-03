@@ -22,6 +22,9 @@ defmodule Cympho.BoardApprovals.ExecutionClaimTest do
   alias Cympho.Budgets.Budget
   alias Cympho.Companies
   alias Cympho.Decisions.Decision
+  alias Cympho.Issues.Issue
+  alias Cympho.Recovery
+  alias Cympho.Recovery.RecoveryCase
 
   setup do
     unique = System.unique_integer([:positive])
@@ -227,6 +230,56 @@ defmodule Cympho.BoardApprovals.ExecutionClaimTest do
   end
 
   describe "durable action effects" do
+    test "an auto-approved recovery vote waits for the separate durable retry effect", %{
+      company: company
+    } do
+      company
+      |> Ecto.Changeset.change(%{
+        governance_config: %{"threshold_type" => "count", "threshold_value" => 1}
+      })
+      |> Repo.update!()
+
+      issue =
+        %Issue{}
+        |> Issue.changeset(%{
+          title: "Auto-approved recovery",
+          company_id: company.id,
+          status: :in_progress
+        })
+        |> Repo.insert!()
+
+      {:ok, case_row} =
+        Recovery.ensure_case(%{
+          company_id: company.id,
+          source_type: "issue_checkout",
+          issue: issue,
+          max_attempts: 1
+        })
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      {:ok, lease} = Recovery.claim_case(case_row, now: now)
+      {:ok, exhausted} = Recovery.record_failure(lease, "provider timeout", now: now)
+      {:ok, approval} = Recovery.exhaust_case(exhausted, now: now)
+
+      :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:approvals")
+
+      assert {:ok, _vote} =
+               BoardApprovals.cast_vote(
+                 approval.id,
+                 Ecto.UUID.generate(),
+                 "approve",
+                 "retry once"
+               )
+
+      approved = Repo.get!(BoardApproval, approval.id)
+      assert approved.status == "approved"
+      assert Repo.get!(RecoveryCase, case_row.id).state == "escalated"
+      refute_receive {:recovery_case_resolved, _, _}, 50
+
+      assert {:ok, %RecoveryCase{state: "scheduled"}} =
+               BoardApprovals.execute_approved_action(approved)
+    end
+
     test "malformed approved actions fail without committing an effect", %{company: company} do
       for category <- [
             "agent_termination",

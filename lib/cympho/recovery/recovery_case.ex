@@ -13,6 +13,7 @@ defmodule Cympho.Recovery.RecoveryCase do
   @active_states ~w(detected scheduled claimed exhausted escalated)
   @states ~w(detected scheduled claimed recovered exhausted escalated resolved superseded)
   @source_types ~w(heartbeat_run issue_checkout)
+  @resolution_note_max_length 1_000
 
   schema "recovery_cases" do
     belongs_to :company, Company
@@ -48,12 +49,16 @@ defmodule Cympho.Recovery.RecoveryCase do
     field :exhausted_at, :utc_datetime
     field :escalated_at, :utc_datetime
     field :resolved_at, :utc_datetime
+    field :resolution_note, :string
     timestamps(type: :utc_datetime)
   end
 
   def active_states, do: @active_states
   def states, do: @states
   def source_types, do: @source_types
+
+  @doc false
+  def resolution_note_max_length, do: @resolution_note_max_length
 
   def changeset(case_row, attrs) do
     case_row
@@ -76,7 +81,8 @@ defmodule Cympho.Recovery.RecoveryCase do
       :policy_snapshot,
       :next_attempt_at,
       :claimed_by,
-      :last_error
+      :last_error,
+      :resolution_note
     ])
     |> validate_required([
       :company_id,
@@ -96,6 +102,7 @@ defmodule Cympho.Recovery.RecoveryCase do
     |> validate_length(:source_fingerprint, is: 64)
     |> validate_format(:source_fingerprint, ~r/\A[0-9a-f]{64}\z/)
     |> validate_length(:source_id, max: 255)
+    |> validate_length(:resolution_note, max: @resolution_note_max_length)
     |> validate_snapshot(:source_snapshot, 16_384)
     |> validate_snapshot(:policy_snapshot, 4_096)
     |> foreign_key_constraint(:company_id)
@@ -104,6 +111,7 @@ defmodule Cympho.Recovery.RecoveryCase do
     |> foreign_key_constraint(:source_run_id)
     |> foreign_key_constraint(:parent_case_id)
     |> foreign_key_constraint(:root_case_id)
+    |> check_constraint(:resolution_note, name: :recovery_cases_resolution_note_size_check)
     |> unique_constraint(:source_id, name: :recovery_cases_active_source_index)
     |> unique_constraint(:source_fingerprint, name: :recovery_cases_source_history_index)
     |> prepare_changes(&validate_association_scope/1)

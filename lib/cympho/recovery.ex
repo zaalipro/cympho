@@ -17,6 +17,7 @@ defmodule Cympho.Recovery do
 
   @lease_seconds 300
   @terminal_run_statuses ~w(completed succeeded failed cancelled timed_out done)
+  @terminal_recovery_approval_statuses ~w(denied expired cancelled)
   @policy_option_keys [:max_attempts, :base_delay, :max_delay, :lease_seconds]
 
   @doc "Escalates an exhausted recovery case to a single board retry proposal."
@@ -282,83 +283,120 @@ defmodule Cympho.Recovery do
 
   defp snapshot_lock_version(_), do: nil
 
-  @doc "Resolves a recovery case when its board approval is denied or cancelled."
-  def handle_approval_resolution(%BoardApproval{
-        id: approval_id
-      })
-      when is_binary(approval_id) do
+  @doc false
+  def resolve_approval_case_locked(%BoardApproval{} = approval, reason) do
+    with :ok <- validate_resolution_approval(approval),
+         %RecoveryCase{} = case_row <- lock_linked_recovery_case(approval.recovery_case_id),
+         :ok <- validate_resolution_company(approval, case_row) do
+      if case_row.state in RecoveryCase.active_states() do
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+        resolution_note = bounded_resolution_note(reason)
+
+        changeset =
+          case_row
+          |> Ecto.Changeset.change(%{
+            state: "resolved",
+            resolved_at: now,
+            resolution_note: resolution_note,
+            claim_token: nil,
+            claimed_at: nil,
+            lease_expires_at: nil,
+            claimed_by: nil,
+            next_attempt_at: nil
+          })
+          |> Ecto.Changeset.validate_length(:resolution_note,
+            max: RecoveryCase.resolution_note_max_length()
+          )
+          |> Ecto.Changeset.check_constraint(:resolution_note,
+            name: :recovery_cases_resolution_note_size_check
+          )
+
+        case Repo.update(changeset) do
+          {:ok, _updated} ->
+            {:changed,
+             %{
+               approval: approval,
+               recovery_case: Repo.get!(RecoveryCase, case_row.id),
+               resolution: approval.status
+             }}
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
+      else
+        :unchanged
+      end
+    else
+      nil -> resolution_scope_error(approval, :recovery_case_id, "does not exist")
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def resolve_approval_case_locked(_value, _reason) do
+    {:error,
+     %Ecto.Changeset{}
+     |> Ecto.Changeset.add_error(:recovery_case_id, "must be a persisted recovery approval")}
+  end
+
+  @doc false
+  def publish_approval_resolution(
+        {:changed,
+         %{
+           approval: %BoardApproval{} = approval,
+           recovery_case: %RecoveryCase{state: "resolved"} = case_row,
+           resolution: status
+         }}
+      ) do
+    approval = Repo.preload(approval, [:requested_by, :company])
+    company_id = approval.company_id
+
+    GovernanceAuditLogs.log_action(
+      "recovery_resolved",
+      {"system", company_id},
+      "Stranded-work recovery approval #{status}",
+      resource: approval,
+      metadata: %{recovery_case_id: case_row.id, resolution: status}
+    )
+
+    Cympho.PubSubGuard.company_broadcast(
+      company_id,
+      "approvals",
+      {:recovery_case_resolved, approval, case_row}
+    )
+
+    _ = Cympho.OwnerAttention.notify_changed(company_id)
+    :ok
+  end
+
+  def publish_approval_resolution(:unchanged), do: :ok
+
+  @doc "Resolves a recovery case when its board approval is denied, expired, or cancelled."
+  def handle_approval_resolution(%BoardApproval{id: approval_id}) when is_binary(approval_id) do
     result =
       Repo.transaction(fn ->
-        with %BoardApproval{
-               category: "stranded_work_recovery",
-               status: status,
-               recovery_case_id: id,
-               company_id: company_id
-             } = persisted
-             when status in ["denied", "expired", "cancelled"] and is_binary(id) and
-                    is_binary(company_id) <-
-               Repo.one(
-                 from a in BoardApproval,
-                   where: a.id == ^approval_id,
-                   lock: "FOR UPDATE"
-               ),
-             %RecoveryCase{} = c <-
-               Repo.one(
-                 from c in RecoveryCase,
-                   where: c.id == ^id and c.company_id == ^company_id,
-                   lock: "FOR UPDATE"
-               ) do
-          case c.state do
-            state when state in ["detected", "scheduled", "claimed", "exhausted", "escalated"] ->
-              now = DateTime.utc_now() |> DateTime.truncate(:second)
+        case Repo.one(
+               from a in BoardApproval,
+                 where: a.id == ^approval_id,
+                 lock: "FOR UPDATE"
+             ) do
+          %BoardApproval{
+            category: "stranded_work_recovery",
+            status: status
+          } = persisted
+          when status in @terminal_recovery_approval_statuses ->
+            case resolve_approval_case_locked(persisted, persisted.decision_reasoning) do
+              {:error, reason} -> Repo.rollback(reason)
+              effect -> effect
+            end
 
-              # If a lease was still held when an operator denied/expired the
-              # proposal, clear it as part of resolution so no worker can
-              # complete a stale attempt after the human decision.
-              Repo.update_all(from(c2 in RecoveryCase, where: c2.id == ^c.id),
-                set: [
-                  state: "resolved",
-                  resolved_at: now,
-                  claim_token: nil,
-                  claimed_at: nil,
-                  lease_expires_at: nil,
-                  claimed_by: nil,
-                  next_attempt_at: nil
-                ]
-              )
-
-              {:changed, persisted, c, status, company_id}
-
-            _terminal_or_historical ->
-              :unchanged
-          end
-        else
-          _ -> :unchanged
+          _ ->
+            :unchanged
         end
       end)
 
     case result do
-      {:ok, {:changed, approval, case_row, status, company_id}} ->
-        # All governance effects are emitted only after the resolution
-        # transaction commits.  This also makes startup reconciliation safe.
-        GovernanceAuditLogs.log_action(
-          "recovery_resolved",
-          {"system", company_id},
-          "Stranded-work recovery approval #{status}",
-          resource: approval,
-          metadata: %{recovery_case_id: case_row.id, resolution: status}
-        )
-
-        Cympho.PubSubGuard.company_broadcast(
-          company_id,
-          "approvals",
-          {:recovery_case_resolved, approval, case_row}
-        )
-
-        _ = Cympho.OwnerAttention.notify_changed(company_id)
-        :ok
-
-      {:ok, :unchanged} ->
+      {:ok, effect} ->
+        _ = publish_approval_resolution(effect)
         :ok
 
       {:error, reason} ->
@@ -367,6 +405,82 @@ defmodule Cympho.Recovery do
   end
 
   def handle_approval_resolution(_), do: :ok
+
+  defp validate_resolution_approval(%BoardApproval{
+         __meta__: %Ecto.Schema.Metadata{state: :loaded},
+         id: id,
+         category: "stranded_work_recovery",
+         status: status,
+         recovery_case_id: recovery_case_id,
+         company_id: company_id
+       })
+       when is_binary(id) and status in @terminal_recovery_approval_statuses and
+              is_binary(recovery_case_id) and is_binary(company_id),
+       do: :ok
+
+  defp validate_resolution_approval(%BoardApproval{__meta__: %{state: state}} = approval)
+       when state != :loaded,
+       do:
+         resolution_scope_error(
+           approval,
+           :recovery_case_id,
+           "must be a persisted recovery approval"
+         )
+
+  defp validate_resolution_approval(%BoardApproval{category: category} = approval)
+       when category != "stranded_work_recovery",
+       do: resolution_scope_error(approval, :category, "must be stranded_work_recovery")
+
+  defp validate_resolution_approval(%BoardApproval{status: status} = approval)
+       when status not in @terminal_recovery_approval_statuses,
+       do: resolution_scope_error(approval, :status, "must be denied, expired, or cancelled")
+
+  defp validate_resolution_approval(%BoardApproval{recovery_case_id: id} = approval)
+       when not is_binary(id),
+       do: resolution_scope_error(approval, :recovery_case_id, "is required")
+
+  defp validate_resolution_approval(%BoardApproval{} = approval),
+    do: resolution_scope_error(approval, :company_id, "is required")
+
+  defp lock_linked_recovery_case(case_id) do
+    Repo.one(
+      from c in RecoveryCase,
+        where: c.id == ^case_id,
+        lock: "FOR UPDATE"
+    )
+  end
+
+  defp validate_resolution_company(
+         %BoardApproval{company_id: company_id},
+         %RecoveryCase{company_id: company_id}
+       ),
+       do: :ok
+
+  defp validate_resolution_company(%BoardApproval{} = approval, %RecoveryCase{}) do
+    resolution_scope_error(
+      approval,
+      :recovery_case_id,
+      "must belong to the approval company"
+    )
+  end
+
+  defp resolution_scope_error(%BoardApproval{} = approval, field, message) do
+    {:error,
+     approval
+     |> Ecto.Changeset.change()
+     |> Ecto.Changeset.add_error(field, message)}
+  end
+
+  defp bounded_resolution_note(nil), do: nil
+
+  defp bounded_resolution_note(reason) when is_binary(reason) do
+    case String.trim(reason) do
+      "" -> nil
+      note -> String.slice(note, 0, RecoveryCase.resolution_note_max_length())
+    end
+  end
+
+  defp bounded_resolution_note(_reason), do: nil
 
   @doc "Applies an approved stranded-work recovery retry exactly once."
   def apply_board_action(approval, opts \\ [])
