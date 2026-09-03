@@ -125,6 +125,7 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
 
   defp run_check(state) do
     usage_reconciliation = reconcile_terminal_usage()
+    due_recovery = Recovery.process_due(limit: 50)
     recovery_stats = recovery_stats()
     stale_runs = HeartbeatEngine.find_stale_runs(@stale_threshold)
     stale_run_ids = MapSet.new(stale_runs, & &1.id)
@@ -173,10 +174,12 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
           stale_checkout_telemetry.cases_created,
       recovery_attempts:
         recovery_stats.attempts + orphaned_issue_telemetry.attempts +
-          stale_checkout_telemetry.attempts,
+          stale_checkout_telemetry.attempts + Map.get(due_recovery, :claimed, 0),
       recovery_exhausted:
         recovery_stats.exhausted + Map.get(orphaned_issues, :exhausted, 0) +
-          Map.get(stale_checkouts, :exhausted, 0),
+          Map.get(stale_checkouts, :exhausted, 0) + Map.get(due_recovery, :exhausted, 0),
+      recovery_due_processed: Map.get(due_recovery, :processed, 0),
+      recovery_due_failed: Map.get(due_recovery, :failed, 0),
       checked_at: DateTime.utc_now()
     }
 
@@ -186,7 +189,7 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
          results.orphaned_issues_recovered > 0 or
          results.stale_checkouts_released > 0 or results.hard_stops_completed > 0 or
          results.recovery_cases_created > 0 or results.recovery_attempts > 0 or
-         results.recovery_exhausted > 0 do
+         results.recovery_exhausted > 0 or results.recovery_due_failed > 0 do
       Logger.info("Watchdog: #{inspect(results)}")
     end
 

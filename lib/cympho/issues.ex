@@ -1029,7 +1029,16 @@ defmodule Cympho.Issues do
       |> normalize_monitor_state()
       |> Map.put("issue_runtime", runtime_state)
 
-    update_issue(issue, %{monitor_state: monitor_state})
+    if Keyword.get(opts, :defer_side_effects, false) do
+      # Recovery composes this update with an exact checkout CAS inside an
+      # outer transaction.  Emitting issue/audit broadcasts here would leak a
+      # resume that could still roll back, so return the optimistic-lock update
+      # without the normal after-commit-ish UI side effects.  Callers outside a
+      # transaction retain the historical behaviour below.
+      do_update_issue(issue, %{monitor_state: monitor_state})
+    else
+      update_issue(issue, %{monitor_state: monitor_state})
+    end
   end
 
   def resume_issue_runtime(_issue, _opts), do: {:error, :invalid_issue}
@@ -2667,6 +2676,13 @@ defmodule Cympho.Issues do
     atomic_clear_checkout_lock(issue, target_status)
   end
 
+  @doc "Clears an exact checkout snapshot without emitting pre-commit side effects."
+  @spec clear_checkout_lock_deferred(Issue.t(), atom()) ::
+          {:ok, Issue.t()} | {:error, :checkout_conflict}
+  def clear_checkout_lock_deferred(%Issue{} = issue, target_status \\ :todo) do
+    atomic_clear_checkout_lock(issue, target_status, true)
+  end
+
   @doc """
   Clears checkout metadata only when `run_id` still owns it.
 
@@ -2930,7 +2946,7 @@ defmodule Cympho.Issues do
   # Compare-and-set on the caller's ownership snapshot. A successor that bound a
   # new `checkout_run_id` (or re-checked out with a newer timestamp / lock)
   # must not be cleared by a stale reclaim. Assignee is intentionally preserved.
-  defp atomic_clear_checkout_lock(%Issue{} = issue, target_status) do
+  defp atomic_clear_checkout_lock(%Issue{} = issue, target_status, defer_side_effects? \\ false) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     query =
@@ -2967,19 +2983,22 @@ defmodule Cympho.Issues do
     case count do
       1 ->
         with {:ok, recovered} <- get_issue(issue.id) do
-          Activities.log_activity(%{
-            issue_id: recovered.id,
-            company_id: recovered.company_id,
-            actor_type: "system",
-            action: "checkout_lock_cleared",
-            metadata: %{
-              previous_assignee_id: issue.assignee_id,
-              target_status: target_status
-            }
-          })
+          unless defer_side_effects? do
+            Activities.log_activity(%{
+              issue_id: recovered.id,
+              company_id: recovered.company_id,
+              actor_type: "system",
+              action: "checkout_lock_cleared",
+              metadata: %{
+                previous_assignee_id: issue.assignee_id,
+                target_status: target_status
+              }
+            })
 
-          broadcast_issue_update(recovered, :issue_updated, %{status: target_status})
-          _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(issue, recovered)
+            broadcast_issue_update(recovered, :issue_updated, %{status: target_status})
+            _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(issue, recovered)
+          end
+
           {:ok, recovered}
         end
 

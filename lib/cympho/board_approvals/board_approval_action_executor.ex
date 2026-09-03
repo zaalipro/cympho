@@ -43,6 +43,11 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
   @impl true
   def handle_info(:recover_pending_approvals, state) do
+    # Reconcile deadline and denial/cancellation rows that were persisted while
+    # this process (or the node) was down before replaying approved work.
+    _ = BoardApprovals.check_expired_approvals()
+    _ = BoardApprovals.reconcile_recovery_resolutions()
+
     # Claims this node abandoned (crash or redeploy during retry backoff) are
     # released first — retry state lives only in this process's mailbox, so a
     # claim we still hold at startup can never be finished by anyone.

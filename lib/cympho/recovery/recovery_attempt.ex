@@ -41,7 +41,32 @@ defmodule Cympho.Recovery.RecoveryAttempt do
     |> validate_required([:recovery_case_id, :attempt_no, :status, :action, :source_fingerprint])
     |> validate_inclusion(:status, statuses())
     |> validate_number(:attempt_no, greater_than: 0)
+    |> validate_length(:source_fingerprint, is: 64)
+    |> validate_format(:source_fingerprint, ~r/\A[0-9a-f]{64}\z/)
+    |> validate_length(:action, max: 64)
+    |> validate_length(:error_reason, max: 255)
+    |> validate_length(:node, max: 255)
+    |> validate_metadata()
     |> foreign_key_constraint(:recovery_case_id)
     |> unique_constraint([:recovery_case_id, :attempt_no])
+  end
+
+  defp validate_metadata(changeset) do
+    metadata = get_field(changeset, :metadata)
+
+    cond do
+      is_nil(metadata) ->
+        changeset
+
+      not is_map(metadata) ->
+        add_error(changeset, :metadata, "must be a map")
+
+      true ->
+        case Jason.encode(metadata) do
+          {:ok, encoded} when byte_size(encoded) <= 8_192 -> changeset
+          {:ok, _encoded} -> add_error(changeset, :metadata, "is too large")
+          {:error, _} -> add_error(changeset, :metadata, "must be JSON encodable")
+        end
+    end
   end
 end

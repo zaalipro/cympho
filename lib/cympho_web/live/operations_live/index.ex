@@ -9,6 +9,7 @@ defmodule CymphoWeb.OperationsLive.Index do
   alias Cympho.Issues
   alias Cympho.Issues.SwarmEvents
   alias Cympho.ReviewNudges
+  alias Cympho.Recovery
   alias Cympho.RuntimeOperations
   alias Cympho.Wakes
 
@@ -969,18 +970,34 @@ defmodule CymphoWeb.OperationsLive.Index do
     orphaned_runs = HeartbeatEngine.find_orphaned_runs_for_company(company_id)
     waiting_runs = HeartbeatEngine.find_stale_waiting_runs_for_company(company_id)
 
-    runs =
+    stale_ids = MapSet.new(stale_runs, & &1.id)
+
+    recovery_results =
       (stale_runs ++ orphaned_runs)
       |> Map.new(&{&1.id, &1})
       |> Map.values()
+      |> Enum.map(fn run ->
+        if MapSet.member?(stale_ids, run.id),
+          do: Recovery.recover_stale_run(run),
+          else: Recovery.recover_orphaned_run(run)
+      end)
 
-    recovery_results = Enum.map(runs, &HeartbeatEngine.recover_stale_run/1)
-    cancel_results = Enum.map(waiting_runs, &HeartbeatEngine.cancel_run/1)
-    {:ok, checkout_results} = RuntimeOperations.recover_stale_checked_out_issues(company_id)
+    cancel_results = Enum.map(waiting_runs, &Recovery.recover_orphaned_run/1)
+    checkout_results = Recovery.recover_stale_checkouts_for_company(company_id)
     results = recovery_results ++ cancel_results
 
-    recovered = Enum.count(recovery_results, &match?({:ok, _}, &1))
-    cancelled = Enum.count(cancel_results, &match?({:ok, _}, &1))
+    recovered =
+      Enum.count(recovery_results, fn
+        {:ok, %{outcome: :recovered}} -> true
+        _ -> false
+      end)
+
+    cancelled =
+      Enum.count(cancel_results, fn
+        {:ok, %{outcome: :recovered}} -> true
+        _ -> false
+      end)
+
     released = checkout_results.released
     failed = Enum.count(results, &match?({:error, _}, &1)) + checkout_results.failed
 

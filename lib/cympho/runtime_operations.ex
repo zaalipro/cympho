@@ -163,23 +163,8 @@ defmodule Cympho.RuntimeOperations do
   """
   @spec recover_stale_checked_out_issues(String.t()) :: {:ok, map()}
   def recover_stale_checked_out_issues(company_id) when is_binary(company_id) do
-    issues = stale_checked_out_issues(company_id)
-
-    results =
-      Enum.map(issues, fn issue ->
-        cond do
-          live_runtime?(issue.id) -> {:skip, :live_runtime}
-          has_active_run?(issue.id) -> {:skip, :active_run}
-          true -> Issues.clear_checkout_lock(issue, :todo)
-        end
-      end)
-
-    {:ok,
-     %{
-       checked: length(issues),
-       released: Enum.count(results, &match?({:ok, _}, &1)),
-       failed: Enum.count(results, &match?({:error, _}, &1))
-     }}
+    result = Cympho.Recovery.recover_stale_checkouts_for_company(company_id)
+    {:ok, Map.take(result, [:checked, :released, :failed])}
   end
 
   def recover_stale_checked_out_issues(_company_id) do
@@ -198,14 +183,22 @@ defmodule Cympho.RuntimeOperations do
     limit = Keyword.get(opts, :limit, @stale_checkout_limit)
     cutoff = DateTime.add(DateTime.utc_now(), -minutes * 60, :second)
 
-    Issue
-    |> where([i], i.status == :in_progress)
-    |> where([i], not is_nil(i.assignee_id))
-    |> where([i], not is_nil(i.checked_out_at))
-    |> where([i], i.checked_out_at < ^cutoff)
-    |> order_by([i], asc: i.checked_out_at)
-    |> limit(^limit)
-    |> Repo.all()
+    query =
+      Issue
+      |> where([i], i.status == :in_progress)
+      |> where([i], not is_nil(i.assignee_id))
+      |> where([i], not is_nil(i.checked_out_at))
+      |> where([i], i.checked_out_at < ^cutoff)
+      |> order_by([i], asc: i.checked_out_at)
+      |> limit(^limit)
+
+    query =
+      case Keyword.get(opts, :company_id) do
+        company_id when is_binary(company_id) -> where(query, [i], i.company_id == ^company_id)
+        _ -> query
+      end
+
+    Repo.all(query)
   end
 
   @doc """
@@ -217,56 +210,8 @@ defmodule Cympho.RuntimeOperations do
   """
   @spec recover_stale_checked_out_issues_all(keyword()) :: {:ok, map()}
   def recover_stale_checked_out_issues_all(opts \\ []) do
-    issues = stale_checked_out_issues_all(opts)
-
-    results =
-      Enum.map(issues, fn issue ->
-        cond do
-          live_runtime?(issue.id) ->
-            {:skip, :live_runtime}
-
-          has_active_run?(issue.id) ->
-            {:skip, :active_run}
-
-          true ->
-            Issues.clear_checkout_lock(issue, :todo)
-        end
-      end)
-
-    {:ok,
-     %{
-       checked: length(issues),
-       released: Enum.count(results, &match?({:ok, _}, &1)),
-       failed: Enum.count(results, &match?({:error, _}, &1))
-     }}
-  end
-
-  defp live_orchestrator?(issue_id) do
-    case Cympho.Orchestrator.whereis(issue_id) do
-      nil -> false
-      pid -> Process.alive?(pid)
-    end
-  end
-
-  defp live_runtime?(issue_id) do
-    live_orchestrator?(issue_id) or
-      case Cympho.AdapterSessions.owners_for_issue(issue_id) do
-        {:ok, []} -> false
-        {:ok, [_ | _]} -> true
-        # Recovery is destructive. If the worker ledger is unavailable, keep
-        # the checkout until a later sweep can prove no cleanup worker exists.
-        {:error, :not_started} -> true
-      end
-  end
-
-  defp has_active_run?(issue_id) do
-    from(r in Run,
-      where: r.issue_id == ^issue_id and r.status in ^@active_run_statuses,
-      select: r.id,
-      limit: 1
-    )
-    |> Repo.one()
-    |> is_binary()
+    result = Cympho.Recovery.recover_stale_checkouts(opts)
+    {:ok, Map.take(result, [:checked, :released, :failed])}
   end
 
   def stale_comment_wake_minutes, do: @stale_comment_wake_minutes

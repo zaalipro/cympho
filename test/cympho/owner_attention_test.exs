@@ -13,6 +13,7 @@ defmodule Cympho.OwnerAttentionTest do
   alias Cympho.Issues
   alias Cympho.IssueThreadInteractions
   alias Cympho.OwnerAttention
+  alias Cympho.Recovery
   alias Cympho.Repo
   alias Cympho.Users
   alias Cympho.Wakes
@@ -137,11 +138,15 @@ defmodule Cympho.OwnerAttentionTest do
     :ok = OwnerAttention.subscribe(context.company.id)
     :ok = OwnerAttention.subscribe(context.other_company.id)
 
+    issue = issue!(context.company.id, "Stranded attention", assignee_id: context.agent.id)
+    {:ok, recovery_case} = Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+
     {:ok, recovery_approval} =
       BoardApprovals.create_board_approval(%{
         title: "Retry stranded work",
         description: "The board must decide whether to retry this work.",
         category: "stranded_work_recovery",
+        recovery_case_id: recovery_case.id,
         company_id: context.company.id,
         proposal_data: %{
           "action" => "retry",
@@ -725,6 +730,12 @@ defmodule Cympho.OwnerAttentionTest do
       case Keyword.get(opts, :assignee_user_id) do
         nil -> attrs
         user_id -> Map.put(attrs, :assignee_user_id, user_id)
+      end
+
+    attrs =
+      case Keyword.get(opts, :assignee_id) do
+        nil -> attrs
+        agent_id -> Map.put(attrs, :assignee_id, agent_id)
       end
 
     {:ok, issue} = Issues.create_issue(attrs)

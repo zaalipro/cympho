@@ -261,6 +261,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp recover_orphans do
+    _ = Cympho.Recovery.process_due(limit: 50)
     recover_orphaned_runs()
     _ = recover_orphaned_in_progress()
     _ = recover_stale_checkouts()
@@ -987,15 +988,22 @@ defmodule Cympho.Orchestrator.Dispatcher do
       unless live_orchestrator?(issue_id) do
         case Issues.get_issue(issue_id) do
           {:ok, %Issue{status: :in_progress, checkout_run_id: nil} = issue} ->
-            case Issues.clear_checkout_lock(issue, :todo) do
-              {:ok, _released} ->
+            case Cympho.Recovery.recover_orphaned_issue(issue,
+                   allow_unbound_active_runs: true
+                 ) do
+              {:ok, %{outcome: :recovered}} ->
                 Logger.warning(
                   "[Dispatcher] released issue #{issue_id} after orchestrator crash (assignee preserved)"
                 )
 
-              {:error, :checkout_conflict} ->
+              {:ok, %{outcome: :superseded}} ->
                 Logger.info(
                   "[Dispatcher] skipped crash release for issue #{issue_id}: checkout already claimed by successor"
+                )
+
+              {:ok, %{outcome: outcome}} when outcome in [:scheduled, :exhausted] ->
+                Logger.info(
+                  "[Dispatcher] crash checkout recovery for issue #{issue_id} #{outcome}"
                 )
 
               {:error, release_reason} ->
@@ -1457,6 +1465,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     # Same helpers the watchdog tick / handle_continue(:recover_orphans) use so
     # either cadence covers the other — including zombie runs that pin issues
     # out of reclaim when recover_orphaned_runs is skipped.
+    _ = Cympho.Recovery.process_due(limit: 50)
     recover_orphaned_runs()
     _ = recover_orphaned_in_progress()
     _ = recover_stale_checkouts()

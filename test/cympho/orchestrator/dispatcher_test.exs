@@ -829,6 +829,10 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
     send(worker, :finish_cleanup)
     wait_until(fn -> refute Process.alive?(worker) end)
 
+    wait_until(fn ->
+      assert {:ok, []} = Cympho.AdapterSessions.owners_for_issue(issue.id)
+    end)
+
     # Drain this test's deferred cleanup before its sandbox owner exits. The
     # application Dispatcher may not share this test's DB connection, so it
     # deliberately retries rather than completing database cleanup here.

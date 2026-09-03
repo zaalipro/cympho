@@ -159,3 +159,81 @@ $ git diff --check
 ```
 
 Both commands exited 0 with no diagnostics.
+
+## Final whole-branch hardening wave (C1-C8, I1-I6)
+
+Date: 2026-09-03 (Asia/Tbilisi)
+Base: `0e7d2f3`
+
+### Finding disposition
+
+- **C1 — persisted approval authority:** resolved. Recovery retry execution now reloads and locks the persisted approval and requires persisted `approved` status, recovery category/FK/company, an unexpired review deadline, exact proposal IDs/fingerprint/source fields, and an `escalated` case. Forged or stale caller structs are only locators and cannot reopen work. Executor entry points also reload persisted approval state.
+- **C2 — canonical retry identity:** resolved. Retry children retain canonical run/issue source IDs, the same root/parent lineage, and the active-source uniqueness fence; conflicting children fail closed rather than acquiring alternate UUID-suffixed identities.
+- **C3 — concurrent ensure-case race:** resolved. Insert constraint conflicts are normalized, the active/exact historical row is reloaded and compared, and bounded retry returns a structured conflict rather than raising. A real two-connection sandbox regression test asserts one active row/result identity.
+- **C4 — durable due processor:** resolved. `Recovery.process_due/1` performs a bounded `FOR UPDATE SKIP LOCKED` selection across detected/scheduled/expired-claimed/exhausted rows, claims through the normal lease API, applies final source checks, records outcomes, and reports DB scan errors fail-closed. Watchdog boot/ticks and Dispatcher boot/polls invoke it.
+- **C5 — exhaustion dead ends:** resolved. Exhaustion failure propagates as `{:exhaustion_failed, reason}`; expired final leases close their claimed attempt, transition to exhausted, and create the single pending recovery approval. Focused due/restart/final-lease tests cover the behavior.
+- **C6 — final run CAS/liveness:** resolved. Heartbeat recovery locks current run and issue, recomputes the exact fingerprint, checks tenant/identity/active state, rejects a live orchestrator or adapter owner and an active successor, then rechecks ownership immediately before the terminal write. Tests cover post-scan fingerprint changes and newly registered liveness.
+- **C7 — facade routing:** resolved for the in-scope stranded-source paths. OperationsLive, RuntimeOperations stale-checkout mutation, Watchdog/Dispatcher scans, stale waiting runs, and crash-time unbound checkout cleanup now route through `Cympho.Recovery`. Ordinary dispatch-failure and wake-delivery retry lineage remains the explicit L3b residual boundary.
+- **C8 — recovery approval category/linkage:** resolved. The helper owns category/status even for string-key params, requires same-company recovery linkage, and only reuses a same-company pending recovery approval. Schema and DB constraints reject recovery FKs on other categories.
+- **I1/I2 — actual resume and retry guards:** resolved. Approved retry uses the existing runtime-resume API with deferred effects, then the exact checkout CAS while preserving assignee semantics. Heartbeat retries require complete source fields and recompute run fingerprint/error family; missing/changed data is stale. Tests cover paused-runtime/failed-checkout cleanup and canonical children.
+- **I3 — durable expiry/denial/cancel:** resolved. Late approval expires instead of executing; cancellation, denial publication, expiry sweeps, and executor startup reconciliation drive the linked recovery case to resolved while leaving its issue blocked. Resolution notifications/audits occur after commit and are idempotent.
+- **I4 — post-commit governance effects/history:** resolved. Retry publication/audit/OwnerAttention/poll and resolution effects run outside the mutation/effect transaction. Escalation proposals contain bounded attempt history/restart packet. Superseded sources cancel stale pending approvals and publish the durable resolution.
+- **I5 — schema/tenant/metadata invariants:** resolved. The hardening migration adds source identity/history indexes, fingerprint/version/attempt/policy/status/JSON-size checks, and the recovery-category constraint. Changesets enforce lowercase SHA-256, bounded payloads, source identity, and same-company associations.
+- **I6 — policy bounds:** resolved. Automatic attempts are capped at three, backoff at 600 seconds, lease at 600 seconds, invalid callers fail closed, and the effective policy snapshot is persisted and reused after restart (bounded explicit test overrides remain available).
+
+### Focused verification
+
+Command:
+
+```bash
+TEST_DB_NAME=cympho_l3b_final_20260903_final3_78511 \
+MIX_BUILD_PATH=_build/l3b_final_20260903_final3_78511 \
+MIX_ENV=test ERL_COMPILER_OPTIONS='[nowarn_deprecated_catch]' \
+mise x -- mix test --max-cases 1 --seed 12345 \
+  test/cympho/recovery/fingerprint_test.exs \
+  test/cympho/recovery_test.exs \
+  test/cympho/board_approvals/recovery_action_test.exs \
+  test/cympho/heartbeat_engine/watchdog_test.exs \
+  test/cympho/orchestrator/dispatcher_test.exs \
+  test/cympho/owner_attention_test.exs
+```
+
+Log: `.superpowers/sdd/2026-09-02-l3b-durable-stranded-work-recovery/logs/final-fix-focused-20260903_final3_78511.log`
+
+Exact summary: `Finished in 12.1 seconds (1.7s async, 10.4s sync)` and `125 tests, 0 failures` (exit 0).
+
+### Complete serial verification
+
+Two initial complete invocations each reached `4437 tests, 1 failure`; both failures were timing-sensitive, unrelated `Cympho.PortKillerTest` cases. Each failed case passed immediately in isolation (`1 test, 0 failures`), and no L3b production behavior was changed to mask them. The fresh authoritative serial rerun used the same otherwise-unique compiled build path to avoid compilation load and a new unique DB:
+
+```bash
+TEST_DB_NAME=cympho_l3b_full_20260903_fullfinal3_94475 \
+MIX_BUILD_PATH=_build/l3b_full_20260903_fullfinal2_87730 \
+MIX_ENV=test ERL_COMPILER_OPTIONS='[nowarn_deprecated_catch]' \
+mise x -- mix test --max-cases 1 --seed 12345
+```
+
+Log: `.superpowers/sdd/2026-09-02-l3b-durable-stranded-work-recovery/logs/full-final-20260903_fullfinal3_94475.log`
+
+Exact authoritative summary: `Finished in 202.1 seconds (68.6s async, 133.4s sync)` and `4437 tests, 0 failures` (exit 0).
+
+Historical failed logs and passing isolated reruns are retained as:
+
+- `logs/full-final-20260903_fullfinal_80749.log` — one PortKiller timing failure; isolated line 412 passed.
+- `logs/full-final-20260903_fullfinal2_87730.log` — one different PortKiller timing failure; isolated line 134 passed.
+- `logs/port-killer-isolated-20260903_portiso_87438.log` and `logs/port-killer-isolated-20260903_portiso2_94216.log` — both `1 test, 0 failures`.
+
+### Static and browser verification
+
+- `mise x -- mix format --check-formatted`: exit 0.
+- `mise x -- bash -n deploy.sh install.sh test/shell/*.sh`: exit 0.
+- `git diff --check`: exit 0.
+- Ego-lite smoke: `/operations` redirected to sign-in, dev login succeeded, and the authenticated Operations page rendered at `http://127.0.0.1:4329/operations`; task space 1 was closed with `completeTaskSpace(..., {keep: false})`. The first smoke used `127.0.0.1` while Phoenix is configured for `localhost`, so socket origin warnings appeared in the server log, but the authenticated HTTP/LiveView render completed. No sessions/cookies were wiped.
+
+### Residuals and concerns
+
+- The designed L3b residual remains: ordinary dispatch failures and wake-delivery retries are not yet represented by recovery lineages. This wave does not expand that scope.
+- Multi-node registry/session liveness remains a conservative hint; the durable database lease/source CAS is authoritative. The documented tiny checkout liveness window and concurrent telemetry overcount remain deferred minor limitations.
+- Full-suite PortKiller timing flakes occurred twice under fresh-build load but were independently isolated and the authoritative complete serial rerun passed with zero failures.
+
+Changed-file credential snapshot: 19 changed/untracked files were copied with relative paths and scanned by `/opt/homebrew/bin/gitleaks dir --no-banner --redact --exit-code 1`; exact result was `scanned ~810636 bytes (810.64 KB)`, `no leaks found`, `GITLEAKS_EXIT=0`. Log: `logs/gitleaks-final-fix.log`.

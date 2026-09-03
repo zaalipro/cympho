@@ -315,12 +315,88 @@ defmodule Cympho.BoardApprovals do
 
   @doc "Inserts a stranded-work recovery approval inside an existing transaction."
   def create_recovery_approval(attrs, _opts \\ []) when is_map(attrs) do
-    attrs = Map.put_new(attrs, :category, "stranded_work_recovery")
+    supplied_category = Map.get(attrs, :category) || Map.get(attrs, "category")
+    recovery_case_id = Map.get(attrs, :recovery_case_id) || Map.get(attrs, "recovery_case_id")
+    company_id = Map.get(attrs, :company_id) || Map.get(attrs, "company_id")
 
-    %BoardApproval{}
-    |> BoardApproval.changeset(attrs)
-    |> Repo.insert()
+    cond do
+      supplied_category not in [nil, "stranded_work_recovery", :stranded_work_recovery] ->
+        {:error,
+         %Ecto.Changeset{}
+         |> Ecto.Changeset.add_error(:category, "must be stranded_work_recovery")}
+
+      is_nil(recovery_case_id) ->
+        {:error,
+         %Ecto.Changeset{}
+         |> Ecto.Changeset.add_error(:recovery_case_id, "is required")}
+
+      not recovery_case_matches_company?(recovery_case_id, company_id) ->
+        {:error,
+         %Ecto.Changeset{}
+         |> Ecto.Changeset.add_error(:recovery_case_id, "must belong to the approval company")}
+
+      true ->
+        attrs =
+          attrs
+          # String-keyed params are common at controller boundaries. Remove
+          # caller-supplied category/status values before adding the
+          # authoritative recovery values; otherwise a string key can shadow
+          # the atom key during Ecto casting.
+          |> Map.delete("category")
+          |> Map.delete("status")
+          |> Map.put(:category, "stranded_work_recovery")
+          |> Map.put(:status, "pending")
+
+        %BoardApproval{}
+        |> BoardApproval.changeset(attrs)
+        |> Repo.insert()
+        |> case do
+          {:ok, approval} ->
+            {:ok, approval}
+
+          {:error, changeset} = error ->
+            if recovery_unique_error?(changeset) do
+              case Repo.one(
+                     from a in BoardApproval,
+                       where:
+                         a.recovery_case_id == ^recovery_case_id and
+                           a.company_id == ^company_id,
+                       lock: "FOR UPDATE"
+                   ) do
+                %BoardApproval{
+                  category: "stranded_work_recovery",
+                  status: "pending",
+                  company_id: ^company_id
+                } = existing ->
+                  {:ok, existing}
+
+                _ ->
+                  error
+              end
+            else
+              error
+            end
+        end
+    end
   end
+
+  defp recovery_unique_error?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_message, opts}} ->
+      Keyword.get(opts, :constraint) == :unique
+    end)
+  end
+
+  defp recovery_unique_error?(_), do: false
+
+  defp recovery_case_matches_company?(case_id, company_id)
+       when is_binary(case_id) and is_binary(company_id) and company_id != "" do
+    case Repo.get(Cympho.Recovery.RecoveryCase, case_id) do
+      %{company_id: ^company_id} -> true
+      _ -> false
+    end
+  end
+
+  defp recovery_case_matches_company?(_, _), do: false
 
   @doc """
   Records a board member vote on a proposal.
@@ -402,21 +478,37 @@ defmodule Cympho.BoardApprovals do
       Repo.transaction(fn ->
         board_approval = lock_pending_board_approval!(board_approval_id)
 
-        updated =
-          board_approval
-          |> BoardApproval.approve_changeset(Map.put(attrs, :status, status))
-          |> Repo.update()
-          |> case do
-            {:ok, updated} -> updated
-            {:error, changeset} -> Repo.rollback(changeset)
-          end
+        if status == "approved" and BoardApproval.expired?(board_approval) do
+          {:ok, expired} =
+            board_approval
+            |> Ecto.Changeset.change(%{
+              status: "expired",
+              decision_reasoning: "Review deadline passed"
+            })
+            |> Repo.update()
 
-        decision = insert_board_decision!(updated, actor)
-        {updated, decision}
+          {:expired, expired}
+        else
+          updated =
+            board_approval
+            |> BoardApproval.approve_changeset(Map.put(attrs, :status, status))
+            |> Repo.update()
+            |> case do
+              {:ok, updated} -> updated
+              {:error, changeset} -> Repo.rollback(changeset)
+            end
+
+          decision = insert_board_decision!(updated, actor)
+          {:resolved, updated, decision}
+        end
       end)
 
     case transaction_result do
-      {:ok, {updated, decision}} ->
+      {:ok, {:expired, expired}} ->
+        publish_expiration(expired)
+        {:error, :approval_expired}
+
+      {:ok, {:resolved, updated, decision}} ->
         {:ok, publish_resolution(updated, actor, decision)}
 
       {:error, reason} ->
@@ -452,6 +544,8 @@ defmodule Cympho.BoardApprovals do
 
     case transaction_result do
       {:ok, updated} ->
+        _ = Cympho.Recovery.handle_approval_resolution(updated)
+
         GovernanceAuditLogs.log_action(
           "board_proposal_cancelled",
           actor,
@@ -483,10 +577,97 @@ defmodule Cympho.BoardApprovals do
   Checks and updates expired board approvals.
   """
   def check_expired_approvals do
-    from(ba in BoardApproval,
-      where: ba.status == "pending" and ba.review_deadline < ^DateTime.utc_now()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    ids =
+      Repo.all(
+        from ba in BoardApproval,
+          where:
+            ba.status == "pending" and not is_nil(ba.review_deadline) and
+              ba.review_deadline <= ^now,
+          order_by: [asc: ba.review_deadline],
+          select: ba.id
+      )
+
+    expired =
+      Enum.flat_map(ids, fn id ->
+        case Repo.transaction(fn ->
+               approval =
+                 BoardApproval
+                 |> where([ba], ba.id == ^id)
+                 |> lock("FOR UPDATE")
+                 |> Repo.one()
+
+               if approval && approval.status == "pending" && approval.review_deadline &&
+                    DateTime.compare(approval.review_deadline, now) != :gt do
+                 {:ok, updated} =
+                   approval
+                   |> Ecto.Changeset.change(%{status: "expired"})
+                   |> Repo.update()
+
+                 updated
+               else
+                 nil
+               end
+             end) do
+          {:ok, %BoardApproval{} = approval} -> [approval]
+          _ -> []
+        end
+      end)
+
+    Enum.each(expired, &publish_expiration/1)
+    _ = reconcile_recovery_resolutions()
+    {length(expired), nil}
+  end
+
+  @doc "Reconciles persisted non-pending recovery approvals after a restart."
+  def reconcile_recovery_resolutions do
+    approvals =
+      Repo.all(
+        from ba in BoardApproval,
+          where:
+            ba.category == "stranded_work_recovery" and
+              ba.status in ["denied", "expired", "cancelled"]
+      )
+
+    Enum.each(approvals, fn approval ->
+      _ = Cympho.Recovery.handle_approval_resolution(approval)
+    end)
+
+    length(approvals)
+  rescue
+    _ -> 0
+  end
+
+  defp publish_expiration(%BoardApproval{} = approval) do
+    approval = Repo.preload(approval, [:requested_by, :company])
+
+    # Resolution of a linked recovery case is durable and happens only after
+    # the approval update transaction has committed. The handler is idempotent
+    # so startup replay and explicit expiry can safely converge.
+    _ = Cympho.Recovery.handle_approval_resolution(approval)
+
+    GovernanceAuditLogs.log_action(
+      "board_decision",
+      {"system", approval.company_id},
+      "Board approval expired: #{approval.title}",
+      resource: approval,
+      metadata: %{status: "expired", category: approval.category}
     )
-    |> Repo.update_all(set: [status: "expired"])
+
+    Cympho.PubSubGuard.company_broadcast(
+      approval.company_id,
+      "approvals",
+      {:board_approval_resolved, approval}
+    )
+
+    Cympho.PubSubGuard.broadcast(
+      "system:board_approvals",
+      {:board_approval_resolved, approval}
+    )
+
+    _ = Cympho.OwnerAttention.notify_changed(approval.company_id)
+    :ok
   end
 
   @doc """
@@ -789,6 +970,8 @@ defmodule Cympho.BoardApprovals do
     updated = Repo.preload(updated, [:requested_by, :company])
     decision = Repo.preload(decision, :company)
 
+    _ = Cympho.Recovery.handle_approval_resolution(updated)
+
     GovernanceAuditLogs.log_action(
       "board_decision",
       actor,
@@ -839,51 +1022,85 @@ defmodule Cympho.BoardApprovals do
   transaction. If the executor dies before commit, both roll back; if it dies
   after commit, a retry observes the unique effect row and does nothing.
   """
-  def execute_approved_action(%BoardApproval{status: "approved"} = board_approval) do
-    execute_action_once(board_approval, fn -> dispatch_approved_action(board_approval) end)
+  def execute_approved_action(%BoardApproval{id: approval_id}) when is_binary(approval_id) do
+    # A struct delivered over PubSub (or fabricated by a caller) is only a
+    # locator. Reload the persisted row before selecting an action category so
+    # stale/forged status and proposal data cannot execute governance work.
+    case Repo.get(BoardApproval, approval_id) do
+      %BoardApproval{status: "approved"} = persisted ->
+        execute_action_once(persisted, fn -> dispatch_approved_action(persisted) end)
+
+      _ ->
+        :ok
+    end
   end
 
   def execute_approved_action(_), do: :ok
 
   @doc false
-  def execute_action_once(%BoardApproval{status: "approved"} = board_approval, action)
-      when is_function(action, 0) do
+  def execute_action_once(%BoardApproval{id: approval_id} = caller, action)
+      when is_binary(approval_id) and is_function(action, 0) do
+    case Repo.get(BoardApproval, approval_id) do
+      %BoardApproval{status: "approved"} = persisted
+      when caller.category == persisted.category and caller.company_id == persisted.company_id ->
+        do_execute_action_once(persisted, action)
+
+      _ ->
+        {:error, :not_approved}
+    end
+  end
+
+  defp do_execute_action_once(%BoardApproval{} = board_approval, action) do
     effect_key = "board_approval:#{board_approval.id}:#{board_approval.category}"
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    Repo.transaction(fn ->
-      {inserted, _} =
-        Repo.insert_all(
-          BoardApprovalEffect,
-          [
-            %{
-              id: Ecto.UUID.generate(),
-              board_approval_id: board_approval.id,
-              effect_key: effect_key,
-              category: board_approval.category,
-              inserted_at: now,
-              updated_at: now
-            }
-          ],
-          on_conflict: :nothing,
-          conflict_target: [:board_approval_id]
-        )
+    transaction_result =
+      Repo.transaction(fn ->
+        {inserted, _} =
+          Repo.insert_all(
+            BoardApprovalEffect,
+            [
+              %{
+                id: Ecto.UUID.generate(),
+                board_approval_id: board_approval.id,
+                effect_key: effect_key,
+                category: board_approval.category,
+                inserted_at: now,
+                updated_at: now
+              }
+            ],
+            on_conflict: :nothing,
+            conflict_target: [:board_approval_id]
+          )
 
-      if inserted == 0 do
-        :already_executed
-      else
-        case action.() do
-          {:error, :already_executed} -> :already_executed
-          {:error, reason} -> Repo.rollback({:effect_failed, reason})
-          result -> result
+        if inserted == 0 do
+          :already_executed
+        else
+          case action.() do
+            {:error, :already_executed} -> :already_executed
+            {:error, reason} -> Repo.rollback({:effect_failed, reason})
+            result -> result
+          end
         end
-      end
-    end)
-    |> case do
-      {:ok, :already_executed} -> :ok
-      {:ok, result} -> result
-      {:error, {:effect_failed, reason}} -> {:error, reason}
-      {:error, reason} -> {:error, reason}
+      end)
+
+    case transaction_result do
+      {:ok, :already_executed} ->
+        :ok
+
+      {:ok, {:ok, %Cympho.Recovery.RecoveryCase{} = child} = result}
+      when board_approval.category == "stranded_work_recovery" ->
+        _ = Cympho.Recovery.publish_retry_applied(board_approval, child, nil, nil)
+        result
+
+      {:ok, result} ->
+        result
+
+      {:error, {:effect_failed, reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -911,7 +1128,10 @@ defmodule Cympho.BoardApprovals do
         trigger_strategic_initiative(board_approval)
 
       "stranded_work_recovery" ->
-        Cympho.Recovery.apply_board_action(board_approval)
+        case Cympho.Recovery.apply_board_action(board_approval, defer_side_effects: true) do
+          {:error, :stale_recovery_proposal} -> :already_executed
+          other -> other
+        end
 
       _ ->
         :ok

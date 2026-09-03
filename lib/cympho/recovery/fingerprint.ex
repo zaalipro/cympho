@@ -5,7 +5,7 @@ defmodule Cympho.Recovery.Fingerprint do
 
   @spec for_run(map(), map()) :: {String.t(), map()}
   def for_run(run, issue) do
-    error_family = error_family(field(run, :error_reason))
+    error_family = do_error_family(field(run, :error_reason))
 
     snapshot = %{
       "version" => @version,
@@ -41,6 +41,10 @@ defmodule Cympho.Recovery.Fingerprint do
     hash(snapshot)
   end
 
+  @doc "Returns the bounded, redacted error family used in run fingerprints."
+  @spec error_family(term()) :: String.t() | nil
+  def error_family(reason), do: do_error_family(reason)
+
   defp hash(snapshot) do
     canonical = snapshot |> sort_maps() |> Jason.encode!()
     {:crypto.hash(:sha256, canonical) |> Base.encode16(case: :lower), snapshot}
@@ -69,9 +73,9 @@ defmodule Cympho.Recovery.Fingerprint do
 
   defp field(_, _), do: nil
 
-  defp error_family(nil), do: nil
+  defp do_error_family(nil), do: nil
 
-  defp error_family(reason) do
+  defp do_error_family(reason) do
     text = reason |> inspect(limit: 20) |> String.downcase()
 
     cond do

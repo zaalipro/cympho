@@ -74,7 +74,11 @@ defmodule Cympho.BoardApprovals.BoardApproval do
     |> foreign_key_constraint(:company_id)
     |> foreign_key_constraint(:requested_by_agent_id)
     |> foreign_key_constraint(:recovery_case_id)
+    |> unique_constraint(:recovery_case_id, name: :board_approvals_recovery_case_index)
+    |> validate_recovery_linkage()
+    |> validate_proposal_bounds()
     |> validate_deadline()
+    |> prepare_changes(&validate_recovery_company/1)
   end
 
   def approve_changeset(board_approval, attrs) do
@@ -83,6 +87,7 @@ defmodule Cympho.BoardApprovals.BoardApproval do
     |> validate_required([:status, :decision_reasoning])
     |> validate_inclusion(:status, ["approved", "denied"])
     |> validate_transition(board_approval.status)
+    |> validate_approval_deadline(board_approval)
   end
 
   def vote_summary(%__MODULE__{} = board_approval) do
@@ -144,7 +149,7 @@ defmodule Cympho.BoardApprovals.BoardApproval do
   def expired?(%__MODULE__{review_deadline: nil}), do: false
 
   def expired?(%__MODULE__{review_deadline: deadline, status: status}) do
-    status == "pending" and DateTime.compare(DateTime.utc_now(), deadline) == :gt
+    status == "pending" and DateTime.compare(DateTime.utc_now(), deadline) != :lt
   end
 
   defp validate_deadline(changeset) do
@@ -158,6 +163,66 @@ defmodule Cympho.BoardApprovals.BoardApproval do
       end
     else
       changeset
+    end
+  end
+
+  defp validate_approval_deadline(changeset, board_approval) do
+    if get_change(changeset, :status) == "approved" and expired?(board_approval) do
+      add_error(changeset, :status, "review deadline has passed")
+    else
+      changeset
+    end
+  end
+
+  defp validate_recovery_linkage(changeset) do
+    category = get_field(changeset, :category)
+    recovery_case_id = get_field(changeset, :recovery_case_id)
+
+    cond do
+      category == "stranded_work_recovery" and is_nil(recovery_case_id) ->
+        add_error(changeset, :recovery_case_id, "is required for stranded work recovery")
+
+      category != "stranded_work_recovery" and not is_nil(recovery_case_id) ->
+        add_error(changeset, :category, "must be stranded_work_recovery when linked to recovery")
+
+      true ->
+        changeset
+    end
+  end
+
+  defp validate_proposal_bounds(changeset) do
+    proposal = get_field(changeset, :proposal_data)
+
+    cond do
+      is_nil(proposal) ->
+        changeset
+
+      not is_map(proposal) ->
+        add_error(changeset, :proposal_data, "must be a map")
+
+      true ->
+        case Jason.encode(proposal) do
+          {:ok, encoded} when byte_size(encoded) <= 32_768 -> changeset
+          {:ok, _encoded} -> add_error(changeset, :proposal_data, "is too large")
+          {:error, _} -> add_error(changeset, :proposal_data, "must be JSON encodable")
+        end
+    end
+  end
+
+  defp validate_recovery_company(changeset) do
+    case {get_field(changeset, :recovery_case_id), get_field(changeset, :company_id)} do
+      {nil, _} ->
+        changeset
+
+      {recovery_case_id, company_id} when is_binary(company_id) and company_id != "" ->
+        case changeset.repo.get(Cympho.Recovery.RecoveryCase, recovery_case_id) do
+          %{company_id: ^company_id} -> changeset
+          nil -> changeset
+          _ -> add_error(changeset, :recovery_case_id, "must belong to the approval company")
+        end
+
+      {_id, _company_id} ->
+        add_error(changeset, :company_id, "is required for recovery linkage")
     end
   end
 

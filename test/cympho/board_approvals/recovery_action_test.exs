@@ -67,10 +67,12 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
                "case_id",
                "issue_id",
                "source_run_id",
+               "source_type",
                "fingerprint",
                "attempt_count",
                "max_attempts",
                "last_error",
+               "attempt_history",
                "restart_packet"
              ])
 
@@ -84,7 +86,8 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
     assert proposal["restart_packet"] == %{
              "issue_id" => issue.id,
              "case_id" => case_row.id,
-             "source_type" => "issue_checkout"
+             "source_type" => "issue_checkout",
+             "attempts" => proposal["attempt_history"]
            }
 
     refute inspect(proposal) =~ "raw-secret"
@@ -127,8 +130,11 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
   end
 
   test "recovery approval helper participates in the caller transaction without publishing", %{
-    company: company
+    company: company,
+    agent: agent
   } do
+    issue = issue!(company, agent, "Helper linkage")
+    {:ok, recovery_case} = Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
     :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:approvals")
 
     assert {:error, :rolled_back} =
@@ -137,6 +143,7 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
                         BoardApprovals.create_recovery_approval(%{
                           title: "Rolled back retry",
                           company_id: company.id,
+                          recovery_case_id: recovery_case.id,
                           proposal_data: %{"action" => "retry"}
                         })
 
@@ -152,6 +159,7 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
                BoardApprovals.create_recovery_approval(%{
                  title: "Committed retry",
                  company_id: company.id,
+                 recovery_case_id: recovery_case.id,
                  proposal_data: %{"action" => "retry"}
                })
              end)
@@ -159,6 +167,16 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
     assert committed.category == "stranded_work_recovery"
     assert Repo.aggregate(BoardApproval, :count) == 1
     refute_receive {:board_approval_created, _}, 50
+
+    assert {:error, wrong_category} =
+             BoardApprovals.create_recovery_approval(%{
+               title: "Wrong category",
+               category: "other",
+               company_id: company.id,
+               recovery_case_id: recovery_case.id
+             })
+
+    assert "must be stranded_work_recovery" in errors_on(wrong_category).category
   end
 
   test "stale source, fingerprint, and tenant mismatches supersede without side effects", %{
@@ -201,7 +219,13 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
            ) == 0
 
     tenant_issue = issue!(company, agent, "Tenant mismatch")
-    tenant_case = checkout_case!(tenant_issue, company_id: other_company.id)
+    tenant_case = checkout_case!(tenant_issue)
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^tenant_case.id),
+      set: [company_id: other_company.id]
+    )
+
+    tenant_case = Repo.get!(RecoveryCase, tenant_case.id)
 
     assert {:ok, %RecoveryCase{state: "superseded"}} =
              Recovery.exhaust_case(tenant_case, reason: "tenant")
@@ -228,7 +252,7 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
              Recovery.exhaust_case(Repo.get!(RecoveryCase, case_row.id), reason: "late retry")
 
     assert Repo.get!(Issue, issue.id).status == :done
-    assert Repo.get!(BoardApproval, approval.id).status == "pending"
+    assert Repo.get!(BoardApproval, approval.id).status == "cancelled"
 
     assert Repo.aggregate(
              from(a in BoardApproval, where: a.recovery_case_id == ^case_row.id),
@@ -435,7 +459,12 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
 
     case_row = exhausted_case!(issue, max_attempts: 1)
     {:ok, approval} = Recovery.exhaust_case(case_row, reason: "timeout")
-    approved = %{approval | status: "approved"}
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [status: "approved"]
+    )
+
+    approved = Repo.get!(BoardApproval, approval.id)
     :ok = OwnerAttention.subscribe(company.id)
     :ok = OwnerAttention.subscribe(other_company.id)
     dispatcher = Process.whereis(Cympho.Orchestrator.Dispatcher)
@@ -450,6 +479,7 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
     assert child.root_case_id == case_row.root_case_id
     assert child.issue_id == issue.id
     assert child.company_id == company.id
+    assert child.source_id == issue.id
     assert child.next_attempt_at != nil
 
     expected_poll = {:poll_company, company.id}
@@ -493,7 +523,12 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
     issue = issue!(company, agent, "Changed before approval")
     case_row = exhausted_case!(issue, max_attempts: 1)
     {:ok, approval} = Recovery.exhaust_case(case_row, reason: "timeout")
-    approved = %{approval | status: "approved"}
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [status: "approved"]
+    )
+
+    approved = Repo.get!(BoardApproval, approval.id)
 
     Repo.update_all(from(i in Issue, where: i.id == ^issue.id), inc: [lock_version: 1])
 
@@ -543,8 +578,14 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
       })
 
     {:ok, approval} = Recovery.exhaust_case(case_row, reason: "network")
-    assert {:ok, child} = Recovery.apply_board_action(%{approval | status: "approved"})
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [status: "approved"]
+    )
+
+    assert {:ok, child} = Recovery.apply_board_action(Repo.get!(BoardApproval, approval.id))
     assert child.source_type == "heartbeat_run"
+    assert child.source_id == run.id
     assert child.source_run_id == run.id
     assert child.root_case_id == case_row.root_case_id
     reopened = Repo.get!(Issue, issue.id)
@@ -553,6 +594,104 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
     assert child.source_fingerprint == expected_fingerprint
     assert child.source_snapshot == expected_snapshot
     assert child.source_status == "todo"
+  end
+
+  test "approved retry resumes a paused runtime and clears the exact failed checkout", %{
+    company: company,
+    agent: agent
+  } do
+    issue = issue!(company, agent, "Paused failed checkout")
+
+    run =
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "codex",
+        error_reason: "timeout"
+      })
+
+    checked_out_at = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id),
+      set: [
+        checkout_run_id: run.id,
+        checked_out_at: checked_out_at,
+        monitor_state: %{
+          "issue_runtime" => %{
+            "paused" => true,
+            "paused_at" => DateTime.to_iso8601(checked_out_at),
+            "paused_reason" => "operator review"
+          }
+        }
+      ]
+    )
+
+    source_issue = Repo.get!(Issue, issue.id)
+    case_row = exhausted_case!(source_issue, max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(case_row, reason: "timeout")
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [status: "approved"]
+    )
+
+    assert {:ok, child} =
+             Recovery.apply_board_action(Repo.get!(BoardApproval, approval.id),
+               defer_side_effects: true
+             )
+
+    reopened = Repo.get!(Issue, issue.id)
+    assert reopened.status == :todo
+    assert reopened.assignee_id == agent.id
+    assert reopened.checkout_run_id == nil
+    assert reopened.checked_out_at == nil
+    refute Cympho.Issues.issue_runtime_paused?(reopened)
+    assert child.source_id == issue.id
+    assert child.parent_case_id == case_row.id
+  end
+
+  test "deadline expiry durably resolves recovery and blocks late approval", %{
+    company: company,
+    agent: agent
+  } do
+    issue = issue!(company, agent, "Expired recovery")
+    case_row = exhausted_case!(issue, max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(case_row, reason: "timeout")
+    expired_at = DateTime.utc_now() |> DateTime.add(-1, :second) |> DateTime.truncate(:second)
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [review_deadline: expired_at]
+    )
+
+    assert {:error, :approval_expired} =
+             BoardApprovals.resolve_board_approval(
+               approval.id,
+               "approved",
+               %{decision_reasoning: "too late"},
+               {"system", company.id}
+             )
+
+    assert Repo.get!(BoardApproval, approval.id).status == "expired"
+    assert Repo.get!(RecoveryCase, case_row.id).state == "resolved"
+    assert Repo.get!(Issue, issue.id).status == :blocked
+  end
+
+  test "startup reconciliation resolves already denied recovery approvals", %{
+    company: company,
+    agent: agent
+  } do
+    issue = issue!(company, agent, "Denied while executor down")
+    case_row = exhausted_case!(issue, max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(case_row, reason: "timeout")
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [status: "denied", decision_reasoning: "leave paused"]
+    )
+
+    assert BoardApprovals.reconcile_recovery_resolutions() >= 1
+    assert Repo.get!(RecoveryCase, case_row.id).state == "resolved"
+    assert Repo.get!(Issue, issue.id).status == :blocked
   end
 
   test "the durable board effect makes executor retry idempotent", %{

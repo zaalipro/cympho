@@ -52,7 +52,11 @@ defmodule Cympho.RecoveryTest do
 
     assert {:ok, _} =
              %RecoveryCase{}
-             |> RecoveryCase.changeset(Map.put(attrs, :state, "superseded"))
+             |> RecoveryCase.changeset(
+               attrs
+               |> Map.put(:state, "superseded")
+               |> Map.put(:source_fingerprint, String.duplicate("e", 64))
+             )
              |> Repo.insert()
   end
 
@@ -469,6 +473,52 @@ defmodule Cympho.RecoveryAdapterTest do
     assert Repo.get!(Run, run.id).status == completed.status
   end
 
+  test "a run fingerprint change after detection is superseded without mutation" do
+    {company, agent, issue} = recovery_source("run-fingerprint-race")
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, stale_snapshot} = HeartbeatEngine.start_run(run)
+
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [error_reason: "authentication changed"]
+    )
+
+    assert {:ok, %{outcome: :superseded, case: case_row}} =
+             Recovery.recover_stale_run(stale_snapshot)
+
+    assert case_row.state == "superseded"
+    assert Repo.get!(Run, run.id).status == "running"
+  end
+
+  test "the final run CAS refuses a newly live orchestrator" do
+    {company, agent, issue} = recovery_source("run-live-race")
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+    {fingerprint, _snapshot} = Cympho.Recovery.Fingerprint.for_run(started, issue)
+    assert {:ok, _} = Registry.register(Cympho.OrchestratorRegistry, issue.id, nil)
+
+    assert {:error, :superseded} =
+             HeartbeatEngine.recover_run_if_current(started, fingerprint, :stale)
+
+    assert Repo.get!(Run, run.id).status == "running"
+    Registry.unregister(Cympho.OrchestratorRegistry, issue.id)
+  end
+
   test "a successor checkout is never cleared by an old issue snapshot" do
     {company, agent, issue} = recovery_source("checkout-race")
     assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
@@ -566,5 +616,242 @@ defmodule Cympho.RecoveryAdapterTest do
 
     issue = Repo.insert!(%Issue{title: "Issue #{suffix}", company_id: company.id})
     {company, agent, issue}
+  end
+end
+
+defmodule Cympho.RecoveryDueTest do
+  use Cympho.DataCase, async: false
+
+  alias Cympho.Agents.Agent
+  alias Cympho.BoardApprovals.BoardApproval
+  alias Cympho.Companies.Company
+  alias Cympho.Issues.Issue
+  alias Cympho.Recovery
+  alias Cympho.Recovery.{RecoveryAttempt, RecoveryCase}
+  alias Cympho.Repo
+
+  test "process_due consumes a detected checkout without relying on an age scan" do
+    {_company, _agent, issue} = due_source("detected")
+    {:ok, case_row} = Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    assert %{checked: 1, claimed: 1, recovered: 1, failed: 0} =
+             Recovery.process_due(now: now, limit: 1)
+
+    assert Repo.get!(Issue, issue.id).status == :todo
+    assert Repo.get!(RecoveryCase, case_row.id).state == "recovered"
+  end
+
+  test "process_due resumes a persisted scheduled case with its policy snapshot" do
+    {_company, _agent, issue} = due_source("scheduled")
+
+    {:ok, case_row} =
+      Recovery.ensure_case(%{
+        source_type: "issue_checkout",
+        issue: issue,
+        base_delay: 1,
+        max_delay: 2,
+        lease_seconds: 3
+      })
+
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    {:ok, lease} = Recovery.claim_case(case_row, now: now, lease_seconds: 3)
+    {:ok, scheduled} = Recovery.record_failure(lease, :network, now: now)
+
+    assert scheduled.next_attempt_at == DateTime.add(now, 1, :second)
+
+    assert %{recovered: 1, failed: 0} =
+             Recovery.process_due(now: scheduled.next_attempt_at, limit: 1)
+
+    assert Repo.get!(RecoveryCase, case_row.id).state == "recovered"
+  end
+
+  test "an expired final lease is closed and escalated exactly once" do
+    {_company, _agent, issue} = due_source("expired-final")
+
+    {:ok, case_row} =
+      Recovery.ensure_case(%{
+        source_type: "issue_checkout",
+        issue: issue,
+        max_attempts: 1,
+        lease_seconds: 1
+      })
+
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    {:ok, _lease} = Recovery.claim_case(case_row, now: now, lease_seconds: 1)
+    expired_at = DateTime.add(now, -1, :second)
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^case_row.id),
+      set: [lease_expires_at: expired_at]
+    )
+
+    assert %{exhausted: 1, failed: 0} = Recovery.process_due(now: now, limit: 1)
+    assert Repo.get!(RecoveryCase, case_row.id).state == "escalated"
+    assert Repo.get!(Issue, issue.id).status == :blocked
+    assert Repo.get_by!(BoardApproval, recovery_case_id: case_row.id).status == "pending"
+
+    assert Repo.get_by!(RecoveryAttempt,
+             recovery_case_id: case_row.id,
+             attempt_no: 1
+           ).status == "failed"
+  end
+
+  test "policy and bounded schema inputs fail closed" do
+    {company, _agent, issue} = due_source("bounds")
+
+    for attrs <- [
+          %{max_attempts: 4},
+          %{base_delay: 601},
+          %{max_delay: 601},
+          %{lease_seconds: 601}
+        ] do
+      assert {:error, :invalid_policy} =
+               Recovery.ensure_case(
+                 Map.merge(%{source_type: "issue_checkout", issue: issue}, attrs)
+               )
+    end
+
+    other = Repo.insert!(%Company{name: "Other bounds", slug: "other-bounds-#{unique()}"})
+
+    invalid =
+      RecoveryCase.changeset(%RecoveryCase{}, %{
+        company_id: other.id,
+        issue_id: issue.id,
+        source_type: "issue_checkout",
+        source_id: issue.id,
+        source_status: "in_progress",
+        source_fingerprint: String.duplicate("A", 64),
+        fingerprint_version: 0,
+        source_snapshot: %{"payload" => String.duplicate("x", 17_000)},
+        max_attempts: 4
+      })
+
+    refute invalid.valid?
+    errors = errors_on(invalid)
+    assert errors.source_fingerprint != []
+    assert errors.fingerprint_version != []
+    assert errors.max_attempts != []
+    assert errors.source_snapshot != []
+
+    assert {:error, cross_scope} =
+             %RecoveryCase{}
+             |> RecoveryCase.changeset(%{
+               company_id: other.id,
+               issue_id: issue.id,
+               source_type: "issue_checkout",
+               source_id: issue.id,
+               source_status: "in_progress",
+               source_fingerprint: String.duplicate("a", 64)
+             })
+             |> Repo.insert()
+
+    assert errors_on(cross_scope).issue_id != []
+    assert company.id == issue.company_id
+  end
+
+  defp due_source(suffix) do
+    company =
+      Repo.insert!(%Company{
+        name: "Due #{suffix}",
+        slug: "due-#{suffix}-#{unique()}"
+      })
+
+    agent =
+      Repo.insert!(%Agent{
+        name: "Due agent #{suffix}",
+        role: :engineer,
+        company_id: company.id
+      })
+
+    issue =
+      Repo.insert!(%Issue{
+        title: "Due issue #{suffix}",
+        company_id: company.id,
+        assignee_id: agent.id,
+        status: :in_progress
+      })
+
+    {company, agent, issue}
+  end
+
+  defp unique, do: System.unique_integer([:positive])
+end
+
+defmodule Cympho.RecoveryConcurrencyTest do
+  use ExUnit.Case, async: false
+
+  import Ecto.Query
+
+  alias Cympho.Companies.Company
+  alias Cympho.Issues.Issue
+  alias Cympho.Recovery
+  alias Cympho.Recovery.RecoveryCase
+  alias Cympho.Repo
+
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo, sandbox: false)
+    unique = System.unique_integer([:positive])
+    company = Repo.insert!(%Company{name: "Recovery race", slug: "recovery-race-#{unique}"})
+
+    issue =
+      Repo.insert!(%Issue{title: "Recovery race", company_id: company.id, status: :in_progress})
+
+    on_exit(fn ->
+      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+        Repo.delete_all(from(c in RecoveryCase, where: c.company_id == ^company.id))
+        Repo.delete_all(from(i in Issue, where: i.id == ^issue.id))
+        Repo.delete_all(from(c in Company, where: c.id == ^company.id))
+      end)
+    end)
+
+    %{company: company, issue: issue}
+  end
+
+  test "concurrent ensure_case calls deduplicate without raising", %{
+    company: company,
+    issue: issue
+  } do
+    caller = self()
+
+    workers =
+      for _ <- 1..2 do
+        spawn_monitor(fn ->
+          Process.delete(:"$callers")
+          :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo, sandbox: false)
+          send(caller, {:ready, self()})
+          receive do: (:go -> :ok)
+
+          result =
+            Recovery.ensure_case(%{
+              company_id: company.id,
+              source_type: "issue_checkout",
+              issue: issue
+            })
+
+          :ok = Ecto.Adapters.SQL.Sandbox.checkin(Repo)
+          send(caller, {:result, self(), result})
+        end)
+      end
+
+    Enum.each(workers, fn {pid, _ref} -> assert_receive {:ready, ^pid}, 5_000 end)
+    Enum.each(workers, fn {pid, _ref} -> send(pid, :go) end)
+
+    ids =
+      Enum.map(workers, fn {pid, ref} ->
+        assert_receive {:result, ^pid, {:ok, case_row}}, 10_000
+        assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
+        case_row.id
+      end)
+
+    assert Enum.uniq(ids) |> length() == 1
+
+    assert Repo.aggregate(
+             from(c in RecoveryCase,
+               where:
+                 c.company_id == ^company.id and c.source_type == "issue_checkout" and
+                   c.source_id == ^issue.id and c.state in ^RecoveryCase.active_states()
+             ),
+             :count
+           ) == 1
   end
 end

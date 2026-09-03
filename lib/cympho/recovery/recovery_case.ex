@@ -33,6 +33,10 @@ defmodule Cympho.Recovery.RecoveryCase do
     field :state, :string, default: "detected"
     field :attempt_count, :integer, default: 0
     field :max_attempts, :integer, default: 3
+    # The effective policy is copied at detection time.  Keeping it on the row
+    # makes a restart (or a later config change) unable to silently widen a
+    # lineage's retry budget.
+    field :policy_snapshot, :map, default: %{}
     field :next_attempt_at, :utc_datetime
     field :claim_token, Ecto.UUID
     field :claimed_at, :utc_datetime
@@ -69,6 +73,7 @@ defmodule Cympho.Recovery.RecoveryCase do
       :state,
       :attempt_count,
       :max_attempts,
+      :policy_snapshot,
       :next_attempt_at,
       :claimed_by,
       :last_error
@@ -86,8 +91,13 @@ defmodule Cympho.Recovery.RecoveryCase do
     |> validate_inclusion(:source_type, source_types())
     |> validate_number(:attempt_count, greater_than_or_equal_to: 0)
     |> validate_number(:max_attempts, greater_than: 0)
+    |> validate_number(:max_attempts, less_than_or_equal_to: 3)
     |> validate_number(:fingerprint_version, greater_than: 0)
     |> validate_length(:source_fingerprint, is: 64)
+    |> validate_format(:source_fingerprint, ~r/\A[0-9a-f]{64}\z/)
+    |> validate_length(:source_id, max: 255)
+    |> validate_snapshot(:source_snapshot, 16_384)
+    |> validate_snapshot(:policy_snapshot, 4_096)
     |> foreign_key_constraint(:company_id)
     |> foreign_key_constraint(:issue_id)
     |> foreign_key_constraint(:agent_id)
@@ -95,5 +105,90 @@ defmodule Cympho.Recovery.RecoveryCase do
     |> foreign_key_constraint(:parent_case_id)
     |> foreign_key_constraint(:root_case_id)
     |> unique_constraint(:source_id, name: :recovery_cases_active_source_index)
+    |> unique_constraint(:source_fingerprint, name: :recovery_cases_source_history_index)
+    |> prepare_changes(&validate_association_scope/1)
+  end
+
+  # JSONB is intentionally kept small.  A recovery row is an audit pointer,
+  # not a log sink; bounded values also keep scanner queries predictable.
+  defp validate_snapshot(changeset, field, max_bytes) do
+    value = get_field(changeset, field)
+
+    cond do
+      is_nil(value) ->
+        changeset
+
+      not is_map(value) ->
+        add_error(changeset, field, "must be a map")
+
+      true ->
+        case Jason.encode(value) do
+          {:ok, encoded} when byte_size(encoded) <= max_bytes -> changeset
+          {:ok, _encoded} -> add_error(changeset, field, "is too large")
+          {:error, _} -> add_error(changeset, field, "must be JSON encodable")
+        end
+    end
+  end
+
+  defp validate_association_scope(changeset) do
+    company_id = get_field(changeset, :company_id)
+
+    if is_binary(company_id) and company_id != "" do
+      changeset
+      |> validate_same_company(:issue_id, Cympho.Issues.Issue, company_id)
+      |> validate_same_company(:agent_id, Cympho.Agents.Agent, company_id)
+      |> validate_same_company(:source_run_id, Cympho.HeartbeatEngine.Run, company_id)
+      |> validate_same_company(:parent_case_id, __MODULE__, company_id)
+      |> validate_same_company(:root_case_id, __MODULE__, company_id)
+      |> validate_source_identity()
+    else
+      add_error(changeset, :company_id, "is required")
+    end
+  end
+
+  defp validate_same_company(changeset, field, schema, company_id) do
+    case get_field(changeset, field) do
+      nil ->
+        changeset
+
+      id ->
+        case changeset.repo.get(schema, id) do
+          %{company_id: ^company_id} -> changeset
+          nil -> changeset
+          _ -> add_error(changeset, field, "must belong to the same company")
+        end
+    end
+  end
+
+  defp validate_source_identity(changeset) do
+    source_type = get_field(changeset, :source_type)
+    source_id = get_field(changeset, :source_id)
+    issue_id = get_field(changeset, :issue_id)
+    source_run_id = get_field(changeset, :source_run_id)
+
+    cond do
+      source_type == "issue_checkout" and source_id != issue_id ->
+        add_error(changeset, :source_id, "must equal issue_id for issue_checkout")
+
+      source_type == "heartbeat_run" and not is_nil(source_run_id) and
+          source_id != source_run_id ->
+        add_error(changeset, :source_id, "must equal source_run_id for heartbeat_run")
+
+      source_type == "heartbeat_run" and is_binary(source_run_id) ->
+        case Ecto.UUID.cast(source_run_id) do
+          {:ok, _} ->
+            case changeset.repo.get(Run, source_run_id) do
+              %Run{issue_id: ^issue_id} -> changeset
+              nil -> changeset
+              _ -> add_error(changeset, :source_run_id, "must belong to the issue")
+            end
+
+          :error ->
+            add_error(changeset, :source_run_id, "is invalid")
+        end
+
+      true ->
+        changeset
+    end
   end
 end

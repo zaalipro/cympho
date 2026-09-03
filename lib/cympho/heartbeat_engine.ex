@@ -18,6 +18,7 @@ defmodule Cympho.HeartbeatEngine do
   alias Cympho.Budgets.Budget
   alias Cympho.Finances.TokenUsage
   alias Cympho.HeartbeatEngine.Run
+  alias Cympho.Recovery.Fingerprint
   alias Cympho.{Agents, Finances, Issues, Workspace, Workspaces}
   alias Cympho.Issues.Issue
   require Logger
@@ -650,6 +651,136 @@ defmodule Cympho.HeartbeatEngine do
       record_usage_event(updated)
     end)
   end
+
+  @doc "Final fingerprint/liveness CAS used by durable recovery adapters."
+  @spec recover_run_if_current(Run.t(), String.t(), atom()) ::
+          {:ok, Run.t()} | {:error, term()}
+  def recover_run_if_current(%Run{} = run, expected_fingerprint, kind)
+      when is_binary(expected_fingerprint) and kind in [:stale, :orphaned] do
+    result =
+      Repo.transaction(fn ->
+        current =
+          Run
+          |> where([r], r.id == ^run.id)
+          |> lock("FOR UPDATE")
+          |> Repo.one()
+
+        issue =
+          case current do
+            %Run{issue_id: issue_id} when is_binary(issue_id) ->
+              Issue |> where([i], i.id == ^issue_id) |> lock("FOR UPDATE") |> Repo.one()
+
+            _ ->
+              nil
+          end
+
+        cond do
+          not match?(%Run{}, current) or not match?(%Issue{}, issue) ->
+            {:error, :superseded}
+
+          current.status not in @active_run_statuses ->
+            {:error, {:invalid_status, current.status}}
+
+          current.company_id != issue.company_id or current.issue_id != issue.id ->
+            {:error, :superseded}
+
+          not is_binary(current.company_id) or current.company_id == "" or
+            not is_binary(issue.company_id) or issue.company_id == "" ->
+            {:error, :superseded}
+
+          Fingerprint.for_run(current, issue) |> elem(0) != expected_fingerprint ->
+            {:error, :superseded}
+
+          live_run_owner?(issue.id) or successor_run_exists?(current, issue.id) ->
+            {:error, :superseded}
+
+          true ->
+            changeset =
+              if kind == :orphaned and current.status in ["pending", "queued"] do
+                Run.fail_changeset(current, %{error_reason: "orphan_run_recovered"})
+                |> Ecto.Changeset.change(%{
+                  status: "cancelled",
+                  error_reason: "orphan_run_recovered"
+                })
+              else
+                Run.fail_changeset(current, %{error_reason: "stale_run_recovered"})
+              end
+
+            # Liveness is deliberately checked again immediately before the
+            # destructive write. Registry/session state is only a hint, but a
+            # second predicate closes the common callback race where a
+            # successor starts after the initial check.
+            if live_run_owner?(issue.id) or successor_run_exists?(current, issue.id) do
+              {:error, :superseded}
+            else
+              case Repo.update(changeset) do
+                {:ok, updated} -> {:ok, updated}
+                {:error, changeset} -> {:error, changeset}
+              end
+            end
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, updated}} ->
+        release_terminal_run_checkout(updated)
+
+        log_audit(
+          updated,
+          if(kind == :orphaned, do: "run_recovered_orphaned", else: "run_recovered_stale")
+        )
+
+        record_usage_event(updated)
+        {:ok, updated}
+
+      {:ok, {:error, reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  def recover_run_if_current(_, _, _), do: {:error, :superseded}
+
+  defp live_run_owner?(issue_id) do
+    case Cympho.Orchestrator.whereis(issue_id) do
+      pid when is_pid(pid) ->
+        Process.alive?(pid) or live_adapter_worker?(issue_id)
+
+      _ ->
+        case Cympho.AdapterSessions.owners_for_issue(issue_id) do
+          {:ok, []} -> false
+          {:ok, _owners} -> true
+          {:error, :not_started} -> true
+        end
+    end
+  rescue
+    _ -> true
+  end
+
+  defp live_adapter_worker?(issue_id) do
+    case Cympho.AdapterSessions.owners_for_issue(issue_id) do
+      {:ok, []} -> false
+      {:ok, [_ | _]} -> true
+      {:error, :not_started} -> true
+    end
+  rescue
+    _ -> true
+  end
+
+  defp successor_run_exists?(%Run{id: run_id}, issue_id) when is_binary(issue_id) do
+    Repo.exists?(
+      from r in Run,
+        where:
+          r.issue_id == ^issue_id and r.id != ^run_id and
+            r.status in ^@active_run_statuses
+    )
+  rescue
+    _ -> true
+  end
+
+  defp successor_run_exists?(_, _), do: true
 
   @doc """
   Recovers a run that has no live orchestrator.
