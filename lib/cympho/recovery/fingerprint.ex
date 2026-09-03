@@ -1,7 +1,10 @@
 defmodule Cympho.Recovery.Fingerprint do
   @moduledoc "Canonical, redacted fingerprints for stranded work sources."
 
-  @version 1
+  @version 2
+
+  @spec version() :: pos_integer()
+  def version, do: @version
 
   @spec for_run(map(), map()) :: {String.t(), map()}
   def for_run(run, issue) do
@@ -15,6 +18,7 @@ defmodule Cympho.Recovery.Fingerprint do
       "issue_id" => id(field(run, :issue_id) || field(issue, :id)),
       "agent_id" => id(field(run, :agent_id)),
       "run_status" => value(field(run, :status)),
+      "liveness_at" => run_liveness_at(run),
       "issue_status" => value(field(issue, :status)),
       "issue_lock_version" => field(issue, :lock_version),
       "lock_version" => field(issue, :lock_version),
@@ -34,6 +38,8 @@ defmodule Cympho.Recovery.Fingerprint do
       "company_id" => id(field(issue, :company_id)),
       "assignee_id" => id(field(issue, :assignee_id)),
       "issue_status" => value(field(issue, :status)),
+      "checkout_liveness_at" =>
+        timestamp(field(issue, :checked_out_at) || field(issue, :updated_at)),
       "checkout_run_id" => id(field(issue, :checkout_run_id)),
       "lock_version" => field(issue, :lock_version)
     }
@@ -67,6 +73,25 @@ defmodule Cympho.Recovery.Fingerprint do
 
   defp value(value) when is_atom(value), do: Atom.to_string(value)
   defp value(value), do: value
+
+  defp run_liveness_at(run) do
+    case value(field(run, :status)) do
+      "running" -> timestamp(field(run, :last_heartbeat_at) || field(run, :inserted_at))
+      _ -> timestamp(field(run, :inserted_at))
+    end
+  end
+
+  defp timestamp(%DateTime{} = value),
+    do: value |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+  defp timestamp(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, parsed, _offset} -> timestamp(parsed)
+      _ -> nil
+    end
+  end
+
+  defp timestamp(_), do: nil
 
   defp field(map, key) when is_map(map),
     do: Map.get(map, key) || Map.get(map, Atom.to_string(key))

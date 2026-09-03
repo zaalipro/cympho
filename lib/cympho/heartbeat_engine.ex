@@ -653,10 +653,25 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   @doc "Final fingerprint/liveness CAS used by durable recovery adapters."
-  @spec recover_run_if_current(Run.t(), String.t(), atom()) ::
+  @spec recover_run_if_current(Run.t(), map(), atom(), keyword()) ::
           {:ok, Run.t()} | {:error, term()}
-  def recover_run_if_current(%Run{} = run, expected_fingerprint, kind)
-      when is_binary(expected_fingerprint) and kind in [:stale, :orphaned] do
+  def recover_run_if_current(%Run{} = run, expected_guard, kind, opts)
+      when is_map(expected_guard) and kind in [:stale, :orphaned] and is_list(opts) do
+    now = Keyword.get(opts, :now)
+
+    if match?(%DateTime{}, now) and complete_recovery_guard?(expected_guard, kind) do
+      do_recover_run_if_current(run, expected_guard, kind, DateTime.truncate(now, :second))
+    else
+      {:error, :superseded}
+    end
+  end
+
+  def recover_run_if_current(_, _, _, _), do: {:error, :superseded}
+
+  @spec recover_run_if_current(Run.t(), String.t(), atom()) :: {:error, :superseded}
+  def recover_run_if_current(_run, _expected_fingerprint, _kind), do: {:error, :superseded}
+
+  defp do_recover_run_if_current(run, expected_guard, kind, now) do
     result =
       Repo.transaction(fn ->
         current =
@@ -678,17 +693,10 @@ defmodule Cympho.HeartbeatEngine do
           not match?(%Run{}, current) or not match?(%Issue{}, issue) ->
             {:error, :superseded}
 
-          current.status not in @active_run_statuses ->
-            {:error, {:invalid_status, current.status}}
-
-          current.company_id != issue.company_id or current.issue_id != issue.id ->
+          not recovery_guard_matches?(expected_guard, current, issue, kind) ->
             {:error, :superseded}
 
-          not is_binary(current.company_id) or current.company_id == "" or
-            not is_binary(issue.company_id) or issue.company_id == "" ->
-            {:error, :superseded}
-
-          Fingerprint.for_run(current, issue) |> elem(0) != expected_fingerprint ->
+          not recovery_source_stale?(current, now) ->
             {:error, :superseded}
 
           live_run_owner?(issue.id) or successor_run_exists?(current, issue.id) ->
@@ -710,7 +718,9 @@ defmodule Cympho.HeartbeatEngine do
             # destructive write. Registry/session state is only a hint, but a
             # second predicate closes the common callback race where a
             # successor starts after the initial check.
-            if live_run_owner?(issue.id) or successor_run_exists?(current, issue.id) do
+            if not recovery_guard_matches?(expected_guard, current, issue, kind) or
+                 not recovery_source_stale?(current, now) or live_run_owner?(issue.id) or
+                 successor_run_exists?(current, issue.id) do
               {:error, :superseded}
             else
               case Repo.update(changeset) do
@@ -741,7 +751,48 @@ defmodule Cympho.HeartbeatEngine do
     end
   end
 
-  def recover_run_if_current(_, _, _), do: {:error, :superseded}
+  defp complete_recovery_guard?(guard, kind) do
+    Map.get(guard, :fingerprint_version) == Fingerprint.version() and
+      Map.get(guard, :recovery_kind) == kind and
+      Enum.all?(
+        [
+          :company_id,
+          :source_type,
+          :issue_id,
+          :source_id,
+          :source_run_id,
+          :agent_id,
+          :source_status,
+          :source_fingerprint,
+          :liveness_at
+        ],
+        fn key -> is_binary(Map.get(guard, key)) and Map.get(guard, key) != "" end
+      )
+  end
+
+  defp recovery_guard_matches?(guard, %Run{} = run, %Issue{} = issue, kind) do
+    {fingerprint, snapshot} = Fingerprint.for_run(run, issue)
+
+    run.status in @active_run_statuses and Map.get(guard, :source_type) == "heartbeat_run" and
+      Map.get(guard, :recovery_kind) == kind and
+      Map.get(guard, :company_id) == issue.company_id and
+      Map.get(guard, :company_id) == run.company_id and Map.get(guard, :issue_id) == issue.id and
+      Map.get(guard, :issue_id) == run.issue_id and Map.get(guard, :source_id) == run.id and
+      Map.get(guard, :source_run_id) == run.id and Map.get(guard, :agent_id) == run.agent_id and
+      Map.get(guard, :source_status) == run.status and
+      Map.get(guard, :source_fingerprint) == fingerprint and
+      Map.get(guard, :liveness_at) == snapshot["liveness_at"]
+  end
+
+  defp recovery_source_stale?(%Run{} = run, %DateTime{} = now) do
+    liveness_at =
+      if run.status in ["pending", "queued"],
+        do: run.inserted_at,
+        else: run.last_heartbeat_at || run.inserted_at
+
+    match?(%DateTime{}, liveness_at) and
+      DateTime.compare(liveness_at, DateTime.add(now, -@stale_threshold_minutes, :minute)) == :lt
+  end
 
   defp live_run_owner?(issue_id) do
     case Cympho.Orchestrator.whereis(issue_id) do

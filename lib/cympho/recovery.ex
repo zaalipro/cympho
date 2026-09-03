@@ -431,6 +431,7 @@ defmodule Cympho.Recovery do
             source_id: source_id,
             source_status: to_string(issue_after.status),
             source_fingerprint: child_fp,
+            fingerprint_version: Fingerprint.version(),
             source_snapshot: child_snapshot,
             policy_snapshot:
               case_row.policy_snapshot || policy_snapshot(case_row.max_attempts, []),
@@ -716,30 +717,20 @@ defmodule Cympho.Recovery do
 
   defp unique_constraint_error?(_), do: false
 
-  defp source_matches?(
-         %RecoveryCase{source_type: "issue_checkout", source_fingerprint: fp},
-         issue
-       ) do
-    {current, snapshot} = Fingerprint.for_issue_checkout(issue)
-    current == fp and snapshot_complete?(snapshot, issue_checkout_snapshot_keys())
-  end
+  defp source_matches?(%RecoveryCase{source_type: "issue_checkout"} = case_row, issue),
+    do: current_source_matches?(case_row, issue, nil)
 
   defp source_matches?(
          %RecoveryCase{
            source_type: "heartbeat_run",
-           source_run_id: run_id,
-           source_fingerprint: fp
-         },
+           source_run_id: run_id
+         } = case_row,
          issue
        )
        when is_binary(run_id) do
     case Repo.get(Run, run_id) do
       %Run{} = run ->
-        {current, snapshot} = Fingerprint.for_run(run, issue)
-
-        run.company_id == issue.company_id and run.issue_id == issue.id and
-          current == fp and to_string(run.status) not in @terminal_run_statuses and
-          snapshot_complete?(snapshot, heartbeat_snapshot_keys())
+        current_source_matches?(case_row, run, issue)
 
       _ ->
         false
@@ -833,6 +824,7 @@ defmodule Cympho.Recovery do
       "company_id",
       "assignee_id",
       "issue_status",
+      "checkout_liveness_at",
       "checkout_run_id",
       "lock_version"
     ]
@@ -846,6 +838,7 @@ defmodule Cympho.Recovery do
       "issue_id",
       "agent_id",
       "run_status",
+      "liveness_at",
       "issue_status",
       "issue_lock_version",
       "lock_version",
@@ -864,6 +857,7 @@ defmodule Cympho.Recovery do
       assignee_id: snapshot["assignee_id"],
       status: snapshot["issue_status"],
       checkout_run_id: snapshot["checkout_run_id"],
+      checked_out_at: snapshot["checkout_liveness_at"],
       lock_version: snapshot["lock_version"]
     }
 
@@ -886,6 +880,8 @@ defmodule Cympho.Recovery do
       issue_id: snapshot["issue_id"],
       agent_id: snapshot["agent_id"],
       status: snapshot["run_status"],
+      last_heartbeat_at: snapshot["liveness_at"],
+      inserted_at: snapshot["liveness_at"],
       error_reason: snapshot["error_family"]
     }
 
@@ -926,6 +922,7 @@ defmodule Cympho.Recovery do
           source_id: source_id,
           source_status: source_status,
           source_fingerprint: fingerprint,
+          fingerprint_version: Fingerprint.version(),
           source_snapshot: snapshot,
           max_attempts: policy.max_attempts,
           policy_snapshot: policy.snapshot
@@ -1440,7 +1437,13 @@ defmodule Cympho.Recovery do
            true <- current_source_matches?(case_row, run, issue),
            false <- source_live?(issue.id) do
         kind = if case_row.source_status in ["pending", "queued"], do: :orphaned, else: :stale
-        HeartbeatEngine.recover_run_if_current(run, case_row.source_fingerprint, kind)
+
+        HeartbeatEngine.recover_run_if_current(
+          run,
+          run_source_guard(case_row, kind),
+          kind,
+          now: option_now(opts)
+        )
       else
         _ -> {:error, :superseded}
       end
@@ -1635,8 +1638,9 @@ defmodule Cympho.Recovery do
                  callback_result =
                    HeartbeatEngine.recover_run_if_current(
                      current,
-                     lease.case.source_fingerprint,
-                     kind
+                     run_source_guard(lease.case, kind),
+                     kind,
+                     now: option_now(opts)
                    )
 
                  case callback_result do
@@ -1666,26 +1670,64 @@ defmodule Cympho.Recovery do
   end
 
   defp current_source_matches?(
-         %RecoveryCase{source_type: "heartbeat_run", source_fingerprint: fp},
+         %RecoveryCase{source_type: "heartbeat_run"} = case_row,
          %Run{} = run,
          %Issue{} = issue
        ) do
-    {current_fp, _snapshot} = Fingerprint.for_run(run, issue)
+    {current_fp, snapshot} = Fingerprint.for_run(run, issue)
 
-    current_fp == fp and run.company_id == issue.company_id and run.issue_id == issue.id and
-      to_string(run.status) not in @terminal_run_statuses
+    complete_v2_snapshot?(case_row, "liveness_at") and
+      case_row.company_id == issue.company_id and case_row.company_id == run.company_id and
+      case_row.issue_id == issue.id and case_row.issue_id == run.issue_id and
+      case_row.source_id == run.id and case_row.source_run_id == run.id and
+      case_row.agent_id == run.agent_id and case_row.source_status == to_string(run.status) and
+      to_string(run.status) not in @terminal_run_statuses and
+      case_row.source_snapshot["liveness_at"] == snapshot["liveness_at"] and
+      case_row.source_fingerprint == current_fp
   end
 
   defp current_source_matches?(
-         %RecoveryCase{source_type: "issue_checkout", source_fingerprint: fp},
+         %RecoveryCase{source_type: "issue_checkout"} = case_row,
          %Issue{} = issue,
          _optional_issue
        ) do
-    {current_fp, _snapshot} = Fingerprint.for_issue_checkout(issue)
-    current_fp == fp and issue.status in [:in_progress, "in_progress"]
+    {current_fp, snapshot} = Fingerprint.for_issue_checkout(issue)
+
+    complete_v2_snapshot?(case_row, "checkout_liveness_at") and
+      case_row.company_id == issue.company_id and case_row.issue_id == issue.id and
+      case_row.source_id == issue.id and case_row.agent_id == issue.assignee_id and
+      case_row.source_run_id == issue.checkout_run_id and
+      case_row.source_status == to_string(issue.status) and
+      issue.status in [:in_progress, "in_progress"] and
+      case_row.source_snapshot["checkout_liveness_at"] == snapshot["checkout_liveness_at"] and
+      case_row.source_fingerprint == current_fp
   end
 
   defp current_source_matches?(_, _, _), do: false
+
+  defp complete_v2_snapshot?(%RecoveryCase{} = case_row, liveness_key) do
+    is_map(case_row.source_snapshot) and
+      case_row.fingerprint_version == Fingerprint.version() and
+      case_row.source_snapshot["version"] == Fingerprint.version() and
+      is_binary(case_row.source_snapshot[liveness_key]) and
+      case_row.source_snapshot[liveness_key] != ""
+  end
+
+  defp run_source_guard(%RecoveryCase{} = case_row, kind) do
+    %{
+      source_type: case_row.source_type,
+      company_id: case_row.company_id,
+      issue_id: case_row.issue_id,
+      source_id: case_row.source_id,
+      source_run_id: case_row.source_run_id,
+      agent_id: case_row.agent_id,
+      source_status: case_row.source_status,
+      source_fingerprint: case_row.source_fingerprint,
+      fingerprint_version: case_row.fingerprint_version,
+      liveness_at: case_row.source_snapshot["liveness_at"],
+      recovery_kind: kind
+    }
+  end
 
   defp source_live?(issue_id) when is_binary(issue_id) do
     case Orchestrator.whereis(issue_id) do
@@ -1925,8 +1967,12 @@ defmodule Cympho.Recovery do
   defp source_details("issue_checkout", issue, _run) do
     {fingerprint, snapshot} = Fingerprint.for_issue_checkout(issue)
 
-    {:ok, fingerprint, snapshot, field(issue, :id), to_string(field(issue, :status)),
-     field(issue, :assignee_id), field(issue, :checkout_run_id)}
+    if is_binary(snapshot["checkout_liveness_at"]) do
+      {:ok, fingerprint, snapshot, field(issue, :id), to_string(field(issue, :status)),
+       field(issue, :assignee_id), field(issue, :checkout_run_id)}
+    else
+      {:error, :invalid_issue_source}
+    end
   end
 
   defp source_details("heartbeat_run", issue, run) when is_map(run) do
@@ -1952,8 +1998,12 @@ defmodule Cympho.Recovery do
         {fingerprint, snapshot} = Fingerprint.for_run(run, issue)
         source_run_id = if match?(%Run{}, run), do: run_id, else: nil
 
-        {:ok, fingerprint, snapshot, run_id, to_string(run_status), field(run, :agent_id),
-         source_run_id}
+        if is_binary(snapshot["liveness_at"]) do
+          {:ok, fingerprint, snapshot, run_id, to_string(run_status), field(run, :agent_id),
+           source_run_id}
+        else
+          {:error, :invalid_run_source}
+        end
     end
   end
 
