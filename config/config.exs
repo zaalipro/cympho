@@ -61,7 +61,7 @@ config :tailwind,
     cd: Path.expand("../assets", __DIR__)
   ]
 
-# Cympho attaches structured metadata to log entries (see CLAUDE.md), but
+# Cympho attaches structured metadata to log entries (see AGENTS.md), but
 # Logger only renders keys that are both in the format string and allowlisted
 # here — everything else is dropped. This list is an allowlist on purpose:
 # correlation identifiers and classified diagnostics only, never free-form
