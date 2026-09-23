@@ -70,9 +70,8 @@ defmodule Cympho.Adapters.AgrentingAdapter do
              agent_did,
              hiring_attrs(issue, agent_id, prompt, config, opts, capability, max_price)
            ),
-         {:ok, hiring_id} <- hiring_id(create_response),
-         {:ok, hiring} <-
-           poll_hiring(
+         {:ok, hiring_id} <- hiring_id(create_response) do
+      case poll_hiring(
              config,
              hiring_id,
              timeout(config),
@@ -80,16 +79,30 @@ defmodule Cympho.Adapters.AgrentingAdapter do
              session_id,
              recipient_pid
            ) do
-      case hiring["status"] do
-        "completed" ->
-          _ = attach_remote_artifacts(issue, agent_id, config, hiring)
-          {:ok, format_completed_turn(hiring)}
+        {:ok, hiring} ->
+          case hiring["status"] do
+            "completed" ->
+              _ = attach_remote_artifacts(issue, agent_id, config, hiring)
+              {:ok, format_completed_turn(hiring)}
 
-        status when status in @terminal_statuses ->
-          {:error, {:agrenting_hiring_terminal, status, failure_reason(hiring)}}
+            status when status in @terminal_statuses ->
+              {:error, {:agrenting_hiring_terminal, status, failure_reason(hiring)}}
 
-        status ->
-          {:error, {:agrenting_hiring_not_terminal, status}}
+            status ->
+              cancel_after_failure(config, hiring_id, {:agrenting_hiring_not_terminal, status})
+          end
+
+        {:error, {:agrenting_timeout, _, _} = reason} ->
+          cancel_after_failure(config, hiring_id, reason)
+
+        {:error, {:cancelled, _} = reason} ->
+          cancel_after_failure(config, hiring_id, reason)
+
+        {:error, :owner_down = reason} ->
+          cancel_after_failure(config, hiring_id, reason)
+
+        {:error, reason} ->
+          cancel_after_failure(config, hiring_id, {:agrenting_poll_failed, hiring_id, reason})
       end
     end
   end
@@ -174,7 +187,8 @@ defmodule Cympho.Adapters.AgrentingAdapter do
   end
 
   defp do_poll_hiring(config, hiring_id, deadline, poll_interval_ms, session_id, recipient_pid) do
-    with {:ok, hiring} <- Client.get_hiring(config, hiring_id) do
+    with {:ok, hiring} <- Client.get_hiring(config, hiring_id),
+         :ok <- valid_hiring_status(hiring) do
       status = hiring["status"]
 
       cond do
@@ -199,10 +213,34 @@ defmodule Cympho.Adapters.AgrentingAdapter do
             {:stop, reason} ->
               # Stopping locally is not enough: the hiring bills until the
               # remote side is told to stop too.
-              _ = Client.cancel_hiring(config, hiring_id)
               {:error, reason}
           end
       end
+    end
+  end
+
+  defp valid_hiring_status(%{"status" => status}) when is_binary(status), do: :ok
+  defp valid_hiring_status(_), do: {:error, :invalid_hiring_response}
+
+  defp cancel_after_failure(config, hiring_id, reason) do
+    cancellation =
+      try do
+        Client.cancel_hiring(config, hiring_id)
+      rescue
+        _ -> {:error, :cancel_exception}
+      catch
+        _, _ -> {:error, :cancel_exception}
+      end
+
+    case cancellation do
+      {:ok, _} ->
+        {:error, reason}
+
+      {:error, cancel_reason} ->
+        {:error, {:agrenting_cancel_failed, hiring_id, reason, cancel_reason}}
+
+      other ->
+        {:error, {:agrenting_cancel_failed, hiring_id, reason, other}}
     end
   end
 

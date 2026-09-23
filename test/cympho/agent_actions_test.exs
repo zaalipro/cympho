@@ -2214,8 +2214,12 @@ defmodule Cympho.AgentActionsTest do
 
     test "set_pr_url updates the issue PR URL and records a review note", %{
       issue: issue,
-      engineer: engineer
+      engineer: engineer,
+      project: project
     } do
+      {:ok, _} =
+        Cympho.Projects.update_project(project, %{repo_url: "https://github.com/example/repo"})
+
       url = "https://github.com/example/repo/pull/42"
       actions = [%{"type" => "set_pr_url", "url" => url}]
 
@@ -2306,8 +2310,12 @@ defmodule Cympho.AgentActionsTest do
     test "Agrenting push mode with repo-token secret can stamp a PR URL", %{
       issue: issue,
       engineer: engineer,
-      company: company
+      company: company,
+      project: project
     } do
+      {:ok, _} =
+        Cympho.Projects.update_project(project, %{repo_url: "https://github.com/example/repo"})
+
       {:ok, engineer} =
         Agents.update_agent(engineer, %{
           adapter: :agrenting,

@@ -922,7 +922,13 @@ defmodule Cympho.Wakes do
       )
 
     if count > 0 and had_review_wake? do
-      notify_owner_attention_for_issue(issue_id)
+      if Process.get(:cympho_agent_actions_defer_terminal_effects, false) do
+        Cympho.HeartbeatEngine.defer_post_commit(fn ->
+          notify_owner_attention_for_issue(issue_id)
+        end)
+      else
+        notify_owner_attention_for_issue(issue_id)
+      end
     end
 
     {:ok, count}

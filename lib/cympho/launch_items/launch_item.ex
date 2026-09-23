@@ -26,7 +26,18 @@ defmodule Cympho.LaunchItems.LaunchItem do
     |> validate_required([:title, :status, :company_id, :owner_user_id])
     |> validate_length(:title, min: 1, max: 255)
     |> validate_inclusion(:status, @statuses)
+    |> validate_immutable_company(item)
     |> foreign_key_constraint(:company_id)
     |> foreign_key_constraint(:owner_user_id)
+  end
+
+  defp validate_immutable_company(changeset, %{id: nil}), do: changeset
+
+  defp validate_immutable_company(changeset, _item) do
+    if match?({:ok, _}, fetch_change(changeset, :company_id)) do
+      add_error(changeset, :company_id, "cannot be changed")
+    else
+      changeset
+    end
   end
 end

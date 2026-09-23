@@ -17,6 +17,58 @@ defmodule CymphoWeb.IssueControllerTest do
   end
 
   describe "POST /api/issues" do
+    test "rejects a PR URL from another repository", %{
+      conn: conn,
+      project: project
+    } do
+      {:ok, _} = Projects.update_project(project, %{repo_url: "https://github.com/acme/app"})
+
+      conn =
+        post(conn, "/api/issues", %{
+          "issue" => %{
+            "title" => "Wrong PR repository",
+            "project_id" => project.id,
+            "github_pr_url" => "https://github.com/other/app/pull/4"
+          }
+        })
+
+      assert %{"errors" => %{"github_pr_url" => [message]}} = json_response(conn, 422)
+      assert message =~ "project repository"
+    end
+
+    test "rejects a malformed PR URL", %{conn: conn, project: project} do
+      {:ok, _} = Projects.update_project(project, %{repo_url: "https://github.com/acme/app"})
+
+      conn =
+        post(conn, "/api/issues", %{
+          "issue" => %{
+            "title" => "Malformed PR URL",
+            "project_id" => project.id,
+            "github_pr_url" => "https://github.com/acme/app/pull/4?redirect=1"
+          }
+        })
+
+      assert %{"errors" => %{"github_pr_url" => [_]}} = json_response(conn, 422)
+    end
+
+    test "accepts a PR URL in its configured repository", %{conn: conn, project: project} do
+      {:ok, _} = Projects.update_project(project, %{repo_url: "https://github.com/acme/app"})
+
+      conn =
+        post(conn, "/api/issues", %{
+          "issue" => %{
+            "title" => "Authorized PR",
+            "project_id" => project.id,
+            "github_pr_url" => "https://github.com/Acme/App/pull/4"
+          }
+        })
+
+      assert %{"data" => %{"id" => issue_id}} = json_response(conn, 201)
+
+      assert Cympho.Issues.get_issue!(issue_id).github_pr_url ==
+               "https://github.com/Acme/App/pull/4"
+    end
+
     test "creates an issue without parentId", %{conn: conn, project: project} do
       params = %{
         "issue" => %{

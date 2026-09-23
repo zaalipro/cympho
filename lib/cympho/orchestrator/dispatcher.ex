@@ -57,6 +57,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @dispatcher_snapshot_timeout_ms 1_000
   @orphan_checkout_grace_seconds 15 * 60
   @low_power_priorities [:critical, :high]
+  @poll_demand_table :cympho_dispatcher_poll_demands
+  @poll_demand_retries 5
   # Delivery roles the CTO both manages and outranks, so it can staff them
   # itself. See `staffing_owner/2`.
   @cto_staffed_roles Cympho.Agents.Agent.pr_delivery_roles()
@@ -79,14 +81,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   @doc "Requests an immediate poll when the dispatcher is running."
   def poll_now do
-    case Process.whereis(__MODULE__) do
-      nil ->
-        {:error, :not_started}
-
-      pid ->
-        send(pid, :poll)
-        :ok
-    end
+    send_demand_poll(:global, :demand_poll, @poll_demand_retries)
   end
 
   @doc "Returns whether autonomous dispatch is enabled for this runtime."
@@ -121,14 +116,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   @doc "Requests an immediate poll scoped to one company."
   def poll_company(company_id) when is_binary(company_id) do
-    case Process.whereis(__MODULE__) do
-      nil ->
-        {:error, :not_started}
-
-      pid ->
-        send(pid, {:poll_company, company_id})
-        :ok
-    end
+    send_demand_poll({:company, company_id}, {:poll_company, company_id}, @poll_demand_retries)
   end
 
   @doc """
@@ -192,12 +180,23 @@ defmodule Cympho.Orchestrator.Dispatcher do
               metadata: metadata
             })
 
-          _ = Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id)
-          _ = poll_now()
+          dispatch = fn ->
+            _ = Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id)
+            _ = poll_now()
+            :ok
+          end
+
+          if Process.get(:cympho_agent_actions_defer_terminal_effects, false),
+            do: Cympho.HeartbeatEngine.defer_post_commit(dispatch),
+            else: dispatch.()
+
           result
 
         true ->
-          _ = poll_now()
+          if Process.get(:cympho_agent_actions_defer_terminal_effects, false),
+            do: Cympho.HeartbeatEngine.defer_post_commit(fn -> poll_now() end),
+            else: poll_now()
+
           {:ok, :queued_for_dispatch}
       end
     end
@@ -217,6 +216,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @impl true
   def init(_opts) do
     Process.flag(:trap_exit, true)
+    :ets.new(@poll_demand_table, [:named_table, :public, :set, write_concurrency: true])
 
     # Always recover orphans once on boot — even when the orchestrator is
     # disabled — so live-node strands and non-dispatcher checkouts do not
@@ -386,10 +386,13 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp recover_orphaned_runs do
-    Cympho.HeartbeatEngine.find_orphaned_runs()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    {:ok, cutoff} = Cympho.HeartbeatEngine.recovery_cutoff(now: now)
+
+    Cympho.HeartbeatEngine.find_orphaned_runs_before(cutoff)
     |> Enum.each(fn run ->
       unless live_orchestrator?(run.issue_id) do
-        case Cympho.Recovery.recover_orphaned_run(run) do
+        case Cympho.Recovery.recover_orphaned_run(run, now: now, stale_cutoff: cutoff) do
           {:ok, %{run: recovered, outcome: outcome}} ->
             level = if outcome == :recovered, do: :warning, else: :info
 
@@ -631,11 +634,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @impl true
   def handle_info(:poll, %State{} = state) do
     if enabled?() do
-      # `poll_now/0` delivers `:poll` too. Rescheduling unconditionally would
-      # start a second self-perpetuating timer chain for every on-demand poll,
-      # and `poll_now/0` runs on issue launch, dashboard actions, and event
-      # heartbeats — so the poll rate grew without bound over a node's life.
-      # schedule_poll/1 cancels the pending timer, leaving exactly one.
+      # Backward-compatible direct :poll handling. Normal demand and periodic
+      # polls use separate messages so demand cannot reset periodic cadence.
       state = state |> do_poll() |> schedule_poll()
       {:noreply, state}
     else
@@ -643,10 +643,32 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
+  def handle_info(:demand_poll, %State{} = state) do
+    clear_poll_demand(:global)
+
+    if enabled?(),
+      do: {:noreply, state |> do_poll() |> ensure_periodic_poll()},
+      else: {:noreply, state}
+  end
+
+  def handle_info({:periodic_poll, token}, %State{poll_token: token} = state)
+      when is_reference(token) do
+    if enabled?() do
+      {:noreply, state |> do_poll() |> schedule_poll()}
+    else
+      {:noreply, %{state | poll_timer: nil, poll_token: nil}}
+    end
+  end
+
+  def handle_info({:periodic_poll, _stale_token}, %State{} = state),
+    do: {:noreply, state}
+
   @impl true
   def handle_info({:poll_company, company_id}, %State{} = state) do
+    clear_poll_demand({:company, company_id})
+
     if enabled?() do
-      state = do_poll(state, company_id)
+      state = state |> do_poll(company_id) |> ensure_periodic_poll()
       {:noreply, state}
     else
       {:noreply, state}
@@ -827,12 +849,87 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   # Internal
 
-  # Keeps exactly one pending periodic poll, cancelling any timer already
-  # armed. Stale `:poll` messages already in the mailbox are harmless: each one
-  # just polls and re-arms this same single timer.
+  # Keeps exactly one pending periodic poll. A token makes any timer message
+  # already in the mailbox harmless after a replacement.
   defp schedule_poll(%State{} = state) do
     if is_reference(state.poll_timer), do: Process.cancel_timer(state.poll_timer)
-    %{state | poll_timer: Process.send_after(self(), :poll, @poll_interval)}
+    token = make_ref()
+
+    %{
+      state
+      | poll_timer: Process.send_after(self(), {:periodic_poll, token}, @poll_interval),
+        poll_token: token
+    }
+  end
+
+  defp ensure_periodic_poll(%State{poll_timer: nil} = state), do: schedule_poll(state)
+  defp ensure_periodic_poll(%State{} = state), do: state
+
+  defp send_demand_poll(_key, _message, 0), do: {:error, :not_started}
+
+  defp send_demand_poll(key, message, retries) do
+    try do
+      pid = Process.whereis(__MODULE__)
+
+      cond do
+        is_nil(pid) ->
+          {:error, :not_started}
+
+        :ets.info(@poll_demand_table, :owner) != pid ->
+          retry_demand_poll(key, message, retries)
+
+        true ->
+          case :ets.lookup(@poll_demand_table, key) do
+            [] ->
+              if :ets.insert_new(@poll_demand_table, {key, pid}) do
+                if demand_generation?(pid) do
+                  send(pid, message)
+
+                  if demand_generation?(pid) do
+                    :ok
+                  else
+                    :ets.match_delete(@poll_demand_table, {key, pid})
+                    retry_demand_poll(key, message, retries)
+                  end
+                else
+                  :ets.match_delete(@poll_demand_table, {key, pid})
+                  retry_demand_poll(key, message, retries)
+                end
+              else
+                retry_demand_poll(key, message, retries)
+              end
+
+            [{^key, ^pid}] ->
+              if demand_generation?(pid),
+                do: :ok,
+                else: retry_demand_poll(key, message, retries)
+
+            [{^key, stale_pid}] ->
+              :ets.match_delete(@poll_demand_table, {key, stale_pid})
+              retry_demand_poll(key, message, retries)
+          end
+      end
+    rescue
+      ArgumentError -> retry_demand_poll(key, message, retries)
+    end
+  end
+
+  defp demand_generation?(pid) do
+    Process.whereis(__MODULE__) == pid and :ets.info(@poll_demand_table, :owner) == pid and
+      Process.alive?(pid)
+  end
+
+  defp retry_demand_poll(key, message, retries) do
+    Process.sleep(1)
+    send_demand_poll(key, message, retries - 1)
+  end
+
+  defp clear_poll_demand(key) do
+    try do
+      :ets.match_delete(@poll_demand_table, {key, self()})
+    rescue
+      ArgumentError -> :ok
+    end
   end
 
   # Reasons where terminate/2 ran (or nothing abnormal happened), so the
@@ -979,6 +1076,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
       # successor that raced in after the first live check) and can unlock a
       # successor-bound checkout via clear_checkout_lock_for_run.
       pre_crash_runs = active_runs_for_issue(issue_id)
+      recovery_now = DateTime.utc_now() |> DateTime.truncate(:second)
+      {:ok, recovery_cutoff} = Cympho.HeartbeatEngine.recovery_cutoff(now: recovery_now)
+      recovery_opts = [now: recovery_now, stale_cutoff: recovery_cutoff]
 
       # Unbound stranded checkout only. A bound checkout_run_id may be a
       # successor that claimed ownership before this DOWN handler ran — a
@@ -989,7 +1089,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
       # checkout. Durable age and Recovery's final source/cohort guard decide
       # whether even a currently-bound pre-crash run is safe to terminalize.
       Enum.each(pre_crash_runs, fn run ->
-        recover_crashed_session_run(issue_id, run)
+        recover_crashed_session_run(issue_id, run, recovery_opts)
       end)
 
       recover_crashed_session_checkout(issue_id)
@@ -1001,18 +1101,18 @@ defmodule Cympho.Orchestrator.Dispatcher do
       :ok
   end
 
-  defp recover_crashed_session_run(issue_id, run) do
+  defp recover_crashed_session_run(issue_id, run, recovery_opts) do
     cond do
       live_orchestrator?(issue_id) ->
         :ok
 
-      not durably_stale_run?(run) ->
+      not durably_stale_run?(run, Keyword.fetch!(recovery_opts, :stale_cutoff)) ->
         Logger.info(
           "[Dispatcher] deferred crashed-session run #{run.id}: durable stale cutoff not reached"
         )
 
       true ->
-        case Cympho.Recovery.recover_orphaned_run(run) do
+        case Cympho.Recovery.recover_orphaned_run(run, recovery_opts) do
           {:ok, %{run: recovered, outcome: :recovered}} ->
             Logger.warning(
               "[Dispatcher] recovered crashed-session run #{run.id} (issue=#{issue_id}) → #{recovered.status}"
@@ -1076,18 +1176,11 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
-  defp durably_stale_run?(%Run{status: status} = run)
-       when status in ["pending", "queued", "running"] do
-    liveness_at =
-      if status in ["pending", "queued"],
-        do: run.inserted_at,
-        else: run.last_heartbeat_at || run.inserted_at
+  defp durably_stale_run?(%Run{status: status} = run, %DateTime{} = cutoff)
+       when status in ["pending", "queued", "running"],
+       do: Cympho.HeartbeatEngine.run_stale_before?(run, cutoff)
 
-    cutoff = DateTime.add(DateTime.utc_now(), -@orphan_checkout_grace_seconds, :second)
-    match?(%DateTime{}, liveness_at) and DateTime.compare(liveness_at, cutoff) == :lt
-  end
-
-  defp durably_stale_run?(_run), do: false
+  defp durably_stale_run?(_run, _cutoff), do: false
 
   defp active_runs_for_issue(issue_id) when is_binary(issue_id) do
     from(r in Run,
@@ -1470,6 +1563,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp do_poll(%State{} = state, company_id \\ nil) do
+    :telemetry.execute([:cympho, :dispatcher, :poll], %{count: 1}, %{company_id: company_id})
+
     # Periodic reclaim: boot-only recovery left live-node strands until restart.
     # Same helpers the watchdog tick / handle_continue(:recover_orphans) use so
     # either cadence covers the other — including zombie runs that pin issues
@@ -1953,7 +2048,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
   """
   @spec preview_agent_for_issue(Cympho.Issues.Issue.t()) ::
           {:ok, Cympho.Agents.Agent.t()} | {:error, :no_agent_available}
-  def preview_agent_for_issue(%Cympho.Issues.Issue{} = issue), do: agent_for_issue(issue)
+  def preview_agent_for_issue(%Cympho.Issues.Issue{} = issue),
+    do: agent_for_issue(issue, false)
 
   @doc false
   # Public for testing — retry bookkeeping for failed dispatches.
@@ -2039,25 +2135,28 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
-  defp agent_for_issue(%Cympho.Issues.Issue{} = issue) do
-    case assigned_agent_for_issue(issue) do
+  defp agent_for_issue(issue, recover_errors? \\ true)
+
+  defp agent_for_issue(%Cympho.Issues.Issue{} = issue, recover_errors?) do
+    case assigned_agent_for_issue(issue, recover_errors?) do
       {:ok, agent} ->
         {:ok, agent}
 
       :unassigned ->
-        routed_agent_for_issue(issue)
+        routed_agent_for_issue(issue, recover_errors?)
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  defp assigned_agent_for_issue(%Cympho.Issues.Issue{assignee_id: nil}), do: :unassigned
+  defp assigned_agent_for_issue(%Cympho.Issues.Issue{assignee_id: nil}, _recover_errors?),
+    do: :unassigned
 
-  defp assigned_agent_for_issue(%Cympho.Issues.Issue{} = issue) do
+  defp assigned_agent_for_issue(%Cympho.Issues.Issue{} = issue, recover_errors?) do
     case Agents.get_agent(issue.assignee_id) do
       {:ok, %Agent{} = agent} ->
-        case maybe_recover_error_agent(agent) do
+        case maybe_recover_error_agent(agent, recover_errors?) do
           {:ok, agent} ->
             evaluate_assigned_agent(issue, agent)
 
@@ -2073,7 +2172,10 @@ defmodule Cympho.Orchestrator.Dispatcher do
   # Transient :error must self-heal under the dispatcher path — AgentHeartbeat
   # skips do_heartbeat (and maybe_recover_error_status) when
   # delegate_to_dispatcher is true (the default).
-  defp maybe_recover_error_agent(%Agent{status: :error} = agent) do
+  defp maybe_recover_error_agent(%Agent{status: :error} = agent, false),
+    do: {:ok, %{agent | status: :idle}}
+
+  defp maybe_recover_error_agent(%Agent{status: :error} = agent, true) do
     Logger.info("[Dispatcher] recovering agent from error status",
       agent_id: agent.id,
       company_id: agent.company_id,
@@ -2083,7 +2185,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     Agents.recover_error_status(agent)
   end
 
-  defp maybe_recover_error_agent(%Agent{} = agent), do: {:ok, agent}
+  defp maybe_recover_error_agent(%Agent{} = agent, _recover_errors?), do: {:ok, agent}
 
   defp evaluate_assigned_agent(%Cympho.Issues.Issue{} = issue, %Agent{} = agent) do
     required_role = Router.infer_role(issue)
@@ -2122,7 +2224,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
-  defp routed_agent_for_issue(%Cympho.Issues.Issue{} = issue) do
+  defp routed_agent_for_issue(%Cympho.Issues.Issue{} = issue, recover_errors?) do
     primary_role = Router.infer_role(issue)
     fallback_roles = Router.fallback_chain(primary_role)
     all_roles = [primary_role | fallback_roles]
@@ -2131,7 +2233,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
     case issue.company_id do
       company_id when is_binary(company_id) ->
         Enum.each(all_roles, fn role ->
-          eligible = Agents.list_eligible_agents(role, company_id)
+          eligible =
+            Agents.list_eligible_agents(role, company_id, recover_errors?: recover_errors?)
 
           case Router.select_agent(role, eligible) do
             {:ok, agent} -> throw({:found, agent})

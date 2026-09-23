@@ -17,7 +17,9 @@ defmodule Cympho.Issues do
   alias Cympho.HeartbeatEngine
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.IssueDigest
+  alias Cympho.Github
   alias Cympho.PullRequestContract
+  alias Cympho.Projects.Project
   alias Cympho.Activities
   alias Cympho.Companies
   alias Cympho.Companies.Company
@@ -1269,8 +1271,13 @@ defmodule Cympho.Issues do
   def create_issue(attrs \\ %{}) do
     attrs = normalize_attrs(attrs)
     attrs = Swarm.embed_config(attrs)
-    attrs = maybe_generate_identifier(attrs)
 
+    with :ok <- validate_pr_link(%Issue{}, attrs) do
+      create_valid_issue(maybe_generate_identifier(attrs))
+    end
+  end
+
+  defp create_valid_issue(attrs) do
     insert_result =
       if company_id = attrs[:company_id] || attrs["company_id"] do
         create_company_scoped_issue(company_id, attrs)
@@ -1643,9 +1650,62 @@ defmodule Cympho.Issues do
   defp maybe_generate_identifier(attrs), do: attrs
 
   def update_issue(%Issue{} = issue, attrs) do
-    with {:ok, updated} <- do_update_issue(issue, attrs) do
+    with :ok <- validate_pr_link(issue, attrs),
+         {:ok, updated} <- do_update_issue(issue, attrs) do
       finalize_issue_update(issue, updated, attrs)
     end
+  end
+
+  # Only a newly linked URL (or a project/company change retaining one) needs
+  # revalidation. Legacy rows remain editable and may always be unlinked.
+  defp validate_pr_link(%Issue{} = issue, attrs) do
+    pr_url = changed_attr(attrs, :github_pr_url, issue.github_pr_url)
+    project_id = changed_attr(attrs, :project_id, issue.project_id)
+    company_id = changed_attr(attrs, :company_id, issue.company_id)
+
+    changed? =
+      pr_url != issue.github_pr_url or project_id != issue.project_id or
+        company_id != issue.company_id
+
+    if changed? and is_binary(pr_url) and String.trim(pr_url) != "" do
+      case pr_link_project(project_id) do
+        %Project{company_id: ^company_id, repo_url: repo_url} ->
+          case Github.parse_repo_url(repo_url) do
+            {:ok, _} ->
+              if Github.pr_in_repo?(pr_url, repo_url),
+                do: :ok,
+                else: pr_link_error(issue, attrs, "must belong to the issue's project repository")
+
+            _ ->
+              pr_link_error(issue, attrs, "requires a configured GitHub project repository")
+          end
+
+        _ ->
+          pr_link_error(issue, attrs, "requires a configured GitHub project repository")
+      end
+    else
+      :ok
+    end
+  end
+
+  defp changed_attr(attrs, key, default) do
+    case Map.fetch(attrs, key) do
+      {:ok, value} -> value
+      :error -> Map.get(attrs, Atom.to_string(key), default)
+    end
+  end
+
+  defp pr_link_project(project_id) when is_binary(project_id) do
+    case Ecto.UUID.cast(project_id) do
+      {:ok, id} -> Repo.get(Project, id)
+      :error -> nil
+    end
+  end
+
+  defp pr_link_project(_), do: nil
+
+  defp pr_link_error(issue, attrs, message) do
+    {:error, Ecto.Changeset.add_error(Issue.changeset(issue, attrs), :github_pr_url, message)}
   end
 
   defp finalize_issue_update(old_issue, updated, attrs) do
@@ -1659,6 +1719,24 @@ defmodule Cympho.Issues do
     updated =
       Repo.preload(updated, [:comments, :blocked_by, :blocks, :assignee, :labels], force: true)
 
+    if Process.get(:cympho_agent_actions_defer_terminal_effects, false) do
+      _ = cleanup_terminal_issue_runtime(old_issue, updated)
+      _ = HeartbeatEngine.defer_issue_update(old_issue, updated, attrs)
+      {:ok, updated}
+    else
+      publish_issue_update_effects(old_issue, updated, attrs)
+      _ = cleanup_terminal_issue_runtime(old_issue, updated)
+      {:ok, updated}
+    end
+  end
+
+  @doc false
+  def publish_deferred_issue_update(%Issue{} = old_issue, %Issue{} = updated, attrs) do
+    publish_issue_update_effects(old_issue, updated, attrs)
+    :ok
+  end
+
+  defp publish_issue_update_effects(old_issue, updated, attrs) do
     Activities.log_issue_changes(old_issue, updated, attrs)
 
     Cympho.PubSubGuard.company_broadcast(
@@ -1680,9 +1758,7 @@ defmodule Cympho.Issues do
     _ = Cympho.ReviewNudges.reconcile_issue(updated)
 
     _ = maybe_reclassify_role(old_issue, updated, attrs)
-    _ = cleanup_terminal_issue_runtime(old_issue, updated)
-
-    {:ok, updated}
+    :ok
   end
 
   @doc "Updates an issue's agent work contract using the supported mode whitelist."
@@ -1736,11 +1812,15 @@ defmodule Cympho.Issues do
            {:ok, run_count} <- HeartbeatEngine.cancel_active_runs_for_issue(updated.id, reason) do
         # Cancel/release remote env even when no active runs remained (orphan
         # provider_ref). cancel_run paths also release; double-release is safe.
-        _ =
-          Workspaces.cancel_and_release_for_issue(updated, %{
-            reason: "issue_terminal_#{updated.status}",
-            company_id: updated.company_id
-          })
+        if Process.get(:cympho_agent_actions_defer_terminal_effects, false) do
+          _ = HeartbeatEngine.defer_terminal_issue_environment(updated)
+        else
+          _ =
+            Workspaces.cancel_and_release_for_issue(updated, %{
+              reason: "issue_terminal_#{updated.status}",
+              company_id: updated.company_id
+            })
+        end
 
         Activities.log_activity(%{
           issue_id: updated.id,
@@ -2140,21 +2220,28 @@ defmodule Cympho.Issues do
   end
 
   defp finish_transition(issue, updated) do
-    cond do
-      updated.status in [:done, :cancelled] ->
-        unblock_dependents(issue.id)
+    effects = fn ->
+      cond do
+        updated.status in [:done, :cancelled] ->
+          unblock_dependents(issue.id)
+          maybe_complete_parent(updated)
+          _ = Wakes.notify_children_completed(updated)
 
-        maybe_complete_parent(updated)
-        _ = Wakes.notify_children_completed(updated)
+        updated.status == :in_review ->
+          _ = Wakes.notify_child_in_review(updated)
 
-      updated.status == :in_review ->
-        _ = Wakes.notify_child_in_review(updated)
+        true ->
+          :ok
+      end
 
-      true ->
-        :ok
+      if updated.status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
+      :ok
     end
 
-    if updated.status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
+    if Process.get(:cympho_agent_actions_defer_terminal_effects, false),
+      do: HeartbeatEngine.defer_post_commit(effects),
+      else: effects.()
+
     {:ok, updated}
   end
 
@@ -2925,22 +3012,37 @@ defmodule Cympho.Issues do
     case count do
       1 ->
         with {:ok, released} <- get_issue(issue.id) do
-          Activities.log_activity(%{
-            issue_id: released.id,
-            company_id: released.company_id,
-            actor_type: "system",
-            action: "unassigned",
-            metadata: %{previous_assignee_id: issue.assignee_id, target_status: target_status}
-          })
+          if Process.get(:cympho_agent_actions_defer_terminal_effects, false) do
+            _ = HeartbeatEngine.defer_issue_release(issue, released, target_status)
+          else
+            publish_issue_release(issue, released, target_status)
+          end
 
-          broadcast_issue_update(released, :issue_updated, %{status: target_status})
-          _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(issue, released)
           {:ok, released}
         end
 
       _ ->
         {:error, :checkout_conflict}
     end
+  end
+
+  @doc false
+  def publish_deferred_issue_release(issue, released, target_status) do
+    publish_issue_release(issue, released, target_status)
+  end
+
+  defp publish_issue_release(issue, released, target_status) do
+    Activities.log_activity(%{
+      issue_id: released.id,
+      company_id: released.company_id,
+      actor_type: "system",
+      action: "unassigned",
+      metadata: %{previous_assignee_id: issue.assignee_id, target_status: target_status}
+    })
+
+    broadcast_issue_update(released, :issue_updated, %{status: target_status})
+    _ = Cympho.OwnerAttention.maybe_notify_human_action_membership(issue, released)
+    :ok
   end
 
   # Compare-and-set on the caller's ownership snapshot. A successor that bound a

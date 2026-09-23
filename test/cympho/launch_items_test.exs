@@ -90,4 +90,43 @@ defmodule Cympho.LaunchItemsTest do
     assert updated.status == "completed"
     refute updated.is_blocked
   end
+
+  test "ordinary update cannot move an item to a company where its owner also belongs", %{
+    company: company,
+    owner: owner
+  } do
+    unique = System.unique_integer([:positive])
+
+    {:ok, other_company} =
+      Companies.create_company(%{
+        name: "Other Launch Company #{unique}",
+        slug: "other-launch-company-#{unique}"
+      })
+
+    {:ok, _membership} =
+      Companies.create_membership(%{
+        user_id: owner.id,
+        company_id: other_company.id,
+        role: "member",
+        is_board_member: false
+      })
+
+    {:ok, item} =
+      LaunchItems.create_launch_item(%{
+        title: "Keep in company A",
+        company_id: company.id,
+        owner_user_id: owner.id
+      })
+
+    assert {:error, changeset} =
+             LaunchItems.update_launch_item(item, %{
+               company_id: other_company.id,
+               title: "Moved"
+             })
+
+    assert Keyword.has_key?(changeset.errors, :company_id)
+    assert {:ok, unchanged} = LaunchItems.get_company_launch_item(company.id, item.id)
+    assert unchanged.title == "Keep in company A"
+    assert {:error, :not_found} = LaunchItems.get_company_launch_item(other_company.id, item.id)
+  end
 end

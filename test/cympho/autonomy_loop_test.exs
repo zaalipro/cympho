@@ -35,6 +35,7 @@ defmodule Cympho.AutonomyLoopTest do
     {:ok,
      %{
        company: company,
+       project: project,
        agents: [ceo, cto, engineer | _],
        goal: goal,
        seed_issues: seed_issues
@@ -44,6 +45,9 @@ defmodule Cympho.AutonomyLoopTest do
         issue_prefix: "LOP",
         engineer_count: 1
       })
+
+    {:ok, _} =
+      Cympho.Projects.update_project(project, %{repo_url: "https://github.com/owner/repo"})
 
     # Wire engineer→CTO→CEO chain explicitly so escalations resolve.
     {:ok, engineer} = Agents.update_agent(engineer, %{parent_id: cto.id})

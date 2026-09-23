@@ -3,6 +3,7 @@ defmodule CymphoWeb.KanbanLiveTest do
   import Ecto.Query
   import Phoenix.LiveViewTest
   alias Cympho.Agents
+  alias Cympho.AgentHeartbeat
   alias Cympho.Comments
   alias Cympho.Goals
   alias Cympho.HeartbeatEngine.Run
@@ -969,6 +970,80 @@ defmodule CymphoWeb.KanbanLiveTest do
   end
 
   describe "Project filter" do
+    test "a tuple-only move into the selected project loads its assignee heartbeat", %{
+      project: project
+    } do
+      {:ok, other} = create_project(%{name: "Heartbeat source", prefix: "HB"})
+
+      {:ok, agent} =
+        create_agent(%{
+          name: "Moved running owner",
+          role: :engineer,
+          status: :idle,
+          adapter: :process
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Moving running card",
+          description: "Tuple-only project move",
+          status: :todo,
+          project_id: other.id,
+          assignee_id: agent.id
+        })
+
+      assert {:ok, heartbeat_pid} = AgentHeartbeat.start_for_agent(agent.id)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, heartbeat_pid, self())
+      on_exit(fn -> AgentHeartbeat.stop_for_agent(agent.id) end)
+      assert :ok = AgentHeartbeat.set_working(agent.id, issue.id)
+
+      {:ok, view, initial_html} = live(conn(), "/kanban?project_id=#{project.id}")
+      refute initial_html =~ "Moving running card"
+
+      moved = issue |> Ecto.Changeset.change(project_id: project.id) |> Repo.update!()
+      send(view.pid, {:issue_updated, moved})
+
+      [card] =
+        view
+        |> render()
+        |> Floki.parse_document!()
+        |> Floki.find("[data-kanban-card][data-issue-id='#{issue.id}']")
+
+      assert Floki.raw_html(card) =~ "Moved running owner · engineer · running"
+    end
+
+    test "initial board load queries issues once per LiveView mount phase", %{
+      current_company: company
+    } do
+      handler_id = "kanban-query-count-#{System.unique_integer([:positive])}"
+      company_id = Ecto.UUID.dump!(company.id)
+      test_pid = self()
+
+      :telemetry.attach(
+        handler_id,
+        [:cympho, :repo, :query],
+        fn _event, _measurements, metadata, {pid, scoped_id} ->
+          if String.contains?(
+               metadata.query || "",
+               ~s|WHERE (i0."company_id" = $1) LIMIT $2|
+             ) and
+               scoped_id in (metadata.params || []) do
+            send(pid, {:board_issue_list_query, metadata.query})
+          end
+        end,
+        {test_pid, company_id}
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "Backlog Issue"
+      assert html =~ "Todo Issue"
+
+      queries = drain_board_issue_queries([])
+      assert length(queries) == 2
+    end
+
     test "shows All Projects",
       do:
         assert(
@@ -991,6 +1066,275 @@ defmodule CymphoWeb.KanbanLiveTest do
       {:ok, _view, html} = live(conn(), "/kanban?project_id=#{project.id}")
       assert html =~ "Backlog Issue"
       refute html =~ "Other Issue"
+    end
+
+    test "tuple-only updates respect the selected project and preserve card order", %{
+      project: project,
+      issue_backlog: backlog,
+      issue_todo: todo
+    } do
+      {:ok, other} = create_project(%{name: "Tuple Project", prefix: "TU"})
+      {:ok, view, _html} = live(conn(), "/kanban?project_id=#{project.id}")
+
+      send(view.pid, {:issue_updated, %{backlog | project_id: other.id}})
+      html = render(view)
+      refute html =~ "Backlog Issue"
+      assert html =~ "Todo Issue"
+
+      send(view.pid, {
+        :issue_created,
+        %{backlog | id: Ecto.UUID.generate(), project_id: project.id, title: "New in project"}
+      })
+
+      html = render(view)
+      assert html =~ "New in project"
+      assert html =~ "Todo Issue"
+      refute html =~ "Backlog Issue"
+
+      send(view.pid, {:issue_deleted, todo.id})
+      refute render(view) =~ "Todo Issue"
+    end
+
+    test "endpoint-only issue event reloads changed card data", %{issue_backlog: issue} do
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      issue
+      |> Ecto.Changeset.change(title: "Endpoint-only title")
+      |> Repo.update!()
+
+      send(view.pid, %Phoenix.Socket.Broadcast{
+        topic: "company:#{issue.company_id}:issues",
+        event: "issue_update",
+        payload: %{resource_id: issue.id, event_type: :issue_updated}
+      })
+
+      assert render(view) =~ "Endpoint-only title"
+    end
+
+    test "endpoint issue event without a payload still refreshes the board", %{
+      issue_backlog: issue
+    } do
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      issue
+      |> Ecto.Changeset.change(title: "Payload-free title")
+      |> Repo.update!()
+
+      send(view.pid, %Phoenix.Socket.Broadcast{
+        topic: "company:#{issue.company_id}:issues",
+        event: "issue_update",
+        payload: nil
+      })
+
+      assert render(view) =~ "Payload-free title"
+    end
+
+    test "independent same-field Endpoint update after tuple-only update is not discarded", %{
+      issue_backlog: issue
+    } do
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      tuple_issue = issue |> Ecto.Changeset.change(title: "Tuple-only title") |> Repo.update!()
+      send(view.pid, {:issue_updated, tuple_issue})
+      assert render(view) =~ "Tuple-only title"
+
+      tuple_issue
+      |> Ecto.Changeset.change(github_pr_url: "https://example.com/independent-pr")
+      |> Repo.update!()
+
+      send(view.pid, %Phoenix.Socket.Broadcast{
+        topic: "company:#{issue.company_id}:issues",
+        event: "issue_update",
+        payload: %{
+          resource_id: issue.id,
+          event_type: :issue_updated,
+          title: tuple_issue.title,
+          status: tuple_issue.status,
+          priority: tuple_issue.priority,
+          identifier: tuple_issue.identifier,
+          assignee_id: tuple_issue.assignee_id,
+          project_id: tuple_issue.project_id
+        }
+      })
+
+      assert render(view) =~ ~s(href="https://example.com/independent-pr")
+    end
+
+    test "endpoint-only project moves remove and restore the selected card", %{
+      project: project,
+      issue_backlog: issue
+    } do
+      {:ok, other} = create_project(%{name: "Endpoint project", prefix: "EP"})
+      {:ok, view, html} = live(conn(), "/kanban?project_id=#{project.id}")
+      assert html =~ "Backlog Issue"
+
+      moved_out = issue |> Ecto.Changeset.change(project_id: other.id) |> Repo.update!()
+
+      send(view.pid, %Phoenix.Socket.Broadcast{
+        topic: "company:#{issue.company_id}:issues",
+        event: "issue_update",
+        payload: %{resource_id: issue.id}
+      })
+
+      refute render(view) =~ "Backlog Issue"
+
+      moved_out |> Ecto.Changeset.change(project_id: project.id) |> Repo.update!()
+
+      send(view.pid, %Phoenix.Socket.Broadcast{
+        topic: "company:#{issue.company_id}:issues",
+        event: "issue_update",
+        payload: %{resource_id: issue.id}
+      })
+
+      assert render(view) =~ "Backlog Issue"
+    end
+
+    test "endpoint-only update removes a deleted card", %{issue_backlog: issue} do
+      {:ok, view, html} = live(conn(), "/kanban")
+      assert html =~ "Backlog Issue"
+      Repo.delete!(issue)
+
+      send(view.pid, %Phoenix.Socket.Broadcast{
+        topic: "company:#{issue.company_id}:issues",
+        event: "issue_update",
+        payload: %{resource_id: issue.id}
+      })
+
+      refute render(view) =~ "Backlog Issue"
+    end
+  end
+
+  describe "Board refresh cost" do
+    test "tuple refresh shows a changed assignee even when the old issue had preloads", %{
+      issue_todo: issue
+    } do
+      {:ok, first} =
+        create_agent(%{
+          name: "First board owner",
+          role: :engineer,
+          status: :idle,
+          adapter: :process
+        })
+
+      {:ok, second} =
+        create_agent(%{
+          name: "Second board owner",
+          role: :engineer,
+          status: :idle,
+          adapter: :process
+        })
+
+      assert {:ok, _} = Issues.update_issue(issue, %{assignee_id: first.id})
+      {:ok, view, html} = live(conn(), "/kanban")
+      assert html =~ "First board owner"
+
+      loaded_issue =
+        Issues.list_issues(%{company_id: issue.company_id})
+        |> Enum.find(&(&1.id == issue.id))
+
+      assert loaded_issue.assignee.id == first.id
+      assert {:ok, _} = Issues.update_issue(loaded_issue, %{assignee_id: second.id})
+
+      html = render(view)
+
+      [card] =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find("[data-kanban-card][data-issue-id='#{issue.id}']")
+
+      card_html = Floki.raw_html(card)
+      assert card_html =~ "Second board owner"
+      refute card_html =~ "First board owner"
+    end
+
+    test "a tuple and matching endpoint event do not fetch the board twice", %{
+      current_company: company,
+      issue_backlog: issue
+    } do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      handler_id = "kanban-event-query-#{System.unique_integer([:positive])}"
+      company_id = Ecto.UUID.dump!(company.id)
+      test_pid = self()
+
+      :telemetry.attach(
+        handler_id,
+        [:cympho, :repo, :query],
+        fn _event, _measurements, metadata, {pid, scoped_id} ->
+          if String.contains?(
+               metadata.query || "",
+               ~s|WHERE (i0."company_id" = $1) LIMIT $2|
+             ) and
+               scoped_id in (metadata.params || []) do
+            send(pid, {:board_issue_list_query, metadata.query})
+          end
+        end,
+        {test_pid, company_id}
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      assert {:ok, updated} = Issues.update_issue(issue, %{title: "Updated once"})
+      assert render(view) =~ updated.title
+      assert drain_board_issue_queries([]) == []
+    end
+
+    test "a paired Endpoint event does not rebuild unchanged card digests", %{
+      issue_backlog: issue
+    } do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      updated = issue |> Ecto.Changeset.change(title: "Tuple result") |> Repo.update!()
+      send(view.pid, {:issue_updated, updated})
+      assert render(view) =~ "Tuple result"
+
+      :erlang.trace_pattern({Cympho.IssueDigest, :build, 5}, true, [:local])
+      :erlang.trace(view.pid, true, [:call])
+
+      on_exit(fn ->
+        if Process.alive?(view.pid), do: :erlang.trace(view.pid, false, [:call])
+        :erlang.trace_pattern({Cympho.IssueDigest, :build, 5}, false, [:local])
+      end)
+
+      send(view.pid, %Phoenix.Socket.Broadcast{
+        topic: "company:#{issue.company_id}:issues",
+        event: "issue_update",
+        payload: %{resource_id: issue.id}
+      })
+
+      assert render(view) =~ "Tuple result"
+      assert drain_digest_calls(0) == 0
+    end
+
+    test "non-issue render reuses card and shared-banner digests" do
+      {:ok, view, _html} = live(conn(), "/kanban?density=detailed")
+      :erlang.trace_pattern({Cympho.IssueDigest, :build, 5}, true, [:local])
+      :erlang.trace(view.pid, true, [:call])
+
+      on_exit(fn ->
+        if Process.alive?(view.pid), do: :erlang.trace(view.pid, false, [:call])
+        :erlang.trace_pattern({Cympho.IssueDigest, :build, 5}, false, [:local])
+      end)
+
+      html = view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
+      assert html =~ "Backlog Issue"
+      assert html =~ "Todo Issue"
+      assert drain_digest_calls(0) == 0
+    end
+  end
+
+  defp drain_board_issue_queries(queries) do
+    receive do
+      {:board_issue_list_query, query} -> drain_board_issue_queries([query | queries])
+    after
+      0 -> Enum.reverse(queries)
+    end
+  end
+
+  defp drain_digest_calls(count) do
+    receive do
+      {:trace, _pid, :call, {Cympho.IssueDigest, :build, _args}} ->
+        drain_digest_calls(count + 1)
+    after
+      0 -> count
     end
   end
 end

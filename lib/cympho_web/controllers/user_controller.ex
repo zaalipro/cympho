@@ -22,9 +22,8 @@ defmodule CymphoWeb.UserController do
 
     with :ok <- require_company_admin(conn.assigns.current_user.id, company_id),
          {:ok, invite} <-
-           Companies.create_invite(%{
+           Companies.create_invite_for_actor(conn.assigns.current_user.id, %{
              company_id: company_id,
-             inviter_id: conn.assigns.current_user.id,
              email: user_params["email"] || user_params[:email],
              role: "member"
            }) do
@@ -69,9 +68,25 @@ defmodule CymphoWeb.UserController do
 
   def delete(conn, %{"id" => id}) do
     with :ok <- enforce_self(conn, id),
-         {:ok, user} <- Users.get_user(id) do
-      Users.delete_user(user)
-      send_resp(conn, :no_content, "")
+         {:ok, _user} <- Users.get_user(id) do
+      case Companies.delete_user_for_actor(id) do
+        :ok ->
+          send_resp(conn, :no_content, "")
+
+        {:error, :last_owner} ->
+          conn |> put_status(:conflict) |> json(%{error: "Cannot remove the last owner"})
+
+        {:error, :conflict} ->
+          conn |> put_status(:conflict) |> json(%{error: "Membership changed; retry deletion"})
+
+        {:error, :issued_invites} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{error: "Cannot delete an account that has issued invitations"})
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 

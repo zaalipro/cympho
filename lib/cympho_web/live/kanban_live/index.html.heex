@@ -275,7 +275,7 @@
     <% flow_metrics = board_flow_metrics(computed) %>
     <% attention_metrics =
       Enum.filter(flow_metrics, &(&1.label in ["Blocked", "Review"] and &1.count > 0)) %>
-    <% shared_digest = shared_board_digest(computed) %>
+    <% shared_digest = shared_board_digest(computed, @issue_digests) %>
 
     <section
       :if={attention_metrics != []}
@@ -444,6 +444,7 @@
                           <%= for issue <- group_issues do %>
                             <.issue_card
                               issue={issue}
+                              digest={Map.fetch!(@issue_digests, issue.id)}
                               status={status}
                               digest_density={@digest_density}
                               agent_heartbeat_states={@agent_heartbeat_states}
@@ -467,6 +468,7 @@
                       <%= for issue <- issues do %>
                         <.issue_card
                           issue={issue}
+                          digest={Map.fetch!(@issue_digests, issue.id)}
                           status={status}
                           digest_density={@digest_density}
                           agent_heartbeat_states={@agent_heartbeat_states}

@@ -9,6 +9,65 @@ defmodule Cympho.RuntimePreflightTest do
   alias Cympho.Secrets
   alias Cympho.Workspaces
 
+  test "previewing an error-state assigned agent does not recover its status" do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Preview Co",
+        slug: "preview-co-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Preview Engineer",
+        role: :engineer,
+        company_id: company.id,
+        status: :error,
+        adapter: :process,
+        config: %{"command" => "echo"}
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Preview error agent",
+        company_id: company.id,
+        assignee_id: agent.id,
+        assigned_role: "engineer"
+      })
+
+    assert %{agent_id: agent_id} = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
+    assert agent_id == agent.id
+    assert Agents.get_agent!(agent.id).status == :error
+  end
+
+  test "previewing an error-state auto-route candidate does not recover its status" do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Auto Preview Co",
+        slug: "auto-preview-co-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Auto Preview Engineer",
+        role: :engineer,
+        company_id: company.id,
+        status: :error,
+        adapter: :claude_code,
+        config: %{"command" => "echo"}
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Preview auto-route",
+        company_id: company.id,
+        assigned_role: "engineer"
+      })
+
+    assert %{agent_id: agent_id} = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
+    assert agent_id == agent.id
+    assert Agents.get_agent!(agent.id).status == :error
+  end
+
   test "the shell probe for an off-PATH command is cached and bounded" do
     # for_agent/for_issue is mapped over every card the kanban board and issues
     # index render. When the configured command is not on the BEAM's PATH —

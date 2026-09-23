@@ -39,7 +39,7 @@ defmodule Cympho.Application do
       board_approval_executor_child(),
       scheduler_child(),
       # HTTP client for adapters and notifications
-      {Finch, name: Cympho.Finch},
+      {Finch, [name: Cympho.Finch] ++ Application.fetch_env!(:cympho, Cympho.Finch)},
       # Adapter system
       Cympho.Adapters.Registry,
       health_checker_child(),

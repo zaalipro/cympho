@@ -58,43 +58,47 @@ defmodule Cympho.Comments do
          |> Comment.changeset(attrs)
          |> Repo.insert() do
       {:ok, comment} ->
-        Activities.log_activity(%{
-          issue_id: comment.issue_id,
-          actor_type: comment.author_type,
-          actor_id: comment.author_id,
-          action: "comment_added",
-          metadata: %{comment_id: comment.id}
-        })
-
-        case Repo.get(Issue, comment.issue_id) do
-          nil ->
-            :ok
-
-          issue ->
-            issue = Repo.preload(issue, :comments)
-
-            # Fail-closed: never company::comments from a nil company_id.
-            Cympho.PubSubGuard.company_broadcast(
-              issue.company_id,
-              "comments",
-              {:comment_created, issue}
-            )
+        if Process.get(:cympho_agent_actions_defer_terminal_effects, false) do
+          Cympho.HeartbeatEngine.defer_post_commit(fn -> publish_comment_effects(comment) end)
+        else
+          publish_comment_effects(comment)
         end
-
-        CymphoWeb.Events.broadcast_comment(comment, :comment_created)
-
-        # Notify users with read state about the new comment for unread tracking
-        _ = IssueReadStates.notify_new_comment(comment.issue_id, comment.id)
-
-        # Wake the assigned agent if the issue is active
-        _ = Wakes.notify_comment(comment)
-        maybe_reconcile_review_nudges(comment)
 
         {:ok, comment}
 
       {:error, changeset} ->
         {:error, changeset}
     end
+  end
+
+  defp publish_comment_effects(comment) do
+    Activities.log_activity(%{
+      issue_id: comment.issue_id,
+      actor_type: comment.author_type,
+      actor_id: comment.author_id,
+      action: "comment_added",
+      metadata: %{comment_id: comment.id}
+    })
+
+    case Repo.get(Issue, comment.issue_id) do
+      nil ->
+        :ok
+
+      issue ->
+        issue = Repo.preload(issue, :comments)
+
+        Cympho.PubSubGuard.company_broadcast(
+          issue.company_id,
+          "comments",
+          {:comment_created, issue}
+        )
+    end
+
+    CymphoWeb.Events.broadcast_comment(comment, :comment_created)
+    _ = IssueReadStates.notify_new_comment(comment.issue_id, comment.id)
+    _ = Wakes.notify_comment(comment)
+    maybe_reconcile_review_nudges(comment)
+    :ok
   end
 
   @doc """

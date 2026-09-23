@@ -41,7 +41,7 @@ defmodule CymphoWeb.RoutineController do
   def update(conn, %{"id" => id, "routine" => routine_params}) do
     company_id = conn.assigns.current_company.id
 
-    with {:ok, routine_params} <- scoped_routine_params(conn, routine_params),
+    with {:ok, routine_params} <- scoped_routine_params(conn, routine_params, :update),
          {:ok, routine} <- Routines.get_company_routine(company_id, id) do
       case Routines.update_routine(routine, routine_params) do
         {:ok, routine} ->
@@ -119,12 +119,18 @@ defmodule CymphoWeb.RoutineController do
     end
   end
 
-  defp scoped_routine_params(conn, params) do
+  defp scoped_routine_params(conn, params, operation \\ :create) do
     company_id = conn.assigns.current_company.id
 
     with :ok <- validate_agent_ref(company_id, params["agent_id"]),
          :ok <- validate_project_ref(company_id, params["project_id"]) do
-      {:ok, Map.put(params, "company_id", company_id)}
+      attrs =
+        case operation do
+          :create -> Map.put(params, "company_id", company_id)
+          :update -> Map.delete(params, "company_id")
+        end
+
+      {:ok, attrs}
     end
   end
 

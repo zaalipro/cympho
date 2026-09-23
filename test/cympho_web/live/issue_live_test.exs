@@ -66,6 +66,50 @@ defmodule CymphoWeb.IssueLiveTest do
     %{issue: issue}
   end
 
+  describe "PR link form repository authority" do
+    test "rejects a foreign repository PR link", %{issue: issue} do
+      {:ok, project} =
+        create_project(%{
+          name: "PR form project",
+          prefix: unique_project_prefix(),
+          repo_url: "https://github.com/acme/app"
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{project_id: project.id})
+      {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
+      render_hook(view, "resolve_review_gate", %{"action" => "code_reference"})
+
+      html =
+        view
+        |> element("#simple-pr-form")
+        |> render_submit(%{"url" => "https://github.com/other/app/pull/4"})
+
+      assert html =~ "project repository"
+      assert Issues.get_issue!(issue.id).github_pr_url == nil
+    end
+
+    test "accepts a PR link in the configured repository", %{issue: issue} do
+      {:ok, project} =
+        create_project(%{
+          name: "Valid PR form project",
+          prefix: unique_project_prefix(),
+          repo_url: "https://github.com/acme/app"
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{project_id: project.id})
+      {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
+      render_hook(view, "resolve_review_gate", %{"action" => "code_reference"})
+
+      html =
+        view
+        |> element("#simple-pr-form")
+        |> render_submit(%{"url" => "https://github.com/acme/app/pull/4"})
+
+      assert html =~ "PR link saved."
+      assert Issues.get_issue!(issue.id).github_pr_url == "https://github.com/acme/app/pull/4"
+    end
+  end
+
   describe "Index - Issue List" do
     test "renders all issues", %{issue: issue} do
       {:ok, _view, html} = live(conn(), "/issues?density=detailed")
@@ -3338,6 +3382,13 @@ defmodule CymphoWeb.IssueLiveTest do
     end
 
     test "queues PR quality nudge from the issue sidebar", %{issue: issue} do
+      {:ok, project} =
+        create_project(%{
+          name: "PR quality sidebar project",
+          prefix: unique_project_prefix(),
+          repo_url: "https://github.com/acme/app"
+        })
+
       {:ok, engineer} =
         create_agent(%{
           name: "PR Repair Agent",
@@ -3353,6 +3404,7 @@ defmodule CymphoWeb.IssueLiveTest do
           status: :in_progress,
           assignee_id: engineer.id,
           assigned_role: "engineer",
+          project_id: project.id,
           github_pr_url: "https://github.com/acme/app/pull/42",
           monitor_state: %{
             "pr_quality" => %{

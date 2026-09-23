@@ -157,7 +157,12 @@ defmodule Cympho.Activities do
   def log_activity(attrs) when is_map(attrs) do
     case attrs |> activity_changeset() |> Repo.insert() do
       {:ok, activity} ->
-        dispatch_activity(activity)
+        if Process.get(:cympho_agent_actions_defer_terminal_effects, false) do
+          Cympho.HeartbeatEngine.defer_activity_event(activity)
+        else
+          dispatch_activity(activity)
+        end
+
         {:ok, activity}
 
       error ->

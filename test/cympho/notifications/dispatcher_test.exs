@@ -9,6 +9,39 @@ defmodule Cympho.Notifications.DispatcherTest do
   alias Cympho.Users
 
   describe "dispatch/1" do
+    test "startup leaves preferences cold, then first delivery loads real saved preferences" do
+      unique = System.unique_integer([:positive])
+
+      {:ok, user} =
+        Users.create_user(%{
+          email: "cold-pref-#{unique}@example.com",
+          name: "Cold Pref User #{unique}"
+        })
+
+      Users.ensure_default_prefs(user.id)
+      Ecto.Adapters.SQL.Sandbox.mode(Cympho.Repo, {:shared, self()})
+
+      assert :ok =
+               Supervisor.terminate_child(
+                 Cympho.Notifications.NotificationSupervisor,
+                 Dispatcher
+               )
+
+      assert {:ok, _pid} =
+               Supervisor.restart_child(
+                 Cympho.Notifications.NotificationSupervisor,
+                 Dispatcher
+               )
+
+      assert :ets.lookup(:notification_preferences_cache, user.id) == []
+      assert :ok = Dispatcher.dispatch(Message.new("First delivery", "Body", user.id))
+      assert_receive {:email, email}
+      assert [{"", user.email}] == email.to
+      user_id = user.id
+      assert [{^user_id, prefs}] = :ets.lookup(:notification_preferences_cache, user.id)
+      assert Enum.any?(prefs, &(&1.channel_type == "email"))
+    end
+
     test "returns error when user not found" do
       message = Message.new("Subject", "Body", "nonexistent-user-id")
       assert Dispatcher.dispatch(message) == {:error, :user_not_found}

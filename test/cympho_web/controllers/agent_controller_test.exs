@@ -32,6 +32,32 @@ defmodule CymphoWeb.AgentControllerTest do
 
   defp put_api_key(conn, key), do: put_req_header(conn, "x-api-key", key)
 
+  test "role update returns a safe agent projection without credentials", %{
+    conn: conn,
+    agent: agent,
+    company: company
+  } do
+    {:ok, agent} =
+      Agents.update_agent(agent, %{
+        config: %{"api_key" => "private-provider-key"},
+        runtime_config: %{"env" => %{"TOKEN" => "private-runtime-token"}}
+      })
+
+    conn =
+      conn
+      |> Plug.Conn.assign(:current_company, company)
+      |> CymphoWeb.AgentController.update_role(%{"id" => agent.id, "role" => "designer"})
+
+    assert %{"data" => %{"id" => id, "role" => "designer"} = data} =
+             json_response(conn, 200)
+
+    assert id == agent.id
+    refute Map.has_key?(data, "config")
+    refute Map.has_key?(data, "runtime_config")
+    refute inspect(data) =~ "private-provider-key"
+    refute inspect(data) =~ "private-runtime-token"
+  end
+
   describe "GET /api/agents/:id/inbox" do
     test "returns empty list for agent with no assignments", %{
       conn: conn,

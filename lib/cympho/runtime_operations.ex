@@ -176,9 +176,21 @@ defmodule Cympho.RuntimeOperations do
   def recover_company_stale_runs(nil), do: {:error, :no_company}
 
   def recover_company_stale_runs(company_id) when is_binary(company_id) do
-    stale_runs = Cympho.HeartbeatEngine.find_stale_runs_for_company(company_id)
-    orphaned_runs = Cympho.HeartbeatEngine.find_orphaned_runs_for_company(company_id)
-    waiting_runs = Cympho.HeartbeatEngine.find_stale_waiting_runs_for_company(company_id)
+    recovery_now = DateTime.utc_now() |> DateTime.truncate(:second)
+    {:ok, recovery_cutoff} = Cympho.HeartbeatEngine.recovery_cutoff(now: recovery_now)
+    recovery_opts = [now: recovery_now, stale_cutoff: recovery_cutoff]
+
+    stale_runs =
+      Cympho.HeartbeatEngine.find_stale_runs_for_company_before(company_id, recovery_cutoff)
+
+    orphaned_runs =
+      Cympho.HeartbeatEngine.find_orphaned_runs_for_company_before(company_id, recovery_cutoff)
+
+    waiting_runs =
+      Cympho.HeartbeatEngine.find_stale_waiting_runs_for_company_before(
+        company_id,
+        recovery_cutoff
+      )
 
     stale_ids = MapSet.new(stale_runs, & &1.id)
     orphan_ids = MapSet.new(orphaned_runs, & &1.id)
@@ -190,11 +202,13 @@ defmodule Cympho.RuntimeOperations do
       |> Map.values()
       |> Enum.map(fn run ->
         if MapSet.member?(stale_ids, run.id),
-          do: Cympho.Recovery.recover_stale_run(run),
-          else: Cympho.Recovery.recover_orphaned_run(run)
+          do: Cympho.Recovery.recover_stale_run(run, recovery_opts),
+          else: Cympho.Recovery.recover_orphaned_run(run, recovery_opts)
       end)
 
-    cancel_results = Enum.map(waiting_runs, &Cympho.Recovery.recover_orphaned_run/1)
+    cancel_results =
+      Enum.map(waiting_runs, &Cympho.Recovery.recover_orphaned_run(&1, recovery_opts))
+
     checkout_results = Cympho.Recovery.recover_stale_checkouts_for_company(company_id)
     results = recovery_results ++ cancel_results
 

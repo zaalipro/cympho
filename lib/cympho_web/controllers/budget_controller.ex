@@ -7,20 +7,21 @@ defmodule CymphoWeb.BudgetController do
   use CymphoWeb, :controller
 
   alias Cympho.Budgets
+  alias Cympho.Budgets.Budget
 
   action_fallback CymphoWeb.FallbackController
 
   def index(conn, _params) do
     company_id = conn.assigns.current_company.id
     budgets = Budgets.list_budgets(%{company_id: company_id})
-    json(conn, %{data: budgets})
+    json(conn, %{data: Enum.map(budgets, &budget_json/1)})
   end
 
   def show(conn, %{"id" => id}) do
     company_id = conn.assigns.current_company.id
 
     with {:ok, budget} <- Budgets.get_company_budget(company_id, id) do
-      json(conn, %{data: budget})
+      json(conn, %{data: budget_json(budget)})
     end
   end
 
@@ -30,7 +31,7 @@ defmodule CymphoWeb.BudgetController do
 
     case Budgets.create_budget(params, conn.assigns[:current_user]) do
       {:ok, budget} ->
-        conn |> put_status(:created) |> json(%{data: budget})
+        conn |> put_status(:created) |> json(%{data: budget_json(budget)})
 
       {:error, changeset} ->
         conn
@@ -46,7 +47,7 @@ defmodule CymphoWeb.BudgetController do
     with {:ok, budget} <- Budgets.get_company_budget(company_id, id) do
       case Budgets.update_budget(budget, params, conn.assigns[:current_user]) do
         {:ok, budget} ->
-          json(conn, %{data: budget})
+          json(conn, %{data: budget_json(budget)})
 
         {:error, changeset} ->
           conn
@@ -73,5 +74,27 @@ defmodule CymphoWeb.BudgetController do
         opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
       end)
     end)
+  end
+
+  defp budget_json(%Budget{} = budget) do
+    Map.take(budget, [
+      :id,
+      :company_id,
+      :project_id,
+      :agent_id,
+      :name,
+      :scope_type,
+      :scope_id,
+      :limit_amount,
+      :spent_amount,
+      :currency,
+      :period_start,
+      :period_end,
+      :hard_stop,
+      :status,
+      :threshold_alert_percentage,
+      :inserted_at,
+      :updated_at
+    ])
   end
 end

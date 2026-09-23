@@ -125,8 +125,8 @@ defmodule Cympho.Orchestrator.DispatcherTest do
   describe "start_link/1" do
     @tag :capture_log
     test "starts linked to calling process" do
-      ensure_dispatcher_running()
       pid = Process.whereis(Dispatcher)
+      assert is_pid(pid)
       assert is_pid(pid)
       assert Process.alive?(pid)
     end
@@ -1356,6 +1356,14 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
         assert recovered_issue.status == :todo
         assert is_nil(recovered_issue.checkout_run_id)
         assert is_nil(recovered_issue.checked_out_at)
+
+        assert Cympho.Repo.exists?(
+                 Ecto.Query.from(c in Cympho.Recovery.RecoveryCase,
+                   where:
+                     c.source_type == "heartbeat_run" and c.source_id == ^run.id and
+                       c.state == "recovered"
+                 )
+               )
       end)
 
       assert Cympho.Repo.aggregate(
@@ -1722,11 +1730,139 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
   end
 
   describe "poll scheduling" do
-    # `poll_now/0` sends the same `:poll` message the periodic timer uses, and
-    # it runs on issue launch, dashboard actions, and event heartbeats. If the
-    # handler re-armed unconditionally, each on-demand poll would leave behind
-    # an extra self-perpetuating timer chain and the poll rate would grow
-    # without bound for the life of the node.
+    test "a stale sender cannot poison the replacement dispatcher's demand gate" do
+      old_pid = Process.whereis(Dispatcher)
+      assert is_pid(old_pid)
+      Process.exit(old_pid, :kill)
+
+      new_pid =
+        wait_until(fn ->
+          pid = Process.whereis(Dispatcher)
+          assert is_pid(pid) and pid != old_pid
+          pid
+        end)
+
+      # Reproduce an old caller that captured old_pid, then inserted its demand
+      # marker after the replacement process created the same-named table.
+      :ets.insert(:cympho_dispatcher_poll_demands, {:global, old_pid})
+      :sys.suspend(new_pid)
+
+      try do
+        assert :ok = Dispatcher.poll_now()
+        {:messages, messages} = Process.info(new_pid, :messages)
+        assert Enum.count(messages, &(&1 == :demand_poll)) == 1
+      after
+        :sys.resume(new_pid)
+      end
+    end
+
+    test "a wake during an active poll queues exactly one final follow-up" do
+      dispatcher = Process.whereis(Dispatcher)
+      assert is_pid(dispatcher)
+      handler_id = "dispatcher-during-poll-#{System.unique_integer([:positive])}"
+      counter = :atomics.new(1, signed: false)
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:cympho, :dispatcher, :poll],
+          fn _event, _measurements, metadata, {pid, count} ->
+            if metadata.company_id == nil do
+              if :atomics.add_get(count, 1, 1) == 1, do: Dispatcher.poll_now()
+              send(pid, :observed_global_poll)
+            end
+          end,
+          {self(), counter}
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+      assert :ok = Dispatcher.poll_now()
+      assert_receive :observed_global_poll, 2_000
+      assert_receive :observed_global_poll, 2_000
+      refute_receive :observed_global_poll, 50
+      assert :atomics.get(counter, 1) == 2
+    end
+
+    test "a demand wake after runtime enable restores periodic polling" do
+      original = Application.get_env(:cympho, :orchestrator, [])
+      Application.put_env(:cympho, :orchestrator, Keyword.put(original, :enabled, true))
+      on_exit(fn -> Application.put_env(:cympho, :orchestrator, original) end)
+
+      assert {:noreply, state} = Dispatcher.handle_info(:demand_poll, State.new())
+      assert is_reference(state.poll_timer)
+      assert is_integer(Process.read_timer(state.poll_timer))
+      Process.cancel_timer(state.poll_timer)
+    end
+
+    test "burst wakeups enqueue one global poll and one poll per company" do
+      pid = Process.whereis(Dispatcher)
+      assert is_pid(pid)
+      company_a = Ecto.UUID.generate()
+      company_b = Ecto.UUID.generate()
+      original = Application.get_env(:cympho, :orchestrator, [])
+      Application.put_env(:cympho, :orchestrator, Keyword.put(original, :enabled, true))
+      on_exit(fn -> Application.put_env(:cympho, :orchestrator, original) end)
+      _ = Dispatcher.state()
+      handler_id = "dispatcher-poll-burst-#{System.unique_integer([:positive])}"
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:cympho, :dispatcher, :poll],
+          fn _event, _measurements, metadata, test_pid ->
+            send(test_pid, {:observed_poll, metadata.company_id})
+          end,
+          self()
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+      :sys.suspend(pid)
+
+      try do
+        for _ <- 1..100 do
+          assert :ok = Dispatcher.poll_now()
+          assert :ok = Dispatcher.poll_company(company_a)
+          assert :ok = Dispatcher.poll_company(company_b)
+        end
+
+        {:messages, messages} = Process.info(pid, :messages)
+        assert Enum.count(messages, &(&1 == :demand_poll)) == 1
+        assert Enum.count(messages, &(&1 == {:poll_company, company_a})) == 1
+        assert Enum.count(messages, &(&1 == {:poll_company, company_b})) == 1
+      after
+        :sys.resume(pid)
+      end
+
+      _ = Dispatcher.state()
+
+      polls =
+        for _ <- 1..3,
+            do:
+              (
+                assert_receive {:observed_poll, company_id}
+                company_id
+              )
+
+      assert Enum.sort(polls) == Enum.sort([nil, company_a, company_b])
+      refute_received {:observed_poll, _}
+
+      :sys.suspend(pid)
+
+      try do
+        for _ <- 1..20, do: assert(:ok = Dispatcher.poll_now())
+        {:messages, messages} = Process.info(pid, :messages)
+        assert Enum.count(messages, &(&1 == :demand_poll)) == 1
+      after
+        :sys.resume(pid)
+      end
+
+      _ = Dispatcher.state()
+      assert_receive {:observed_poll, nil}
+      refute_received {:observed_poll, _}
+    end
+
+    # Legacy direct :poll handling must also leave one periodic timer; normal
+    # demand and periodic messages now have separate scheduling paths.
     test "handling :poll leaves exactly one armed timer" do
       {:noreply, first} = Dispatcher.handle_info(:poll, State.new())
 

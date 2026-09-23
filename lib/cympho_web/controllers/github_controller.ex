@@ -17,7 +17,7 @@ defmodule CymphoWeb.GithubController do
       a success-and-mergeable wakes the release engineer.
 
   Verifies the `X-Hub-Signature-256` header against the webhook secret
-  stored on the project that owns the PR.
+  stored on the project that owns the PR's base repository.
   """
   # `pull_request_review` delivers `{action, review, pull_request, ...}` —
   # the `review` key is the discriminator. This clause MUST come before the
@@ -29,7 +29,7 @@ defmodule CymphoWeb.GithubController do
 
     with {:ok, project} <- find_project_by_pr(pr),
          :ok <- verify_signature(conn, project),
-         {:ok, issue, _project} <- find_issue_and_project(pr_url, pr),
+         {:ok, issue, _project} <- find_issue_and_project(pr_url, pr, project),
          :fresh <- Cympho.WebhookDedup.check_and_mark(delivery_id) do
       Logger.info("GitHub review webhook: action=#{action}, pr_url=#{pr_url}")
       handle_review_action(issue, action, review, pr)
@@ -38,6 +38,7 @@ defmodule CymphoWeb.GithubController do
       :duplicate -> send_resp(conn, :ok, "")
       :error -> send_resp(conn, :unauthorized, "")
       {:error, :not_found} -> send_resp(conn, :ok, "")
+      {:error, :project_mismatch} -> send_resp(conn, :unauthorized, "")
       {:error, :no_project} -> send_resp(conn, :unauthorized, "")
       {:error, :no_secret} -> send_resp(conn, :unauthorized, "")
       {:error, :invalid_signature} -> send_resp(conn, :unauthorized, "")
@@ -56,13 +57,16 @@ defmodule CymphoWeb.GithubController do
       send_resp(conn, :ok, "")
     else
       with {:ok, issue, project} <- find_issue_and_project(pr_url),
+           true <- Github.pr_in_repo?(pr_url, project.repo_url),
            :ok <- verify_signature(conn, project),
            :fresh <- Cympho.WebhookDedup.check_and_mark(delivery_id) do
         handle_check_run(issue, check_run)
         send_resp(conn, :ok, "")
       else
         :duplicate -> send_resp(conn, :ok, "")
+        false -> send_resp(conn, :unauthorized, "")
         {:error, :not_found} -> send_resp(conn, :ok, "")
+        {:error, :project_mismatch} -> send_resp(conn, :unauthorized, "")
         {:error, :no_project} -> send_resp(conn, :unauthorized, "")
         {:error, :no_secret} -> send_resp(conn, :unauthorized, "")
         {:error, :invalid_signature} -> send_resp(conn, :unauthorized, "")
@@ -78,7 +82,7 @@ defmodule CymphoWeb.GithubController do
 
     with {:ok, project} <- find_project_by_pr(pr),
          :ok <- verify_signature(conn, project),
-         {:ok, issue, _project} <- find_issue_and_project(pr_url, pr),
+         {:ok, issue, _project} <- find_issue_and_project(pr_url, pr, project),
          :fresh <- Cympho.WebhookDedup.check_and_mark(delivery_id) do
       Logger.info("GitHub webhook received: action=#{action}, pr_url=#{pr_url}")
       issue = record_pr_quality_from_webhook(issue, action, pr)
@@ -97,6 +101,9 @@ defmodule CymphoWeb.GithubController do
         Logger.info("No issue found linked to PR: #{pr_url}")
         send_resp(conn, :ok, "")
 
+      {:error, :project_mismatch} ->
+        send_resp(conn, :unauthorized, "")
+
       {:error, :no_project} ->
         Logger.warning("Issue linked to PR has no project; refusing: #{pr_url}")
         send_resp(conn, :unauthorized, "")
@@ -114,43 +121,56 @@ defmodule CymphoWeb.GithubController do
     send_resp(conn, :ok, "")
   end
 
-  defp find_issue_and_project(pr_url, pr \\ nil) do
-    case find_by_pr_url(pr_url) do
+  defp find_issue_and_project(pr_url, pr, verified_project) do
+    case find_by_pr_url(pr_url, verified_project) do
       {:ok, _issue, _project} = ok ->
         ok
 
       {:error, :no_project} = err ->
         err
 
+      {:error, :project_mismatch} = err ->
+        err
+
       {:error, :not_found} ->
-        try_auto_link_by_branch(pr_url, pr)
+        try_auto_link_by_branch(pr_url, pr, verified_project)
     end
   end
 
-  defp find_by_pr_url(pr_url) do
+  defp find_issue_and_project(pr_url) do
+    find_by_pr_url(pr_url)
+  end
+
+  defp find_by_pr_url(pr_url, verified_project \\ nil) do
     query =
       from i in Issue,
         where: i.github_pr_url == ^pr_url,
         preload: [:project]
 
     case Repo.all(query) do
-      [%Issue{project: %Project{} = project} = issue] -> {:ok, issue, project}
-      [%Issue{project: nil}] -> {:error, :no_project}
-      [] -> {:error, :not_found}
+      [%Issue{project: %Project{} = project} = issue]
+      when is_nil(verified_project) or project.id == verified_project.id ->
+        {:ok, issue, project}
+
+      [%Issue{project: nil}] ->
+        {:error, :no_project}
+
+      [] ->
+        {:error, :not_found}
+
+      _ ->
+        {:error, :project_mismatch}
     end
   end
 
   # When the URL lookup misses, fall back to the branch convention encoded in
   # `PullRequestContract.branch_name(issue)` — `<identifier>/<slug>`. We
-  # match the project first (via `repo_url`) so the identifier lookup is
+  # use the already authenticated base project so the identifier lookup is
   # unambiguous, then auto-link the PR URL onto the issue so subsequent
   # webhooks find it by URL directly.
-  defp try_auto_link_by_branch(_pr_url, nil), do: {:error, :not_found}
-
-  defp try_auto_link_by_branch(pr_url, pr) do
+  defp try_auto_link_by_branch(pr_url, pr, project) do
     with {:ok, branch} <- extract_branch_ref(pr),
          {:ok, identifier} <- extract_branch_identifier(branch),
-         {:ok, project} <- find_project_by_pr(pr),
          {:ok, issue} <- Issues.get_by_identifier(identifier, project_id: project.id),
          {:ok, linked} <- attach_pr_to_issue(issue, pr_url, branch) do
       Logger.info(
@@ -178,24 +198,34 @@ defmodule CymphoWeb.GithubController do
   end
 
   defp find_project_by_pr(pr) do
-    candidates =
-      [
-        get_in(pr, ["base", "repo", "html_url"]),
-        get_in(pr, ["head", "repo", "html_url"])
+    base_url = get_in(pr, ["base", "repo", "html_url"])
+
+    with {:ok, {owner, repo}} <- Github.parse_repo_url(base_url),
+         true <- Github.pr_in_repo?(pr["html_url"], base_url) do
+      owner = String.downcase(owner)
+      repo = String.downcase(repo)
+
+      repo_urls = [
+        "https://github.com/#{owner}/#{repo}",
+        "https://github.com/#{owner}/#{repo}.git",
+        "git@github.com:#{owner}/#{repo}",
+        "git@github.com:#{owner}/#{repo}.git"
       ]
-      |> Enum.reject(&is_nil/1)
-      |> Enum.map(&String.trim_trailing(&1, "/"))
-      |> Enum.uniq()
 
-    case candidates do
-      [] ->
-        :error
+      projects =
+        Repo.all(
+          from p in Project,
+            where: fragment("lower(?)", p.repo_url) in ^repo_urls,
+            limit: 2
+        )
+        |> Enum.filter(&Github.pr_in_repo?(pr["html_url"], &1.repo_url))
 
-      urls ->
-        case Repo.all(from p in Project, where: p.repo_url in ^urls, limit: 2) do
-          [%Project{} = project] -> {:ok, project}
-          _ -> :error
-        end
+      case projects do
+        [%Project{} = project] -> {:ok, project}
+        _ -> :error
+      end
+    else
+      _ -> :error
     end
   end
 

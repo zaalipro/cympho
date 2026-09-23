@@ -2,6 +2,7 @@ defmodule CymphoWeb.AgentLiveTest do
   use CymphoWeb.LiveCase, async: false
 
   import Phoenix.LiveViewTest
+  import Mock
   alias Cympho.Agents
   alias Cympho.AgentHeartbeat
   alias Cympho.Comments
@@ -15,6 +16,18 @@ defmodule CymphoWeb.AgentLiveTest do
   defp create_agent(attrs), do: Agents.create_agent(scoped_attrs(attrs))
   defp create_issue(attrs), do: Issues.create_issue(scoped_attrs(attrs))
   defp create_plugin(attrs), do: Skills.create_plugin(scoped_attrs(attrs))
+
+  defp roster_metric(html, label) do
+    pattern =
+      Regex.compile!(
+        "<p class=\"text-eyebrow[^\"]*\">\\s*#{Regex.escape(label)}\\s*</p><p[^>]*>\\s*(\\d+)\\s*</p>"
+      )
+
+    case Regex.run(pattern, html) do
+      [_, value] -> value
+      _ -> nil
+    end
+  end
 
   describe "Index - Agent Dashboard" do
     test "renders the agents page", %{conn: conn} do
@@ -86,6 +99,19 @@ defmodule CymphoWeb.AgentLiveTest do
         flash = :sys.get_state(view.pid).socket.assigns.flash
         assert Phoenix.Flash.get(flash, :error) == "Agent not found"
         assert Agents.get_agent!(agent.id).status == expected_status
+      end
+
+      test_pid = self()
+
+      with_mock Agents, [:passthrough],
+        kill_session: fn _foreign_id ->
+          send(test_pid, :foreign_session_stop_called)
+          :ok
+        end do
+        render_click(view, "kill_session", %{"id" => pause_target.id})
+        flash = :sys.get_state(view.pid).socket.assigns.flash
+        assert Phoenix.Flash.get(flash, :error) == "Agent not found"
+        refute_received :foreign_session_stop_called
       end
     end
 
@@ -177,6 +203,90 @@ defmodule CymphoWeb.AgentLiveTest do
   end
 
   describe "Index - Kill Session" do
+    @tag membership_role: "admin"
+    test "idle roster agent with a delegated run shows progress and Stop session", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Delegated Roster CTO",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Delegated roster work",
+          assignee_id: agent.id,
+          assigned_role: "cto",
+          status: :todo
+        })
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      Cympho.Adapters.MockAdapter.script(agent.id, issue.id, [:silent])
+      on_exit(fn -> Cympho.Adapters.MockAdapter.clear(agent.id, issue.id) end)
+
+      with_mock Cympho.Adapters, [:passthrough],
+        resolve: fn _ -> {:ok, Cympho.Adapters.MockAdapter, %{}} end do
+        assert {:ok, pid} =
+                 Cympho.Orchestrator.start_and_run(checked_out, agent.id,
+                   adapter: :mock,
+                   adapter_config: %{}
+                 )
+
+        wait_until(fn ->
+          assert {:ok, %{status: "running"}} =
+                   Cympho.HeartbeatEngine.get_active_run_for_agent(agent.id)
+        end)
+
+        assert Agents.get_agent!(agent.id).status == :idle
+        {:ok, view, html} = live(conn, "/agents")
+        assert has_element?(view, "button[phx-click='kill_session'][phx-value-id='#{agent.id}']")
+        assert html =~ issue.identifier
+        assert html =~ "1 running now"
+        assert html =~ "1 working now"
+        assert html =~ ~r/>\s*1 running\s*</
+        refute html =~ ~r/>\s*1 free\s*</
+        assert roster_metric(html, "Running") == "1"
+        assert roster_metric(html, "Idle") == "0"
+
+        view
+        |> element("button[phx-click='kill_session'][phx-value-id='#{agent.id}']")
+        |> render_click()
+
+        flash = :sys.get_state(view.pid).socket.assigns.flash
+        assert Phoenix.Flash.get(flash, :info) == "Agent session stopped successfully"
+        refute Process.alive?(pid)
+
+        send(view.pid, :update_progress)
+        stopped_html = render(view)
+        assert stopped_html =~ "0 running now"
+        assert stopped_html =~ "0 working now"
+        assert stopped_html =~ ~r/>\s*1 free\s*</
+        assert roster_metric(stopped_html, "Running") == "0"
+        assert roster_metric(stopped_html, "Idle") == "1"
+      end
+    end
+
+    @tag membership_role: "admin"
+    test "deferred cleanup returns controlled feedback instead of crashing the roster", %{
+      conn: conn
+    } do
+      {:ok, agent} = create_agent(%{name: "Pending Stop", role: :cto, status: :running})
+      {:ok, view, _html} = live(conn, "/agents")
+      agent_id = agent.id
+
+      with_mock Agents, [:passthrough],
+        kill_session: fn ^agent_id -> {:error, :cleanup_pending} end do
+        view
+        |> element("button[phx-click='kill_session'][phx-value-id='#{agent.id}']")
+        |> render_click()
+
+        flash = :sys.get_state(view.pid).socket.assigns.flash
+        assert Phoenix.Flash.get(flash, :error) =~ "cleanup"
+      end
+    end
+
     @tag membership_role: "admin"
     test "shows stop button for running agents", %{conn: conn} do
       {:ok, agent} =

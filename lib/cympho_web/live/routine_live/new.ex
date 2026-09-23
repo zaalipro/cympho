@@ -6,14 +6,18 @@ defmodule CymphoWeb.RoutineLive.New do
 
   @impl true
   def mount(_params, _session, socket) do
-    changeset = Routines.change_routine(%Routine{})
+    if is_binary(current_company_id(socket)) do
+      changeset = Routines.change_routine(%Routine{})
 
-    socket =
-      socket
-      |> assign(changeset: changeset, form: to_form(changeset), page_title: "New Routine")
-      |> FormHelpers.assign_context_options()
+      socket =
+        socket
+        |> assign(changeset: changeset, form: to_form(changeset), page_title: "New Routine")
+        |> FormHelpers.assign_context_options()
 
-    {:ok, socket}
+      {:ok, socket}
+    else
+      {:ok, redirect(socket, to: ~p"/onboarding")}
+    end
   end
 
   @impl true
@@ -37,4 +41,7 @@ defmodule CymphoWeb.RoutineLive.New do
         {:noreply, put_flash(socket, :error, "Choose an owner and project from this company.")}
     end
   end
+
+  defp current_company_id(%{assigns: %{current_company: %{id: id}}}), do: id
+  defp current_company_id(_socket), do: nil
 end

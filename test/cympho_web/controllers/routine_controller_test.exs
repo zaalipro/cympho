@@ -48,6 +48,28 @@ defmodule CymphoWeb.RoutineControllerTest do
   end
 
   describe "create" do
+    test "forces the authenticated company despite a forged company id", %{
+      conn: conn,
+      company: company
+    } do
+      unique = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Forged Create Routine API #{unique}",
+          slug: "forged-create-routine-api-#{unique}"
+        })
+
+      conn =
+        post(conn, ~p"/api/routines", %{
+          "routine" => %{"name" => "Local API routine", "company_id" => other_company.id}
+        })
+
+      assert %{"data" => %{"id" => id, "company_id" => company_id}} = json_response(conn, 201)
+      assert company_id == company.id
+      assert Routines.get_routine!(id).company_id == company.id
+    end
+
     test "creates a routine with valid data", %{conn: conn, company: company} do
       {:ok, agent} =
         Cympho.Agents.create_agent(%{
@@ -79,6 +101,30 @@ defmodule CymphoWeb.RoutineControllerTest do
   end
 
   describe "update" do
+    test "ignores a forged company id while updating a routine", %{conn: conn, company: company} do
+      unique = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign Routine API #{unique}",
+          slug: "foreign-routine-api-#{unique}"
+        })
+
+      {:ok, routine} =
+        company_routine(company, %{name: "Local Routine", company_id: company.id})
+
+      conn =
+        patch(conn, ~p"/api/routines/#{routine.id}", %{
+          "routine" => %{"name" => "Renamed locally", "company_id" => other_company.id}
+        })
+
+      assert %{"data" => %{"company_id" => company_id, "name" => "Renamed locally"}} =
+               json_response(conn, 200)
+
+      assert company_id == company.id
+      assert Routines.get_routine!(routine.id).company_id == company.id
+    end
+
     test "updates a routine", %{conn: conn, company: company} do
       {:ok, routine} = company_routine(company, %{name: "Original"})
 

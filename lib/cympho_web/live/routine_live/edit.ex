@@ -33,7 +33,8 @@ defmodule CymphoWeb.RoutineLive.Edit do
 
   @impl true
   def handle_event("save", %{"routine" => routine_params}, socket) do
-    with {:ok, routine_params} <- FormHelpers.scoped_routine_params(socket, routine_params) do
+    with {:ok, routine_params} <-
+           FormHelpers.scoped_routine_params(socket, routine_params, put_company_scope: false) do
       case Routines.update_routine(socket.assigns.routine, routine_params) do
         {:ok, routine} ->
           {:noreply, push_navigate(socket, to: ~p"/routines/#{routine.id}")}
@@ -49,7 +50,7 @@ defmodule CymphoWeb.RoutineLive.Edit do
 
   defp get_scoped_routine(socket, id) do
     case current_company_id(socket) do
-      nil -> Routines.get_routine(id)
+      nil -> {:error, :not_found}
       company_id -> Routines.get_company_routine(company_id, id)
     end
   end

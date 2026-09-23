@@ -11,6 +11,8 @@ defmodule Cympho.Agents do
   alias Cympho.Authentication
   alias Cympho.BoardApprovals
   alias Cympho.Issues.Issue
+  alias Cympho.HeartbeatEngine.Run
+  alias Cympho.HeartbeatEngine
 
   # Hard upper bound for unscoped agent listings. Real installs have far
   # fewer agents than this; the cap exists to prevent an unbounded `Repo.all`
@@ -417,13 +419,29 @@ defmodule Cympho.Agents do
   end
 
   def list_eligible_agents(role, company_id) when is_atom(role) do
+    list_eligible_agents(role, company_id, [])
+  end
+
+  def list_eligible_agents(role, company_id, opts) when is_atom(role) do
     Agent
     |> where([a], a.role == ^role and a.company_id == ^company_id and a.status in [:idle, :error])
     |> where_active_governance()
     |> exclude_temporary()
     |> Repo.all()
-    |> Enum.flat_map(&eligible_after_error_recovery/1)
+    |> Enum.flat_map(&eligible_after_error_recovery(&1, opts))
   end
+
+  defp eligible_after_error_recovery(%Agent{status: :error} = agent, opts)
+       when is_list(opts) do
+    if Keyword.get(opts, :recover_errors?, true) do
+      eligible_after_error_recovery(agent)
+    else
+      eligible_after_error_recovery(%{agent | status: :idle})
+    end
+  end
+
+  defp eligible_after_error_recovery(%Agent{} = agent, _opts),
+    do: eligible_after_error_recovery(agent)
 
   defp eligible_after_error_recovery(%Agent{} = agent) do
     case recover_error_status(agent) do
@@ -931,41 +949,172 @@ defmodule Cympho.Agents do
 
   @doc """
   Returns session progress for a running agent.
-  Gets current issue, turn count, and elapsed time from AgentHeartbeat and Orchestrator.
+  Prefers the current orchestrator/run owner, with legacy heartbeat fallback.
   """
-  @spec get_session_progress(String.t()) :: {:ok, map()} | {:error, :not_running}
+  @spec get_session_progress(String.t()) ::
+          {:ok, map()} | {:error, :not_running | :not_found}
   def get_session_progress(agent_id) when is_binary(agent_id) do
+    case active_session_owner(agent_id) do
+      {:ok, _pid, session, run} ->
+        {:ok,
+         session_progress(
+           agent_id,
+           run.issue_id,
+           session.turn_count,
+           run.started_at || run.inserted_at
+         )}
+
+      :none ->
+        legacy_session_progress(agent_id)
+    end
+  end
+
+  defp legacy_session_progress(agent_id) do
     case Cympho.AgentHeartbeat.status(agent_id) do
       {:ok, :running} ->
         heartbeat_state = get_heartbeat_state(agent_id)
         issue_id = heartbeat_state[:current_issue_id]
 
-        issue_info =
-          if issue_id do
-            case Repo.get(Issue, issue_id) do
-              nil -> nil
-              issue -> %{id: issue.id, title: issue.title, identifier: issue.identifier}
-            end
-          else
-            nil
-          end
+        case Cympho.Orchestrator.get_session_state(issue_id) do
+          %{agent_id: ^agent_id} = session ->
+            {:ok,
+             session_progress(
+               agent_id,
+               issue_id,
+               session.turn_count,
+               heartbeat_state[:started_at]
+             )}
 
-        orchestrator_info = get_orchestrator_info(issue_id)
+          nil ->
+            {:ok, session_progress(agent_id, issue_id, 0, heartbeat_state[:started_at])}
 
-        {:ok,
-         %{
-           agent_id: agent_id,
-           issue: issue_info,
-           turn_count: orchestrator_info[:turn_count] || 0,
-           started_at: heartbeat_state[:started_at],
-           elapsed_seconds: calculate_elapsed(heartbeat_state[:started_at])
-         }}
+          _successor ->
+            {:error, :not_running}
+        end
 
       {:ok, _} ->
         {:error, :not_running}
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp session_progress(agent_id, issue_id, turn_count, started_at) do
+    issue_info =
+      case issue_id && Repo.get(Issue, issue_id) do
+        nil -> nil
+        issue -> %{id: issue.id, title: issue.title, identifier: issue.identifier}
+      end
+
+    %{
+      agent_id: agent_id,
+      issue: issue_info,
+      turn_count: turn_count || 0,
+      started_at: started_at,
+      elapsed_seconds: calculate_elapsed(started_at)
+    }
+  end
+
+  defp active_session_owner(agent_id) do
+    case Ecto.UUID.cast(agent_id) do
+      {:ok, id} -> active_session_owner_uuid(id)
+      :error -> :none
+    end
+  end
+
+  defp active_session_owner_uuid(agent_id) do
+    live_run_candidates(agent_id: agent_id)
+    |> Enum.find_value(:none, &active_run_owner/1)
+  end
+
+  @doc "Returns progress for live company runs with one batched active-run lookup."
+  def list_session_progress_by_company(company_id) when is_binary(company_id) do
+    live_run_candidates(company_id: company_id)
+    |> Enum.reduce(%{}, fn run, progress ->
+      if Map.has_key?(progress, run.agent_id) do
+        progress
+      else
+        case active_run_owner(run) do
+          {:ok, _pid, session, _run} ->
+            Map.put(
+              progress,
+              run.agent_id,
+              session_progress(
+                run.agent_id,
+                run.issue_id,
+                session.turn_count,
+                run.started_at || run.inserted_at
+              )
+            )
+
+          _ ->
+            progress
+        end
+      end
+    end)
+  end
+
+  def list_session_progress_by_company(_company_id), do: %{}
+
+  defp live_run_candidates(scope) do
+    run_ids =
+      try do
+        Registry.select(Cympho.OrchestratorRegistry, [{{:"$1", :_, :_}, [], [:"$1"]}])
+        |> Enum.reduce([], fn issue_id, ids ->
+          case Cympho.Orchestrator.get_session_state(issue_id) do
+            %{run_id: run_id} when is_binary(run_id) -> [run_id | ids]
+            _ -> ids
+          end
+        end)
+      rescue
+        error in ArgumentError ->
+          if String.starts_with?(Exception.message(error), "unknown registry: ") do
+            []
+          else
+            reraise error, __STACKTRACE__
+          end
+      catch
+        :exit, _ -> []
+      end
+
+    if run_ids == [] do
+      []
+    else
+      query =
+        from r in Run,
+          where: r.id in ^run_ids and r.status in ["pending", "queued", "running"],
+          order_by: [desc: r.inserted_at],
+          select: struct(r, [:id, :agent_id, :company_id, :issue_id, :started_at, :inserted_at])
+
+      query =
+        case scope do
+          [agent_id: agent_id] -> where(query, [r], r.agent_id == ^agent_id)
+          [company_id: company_id] -> where(query, [r], r.company_id == ^company_id)
+        end
+
+      Repo.all(query)
+    end
+  end
+
+  defp active_run_owner(%Run{} = run) do
+    try do
+      case Cympho.Orchestrator.whereis(run.issue_id) do
+        pid when is_pid(pid) ->
+          case GenServer.call(pid, :get_session_state, 5_000) do
+            %{agent_id: agent_id, run_id: run_id} = session
+            when agent_id == run.agent_id and run_id == run.id ->
+              {:ok, pid, session, run}
+
+            _ ->
+              false
+          end
+
+        _ ->
+          false
+      end
+    catch
+      :exit, _ -> false
     end
   end
 
@@ -983,15 +1132,6 @@ defmodule Cympho.Agents do
     end
   end
 
-  defp get_orchestrator_info(nil), do: %{turn_count: 0}
-
-  defp get_orchestrator_info(issue_id) do
-    case Cympho.Orchestrator.get_session_state(issue_id) do
-      nil -> %{turn_count: 0}
-      state -> %{turn_count: state[:turn_count]}
-    end
-  end
-
   defp calculate_elapsed(nil), do: 0
 
   defp calculate_elapsed(started_at) do
@@ -1000,36 +1140,72 @@ defmodule Cympho.Agents do
 
   @doc """
   Kills the running session for an agent.
-  Stops the Orchestrator session gracefully and resets agent to idle.
+  Stops only the matching orchestrator run; legacy heartbeats return to idle
+  once no adapter worker remains.
   """
-  @spec kill_session(String.t()) :: :ok | {:error, :not_running | :not_found}
+  @spec kill_session(String.t()) ::
+          :ok | {:error, :not_running | :not_found | :cleanup_pending}
   def kill_session(agent_id) when is_binary(agent_id) do
+    case active_session_owner(agent_id) do
+      {:ok, pid, _session, run} ->
+        Cympho.Orchestrator.stop_owned(pid, agent_id, run.id, :operator_stop)
+
+      :none ->
+        legacy_kill_session(agent_id)
+    end
+  end
+
+  defp legacy_kill_session(agent_id) do
     case Cympho.AgentHeartbeat.status(agent_id) do
       {:ok, :running} ->
         heartbeat_state = get_heartbeat_state(agent_id)
         issue_id = heartbeat_state[:current_issue_id]
 
-        if issue_id do
-          Cympho.Orchestrator.stop(issue_id, :operator_stop)
+        try do
+          case Cympho.Orchestrator.whereis(issue_id) do
+            pid when is_pid(pid) ->
+              case GenServer.call(pid, :get_session_state, 5_000) do
+                %{agent_id: ^agent_id, run_id: run_id} ->
+                  case Cympho.Orchestrator.stop_owned(pid, agent_id, run_id, :operator_stop) do
+                    :ok -> maybe_idle_legacy_session(agent_id, issue_id)
+                    error -> error
+                  end
+
+                _ ->
+                  {:error, :not_running}
+              end
+
+            nil ->
+              maybe_idle_legacy_session(agent_id, issue_id)
+          end
+        catch
+          :exit, _ -> {:error, :not_running}
         end
-
-        _ = Cympho.AgentHeartbeat.set_idle(agent_id)
-
-        case get_agent(agent_id) do
-          {:ok, agent} ->
-            update_agent(agent, %{status: :idle})
-
-          {:error, _} ->
-            :error
-        end
-
-        :ok
 
       {:ok, _} ->
         {:error, :not_running}
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp maybe_idle_legacy_session(agent_id, issue_id) do
+    no_worker? =
+      is_nil(issue_id) or Cympho.AdapterSessions.owners_for_issue(issue_id) == {:ok, []}
+
+    if is_nil(Cympho.Orchestrator.whereis(issue_id)) and no_worker? and
+         HeartbeatEngine.get_active_run_for_agent(agent_id) == {:error, :not_found} do
+      _ = Cympho.AgentHeartbeat.set_idle(agent_id)
+
+      case get_agent(agent_id) do
+        {:ok, agent} -> _ = update_agent(agent, %{status: :idle})
+        {:error, _} -> :ok
+      end
+
+      :ok
+    else
+      {:error, :cleanup_pending}
     end
   end
 

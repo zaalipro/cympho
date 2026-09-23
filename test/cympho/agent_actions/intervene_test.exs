@@ -2,8 +2,10 @@ defmodule Cympho.AgentActions.InterveneTest do
   use Cympho.DataCase, async: false
 
   import Cympho.WaitHelpers
+  import Mock
 
-  alias Cympho.{AgentActions, Agents, Comments, Companies, Issues}
+  alias Cympho.{Activities, AgentActions, Agents, Comments, Companies, Issues}
+  alias Cympho.Adapters.MockAdapter
   alias Cympho.Repo
   alias Cympho.Wakes.AgentWake
   import Ecto.Query
@@ -281,6 +283,8 @@ defmodule Cympho.AgentActions.InterveneTest do
 
   describe "intervene cancel" do
     test "CEO cancels a stalled issue", %{ceo: ceo, issue: issue} do
+      :ok = Activities.subscribe(issue.company_id)
+
       actions = [
         %{
           "type" => "intervene",
@@ -294,6 +298,76 @@ defmodule Cympho.AgentActions.InterveneTest do
 
       reloaded = Issues.get_issue!(issue.id)
       assert reloaded.status == :cancelled
+      assert_receive {:activity_created, activity}, 1_000
+      activity_id = activity.id
+      refute_receive {:activity_created, %{id: ^activity_id}}, 100
+      assert Process.get(:cympho_deferred_activity_events) == nil
+    end
+
+    test "terminal run cancellation rolls back with the enclosing action batch", %{
+      ceo: ceo,
+      issue: issue
+    } do
+      :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{issue.company_id}:runs")
+      :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{issue.company_id}:issues")
+      :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{issue.company_id}:activities")
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+      MockAdapter.script(issue.assignee_id, issue.id, [:silent])
+
+      actions = [
+        %{
+          "type" => "intervene",
+          "mode" => "cancel",
+          "reason" => "Mission pivoted, this issue is no longer needed."
+        },
+        %{
+          "type" => "intervene",
+          "mode" => "cancel",
+          "reason" => "A second cancellation must fail and roll back the batch."
+        }
+      ]
+
+      with_mock Cympho.Adapters, [], resolve: fn _ -> {:ok, MockAdapter, %{}} end do
+        assert {:ok, orchestrator} =
+                 Cympho.Orchestrator.start_and_run(issue, issue.assignee_id,
+                   adapter: :mock,
+                   adapter_config: %{}
+                 )
+
+        Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), orchestrator)
+
+        run =
+          Enum.find_value(1..100, fn _ ->
+            case Enum.find(
+                   Cympho.HeartbeatEngine.list_runs_for_issue(issue.id),
+                   &(&1.status == "running")
+                 ) do
+              nil ->
+                Process.sleep(10)
+                nil
+
+              running ->
+                running
+            end
+          end)
+
+        assert %Cympho.HeartbeatEngine.Run{} = run
+        flush_messages()
+
+        assert {:error, :invalid_transition} = AgentActions.execute(issue, ceo, actions)
+        assert Repo.get!(Cympho.HeartbeatEngine.Run, run.id).status == "running"
+        assert Issues.get_issue!(issue.id).status == :in_progress
+        assert Process.alive?(orchestrator)
+        refute_receive %{event: "run_status", payload: %{event_type: :run_cancelled}}, 100
+        refute_receive {:issue_updated, _}, 100
+        refute_receive {:activity_created, _}, 100
+        assert Process.get(:cympho_deferred_terminal_runs) == nil
+        assert Process.get(:cympho_deferred_runtime_stops) == nil
+        assert Process.get(:cympho_agent_actions_defer_terminal_effects) == nil
+
+        Cympho.Orchestrator.stop(issue.id)
+      end
     end
   end
 
@@ -436,5 +510,13 @@ defmodule Cympho.AgentActions.InterveneTest do
       "Evidence required: attach the code-change work product or PR plus a delivery note. " <>
       "Verification required: run the focused test or name the blocker preventing it. " <>
       "Definition of done: ready for CTO review with evidence, verification, and remaining risk named."
+  end
+
+  defp flush_messages do
+    receive do
+      _ -> flush_messages()
+    after
+      0 -> :ok
+    end
   end
 end

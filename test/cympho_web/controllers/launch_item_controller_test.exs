@@ -88,6 +88,21 @@ defmodule CymphoWeb.LaunchItemControllerTest do
   end
 
   describe "POST /api/launch-items" do
+    test "ignores a forged company on create", %{
+      conn: conn,
+      company: company,
+      other_company: other_company
+    } do
+      conn =
+        post(conn, ~p"/api/launch-items", %{
+          "launch_item" => %{"title" => "Keep local", "company_id" => other_company.id}
+        })
+
+      assert %{"data" => %{"id" => id}} = json_response(conn, 201)
+      assert {:ok, _} = LaunchItems.get_company_launch_item(company.id, id)
+      assert {:error, :not_found} = LaunchItems.get_company_launch_item(other_company.id, id)
+    end
+
     test "creates a launch item with default owner, status, and blocked flag", %{
       conn: conn,
       current_user: current_user
@@ -121,6 +136,25 @@ defmodule CymphoWeb.LaunchItemControllerTest do
   end
 
   describe "PATCH /api/launch-items/:id" do
+    test "rejects a forged company move even when owner belongs to both companies", %{
+      conn: conn,
+      company: company,
+      current_user: current_user,
+      other_company: other_company
+    } do
+      {:ok, item} = launch_item(company, current_user, %{title: "Company A item"})
+
+      conn =
+        patch(conn, ~p"/api/launch-items/#{item.id}", %{
+          "launch_item" => %{"company_id" => other_company.id, "title" => "Moved"}
+        })
+
+      assert %{"errors" => %{"company_id" => _}} = json_response(conn, 422)
+      assert {:ok, unchanged} = LaunchItems.get_company_launch_item(company.id, item.id)
+      assert unchanged.title == "Company A item"
+      assert {:error, :not_found} = LaunchItems.get_company_launch_item(other_company.id, item.id)
+    end
+
     test "updates a launch item", %{
       conn: conn,
       company: company,

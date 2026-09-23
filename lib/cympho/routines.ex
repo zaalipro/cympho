@@ -1,7 +1,11 @@
 defmodule Cympho.Routines do
   import Ecto.Query, warn: false
+  import Ecto.Changeset, only: [add_error: 3, get_field: 2]
   alias Cympho.Repo
   alias Cympho.Routines.Routine
+  alias Cympho.RoutineTriggers.{RoutineRun, RoutineTrigger}
+  alias Cympho.Agents.Agent
+  alias Cympho.Projects.Project
 
   @stale_run_after_seconds 2 * 60 * 60
   @recent_failure_window_seconds 24 * 60 * 60
@@ -31,6 +35,30 @@ defmodule Cympho.Routines do
     )
   end
 
+  @doc "A routine page with bounded latest-run and health-signal projections."
+  def list_routines_overview_page(opts \\ []) do
+    page = list_routines_page(opts)
+    %{page | entries: attach_overview(page.entries, Keyword.get(opts, :now, DateTime.utc_now()))}
+  end
+
+  @doc "Returns at most one candidate for each index command priority."
+  def routine_command_candidates(company_id, opts \\ []) do
+    now = opts |> Keyword.get(:now, DateTime.utc_now()) |> DateTime.truncate(:second)
+    stale_before = DateTime.add(now, -@stale_run_after_seconds, :second)
+    failure_after = DateTime.add(now, -@recent_failure_window_seconds, :second)
+
+    [
+      first_matching_routine(company_id, :triggerless),
+      first_matching_routine(company_id, {:stale, stale_before}),
+      first_matching_routine(company_id, {:failed, failure_after}),
+      first_matching_routine(company_id, :paused),
+      first_matching_routine(company_id, :runnable)
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq_by(& &1.id)
+    |> attach_overview(now)
+  end
+
   def list_routines_by_status(status) when is_atom(status) do
     Repo.all(
       from r in Routine, where: r.status == ^status, order_by: [desc: r.inserted_at, desc: r.id]
@@ -46,16 +74,8 @@ defmodule Cympho.Routines do
     end
   end
 
-  def get_company_routine(company_id, id) do
-    query =
-      from(r in Routine,
-        left_join: agent in assoc(r, :agent),
-        left_join: project in assoc(r, :project),
-        where:
-          r.id == ^id and
-            (r.company_id == ^company_id or agent.company_id == ^company_id or
-               project.company_id == ^company_id)
-      )
+  def get_company_routine(company_id, id) when is_binary(company_id) do
+    query = from(r in routines_scope_query(company_id), where: r.id == ^id)
 
     case Repo.one(query) do
       nil -> {:error, :not_found}
@@ -63,15 +83,19 @@ defmodule Cympho.Routines do
     end
   end
 
+  def get_company_routine(_company_id, _id), do: {:error, :not_found}
+
   def create_routine(attrs \\ %{}) do
     %Routine{}
     |> Routine.changeset(attrs)
+    |> validate_association_companies()
     |> Repo.insert()
   end
 
   def update_routine(%Routine{} = routine, attrs) do
     routine
     |> Routine.changeset(attrs)
+    |> validate_association_companies()
     |> Repo.update()
   end
 
@@ -115,13 +139,7 @@ defmodule Cympho.Routines do
     stale_before = DateTime.add(now, -stale_after, :second)
     recent_failure_after = DateTime.add(now, -failure_window, :second)
 
-    routines =
-      company_id
-      |> routines_health_query()
-      |> preload([:triggers, :runs])
-      |> Repo.all()
-
-    metrics = routine_health_metrics(routines, stale_before, recent_failure_after)
+    metrics = routine_health_metrics(company_id, stale_before, recent_failure_after)
     recommendations = routine_health_recommendations(metrics)
     level = routine_health_level(metrics)
 
@@ -142,73 +160,235 @@ defmodule Cympho.Routines do
       left_join: agent in assoc(r, :agent),
       left_join: project in assoc(r, :project),
       where:
-        r.company_id == ^company_id or agent.company_id == ^company_id or
-          project.company_id == ^company_id,
-      distinct: r.id
+        (r.company_id == ^company_id or
+           (is_nil(r.company_id) and
+              (agent.company_id == ^company_id or project.company_id == ^company_id))) and
+          (is_nil(agent.id) or agent.company_id == ^company_id) and
+          (is_nil(project.id) or project.company_id == ^company_id)
     )
   end
 
-  defp routines_health_query(nil) do
-    from(r in Routine, order_by: [desc: r.inserted_at, desc: r.id])
-  end
+  defp routine_health_metrics(company_id, stale_before, recent_failure_after) do
+    ids = scoped_routine_ids(company_id)
 
-  defp routines_health_query(company_id) do
-    from(r in Routine,
-      left_join: agent in assoc(r, :agent),
-      left_join: project in assoc(r, :project),
-      where:
-        r.company_id == ^company_id or agent.company_id == ^company_id or
-          project.company_id == ^company_id,
-      distinct: r.id,
-      order_by: [desc: r.inserted_at, desc: r.id]
-    )
-  end
+    status_counts =
+      from(r in Routine,
+        where: r.id in subquery(ids),
+        group_by: r.status,
+        select: {r.status, count(r.id)}
+      )
+      |> Repo.all()
+      |> Map.new()
 
-  defp routine_health_metrics(routines, stale_before, recent_failure_after) do
-    active_routines = Enum.filter(routines, &(&1.status == :active))
+    active_without_triggers =
+      from(r in Routine,
+        where: r.id in subquery(ids) and r.status == :active,
+        where:
+          fragment(
+            "NOT EXISTS (SELECT 1 FROM routine_triggers t WHERE t.routine_id = ? AND t.enabled = TRUE)",
+            r.id
+          )
+      )
+      |> Repo.aggregate(:count, :id)
+
+    stale_runs =
+      from(run in RoutineRun,
+        where: run.routine_id in subquery(ids),
+        where: run.status in ["pending", "running"] and run.triggered_at < ^stale_before
+      )
+      |> Repo.aggregate(:count, :id)
+
+    recent_failures =
+      from(run in RoutineRun,
+        where: run.routine_id in subquery(ids) and run.status == "failed",
+        where:
+          fragment(
+            "COALESCE(?, ?) >= ?",
+            run.completed_at,
+            run.triggered_at,
+            ^recent_failure_after
+          )
+      )
+      |> Repo.aggregate(:count, :id)
 
     %{
-      total_routines: length(routines),
-      active_routines: count_status(routines, :active),
-      paused_routines: count_status(routines, :paused),
-      archived_routines: count_status(routines, :archived),
-      active_without_triggers: Enum.count(active_routines, &without_enabled_trigger?/1),
-      stale_runs: stale_run_count(routines, stale_before),
-      recent_failures: recent_failure_count(routines, recent_failure_after)
+      total_routines:
+        Enum.reduce(status_counts, 0, fn {_status, count}, total -> total + count end),
+      active_routines: Map.get(status_counts, :active, 0),
+      paused_routines: Map.get(status_counts, :paused, 0),
+      archived_routines: Map.get(status_counts, :archived, 0),
+      active_without_triggers: active_without_triggers,
+      stale_runs: stale_runs,
+      recent_failures: recent_failures
     }
   end
 
-  defp count_status(routines, status), do: Enum.count(routines, &(&1.status == status))
-
-  defp without_enabled_trigger?(routine) do
-    Enum.empty?(routine.triggers) or Enum.all?(routine.triggers, &(&1.enabled == false))
+  defp scoped_routine_ids(company_id) do
+    from(r in routines_scope_query(company_id), select: r.id)
   end
 
-  defp stale_run_count(routines, stale_before) do
-    routines
-    |> Enum.flat_map(& &1.runs)
-    |> Enum.count(fn run ->
-      run.status in ["pending", "running"] and before?(run.triggered_at, stale_before)
+  defp first_matching_routine(company_id, kind) do
+    ids = scoped_routine_ids(company_id)
+
+    query =
+      from(r in Routine,
+        where: r.id in subquery(ids),
+        order_by: [desc: r.inserted_at, desc: r.id],
+        limit: 1
+      )
+
+    query =
+      case kind do
+        :triggerless ->
+          from(r in query,
+            where: r.status == :active,
+            where:
+              fragment(
+                "NOT EXISTS (SELECT 1 FROM routine_triggers t WHERE t.routine_id = ? AND t.enabled = TRUE)",
+                r.id
+              )
+          )
+
+        :runnable ->
+          from(r in query,
+            where: r.status == :active,
+            where:
+              fragment(
+                "EXISTS (SELECT 1 FROM routine_triggers t WHERE t.routine_id = ? AND t.enabled = TRUE)",
+                r.id
+              )
+          )
+
+        :paused ->
+          from(r in query, where: r.status == :paused)
+
+        {:stale, cutoff} ->
+          run_ids =
+            from(run in RoutineRun,
+              where: run.status in ["pending", "running"] and run.triggered_at < ^cutoff,
+              select: run.routine_id
+            )
+
+          from(r in query, where: r.id in subquery(run_ids))
+
+        {:failed, cutoff} ->
+          run_ids =
+            from(run in RoutineRun,
+              where: run.status == "failed",
+              where: fragment("COALESCE(?, ?) >= ?", run.completed_at, run.triggered_at, ^cutoff),
+              select: run.routine_id
+            )
+
+          from(r in query, where: r.id in subquery(run_ids))
+      end
+
+    Repo.one(query)
+  end
+
+  defp attach_overview([], _now), do: []
+
+  defp attach_overview(routines, now) do
+    now = DateTime.truncate(now, :second)
+    stale_before = DateTime.add(now, -@stale_run_after_seconds, :second)
+    failure_after = DateTime.add(now, -@recent_failure_window_seconds, :second)
+    ids = Enum.map(routines, & &1.id)
+
+    latest_runs =
+      from(run in RoutineRun,
+        where: run.routine_id in ^ids,
+        distinct: run.routine_id,
+        order_by: [asc: run.routine_id, desc: run.triggered_at, desc: run.id],
+        select: %{
+          routine_id: run.routine_id,
+          status: run.status,
+          trigger_type: run.trigger_type,
+          triggered_at: run.triggered_at
+        }
+      )
+      |> Repo.all()
+      |> Map.new(&{&1.routine_id, &1})
+
+    stale_ids =
+      from(run in RoutineRun,
+        where: run.routine_id in ^ids,
+        where: run.status in ["pending", "running"] and run.triggered_at < ^stale_before,
+        distinct: run.routine_id,
+        select: run.routine_id
+      )
+      |> Repo.all()
+      |> MapSet.new()
+
+    failure_ids =
+      from(run in RoutineRun,
+        where: run.routine_id in ^ids and run.status == "failed",
+        where:
+          fragment("COALESCE(?, ?) >= ?", run.completed_at, run.triggered_at, ^failure_after),
+        distinct: run.routine_id,
+        select: run.routine_id
+      )
+      |> Repo.all()
+      |> MapSet.new()
+
+    triggers =
+      from(t in RoutineTrigger,
+        where: t.routine_id in ^ids,
+        select: %{
+          routine_id: t.routine_id,
+          type: t.type,
+          enabled: t.enabled,
+          cron_expression: t.cron_expression
+        }
+      )
+      |> Repo.all()
+      |> Enum.group_by(& &1.routine_id)
+
+    Enum.map(routines, fn routine ->
+      routine
+      |> Map.put(:runs, List.wrap(Map.get(latest_runs, routine.id)))
+      |> Map.put(:triggers, Map.get(triggers, routine.id, []))
+      |> Map.put(:has_stale_run, MapSet.member?(stale_ids, routine.id))
+      |> Map.put(:has_recent_failure, MapSet.member?(failure_ids, routine.id))
     end)
   end
 
-  defp recent_failure_count(routines, recent_failure_after) do
-    routines
-    |> Enum.flat_map(& &1.runs)
-    |> Enum.count(fn run ->
-      run.status == "failed" and
-        after_or_equal?(run.completed_at || run.triggered_at, recent_failure_after)
-    end)
+  defp validate_association_companies(changeset) do
+    company_id = get_field(changeset, :company_id)
+    agent_company = association_company(Agent, get_field(changeset, :agent_id))
+    project_company = association_company(Project, get_field(changeset, :project_id))
+
+    changeset
+    |> maybe_reject_foreign(:agent_id, agent_company, company_id)
+    |> maybe_reject_foreign(:project_id, project_company, company_id)
+    |> maybe_reject_conflicting_legacy_associations(agent_company, project_company, company_id)
   end
 
-  defp before?(nil, _datetime), do: false
-  defp before?(datetime, cutoff), do: DateTime.compare(datetime, cutoff) == :lt
+  defp association_company(_schema, nil), do: nil
 
-  defp after_or_equal?(nil, _datetime), do: false
-
-  defp after_or_equal?(datetime, cutoff) do
-    DateTime.compare(datetime, cutoff) in [:gt, :eq]
+  defp association_company(schema, id) do
+    case Repo.get(schema, id) do
+      nil -> :missing
+      %{company_id: nil} -> :unscoped
+      record -> record.company_id
+    end
   end
+
+  defp maybe_reject_foreign(changeset, _field, nil, _company_id), do: changeset
+  defp maybe_reject_foreign(changeset, _field, company_id, company_id), do: changeset
+
+  defp maybe_reject_foreign(changeset, field, :missing, _company_id),
+    do: add_error(changeset, field, "does not exist")
+
+  defp maybe_reject_foreign(changeset, _field, _associated, nil), do: changeset
+
+  defp maybe_reject_foreign(changeset, field, _associated, _company_id),
+    do: add_error(changeset, field, "must belong to the company")
+
+  defp maybe_reject_conflicting_legacy_associations(changeset, agent, project, nil)
+       when not is_nil(agent) and not is_nil(project) and agent != project,
+       do: add_error(changeset, :project_id, "must belong to the same company as the agent")
+
+  defp maybe_reject_conflicting_legacy_associations(changeset, _agent, _project, _company_id),
+    do: changeset
 
   defp routine_health_recommendations(metrics) do
     []

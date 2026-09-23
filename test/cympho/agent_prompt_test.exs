@@ -1117,12 +1117,22 @@ defmodule Cympho.AgentPromptTest do
     test "prompt marks digest quality ready when evidence is complete", %{
       engineer: engineer
     } do
+      {:ok, project} =
+        Cympho.Projects.create_project(%{
+          name: "Prompt PR project",
+          prefix: "PPR",
+          company_id: engineer.company_id,
+          repo_url: "https://github.com/acme/app"
+        })
+
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Evidence-ready prompt issue",
           description: "Implement and verify the thing.",
           status: :in_review,
           priority: :medium,
+          company_id: engineer.company_id,
+          project_id: project.id,
           github_pr_url: "https://github.com/acme/app/pull/42"
         })
 

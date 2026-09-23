@@ -17,15 +17,18 @@ defmodule CymphoWeb.AgentLive.Index do
     current_agent = session["current_agent"]
     full_agent = scoped_session_agent(current_agent, company_id)
 
+    agents = list_agents(company_id)
+    progress = Agents.list_session_progress_by_company(company_id)
+
     socket =
-      assign(socket, :agents, list_agents(company_id))
+      assign(socket, :agents, agents)
       |> assign(:current_agent_id, current_agent && current_agent.id)
       |> assign(:current_agent_role, current_agent && current_agent.role)
       |> assign(:current_agent, full_agent)
-      |> assign(:status_counts, status_counts(company_id))
+      |> assign(:status_counts, roster_status_counts(agents, progress))
       |> assign(:org_health, org_health_snapshot(company_id))
       |> assign(:workload, workload_counts(company_id))
-      |> assign(:session_progress, %{})
+      |> assign(:session_progress, progress)
 
     if connected?(socket) do
       schedule_progress_update()
@@ -58,16 +61,11 @@ defmodule CymphoWeb.AgentLive.Index do
     {:noreply,
      socket
      |> update(:agents, fn agents -> [agent | agents] end)
-     |> update(:status_counts, fn counts ->
-       Map.update(counts, agent.status, 1, &(&1 + 1))
-     end)
+     |> refresh_roster_status_counts()
      |> refresh_org_health()}
   end
 
   def handle_info({:agent_updated, updated_agent}, socket) do
-    old_agent = Enum.find(socket.assigns.agents, fn a -> a.id == updated_agent.id end)
-    old_status = old_agent && old_agent.status
-
     {:noreply,
      socket
      |> update(:agents, fn agents ->
@@ -75,39 +73,28 @@ defmodule CymphoWeb.AgentLive.Index do
          if agent.id == updated_agent.id, do: updated_agent, else: agent
        end)
      end)
-     |> update(:status_counts, fn counts ->
-       if old_status && old_status != updated_agent.status do
-         counts
-         |> Map.update(old_status, 0, &(&1 - 1))
-         |> Map.update(updated_agent.status, 0, &(&1 + 1))
-       else
-         counts
-       end
-     end)
+     |> refresh_roster_status_counts()
      |> refresh_org_health()}
   end
 
   def handle_info({:agent_deleted, deleted_id}, socket) do
-    deleted_agent = Enum.find(socket.assigns.agents, fn a -> a.id == deleted_id end)
-    status = deleted_agent && deleted_agent.status
-
     {:noreply,
      socket
      |> update(:agents, fn agents ->
        Enum.filter(agents, fn agent -> agent.id != deleted_id end)
      end)
-     |> update(:status_counts, fn counts ->
-       if status do
-         Map.update(counts, status, 0, &(&1 - 1))
-       else
-         counts
-       end
-     end)
+     |> refresh_roster_status_counts()
      |> refresh_org_health()}
   end
 
   def handle_info(:update_progress, socket) do
-    running_agents = Enum.filter(socket.assigns.agents, fn a -> a.status == :running end)
+    company_id = current_company_id(socket)
+    delegated_progress = Agents.list_session_progress_by_company(company_id)
+
+    running_agents =
+      Enum.filter(socket.assigns.agents, fn agent ->
+        agent.status == :running and not Map.has_key?(delegated_progress, agent.id)
+      end)
 
     progress =
       running_agents
@@ -117,13 +104,14 @@ defmodule CymphoWeb.AgentLive.Index do
           {:error, _} -> {agent.id, nil}
         end
       end)
-      |> Enum.into(%{})
+      |> Enum.into(delegated_progress)
 
     schedule_progress_update()
 
     {:noreply,
      socket
      |> assign(:session_progress, progress)
+     |> refresh_roster_status_counts()
      |> assign(:workload, workload_counts(current_company_id(socket)))}
   end
 
@@ -142,8 +130,15 @@ defmodule CymphoWeb.AgentLive.Index do
   def handle_event("kill_session", %{"id" => agent_id}, socket) do
     with {:ok, _agent} <- get_scoped_agent(socket, agent_id),
          :ok <- Agents.kill_session(agent_id) do
-      {:noreply, put_flash(socket, :info, "Agent session stopped successfully")}
+      {:noreply,
+       socket
+       |> update(:session_progress, &Map.delete(&1, agent_id))
+       |> refresh_roster_status_counts()
+       |> put_flash(:info, "Agent session stopped successfully")}
     else
+      {:error, :cleanup_pending} ->
+        {:noreply, put_flash(socket, :error, "Session cleanup is still in progress")}
+
       {:error, :not_running} ->
         {:noreply, put_flash(socket, :error, "Agent is not currently running")}
 
@@ -199,6 +194,10 @@ defmodule CymphoWeb.AgentLive.Index do
   def status_label(:pending_approval), do: "Pending Approval"
   def status_label(:terminated), do: "Terminated"
 
+  def agent_runtime_status(progress, agent) do
+    if Map.has_key?(progress || %{}, agent.id), do: :running, else: agent.status
+  end
+
   def role_label(:other), do: "Other"
   def role_label(role), do: Agent.role_label(role)
 
@@ -212,10 +211,10 @@ defmodule CymphoWeb.AgentLive.Index do
   One-line summary for a role group header so a manager can skip
   whole groups at a glance: "2 running · 1 needs attention" etc.
   """
-  def group_pulse(agents) do
-    running = Enum.count(agents, &(&1.status == :running))
+  def group_pulse(agents, progress \\ %{}) do
+    running = Enum.count(agents, &(agent_runtime_status(progress, &1) == :running))
     stuck = Enum.count(agents, &(&1.status == :error))
-    free = Enum.count(agents, &(&1.status in [:idle, :active]))
+    free = Enum.count(agents, &(agent_runtime_status(progress, &1) in [:idle, :active]))
 
     [
       stuck > 0 && "#{stuck} need#{if stuck == 1, do: "s", else: ""} attention",
@@ -402,8 +401,19 @@ defmodule CymphoWeb.AgentLive.Index do
   defp list_agents(nil), do: Agents.list_agents()
   defp list_agents(company_id), do: Agents.list_agents_by_company(company_id)
 
-  defp status_counts(nil), do: Agents.count_by_status()
-  defp status_counts(company_id), do: Agents.count_by_status(company_id)
+  defp roster_status_counts(agents, progress) do
+    Enum.reduce(agents, %{}, fn agent, counts ->
+      Map.update(counts, agent_runtime_status(progress, agent), 1, &(&1 + 1))
+    end)
+  end
+
+  defp refresh_roster_status_counts(socket) do
+    assign(
+      socket,
+      :status_counts,
+      roster_status_counts(socket.assigns.agents, socket.assigns.session_progress)
+    )
+  end
 
   defp org_health_snapshot(nil), do: OrgHealth.snapshot(nil)
   defp org_health_snapshot(company_id), do: OrgHealth.snapshot(company_id)

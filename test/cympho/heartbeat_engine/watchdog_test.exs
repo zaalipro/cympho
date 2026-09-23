@@ -3,6 +3,8 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
   # sandbox connection without contention with other tests.
   use Cympho.DataCase, async: false
 
+  import Mock
+
   alias Cympho.Agents
   alias Cympho.HeartbeatEngine
   alias Cympho.HeartbeatEngine.Run
@@ -41,6 +43,59 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
       assert :ok = Watchdog.check_now()
       # Sync through the GenServer so the check_now cast has been processed.
       _ = :sys.get_state(Process.whereis(Watchdog))
+    end
+
+    test "default due pass honors a persisted five-minute case threshold" do
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Watchdog case threshold #{System.unique_integer([:positive])}",
+          slug: "wd-case-threshold-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Watchdog threshold agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Watchdog five-minute child",
+          status: :todo,
+          assignee_id: agent.id,
+          company_id: company.id
+        })
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          company_id: company.id,
+          agent_id: agent.id,
+          issue_id: issue.id,
+          adapter: "process"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+      old = DateTime.utc_now() |> DateTime.add(-10, :minute) |> DateTime.truncate(:second)
+
+      Repo.update_all(Ecto.Query.from(r in Run, where: r.id == ^started.id),
+        set: [last_heartbeat_at: old]
+      )
+
+      assert {:ok, case_row} =
+               Cympho.Recovery.ensure_case(%{
+                 source_type: "heartbeat_run",
+                 issue: issue,
+                 run: Repo.get!(Run, run.id),
+                 stale_threshold_minutes: 5
+               })
+
+      assert :ok = Watchdog.check_now()
+      _ = :sys.get_state(Process.whereis(Watchdog))
+
+      assert Repo.get!(RecoveryCase, case_row.id).state == "recovered"
+      assert Repo.get!(Run, run.id).status == "failed"
     end
 
     test "skips never-started orphaned runs without a company scope" do
@@ -273,6 +328,100 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
       assert Repo.aggregate(
                Ecto.Query.from(a in RecoveryAttempt,
                  where: a.recovery_case_id == ^recovery_case.id
+               ),
+               :count
+             ) == 1
+    end
+
+    test "counts a persisted post-claim deferral but not a preflight deferral" do
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Watchdog deferred telemetry #{System.unique_integer([:positive])}",
+          slug: "wd-deferred-telemetry-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Watchdog deferred telemetry agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      make_stale_run = fn suffix ->
+        {:ok, issue} =
+          Issues.create_issue(%{
+            title: "Watchdog deferred #{suffix}",
+            status: :todo,
+            assignee_id: agent.id,
+            company_id: company.id
+          })
+
+        {:ok, run} =
+          HeartbeatEngine.create_run(%{
+            company_id: company.id,
+            agent_id: agent.id,
+            issue_id: issue.id,
+            adapter: "process"
+          })
+
+        {:ok, started} = HeartbeatEngine.start_run(run)
+        old = DateTime.utc_now() |> DateTime.add(-20, :minute) |> DateTime.truncate(:second)
+
+        Repo.update_all(Ecto.Query.from(r in Run, where: r.id == ^started.id),
+          set: [last_heartbeat_at: old]
+        )
+
+        {issue, Repo.get!(Run, run.id)}
+      end
+
+      {persisted_issue, persisted_run} = make_stale_run.("persisted")
+      {_preflight_issue, preflight_run} = make_stale_run.("preflight")
+
+      assert {:ok, persisted_case} =
+               Cympho.Recovery.ensure_case(%{
+                 source_type: "heartbeat_run",
+                 issue: persisted_issue,
+                 run: persisted_run
+               })
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      assert {:ok, _lease} = Cympho.Recovery.claim_case(persisted_case, now: now)
+      persisted_case = Repo.get!(RecoveryCase, persisted_case.id)
+
+      with_mock Cympho.Recovery, [:passthrough],
+        recover_stale_run: fn run, _opts ->
+          if run.id == persisted_run.id do
+            {:ok,
+             %{
+               run: run,
+               outcome: :deferred,
+               case: persisted_case,
+               recovery: %{cases_created: 0, attempts: 0, outcome: :deferred}
+             }}
+          else
+            assert run.id == preflight_run.id
+
+            {:ok,
+             %{
+               run: run,
+               outcome: :deferred,
+               case: nil,
+               recovery: %{cases_created: 0, attempts: 0, outcome: :deferred}
+             }}
+          end
+        end do
+        assert :ok = Watchdog.check_now()
+        _ = :sys.get_state(Process.whereis(Watchdog))
+      end
+
+      results = Watchdog.last_results()
+      assert results.recovery_attempts == 1
+      assert results.recovery_cases_created == 0
+
+      assert Repo.aggregate(
+               Ecto.Query.from(a in RecoveryAttempt,
+                 where: a.recovery_case_id == ^persisted_case.id
                ),
                :count
              ) == 1

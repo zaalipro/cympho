@@ -38,6 +38,7 @@ defmodule Cympho.Recovery.RecoveryCase do
     # makes a restart (or a later config change) unable to silently widen a
     # lineage's retry budget.
     field :policy_snapshot, :map, default: %{}
+    field :stale_threshold_minutes, :integer, default: 15
     field :next_attempt_at, :utc_datetime
     field :claim_token, Ecto.UUID
     field :claimed_at, :utc_datetime
@@ -79,6 +80,7 @@ defmodule Cympho.Recovery.RecoveryCase do
       :attempt_count,
       :max_attempts,
       :policy_snapshot,
+      :stale_threshold_minutes,
       :next_attempt_at,
       :claimed_by,
       :last_error,
@@ -98,6 +100,7 @@ defmodule Cympho.Recovery.RecoveryCase do
     |> validate_number(:attempt_count, greater_than_or_equal_to: 0)
     |> validate_number(:max_attempts, greater_than: 0)
     |> validate_number(:max_attempts, less_than_or_equal_to: 3)
+    |> validate_number(:stale_threshold_minutes, greater_than: 0)
     |> validate_number(:fingerprint_version, greater_than: 0)
     |> validate_length(:source_fingerprint, is: 64)
     |> validate_format(:source_fingerprint, ~r/\A[0-9a-f]{64}\z/)

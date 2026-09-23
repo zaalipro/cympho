@@ -930,6 +930,7 @@ defmodule CymphoWeb.Components.IssueDigest do
   end
 
   attr :issue, :map, required: true
+  attr :digest, :map, default: nil
   attr :density, :string, default: "detailed"
   attr :variant, :string, default: "card"
   attr :class, :any, default: ""
@@ -941,7 +942,7 @@ defmodule CymphoWeb.Components.IssueDigest do
   def issue_digest_card(assigns) do
     assigns =
       assigns
-      |> assign(:digest, IssueDigest.build(assigns.issue))
+      |> assign(:digest, assigns[:digest] || IssueDigest.build(assigns.issue))
       |> assign(:mission_context, issue_mission_context(assigns.issue))
       |> assign(:compact?, assigns.density == "compact")
       |> assign(:inline?, assigns.variant == "inline")

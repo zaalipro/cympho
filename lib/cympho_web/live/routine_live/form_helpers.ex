@@ -17,9 +17,13 @@ defmodule CymphoWeb.RoutineLive.FormHelpers do
   def scoped_routine_params(socket, params, opts \\ []) do
     company_id = current_company_id(socket)
 
-    with :ok <- validate_agent_ref(company_id, params["agent_id"]),
-         :ok <- validate_project_ref(company_id, params["project_id"]) do
-      {:ok, maybe_put_company_scope(company_id, params, Keyword.get(opts, :put_company_scope))}
+    if is_binary(company_id) do
+      with :ok <- validate_agent_ref(company_id, params["agent_id"]),
+           :ok <- validate_project_ref(company_id, params["project_id"]) do
+        {:ok, maybe_put_company_scope(company_id, params, Keyword.get(opts, :put_company_scope))}
+      end
+    else
+      {:error, :not_found}
     end
   end
 
@@ -27,7 +31,7 @@ defmodule CymphoWeb.RoutineLive.FormHelpers do
   defp maybe_put_company_scope(_company_id, params, false), do: params
 
   defp maybe_put_company_scope(company_id, params, _put_scope?),
-    do: Map.put_new(params, "company_id", company_id)
+    do: Map.put(params, "company_id", company_id)
 
   defp validate_agent_ref(_company_id, nil), do: :ok
   defp validate_agent_ref(_company_id, ""), do: :ok

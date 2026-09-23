@@ -2826,6 +2826,167 @@ defmodule Cympho.Companies do
     Repo.delete(membership)
   end
 
+  @doc "Creates a membership after rechecking the actor under a company lock."
+  def create_membership_for_actor(actor_id, attrs) do
+    company_id = attrs[:company_id] || attrs["company_id"]
+    role = attrs[:role] || attrs["role"]
+
+    with_company_authority(actor_id, company_id, role == "owner", fn ->
+      create_membership(attrs) |> unwrap_or_rollback()
+    end)
+  end
+
+  @doc "Removes a membership, preserving at least one owner and disconnecting its company socket."
+  def delete_membership_for_actor(actor_id, company_id, membership_id) do
+    result =
+      with_company_authority(actor_id, company_id, false, fn ->
+        membership = locked_membership(company_id, membership_id)
+        if is_nil(membership), do: Repo.rollback(:not_found)
+        require_owner_for_owner_change!(actor_id, company_id, membership.role, nil)
+        protect_last_owner!(company_id, membership.role, nil)
+        Repo.delete(membership) |> unwrap_or_rollback()
+      end)
+
+    case result do
+      {:ok, membership} ->
+        CymphoWeb.Endpoint.broadcast(
+          "socket:#{company_id}:#{membership.user_id}",
+          "disconnect",
+          %{}
+        )
+
+        result
+
+      _ ->
+        result
+    end
+  end
+
+  defp with_company_authority(actor_id, company_id, owner_only?, operation) do
+    Repo.transaction(fn ->
+      if is_nil(Repo.one(from(c in Company, where: c.id == ^company_id, lock: "FOR UPDATE"))),
+        do: Repo.rollback(:not_found)
+
+      actor = get_membership_for_update(actor_id, company_id)
+
+      unless authorized_membership_manager?(actor) and (not owner_only? or actor.role == "owner"),
+        do: Repo.rollback(:forbidden)
+
+      operation.()
+    end)
+  end
+
+  defp get_membership_for_update(user_id, company_id) do
+    Repo.one(
+      from(m in CompanyMembership,
+        where: m.user_id == ^user_id and m.company_id == ^company_id,
+        lock: "FOR UPDATE"
+      )
+    )
+  end
+
+  defp locked_membership(company_id, membership_id) do
+    Repo.one(
+      from(m in CompanyMembership,
+        where: m.id == ^membership_id and m.company_id == ^company_id,
+        lock: "FOR UPDATE"
+      )
+    )
+  end
+
+  defp authorized_membership_manager?(%CompanyMembership{role: "owner"}), do: true
+  defp authorized_membership_manager?(%CompanyMembership{role: "admin"}), do: true
+
+  defp authorized_membership_manager?(%CompanyMembership{role: "member", is_board_member: true}),
+    do: true
+
+  defp authorized_membership_manager?(_), do: false
+
+  defp require_owner_for_owner_change!(actor_id, company_id, old_role, new_role) do
+    if (old_role == "owner" or new_role == "owner") and
+         get_membership_for_update(actor_id, company_id).role != "owner",
+       do: Repo.rollback(:forbidden)
+  end
+
+  defp protect_last_owner!(company_id, "owner", new_role) when new_role != "owner" do
+    count =
+      Repo.aggregate(
+        from(m in CompanyMembership, where: m.company_id == ^company_id and m.role == "owner"),
+        :count
+      )
+
+    if count <= 1, do: Repo.rollback(:last_owner)
+  end
+
+  defp protect_last_owner!(_company_id, _old_role, _new_role), do: :ok
+
+  @doc "Deletes a user only if every company they own retains another owner."
+  def delete_user_for_actor(user_id), do: delete_user_for_actor(user_id, 3)
+
+  defp delete_user_for_actor(_user_id, 0), do: {:error, :conflict}
+
+  defp delete_user_for_actor(user_id, attempts) do
+    company_ids =
+      from(m in CompanyMembership,
+        where: m.user_id == ^user_id,
+        select: m.company_id,
+        order_by: m.company_id
+      )
+      |> Repo.all()
+
+    result =
+      Repo.transaction(fn ->
+        for company_id <- company_ids do
+          Repo.one(from(c in Company, where: c.id == ^company_id, lock: "FOR UPDATE"))
+        end
+
+        user = Repo.one(from(u in User, where: u.id == ^user_id, lock: "FOR UPDATE"))
+        if is_nil(user), do: Repo.rollback(:not_found)
+
+        memberships =
+          from(m in CompanyMembership,
+            where: m.user_id == ^user_id,
+            order_by: m.company_id,
+            lock: "FOR UPDATE"
+          )
+          |> Repo.all()
+
+        if Enum.map(memberships, & &1.company_id) != company_ids,
+          do: Repo.rollback(:membership_changed)
+
+        for membership <- memberships do
+          protect_last_owner!(membership.company_id, membership.role, nil)
+        end
+
+        if Repo.exists?(from(i in CompanyInvite, where: i.inviter_id == ^user_id)),
+          do: Repo.rollback(:issued_invites)
+
+        case Cympho.Users.delete_user(user) do
+          :ok -> memberships
+          {:error, changeset} -> Repo.rollback(changeset)
+        end
+      end)
+
+    case result do
+      {:error, :membership_changed} ->
+        delete_user_for_actor(user_id, attempts - 1)
+
+      {:ok, memberships} ->
+        for membership <- memberships do
+          CymphoWeb.Endpoint.broadcast(
+            "socket:#{membership.company_id}:#{user_id}",
+            "disconnect",
+            %{}
+          )
+        end
+
+        :ok
+
+      error ->
+        error
+    end
+  end
+
   @doc """
   Ensures the user is an owner and board member of the company.
 
@@ -2924,6 +3085,18 @@ defmodule Cympho.Companies do
     |> Repo.insert()
   end
 
+  def create_invite_for_actor(actor_id, attrs) do
+    company_id = attrs[:company_id] || attrs["company_id"]
+    role = attrs[:role] || attrs["role"] || "member"
+
+    with_company_authority(actor_id, company_id, role == "owner", fn ->
+      attrs
+      |> Map.put(:inviter_id, actor_id)
+      |> create_invite()
+      |> unwrap_or_rollback()
+    end)
+  end
+
   def get_invite_by_token(token) do
     Repo.get_by(CompanyInvite, token: token)
   end
@@ -2938,10 +3111,11 @@ defmodule Cympho.Companies do
 
   def accept_invite(token, user_id) when is_binary(token) and is_binary(user_id) do
     invite_transaction(fn ->
-      invite = get_invite_by_token_for_update(token)
+      invite = lock_invite_and_company(token)
       user = Repo.get(User, user_id)
 
-      with :ok <- validate_invite_recipient(invite, user) do
+      with :ok <- validate_invite_recipient(invite, user),
+           :ok <- validate_owner_invite_authority(invite) do
         ensure_invited_membership!(invite, user)
 
         invite
@@ -2963,9 +3137,10 @@ defmodule Cympho.Companies do
   """
   def register_from_invite(token, attrs) when is_binary(token) and is_map(attrs) do
     invite_transaction(fn ->
-      invite = get_invite_by_token_for_update(token)
+      invite = lock_invite_and_company(token)
 
-      with :ok <- validate_invite_for_registration(invite, attrs) do
+      with :ok <- validate_invite_for_registration(invite, attrs),
+           :ok <- validate_owner_invite_authority(invite) do
         attrs = put_invited_email(attrs, invite.email)
 
         user =
@@ -3015,6 +3190,22 @@ defmodule Cympho.Companies do
     |> Repo.update()
   end
 
+  def revoke_invite_for_actor(actor_id, company_id, invite_id) do
+    with_company_authority(actor_id, company_id, false, fn ->
+      invite =
+        Repo.one(
+          from(i in CompanyInvite,
+            where: i.id == ^invite_id and i.company_id == ^company_id,
+            lock: "FOR UPDATE"
+          )
+        )
+
+      if is_nil(invite), do: Repo.rollback(:not_found)
+      require_owner_for_owner_change!(actor_id, company_id, invite.role, nil)
+      revoke_invite(invite) |> unwrap_or_rollback()
+    end)
+  end
+
   defp mark_invite_expired(invite) do
     invite
     |> CompanyInvite.changeset(%{status: "expired"})
@@ -3024,6 +3215,26 @@ defmodule Cympho.Companies do
   defp get_invite_by_token_for_update(token) do
     Repo.one(from(i in CompanyInvite, where: i.token == ^token, lock: "FOR UPDATE"))
   end
+
+  defp lock_invite_and_company(token) do
+    case get_invite_by_token(token) do
+      nil ->
+        nil
+
+      invite ->
+        Repo.one(from(c in Company, where: c.id == ^invite.company_id, lock: "FOR UPDATE"))
+        get_invite_by_token_for_update(token)
+    end
+  end
+
+  defp validate_owner_invite_authority(%CompanyInvite{role: "owner"} = invite) do
+    case get_membership_for_update(invite.inviter_id, invite.company_id) do
+      %CompanyMembership{role: "owner"} -> :ok
+      _ -> {:error, :forbidden}
+    end
+  end
+
+  defp validate_owner_invite_authority(_invite), do: :ok
 
   defp validate_invite_recipient(nil, _user), do: {:error, :not_found}
   defp validate_invite_recipient(_invite, nil), do: {:error, :not_found}
@@ -3151,6 +3362,35 @@ defmodule Cympho.Companies do
     end)
   end
 
+  def approve_join_request_for_actor(actor_id, company_id, request_id) do
+    with_company_authority(actor_id, company_id, false, fn ->
+      request = locked_join_request(company_id, request_id)
+      if is_nil(request), do: Repo.rollback(:not_found)
+      if request.status != "pending", do: Repo.rollback(:not_pending)
+
+      if get_membership(request.user_id, company_id),
+        do: Repo.rollback(:already_member)
+
+      request
+      |> JoinRequest.changeset(%{
+        status: "approved",
+        reviewed_by_id: actor_id,
+        reviewed_at: DateTime.utc_now()
+      })
+      |> Repo.update()
+      |> unwrap_or_rollback()
+
+      case create_membership(%{
+             user_id: request.user_id,
+             company_id: company_id,
+             role: "member"
+           }) do
+        {:ok, membership} -> membership
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
   def reject_join_request(%JoinRequest{} = request, reviewer_id) do
     request
     |> JoinRequest.changeset(%{
@@ -3159,6 +3399,24 @@ defmodule Cympho.Companies do
       reviewed_at: DateTime.utc_now()
     })
     |> Repo.update()
+  end
+
+  def reject_join_request_for_actor(actor_id, company_id, request_id) do
+    with_company_authority(actor_id, company_id, false, fn ->
+      request = locked_join_request(company_id, request_id)
+      if is_nil(request), do: Repo.rollback(:not_found)
+      if request.status != "pending", do: Repo.rollback(:not_pending)
+      reject_join_request(request, actor_id) |> unwrap_or_rollback()
+    end)
+  end
+
+  defp locked_join_request(company_id, request_id) do
+    Repo.one(
+      from(j in JoinRequest,
+        where: j.id == ^request_id and j.company_id == ^company_id,
+        lock: "FOR UPDATE"
+      )
+    )
   end
 
   # ── Export ──

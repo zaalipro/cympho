@@ -12,6 +12,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
   alias Cympho.Adapters.RunDeadline
   alias Cympho.Adapters.RuntimeTimeout
+  alias Cympho.Adapters.OutputLimit
 
   @default_timeout 300_000
   @max_timeout 3_600_000
@@ -256,7 +257,17 @@ defmodule Cympho.Adapters.ProcessAdapter do
                  fn {port, monitor} ->
                    send(recipient_pid, {:session_started, session_id})
                    timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
-                   wait_for_process(port, monitor, session_id, recipient_pid, timeout, <<>>)
+                   limit = OutputLimit.effective(runtime_opts, config)
+
+                   wait_for_process(
+                     port,
+                     monitor,
+                     session_id,
+                     recipient_pid,
+                     timeout,
+                     <<>>,
+                     limit
+                   )
                  end
                ) do
             {:error, :runtime_admission_start_failed} ->
@@ -287,13 +298,8 @@ defmodule Cympho.Adapters.ProcessAdapter do
        ) do
     if write_prompt_stdin?(config) do
       with_prompt_file(prompt, fn prompt_path ->
-        shell = System.find_executable("sh") || "/bin/sh"
-
-        shell_args = [
-          "-c",
-          "exec \"$0\" \"$@\" < \"$CYMPHO_PROMPT_FILE\"",
-          command_path | args
-        ]
+        limit = OutputLimit.effective(runtime_opts, config)
+        {shell, shell_args} = OutputLimit.wrapped_command(command_path, args, limit, true)
 
         port_opts =
           port_opts
@@ -309,7 +315,10 @@ defmodule Cympho.Adapters.ProcessAdapter do
         |> put_port_args(args)
         |> put_port_env([])
 
-      port = Port.open({:spawn_executable, String.to_charlist(command_path)}, port_opts)
+      limit = OutputLimit.effective(runtime_opts, config)
+      {shell, shell_args} = OutputLimit.wrapped_command(command_path, args, limit)
+      port_opts = put_port_args(port_opts, shell_args)
+      port = Port.open({:spawn_executable, String.to_charlist(shell)}, port_opts)
       run_marked_port(port, session_id, runtime_opts, fun)
     end
   end
@@ -357,9 +366,17 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp wait_for_process(port, monitor, session_id, recipient_pid, timeout, acc)
+  defp wait_for_process(port, monitor, session_id, recipient_pid, timeout, acc, limit)
        when is_integer(timeout) do
-    wait_for_process(port, monitor, session_id, recipient_pid, RunDeadline.new(timeout), acc)
+    wait_for_process(
+      port,
+      monitor,
+      session_id,
+      recipient_pid,
+      RunDeadline.new(timeout),
+      acc,
+      limit
+    )
   end
 
   defp wait_for_process(
@@ -368,9 +385,19 @@ defmodule Cympho.Adapters.ProcessAdapter do
          session_id,
          recipient_pid,
          %RunDeadline{} = deadline,
-         acc
+         acc,
+         limit
        ) do
     receive do
+      {^port, {:data, data}} when byte_size(acc) + byte_size(data) > limit ->
+        close_port(port, monitor)
+
+        send(
+          recipient_pid,
+          {:turn_ended_with_error, session_id,
+           {:output_limit_exceeded, limit, OutputLimit.tail(acc, data)}}
+        )
+
       {^port, {:data, data}} ->
         wait_for_process(
           port,
@@ -378,11 +405,12 @@ defmodule Cympho.Adapters.ProcessAdapter do
           session_id,
           recipient_pid,
           RunDeadline.observe(deadline, data, session_id, recipient_pid),
-          acc <> data
+          acc <> data,
+          limit
         )
 
       {:EXIT, ^port, _reason} ->
-        wait_for_process(port, monitor, session_id, recipient_pid, deadline, acc)
+        wait_for_process(port, monitor, session_id, recipient_pid, deadline, acc, limit)
 
       {^port, {:exit_status, 0}} ->
         Process.demonitor(monitor, [:flush])
@@ -416,7 +444,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
         # otherwise hold its dispatch slot forever.
         case RunDeadline.expired(deadline) do
           nil ->
-            wait_for_process(port, monitor, session_id, recipient_pid, deadline, acc)
+            wait_for_process(port, monitor, session_id, recipient_pid, deadline, acc, limit)
 
           :max_run ->
             close_port(port, monitor)

@@ -2,9 +2,29 @@ defmodule Cympho.Recovery.Fingerprint do
   @moduledoc "Canonical, redacted fingerprints for stranded work sources."
 
   @version 2
+  @run_snapshot_keys ~w(
+    version source_type company_id run_id issue_id agent_id run_status liveness_at
+    issue_status issue_lock_version lock_version checkout_run_id error_family
+  )
+  @checkout_snapshot_keys ~w(
+    version source_type issue_id company_id assignee_id issue_status checkout_liveness_at
+    checkout_run_id lock_version
+  )
 
   @spec version() :: pos_integer()
   def version, do: @version
+
+  @doc false
+  def run_snapshot_keys, do: @run_snapshot_keys
+
+  @doc false
+  def checkout_snapshot_keys, do: @checkout_snapshot_keys
+
+  @doc false
+  def exact_run_snapshot?(snapshot), do: exact_snapshot?(snapshot, @run_snapshot_keys)
+
+  @doc false
+  def exact_checkout_snapshot?(snapshot), do: exact_snapshot?(snapshot, @checkout_snapshot_keys)
 
   @spec for_run(map(), map()) :: {String.t(), map()}
   def for_run(run, issue) do
@@ -55,6 +75,13 @@ defmodule Cympho.Recovery.Fingerprint do
     canonical = snapshot |> sort_maps() |> Jason.encode!()
     {:crypto.hash(:sha256, canonical) |> Base.encode16(case: :lower), snapshot}
   end
+
+  defp exact_snapshot?(snapshot, keys) when is_map(snapshot) do
+    map_size(snapshot) == length(keys) and snapshot["version"] == @version and
+      Enum.all?(keys, &Map.has_key?(snapshot, &1))
+  end
+
+  defp exact_snapshot?(_snapshot, _keys), do: false
 
   defp sort_maps(value) when is_map(value) do
     value

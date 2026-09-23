@@ -298,6 +298,84 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
+    test "owned stop reports deferred cleanup while its adapter child retains admission", %{
+      agent: agent,
+      issue: issue
+    } do
+      session_id = "session-owned-stop-stubborn-child"
+      run_id = Ecto.UUID.generate()
+      parent = self()
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      before_count = Cympho.RuntimeAdmission.snapshot().total_running
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id, status: "running"}} end,
+           start_run: fn _ -> :ok end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             worker =
+               Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
+                 receive do
+                   {:cancel_session, ^session_id, _reason} ->
+                     send(parent, :owned_stop_cancel_requested)
+                     receive do: (:shutdown -> :ok)
+                 end
+               end)
+
+             send(parent, {:owned_stop_worker, worker})
+             send(recipient_pid, {:session_started, session_id})
+             session_id
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent.id)
+        assert_receive {:owned_stop_worker, worker}, 1_000
+        assert wait_for_session_id(pid, session_id)
+        assert Cympho.RuntimeAdmission.snapshot().total_running == before_count + 1
+
+        assert {:error, :cleanup_pending} =
+                 Orchestrator.stop_owned(pid, agent.id, run_id, :operator_stop)
+
+        assert_received :owned_stop_cancel_requested
+        assert Process.alive?(worker)
+        assert Cympho.RuntimeAdmission.snapshot().total_running == before_count + 1
+
+        send(worker, :shutdown)
+
+        wait_until(fn ->
+          assert Cympho.RuntimeAdmission.snapshot().total_running == before_count
+        end)
+      end
+    end
+
+    test "owned stop timeout never acknowledges a controller before its DOWN" do
+      controller =
+        spawn(fn ->
+          receive do
+            {:"$gen_call", from, {:stop_if_owner, _agent_id, _run_id, _reason}} ->
+              GenServer.reply(from, :ok)
+              Process.sleep(:infinity)
+          end
+        end)
+
+      assert {:error, :cleanup_pending} =
+               Orchestrator.stop_owned(
+                 controller,
+                 Ecto.UUID.generate(),
+                 Ecto.UUID.generate(),
+                 :operator_stop
+               )
+
+      refute Process.alive?(controller)
+    end
+
     test "starts session when adapter resolves successfully", %{
       issue_id: issue_id,
       agent_id: agent_id,
@@ -1188,6 +1266,111 @@ defmodule Cympho.OrchestratorTest do
         assert length(runs) == 2
         assert Enum.count(runs, &(&1.status == "failed")) == 1
         assert Enum.count(runs, &(&1.status == "completed")) == 1
+      end
+    end
+
+    test "no-output retry replaces the heartbeat timer and ignores a stale tick", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      MockAdapter.script(agent_id, issue.id, [:silent, :silent])
+      on_exit(fn -> MockAdapter.clear(agent_id, issue.id) end)
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
+      with_mocks([
+        {Cympho.Adapters, [], [resolve: fn _ -> {:ok, MockAdapter, %{}} end]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
+
+        first =
+          wait_until(fn ->
+            state = :sys.get_state(pid)
+            assert state.session_id
+            assert is_reference(state.heartbeat_timer)
+            state
+          end)
+
+        assert {:ok, worker} = Cympho.AdapterSessions.owner(first.session_id)
+        Process.exit(worker, :kill)
+        send(pid, {:turn_ended_with_error, first.session_id, :no_output})
+
+        second =
+          wait_until(fn ->
+            state = :sys.get_state(pid)
+            assert state.no_work_retry_count == 1
+            assert state.session_id != first.session_id
+            assert is_reference(state.heartbeat_timer)
+            state
+          end)
+
+        assert Process.read_timer(first.heartbeat_timer) == false
+        assert is_integer(Process.read_timer(second.heartbeat_timer))
+
+        send(pid, {:heartbeat_tick, first.heartbeat_token})
+        after_stale = :sys.get_state(pid)
+        assert after_stale.heartbeat_timer == second.heartbeat_timer
+        assert after_stale.adapter_session_misses == second.adapter_session_misses
+
+        Orchestrator.stop(checked_out.id, :operator_stop)
+      end
+    end
+
+    test "provider fallback replaces its heartbeat timer without a stale liveness miss", %{
+      agent: agent,
+      issue: issue
+    } do
+      {:ok, agent} =
+        Agents.update_agent(agent, %{
+          runtime_config: %{
+            "profile_id" => "codex-gpt-5.5",
+            "fallback_profile_ids" => ["codex-mini"]
+          }
+        })
+
+      MockAdapter.script(agent.id, issue.id, [:silent, :silent])
+      on_exit(fn -> MockAdapter.clear(agent.id, issue.id) end)
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent.id)
+
+      with_mocks([
+        {Cympho.Adapters, [], [resolve: fn %{config: config} -> {:ok, MockAdapter, config} end]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent.id)
+
+        first =
+          wait_until(fn ->
+            state = :sys.get_state(pid)
+            assert state.session_id
+            assert is_reference(state.heartbeat_timer)
+            state
+          end)
+
+        assert {:ok, worker} = Cympho.AdapterSessions.owner(first.session_id)
+        Process.exit(worker, :kill)
+
+        send(
+          pid,
+          {:turn_ended_with_error, first.session_id,
+           {:provider_failure, :rate_limited, "HTTP 429 Too Many Requests"}}
+        )
+
+        fallback =
+          wait_until(fn ->
+            state = :sys.get_state(pid)
+            assert state.session_id != first.session_id
+            assert state.run_id != first.run_id
+            assert is_reference(state.heartbeat_timer)
+            state
+          end)
+
+        assert Process.read_timer(first.heartbeat_timer) == false
+        assert is_integer(Process.read_timer(fallback.heartbeat_timer))
+
+        send(pid, {:heartbeat_tick, first.heartbeat_token})
+        after_stale = :sys.get_state(pid)
+        assert after_stale.heartbeat_timer == fallback.heartbeat_timer
+        assert after_stale.adapter_session_misses == fallback.adapter_session_misses
+
+        Orchestrator.stop(checked_out.id, :operator_stop)
       end
     end
 

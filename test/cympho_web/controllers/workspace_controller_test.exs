@@ -51,6 +51,201 @@ defmodule CymphoWeb.WorkspaceControllerTest do
     assert Enum.any?(data, fn row -> row["id"] == execution_workspace.id end)
   end
 
+  test "project workspace read, create, and update return safe nonempty data", %{
+    conn: conn,
+    company: company,
+    project: project,
+    workspace: workspace
+  } do
+    secret = "workspace-secret-sentinel"
+
+    {:ok, workspace} =
+      Workspaces.update_project_workspace(workspace, %{metadata: %{"secret_bindings" => secret}})
+
+    list = get(conn, "/api/workspaces?project_id=#{project.id}")
+    assert %{"data" => rows} = json_response(list, 200)
+    assert Enum.any?(rows, &(&1["id"] == workspace.id))
+    refute inspect(rows) =~ secret
+
+    show = get(recycle(conn), "/api/workspaces/#{workspace.id}")
+
+    assert %{"data" => %{"id" => id, "name" => name, "company_id" => company_id}} =
+             json_response(show, 200)
+
+    assert id == workspace.id
+    assert name == workspace.name
+    assert company_id == company.id
+    refute show.resp_body =~ secret
+
+    branch = get(recycle(conn), "/api/exec-workspaces/#{workspace.id}/default-branch")
+
+    assert %{"data" => %{"default_branch" => "main", "project_workspace" => %{"id" => ^id}}} =
+             json_response(branch, 200)
+
+    refute branch.resp_body =~ secret
+
+    create =
+      post(recycle(conn), "/api/workspaces", %{
+        "project_workspace" => %{
+          "project_id" => project.id,
+          "name" => "Created workspace",
+          "repo_url" => "https://user:#{secret}@git.example/repo.git",
+          "setup_command" => "export TOKEN=#{secret}",
+          "shared_workspace_key" => secret,
+          "metadata" => %{"secret_bindings" => secret}
+        }
+      })
+
+    assert %{"data" => %{"id" => created_id, "name" => "Created workspace"}} =
+             json_response(create, 201)
+
+    refute create.resp_body =~ secret
+
+    update =
+      patch(recycle(conn), "/api/workspaces/#{created_id}", %{
+        "project_workspace" => %{"name" => "Renamed workspace"}
+      })
+
+    assert %{"data" => %{"name" => "Renamed workspace"}} = json_response(update, 200)
+    refute update.resp_body =~ secret
+
+    config =
+      patch(recycle(conn), "/api/workspaces/#{created_id}/worktree-config", %{
+        "config" => %{"credential" => secret}
+      })
+
+    assert %{"data" => %{"id" => ^created_id}} = json_response(config, 200)
+    refute config.resp_body =~ secret
+  end
+
+  test "execution workspace read, create, update, seed, and secret injection omit secret config",
+       %{
+         conn: conn,
+         project: project,
+         workspace: workspace,
+         execution_workspace: execution_workspace
+       } do
+    secret = "execution-secret-sentinel"
+
+    create =
+      post(conn, "/api/workspaces/#{workspace.id}/exec-workspaces", %{
+        "execution_workspace" => %{
+          "name" => "Created execution workspace",
+          "repo_url" => "https://user:#{secret}@git.example/repo.git",
+          "metadata" => %{"secret_bindings" => secret}
+        }
+      })
+
+    assert %{"data" => %{"id" => created_id, "name" => "Created execution workspace"}} =
+             json_response(create, 201)
+
+    refute create.resp_body =~ secret
+
+    update =
+      patch(recycle(conn), "/api/exec-workspaces/#{created_id}", %{
+        "execution_workspace" => %{"name" => "Renamed execution workspace"}
+      })
+
+    assert %{"data" => %{"name" => "Renamed execution workspace"}} =
+             json_response(update, 200)
+
+    refute update.resp_body =~ secret
+
+    list = get(recycle(conn), "/api/workspaces/#{workspace.id}/exec-workspaces")
+    assert %{"data" => rows} = json_response(list, 200)
+    assert Enum.any?(rows, &(&1["id"] == created_id))
+    refute list.resp_body =~ secret
+
+    show = get(recycle(conn), "/api/exec-workspaces/#{created_id}")
+
+    assert %{"data" => %{"id" => ^created_id, "project_id" => project_id}} =
+             json_response(show, 200)
+
+    assert project_id == project.id
+    refute show.resp_body =~ secret
+
+    seed =
+      post(recycle(conn), "/api/exec-workspaces/#{execution_workspace.id}/seed", %{
+        "seed_config" => %{"credential" => secret}
+      })
+
+    assert %{"data" => %{"id" => _}} = json_response(seed, 200)
+    refute seed.resp_body =~ secret
+
+    inject =
+      post(recycle(conn), "/api/exec-workspaces/#{execution_workspace.id}/secrets", %{
+        "secret_mappings" => %{"API_KEY" => secret}
+      })
+
+    assert %{"data" => %{"id" => _}} = json_response(inject, 200)
+    refute inject.resp_body =~ secret
+  end
+
+  test "workspace subresources omit commands, provider credentials, metadata, and logs", %{
+    conn: conn,
+    company: company,
+    execution_workspace: execution_workspace
+  } do
+    secret = "subresource-secret-sentinel"
+
+    service_create =
+      post(conn, "/api/exec-workspaces/#{execution_workspace.id}/services", %{
+        "runtime_service" => %{
+          "service_name" => "API service",
+          "reuse_key" => "stable-api-service",
+          "command" => secret
+        }
+      })
+
+    assert %{
+             "data" => %{
+               "id" => service_id,
+               "service_name" => "API service",
+               "reuse_key" => "stable-api-service"
+             }
+           } =
+             json_response(service_create, 201)
+
+    refute service_create.resp_body =~ secret
+
+    service_id
+    |> Workspaces.get_runtime_service!()
+    |> Cympho.Workspaces.RuntimeService.lifecycle_changeset(%{
+      url: "https://preview.test/?token=#{secret}",
+      provider_ref: secret,
+      stop_policy: %{"credential" => secret}
+    })
+    |> Cympho.Repo.update!()
+
+    services = get(recycle(conn), "/api/exec-workspaces/#{execution_workspace.id}/services")
+
+    assert %{"data" => [%{"id" => ^service_id, "reuse_key" => "stable-api-service"}]} =
+             json_response(services, 200)
+
+    refute services.resp_body =~ secret
+
+    start = patch(recycle(conn), "/api/services/#{service_id}/start")
+    assert %{"data" => %{"status" => "starting"}} = json_response(start, 200)
+    refute start.resp_body =~ secret
+
+    {:ok, _operation} =
+      Workspaces.create_operation(%{
+        phase: "launch",
+        status: "completed",
+        company_id: company.id,
+        execution_workspace_id: execution_workspace.id,
+        stdout_excerpt: secret,
+        metadata: %{"credential" => secret}
+      })
+
+    operations = get(recycle(conn), "/api/exec-workspaces/#{execution_workspace.id}/operations")
+
+    assert %{"data" => [%{"phase" => "launch", "status" => "completed"}]} =
+             json_response(operations, 200)
+
+    refute operations.resp_body =~ secret
+  end
+
   test "GET /api/exec-workspaces/:id/operations returns 200 for a found record", %{
     conn: conn,
     company: company,
@@ -164,6 +359,7 @@ defmodule CymphoWeb.WorkspaceControllerTest do
       })
 
     forged_id = Ecto.UUID.generate()
+    secret = "lease-secret-sentinel"
 
     conn =
       post(conn, "/api/exec-workspaces/#{execution_workspace.id}/leases", %{
@@ -174,12 +370,14 @@ defmodule CymphoWeb.WorkspaceControllerTest do
           "status" => "released",
           "provider" => "fake",
           "provider_lease_id" => "forged-provider-lease",
+          "metadata" => %{"credential" => secret},
           "acquired_at" => DateTime.utc_now(),
           "released_at" => DateTime.utc_now()
         }
       })
 
     assert %{"data" => %{"id" => lease_id}} = json_response(conn, 201)
+    refute conn.resp_body =~ secret
     {:ok, lease} = Workspaces.get_company_environment_lease(company.id, lease_id)
 
     assert lease.company_id == company.id
@@ -189,6 +387,17 @@ defmodule CymphoWeb.WorkspaceControllerTest do
     assert is_nil(lease.provider)
     assert is_nil(lease.provider_lease_id)
     assert is_nil(lease.released_at)
+
+    lease
+    |> Cympho.Workspaces.EnvironmentLease.changeset(%{provider_lease_id: secret})
+    |> Cympho.Repo.update!()
+
+    revoke = delete(recycle(conn), "/api/leases/#{lease_id}")
+
+    assert %{"data" => %{"id" => ^lease_id, "status" => "released"}} =
+             json_response(revoke, 200)
+
+    refute revoke.resp_body =~ secret
   end
 
   defp project_prefix(base, unique) do

@@ -1136,40 +1136,89 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
+  defp do_execute_action_once(
+         %BoardApproval{category: "stranded_work_recovery"} = board_approval,
+         action
+       ) do
+    effect_key = "board_approval:#{board_approval.id}:#{board_approval.category}"
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    transaction_result =
+      Repo.transaction(fn ->
+        case_row =
+          Repo.one(
+            from recovery_case in RecoveryCase,
+              where: recovery_case.id == ^board_approval.recovery_case_id,
+              lock: "FOR UPDATE"
+          )
+
+        locked_approval =
+          Repo.one(
+            from approval in BoardApproval,
+              where: approval.id == ^board_approval.id,
+              lock: "FOR UPDATE"
+          )
+
+        with %RecoveryCase{} <- case_row,
+             %BoardApproval{
+               status: "approved",
+               category: "stranded_work_recovery",
+               recovery_case_id: recovery_case_id,
+               company_id: company_id
+             } <- locked_approval,
+             true <- recovery_case_id == case_row.id,
+             true <- company_id == case_row.company_id do
+          execute_inserted_effect(locked_approval, effect_key, now, action)
+        else
+          _ -> Repo.rollback({:effect_failed, :stale_recovery_proposal})
+        end
+      end)
+
+    finish_action_once(transaction_result, board_approval)
+  end
+
   defp do_execute_action_once(%BoardApproval{} = board_approval, action) do
     effect_key = "board_approval:#{board_approval.id}:#{board_approval.category}"
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     transaction_result =
       Repo.transaction(fn ->
-        {inserted, _} =
-          Repo.insert_all(
-            BoardApprovalEffect,
-            [
-              %{
-                id: Ecto.UUID.generate(),
-                board_approval_id: board_approval.id,
-                effect_key: effect_key,
-                category: board_approval.category,
-                inserted_at: now,
-                updated_at: now
-              }
-            ],
-            on_conflict: :nothing,
-            conflict_target: [:board_approval_id]
-          )
-
-        if inserted == 0 do
-          :already_executed
-        else
-          case action.() do
-            {:error, :already_executed} -> :already_executed
-            {:error, reason} -> Repo.rollback({:effect_failed, reason})
-            result -> result
-          end
-        end
+        execute_inserted_effect(board_approval, effect_key, now, action)
       end)
 
+    finish_action_once(transaction_result, board_approval)
+  end
+
+  defp execute_inserted_effect(board_approval, effect_key, now, action) do
+    {inserted, _} =
+      Repo.insert_all(
+        BoardApprovalEffect,
+        [
+          %{
+            id: Ecto.UUID.generate(),
+            board_approval_id: board_approval.id,
+            effect_key: effect_key,
+            category: board_approval.category,
+            inserted_at: now,
+            updated_at: now
+          }
+        ],
+        on_conflict: :nothing,
+        conflict_target: [:board_approval_id]
+      )
+
+    if inserted == 0 do
+      :already_executed
+    else
+      case action.() do
+        {:error, :already_executed} -> :already_executed
+        {:error, reason} -> Repo.rollback({:effect_failed, reason})
+        result -> result
+      end
+    end
+  end
+
+  defp finish_action_once(transaction_result, board_approval) do
     case transaction_result do
       {:ok, :already_executed} ->
         :ok

@@ -96,8 +96,15 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
   def handle_info({:retry_approval, approval, attempt}, state) do
     case BoardApprovals.renew_execution_claim(approval) do
-      :ok -> execute_with_retry(approval, attempt)
-      {:error, :claim_lost} -> :ok
+      :ok ->
+        execute_with_retry(approval, attempt)
+
+      {:error, :claim_lost} ->
+        case BoardApprovals.claim_for_execution(approval.id) do
+          {:ok, claimed} -> execute_with_retry(claimed, attempt)
+          {:error, :already_executed} -> :ok
+          {:error, :not_found} -> :ok
+        end
     end
 
     {:noreply, state}
@@ -170,24 +177,35 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
         BoardApprovals.mark_executed(approval)
         :ok
 
+      {:error, :recovery_deferred} ->
+        # A deferred exact source has not applied any durable action. Release
+        # the execution claim before backoff so `executed_at` does not make the
+        # approval look consumed and the retry can claim it afresh.
+        _ = BoardApprovals.release_claim(approval.id)
+        schedule_retry(approval, attempt, attempt)
+
       {:error, _reason} ->
-        delay = calculate_retry_delay(attempt)
-
-        GovernanceAuditLogs.log_action(
-          "board_decision",
-          {"system", approval.company_id},
-          "Board approval execution failed (attempt #{attempt + 1}/#{@max_retries}), retrying in #{div(delay, 1000)}s: #{approval.title}",
-          resource: approval,
-          metadata: %{
-            board_approval_id: approval.id,
-            category: approval.category,
-            attempt: attempt + 1,
-            retry_delay_ms: delay
-          }
-        )
-
-        Process.send_after(self(), {:retry_approval, approval, attempt + 1}, delay)
+        schedule_retry(approval, attempt, attempt + 1)
     end
+  end
+
+  defp schedule_retry(approval, attempt, next_attempt) do
+    delay = calculate_retry_delay(attempt)
+
+    GovernanceAuditLogs.log_action(
+      "board_decision",
+      {"system", approval.company_id},
+      "Board approval execution failed (attempt #{attempt + 1}/#{@max_retries}), retrying in #{div(delay, 1000)}s: #{approval.title}",
+      resource: approval,
+      metadata: %{
+        board_approval_id: approval.id,
+        category: approval.category,
+        attempt: attempt + 1,
+        retry_delay_ms: delay
+      }
+    )
+
+    Process.send_after(self(), {:retry_approval, approval, next_attempt}, delay)
   end
 
   defp calculate_retry_delay(attempt) do

@@ -63,7 +63,7 @@ defmodule CymphoWeb.AgentController do
 
     with {:ok, agent} <- Agents.get_company_agent(company_id, id) do
       case Agents.update_agent(agent, %{role: new_role}) do
-        {:ok, updated} -> json(conn, %{data: updated})
+        {:ok, updated} -> json(conn, %{data: serialize_agent(updated)})
         {:error, changeset} -> {:error, changeset}
       end
     end

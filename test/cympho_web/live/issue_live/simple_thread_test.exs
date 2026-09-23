@@ -311,11 +311,21 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
   end
 
   test "simple set-PR gate opens form, saves URL, and proof chip links to PR", %{issue: issue} do
+    {:ok, project} =
+      Cympho.Projects.create_project(
+        scoped_attrs(%{
+          name: "Simple thread PR project",
+          prefix: "STPR",
+          repo_url: "https://github.com/acme/app"
+        })
+      )
+
     {:ok, _issue} =
       Issues.update_issue(issue, %{
         description: "Owner request is clear.",
         status: :in_progress,
-        assigned_role: "engineer"
+        assigned_role: "engineer",
+        project_id: project.id
       })
 
     {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")

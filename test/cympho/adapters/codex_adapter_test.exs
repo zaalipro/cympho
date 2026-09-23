@@ -3,9 +3,65 @@ defmodule Cympho.Adapters.CodexAdapterTest do
 
   alias Cympho.Adapters.CodexAdapter
   alias Cympho.RuntimeContext
+  alias Cympho.RuntimeAdmission
   alias Cympho.Workspace
 
   @issue %{id: "issue-1", title: "Test issue", description: "Exercise the adapter."}
+
+  test "a Codex output flood fails without completing truncated JSON" do
+    pid_path =
+      Path.join(System.tmp_dir!(), "cympho-codex-flood-#{System.unique_integer([:positive])}")
+
+    go_path = pid_path <> ".go"
+    sleep = System.find_executable("sleep") || "/bin/sleep"
+
+    on_exit(fn ->
+      File.rm(pid_path)
+      File.rm(go_path)
+    end)
+
+    server =
+      start_supervised!(
+        {RuntimeAdmission, name: nil, max_total_runs: 1, max_local_runs: 1, memory_check?: false}
+      )
+
+    assert {:ok, token} = RuntimeAdmission.checkout(CodexAdapter, server)
+
+    with_fake_codex(
+      "echo $$ > #{pid_path}\nwhile [ ! -e #{go_path} ]; do #{sleep} 0.01; done\nwhile :; do printf 'tail-marker-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n'; done",
+      fn ->
+        session_id =
+          CodexAdapter.run(@issue, "agent-1", self(),
+            config: %{"timeout" => 2_000, "max_output_bytes" => 16_384},
+            cwd: System.tmp_dir!(),
+            runtime_admission_claim: {token, server, :local_process}
+          )
+
+        assert_receive {:session_started, ^session_id}, 3_000
+        assert eventually(fn -> File.exists?(pid_path) end)
+        assert RuntimeAdmission.snapshot(server).total_running == 1
+        assert {:error, :total_slots_exhausted} = RuntimeAdmission.available(CodexAdapter, server)
+        File.write!(go_path, "go")
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:output_limit_exceeded, 16_384, tail}},
+                       5_000
+
+        assert byte_size(tail) <= 8_192
+        assert tail =~ "tail-marker"
+        refute_receive {:turn_completed, ^session_id, _}, 100
+        child_pid = pid_path |> File.read!() |> String.trim()
+
+        assert {_output, code} =
+                 System.cmd("/bin/kill", ["-0", child_pid], stderr_to_stdout: true)
+
+        assert code != 0
+        assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
+        assert eventually(fn -> RuntimeAdmission.snapshot(server).total_running == 0 end)
+        assert :ok = RuntimeAdmission.available(CodexAdapter, server)
+      end
+    )
+  end
 
   test "reports missing codex command" do
     with_empty_path(fn ->
@@ -619,6 +675,7 @@ defmodule Cympho.Adapters.CodexAdapterTest do
   defp with_fake_codex(script, fun) do
     dir = Path.join(System.tmp_dir!(), "cympho-codex-test-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
+    File.ln_s!(System.find_executable("python3"), Path.join(dir, "python3"))
     codex_path = Path.join(dir, "codex")
     bwrap_path = Path.join(dir, "bwrap")
     File.write!(codex_path, "#!/bin/sh\n#{script}\n")
@@ -709,5 +766,13 @@ defmodule Cympho.Adapters.CodexAdapterTest do
     end
   rescue
     _ -> false
+  end
+
+  defp eventually(fun, attempts \\ 40) do
+    cond do
+      fun.() -> true
+      attempts <= 1 -> false
+      true -> Process.sleep(25) && eventually(fun, attempts - 1)
+    end
   end
 end

@@ -4,6 +4,17 @@ defmodule CymphoWeb.RoutineLiveTest do
   import Phoenix.LiveViewTest
   alias Cympho.{Agents, Projects, RoutineTriggers, Routines}
 
+  test "routine form params fail closed when no company is assigned" do
+    socket = %{assigns: %{current_company: nil}}
+
+    assert {:error, :not_found} =
+             CymphoWeb.RoutineLive.FormHelpers.scoped_routine_params(
+               socket,
+               %{"name" => "Forged", "company_id" => Ecto.UUID.generate()},
+               put_company_scope: true
+             )
+  end
+
   defp create_routine(attrs) do
     attrs
     |> Map.put_new(:company_id, current_company_id())
@@ -108,6 +119,33 @@ defmodule CymphoWeb.RoutineLiveTest do
       refute html =~ "Foreign Routine"
       refute company.id == other_company.id
       assert foreign.company_id == other_company.id
+    end
+
+    test "does not expose a foreign-owned routine through a local agent association", %{
+      conn: conn
+    } do
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign Routine With Local Agent",
+          slug: "foreign-local-agent-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, local_agent} = create_agent(%{name: "Local Owner", role: :engineer})
+
+      {:ok, foreign} =
+        Routines.create_routine(%{name: "Do Not Expose", company_id: other_company.id})
+
+      foreign =
+        foreign
+        |> Ecto.Changeset.change(agent_id: local_agent.id)
+        |> Cympho.Repo.update!()
+
+      {:ok, _view, html} = live(conn, "/routines")
+      refute html =~ "Do Not Expose"
+      assert {:error, {:live_redirect, %{to: "/"}}} = live(conn, "/routines/#{foreign.id}")
+
+      assert {:error, {:live_redirect, %{to: "/routines"}}} =
+               live(conn, "/routines/#{foreign.id}/edit")
     end
 
     test "shows pause button for active routines", %{conn: conn} do
@@ -259,6 +297,29 @@ defmodule CymphoWeb.RoutineLiveTest do
   end
 
   describe "New" do
+    test "forged company id cannot override the current company", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Forged Routine Company",
+          slug: "forged-routine-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, view, _html} = live(conn, "/routines/new")
+
+      assert {:error, {:live_redirect, %{to: "/routines/" <> id}}} =
+               render_submit(view, "save", %{
+                 "routine" => %{
+                   "name" => "Tenant-bound routine",
+                   "company_id" => other_company.id
+                 }
+               })
+
+      assert Routines.get_routine!(id).company_id == company.id
+    end
+
     test "renders the new routine form", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/routines/new")
       assert html =~ "New Routine"
@@ -346,6 +407,70 @@ defmodule CymphoWeb.RoutineLiveTest do
   end
 
   describe "Edit" do
+    test "updates an accessible legacy null-company routine without changing ownership", %{
+      conn: conn
+    } do
+      {:ok, agent} = create_agent(%{name: "Legacy Owner", role: :engineer})
+      {:ok, routine} = Routines.create_routine(%{name: "Legacy routine", agent_id: agent.id})
+      {:ok, view, _html} = live(conn, "/routines/#{routine.id}/edit")
+
+      assert {:error, {:live_redirect, %{to: "/routines/" <> _}}} =
+               render_submit(view, "save", %{"routine" => %{"name" => "Legacy updated"}})
+
+      updated = Routines.get_routine!(routine.id)
+      assert updated.name == "Legacy updated"
+      assert updated.company_id == nil
+    end
+
+    test "forged company id on edit cannot move a routine", %{conn: conn} do
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Forged Edit Company",
+          slug: "forged-edit-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, routine} = create_routine(%{name: "Stay local"})
+      {:ok, view, _html} = live(conn, "/routines/#{routine.id}/edit")
+
+      render_submit(view, "save", %{
+        "routine" => %{"name" => "Moved", "company_id" => other_company.id}
+      })
+
+      changeset = :sys.get_state(view.pid).socket.assigns.changeset
+      assert Keyword.has_key?(changeset.errors, :company_id)
+      assert Routines.get_routine!(routine.id).company_id == routine.company_id
+      assert Routines.get_routine!(routine.id).name == "Stay local"
+    end
+
+    test "rejects an owner and project from another company", %{conn: conn} do
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign Edit References",
+          slug: "foreign-edit-refs-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, foreign_agent} =
+        create_agent(%{name: "Foreign Agent", role: :engineer, company_id: other_company.id})
+
+      {:ok, foreign_project} =
+        create_project(%{name: "Foreign Project", company_id: other_company.id})
+
+      {:ok, routine} = create_routine(%{name: "Local references only"})
+      {:ok, view, _html} = live(conn, "/routines/#{routine.id}/edit")
+
+      render_submit(view, "save", %{
+        "routine" => %{
+          "name" => "Changed",
+          "agent_id" => foreign_agent.id,
+          "project_id" => foreign_project.id
+        }
+      })
+
+      assert Routines.get_routine!(routine.id).name == "Local references only"
+      assert Routines.get_routine!(routine.id).agent_id == nil
+      assert Routines.get_routine!(routine.id).project_id == nil
+    end
+
     test "renders the edit form with existing values", %{conn: conn} do
       {:ok, routine} = create_routine(%{name: "Edit Me"})
 

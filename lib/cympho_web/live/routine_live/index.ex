@@ -1,22 +1,22 @@
 defmodule CymphoWeb.RoutineLive.Index do
   use CymphoWeb, :live_view
   import CymphoWeb.RoutineLive.FormHelpers, only: [schedule_summary: 1, next_run: 1, raw_cron: 1]
-  alias Cympho.Repo
   alias Cympho.Routines
   alias Cympho.Routines.Routine
 
-  @stale_run_after_seconds 2 * 60 * 60
-  @recent_failure_window_seconds 24 * 60 * 60
-
   @impl true
   def mount(_params, _session, socket) do
-    socket =
-      socket
-      |> assign(:digest_density, "compact")
-      |> assign(:infinite_scroll, %{})
-      |> assign_routine_overview()
+    if is_binary(current_company_id(socket)) do
+      socket =
+        socket
+        |> assign(:digest_density, "compact")
+        |> assign(:infinite_scroll, %{})
+        |> assign_routine_overview()
 
-    {:ok, init_stream(socket, :routine, &fetch_routines(socket, &1))}
+      {:ok, init_stream(socket, :routine, &fetch_routines(socket, &1))}
+    else
+      {:ok, redirect(socket, to: ~p"/onboarding")}
+    end
   end
 
   @impl true
@@ -99,8 +99,7 @@ defmodule CymphoWeb.RoutineLive.Index do
   end
 
   defp fetch_routines(socket, cursor) do
-    page = Routines.list_routines_page(company_id: current_company_id(socket), after: cursor)
-    %{page | entries: Repo.preload(page.entries, [:triggers, :runs])}
+    Routines.list_routines_overview_page(company_id: current_company_id(socket), after: cursor)
   end
 
   defp refresh_routines(socket) do
@@ -111,8 +110,9 @@ defmodule CymphoWeb.RoutineLive.Index do
 
   defp assign_routine_overview(socket) do
     company_id = current_company_id(socket)
-    health = Routines.health_summary(company_id)
-    command_routines = command_routines(company_id)
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    health = Routines.health_summary(company_id, now: now)
+    command_routines = Routines.routine_command_candidates(company_id, now: now)
     health = put_next_action_routine_id(health, command_routines)
 
     socket
@@ -139,14 +139,9 @@ defmodule CymphoWeb.RoutineLive.Index do
 
   defp put_next_action_routine_id(health, _routines), do: health
 
-  defp command_routines(company_id) do
-    Routines.list_routines(company_id: company_id)
-    |> Repo.preload([:triggers, :runs])
-  end
-
   defp get_scoped_routine(socket, id) do
     case current_company_id(socket) do
-      nil -> Routines.get_routine(id)
+      nil -> {:error, :not_found}
       company_id -> Routines.get_company_routine(company_id, id)
     end
   end
@@ -162,14 +157,11 @@ defmodule CymphoWeb.RoutineLive.Index do
   defp normalize_digest_density(_), do: "compact"
 
   defp build_routine_command(%{metrics: metrics}, routines) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
-    stale_before = DateTime.add(now, -@stale_run_after_seconds, :second)
-    recent_failure_after = DateTime.add(now, -@recent_failure_window_seconds, :second)
     active_routines = Enum.filter(routines, &(&1.status == :active))
 
     triggerless = Enum.find(active_routines, &without_enabled_trigger?/1)
-    stale = Enum.find(routines, &has_stale_run?(&1, stale_before))
-    failed = Enum.find(routines, &has_recent_failure?(&1, recent_failure_after))
+    stale = Enum.find(routines, & &1.has_stale_run)
+    failed = Enum.find(routines, & &1.has_recent_failure)
     paused = Enum.find(routines, &(&1.status == :paused))
     runnable = Enum.find(active_routines, &(not without_enabled_trigger?(&1)))
 
@@ -274,19 +266,6 @@ defmodule CymphoWeb.RoutineLive.Index do
     Enum.empty?(routine.triggers) or Enum.all?(routine.triggers, &(&1.enabled == false))
   end
 
-  defp has_stale_run?(routine, stale_before) do
-    Enum.any?(routine.runs, fn run ->
-      run.status in ["pending", "running"] and before?(run.triggered_at, stale_before)
-    end)
-  end
-
-  defp has_recent_failure?(routine, recent_failure_after) do
-    Enum.any?(routine.runs, fn run ->
-      run.status == "failed" and
-        after_or_equal?(run.completed_at || run.triggered_at, recent_failure_after)
-    end)
-  end
-
   defp latest_run_label(%{runs: []}), do: "No runs yet"
 
   defp latest_run_label(%{runs: runs}) do
@@ -296,11 +275,6 @@ defmodule CymphoWeb.RoutineLive.Index do
       "#{routine_label(run.status)} · #{routine_label(run.trigger_type)}"
     end)
   end
-
-  defp before?(nil, _datetime), do: false
-  defp before?(datetime, cutoff), do: DateTime.compare(datetime, cutoff) == :lt
-  defp after_or_equal?(nil, _datetime), do: false
-  defp after_or_equal?(datetime, cutoff), do: DateTime.compare(datetime, cutoff) in [:gt, :eq]
 
   def routine_label(nil), do: "Unknown"
 
@@ -447,14 +421,10 @@ defmodule CymphoWeb.RoutineLive.Index do
 
   # Highest-urgency signal wins; only failed/stale/trigger_gap are "act now".
   def routine_card_signal(routine) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
-    stale_before = DateTime.add(now, -@stale_run_after_seconds, :second)
-    recent_failure_after = DateTime.add(now, -@recent_failure_window_seconds, :second)
-
     cond do
       routine.status == :archived -> :archived
-      has_recent_failure?(routine, recent_failure_after) -> :failed
-      has_stale_run?(routine, stale_before) -> :stale
+      routine.has_recent_failure -> :failed
+      routine.has_stale_run -> :stale
       routine.status == :active and without_enabled_trigger?(routine) -> :trigger_gap
       routine.status == :paused -> :paused
       true -> :ok

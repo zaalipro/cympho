@@ -5,6 +5,9 @@ defmodule Cympho.Github do
   """
 
   @finch_name Application.compile_env(:cympho, :finch_name, Cympho.Finch)
+  @https_repo ~r{\Ahttps://github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?\z}
+  @ssh_repo ~r{\Agit@github\.com:([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?\z}
+  @pull_request ~r{\Ahttps://github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)/pull/([1-9][0-9]*)/?\z}
 
   @doc """
   Parses a GitHub repository URL into `{owner, repo}`.
@@ -19,15 +22,9 @@ defmodule Cympho.Github do
   Returns `{:ok, {owner, repo}}` or `{:error, :invalid_url}`.
   """
   def parse_repo_url(url) when is_binary(url) do
-    cond do
-      String.starts_with?(url, "https://github.com/") ->
-        parse_https(url)
-
-      String.starts_with?(url, "git@github.com:") ->
-        parse_ssh(url)
-
-      true ->
-        {:error, :invalid_url}
+    case Regex.run(@https_repo, url) || Regex.run(@ssh_repo, url) do
+      [_, owner, repo] -> {:ok, {owner, repo}}
+      _ -> {:error, :invalid_url}
     end
   end
 
@@ -39,52 +36,22 @@ defmodule Cympho.Github do
   Accepts `https://github.com/owner/repo/pull/123`.
   """
   def parse_pull_request_url(url) when is_binary(url) do
-    url
-    |> URI.parse()
-    |> case do
-      %URI{scheme: "https", host: "github.com", path: path} ->
-        path
-        |> String.trim_leading("/")
-        |> String.trim_trailing("/")
-        |> String.split("/")
-        |> case do
-          [owner, repo, "pull", number] ->
-            with {number, ""} <- Integer.parse(number) do
-              {:ok, {owner, repo, number}}
-            else
-              _ -> {:error, :invalid_url}
-            end
-
-          _ ->
-            {:error, :invalid_url}
-        end
-
-      _ ->
-        {:error, :invalid_url}
+    case Regex.run(@pull_request, url) do
+      [_, owner, repo, number] -> {:ok, {owner, repo, String.to_integer(number)}}
+      _ -> {:error, :invalid_url}
     end
   end
 
   def parse_pull_request_url(_), do: {:error, :invalid_url}
 
-  defp parse_https(url) do
-    url
-    |> String.trim_leading("https://github.com/")
-    |> String.trim_trailing(".git")
-    |> String.split("/")
-    |> case do
-      [owner, repo] -> {:ok, {owner, repo}}
-      _ -> {:error, :invalid_url}
-    end
-  end
-
-  defp parse_ssh(url) do
-    url
-    |> String.trim_leading("git@github.com:")
-    |> String.trim_trailing(".git")
-    |> String.split("/")
-    |> case do
-      [owner, repo] -> {:ok, {owner, repo}}
-      _ -> {:error, :invalid_url}
+  @doc "Returns true only when a PR belongs to the configured GitHub repository."
+  def pr_in_repo?(pr_url, repo_url) do
+    with {:ok, {pr_owner, pr_repo, _number}} <- parse_pull_request_url(pr_url),
+         {:ok, {owner, repo}} <- parse_repo_url(repo_url) do
+      String.downcase(pr_owner) == String.downcase(owner) and
+        String.downcase(pr_repo) == String.downcase(repo)
+    else
+      _ -> false
     end
   end
 

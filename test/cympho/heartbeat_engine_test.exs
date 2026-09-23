@@ -182,7 +182,8 @@ defmodule Cympho.HeartbeatEngineTest do
       assert successor_checkout.status == :in_progress
       assert successor_checkout.checked_out_at
 
-      assert {:ok, _recovered} = HeartbeatEngine.recover_stale_run(started_old_run)
+      assert {:error, :recovery_deferred} = HeartbeatEngine.recover_stale_run(started_old_run)
+      assert Repo.get!(Run, started_old_run.id).status == "running"
 
       reloaded = Cympho.Repo.get!(Cympho.Issues.Issue, issue.id)
       assert is_nil(reloaded.checkout_run_id)
@@ -541,21 +542,89 @@ defmodule Cympho.HeartbeatEngineTest do
       assert length(stale) >= 1
       assert Enum.any?(stale, &(&1.id == started.id))
     end
+
+    test "uses inserted_at for running rows whose heartbeat is nil" do
+      company = insert_company("HB nil heartbeat")
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id, company.id)
+
+      fresh_issue_id = insert_issue(company.id)
+      stale_issue_id = insert_issue(company.id)
+
+      {:ok, fresh} =
+        HeartbeatEngine.create_run(%{
+          company_id: company.id,
+          agent_id: agent_id,
+          issue_id: fresh_issue_id,
+          adapter: "claude_local"
+        })
+
+      {:ok, stale} =
+        HeartbeatEngine.create_run(%{
+          company_id: company.id,
+          agent_id: agent_id,
+          issue_id: stale_issue_id,
+          adapter: "claude_local"
+        })
+
+      cutoff = DateTime.utc_now() |> DateTime.add(-15, :minute) |> DateTime.truncate(:second)
+
+      Repo.update_all(from(r in Run, where: r.id == ^fresh.id),
+        set: [status: "running", last_heartbeat_at: nil, inserted_at: DateTime.add(cutoff, 1)]
+      )
+
+      Repo.update_all(from(r in Run, where: r.id == ^stale.id),
+        set: [status: "running", last_heartbeat_at: nil, inserted_at: DateTime.add(cutoff, -1)]
+      )
+
+      stale_ids = HeartbeatEngine.find_stale_runs(15) |> MapSet.new(& &1.id)
+
+      assert MapSet.member?(stale_ids, stale.id)
+      refute MapSet.member?(stale_ids, fresh.id)
+    end
   end
 
   describe "recover_stale_run/1" do
-    test "marks stale run as failed" do
+    test "does not destructively recover a fresh run without the durable cutoff" do
       agent_id = Ecto.UUID.generate()
-      insert_agent(agent_id)
+      company = insert_company("HB Recovery Co")
+      agent = insert_agent(agent_id, company.id)
 
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: insert_issue(),
+          issue_id: insert_issue(agent.company_id),
           adapter: "claude_local"
         })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
+
+      assert {:error, :recovery_deferred} = HeartbeatEngine.recover_stale_run(started)
+      assert Repo.get!(Run, started.id).status == "running"
+      refute Repo.get_by(Cympho.Recovery.RecoveryCase, source_id: started.id)
+    end
+
+    test "marks stale run as failed" do
+      agent_id = Ecto.UUID.generate()
+      company = insert_company("HB Recovery Co")
+      agent = insert_agent(agent_id, company.id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(agent.company_id),
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+
+      stale_at = DateTime.utc_now() |> DateTime.add(-20, :minute) |> DateTime.truncate(:second)
+
+      Repo.update_all(from(r in Run, where: r.id == ^started.id),
+        set: [last_heartbeat_at: stale_at]
+      )
+
+      started = Repo.get!(Run, started.id)
 
       assert {:ok, recovered} = HeartbeatEngine.recover_stale_run(started)
       assert recovered.status == "failed"
@@ -576,6 +645,14 @@ defmodule Cympho.HeartbeatEngineTest do
         })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
+
+      stale_at = DateTime.utc_now() |> DateTime.add(-20, :minute) |> DateTime.truncate(:second)
+
+      Repo.update_all(from(r in Run, where: r.id == ^started.id),
+        set: [last_heartbeat_at: stale_at]
+      )
+
+      started = Repo.get!(Run, started.id)
 
       assert {:ok, recovered} = HeartbeatEngine.recover_stale_run(started)
       assert recovered.status == "failed"
@@ -613,16 +690,24 @@ defmodule Cympho.HeartbeatEngineTest do
 
     test "complete_run loses to a run the watchdog already recovered" do
       agent_id = Ecto.UUID.generate()
-      insert_agent(agent_id)
+      company = insert_company("HB Recovery Co")
+      agent = insert_agent(agent_id, company.id)
 
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: insert_issue(),
+          issue_id: insert_issue(agent.company_id),
           adapter: "claude_local"
         })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
+      stale_at = DateTime.utc_now() |> DateTime.add(-20, :minute) |> DateTime.truncate(:second)
+
+      Repo.update_all(from(r in Run, where: r.id == ^started.id),
+        set: [last_heartbeat_at: stale_at]
+      )
+
+      started = Repo.get!(Run, started.id)
       {:ok, _recovered} = HeartbeatEngine.recover_stale_run(started)
 
       assert {:error, {:invalid_status, "failed"}} =
@@ -653,16 +738,24 @@ defmodule Cympho.HeartbeatEngineTest do
 
     test "record_heartbeat with a stale struct cannot re-touch a finished run" do
       agent_id = Ecto.UUID.generate()
-      insert_agent(agent_id)
+      company = insert_company("HB Recovery Co")
+      agent = insert_agent(agent_id, company.id)
 
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: insert_issue(),
+          issue_id: insert_issue(agent.company_id),
           adapter: "claude_local"
         })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
+      stale_at = DateTime.utc_now() |> DateTime.add(-20, :minute) |> DateTime.truncate(:second)
+
+      Repo.update_all(from(r in Run, where: r.id == ^started.id),
+        set: [last_heartbeat_at: stale_at]
+      )
+
+      started = Repo.get!(Run, started.id)
       {:ok, recovered} = HeartbeatEngine.recover_stale_run(started)
 
       # Backdate the terminal run's liveness timestamp so an erroneous
@@ -870,32 +963,46 @@ defmodule Cympho.HeartbeatEngineTest do
 
     test "cancels orphaned runs that never started" do
       agent_id = Ecto.UUID.generate()
-      insert_agent(agent_id)
+      company = insert_company("HB Recovery Co")
+      agent = insert_agent(agent_id, company.id)
 
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: insert_issue(),
+          issue_id: insert_issue(agent.company_id),
           adapter: "claude_local"
         })
 
+      stale_at = DateTime.utc_now() |> DateTime.add(-20, :minute) |> DateTime.truncate(:second)
+      Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [inserted_at: stale_at])
+      run = Repo.get!(Run, run.id)
+
       assert {:ok, recovered} = HeartbeatEngine.recover_orphaned_run(run)
       assert recovered.status == "cancelled"
-      assert is_nil(recovered.error_reason)
+      assert recovered.error_reason == "orphan_run_recovered"
     end
 
     test "fails orphaned running runs" do
       agent_id = Ecto.UUID.generate()
-      insert_agent(agent_id)
+      company = insert_company("HB Recovery Co")
+      agent = insert_agent(agent_id, company.id)
 
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: insert_issue(),
+          issue_id: insert_issue(agent.company_id),
           adapter: "claude_local"
         })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
+
+      stale_at = DateTime.utc_now() |> DateTime.add(-20, :minute) |> DateTime.truncate(:second)
+
+      Repo.update_all(from(r in Run, where: r.id == ^started.id),
+        set: [last_heartbeat_at: stale_at]
+      )
+
+      started = Repo.get!(Run, started.id)
 
       assert {:ok, recovered} = HeartbeatEngine.recover_orphaned_run(started)
       assert recovered.status == "failed"

@@ -34,15 +34,21 @@ defmodule Cympho.Adapters.AgrentingAdapterTest do
     "timeout" => 60_000
   }
 
-  defp client_mocks(test_pid, status) do
+  defp client_mocks(
+         test_pid,
+         status,
+         cancel_result \\ {:ok, %{"id" => "hire-1", "status" => "cancelled"}}
+       ) do
     [
       {Client, [],
        [
          create_hiring: fn _config, _did, _attrs -> {:ok, %{"id" => "hire-1"}} end,
-         get_hiring: fn _config, _id -> {:ok, %{"id" => "hire-1", "status" => status}} end,
+         get_hiring: fn _config, _id ->
+           if is_tuple(status), do: status, else: {:ok, %{"id" => "hire-1", "status" => status}}
+         end,
          cancel_hiring: fn _config, id ->
            send(test_pid, {:cancelled_remotely, id})
-           {:ok, %{"id" => id, "status" => "cancelled"}}
+           cancel_result
          end,
          config_value: fn config, key -> Map.get(config, key) end
        ]}
@@ -103,6 +109,73 @@ defmodule Cympho.Adapters.AgrentingAdapterTest do
 
       assert_receive {:turn_completed, ^session_id, _result}, 5_000
       assert eventually(fn -> not AdapterSessions.registered?(session_id) end)
+    end
+  end
+
+  test "a timed-out paid hiring is cancelled before reporting the hiring ID" do
+    with_mocks(client_mocks(self(), "running")) do
+      session_id =
+        AgrentingAdapter.run(@issue, "agent-1", self(), config: %{@config | "timeout" => 1})
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:agrenting_timeout, "hire-1", "running"}},
+                     5_000
+
+      assert_receive {:cancelled_remotely, "hire-1"}, 5_000
+      assert eventually(fn -> not AdapterSessions.registered?(session_id) end)
+    end
+  end
+
+  test "a polling error after creation attempts cancellation and retains the hiring ID" do
+    with_mocks(client_mocks(self(), {:error, :provider_unavailable})) do
+      session_id = AgrentingAdapter.run(@issue, "agent-1", self(), config: @config)
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:agrenting_poll_failed, "hire-1", :provider_unavailable}},
+                     5_000
+
+      assert_receive {:cancelled_remotely, "hire-1"}, 5_000
+    end
+  end
+
+  test "malformed successful polling payloads cancel the paid hiring and emit one terminal error" do
+    for payload <- ["not-json", [], nil] do
+      with_mocks(client_mocks(self(), {:ok, payload})) do
+        session_id = AgrentingAdapter.run(@issue, "agent-1", self(), config: @config)
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:agrenting_poll_failed, "hire-1", :invalid_hiring_response}},
+                       5_000
+
+        assert_receive {:cancelled_remotely, "hire-1"}, 5_000
+        refute_receive {:turn_completed, ^session_id, _}, 100
+        refute_receive {:turn_ended_with_error, ^session_id, _}, 100
+      end
+    end
+  end
+
+  test "a terminal failed hiring is not cancelled" do
+    with_mocks(client_mocks(self(), "failed")) do
+      session_id = AgrentingAdapter.run(@issue, "agent-1", self(), config: @config)
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:agrenting_hiring_terminal, "failed", _}},
+                     5_000
+
+      refute_receive {:cancelled_remotely, _}, 100
+    end
+  end
+
+  test "cancellation failure retains the hiring ID and remote uncertainty" do
+    with_mocks(client_mocks(self(), {:error, :provider_unavailable}, {:error, :cancel_denied})) do
+      session_id = AgrentingAdapter.run(@issue, "agent-1", self(), config: @config)
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:agrenting_cancel_failed, "hire-1",
+                       {:agrenting_poll_failed, "hire-1", :provider_unavailable}, :cancel_denied}},
+                     5_000
+
+      assert_receive {:cancelled_remotely, "hire-1"}, 5_000
     end
   end
 

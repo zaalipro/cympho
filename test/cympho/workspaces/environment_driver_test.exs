@@ -430,6 +430,14 @@ defmodule Cympho.Workspaces.EnvironmentDriverTest do
           adapter: "claude_local"
         })
 
+      stale_at = DateTime.utc_now() |> DateTime.add(-20, :minute) |> DateTime.truncate(:second)
+
+      Repo.update_all(from(r in Cympho.HeartbeatEngine.Run, where: r.id == ^run.id),
+        set: [inserted_at: stale_at]
+      )
+
+      run = Repo.get!(Cympho.HeartbeatEngine.Run, run.id)
+
       assert {:ok, recovered} = HeartbeatEngine.recover_orphaned_run(run)
       assert recovered.status == "cancelled"
       assert is_nil(Workspaces.get_execution_workspace!(ew.id).provider_ref)

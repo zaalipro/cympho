@@ -124,18 +124,38 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
   end
 
   defp run_check(state) do
+    recovery_now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {:ok, recovery_cutoff} =
+      HeartbeatEngine.recovery_cutoff(
+        now: recovery_now,
+        stale_threshold_minutes: @stale_threshold
+      )
+
+    recovery_opts = [
+      now: recovery_now,
+      stale_cutoff: recovery_cutoff,
+      stale_threshold_minutes: @stale_threshold
+    ]
+
     usage_reconciliation = reconcile_terminal_usage()
-    due_recovery = Recovery.process_due(limit: 50)
+
+    due_recovery =
+      Recovery.process_due(limit: 50)
+
     recovery_stats = recovery_stats()
-    stale_runs = HeartbeatEngine.find_stale_runs(@stale_threshold)
+    stale_runs = HeartbeatEngine.find_stale_runs_before(recovery_cutoff)
     stale_run_ids = MapSet.new(stale_runs, & &1.id)
 
     orphaned_runs =
-      HeartbeatEngine.find_orphaned_runs()
+      HeartbeatEngine.find_orphaned_runs_before(recovery_cutoff)
       |> Enum.reject(&MapSet.member?(stale_run_ids, &1.id))
 
-    {stale_recovered, recovery_stats} = recover_runs(stale_runs, :stale, recovery_stats)
-    {orphaned_recovered, recovery_stats} = recover_runs(orphaned_runs, :orphaned, recovery_stats)
+    {stale_recovered, recovery_stats} =
+      recover_runs(stale_runs, :stale, recovery_stats, recovery_opts)
+
+    {orphaned_recovered, recovery_stats} =
+      recover_runs(orphaned_runs, :orphaned, recovery_stats, recovery_opts)
 
     stale_wake_claims = WakeupQueue.recover_stale_running(@stale_threshold)
     stranded_wake_agents = rewake_stranded_agents(stale_wake_claims.agent_ids)
@@ -210,12 +230,12 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
     %{cases_created: 0, attempts: 0, exhausted: 0, existing_sources: existing_sources}
   end
 
-  defp recover_runs(runs, kind, stats) do
+  defp recover_runs(runs, kind, stats, recovery_opts) do
     Enum.reduce(runs, {[], stats}, fn run, {recovered_runs, stats} ->
       result =
         case kind do
-          :stale -> Recovery.recover_stale_run(run)
-          :orphaned -> Recovery.recover_orphaned_run(run)
+          :stale -> Recovery.recover_stale_run(run, recovery_opts)
+          :orphaned -> Recovery.recover_orphaned_run(run, recovery_opts)
         end
 
       case result do
@@ -257,7 +277,18 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
 
           {recovered_runs, record_recovery(stats, recovery_case, outcome)}
 
-        {:ok, %{outcome: :deferred}} ->
+        {:ok, %{outcome: :deferred, case: %RecoveryCase{} = recovery_case} = result} ->
+          Logger.info("Watchdog: #{kind} run #{run.id} recovery deferred after claim",
+            component: "watchdog",
+            agent_id: run.agent_id,
+            issue_id: run.issue_id,
+            run_id: run.id
+          )
+
+          {recovered_runs,
+           record_recovery(stats, recovery_case, :deferred, Map.get(result, :recovery, %{}))}
+
+        {:ok, %{outcome: :deferred, case: nil}} ->
           Logger.info("Watchdog: #{kind} run #{run.id} recovery deferred",
             component: "watchdog",
             agent_id: run.agent_id,

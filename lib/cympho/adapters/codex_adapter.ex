@@ -11,7 +11,7 @@ defmodule Cympho.Adapters.CodexAdapter do
   @impl true
   def execution_class, do: :local_process
 
-  alias Cympho.Adapters.{ProviderFailure, ProviderProxy, RunDeadline, RuntimeTimeout}
+  alias Cympho.Adapters.{OutputLimit, ProviderFailure, ProviderProxy, RunDeadline, RuntimeTimeout}
 
   @default_model "o4-mini"
   @model_options [
@@ -153,21 +153,22 @@ defmodule Cympho.Adapters.CodexAdapter do
             ]
 
         with_private_file("prompt", prompt <> "\n", fn prompt_path ->
-          shell = System.find_executable("sh") || "/bin/sh"
+          limit = OutputLimit.effective(opts, config)
 
-          shell_args = [
-            "-c",
-            "exec \"$0\" \"$@\" < \"$CYMPHO_PROMPT_FILE\"",
-            to_string(bwrap_bin)
-            | bwrap_args(
+          {shell, shell_args} =
+            OutputLimit.wrapped_command(
+              bwrap_bin,
+              bwrap_args(
                 codex_bin,
                 args,
                 cwd,
                 ProviderProxy.capability(proxy),
                 read_only_work_mode?,
                 opts
-              )
-          ]
+              ),
+              limit,
+              true
+            )
 
           env = clean_port_env([{"CYMPHO_PROMPT_FILE", prompt_path}])
 
@@ -189,7 +190,7 @@ defmodule Cympho.Adapters.CodexAdapter do
             fn port ->
               send(recipient_pid, {:session_started, session_id})
 
-              case collect_output(port, "", timeout, session_id, recipient_pid) do
+              case collect_output(port, "", timeout, session_id, recipient_pid, limit) do
                 {:ok, raw} ->
                   case ProviderFailure.detect(raw) do
                     :ok -> parse_codex_output(raw)
@@ -277,23 +278,29 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
-  defp collect_output(port, acc, timeout, session_id, recipient_pid) when is_integer(timeout) do
-    collect_output(port, acc, RunDeadline.new(timeout), session_id, recipient_pid)
+  defp collect_output(port, acc, timeout, session_id, recipient_pid, limit)
+       when is_integer(timeout) do
+    collect_output(port, acc, RunDeadline.new(timeout), session_id, recipient_pid, limit)
   end
 
-  defp collect_output(port, acc, %RunDeadline{} = deadline, session_id, recipient_pid) do
+  defp collect_output(port, acc, %RunDeadline{} = deadline, session_id, recipient_pid, limit) do
     receive do
+      {^port, {:data, data}} when byte_size(acc) + byte_size(data) > limit ->
+        close_port(port)
+        {:error, {:output_limit_exceeded, limit, OutputLimit.tail(acc, data)}}
+
       {^port, {:data, data}} ->
         collect_output(
           port,
           acc <> data,
           RunDeadline.observe(deadline, data, session_id, recipient_pid),
           session_id,
-          recipient_pid
+          recipient_pid,
+          limit
         )
 
       {:EXIT, ^port, _reason} ->
-        collect_output(port, acc, deadline, session_id, recipient_pid)
+        collect_output(port, acc, deadline, session_id, recipient_pid, limit)
 
       {^port, {:exit_status, 0}} ->
         {:ok, acc}
@@ -316,7 +323,7 @@ defmodule Cympho.Adapters.CodexAdapter do
         # resets forever. The absolute deadline is what actually ends the run.
         case RunDeadline.expired(deadline) do
           nil ->
-            collect_output(port, acc, deadline, session_id, recipient_pid)
+            collect_output(port, acc, deadline, session_id, recipient_pid, limit)
 
           :max_run ->
             close_port(port)

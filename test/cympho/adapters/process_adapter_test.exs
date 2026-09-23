@@ -2,6 +2,7 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
   use ExUnit.Case, async: false
 
   alias Cympho.Adapters.ProcessAdapter
+  alias Cympho.RuntimeAdmission
 
   @issue %{
     id: "issue-1",
@@ -10,6 +11,66 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
     status: :todo,
     priority: :medium
   }
+
+  test "an output flood fails at the configured cap after reaping its child" do
+    pid_path =
+      Path.join(System.tmp_dir!(), "cympho-process-flood-#{System.unique_integer([:positive])}")
+
+    go_path = pid_path <> ".go"
+    sleep = System.find_executable("sleep") || "/bin/sleep"
+
+    on_exit(fn ->
+      File.rm(pid_path)
+      File.rm(go_path)
+    end)
+
+    server =
+      start_supervised!(
+        {RuntimeAdmission, name: nil, max_total_runs: 1, max_local_runs: 1, memory_check?: false}
+      )
+
+    assert {:ok, token} = RuntimeAdmission.checkout(ProcessAdapter, server)
+
+    with_fake_command(
+      "flood-agent",
+      "echo $$ > #{pid_path}\nwhile [ ! -e #{go_path} ]; do #{sleep} 0.01; done\nwhile :; do printf 'tail-marker-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n'; done",
+      fn ->
+        session_id =
+          ProcessAdapter.run(@issue, "agent-1", self(),
+            config: %{"command" => "flood-agent", "timeout" => 2_000},
+            max_output_bytes: 16_384,
+            runtime_admission_claim: {token, server, :local_process}
+          )
+
+        assert_receive {:session_started, ^session_id}, 3_000
+        assert wait_until(fn -> File.exists?(pid_path) end)
+        assert RuntimeAdmission.snapshot(server).total_running == 1
+
+        assert {:error, :total_slots_exhausted} =
+                 RuntimeAdmission.available(ProcessAdapter, server)
+
+        File.write!(go_path, "go")
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:output_limit_exceeded, 16_384, tail}},
+                       5_000
+
+        assert byte_size(tail) <= 8_192
+        assert tail =~ "tail-marker"
+        refute_receive {:turn_completed, ^session_id, _}, 100
+        assert File.exists?(pid_path)
+        child_pid = pid_path |> File.read!() |> String.trim()
+
+        assert {_output, code} =
+                 System.cmd("/bin/kill", ["-0", child_pid], stderr_to_stdout: true)
+
+        assert code != 0
+        assert wait_until(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
+        assert wait_until(fn -> RuntimeAdmission.snapshot(server).total_running == 0 end)
+        assert :ok = RuntimeAdmission.available(ProcessAdapter, server)
+      end
+    )
+  end
 
   test "passes model and prompt through argv templates without requiring stdin" do
     with_fake_command(
@@ -436,6 +497,7 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
       Path.join(System.tmp_dir!(), "cympho-process-test-#{System.unique_integer([:positive])}")
 
     File.mkdir_p!(dir)
+    File.ln_s!(System.find_executable("python3"), Path.join(dir, "python3"))
     command_path = Path.join(dir, command)
     File.write!(command_path, "#!/bin/sh\n#{script}\n")
     File.chmod!(command_path, 0o755)

@@ -31,6 +31,7 @@ defmodule Cympho.AgentActions do
   alias Cympho.Agents.Agent
   alias Cympho.Comments.Comment
   alias Cympho.Issues.{ExecutionState, Issue, SwarmEvents}
+  alias Cympho.Projects.Project
   alias Cympho.WorkProducts.IssueWorkProduct
   alias Cympho.AuditTrail.Instrumenter
 
@@ -198,89 +199,136 @@ defmodule Cympho.AgentActions do
   defp maybe_mark_paired_submit_review(action, _comment_body), do: action
 
   defp do_execute(%Issue{} = issue, %Agent{} = agent, actions) do
-    result =
-      Repo.transaction(fn ->
-        # Thread a fresh issue through the action loop. Earlier actions can
-        # mutate status (e.g. submit_review → :in_review, approve_issue → :done)
-        # and later actions in the same batch must see the new state — using a
-        # single `current_issue` snapshot causes silent corruption when actions
-        # are chained.
-        initial_issue = Issues.get_issue!(issue.id)
+    # Terminal run callbacks are deliberately deferred while this batch owns
+    # the outer transaction.  A later action may roll the batch back, so
+    # irreversible checkout/provider/usage/audit/broadcast effects must not
+    # escape before the commit boundary.
+    previous_defer_marker = Process.get(:cympho_agent_actions_defer_terminal_effects, :absent)
+    previous_terminal_effects = Cympho.HeartbeatEngine.deferred_terminal_effects_snapshot()
+    nested_defer? = previous_defer_marker == true
+    _ = Cympho.HeartbeatEngine.clear_deferred_terminal_effects()
+    Process.put(:cympho_agent_actions_defer_terminal_effects, true)
 
-        case Validation.ensure_work_mode_actions(initial_issue, actions) do
-          :ok -> :ok
-          {:error, reason} -> Repo.rollback(reason)
-        end
+    try do
+      result =
+        Repo.transaction(fn ->
+          # Thread a fresh issue through the action loop. Earlier actions can
+          # mutate status (e.g. submit_review → :in_review, approve_issue → :done)
+          # and later actions in the same batch must see the new state — using a
+          # single `current_issue` snapshot causes silent corruption when actions
+          # are chained.
+          initial_issue = Issues.get_issue!(issue.id)
 
-        {final_issue, results} =
-          actions
-          |> Enum.with_index()
-          |> Enum.reduce({initial_issue, []}, fn {action, index}, {current_issue, acc} ->
-            action = resolve_action_context(action, current_issue, agent)
+          case Validation.ensure_work_mode_actions(initial_issue, actions) do
+            :ok -> :ok
+            {:error, reason} -> Repo.rollback(reason)
+          end
 
-            with :ok <- authorize_action(action, current_issue, agent),
-                 {:ok, action_result} <- execute_action(current_issue, agent, action) do
-              log_action(current_issue, agent, action, action_result)
+          {final_issue, results} =
+            actions
+            |> Enum.with_index()
+            |> Enum.reduce({initial_issue, []}, fn {action, index}, {current_issue, acc} ->
+              action = resolve_action_context(action, current_issue, agent)
 
-              # Refetch only when the action could have mutated the issue;
-              # cheap actions like `comment` or `attach_work_product` don't
-              # change status / assignee.
-              next_issue =
-                if mutates_issue?(action),
-                  do: Issues.get_issue!(issue.id),
-                  else: current_issue
+              with :ok <- authorize_action(action, current_issue, agent),
+                   {:ok, action_result} <- execute_action(current_issue, agent, action) do
+                log_action(current_issue, agent, action, action_result)
 
-              {next_issue, [action_result | acc]}
-            else
-              {:error, reason} ->
-                Logger.warning("agent action batch rolled back",
-                  issue_id: issue.id,
-                  agent_id: agent.id,
-                  company_id: issue.company_id,
-                  component: "agent_actions",
-                  action_type: action["type"],
-                  action_index: index,
-                  batch_size: length(actions),
-                  reason: inspect(reason)
-                )
+                # Refetch only when the action could have mutated the issue;
+                # cheap actions like `comment` or `attach_work_product` don't
+                # change status / assignee.
+                next_issue =
+                  if mutates_issue?(action),
+                    do: Issues.get_issue!(issue.id),
+                    else: current_issue
 
-                Repo.rollback(reason)
-            end
-          end)
+                {next_issue, [action_result | acc]}
+              else
+                {:error, reason} ->
+                  Logger.warning("agent action batch rolled back",
+                    issue_id: issue.id,
+                    agent_id: agent.id,
+                    company_id: issue.company_id,
+                    component: "agent_actions",
+                    action_type: action["type"],
+                    action_index: index,
+                    batch_size: length(actions),
+                    reason: inspect(reason)
+                  )
 
-        results = Enum.reverse(results)
-        final_issue = maybe_auto_block_after_decomposition(final_issue, agent, results)
+                  Repo.rollback(reason)
+              end
+            end)
 
-        %{issue: final_issue, results: results}
-      end)
+          results = Enum.reverse(results)
+          final_issue = maybe_auto_block_after_decomposition(final_issue, agent, results)
 
-    case result do
-      {:ok, ok_result} ->
-        {:ok, ok_result}
+          %{issue: final_issue, results: results}
+        end)
 
-      {:error, reason} ->
-        # The transaction rolled back, which means any system_comment
-        # written inside an execute_action clause was discarded too.
-        # Re-emit the rejection comment outside the transaction so the
-        # LLM sees it on its next turn and self-corrects.
-        maybe_emit_rejection_comment(issue, reason)
-        {:error, reason}
+      case result do
+        {:ok, ok_result} ->
+          if nested_defer? do
+            current = Cympho.HeartbeatEngine.deferred_terminal_effects_snapshot()
+
+            _ =
+              Cympho.HeartbeatEngine.restore_deferred_terminal_effects(%{
+                runs: current.runs ++ previous_terminal_effects.runs,
+                issues: current.issues ++ previous_terminal_effects.issues,
+                runtime_stops: current.runtime_stops ++ previous_terminal_effects.runtime_stops,
+                issue_updates: current.issue_updates ++ previous_terminal_effects.issue_updates,
+                issue_releases:
+                  current.issue_releases ++ previous_terminal_effects.issue_releases,
+                activity_events:
+                  current.activity_events ++ previous_terminal_effects.activity_events,
+                callbacks: current.callbacks ++ previous_terminal_effects.callbacks
+              })
+          else
+            restore_terminal_effect_marker(previous_defer_marker)
+            _ = Cympho.HeartbeatEngine.flush_deferred_terminal_effects()
+
+            _ =
+              Cympho.HeartbeatEngine.restore_deferred_terminal_effects(previous_terminal_effects)
+          end
+
+          {:ok, ok_result}
+
+        {:error, reason} ->
+          _ = Cympho.HeartbeatEngine.clear_deferred_terminal_effects()
+          _ = Cympho.HeartbeatEngine.restore_deferred_terminal_effects(previous_terminal_effects)
+          # The transaction rolled back, which means any system_comment
+          # written inside an execute_action clause was discarded too.
+          # Re-emit the rejection comment outside the transaction so the
+          # LLM sees it on its next turn and self-corrects.
+          maybe_emit_rejection_comment(issue, reason)
+          {:error, reason}
+      end
+    rescue
+      exception ->
+        _ = Cympho.HeartbeatEngine.clear_deferred_terminal_effects()
+        _ = Cympho.HeartbeatEngine.restore_deferred_terminal_effects(previous_terminal_effects)
+        # An executor crash (bad data, unexpected state) must degrade to a
+        # failed batch with a reason — never crash the orchestrator run. The
+        # transaction already rolled back when the exception propagated.
+        Logger.error("agent action batch crashed",
+          issue_id: issue.id,
+          agent_id: agent.id,
+          company_id: issue.company_id,
+          component: "agent_actions",
+          reason: Exception.message(exception)
+        )
+
+        {:error, {:action_crashed, Exception.message(exception)}}
+    after
+      restore_terminal_effect_marker(previous_defer_marker)
     end
-  rescue
-    exception ->
-      # An executor crash (bad data, unexpected state) must degrade to a
-      # failed batch with a reason — never crash the orchestrator run. The
-      # transaction already rolled back when the exception propagated.
-      Logger.error("agent action batch crashed",
-        issue_id: issue.id,
-        agent_id: agent.id,
-        company_id: issue.company_id,
-        component: "agent_actions",
-        reason: Exception.message(exception)
-      )
-
-      {:error, {:action_crashed, Exception.message(exception)}}
   end
+
+  defp restore_terminal_effect_marker(:absent),
+    do: Process.delete(:cympho_agent_actions_defer_terminal_effects)
+
+  defp restore_terminal_effect_marker(value),
+    do: Process.put(:cympho_agent_actions_defer_terminal_effects, value)
 
   defp maybe_emit_rejection_comment(%Issue{} = issue, :no_supervisor_to_review) do
     system_comment(
@@ -1277,20 +1325,22 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "set_pr_url"} = action) do
-    note = action["notes"] || "Linked pull request for review: #{action["url"]}"
+    with :ok <- ensure_pr_repository(issue, action["url"]) do
+      note = action["notes"] || "Linked pull request for review: #{action["url"]}"
 
-    pr_quality =
-      PullRequestContract.check_url(issue, action["url"], source: "agent_action:set_pr_url")
+      pr_quality =
+        PullRequestContract.check_url(issue, action["url"], source: "agent_action:set_pr_url")
 
-    attrs = %{
-      github_pr_url: action["url"],
-      monitor_state: Issues.pr_quality_monitor_state(issue.monitor_state, pr_quality)
-    }
+      attrs = %{
+        github_pr_url: action["url"],
+        monitor_state: Issues.pr_quality_monitor_state(issue.monitor_state, pr_quality)
+      }
 
-    with {:ok, updated} <- update_workflow_issue(issue, agent, attrs),
-         {:ok, _comment} <- maybe_agent_comment(issue, agent, note),
-         {:ok, _quality_comment} <- maybe_pr_quality_comment(updated, pr_quality) do
-      {:ok, %{type: "set_pr_url", issue_id: updated.id, pr_quality: pr_quality.status}}
+      with {:ok, updated} <- update_workflow_issue(issue, agent, attrs),
+           {:ok, _comment} <- maybe_agent_comment(issue, agent, note),
+           {:ok, _quality_comment} <- maybe_pr_quality_comment(updated, pr_quality) do
+        {:ok, %{type: "set_pr_url", issue_id: updated.id, pr_quality: pr_quality.status}}
+      end
     end
   end
 
@@ -3149,8 +3199,19 @@ defmodule Cympho.AgentActions do
   # absence of runtime is not a failure for intervene.
   defp stop_live_issue_runtime(%Issue{id: issue_id}, reason_label)
        when is_binary(issue_id) do
+    defer? = Process.get(:cympho_agent_actions_defer_terminal_effects, false)
+
     case Cympho.Orchestrator.whereis(issue_id) do
       nil ->
+        :ok
+
+      _pid when defer? ->
+        _ =
+          Cympho.HeartbeatEngine.defer_runtime_stop(
+            issue_id,
+            {:shutdown, {:intervene, reason_label}}
+          )
+
         :ok
 
       _pid ->
@@ -3219,47 +3280,66 @@ defmodule Cympho.AgentActions do
         {:error, :no_pr_url}
 
       true ->
-        method = action["method"] || "squash"
-
-        merge_opts =
-          [method: method]
-          |> maybe_put_kw(:commit_title, action["commit_title"])
-          |> maybe_put_kw(:commit_message, action["commit_message"])
-          |> maybe_put_kw(:sha, action["sha"])
-
-        case Cympho.Github.merge_pr(issue.github_pr_url, merge_opts) do
-          {:ok, %{merged: true} = info} ->
-            note = "[review] Merged PR (#{method}, sha=#{info[:sha] || "?"})"
-            _ = system_comment(issue, note)
-
-            {:ok, %{type: "merge_pr", issue_id: issue.id, sha: info[:sha], method: method}}
-
-          {:ok, info} ->
-            {:error, {:merge_did_not_complete, info}}
-
-          {:error, {:merge_conflict, _body}} ->
-            # Wake the release engineer (if any) and report the conflict.
-            target = pick_release_engineer_for_issue(issue)
-
-            if is_binary(target) do
-              _ =
-                Cympho.Wakes.wake_for_merge_conflict(target, issue.id, %{
-                  "pr_url" => issue.github_pr_url,
-                  "from_agent_id" => agent.id
-                })
-            end
-
-            _ =
-              system_comment(
-                issue,
-                "[blocked] PR has merge conflicts — release engineer notified."
-              )
-
-            {:error, :merge_conflict}
-
-          {:error, reason} ->
-            {:error, {:merge_pr_failed, reason}}
+        with :ok <- ensure_pr_repository(issue, issue.github_pr_url) do
+          merge_authorized_pr(issue, agent, action)
         end
+    end
+  end
+
+  defp merge_authorized_pr(issue, agent, action) do
+    method = action["method"] || "squash"
+
+    merge_opts =
+      [method: method]
+      |> maybe_put_kw(:commit_title, action["commit_title"])
+      |> maybe_put_kw(:commit_message, action["commit_message"])
+      |> maybe_put_kw(:sha, action["sha"])
+
+    case Cympho.Github.merge_pr(issue.github_pr_url, merge_opts) do
+      {:ok, %{merged: true} = info} ->
+        note = "[review] Merged PR (#{method}, sha=#{info[:sha] || "?"})"
+        _ = system_comment(issue, note)
+
+        {:ok, %{type: "merge_pr", issue_id: issue.id, sha: info[:sha], method: method}}
+
+      {:ok, info} ->
+        {:error, {:merge_did_not_complete, info}}
+
+      {:error, {:merge_conflict, _body}} ->
+        # Wake the release engineer (if any) and report the conflict.
+        target = pick_release_engineer_for_issue(issue)
+
+        if is_binary(target) do
+          _ =
+            Cympho.Wakes.wake_for_merge_conflict(target, issue.id, %{
+              "pr_url" => issue.github_pr_url,
+              "from_agent_id" => agent.id
+            })
+        end
+
+        _ =
+          system_comment(
+            issue,
+            "[blocked] PR has merge conflicts — release engineer notified."
+          )
+
+        {:error, :merge_conflict}
+
+      {:error, reason} ->
+        {:error, {:merge_pr_failed, reason}}
+    end
+  end
+
+  defp ensure_pr_repository(%Issue{project_id: project_id, company_id: company_id}, pr_url) do
+    case project_id && Repo.get(Project, project_id) do
+      %Project{company_id: ^company_id, repo_url: repo_url}
+      when is_binary(repo_url) and repo_url != "" ->
+        if Cympho.Github.pr_in_repo?(pr_url, repo_url),
+          do: :ok,
+          else: {:error, :pr_repository_mismatch}
+
+      _ ->
+        {:error, :missing_project_repository}
     end
   end
 

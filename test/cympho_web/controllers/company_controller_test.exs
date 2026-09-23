@@ -4,6 +4,169 @@ defmodule CymphoWeb.CompanyControllerTest do
   alias Cympho.Companies
   alias Cympho.Companies.ImportDecodeAdmission
 
+  test "admin cannot grant or remove owner via membership API", %{conn: conn} do
+    {conn, admin, company} = register_and_log_in_user(conn, %{role: "admin"})
+    target = user("owner-target")
+
+    denied =
+      post(conn, "/api/companies/#{company.id}/members", %{user_id: target.id, role: "owner"})
+
+    assert json_response(denied, 403)
+    refute Companies.has_access?(target.id, company.id)
+
+    owner = user("existing-owner")
+
+    {:ok, membership} =
+      Companies.create_membership(%{company_id: company.id, user_id: owner.id, role: "owner"})
+
+    denied = conn |> recycle() |> delete("/api/companies/#{company.id}/members/#{owner.id}")
+    assert json_response(denied, 403)
+    assert Companies.get_membership(owner.id, company.id).id == membership.id
+    assert Companies.get_membership(admin.id, company.id)
+  end
+
+  test "membership and invite JSON use allowlisted fields", %{conn: conn} do
+    {conn, _owner, company} = register_and_log_in_user(conn, %{role: "owner"})
+    target = user("json-target")
+
+    added =
+      post(conn, "/api/companies/#{company.id}/members", %{user_id: target.id, role: "member"})
+
+    assert %{"data" => %{"id" => membership_id, "user_id" => user_id, "role" => "member"}} =
+             json_response(added, 201)
+
+    assert user_id == target.id
+    assert is_binary(membership_id)
+    assert get_in(json_response(added, 201), ["data", "user", "email"]) == target.email
+
+    members =
+      conn |> recycle() |> get("/api/companies/#{company.id}/members") |> json_response(200)
+
+    assert Enum.any?(
+             members["data"],
+             &(&1["user_id"] == target.id and &1["user"]["name"] == target.name)
+           )
+
+    refute Enum.any?(members["data"], &Map.has_key?(&1, "password_hash"))
+    refute Enum.any?(members["data"], &Map.has_key?(&1["user"], "password_hash"))
+
+    created =
+      conn
+      |> recycle()
+      |> post("/api/companies/#{company.id}/invites", %{
+        invite: %{email: "invite@example.com", role: "member"}
+      })
+
+    assert %{"data" => %{"token" => token, "email" => "invite@example.com"}} =
+             json_response(created, 201)
+
+    assert is_binary(token)
+
+    listed =
+      conn |> recycle() |> get("/api/companies/#{company.id}/invites") |> json_response(200)
+
+    assert [%{"email" => "invite@example.com"} | _] = listed["data"]
+    refute Enum.any?(listed["data"], &Map.has_key?(&1, "token"))
+  end
+
+  test "join request JSON supports a nonempty read", %{conn: conn} do
+    {conn, _admin, company} = register_and_log_in_user(conn, %{role: "admin"})
+    target = user("join-target")
+
+    {:ok, request} =
+      Companies.create_join_request(%{
+        company_id: company.id,
+        user_id: target.id,
+        message: "Please"
+      })
+
+    listed = conn |> get("/api/companies/#{company.id}/join-requests") |> json_response(200)
+    assert Enum.any?(listed["data"], &(&1["id"] == request.id and &1["message"] == "Please"))
+    assert Enum.any?(listed["data"], &(&1["user"]["email"] == target.email))
+    refute Enum.any?(listed["data"], &Map.has_key?(&1["user"], "password_hash"))
+  end
+
+  test "join request creation and approval keep JSON envelopes", %{conn: conn} do
+    {conn, owner, company} = register_and_log_in_user(conn, %{role: "owner"})
+    target = user("new-join-target")
+
+    created = post(conn, "/api/companies/#{company.id}/join-requests", %{message: "Please"})
+
+    assert %{
+             "data" => %{
+               "user_id" => user_id,
+               "message" => "Please",
+               "user" => %{"email" => email}
+             }
+           } =
+             json_response(created, 201)
+
+    assert user_id == owner.id
+    assert email == owner.email
+
+    {:ok, request} =
+      Companies.create_join_request(%{company_id: company.id, user_id: target.id})
+
+    approved =
+      conn
+      |> recycle()
+      |> post("/api/companies/#{company.id}/join-requests/#{request.id}/approve")
+
+    assert %{"data" => %{"approved" => true}} = json_response(approved, 200)
+    assert Companies.has_access?(target.id, company.id)
+  end
+
+  test "replayed and stale join approvals return conflicts without changing membership", %{
+    conn: conn
+  } do
+    {conn, owner, company} = register_and_log_in_user(conn, %{role: "owner"})
+    rejected_user = user("rejected-join")
+
+    {:ok, rejected} =
+      Companies.create_join_request(%{company_id: company.id, user_id: rejected_user.id})
+
+    {:ok, _} = Companies.reject_join_request(rejected, owner.id)
+
+    response =
+      post(conn, "/api/companies/#{company.id}/join-requests/#{rejected.id}/approve")
+
+    assert %{"error" => "Join request is no longer pending"} = json_response(response, 409)
+    refute Companies.has_access?(rejected_user.id, company.id)
+
+    existing_user = user("existing-join")
+
+    {:ok, pending} =
+      Companies.create_join_request(%{company_id: company.id, user_id: existing_user.id})
+
+    {:ok, _} =
+      Companies.create_membership_for_actor(owner.id, %{
+        company_id: company.id,
+        user_id: existing_user.id,
+        role: "owner"
+      })
+
+    response =
+      conn
+      |> recycle()
+      |> post("/api/companies/#{company.id}/join-requests/#{pending.id}/approve")
+
+    assert %{"error" => "User is already a member"} = json_response(response, 409)
+    assert Companies.get_role(existing_user.id, company.id) == "owner"
+  end
+
+  defp user(prefix) do
+    unique = System.unique_integer([:positive])
+
+    {:ok, user} =
+      Cympho.Users.create_user(%{
+        name: prefix,
+        email: "#{prefix}-#{unique}@example.com",
+        password: "password1234"
+      })
+
+    user
+  end
+
   test "creating a company atomically grants owner and board membership", %{conn: conn} do
     {conn, user, _company} = register_and_log_in_user(conn, %{role: "member"})
     unique = System.unique_integer([:positive])

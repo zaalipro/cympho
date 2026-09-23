@@ -22,6 +22,7 @@ defmodule CymphoWeb.CompanyChannel do
   use CymphoWeb, :channel
 
   alias Cympho.RateLimiting
+  alias Cympho.Companies
 
   @impl true
   def join("company:" <> rest, payload, socket) do
@@ -44,7 +45,7 @@ defmodule CymphoWeb.CompanyChannel do
   defp do_join(rest, payload, socket) do
     case String.split(rest, ":", parts: 2) do
       [company_id] ->
-        if socket.assigns.company_id == company_id do
+        if can_join_company?(socket, company_id) do
           socket = assign_last_event_id(socket, payload)
           send(self(), :after_join)
           {:ok, socket}
@@ -53,12 +54,18 @@ defmodule CymphoWeb.CompanyChannel do
         end
 
       [company_id, sub_topic] ->
-        if socket.assigns.company_id == company_id do
+        if can_join_company?(socket, company_id) do
           dispatch_sub_topic("company:#{rest}", sub_topic, payload, socket)
         else
           {:error, %{reason: "unauthorized"}}
         end
     end
+  end
+
+  defp can_join_company?(socket, company_id) do
+    socket.assigns.company_id == company_id and
+      (socket.assigns.auth_method != :session or
+         Companies.has_access?(socket.assigns.user_id, company_id))
   end
 
   @impl true

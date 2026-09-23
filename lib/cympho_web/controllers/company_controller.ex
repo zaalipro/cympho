@@ -95,17 +95,22 @@ defmodule CymphoWeb.CompanyController do
   # ── Memberships ──
 
   def list_members(conn, %{"company_id" => company_id}) do
-    json(conn, %{data: Companies.list_memberships(company_id)})
+    json(conn, %{data: Enum.map(Companies.list_memberships(company_id), &membership_data/1)})
   end
 
   def add_member(conn, %{"company_id" => company_id, "user_id" => user_id, "role" => role}) do
-    case Companies.create_membership(%{
+    case Companies.create_membership_for_actor(conn.assigns.current_user.id, %{
            company_id: company_id,
            user_id: user_id,
            role: role
          }) do
-      {:ok, m} -> conn |> put_status(:created) |> json(%{data: m})
-      {:error, changeset} -> error_changeset(conn, changeset)
+      {:ok, m} ->
+        conn
+        |> put_status(:created)
+        |> json(%{data: membership_data(Cympho.Repo.preload(m, :user))})
+
+      {:error, reason} ->
+        mutation_error(conn, reason)
     end
   end
 
@@ -115,9 +120,13 @@ defmodule CymphoWeb.CompanyController do
         conn |> put_status(:not_found) |> json(%{error: "Membership not found"})
 
       membership ->
-        case Companies.delete_membership(membership) do
+        case Companies.delete_membership_for_actor(
+               conn.assigns.current_user.id,
+               company_id,
+               membership.id
+             ) do
           {:ok, _} -> send_resp(conn, :no_content, "")
-          {:error, changeset} -> error_changeset(conn, changeset)
+          {:error, reason} -> mutation_error(conn, reason)
         end
     end
   end
@@ -125,7 +134,7 @@ defmodule CymphoWeb.CompanyController do
   # ── Invites ──
 
   def list_invites(conn, %{"company_id" => company_id}) do
-    json(conn, %{data: Companies.list_pending_invites(company_id)})
+    json(conn, %{data: Enum.map(Companies.list_pending_invites(company_id), &invite_data/1)})
   end
 
   def create_invite(conn, %{"company_id" => company_id, "invite" => invite_params}) do
@@ -135,9 +144,14 @@ defmodule CymphoWeb.CompanyController do
         "inviter_id" => conn.assigns.current_user.id
       })
 
-    case Companies.create_invite(attrs) do
-      {:ok, invite} -> conn |> put_status(:created) |> json(%{data: invite})
-      {:error, changeset} -> error_changeset(conn, changeset)
+    case Companies.create_invite_for_actor(conn.assigns.current_user.id, attrs) do
+      {:ok, invite} ->
+        conn
+        |> put_status(:created)
+        |> json(%{data: Map.put(invite_data(invite), :token, invite.token)})
+
+      {:error, reason} ->
+        mutation_error(conn, reason)
     end
   end
 
@@ -159,9 +173,13 @@ defmodule CymphoWeb.CompanyController do
         conn |> put_status(:not_found) |> json(%{error: "Invite not found"})
 
       true ->
-        case Companies.revoke_invite(invite) do
+        case Companies.revoke_invite_for_actor(
+               conn.assigns.current_user.id,
+               company_id,
+               invite.id
+             ) do
           {:ok, _} -> json(conn, %{data: %{revoked: true}})
-          {:error, changeset} -> error_changeset(conn, changeset)
+          {:error, reason} -> mutation_error(conn, reason)
         end
     end
   end
@@ -169,7 +187,9 @@ defmodule CymphoWeb.CompanyController do
   # ── Join Requests ──
 
   def list_join_requests(conn, %{"company_id" => company_id}) do
-    json(conn, %{data: Companies.list_pending_join_requests(company_id)})
+    json(conn, %{
+      data: Enum.map(Companies.list_pending_join_requests(company_id), &join_request_data/1)
+    })
   end
 
   def create_join_request(conn, %{"company_id" => company_id} = params) do
@@ -178,19 +198,24 @@ defmodule CymphoWeb.CompanyController do
            user_id: conn.assigns.current_user.id,
            message: params["message"]
          }) do
-      {:ok, request} -> conn |> put_status(:created) |> json(%{data: request})
-      {:error, changeset} -> error_changeset(conn, changeset)
+      {:ok, request} ->
+        conn
+        |> put_status(:created)
+        |> json(%{data: join_request_data(Cympho.Repo.preload(request, :user))})
+
+      {:error, changeset} ->
+        error_changeset(conn, changeset)
     end
   end
 
   def approve_join_request(conn, %{"company_id" => company_id, "request_id" => request_id}) do
-    handle_join_request(conn, company_id, request_id, &Companies.approve_join_request/2,
+    handle_join_request(conn, company_id, request_id, &Companies.approve_join_request_for_actor/3,
       key: :approved
     )
   end
 
   def reject_join_request(conn, %{"company_id" => company_id, "request_id" => request_id}) do
-    handle_join_request(conn, company_id, request_id, &Companies.reject_join_request/2,
+    handle_join_request(conn, company_id, request_id, &Companies.reject_join_request_for_actor/3,
       key: :rejected
     )
   end
@@ -275,9 +300,9 @@ defmodule CymphoWeb.CompanyController do
         conn |> put_status(:not_found) |> json(%{error: "Join request not found"})
 
       true ->
-        case fun.(request, conn.assigns.current_user.id) do
+        case fun.(conn.assigns.current_user.id, company_id, request.id) do
           {:ok, _} -> json(conn, %{data: %{Keyword.fetch!(opts, :key) => true}})
-          {:error, changeset} -> error_changeset(conn, changeset)
+          {:error, reason} -> mutation_error(conn, reason)
         end
     end
   end
@@ -287,6 +312,71 @@ defmodule CymphoWeb.CompanyController do
     |> put_status(:unprocessable_entity)
     |> json(%{errors: translate_errors(changeset)})
   end
+
+  defp mutation_error(conn, %Ecto.Changeset{} = changeset), do: error_changeset(conn, changeset)
+
+  defp mutation_error(conn, :forbidden) do
+    conn |> put_status(:forbidden) |> json(%{errors: [%{detail: "Forbidden"}]})
+  end
+
+  defp mutation_error(conn, :not_found) do
+    conn |> put_status(:not_found) |> json(%{error: "Not found"})
+  end
+
+  defp mutation_error(conn, :last_owner) do
+    conn |> put_status(:conflict) |> json(%{error: "Cannot remove the last owner"})
+  end
+
+  defp mutation_error(conn, :not_pending) do
+    conn |> put_status(:conflict) |> json(%{error: "Join request is no longer pending"})
+  end
+
+  defp mutation_error(conn, :already_member) do
+    conn |> put_status(:conflict) |> json(%{error: "User is already a member"})
+  end
+
+  defp membership_data(membership) do
+    %{
+      id: membership.id,
+      company_id: membership.company_id,
+      user_id: membership.user_id,
+      user: user_data(membership.user),
+      role: membership.role,
+      is_board_member: membership.is_board_member,
+      inserted_at: membership.inserted_at,
+      updated_at: membership.updated_at
+    }
+  end
+
+  defp invite_data(invite) do
+    %{
+      id: invite.id,
+      company_id: invite.company_id,
+      inviter_id: invite.inviter_id,
+      email: invite.email,
+      role: invite.role,
+      status: invite.status,
+      expires_at: invite.expires_at,
+      inserted_at: invite.inserted_at
+    }
+  end
+
+  defp join_request_data(request) do
+    %{
+      id: request.id,
+      company_id: request.company_id,
+      user_id: request.user_id,
+      user: user_data(request.user),
+      status: request.status,
+      message: request.message,
+      reviewed_by_id: request.reviewed_by_id,
+      reviewed_at: request.reviewed_at,
+      inserted_at: request.inserted_at
+    }
+  end
+
+  defp user_data(%Cympho.Users.User{} = user),
+    do: %{id: user.id, name: user.name, email: user.email}
 
   defp translate_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->

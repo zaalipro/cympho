@@ -1,15 +1,17 @@
 defmodule Cympho.AgentActions.PrLifecycleActionsTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.{AgentActions, Agents, Companies, Issues}
+  alias Cympho.{AgentActions, Agents, Companies, Issues, Projects}
   alias Cympho.Repo
   alias Cympho.Wakes.AgentWake
   import Ecto.Query
+  import Mock
 
   setup do
     {:ok,
      %{
        company: company,
+       project: project,
        agents: [ceo, cto, engineer | _],
        seed_issues: [seed | _]
      }} =
@@ -18,6 +20,8 @@ defmodule Cympho.AgentActions.PrLifecycleActionsTest do
         issue_prefix: "PRA",
         engineer_count: 1
       })
+
+    {:ok, _} = Projects.update_project(project, %{repo_url: "https://github.com/owner/repo"})
 
     # Set engineer parent to CTO so escalations/iterations route correctly.
     {:ok, engineer} = Agents.update_agent(engineer, %{parent_id: cto.id})
@@ -66,6 +70,111 @@ defmodule Cympho.AgentActions.PrLifecycleActionsTest do
 
       actions = [%{"type" => "merge_pr"}]
       assert {:error, :no_pr_url} = AgentActions.execute(no_pr_issue, cto, actions)
+    end
+  end
+
+  describe "PR repository authority" do
+    setup %{company: company, issue: issue} do
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Authorized PR Project",
+          prefix: "PRTEST",
+          company_id: company.id,
+          repo_url: "https://github.com/owner/repo"
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{project_id: project.id})
+      %{issue: issue, project: project}
+    end
+
+    test "set_pr_url rejects a different repository without changing the issue", %{
+      engineer: engineer,
+      issue: issue
+    } do
+      wrong_url = "https://github.com/other/repo/pull/44"
+
+      assert {:error, :pr_repository_mismatch} =
+               AgentActions.execute(issue, engineer, [
+                 %{"type" => "set_pr_url", "url" => wrong_url}
+               ])
+
+      assert Issues.get_issue!(issue.id).github_pr_url == issue.github_pr_url
+    end
+
+    test "set_pr_url fails clearly when the issue project has no repository", %{
+      engineer: engineer,
+      issue: issue,
+      project: project
+    } do
+      {:ok, _} = Projects.update_project(project, %{repo_url: nil})
+
+      assert {:error, :missing_project_repository} =
+               AgentActions.execute(issue, engineer, [
+                 %{"type" => "set_pr_url", "url" => "https://github.com/owner/repo/pull/44"}
+               ])
+
+      assert Issues.get_issue!(issue.id).github_pr_url == issue.github_pr_url
+    end
+
+    test "set_pr_url fails clearly when the issue has no project", %{
+      engineer: engineer,
+      issue: issue
+    } do
+      {:ok, issue} = Issues.update_issue(issue, %{github_pr_url: nil, project_id: nil})
+
+      assert {:error, :missing_project_repository} =
+               AgentActions.execute(issue, engineer, [
+                 %{"type" => "set_pr_url", "url" => "https://github.com/owner/repo/pull/44"}
+               ])
+
+      assert Issues.get_issue!(issue.id).github_pr_url == issue.github_pr_url
+    end
+
+    test "merge_pr rejects a linked PR outside the issue project before calling GitHub", %{
+      cto: cto,
+      issue: issue
+    } do
+      # Deliberately model an old cross-repository link that predates link-time validation.
+      issue =
+        Repo.update!(
+          Ecto.Changeset.change(issue,
+            github_pr_url: "https://github.com/other/repo/pull/44"
+          )
+        )
+
+      assert {:error, :pr_repository_mismatch} =
+               AgentActions.execute(issue, cto, [%{"type" => "merge_pr"}])
+
+      assert Issues.get_issue!(issue.id).github_pr_url == issue.github_pr_url
+    end
+
+    test "merge_pr merges an authorized PR through the HTTP boundary", %{
+      cto: cto,
+      issue: issue
+    } do
+      previous_token = Application.get_env(:cympho, :github_token)
+      Application.put_env(:cympho, :github_token, "test-token")
+
+      on_exit(fn ->
+        if previous_token,
+          do: Application.put_env(:cympho, :github_token, previous_token),
+          else: Application.delete_env(:cympho, :github_token)
+      end)
+
+      with_mock Finch, [:passthrough],
+        request: fn request, Cympho.Finch ->
+          assert request.method == "PUT"
+          assert request.path == "/repos/owner/repo/pulls/42/merge"
+          assert Jason.decode!(request.body)["merge_method"] == "squash"
+          {:ok, %Finch.Response{status: 200, body: ~s({"sha":"merged-sha","merged":true})}}
+        end do
+        assert {:ok, %{results: [%{type: "merge_pr", sha: "merged-sha"}]}} =
+                 AgentActions.execute(issue, cto, [%{"type" => "merge_pr"}])
+
+        assert Enum.any?(Cympho.Comments.list_comments(issue.id), fn comment ->
+                 String.contains?(comment.body, "Merged PR")
+               end)
+      end
     end
   end
 

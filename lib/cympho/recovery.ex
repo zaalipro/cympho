@@ -19,6 +19,7 @@ defmodule Cympho.Recovery do
   @terminal_run_statuses ~w(completed succeeded failed cancelled timed_out done)
   @terminal_recovery_approval_statuses ~w(denied expired cancelled)
   @policy_option_keys [:max_attempts, :base_delay, :max_delay, :lease_seconds]
+  @default_stale_threshold_minutes HeartbeatEngine.default_stale_threshold_minutes()
 
   @doc "Escalates an exhausted recovery case to a single board retry proposal."
   def exhaust_case(%RecoveryCase{id: id} = case_row, opts \\ []) do
@@ -26,56 +27,110 @@ defmodule Cympho.Recovery do
     now = option_now(opts)
 
     result =
-      Repo.transaction(fn ->
-        locked =
-          case Repo.one(from c in RecoveryCase, where: c.id == ^id, lock: "FOR UPDATE") do
-            %RecoveryCase{} = row -> row
-            nil -> Repo.rollback(:not_found)
+      case HeartbeatEngine.recovery_cutoff(opts) do
+        {:ok, cutoff} ->
+          with {:ok, stale_threshold_minutes} <- HeartbeatEngine.recovery_threshold_minutes(opts) do
+            Repo.transaction(fn ->
+              locked =
+                case Repo.one(from c in RecoveryCase, where: c.id == ^id, lock: "FOR UPDATE") do
+                  %RecoveryCase{} = row -> row
+                  nil -> Repo.rollback(:not_found)
+                end
+
+              requested_threshold =
+                if Keyword.get_values(opts, :stale_threshold_minutes) == [] do
+                  locked.stale_threshold_minutes
+                else
+                  stale_threshold_minutes
+                end
+
+              if locked.stale_threshold_minutes != requested_threshold do
+                Repo.rollback(:invalid_stale_threshold)
+              end
+
+              cutoff =
+                if Keyword.get_values(opts, :stale_threshold_minutes) == [] do
+                  case Keyword.get(opts, :stale_cutoff) do
+                    %DateTime{} ->
+                      cutoff
+
+                    _ ->
+                      {:ok, persisted_cutoff} =
+                        HeartbeatEngine.recovery_cutoff(
+                          now: now,
+                          stale_threshold_minutes: locked.stale_threshold_minutes
+                        )
+
+                      persisted_cutoff
+                  end
+                else
+                  if locked.stale_threshold_minutes == stale_threshold_minutes do
+                    cutoff
+                  else
+                    Repo.rollback(:invalid_stale_threshold)
+                  end
+                end
+
+              case policy_for_case(locked, []) do
+                {:ok, _policy} -> :ok
+                {:error, :invalid_policy} -> Repo.rollback(:invalid_policy)
+              end
+
+              existing_approval =
+                Repo.one(
+                  from a in BoardApproval,
+                    where: a.recovery_case_id == ^locked.id,
+                    lock: "FOR UPDATE"
+                )
+
+              issue =
+                case Repo.one(
+                       from i in Issue, where: i.id == ^locked.issue_id, lock: "FOR UPDATE"
+                     ) do
+                  %Issue{} = row -> row
+                  nil -> Repo.rollback(:not_found)
+                end
+
+              source_run = lock_case_source_run(locked)
+
+              cond do
+                not approval_scope_matches?(existing_approval, locked) ->
+                  Repo.rollback(:invalid_recovery_approval)
+
+                locked.state in ["recovered", "resolved", "superseded"] ->
+                  {:historical, locked}
+
+                locked.state not in ["exhausted", "escalated"] ->
+                  Repo.rollback(:case_not_exhausted)
+
+                true ->
+                  case locked_exhaustion_source_state(
+                         locked,
+                         issue,
+                         source_run,
+                         existing_approval,
+                         cutoff
+                       ) do
+                    :deferred ->
+                      Repo.rollback(:recovery_deferred)
+
+                    :idempotent ->
+                      {:existing, Repo.preload(existing_approval, [:company, :recovery_case])}
+
+                    :current ->
+                      {:new, do_exhaust_case(locked, issue, existing_approval, reason, now, true)}
+
+                    :superseded ->
+                      {:new,
+                       do_exhaust_case(locked, issue, existing_approval, reason, now, false)}
+                  end
+              end
+            end)
           end
 
-        case policy_for_case(locked, []) do
-          {:ok, _policy} -> :ok
-          {:error, :invalid_policy} -> Repo.rollback(:invalid_policy)
-        end
-
-        existing_approval =
-          Repo.one(
-            from a in BoardApproval,
-              where: a.recovery_case_id == ^locked.id,
-              lock: "FOR UPDATE"
-          )
-
-        issue =
-          case Repo.one(from i in Issue, where: i.id == ^locked.issue_id, lock: "FOR UPDATE") do
-            %Issue{} = row -> row
-            nil -> Repo.rollback(:not_found)
-          end
-
-        cond do
-          not approval_scope_matches?(existing_approval, locked) ->
-            Repo.rollback(:invalid_recovery_approval)
-
-          locked.state in ["recovered", "resolved", "superseded"] ->
-            {:historical, locked}
-
-          locked.state not in ["exhausted", "escalated"] ->
-            Repo.rollback(:case_not_exhausted)
-
-          recovery_source_deferred?(locked, issue, now) ->
-            Repo.rollback(:recovery_deferred)
-
-          # Blocking the issue updates the checkout fingerprint. Once an
-          # approval has been persisted, a repeated exhaustion callback must
-          # return that durable proposal rather than treating its own block as
-          # a stale source and superseding the case.
-          locked.company_id == issue.company_id and match?(%BoardApproval{}, existing_approval) and
-              idempotent_escalation?(locked, issue) ->
-            {:existing, Repo.preload(existing_approval, [:company, :recovery_case])}
-
-          true ->
-            {:new, do_exhaust_case(locked, issue, existing_approval, reason, now)}
-        end
-      end)
+        {:error, reason} ->
+          {:error, reason}
+      end
 
     case result do
       {:ok, {:existing, %BoardApproval{} = approval}} ->
@@ -116,14 +171,13 @@ defmodule Cympho.Recovery do
     end
   end
 
-  defp do_exhaust_case(locked, issue, existing_approval, reason, now) do
-    if locked.company_id == issue.company_id and
+  defp do_exhaust_case(locked, issue, existing_approval, reason, now, source_current?) do
+    if source_current? and locked.company_id == issue.company_id and
          approval_scope_matches?(existing_approval, locked) and
-         source_matches?(locked, issue) and
          issue.status not in [:done, :cancelled, "done", "cancelled"] do
       if issue.status not in [:blocked, "blocked"] do
         Repo.update_all(from(i in Issue, where: i.id == ^issue.id),
-          set: [status: :blocked, updated_at: now],
+          set: [status: :blocked],
           inc: [lock_version: 1]
         )
       end
@@ -557,6 +611,12 @@ defmodule Cympho.Recovery do
               lock: "FOR UPDATE"
           )
 
+        cutoff =
+          case retry_cutoff(case_row, now, opts) do
+            {:ok, value} -> value
+            {:error, reason} -> Repo.rollback(reason)
+          end
+
         with %RecoveryCase{} = case_row <- case_row,
              %BoardApproval{recovery_case_id: ^case_id} = persisted <- persisted,
              :ok <- valid_persisted_retry_approval(persisted, now),
@@ -564,7 +624,8 @@ defmodule Cympho.Recovery do
              :ok <- valid_case_linkage(persisted, case_row, data),
              %Issue{} = issue <-
                Repo.one(from i in Issue, where: i.id == ^case_row.issue_id, lock: "FOR UPDATE"),
-             :ok <- valid_retry_issue(case_row, issue, data),
+             source_run <- lock_case_source_run(case_row),
+             :ok <- valid_retry_issue(case_row, issue, data, source_run, cutoff),
              {:ok, policy} <- policy_for_case(case_row, []) do
           # Clear any failed checkout binding and the runtime pause using the
           # exact source snapshot before changing the visible status.  The
@@ -580,11 +641,8 @@ defmodule Cympho.Recovery do
             set: [state: "resolved", resolved_at: now, next_attempt_at: nil]
           )
 
-          {child_fp, child_snapshot} =
-            case retry_child_fingerprint(case_row, issue_after) do
-              {:ok, value} -> value
-              {:error, reason} -> Repo.rollback(reason)
-            end
+          {:ok, {child_fp, child_snapshot}} =
+            retry_child_fingerprint(case_row, issue_after, source_run)
 
           source_id =
             case canonical_source_id(case_row, issue_after) do
@@ -604,12 +662,13 @@ defmodule Cympho.Recovery do
             # may share this identity, but the active partial index prevents a
             # second root/child from coexisting.
             source_id: source_id,
-            source_status: to_string(issue_after.status),
+            source_status: retry_child_source_status(case_row, child_snapshot),
             source_fingerprint: child_fp,
             fingerprint_version: Fingerprint.version(),
             source_snapshot: child_snapshot,
             policy_snapshot: policy.snapshot,
             max_attempts: policy.max_attempts,
+            stale_threshold_minutes: case_row.stale_threshold_minutes,
             state: "scheduled",
             next_attempt_at: now
           }
@@ -617,6 +676,7 @@ defmodule Cympho.Recovery do
           child = insert_retry_child!(child_attrs)
           {:applied, persisted, child, issue, issue_after}
         else
+          {:error, :recovery_deferred} -> Repo.rollback(:recovery_deferred)
           _ -> Repo.rollback(:stale_recovery_proposal)
         end
       end)
@@ -629,6 +689,9 @@ defmodule Cympho.Recovery do
 
         {:ok, child}
 
+      {:error, :recovery_deferred} ->
+        {:error, :recovery_deferred}
+
       {:error, :stale_recovery_proposal} ->
         audit_stale_retry_proposal(approval_id)
         {:error, :stale_recovery_proposal}
@@ -639,6 +702,23 @@ defmodule Cympho.Recovery do
   end
 
   def apply_board_action(_, _opts), do: {:error, :stale_recovery_proposal}
+
+  defp retry_cutoff(
+         %RecoveryCase{stale_threshold_minutes: threshold},
+         %DateTime{} = now,
+         opts
+       )
+       when is_integer(threshold) and threshold > 0 do
+    supplied = Keyword.get_values(opts, :stale_threshold_minutes)
+
+    if supplied == [] or Enum.all?(supplied, &(&1 === threshold)) do
+      HeartbeatEngine.recovery_cutoff(now: now, stale_threshold_minutes: threshold)
+    else
+      {:error, :invalid_stale_threshold}
+    end
+  end
+
+  defp retry_cutoff(_, _, _), do: {:error, :invalid_stale_threshold}
 
   defp audit_stale_retry_proposal(approval_id) do
     case Repo.get(BoardApproval, approval_id) do
@@ -772,12 +852,22 @@ defmodule Cympho.Recovery do
 
   defp valid_case_linkage(_, _, _), do: {:error, :stale_recovery_proposal}
 
-  defp valid_retry_issue(case_row, %Issue{} = issue, data) do
+  defp valid_retry_issue(case_row, %Issue{} = issue, data, source_run, cutoff) do
     cond do
-      issue.status not in [:blocked, "blocked"] -> {:error, :stale_recovery_proposal}
-      Map.get(data, "issue_id") != issue.id -> {:error, :stale_recovery_proposal}
-      not retry_source_matches?(case_row, issue) -> {:error, :stale_recovery_proposal}
-      true -> :ok
+      issue.status not in [:blocked, "blocked"] ->
+        {:error, :stale_recovery_proposal}
+
+      Map.get(data, "issue_id") != issue.id ->
+        {:error, :stale_recovery_proposal}
+
+      not retry_source_matches?(case_row, issue, source_run) ->
+        {:error, :stale_recovery_proposal}
+
+      recovery_source_deferred_locked?(case_row, issue, source_run, cutoff) ->
+        {:error, :recovery_deferred}
+
+      true ->
+        :ok
     end
   end
 
@@ -828,18 +918,38 @@ defmodule Cympho.Recovery do
   defp snapshot_value(snapshot, key) when is_map(snapshot), do: Map.get(snapshot, key)
   defp snapshot_value(_, _), do: nil
 
-  defp retry_child_fingerprint(%RecoveryCase{source_type: "issue_checkout"} = _case_row, issue),
-    do: {:ok, Fingerprint.for_issue_checkout(issue)}
+  defp retry_child_fingerprint(
+         %RecoveryCase{source_type: "issue_checkout"} = _case_row,
+         issue,
+         _source_run
+       ),
+       do: {:ok, Fingerprint.for_issue_checkout(issue)}
 
-  defp retry_child_fingerprint(%RecoveryCase{source_type: "heartbeat_run"} = case_row, issue) do
-    case Repo.get(Run, case_row.source_run_id) do
-      %Run{} = run -> {:ok, Fingerprint.for_run(run, issue)}
-      _ -> {:error, :stale_recovery_proposal}
-    end
-  end
+  defp retry_child_fingerprint(
+         %RecoveryCase{source_type: "heartbeat_run"},
+         issue,
+         %Run{} = run
+       ),
+       do: {:ok, Fingerprint.for_run(run, issue)}
 
-  defp retry_child_fingerprint(case_row, _issue),
+  defp retry_child_fingerprint(case_row, _issue, _source_run),
     do: {:ok, {case_row.source_fingerprint, case_row.source_snapshot}}
+
+  defp retry_child_source_status(
+         %RecoveryCase{source_type: "heartbeat_run"},
+         %{"run_status" => status}
+       )
+       when status in ["running", "pending", "queued"],
+       do: status
+
+  defp retry_child_source_status(
+         %RecoveryCase{source_type: "issue_checkout"},
+         %{"issue_status" => status}
+       )
+       when is_binary(status),
+       do: status
+
+  defp retry_child_source_status(_case_row, _snapshot), do: nil
 
   defp canonical_source_id(
          %RecoveryCase{source_type: "heartbeat_run", source_run_id: run_id},
@@ -904,45 +1014,76 @@ defmodule Cympho.Recovery do
 
   defp unique_constraint_error?(_), do: false
 
-  defp source_matches?(%RecoveryCase{source_type: "issue_checkout"} = case_row, issue),
-    do: current_source_matches?(case_row, issue, nil)
-
-  defp source_matches?(
-         %RecoveryCase{
-           source_type: "heartbeat_run",
-           source_run_id: run_id
-         } = case_row,
-         issue
-       )
-       when is_binary(run_id) do
-    case Repo.get(Run, run_id) do
-      %Run{} = run ->
-        current_source_matches?(case_row, run, issue)
-
-      _ ->
-        false
-    end
+  defp lock_case_source_run(%RecoveryCase{source_run_id: run_id}) when is_binary(run_id) do
+    Repo.one(from r in Run, where: r.id == ^run_id, lock: "FOR UPDATE")
   end
 
-  defp source_matches?(_, _), do: false
+  defp lock_case_source_run(%RecoveryCase{}), do: nil
 
-  defp recovery_source_deferred?(
-         %RecoveryCase{source_type: "heartbeat_run", source_run_id: run_id},
+  defp locked_exhaustion_source_state(
+         %RecoveryCase{} = case_row,
          %Issue{} = issue,
-         now
-       )
-       when is_binary(run_id) and is_struct(now, DateTime) do
-    case Repo.get(Run, run_id) do
-      %Run{} = run when run.issue_id == issue.id -> HeartbeatEngine.recovery_deferred?(run, now)
-      _ -> false
+         source_run,
+         existing_approval,
+         cutoff
+       ) do
+    source_state =
+      cond do
+        locked_current_source_matches?(case_row, issue, source_run) ->
+          :current
+
+        match?(%BoardApproval{}, existing_approval) and idempotent_escalation?(case_row, issue) and
+            retry_source_matches?(case_row, issue, source_run) ->
+          :idempotent
+
+        true ->
+          :superseded
+      end
+
+    if source_state in [:current, :idempotent] and
+         recovery_source_deferred_locked?(case_row, issue, source_run, cutoff) do
+      :deferred
+    else
+      source_state
     end
   end
 
-  defp recovery_source_deferred?(%RecoveryCase{source_type: "issue_checkout"}, issue, _now) do
+  defp locked_current_source_matches?(
+         %RecoveryCase{source_type: "heartbeat_run"} = case_row,
+         issue,
+         %Run{} = run
+       ),
+       do: current_source_matches?(case_row, run, issue)
+
+  defp locked_current_source_matches?(
+         %RecoveryCase{source_type: "issue_checkout"} = case_row,
+         issue,
+         _run
+       ),
+       do: current_source_matches?(case_row, issue, nil)
+
+  defp locked_current_source_matches?(_, _, _), do: false
+
+  defp recovery_source_deferred_locked?(
+         %RecoveryCase{source_type: "heartbeat_run"},
+         _issue,
+         %Run{} = run,
+         %DateTime{} = cutoff
+       ) do
+    not HeartbeatEngine.run_stale_before?(run, cutoff) or
+      HeartbeatEngine.recovery_deferred_locked?(run, cutoff)
+  end
+
+  defp recovery_source_deferred_locked?(
+         %RecoveryCase{source_type: "issue_checkout"},
+         issue,
+         _run,
+         _cutoff
+       ) do
     source_live?(issue.id) or active_checkout_run?(issue.id)
   end
 
-  defp recovery_source_deferred?(_, _, _), do: false
+  defp recovery_source_deferred_locked?(_, _, _, _), do: false
 
   # The escalation itself moves the issue to `:blocked` and increments its
   # lock version. Retry therefore validates the durable pre-escalation
@@ -953,12 +1094,25 @@ defmodule Cympho.Recovery do
            source_type: "issue_checkout",
            source_fingerprint: source_fingerprint,
            source_snapshot: snapshot
-         },
-         %Issue{} = issue
+         } = case_row,
+         %Issue{} = issue,
+         source_run
        )
        when is_map(snapshot) do
-    retry_issue_snapshot_matches?(snapshot, issue, "issue_checkout") and
-      recomputed_original_checkout?(source_fingerprint, snapshot, issue)
+    Fingerprint.exact_checkout_snapshot?(snapshot) and
+      case_row.fingerprint_version == snapshot["version"] and
+      case_row.fingerprint_version == Fingerprint.version() and
+      case_row.company_id == snapshot["company_id"] and case_row.company_id == issue.company_id and
+      case_row.issue_id == snapshot["issue_id"] and case_row.issue_id == issue.id and
+      case_row.source_id == snapshot["issue_id"] and case_row.source_id == issue.id and
+      case_row.agent_id == snapshot["assignee_id"] and case_row.agent_id == issue.assignee_id and
+      case_row.source_run_id == snapshot["checkout_run_id"] and
+      case_row.source_run_id == issue.checkout_run_id and
+      case_row.source_status == snapshot["issue_status"] and
+      retry_issue_snapshot_matches?(snapshot, issue, "issue_checkout") and
+      checkout_liveness_matches_snapshot?(snapshot, issue) and
+      recomputed_original_checkout?(source_fingerprint, snapshot) and
+      checkout_run_link_matches?(source_run, case_row, issue)
   end
 
   defp retry_source_matches?(
@@ -967,25 +1121,28 @@ defmodule Cympho.Recovery do
            source_run_id: run_id,
            source_fingerprint: source_fingerprint,
            source_snapshot: snapshot
-         },
-         %Issue{} = issue
+         } = case_row,
+         %Issue{} = issue,
+         %Run{} = run
        )
        when is_binary(run_id) and is_map(snapshot) do
-    with %Run{} = run <- Repo.get(Run, run_id),
-         true <- run.company_id == issue.company_id,
-         true <- run.issue_id == issue.id,
-         true <- to_string(run.status) not in @terminal_run_statuses,
-         true <- to_string(run.status) == snapshot["run_status"],
-         true <- run.agent_id == snapshot["agent_id"],
-         true <- retry_issue_snapshot_matches?(snapshot, issue, "heartbeat_run"),
-         true <- recomputed_original_run?(source_fingerprint, snapshot, run, issue) do
-      true
-    else
-      _ -> false
-    end
+    Fingerprint.exact_run_snapshot?(snapshot) and
+      case_row.fingerprint_version == snapshot["version"] and
+      case_row.fingerprint_version == Fingerprint.version() and
+      case_row.company_id == snapshot["company_id"] and case_row.company_id == issue.company_id and
+      case_row.company_id == run.company_id and case_row.issue_id == snapshot["issue_id"] and
+      case_row.issue_id == issue.id and case_row.issue_id == run.issue_id and
+      case_row.source_id == snapshot["run_id"] and case_row.source_id == run.id and
+      case_row.source_run_id == snapshot["run_id"] and case_row.source_run_id == run.id and
+      case_row.agent_id == snapshot["agent_id"] and case_row.agent_id == run.agent_id and
+      case_row.source_status == snapshot["run_status"] and
+      case_row.source_status == to_string(run.status) and
+      to_string(run.status) not in @terminal_run_statuses and
+      retry_issue_snapshot_matches?(snapshot, issue, "heartbeat_run") and
+      recomputed_original_run?(source_fingerprint, snapshot, run)
   end
 
-  defp retry_source_matches?(_, _), do: false
+  defp retry_source_matches?(_, _, _), do: false
 
   defp retry_issue_snapshot_matches?(snapshot, %Issue{} = issue, source_type) do
     expected_assignee =
@@ -993,8 +1150,7 @@ defmodule Cympho.Recovery do
 
     assignee_ok? = expected_assignee == id_value(issue.assignee_id)
 
-    snapshot_complete?(snapshot, issue_snapshot_keys(source_type)) and
-      snapshot["source_type"] == source_type and
+    snapshot["source_type"] == source_type and
       snapshot["issue_id"] == issue.id and
       snapshot["company_id"] == issue.company_id and
       assignee_ok? and
@@ -1002,11 +1158,17 @@ defmodule Cympho.Recovery do
       retry_lock_version_matches?(snapshot, issue)
   end
 
-  defp snapshot_complete?(snapshot, keys) when is_map(snapshot) do
-    Enum.all?(keys, &Map.has_key?(snapshot, &1))
-  end
+  defp checkout_liveness_matches_snapshot?(snapshot, %Issue{} = issue) do
+    current = issue.checked_out_at || issue.updated_at
 
-  defp snapshot_complete?(_, _), do: false
+    case {current, DateTime.from_iso8601(snapshot["checkout_liveness_at"] || "")} do
+      {%DateTime{} = current, {:ok, expected, _offset}} ->
+        DateTime.compare(DateTime.truncate(current, :second), expected) == :eq
+
+      _ ->
+        false
+    end
+  end
 
   defp retry_lock_version_matches?(snapshot, %Issue{status: status, lock_version: lock_version})
        when status in [:blocked, "blocked"] do
@@ -1051,11 +1213,7 @@ defmodule Cympho.Recovery do
       "error_family"
     ]
 
-  defp issue_snapshot_keys("issue_checkout"), do: issue_checkout_snapshot_keys()
-  defp issue_snapshot_keys("heartbeat_run"), do: heartbeat_snapshot_keys()
-  defp issue_snapshot_keys(_), do: []
-
-  defp recomputed_original_checkout?(source_fingerprint, snapshot, issue) do
+  defp recomputed_original_checkout?(source_fingerprint, snapshot) do
     synthetic = %{
       id: snapshot["issue_id"],
       company_id: snapshot["company_id"],
@@ -1066,11 +1224,11 @@ defmodule Cympho.Recovery do
       lock_version: snapshot["lock_version"]
     }
 
-    {fingerprint, _} = Fingerprint.for_issue_checkout(synthetic)
-    fingerprint == source_fingerprint and issue.company_id == snapshot["company_id"]
+    {fingerprint, recomputed_snapshot} = Fingerprint.for_issue_checkout(synthetic)
+    fingerprint == source_fingerprint and recomputed_snapshot == snapshot
   end
 
-  defp recomputed_original_run?(source_fingerprint, snapshot, run, issue) do
+  defp recomputed_original_run?(source_fingerprint, snapshot, run) do
     synthetic_issue = %{
       id: snapshot["issue_id"],
       company_id: snapshot["company_id"],
@@ -1079,26 +1237,23 @@ defmodule Cympho.Recovery do
       checkout_run_id: snapshot["checkout_run_id"]
     }
 
-    synthetic_run = %{
-      id: snapshot["run_id"],
-      company_id: snapshot["company_id"],
-      issue_id: snapshot["issue_id"],
-      agent_id: snapshot["agent_id"],
-      status: snapshot["run_status"],
-      last_heartbeat_at: snapshot["liveness_at"],
-      inserted_at: snapshot["liveness_at"],
-      error_reason: snapshot["error_family"]
-    }
-
-    {fingerprint, _} = Fingerprint.for_run(synthetic_run, synthetic_issue)
-
-    fingerprint == source_fingerprint and
-      run.id == snapshot["run_id"] and run.company_id == snapshot["company_id"] and
-      run.issue_id == snapshot["issue_id"] and run.agent_id == snapshot["agent_id"] and
-      to_string(run.status) == snapshot["run_status"] and
-      Fingerprint.error_family(run.error_reason) == snapshot["error_family"] and
-      issue.company_id == snapshot["company_id"]
+    {fingerprint, recomputed_snapshot} = Fingerprint.for_run(run, synthetic_issue)
+    fingerprint == source_fingerprint and recomputed_snapshot == snapshot
   end
+
+  defp checkout_run_link_matches?(nil, %RecoveryCase{source_run_id: nil}, _issue), do: true
+
+  defp checkout_run_link_matches?(
+         %Run{} = run,
+         %RecoveryCase{source_run_id: run_id, company_id: company_id, agent_id: agent_id},
+         %Issue{id: issue_id}
+       )
+       when is_binary(run_id) do
+    run.id == run_id and run.company_id == company_id and run.issue_id == issue_id and
+      run.agent_id == agent_id
+  end
+
+  defp checkout_run_link_matches?(_, _, _), do: false
 
   defp increment(value) when is_integer(value), do: value + 1
   defp increment(_), do: nil
@@ -1117,7 +1272,15 @@ defmodule Cympho.Recovery do
          :ok <- validate_scope(issue, attrs, run),
          {:ok, fingerprint, snapshot, source_id, source_status, agent_id, source_run_id} <-
            source_details(source_type, issue, run) do
-      with {:ok, policy} <- normalize_policy(attrs) do
+      stale_threshold_minutes =
+        attrs[:stale_threshold_minutes] || attrs["stale_threshold_minutes"] ||
+          @default_stale_threshold_minutes
+
+      with {:ok, _} <-
+             HeartbeatEngine.recovery_threshold_minutes(
+               stale_threshold_minutes: stale_threshold_minutes
+             ),
+           {:ok, policy} <- normalize_policy(attrs) do
         attrs = %{
           company_id: issue.company_id,
           issue_id: issue.id,
@@ -1130,7 +1293,8 @@ defmodule Cympho.Recovery do
           fingerprint_version: Fingerprint.version(),
           source_snapshot: snapshot,
           max_attempts: policy.max_attempts,
-          policy_snapshot: policy.snapshot
+          policy_snapshot: policy.snapshot,
+          stale_threshold_minutes: stale_threshold_minutes
         }
 
         case do_ensure_case(attrs) do
@@ -1179,7 +1343,7 @@ defmodule Cympho.Recovery do
           | :none
           | {:error, term()}
   def claim_next_due_case(visited_ids, opts) when is_list(opts) do
-    with {:ok, _requested_policy} <- normalize_policy(opts),
+    with :ok <- validate_supplied_policy_options(opts),
          {:ok, visited_ids} <- normalize_visited_ids(visited_ids) do
       now = option_now(opts)
       claimed_by = option_value(opts, :claimed_by) || node() |> to_string()
@@ -1231,7 +1395,7 @@ defmodule Cympho.Recovery do
   def claim_case(%RecoveryCase{id: id}, opts), do: claim_case(id, opts)
 
   def claim_case(id, opts) when is_binary(id) do
-    with {:ok, _requested_policy} <- normalize_policy(opts) do
+    with :ok <- validate_supplied_policy_options(opts) do
       now = option_now(opts)
       claimed_by = option_value(opts, :claimed_by) || node() |> to_string()
 
@@ -1248,7 +1412,12 @@ defmodule Cympho.Recovery do
           {:ok, lease}
 
         {:ok, {:needs_escalation, exhausted_case}} ->
-          case exhaust_case(exhausted_case, reason: exhausted_case.last_error, now: now) do
+          exhaust_opts =
+            opts
+            |> Keyword.put(:reason, exhausted_case.last_error)
+            |> Keyword.put(:now, now)
+
+          case exhaust_case(exhausted_case, exhaust_opts) do
             {:ok, %BoardApproval{}} -> {:error, :exhausted}
             {:ok, %RecoveryCase{state: "superseded"}} -> {:error, :superseded}
             {:error, reason} -> {:error, {:exhaustion_failed, reason}}
@@ -1264,7 +1433,8 @@ defmodule Cympho.Recovery do
   end
 
   defp claim_locked_case(%RecoveryCase{} = case_row, opts, now, claimed_by) do
-    with {:ok, policy} <- policy_for_case(case_row, opts) do
+    with {:ok, _cutoff_opts} <- case_recovery_cutoff_opts(case_row, opts),
+         {:ok, policy} <- policy_for_case(case_row, opts) do
       lease_seconds = policy.lease_seconds
 
       cond do
@@ -1621,7 +1791,12 @@ defmodule Cympho.Recovery do
   def recover_orphaned_issue(issue, opts \\ [])
 
   def recover_orphaned_issue(%Issue{} = issue, opts) do
-    source = %{source_type: "issue_checkout", issue: issue}
+    source = %{
+      source_type: "issue_checkout",
+      issue: issue,
+      stale_threshold_minutes:
+        Keyword.get(opts, :stale_threshold_minutes, @default_stale_threshold_minutes)
+    }
 
     with {:ok, recovery_opts} <- adapter_recovery_options(opts),
          {:ok, result} <-
@@ -1659,8 +1834,9 @@ defmodule Cympho.Recovery do
   def process_due(opts \\ [])
 
   def process_due(opts) when is_list(opts) do
-    with {:ok, _policy} <- normalize_policy(opts),
-         :ok <- validate_due_clock(opts) do
+    with :ok <- validate_supplied_policy_options(opts),
+         :ok <- validate_due_clock(opts),
+         {:ok, _cutoff} <- HeartbeatEngine.recovery_cutoff(opts) do
       limit = bounded_limit(Keyword.get(opts, :limit, 50))
 
       process_due_loop(opts, limit, MapSet.new(), empty_due_stats())
@@ -1767,10 +1943,16 @@ defmodule Cympho.Recovery do
   end
 
   defp process_due_escalation_safely(stats, %RecoveryCase{} = case_row, opts) do
-    with {:ok, escalation_now} <- due_time(opts) do
+    with {:ok, escalation_now} <- due_time(opts),
+         {:ok, escalation_opts} <- case_recovery_cutoff_opts(case_row, opts) do
       result =
         protected_call(fn ->
-          exhaust_case(case_row, reason: case_row.last_error, now: escalation_now)
+          exhaust_case(
+            case_row,
+            escalation_opts
+            |> Keyword.put(:reason, case_row.last_error)
+            |> Keyword.put(:now, escalation_now)
+          )
         end)
 
       case result do
@@ -1823,29 +2005,37 @@ defmodule Cympho.Recovery do
        ) do
     case {Repo.get(Run, case_row.source_run_id), Repo.get(Issue, case_row.issue_id)} do
       {%Run{} = run, %Issue{} = issue} ->
-        cond do
-          current_source_matches?(case_row, run, issue) and source_live?(issue.id) ->
-            {:error, :recovery_deferred}
+        case case_recovery_cutoff_opts(case_row, opts) do
+          {:ok, callback_opts} ->
+            cond do
+              current_source_matches?(case_row, run, issue) and source_live?(issue.id) ->
+                {:error, :recovery_deferred}
 
-          current_source_matches?(case_row, run, issue) ->
-            kind =
-              if case_row.source_status in ["pending", "queued"], do: :orphaned, else: :stale
+              current_source_matches?(case_row, run, issue) ->
+                kind =
+                  if case_row.source_status in ["pending", "queued"],
+                    do: :orphaned,
+                    else: :stale
 
-            case HeartbeatEngine.recover_run_if_current(
-                   run,
-                   run_source_guard(case_row, kind),
-                   kind,
-                   now: option_now(opts)
-                 ) do
-              {:ok, recovered} -> {:ok, run_recovery_result(recovered, opts)}
-              error -> error
+                case HeartbeatEngine.recover_run_if_current(
+                       run,
+                       run_source_guard(case_row, kind),
+                       kind,
+                       Keyword.put(callback_opts, :now, option_now(opts))
+                     ) do
+                  {:ok, recovered} -> {:ok, run_recovery_result(recovered, callback_opts)}
+                  error -> error
+                end
+
+              terminal_case_run?(case_row, run, issue) ->
+                {:error, {:terminal_run, run}}
+
+              true ->
+                {:error, :superseded}
             end
 
-          terminal_case_run?(case_row, run, issue) ->
-            {:error, {:terminal_run, run}}
-
-          true ->
-            {:error, :superseded}
+          {:error, reason} ->
+            {:error, reason}
         end
 
       _ ->
@@ -1878,6 +2068,19 @@ defmodule Cympho.Recovery do
         {:error, :superseded}
     end
   end
+
+  defp case_recovery_cutoff_opts(%RecoveryCase{stale_threshold_minutes: threshold}, opts)
+       when is_integer(threshold) and threshold > 0 do
+    supplied = Keyword.get_values(opts, :stale_threshold_minutes)
+
+    if supplied == [] or Enum.all?(supplied, &(&1 === threshold)) do
+      {:ok, Keyword.put(opts, :stale_threshold_minutes, threshold)}
+    else
+      {:error, :invalid_stale_threshold}
+    end
+  end
+
+  defp case_recovery_cutoff_opts(_case_row, _opts), do: {:error, :invalid_stale_threshold}
 
   defp finish_due_result(
          lease,
@@ -1930,7 +2133,12 @@ defmodule Cympho.Recovery do
   defp finish_due_result(lease, {:error, reason}, opts, stats) do
     case record_failure(lease, reason, opts) do
       {:ok, updated} when updated.state == "exhausted" ->
-        case exhaust_case(updated, reason: reason, now: option_now(opts)) do
+        exhaust_opts =
+          opts
+          |> Keyword.put(:reason, reason)
+          |> Keyword.put(:now, option_now(opts))
+
+        case exhaust_case(updated, exhaust_opts) do
           {:ok, %BoardApproval{}} ->
             %{stats | processed: stats.processed + 1, exhausted: stats.exhausted + 1}
 
@@ -2051,12 +2259,23 @@ defmodule Cympho.Recovery do
   end
 
   defp recover_run(%Run{} = run, kind, opts) do
-    source = %{source_type: "heartbeat_run", issue: nil, run: run}
+    source = %{
+      source_type: "heartbeat_run",
+      issue: nil,
+      run: run,
+      stale_threshold_minutes:
+        Keyword.get(opts, :stale_threshold_minutes, @default_stale_threshold_minutes)
+    }
 
     with {:ok, recovery_opts} <- adapter_recovery_options(opts),
-         {:ok, issue} <- Issues.get_issue(run.issue_id) do
+         {:ok, issue} <- Issues.get_issue(run.issue_id),
+         {:ok, cutoff} <- HeartbeatEngine.recovery_cutoff(opts) do
+      opts = Keyword.put(opts, :stale_cutoff, cutoff)
+      recovery_opts = Keyword.put(recovery_opts, :stale_cutoff, cutoff)
+
       if run_scope_matches?(run, issue) and
-           HeartbeatEngine.recovery_deferred?(run, option_now(opts)) do
+           (not HeartbeatEngine.run_stale_before?(run, cutoff) or
+              HeartbeatEngine.recovery_deferred?(run, option_now(opts), opts)) do
         {:ok,
          %{
            run: run,
@@ -2090,7 +2309,7 @@ defmodule Cympho.Recovery do
                           current,
                           run_source_guard(lease.case, effective_kind),
                           effective_kind,
-                          now: option_now(opts)
+                          Keyword.put(opts, :now, option_now(opts))
                         ) do
                      {:error, {:invalid_status, _status}} -> {:error, :superseded}
                      {:ok, updated} -> {:ok, run_recovery_result(updated, opts)}
@@ -2184,6 +2403,7 @@ defmodule Cympho.Recovery do
       source_status: case_row.source_status,
       source_fingerprint: case_row.source_fingerprint,
       fingerprint_version: case_row.fingerprint_version,
+      source_snapshot: case_row.source_snapshot,
       liveness_at: case_row.source_snapshot["liveness_at"],
       recovery_kind: kind
     }
@@ -2639,15 +2859,31 @@ defmodule Cympho.Recovery do
 
         cond do
           active && active.source_fingerprint == attrs.source_fingerprint &&
-              case_policy_matches?(active, attrs) ->
+            case_policy_matches?(active, attrs) &&
+              active.stale_threshold_minutes == attrs.stale_threshold_minutes ->
             active
+
+          active && active.source_fingerprint == attrs.source_fingerprint &&
+              case_policy_matches?(active, attrs) ->
+            Repo.rollback(:invalid_stale_threshold)
 
           active && active.source_fingerprint == attrs.source_fingerprint ->
             Repo.rollback(:invalid_policy)
 
           active ->
+            superseded_at = DateTime.utc_now() |> DateTime.truncate(:second)
+            close_superseded_claim!(active, superseded_at)
+
             Repo.update_all(from(c in RecoveryCase, where: c.id == ^active.id),
-              set: [state: "superseded", resolved_at: DateTime.utc_now()]
+              set: [
+                state: "superseded",
+                resolved_at: superseded_at,
+                claim_token: nil,
+                claimed_at: nil,
+                lease_expires_at: nil,
+                claimed_by: nil,
+                next_attempt_at: nil
+              ]
             )
 
             # A pending proposal for the old fingerprint cannot remain
@@ -2658,6 +2894,8 @@ defmodule Cympho.Recovery do
               ),
               set: [status: "cancelled", decision_reasoning: "Recovery source superseded"]
             )
+
+            lock_case_insert_sources!(attrs)
 
             case insert_case(attrs, active) do
               {:ok, row} ->
@@ -2671,6 +2909,8 @@ defmodule Cympho.Recovery do
             end
 
           true ->
+            lock_case_insert_sources!(attrs)
+
             case insert_case(attrs, nil) do
               {:ok, row} ->
                 row
@@ -2694,8 +2934,9 @@ defmodule Cympho.Recovery do
       {:error, {:unique_conflict, _changeset}} ->
         case reload_active_case(attrs) do
           {:ok, row} ->
-            if row.source_fingerprint == attrs.source_fingerprint &&
-                 case_policy_matches?(row, attrs) do
+            if (row.source_fingerprint == attrs.source_fingerprint &&
+                  case_policy_matches?(row, attrs)) and
+                 row.stale_threshold_minutes == attrs.stale_threshold_minutes do
               {:ok, row}
             else
               if row.source_fingerprint == attrs.source_fingerprint,
@@ -2718,9 +2959,10 @@ defmodule Cympho.Recovery do
                      order_by: [desc: c.inserted_at]
                  ) do
               %RecoveryCase{} = row ->
-                if case_policy_matches?(row, attrs),
-                  do: {:ok, row},
-                  else: {:error, :invalid_policy}
+                if case_policy_matches?(row, attrs) and
+                     row.stale_threshold_minutes == attrs.stale_threshold_minutes,
+                   do: {:ok, row},
+                   else: {:error, :invalid_policy}
 
               _ ->
                 do_ensure_case(attrs, attempt + 1)
@@ -2733,6 +2975,55 @@ defmodule Cympho.Recovery do
   end
 
   defp do_ensure_case(_attrs, _attempt), do: {:error, :concurrent_conflict}
+
+  defp close_superseded_claim!(%RecoveryCase{state: "claimed", id: case_id}, completed_at) do
+    {count, _} =
+      Repo.update_all(
+        from(a in RecoveryAttempt,
+          where: a.recovery_case_id == ^case_id and a.status == "claimed"
+        ),
+        set: [
+          status: "skipped",
+          completed_at: completed_at,
+          error_reason: "source_superseded",
+          next_retry_at: nil
+        ]
+      )
+
+    if count != 1, do: Repo.rollback(:invalid_claim_state)
+    :ok
+  end
+
+  defp close_superseded_claim!(%RecoveryCase{}, _completed_at), do: :ok
+
+  defp lock_case_insert_sources!(attrs) do
+    issue =
+      Repo.one(
+        from i in Issue,
+          where: i.id == ^attrs.issue_id,
+          lock: "FOR UPDATE"
+      )
+
+    unless match?(%Issue{company_id: company_id} when company_id == attrs.company_id, issue),
+      do: Repo.rollback(:company_scope_required)
+
+    case attrs.source_run_id do
+      run_id when is_binary(run_id) ->
+        run = Repo.one(from r in Run, where: r.id == ^run_id, lock: "FOR UPDATE")
+
+        unless match?(
+                 %Run{company_id: company_id, issue_id: issue_id}
+                 when company_id == attrs.company_id and issue_id == attrs.issue_id,
+                 run
+               ),
+               do: Repo.rollback(:company_scope_required)
+
+      _ ->
+        :ok
+    end
+
+    :ok
+  end
 
   defp insert_case(attrs, parent) do
     root_id = if parent, do: parent.root_case_id || parent.id
@@ -2980,14 +3271,21 @@ defmodule Cympho.Recovery do
     do: is_integer(value) and value > 0 and value <= @max_policy_lease_seconds
 
   defp validate_supplied_policy_options(opts) when is_list(opts) or is_map(opts) do
-    if Enum.all?(@policy_option_keys, fn key ->
-         case duplicate_safe_value(supplied_policy_values(opts, key), key, :absent) do
-           {:ok, _value} -> true
-           {:error, :invalid_policy} -> false
-         end
-       end),
-       do: :ok,
-       else: {:error, :invalid_policy}
+    with true <-
+           Enum.all?(@policy_option_keys, fn key ->
+             match?(
+               {:ok, _value},
+               duplicate_safe_value(supplied_policy_values(opts, key), key, :absent)
+             )
+           end),
+         {:ok, base_delay} <- supplied_policy_value(opts, :base_delay),
+         {:ok, max_delay} <- supplied_policy_value(opts, :max_delay),
+         true <-
+           base_delay == :absent or max_delay == :absent or max_delay >= base_delay do
+      :ok
+    else
+      _ -> {:error, :invalid_policy}
+    end
   end
 
   defp validate_supplied_policy_options(_opts), do: {:error, :invalid_policy}
@@ -2998,6 +3296,10 @@ defmodule Cympho.Recovery do
     [key, Atom.to_string(key)]
     |> Enum.filter(&Map.has_key?(opts, &1))
     |> Enum.map(&Map.fetch!(opts, &1))
+  end
+
+  defp supplied_policy_value(opts, key) do
+    duplicate_safe_value(supplied_policy_values(opts, key), key, :absent)
   end
 
   # A case snapshots its effective policy at detection time. Later calls may

@@ -70,6 +70,19 @@ defmodule Cympho.GithubTest do
     test "returns error for URL with only owner" do
       assert {:error, :invalid_url} = Github.parse_repo_url("https://github.com/owner")
     end
+
+    test "rejects malformed repository identities" do
+      for url <- [
+            "https://github.com//repo",
+            "https://github.com/owner/",
+            "https://github.com/owner/repo?redirect=1",
+            "https://github.com/owner/repo#fragment",
+            "https://github.com@evil.example/owner/repo",
+            "git@github.com:owner/repo/extra"
+          ] do
+        assert {:error, :invalid_url} = Github.parse_repo_url(url)
+      end
+    end
   end
 
   describe "parse_pull_request_url/1" do
@@ -81,6 +94,57 @@ defmodule Cympho.GithubTest do
     test "rejects non-PR URLs" do
       assert {:error, :invalid_url} =
                Github.parse_pull_request_url("https://github.com/openai/symphony/issues/123")
+    end
+
+    test "rejects malformed PR URL identities" do
+      for url <- [
+            "https://github.com//repo/pull/1",
+            "https://github.com/owner//pull/1",
+            "https://github.com/owner/repo/pull/0",
+            "https://github.com/owner/repo/pull/1?redirect=1",
+            "https://github.com/owner/repo/pull/1#fragment",
+            "https://github.com/owner/repo/pull/1@evil.example"
+          ] do
+        assert {:error, :invalid_url} = Github.parse_pull_request_url(url)
+      end
+    end
+  end
+
+  describe "pr_in_repo?/2" do
+    test "compares the canonical base repository for HTTPS and SSH project URLs" do
+      assert Github.pr_in_repo?(
+               "https://github.com/Owner/Repo/pull/42",
+               "https://github.com/owner/repo.git"
+             )
+
+      assert Github.pr_in_repo?(
+               "https://github.com/owner/repo/pull/42",
+               "git@github.com:OWNER/REPO.git"
+             )
+
+      refute Github.pr_in_repo?(
+               "https://github.com/other/repo/pull/42",
+               "git@github.com:owner/repo"
+             )
+
+      refute Github.pr_in_repo?(
+               "https://github.com/owner/other/pull/42",
+               "https://github.com/owner/repo"
+             )
+    end
+
+    test "fails closed for missing or malformed repository configuration" do
+      refute Github.pr_in_repo?("https://github.com/owner/repo/pull/42", nil)
+
+      refute Github.pr_in_repo?(
+               "https://github.com/owner/repo/pull/42",
+               "https://github.com/owner/repo?x=1"
+             )
+
+      refute Github.pr_in_repo?(
+               "https://github.com/owner/repo/pull/42?x=1",
+               "https://github.com/owner/repo"
+             )
     end
   end
 

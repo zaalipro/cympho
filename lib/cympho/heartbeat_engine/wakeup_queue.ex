@@ -74,11 +74,19 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
 
     case result do
       {:ok, wake} ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "wakeups:#{agent_id}",
-          {:wakeup_enqueued, agent_id, wake}
-        )
+        publish = fn ->
+          Phoenix.PubSub.broadcast(
+            Cympho.PubSub,
+            "wakeups:#{agent_id}",
+            {:wakeup_enqueued, agent_id, wake}
+          )
+        end
+
+        if Process.get(:cympho_agent_actions_defer_terminal_effects, false) do
+          Cympho.HeartbeatEngine.defer_post_commit(publish)
+        else
+          publish.()
+        end
 
         {:ok, wake}
 

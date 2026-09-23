@@ -50,6 +50,162 @@ defmodule CymphoWeb.GithubControllerTest do
   end
 
   describe "webhook authentication" do
+    test "project A signature cannot update project B's linked PR", %{
+      conn: conn,
+      project: project,
+      issue: issue
+    } do
+      {:ok, other_project} =
+        Projects.create_project(%{
+          name: "Other Project",
+          prefix: "OTHER",
+          github_webhook_secret: "other-secret",
+          repo_url: "https://github.com/other/repo",
+          company_id: project.company_id
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Other repository issue",
+          status: :in_progress,
+          project_id: other_project.id,
+          company_id: project.company_id,
+          github_pr_url: "https://github.com/other/repo/pull/91"
+        })
+
+      payload = build_pr_payload("opened", other_issue.github_pr_url)
+      delivery_id = "cross-pr-#{System.unique_integer([:positive])}"
+
+      conn =
+        post_signed_webhook_with_delivery(
+          conn,
+          payload,
+          project.github_webhook_secret,
+          delivery_id
+        )
+
+      assert response(conn, :unauthorized) == ""
+      assert Issues.get_issue!(other_issue.id).status == :in_progress
+      assert Cympho.Comments.list_comments(other_issue.id) == []
+
+      # A rejected delivery must not consume its dedup key.
+      valid_payload = build_pr_payload("opened", "https://github.com/owner/repo/pull/123")
+
+      valid_conn =
+        post_signed_webhook_with_delivery(
+          build_conn(),
+          valid_payload,
+          project.github_webhook_secret,
+          delivery_id
+        )
+
+      assert response(valid_conn, :ok) == ""
+      assert Issues.get_issue!(issue.id).status == :in_review
+    end
+
+    test "project A signature cannot submit a review for project B's linked PR", %{
+      conn: conn,
+      project: project
+    } do
+      {:ok, other_project} =
+        Projects.create_project(%{
+          name: "Review Target Project",
+          prefix: "RVT",
+          github_webhook_secret: "review-target-secret",
+          repo_url: "https://github.com/review-target/repo",
+          company_id: project.company_id
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Review target issue",
+          status: :in_review,
+          project_id: other_project.id,
+          company_id: project.company_id,
+          github_pr_url: "https://github.com/review-target/repo/pull/92"
+        })
+
+      payload =
+        build_pr_payload("submitted", other_issue.github_pr_url)
+        |> Map.put("review", %{
+          "id" => 92,
+          "state" => "changes_requested",
+          "body" => "Cross-project review",
+          "user" => %{"login" => "reviewer"}
+        })
+
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
+
+      assert response(conn, :unauthorized) == ""
+      assert Issues.get_issue!(other_issue.id).status == :in_review
+      assert Cympho.Comments.list_comments(other_issue.id) == []
+    end
+
+    test "signed base repository cannot act on an issue linked under another project", %{
+      conn: conn,
+      project: project
+    } do
+      {:ok, other_project} =
+        Projects.create_project(%{
+          name: "Mislinked Project",
+          prefix: "MIS",
+          github_webhook_secret: "mislinked-secret",
+          repo_url: "https://github.com/other/repo",
+          company_id: project.company_id
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Legacy mislinked issue",
+          status: :in_progress,
+          project_id: other_project.id,
+          company_id: project.company_id
+        })
+
+      # Deliberately model a pre-existing corrupt link without using the public context.
+      other_issue =
+        Cympho.Repo.update!(
+          Ecto.Changeset.change(other_issue,
+            github_pr_url: "https://github.com/owner/repo/pull/201"
+          )
+        )
+
+      payload = build_pr_payload("opened", other_issue.github_pr_url)
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
+
+      assert response(conn, :unauthorized) == ""
+      assert Issues.get_issue!(other_issue.id).status == :in_progress
+      assert Cympho.Comments.list_comments(other_issue.id) == []
+    end
+
+    test "fork PR is authenticated against its base repository", %{
+      conn: conn,
+      issue: issue,
+      project: project
+    } do
+      {:ok, _fork_project} =
+        Projects.create_project(%{
+          name: "Fork Project",
+          prefix: "FORK",
+          github_webhook_secret: "fork-secret",
+          repo_url: "https://github.com/contributor/repo",
+          company_id: project.company_id
+        })
+
+      payload =
+        build_pr_payload("opened", issue.github_pr_url, %{
+          "head" => %{
+            "ref" => "feature",
+            "repo" => %{"html_url" => "https://github.com/contributor/repo"}
+          }
+        })
+
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
+
+      assert response(conn, :ok) == ""
+      assert Issues.get_issue!(issue.id).status == :in_review
+    end
+
     test "returns 401 when signature is missing", %{conn: conn, issue: issue} do
       payload = build_pr_payload("opened", issue.github_pr_url)
 
@@ -139,6 +295,7 @@ defmodule CymphoWeb.GithubControllerTest do
           status: :backlog,
           priority: :medium,
           project_id: project.id,
+          company_id: project.company_id,
           github_pr_url: "https://github.com/owner/repo/pull/124"
         })
 
@@ -163,6 +320,7 @@ defmodule CymphoWeb.GithubControllerTest do
           status: :todo,
           priority: :medium,
           project_id: project.id,
+          company_id: project.company_id,
           github_pr_url: "https://github.com/owner/repo/pull/125"
         })
 
@@ -320,7 +478,7 @@ defmodule CymphoWeb.GithubControllerTest do
 
     test "returns 200 for unlinked PR", %{conn: conn, project: project} do
       # Use a PR URL that is not linked to any issue
-      payload = build_pr_payload("opened", "https://github.com/other/repo/pull/999")
+      payload = build_pr_payload("opened", "https://github.com/owner/repo/pull/999")
       conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
 
       # Should return 200 but take no action (no issue linked)
@@ -351,7 +509,8 @@ defmodule CymphoWeb.GithubControllerTest do
           description: "PR opened with no set_pr_url",
           status: :todo,
           priority: :medium,
-          project_id: project.id
+          project_id: project.id,
+          company_id: company.id
         })
 
       # Sanity: identifier was generated and PR is not linked yet.

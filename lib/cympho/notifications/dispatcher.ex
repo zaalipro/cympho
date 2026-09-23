@@ -3,8 +3,8 @@ defmodule Cympho.Notifications.Dispatcher do
   Dispatches notifications to enabled channels for a user.
 
   Uses an ETS cache (:notification_preferences_cache) to avoid repeated DB reads.
-  Cache is populated on first lookup (cache-aside pattern) and can be warmed
-  via warm_cache/0 or invalidated via invalidate_cache/1.
+  Cache is populated on first lookup (cache-aside pattern) and can be invalidated
+  via invalidate_cache/1. warm_cache/0 remains available for explicit callers.
 
   Channel delivery runs concurrently via Task.Supervisor.async_nolink/2
   for fan-out parallelism across enabled channels.
@@ -34,7 +34,6 @@ defmodule Cympho.Notifications.Dispatcher do
   def init(_opts) do
     table_opts = [:set, :named_table, :public, read_concurrency: true, write_concurrency: true]
     :ets.new(@cache_table, table_opts)
-    warm_cache()
     {:ok, %{}}
   end
 

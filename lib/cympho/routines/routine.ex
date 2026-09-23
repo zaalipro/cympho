@@ -38,6 +38,9 @@ defmodule Cympho.Routines.Routine do
     has_many :triggers, Cympho.RoutineTriggers.RoutineTrigger, foreign_key: :routine_id
     has_many :runs, Cympho.RoutineTriggers.RoutineRun, foreign_key: :routine_id
 
+    field :has_stale_run, :boolean, virtual: true, default: false
+    field :has_recent_failure, :boolean, virtual: true, default: false
+
     timestamps(type: :utc_datetime)
   end
 
@@ -71,5 +74,16 @@ defmodule Cympho.Routines.Routine do
     ])
     |> validate_required([:name])
     |> validate_length(:name, min: 1, max: 200)
+    |> validate_immutable_company(routine)
+  end
+
+  defp validate_immutable_company(changeset, %{id: nil}), do: changeset
+
+  defp validate_immutable_company(changeset, _routine) do
+    if match?({:ok, _}, fetch_change(changeset, :company_id)) do
+      add_error(changeset, :company_id, "cannot be changed")
+    else
+      changeset
+    end
   end
 end

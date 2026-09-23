@@ -9,13 +9,13 @@ defmodule Cympho.Orchestrator.Dispatcher.State do
             reference() => String.t() | {:adapter_cleanup, String.t(), term(), :stop | :crash}
           },
           poll_timer: reference() | nil,
+          poll_token: reference() | nil,
           poll_cursor: non_neg_integer()
         }
 
   @enforce_keys []
-  # `poll_timer` holds the one pending periodic-poll timer. It is tracked so an
-  # on-demand `poll_now/0` resets that timer instead of starting a second
-  # self-perpetuating chain.
+  # `poll_timer` and `poll_token` identify the single periodic timer. On-demand
+  # polls do not reset its cadence; stale timer messages cannot start chains.
   #
   # `poll_cursor` rotates which companies a global poll looks at first, so a
   # bounded per-poll slice still gives every tenant a turn.
@@ -24,6 +24,7 @@ defmodule Cympho.Orchestrator.Dispatcher.State do
     :retry_attempts,
     monitors: %{},
     poll_timer: nil,
+    poll_token: nil,
     poll_cursor: 0
   ]
 
@@ -34,6 +35,7 @@ defmodule Cympho.Orchestrator.Dispatcher.State do
       retry_attempts: %{},
       monitors: %{},
       poll_timer: nil,
+      poll_token: nil,
       poll_cursor: 0
     }
   end

@@ -60,7 +60,7 @@ defmodule Cympho.HeartbeatEngine do
   def start_run(%Run{status: "pending"} = run) do
     with {:ok, workspace_path} <- resolve_workspace(run),
          {:ok, run} <-
-           finalize_run(run, ["pending"], fn current ->
+           finalize_run_only(run, ["pending"], fn current ->
              Run.start_changeset(current, %{
                workspace_path: workspace_path,
                budget_allocated: @default_budget_allocation
@@ -80,7 +80,7 @@ defmodule Cympho.HeartbeatEngine do
   @spec complete_run(Run.t(), map()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
   def complete_run(%Run{status: "running"} = run, result_attrs) do
     run
-    |> finalize_run(["running"], &Run.complete_changeset(&1, result_attrs))
+    |> finalize_terminal_run(["running"], &Run.complete_changeset(&1, result_attrs))
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_completed")
@@ -105,7 +105,7 @@ defmodule Cympho.HeartbeatEngine do
   def fail_run(%Run{status: status} = run, error_reason, usage_attrs)
       when status in @active_run_statuses do
     run
-    |> finalize_run(@active_run_statuses, fn current ->
+    |> finalize_terminal_run(@active_run_statuses, fn current ->
       attrs =
         AdapterError.run_attrs(error_reason, current.run_metadata || %{},
           adapter: current.adapter,
@@ -155,21 +155,43 @@ defmodule Cympho.HeartbeatEngine do
   """
   @spec cancel_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
   def cancel_run(%Run{status: status} = run) when status in ~w(pending queued running) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
-
-    run
-    |> finalize_run(@active_run_statuses, fn current ->
-      change(current, %{status: "cancelled", completed_at: now, last_heartbeat_at: now})
-    end)
-    |> tap_ok(fn updated ->
-      release_terminal_run_checkout(updated)
-      log_audit(updated, "run_cancelled")
-      record_usage_event(updated)
-      CymphoWeb.Events.broadcast_run_status(updated, :run_cancelled)
-    end)
+    cancel_run_with_effects(run, false)
   end
 
   def cancel_run(%Run{status: status}), do: {:error, {:invalid_status, status}}
+
+  defp cancel_run_with_effects(%Run{status: status} = run, defer?)
+       when status in ~w(pending queued running) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    result =
+      run
+      |> finalize_terminal_run(@active_run_statuses, fn current ->
+        change(current, %{status: "cancelled", completed_at: now, last_heartbeat_at: now})
+      end)
+
+    if defer? do
+      case result do
+        {:ok, updated} ->
+          Process.put(
+            :cympho_deferred_terminal_runs,
+            [updated | Process.get(:cympho_deferred_terminal_runs, [])]
+          )
+
+          result
+
+        other ->
+          other
+      end
+    else
+      tap_ok(result, fn updated ->
+        release_terminal_run_checkout(updated)
+        log_audit(updated, "run_cancelled")
+        record_usage_event(updated)
+        CymphoWeb.Events.broadcast_run_status(updated, :run_cancelled)
+      end)
+    end
+  end
 
   @doc """
   Cancels every pending, queued, or running run for one issue.
@@ -181,12 +203,15 @@ defmodule Cympho.HeartbeatEngine do
   def cancel_active_runs_for_issue(issue_id, reason \\ "Issue closed")
 
   def cancel_active_runs_for_issue(issue_id, _reason) when is_binary(issue_id) do
+    defer? = Process.get(:cympho_agent_actions_defer_terminal_effects, false)
+
     Run
     |> where([r], r.issue_id == ^issue_id and r.status in ["pending", "queued", "running"])
+    |> order_by([r], asc: r.id)
     |> Repo.all()
     |> Enum.reduce({:ok, 0}, fn
       run, {:ok, count} ->
-        case cancel_run(run) do
+        case cancel_run_with_effects(run, defer?) do
           {:ok, _cancelled} -> {:ok, count + 1}
           {:error, _reason} -> {:ok, count}
         end
@@ -194,6 +219,197 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   def cancel_active_runs_for_issue(_issue_id, _reason), do: {:ok, 0}
+
+  @doc false
+  def flush_deferred_terminal_effects do
+    try do
+      runs = Process.get(:cympho_deferred_terminal_runs, [])
+      issues = Process.get(:cympho_deferred_terminal_issues, [])
+      runtime_stops = Process.get(:cympho_deferred_runtime_stops, [])
+      issue_updates = Process.get(:cympho_deferred_issue_updates, [])
+      issue_releases = Process.get(:cympho_deferred_issue_releases, [])
+      activity_events = Process.get(:cympho_deferred_activity_events, [])
+      callbacks = Process.get(:cympho_deferred_post_commit_callbacks, [])
+      Process.delete(:cympho_deferred_terminal_runs)
+      Process.delete(:cympho_deferred_terminal_issues)
+      Process.delete(:cympho_deferred_runtime_stops)
+      Process.delete(:cympho_deferred_issue_updates)
+      Process.delete(:cympho_deferred_issue_releases)
+      Process.delete(:cympho_deferred_activity_events)
+      Process.delete(:cympho_deferred_post_commit_callbacks)
+
+      Enum.each(Enum.reverse(runtime_stops), fn {issue_id, reason} ->
+        case Cympho.Orchestrator.whereis(issue_id) do
+          pid when is_pid(pid) -> Cympho.Orchestrator.stop(issue_id, reason)
+          _ -> :ok
+        end
+      end)
+
+      Enum.each(Enum.reverse(runs), fn run ->
+        release_terminal_run_checkout(run)
+        log_audit(run, "run_cancelled")
+        record_usage_event(run)
+        CymphoWeb.Events.broadcast_run_status(run, :run_cancelled)
+      end)
+
+      Enum.each(Enum.reverse(issues), fn issue ->
+        _ =
+          Workspaces.cancel_and_release_for_issue(issue, %{
+            reason: "issue_terminal_#{issue.status}",
+            company_id: issue.company_id
+          })
+      end)
+
+      Enum.each(Enum.reverse(issue_updates), fn {old_issue, updated, attrs} ->
+        _ = Cympho.Issues.publish_deferred_issue_update(old_issue, updated, attrs)
+      end)
+
+      Enum.each(Enum.reverse(issue_releases), fn {issue, released, target_status} ->
+        _ = Cympho.Issues.publish_deferred_issue_release(issue, released, target_status)
+      end)
+
+      Enum.each(Enum.reverse(activity_events), &Cympho.Activities.dispatch_activity/1)
+      Enum.each(Enum.reverse(callbacks), &safely_run_deferred_callback/1)
+
+      :ok
+    rescue
+      error ->
+        Logger.error("deferred terminal effects failed after commit",
+          component: "heartbeat_engine",
+          error: inspect(error)
+        )
+
+        :ok
+    end
+  end
+
+  @doc false
+  def clear_deferred_terminal_effects do
+    Process.delete(:cympho_deferred_terminal_runs)
+    Process.delete(:cympho_deferred_terminal_issues)
+    Process.delete(:cympho_deferred_runtime_stops)
+    Process.delete(:cympho_deferred_issue_updates)
+    Process.delete(:cympho_deferred_issue_releases)
+    Process.delete(:cympho_deferred_activity_events)
+    Process.delete(:cympho_deferred_post_commit_callbacks)
+    :ok
+  end
+
+  @doc false
+  def deferred_terminal_effects_snapshot do
+    %{
+      runs: Process.get(:cympho_deferred_terminal_runs, []),
+      issues: Process.get(:cympho_deferred_terminal_issues, []),
+      runtime_stops: Process.get(:cympho_deferred_runtime_stops, []),
+      issue_updates: Process.get(:cympho_deferred_issue_updates, []),
+      issue_releases: Process.get(:cympho_deferred_issue_releases, []),
+      activity_events: Process.get(:cympho_deferred_activity_events, []),
+      callbacks: Process.get(:cympho_deferred_post_commit_callbacks, [])
+    }
+  end
+
+  @doc false
+  def restore_deferred_terminal_effects(%{
+        runs: runs,
+        issues: issues,
+        runtime_stops: runtime_stops,
+        issue_updates: issue_updates,
+        issue_releases: issue_releases,
+        activity_events: activity_events,
+        callbacks: callbacks
+      }) do
+    restore_process_list(:cympho_deferred_terminal_runs, runs)
+    restore_process_list(:cympho_deferred_terminal_issues, issues)
+    restore_process_list(:cympho_deferred_runtime_stops, runtime_stops)
+    restore_process_list(:cympho_deferred_issue_updates, issue_updates)
+    restore_process_list(:cympho_deferred_issue_releases, issue_releases)
+    restore_process_list(:cympho_deferred_activity_events, activity_events)
+    restore_process_list(:cympho_deferred_post_commit_callbacks, callbacks)
+    :ok
+  end
+
+  @doc false
+  def defer_issue_update(old_issue, updated, attrs) do
+    Process.put(
+      :cympho_deferred_issue_updates,
+      [{old_issue, updated, attrs} | Process.get(:cympho_deferred_issue_updates, [])]
+    )
+
+    :ok
+  end
+
+  @doc false
+  def defer_issue_release(issue, released, target_status) do
+    Process.put(
+      :cympho_deferred_issue_releases,
+      [{issue, released, target_status} | Process.get(:cympho_deferred_issue_releases, [])]
+    )
+
+    :ok
+  end
+
+  @doc false
+  def defer_activity_event(activity) do
+    Process.put(
+      :cympho_deferred_activity_events,
+      [activity | Process.get(:cympho_deferred_activity_events, [])]
+    )
+
+    :ok
+  end
+
+  @doc false
+  def defer_post_commit(callback) when is_function(callback, 0) do
+    Process.put(
+      :cympho_deferred_post_commit_callbacks,
+      [callback | Process.get(:cympho_deferred_post_commit_callbacks, [])]
+    )
+
+    :ok
+  end
+
+  defp safely_run_deferred_callback(callback) do
+    callback.()
+  rescue
+    error ->
+      Logger.error("deferred post-commit callback failed",
+        component: "heartbeat_engine",
+        error: inspect(error)
+      )
+
+      :ok
+  catch
+    kind, reason ->
+      Logger.error("deferred post-commit callback exited",
+        component: "heartbeat_engine",
+        error: inspect({kind, reason})
+      )
+
+      :ok
+  end
+
+  @doc false
+  def defer_runtime_stop(issue_id, reason) when is_binary(issue_id) do
+    Process.put(
+      :cympho_deferred_runtime_stops,
+      [{issue_id, reason} | Process.get(:cympho_deferred_runtime_stops, [])]
+    )
+
+    :ok
+  end
+
+  @doc false
+  def defer_terminal_issue_environment(%Issue{} = issue) do
+    Process.put(
+      :cympho_deferred_terminal_issues,
+      [issue | Process.get(:cympho_deferred_terminal_issues, [])]
+    )
+
+    :ok
+  end
+
+  defp restore_process_list(key, []), do: Process.delete(key)
+  defp restore_process_list(key, values), do: Process.put(key, values)
 
   @doc """
   Cancels every pending, queued, or running run for one company-scoped agent.
@@ -213,6 +429,7 @@ defmodule Cympho.HeartbeatEngine do
       r.company_id == ^company_id and r.agent_id == ^agent_id and
         r.status in ["pending", "queued", "running"]
     )
+    |> order_by([r], asc: r.issue_id, asc: r.id)
     |> Repo.all()
     |> Enum.reduce({:ok, 0}, fn
       run, {:ok, count} ->
@@ -543,14 +760,60 @@ defmodule Cympho.HeartbeatEngine do
   # Stale run detection and recovery
   # ---------------------------------------------------------------------------
 
+  @stale_run_batch_size 200
+
+  @doc false
+  def default_stale_threshold_minutes, do: @stale_threshold_minutes
+
+  @doc false
+  def recovery_threshold_minutes(opts \\ [])
+
+  def recovery_threshold_minutes(opts) when is_list(opts) do
+    opts
+    |> Keyword.get_values(:stale_threshold_minutes)
+    |> normalize_stale_threshold()
+  end
+
+  def recovery_threshold_minutes(_opts), do: {:error, :invalid_stale_threshold}
+
+  @doc false
+  @spec recovery_cutoff(keyword()) :: {:ok, DateTime.t()} | {:error, :invalid_stale_threshold}
+  def recovery_cutoff(opts \\ [])
+
+  def recovery_cutoff(opts) when is_list(opts) do
+    with {:ok, threshold_minutes} <- recovery_threshold_minutes(opts),
+         {:ok, cutoff} <- requested_recovery_cutoff(opts, threshold_minutes) do
+      {:ok, DateTime.truncate(cutoff, :second)}
+    end
+  end
+
+  def recovery_cutoff(_opts), do: {:error, :invalid_stale_threshold}
+
+  @doc false
+  def run_stale_before?(%Run{} = run, %DateTime{} = cutoff) do
+    case run_liveness_at(run) do
+      %DateTime{} = liveness_at -> DateTime.compare(liveness_at, cutoff) == :lt
+      _ -> false
+    end
+  end
+
+  def run_stale_before?(_run, _cutoff), do: false
+
   @doc """
   Finds runs that have not had a heartbeat within the threshold.
   """
-  @stale_run_batch_size 200
-
   @spec find_stale_runs(pos_integer()) :: [Run.t()]
   def find_stale_runs(threshold_minutes \\ @stale_threshold_minutes) do
-    threshold_minutes
+    with {:ok, cutoff} <- recovery_cutoff(stale_threshold_minutes: threshold_minutes) do
+      find_stale_runs_before(cutoff)
+    else
+      _ -> []
+    end
+  end
+
+  @doc false
+  def find_stale_runs_before(%DateTime{} = cutoff) do
+    cutoff
     |> stale_runs_query()
     |> Repo.all()
   end
@@ -561,7 +824,17 @@ defmodule Cympho.HeartbeatEngine do
   @spec find_stale_runs_for_company(String.t(), pos_integer()) :: [Run.t()]
   def find_stale_runs_for_company(company_id, threshold_minutes \\ @stale_threshold_minutes)
       when is_binary(company_id) do
-    threshold_minutes
+    with {:ok, cutoff} <- recovery_cutoff(stale_threshold_minutes: threshold_minutes) do
+      find_stale_runs_for_company_before(company_id, cutoff)
+    else
+      _ -> []
+    end
+  end
+
+  @doc false
+  def find_stale_runs_for_company_before(company_id, %DateTime{} = cutoff)
+      when is_binary(company_id) do
+    cutoff
     |> stale_runs_query()
     |> where([r], r.company_id == ^company_id)
     |> Repo.all()
@@ -576,13 +849,17 @@ defmodule Cympho.HeartbeatEngine do
   @spec count_stale_runs_for_company(String.t(), pos_integer()) :: non_neg_integer()
   def count_stale_runs_for_company(company_id, threshold_minutes \\ @stale_threshold_minutes)
       when is_binary(company_id) do
-    threshold_minutes
-    |> stale_runs_query()
-    |> exclude(:order_by)
-    |> exclude(:limit)
-    |> where([r], r.company_id == ^company_id)
-    |> select([r], count(r.id))
-    |> Repo.one()
+    with {:ok, cutoff} <- recovery_cutoff(stale_threshold_minutes: threshold_minutes) do
+      cutoff
+      |> stale_runs_query()
+      |> exclude(:order_by)
+      |> exclude(:limit)
+      |> where([r], r.company_id == ^company_id)
+      |> select([r], count(r.id))
+      |> Repo.one()
+    else
+      _ -> 0
+    end
   end
 
   @doc """
@@ -594,14 +871,16 @@ defmodule Cympho.HeartbeatEngine do
         threshold_minutes \\ @stale_threshold_minutes
       )
       when is_binary(company_id) do
-    threshold = DateTime.add(DateTime.utc_now(), -threshold_minutes * 60, :second)
-
-    Run
-    |> where([r], r.company_id == ^company_id)
-    |> where([r], r.status in ["pending", "queued"])
-    |> where([r], r.inserted_at < ^threshold)
-    |> select([r], count(r.id))
-    |> Repo.one()
+    with {:ok, cutoff} <- recovery_cutoff(stale_threshold_minutes: threshold_minutes) do
+      Run
+      |> where([r], r.company_id == ^company_id)
+      |> where([r], r.status in ["pending", "queued"])
+      |> where([r], r.inserted_at < ^cutoff)
+      |> select([r], count(r.id))
+      |> Repo.one()
+    else
+      _ -> 0
+    end
   end
 
   @doc """
@@ -613,43 +892,37 @@ defmodule Cympho.HeartbeatEngine do
         threshold_minutes \\ @stale_threshold_minutes
       )
       when is_binary(company_id) do
-    threshold = DateTime.add(DateTime.utc_now(), -threshold_minutes * 60, :second)
+    with {:ok, cutoff} <- recovery_cutoff(stale_threshold_minutes: threshold_minutes) do
+      find_stale_waiting_runs_for_company_before(company_id, cutoff)
+    else
+      _ -> []
+    end
+  end
 
+  @doc false
+  def find_stale_waiting_runs_for_company_before(company_id, %DateTime{} = cutoff)
+      when is_binary(company_id) do
     Run
     |> where([r], r.company_id == ^company_id)
     |> where([r], r.status in ["pending", "queued"])
-    |> where([r], r.inserted_at < ^threshold)
+    |> where([r], r.inserted_at < ^cutoff)
     |> order_by([r], asc: r.inserted_at)
     |> limit(^@stale_run_batch_size)
     |> Repo.all()
   end
 
   @doc """
-  Recovers a stale run by marking it failed and optionally re-queuing.
+  Compatibility wrapper for durable stale-run recovery.
 
-  Uses a compare-and-swap on run status so recovery racing a genuinely
-  finishing run cannot overwrite a completed/failed run. Returns
-  `{:error, {:invalid_status, status}}` when the run already reached a
-  terminal state.
+  Destructive recovery is owned by `Cympho.Recovery`; callers of this legacy
+  low-level entry point receive the historical `{:ok, Run.t()}` shape while
+  still going through the durable case, lease, identity, liveness, and cutoff
+  guards.
   """
-  @spec recover_stale_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
-  def recover_stale_run(%Run{} = run) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
-
-    run
-    |> finalize_run(@active_run_statuses, fn current ->
-      change(current, %{
-        status: "failed",
-        error_reason: "stale_run_recovered",
-        completed_at: now,
-        last_heartbeat_at: now
-      })
-    end)
-    |> tap_ok(fn updated ->
-      release_terminal_run_checkout(updated)
-      log_audit(updated, "run_recovered_stale")
-      record_usage_event(updated)
-    end)
+  @spec recover_stale_run(Run.t(), keyword()) ::
+          {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
+  def recover_stale_run(%Run{} = run, opts \\ []) do
+    durable_recovery_result(run, :stale, opts)
   end
 
   @doc "Final fingerprint/liveness CAS used by durable recovery adapters."
@@ -659,10 +932,19 @@ defmodule Cympho.HeartbeatEngine do
       when is_map(expected_guard) and kind in [:stale, :orphaned] and is_list(opts) do
     now = Keyword.get(opts, :now)
 
-    if match?(%DateTime{}, now) and complete_recovery_guard?(expected_guard, kind) do
-      do_recover_run_if_current(run, expected_guard, kind, DateTime.truncate(now, :second))
+    with %DateTime{} = now <- now,
+         true <- complete_recovery_guard?(expected_guard, kind),
+         {:ok, cutoff} <- recovery_cutoff(Keyword.put_new(opts, :now, now)) do
+      do_recover_run_if_current(
+        run,
+        expected_guard,
+        kind,
+        DateTime.truncate(now, :second),
+        cutoff
+      )
     else
-      {:error, :superseded}
+      {:error, :invalid_stale_threshold} = error -> error
+      _ -> {:error, :superseded}
     end
   end
 
@@ -671,23 +953,20 @@ defmodule Cympho.HeartbeatEngine do
   @spec recover_run_if_current(Run.t(), String.t(), atom()) :: {:error, :superseded}
   def recover_run_if_current(_run, _expected_fingerprint, _kind), do: {:error, :superseded}
 
-  defp do_recover_run_if_current(run, expected_guard, kind, now) do
+  defp do_recover_run_if_current(run, expected_guard, kind, _now, cutoff) do
     result =
       Repo.transaction(fn ->
+        issue =
+          Issue
+          |> where([i], i.id == ^Map.fetch!(expected_guard, :issue_id))
+          |> lock("FOR UPDATE")
+          |> Repo.one()
+
         current =
           Run
           |> where([r], r.id == ^run.id)
           |> lock("FOR UPDATE")
           |> Repo.one()
-
-        issue =
-          case current do
-            %Run{issue_id: issue_id} when is_binary(issue_id) ->
-              Issue |> where([i], i.id == ^issue_id) |> lock("FOR UPDATE") |> Repo.one()
-
-            _ ->
-              nil
-          end
 
         cond do
           not match?(%Run{}, current) or not match?(%Issue{}, issue) ->
@@ -696,10 +975,10 @@ defmodule Cympho.HeartbeatEngine do
           not recovery_guard_matches?(expected_guard, current, issue, kind) ->
             {:error, :superseded}
 
-          not recovery_source_stale?(current, now) ->
-            {:error, :superseded}
+          not run_stale_before?(current, cutoff) ->
+            {:error, :recovery_deferred}
 
-          recovery_deferred?(current, now) ->
+          recovery_deferred_locked?(current, cutoff) ->
             {:error, :recovery_deferred}
 
           true ->
@@ -719,10 +998,10 @@ defmodule Cympho.HeartbeatEngine do
             # second predicate closes the common callback race where a
             # successor starts after the initial check.
             if not recovery_guard_matches?(expected_guard, current, issue, kind) or
-                 not recovery_source_stale?(current, now) do
-              {:error, :superseded}
+                 not run_stale_before?(current, cutoff) do
+              {:error, :recovery_deferred}
             else
-              if recovery_deferred?(current, now) do
+              if recovery_deferred_locked?(current, cutoff) do
                 {:error, :recovery_deferred}
               else
                 case Repo.update(changeset) do
@@ -755,7 +1034,11 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   defp complete_recovery_guard?(guard, kind) do
+    snapshot = Map.get(guard, :source_snapshot)
+
     Map.get(guard, :fingerprint_version) == Fingerprint.version() and
+      Fingerprint.exact_run_snapshot?(snapshot) and
+      snapshot["version"] == Map.get(guard, :fingerprint_version) and
       Map.get(guard, :recovery_kind) == kind and
       Enum.all?(
         [
@@ -785,7 +1068,8 @@ defmodule Cympho.HeartbeatEngine do
       Map.get(guard, :source_run_id) == run.id and Map.get(guard, :agent_id) == run.agent_id and
       Map.get(guard, :source_status) == run.status and
       Map.get(guard, :source_fingerprint) == fingerprint and
-      Map.get(guard, :liveness_at) == snapshot["liveness_at"]
+      Map.get(guard, :liveness_at) == snapshot["liveness_at"] and
+      Map.get(guard, :source_snapshot) == snapshot
   end
 
   defp valid_recovery_kind_status?(:stale, "running"), do: true
@@ -794,16 +1078,6 @@ defmodule Cympho.HeartbeatEngine do
     do: true
 
   defp valid_recovery_kind_status?(_kind, _status), do: false
-
-  defp recovery_source_stale?(%Run{} = run, %DateTime{} = now) do
-    liveness_at =
-      if run.status in ["pending", "queued"],
-        do: run.inserted_at,
-        else: run.last_heartbeat_at || run.inserted_at
-
-    match?(%DateTime{}, liveness_at) and
-      DateTime.compare(liveness_at, DateTime.add(now, -@stale_threshold_minutes, :minute)) == :lt
-  end
 
   defp live_run_owner?(issue_id) do
     case Cympho.Orchestrator.whereis(issue_id) do
@@ -834,21 +1108,41 @@ defmodule Cympho.HeartbeatEngine do
   @doc false
   @spec recovery_deferred?(Run.t(), DateTime.t()) :: boolean()
   def recovery_deferred?(%Run{} = run, %DateTime{} = now) do
-    case Repo.get(Run, run.id) do
-      %Run{status: status} = current when status in @active_run_statuses ->
-        live_run_owner?(current.issue_id) or
-          blocking_successor_run_exists?(current, current.issue_id, now)
+    recovery_deferred?(run, now, [])
+  end
 
-      _ ->
-        false
+  def recovery_deferred?(_run, _now), do: true
+
+  @doc false
+  def recovery_deferred?(%Run{} = run, %DateTime{} = now, opts) when is_list(opts) do
+    with {:ok, cutoff} <- recovery_cutoff(Keyword.put_new(opts, :now, now)) do
+      case Repo.get(Run, run.id) do
+        %Run{status: status} = current when status in @active_run_statuses ->
+          recovery_deferred_locked?(current, cutoff)
+
+        _ ->
+          false
+      end
+    else
+      _ -> true
     end
   rescue
     _ -> true
   end
 
-  def recovery_deferred?(_run, _now), do: true
+  def recovery_deferred?(_run, _now, _opts), do: true
 
-  defp blocking_successor_run_exists?(%Run{id: run_id}, issue_id, now)
+  @doc false
+  def recovery_deferred_locked?(%Run{status: status} = run, %DateTime{} = cutoff)
+      when status in @active_run_statuses do
+    live_run_owner?(run.issue_id) or blocking_successor_run_exists?(run, run.issue_id, cutoff)
+  rescue
+    _ -> true
+  end
+
+  def recovery_deferred_locked?(_run, _cutoff), do: true
+
+  defp blocking_successor_run_exists?(%Run{id: run_id}, issue_id, cutoff)
        when is_binary(issue_id) do
     Run
     |> where(
@@ -856,7 +1150,7 @@ defmodule Cympho.HeartbeatEngine do
       r.issue_id == ^issue_id and r.id != ^run_id and r.status in ^@active_run_statuses
     )
     |> Repo.all()
-    |> Enum.any?(&(not recovery_source_stale?(&1, now)))
+    |> Enum.any?(&(not run_stale_before?(&1, cutoff)))
   rescue
     _ -> true
   end
@@ -864,17 +1158,43 @@ defmodule Cympho.HeartbeatEngine do
   defp blocking_successor_run_exists?(_, _, _), do: true
 
   @doc """
-  Recovers a run that has no live orchestrator.
+  Compatibility wrapper for durable orphan-run recovery.
 
-  Runs that never started are cancelled instead of failed so an abandoned
-  pre-runtime record does not poison review gates after a later successful
-  retry. Running orphans still fail because work may have been interrupted.
+  Pending/queued and running orphans are routed through the same durable
+  recovery facade as all other destructive recovery callers.
   """
-  @spec recover_orphaned_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
-  def recover_orphaned_run(%Run{status: status} = run) when status in ~w(pending queued),
-    do: cancel_run(run)
+  @spec recover_orphaned_run(Run.t(), keyword()) ::
+          {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
+  def recover_orphaned_run(%Run{} = run, opts \\ []) do
+    durable_recovery_result(run, :orphaned, opts)
+  end
 
-  def recover_orphaned_run(%Run{} = run), do: recover_stale_run(run)
+  defp durable_recovery_result(%Run{} = run, kind, opts) do
+    case Repo.get(Run, run.id) do
+      %Run{status: status} when status in @terminal_run_statuses ->
+        {:error, {:invalid_status, status}}
+
+      %Run{} ->
+        opts = Keyword.put_new(opts, :now, DateTime.utc_now() |> DateTime.truncate(:second))
+
+        result =
+          case kind do
+            :stale -> Cympho.Recovery.recover_stale_run(run, opts)
+            :orphaned -> Cympho.Recovery.recover_orphaned_run(run, opts)
+          end
+
+        case result do
+          {:ok, %{outcome: :recovered, run: %Run{} = recovered}} -> {:ok, recovered}
+          {:ok, %{outcome: :deferred}} -> {:error, :recovery_deferred}
+          {:ok, %{outcome: :superseded}} -> {:error, :superseded}
+          {:error, reason} -> {:error, reason}
+          _ -> {:error, :superseded}
+        end
+
+      nil ->
+        {:error, :not_found}
+    end
+  end
 
   @doc """
   Finds runs whose orchestrator process has crashed or disappeared.
@@ -886,7 +1206,14 @@ defmodule Cympho.HeartbeatEngine do
   """
   @spec find_orphaned_runs() :: [Run.t()]
   def find_orphaned_runs do
-    orphaned_runs_query()
+    {:ok, cutoff} = recovery_cutoff()
+    find_orphaned_runs_before(cutoff)
+  end
+
+  @doc false
+  def find_orphaned_runs_before(%DateTime{} = cutoff) do
+    cutoff
+    |> orphaned_runs_query()
     |> Repo.all()
     |> Enum.reject(&active_orchestrator_run?/1)
   end
@@ -896,7 +1223,16 @@ defmodule Cympho.HeartbeatEngine do
   """
   @spec find_orphaned_runs_for_company(String.t()) :: [Run.t()]
   def find_orphaned_runs_for_company(company_id) when is_binary(company_id) do
-    orphaned_runs_query()
+    {:ok, cutoff} = recovery_cutoff()
+
+    find_orphaned_runs_for_company_before(company_id, cutoff)
+  end
+
+  @doc false
+  def find_orphaned_runs_for_company_before(company_id, %DateTime{} = cutoff)
+      when is_binary(company_id) do
+    cutoff
+    |> orphaned_runs_query()
     |> where([r], r.company_id == ^company_id)
     |> Repo.all()
     |> Enum.reject(&active_orchestrator_run?/1)
@@ -990,34 +1326,59 @@ defmodule Cympho.HeartbeatEngine do
     end
   end
 
-  defp stale_runs_query(threshold_minutes) do
-    threshold = DateTime.add(DateTime.utc_now(), -threshold_minutes * 60, :second)
-
+  defp stale_runs_query(%DateTime{} = cutoff) do
     # Bound the batch so a backlog (e.g. after extended downtime) doesn't
     # block the watchdog tick. Anything we miss this tick gets caught on
     # the next 5-minute tick.
     Run
     |> where([r], r.status == "running")
-    |> where([r], is_nil(r.last_heartbeat_at) or r.last_heartbeat_at < ^threshold)
-    |> order_by([r], asc: r.last_heartbeat_at)
+    |> where([r], fragment("COALESCE(?, ?) < ?", r.last_heartbeat_at, r.inserted_at, ^cutoff))
+    |> order_by([r], asc: fragment("COALESCE(?, ?)", r.last_heartbeat_at, r.inserted_at))
     |> limit(^@stale_run_batch_size)
   end
 
-  defp orphaned_runs_query do
-    stale_before =
-      DateTime.utc_now()
-      |> DateTime.add(-@stale_threshold_minutes * 60, :second)
-
+  defp orphaned_runs_query(%DateTime{} = cutoff) do
     Run
     |> where(
       [r],
-      (r.status in ["pending", "queued"] and r.inserted_at < ^stale_before) or
+      (r.status in ["pending", "queued"] and r.inserted_at < ^cutoff) or
         (r.status == "running" and
-           ((is_nil(r.last_heartbeat_at) and r.inserted_at < ^stale_before) or
-              r.last_heartbeat_at < ^stale_before))
+           fragment("COALESCE(?, ?) < ?", r.last_heartbeat_at, r.inserted_at, ^cutoff))
     )
     |> order_by([r], asc: r.inserted_at)
     |> limit(^@stale_run_batch_size)
+  end
+
+  defp normalize_stale_threshold([]), do: {:ok, @stale_threshold_minutes}
+
+  defp normalize_stale_threshold([value | rest])
+       when is_integer(value) and value > 0 do
+    if Enum.all?(rest, &(&1 === value)),
+      do: {:ok, value},
+      else: {:error, :invalid_stale_threshold}
+  end
+
+  defp normalize_stale_threshold(_values), do: {:error, :invalid_stale_threshold}
+
+  defp run_liveness_at(%Run{status: status} = run) when status in ["pending", "queued"],
+    do: run.inserted_at
+
+  defp run_liveness_at(%Run{} = run), do: run.last_heartbeat_at || run.inserted_at
+
+  defp requested_recovery_cutoff(opts, threshold_minutes) do
+    case Keyword.fetch(opts, :stale_cutoff) do
+      {:ok, %DateTime{} = cutoff} ->
+        {:ok, cutoff}
+
+      {:ok, _invalid} ->
+        {:error, :invalid_stale_threshold}
+
+      :error ->
+        case Keyword.get(opts, :now, DateTime.utc_now()) do
+          %DateTime{} = now -> {:ok, DateTime.add(now, -threshold_minutes, :minute)}
+          _ -> {:error, :invalid_stale_threshold}
+        end
+    end
   end
 
   defp active_orchestrator_run?(%Run{issue_id: nil}), do: false
@@ -1175,7 +1536,7 @@ defmodule Cympho.HeartbeatEngine do
   # as agent-action batches invoke run finalization inside their own outer
   # transaction, and a nested rollback would abort the whole batch instead of
   # just reporting this run as already finished.
-  defp finalize_run(%Run{id: id}, expected_statuses, changeset_fun) do
+  defp finalize_run_only(%Run{id: id}, expected_statuses, changeset_fun) do
     result =
       Repo.transaction(fn ->
         current =
@@ -1186,6 +1547,54 @@ defmodule Cympho.HeartbeatEngine do
 
         cond do
           is_nil(current) ->
+            {:error, :not_found}
+
+          current.status not in expected_statuses ->
+            {:error, {:invalid_status, current.status}}
+
+          true ->
+            Repo.update(changeset_fun.(current))
+        end
+      end)
+
+    case result do
+      {:ok, inner} -> inner
+      {:error, _reason} = error -> error
+    end
+  end
+
+  # Terminal run paths may clear checkout state before an enclosing caller
+  # commits. Acquire the linked issue before the exact run so nested
+  # transactions retain the same Issue -> Run order used by terminal issue
+  # transitions. Start/heartbeat/metadata paths remain run-only.
+  defp finalize_terminal_run(
+         %Run{id: id, issue_id: issue_id},
+         expected_statuses,
+         changeset_fun
+       ) do
+    result =
+      Repo.transaction(fn ->
+        issue =
+          if is_binary(issue_id) do
+            Issue
+            |> where([i], i.id == ^issue_id)
+            |> lock("FOR UPDATE")
+            |> Repo.one()
+          end
+
+        current =
+          Run
+          |> where([r], r.id == ^id)
+          |> lock("FOR UPDATE")
+          |> Repo.one()
+
+        cond do
+          is_nil(current) ->
+            {:error, :not_found}
+
+          is_binary(current.issue_id) and
+              (not match?(%Issue{}, issue) or current.issue_id != issue.id or
+                 (not is_nil(current.company_id) and current.company_id != issue.company_id)) ->
             {:error, :not_found}
 
           current.status not in expected_statuses ->

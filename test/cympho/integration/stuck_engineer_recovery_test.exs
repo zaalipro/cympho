@@ -30,6 +30,7 @@ defmodule Cympho.Integration.StuckEngineerRecoveryTest do
     {:ok,
      %{
        company: company,
+       project: project,
        agents: [ceo, cto, engineer | _]
      }} =
       Companies.create_autonomous_company(%{
@@ -37,6 +38,9 @@ defmodule Cympho.Integration.StuckEngineerRecoveryTest do
         issue_prefix: "STK",
         engineer_count: 1
       })
+
+    {:ok, _} =
+      Cympho.Projects.update_project(project, %{repo_url: "https://github.com/owner/repo"})
 
     {:ok, engineer} = Agents.update_agent(engineer, %{parent_id: cto.id})
     {:ok, cto} = Agents.update_agent(cto, %{parent_id: ceo.id})
@@ -55,6 +59,7 @@ defmodule Cympho.Integration.StuckEngineerRecoveryTest do
 
     %{
       company: company,
+      project: project,
       ceo: ceo,
       cto: cto,
       engineer: engineer,
@@ -64,6 +69,7 @@ defmodule Cympho.Integration.StuckEngineerRecoveryTest do
 
   test "silent engineer → patrol detects → CTO reassigns → backup completes", %{
     company: company,
+    project: project,
     cto: cto,
     engineer: engineer,
     backup: backup
@@ -84,6 +90,7 @@ defmodule Cympho.Integration.StuckEngineerRecoveryTest do
         Definition of done: ready for CTO review with evidence and residual risk named.
         """,
         company_id: company.id,
+        project_id: project.id,
         status: :in_progress,
         assignee_id: engineer.id,
         checked_out_at: stale_at

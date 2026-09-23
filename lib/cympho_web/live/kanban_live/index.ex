@@ -32,17 +32,15 @@ defmodule CymphoWeb.KanbanLive.Index do
         do: Projects.list_projects_by_company(company_id),
         else: []
 
-    issues = list_company_issues(company_id)
-    agent_heartbeat_states = load_heartbeat_states(issues)
-    pending_wakes = load_pending_wakes(issues)
     runtime_enabled? = Dispatcher.enabled?()
 
     socket =
       socket
-      |> assign(:issues, issues)
-      |> assign(:agent_heartbeat_states, agent_heartbeat_states)
-      |> assign(:pending_wakes, pending_wakes)
-      |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, runtime_enabled?))
+      |> assign(:issues, [])
+      |> assign(:issue_digests, %{})
+      |> assign(:agent_heartbeat_states, %{})
+      |> assign(:pending_wakes, %{})
+      |> assign(:launch_readiness_by_issue, %{})
       |> assign(:projects, projects)
       |> assign(:runtime_enabled?, runtime_enabled?)
       |> assign(
@@ -132,7 +130,14 @@ defmodule CymphoWeb.KanbanLive.Index do
       |> assign(:selected_project, selected_project)
       |> assign(:digest_density, digest_density)
       |> assign(:page_title, "Board")
-      |> apply_project_filter(project_id)
+      |> then(fn socket ->
+        if socket.assigns[:loaded_project_id] == project_id and
+             Map.has_key?(socket.assigns, :loaded_project_id) do
+          socket
+        else
+          apply_project_filter(socket, project_id)
+        end
+      end)
 
     {:noreply, socket}
   end
@@ -141,9 +146,9 @@ defmodule CymphoWeb.KanbanLive.Index do
     issues = list_company_issues(current_company_id(socket))
 
     socket
-    |> assign(:issues, issues)
-    |> assign(:pending_wakes, load_pending_wakes(issues))
-    |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))
+    |> assign(:loaded_project_id, nil)
+    |> assign(:agent_heartbeat_states, load_heartbeat_states(issues))
+    |> assign_board_issues(issues)
   end
 
   defp apply_project_filter(socket, project_id) do
@@ -158,14 +163,28 @@ defmodule CymphoWeb.KanbanLive.Index do
       end
 
     socket
-    |> assign(:issues, issues)
-    |> assign(:pending_wakes, load_pending_wakes(issues))
-    |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))
+    |> assign(:loaded_project_id, project_id)
+    |> assign(:agent_heartbeat_states, load_heartbeat_states(issues))
+    |> assign_board_issues(issues)
   end
 
   @impl true
-  def handle_info(%Phoenix.Socket.Broadcast{event: "issue_update"}, socket) do
+  def handle_info(%Phoenix.Socket.Broadcast{event: "issue_update", payload: payload}, socket)
+      when not is_map(payload) do
     {:noreply, apply_project_filter(socket, socket.assigns[:selected_project_id])}
+  end
+
+  def handle_info(%Phoenix.Socket.Broadcast{event: "issue_update", payload: payload}, socket) do
+    case Map.get(payload, :resource_id) || Map.get(payload, "resource_id") do
+      issue_id when is_binary(issue_id) ->
+        case Ecto.UUID.cast(issue_id) do
+          {:ok, id} -> {:noreply, reconcile_issue(socket, id)}
+          :error -> {:noreply, apply_project_filter(socket, socket.assigns[:selected_project_id])}
+        end
+
+      _ ->
+        {:noreply, apply_project_filter(socket, socket.assigns[:selected_project_id])}
+    end
   end
 
   # Fired after blocker-resolution wakes land (status-only broadcasts race ahead
@@ -179,26 +198,37 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   def handle_info({:issue_created, issue}, socket) do
-    issues = [issue | socket.assigns.issues]
+    issues =
+      if visible_issue?(socket, issue) do
+        issue = hydrate_board_issue(issue)
+        [issue | Enum.reject(socket.assigns.issues, &(&1.id == issue.id))]
+      else
+        socket.assigns.issues
+      end
 
     {:noreply,
      socket
-     |> assign(:issues, issues)
-     |> assign(:pending_wakes, load_pending_wakes(issues))
-     |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
+     |> assign_board_issues(issues)}
   end
 
   def handle_info({:issue_updated, updated_issue}, socket) do
+    issues = Enum.reject(socket.assigns.issues, &(&1.id == updated_issue.id))
+
     issues =
-      Enum.map(socket.assigns.issues, fn issue ->
-        if issue.id == updated_issue.id, do: updated_issue, else: issue
-      end)
+      if visible_issue?(socket, updated_issue) do
+        updated_issue = hydrate_board_issue(updated_issue)
+
+        case Enum.find_index(socket.assigns.issues, &(&1.id == updated_issue.id)) do
+          nil -> [updated_issue | issues]
+          index -> List.insert_at(issues, index, updated_issue)
+        end
+      else
+        issues
+      end
 
     {:noreply,
      socket
-     |> assign(:issues, issues)
-     |> assign(:pending_wakes, load_pending_wakes(issues))
-     |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
+     |> assign_board_issues(issues)}
   end
 
   def handle_info({:issue_deleted, deleted_id}, socket) do
@@ -206,9 +236,7 @@ defmodule CymphoWeb.KanbanLive.Index do
 
     {:noreply,
      socket
-     |> assign(:issues, issues)
-     |> assign(:pending_wakes, load_pending_wakes(issues))
-     |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
+     |> assign_board_issues(issues)}
   end
 
   def handle_info({:agent_updated, updated_agent}, socket) do
@@ -224,6 +252,7 @@ defmodule CymphoWeb.KanbanLive.Index do
     {:noreply,
      socket
      |> assign(:issues, issues)
+     |> assign(:issue_digests, build_issue_digests(issues))
      |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
   end
 
@@ -432,12 +461,15 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   defp update_local_status(socket, issue_id, new_status) do
-    update(socket, :issues, fn issues ->
-      Enum.map(issues, fn
+    issues =
+      Enum.map(socket.assigns.issues, fn
         %{id: ^issue_id} = issue -> %{issue | status: new_status}
         issue -> issue
       end)
-    end)
+
+    socket
+    |> assign(:issues, issues)
+    |> assign(:issue_digests, build_issue_digests(issues))
   end
 
   defp rollback_transition(socket, issue_id, attempted_status, original_status, message) do
@@ -744,8 +776,8 @@ defmodule CymphoWeb.KanbanLive.Index do
   cause once in a banner instead of printing the same pill and headline on each
   card. Returns `nil` as soon as the cards disagree.
   """
-  def shared_board_digest([_, _ | _] = issues) do
-    digests = Enum.map(issues, &Cympho.IssueDigest.build/1)
+  def shared_board_digest([_, _ | _] = issues, issue_digests) do
+    digests = Enum.map(issues, &Map.fetch!(issue_digests, &1.id))
 
     if match?([_], Enum.uniq_by(digests, & &1.state)) do
       digest = hd(digests)
@@ -753,7 +785,7 @@ defmodule CymphoWeb.KanbanLive.Index do
     end
   end
 
-  def shared_board_digest(_issues), do: nil
+  def shared_board_digest(_issues, _issue_digests), do: nil
 
   def kanban_url(project_id, density) do
     query =
@@ -862,6 +894,79 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   defp list_company_issues(nil), do: []
   defp list_company_issues(company_id), do: Issues.list_issues(%{company_id: company_id})
+
+  defp assign_board_issues(socket, issues) do
+    states = socket.assigns.agent_heartbeat_states
+
+    new_agent_issues =
+      Enum.filter(issues, fn issue ->
+        issue.assignee && not Map.has_key?(states, issue.assignee.id)
+      end)
+
+    socket
+    |> assign(:issues, issues)
+    |> assign(:issue_digests, build_issue_digests(issues))
+    |> assign(:agent_heartbeat_states, Map.merge(states, load_heartbeat_states(new_agent_issues)))
+    |> assign(:pending_wakes, load_pending_wakes(issues))
+    |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))
+  end
+
+  defp build_issue_digests(issues) do
+    Map.new(issues, fn issue -> {issue.id, Cympho.IssueDigest.build(issue)} end)
+  end
+
+  defp hydrate_board_issue(issue) do
+    Cympho.Repo.preload(
+      issue,
+      [:comments, :blocked_by, :blocks, :assignee, :labels, :goal],
+      force: true
+    )
+  end
+
+  defp visible_issue?(socket, issue) do
+    issue.company_id == current_company_id(socket) and
+      (is_nil(socket.assigns[:selected_project_id]) or
+         issue.project_id == socket.assigns.selected_project_id)
+  end
+
+  defp reconcile_issue(socket, issue_id) do
+    case current_company_id(socket) do
+      nil ->
+        socket
+
+      company_id ->
+        issue =
+          case Cympho.Repo.get_by(Issue, id: issue_id, company_id: company_id) do
+            nil -> nil
+            issue -> hydrate_board_issue(issue)
+          end
+
+        current = Enum.find(socket.assigns.issues, &(&1.id == issue_id))
+
+        cond do
+          is_nil(current) and (is_nil(issue) or not visible_issue?(socket, issue)) ->
+            socket
+
+          current == issue ->
+            socket
+
+          true ->
+            issues = Enum.reject(socket.assigns.issues, &(&1.id == issue_id))
+
+            issues =
+              if issue && visible_issue?(socket, issue) do
+                case Enum.find_index(socket.assigns.issues, &(&1.id == issue_id)) do
+                  nil -> [issue | issues]
+                  index -> List.insert_at(issues, index, issue)
+                end
+              else
+                issues
+              end
+
+            assign_board_issues(socket, issues)
+        end
+    end
+  end
 
   defp get_scoped_issue(socket, id) do
     case current_company_id(socket) do

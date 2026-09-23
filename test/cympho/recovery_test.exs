@@ -584,6 +584,124 @@ defmodule Cympho.RecoveryReviewFixTest do
     assert unchanged_attempt.completed_at == nil
     assert unchanged_attempt.error_reason == nil
   end
+
+  test "a new fingerprint closes an active lease and preserves its attempt audit" do
+    company =
+      Repo.insert!(%Company{
+        name: "Claimed source superseded",
+        slug: "claimed-source-superseded"
+      })
+
+    detected_at = ~U[2026-01-06 00:00:00Z]
+
+    issue =
+      Repo.insert!(%Issue{
+        title: "Claimed source superseded",
+        company_id: company.id,
+        status: :in_progress,
+        checked_out_at: detected_at
+      })
+
+    assert {:ok, first} =
+             Recovery.ensure_case(%{source_type: "issue_checkout", issue: issue})
+
+    assert {:ok, lease} = Recovery.claim_case(first, now: detected_at, lease_seconds: 300)
+
+    changed_at = DateTime.add(detected_at, 1, :second)
+
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id),
+      set: [checked_out_at: changed_at],
+      inc: [lock_version: 1]
+    )
+
+    assert {:ok, child} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: Repo.get!(Issue, issue.id)
+             })
+
+    old_case = Repo.get!(RecoveryCase, first.id)
+    old_attempt = Repo.get!(RecoveryAttempt, lease.attempt.id)
+
+    assert old_case.state == "superseded"
+    assert old_case.claim_token == nil
+    assert old_case.claimed_at == nil
+    assert old_case.claimed_by == nil
+    assert old_case.lease_expires_at == nil
+    assert old_case.next_attempt_at == nil
+    assert old_attempt.status == "skipped"
+    assert %DateTime{} = old_attempt.completed_at
+    assert old_attempt.error_reason == "source_superseded"
+    assert {:error, :stale_claim} = Recovery.record_success(lease, now: changed_at)
+
+    assert child.parent_case_id == first.id
+    assert {:ok, child_lease} = Recovery.claim_case(child, now: changed_at)
+    assert child_lease.case.id == child.id
+  end
+
+  test "existing-case entry points validate partial policy overrides contextually" do
+    company =
+      Repo.insert!(%Company{
+        name: "Contextual partial policy",
+        slug: "contextual-partial-policy"
+      })
+
+    now = ~U[2026-01-07 00:00:00Z]
+
+    new_case = fn suffix ->
+      issue =
+        Repo.insert!(%Issue{
+          title: "Contextual partial policy #{suffix}",
+          company_id: company.id,
+          status: :in_progress,
+          checked_out_at: DateTime.add(now, -1, :hour)
+        })
+
+      {:ok, case_row} =
+        Recovery.ensure_case(%{
+          source_type: "issue_checkout",
+          issue: issue,
+          max_attempts: 3,
+          base_delay: 7,
+          max_delay: 9,
+          lease_seconds: 11
+        })
+
+      {issue, case_row}
+    end
+
+    {_issue, direct} = new_case.("direct")
+    assert {:ok, direct_lease} = Recovery.claim_case(direct, now: now, max_delay: 9)
+    assert {:ok, _} = Recovery.record_success(direct_lease, now: now, max_delay: 9)
+
+    {_issue, due} = new_case.("due")
+    assert {:ok, due_lease} = Recovery.claim_due_case(due, now: now, max_delay: 9)
+    assert {:ok, _} = Recovery.record_success(due_lease, now: now, max_delay: 9)
+
+    {_issue, next_due} = new_case.("next-due")
+
+    assert {:ok, next_lease} =
+             Recovery.claim_next_due_case(MapSet.new(), now: now, max_delay: 9)
+
+    assert next_lease.case.id == next_due.id
+    assert {:ok, _} = Recovery.record_success(next_lease, now: now, max_delay: 9)
+
+    {_issue, process_due} = new_case.("process-due")
+
+    assert %{checked: 1, recovered: 1, failed: 0} =
+             Recovery.process_due(now: now, limit: 1, max_delay: 9)
+
+    assert Repo.get!(RecoveryCase, process_due.id).state == "recovered"
+
+    {_issue, conflict} = new_case.("conflict")
+    assert {:error, :invalid_policy} = Recovery.claim_case(conflict, now: now, max_delay: 10)
+    assert Repo.get!(RecoveryCase, conflict.id).state == "detected"
+
+    assert {:error, :invalid_policy} =
+             Recovery.claim_case(conflict, now: now, base_delay: 10, max_delay: 9)
+
+    refute Repo.exists?(from(a in RecoveryAttempt, where: a.recovery_case_id == ^conflict.id))
+  end
 end
 
 defmodule Cympho.RecoveryMalformedRunTest do
@@ -1335,6 +1453,12 @@ defmodule Cympho.RecoveryAdapterTest do
 
     now = ~U[2026-03-04 00:00:00Z]
 
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [inserted_at: DateTime.add(now, -20, :minute)]
+    )
+
+    run = Repo.get!(Run, run.id)
+
     assert {:ok, parent} =
              Recovery.ensure_case(%{
                source_type: "heartbeat_run",
@@ -1381,7 +1505,7 @@ defmodule Cympho.RecoveryAdapterTest do
           root_case_id: parent.root_case_id,
           source_type: "heartbeat_run",
           source_id: run.id,
-          source_status: "todo",
+          source_status: "pending",
           source_fingerprint: child_fingerprint,
           fingerprint_version: Fingerprint.version(),
           source_snapshot: child_snapshot,
@@ -1449,7 +1573,14 @@ defmodule Cympho.RecoveryAdapterTest do
                adapter: "claude_code"
              })
 
-    assert {:ok, stale_snapshot} = HeartbeatEngine.start_run(run)
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+    stale_at = DateTime.add(DateTime.utc_now(), -20, :minute) |> DateTime.truncate(:second)
+
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [last_heartbeat_at: stale_at]
+    )
+
+    stale_snapshot = Repo.get!(Run, started.id)
     assert {:ok, completed} = HeartbeatEngine.complete_run(stale_snapshot, %{})
 
     assert {:ok, %{outcome: :superseded, case: case_row}} =
@@ -1470,7 +1601,14 @@ defmodule Cympho.RecoveryAdapterTest do
                adapter: "claude_code"
              })
 
-    assert {:ok, stale_snapshot} = HeartbeatEngine.start_run(run)
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+    stale_at = DateTime.add(DateTime.utc_now(), -20, :minute) |> DateTime.truncate(:second)
+
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [last_heartbeat_at: stale_at]
+    )
+
+    stale_snapshot = Repo.get!(Run, started.id)
 
     Repo.update_all(from(r in Run, where: r.id == ^run.id),
       set: [error_reason: "authentication changed"]
@@ -1610,7 +1748,7 @@ defmodule Cympho.RecoveryAdapterTest do
     assert {:ok, case_row} =
              Recovery.ensure_case(%{source_type: "heartbeat_run", issue: issue, run: started})
 
-    assert {:error, :superseded} =
+    assert {:error, :recovery_deferred} =
              HeartbeatEngine.recover_run_if_current(
                started,
                run_guard(case_row, :stale),
@@ -1792,6 +1930,435 @@ defmodule Cympho.RecoveryAdapterTest do
            ) == 1
   end
 
+  test "direct recovery honors non-default stale thresholds" do
+    now = ~U[2026-03-10 12:00:00Z]
+
+    for {suffix, threshold, expected_outcome} <- [
+          {"five-minutes", 5, :recovered},
+          {"thirty-minutes", 30, :deferred}
+        ] do
+      {company, agent, issue} = recovery_source("threshold-#{suffix}")
+
+      assert {:ok, run} =
+               HeartbeatEngine.create_run(%{
+                 company_id: company.id,
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 adapter: "claude_code"
+               })
+
+      assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+      Repo.update_all(from(r in Run, where: r.id == ^started.id),
+        set: [last_heartbeat_at: DateTime.add(now, -10, :minute)]
+      )
+
+      stale = Repo.get!(Run, started.id)
+
+      {:ok, cutoff} =
+        HeartbeatEngine.recovery_cutoff(
+          now: now,
+          stale_threshold_minutes: threshold
+        )
+
+      assert HeartbeatEngine.run_stale_before?(stale, cutoff) == (threshold == 5)
+
+      if threshold == 5 do
+        refute HeartbeatEngine.recovery_deferred?(stale, now,
+                 stale_cutoff: cutoff,
+                 stale_threshold_minutes: threshold
+               )
+      end
+
+      assert {:ok, result} =
+               Recovery.recover_stale_run(stale,
+                 now: now,
+                 stale_threshold_minutes: threshold
+               )
+
+      assert result.outcome == expected_outcome
+
+      case expected_outcome do
+        :recovered ->
+          assert result.case.state == "recovered"
+          assert result.case.stale_threshold_minutes == threshold
+          assert Repo.get!(Run, run.id).status == "failed"
+
+        :deferred ->
+          assert result.case == nil
+          assert Repo.get!(Run, run.id).status == "running"
+          refute Repo.get_by(RecoveryCase, source_id: run.id)
+      end
+    end
+  end
+
+  test "an active case rejects a conflicting stale threshold" do
+    {_company, _agent, issue} = recovery_source("conflicting-stale-threshold")
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: issue,
+               stale_threshold_minutes: 5
+             })
+
+    assert case_row.stale_threshold_minutes == 5
+
+    assert {:error, :invalid_stale_threshold} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: issue,
+               stale_threshold_minutes: 15
+             })
+
+    assert Repo.get!(RecoveryCase, case_row.id).stale_threshold_minutes == 5
+  end
+
+  test "exhaustion rejects a stale threshold that conflicts with the case" do
+    {company, agent, issue} = recovery_source("conflicting-exhaust-threshold")
+    now = ~U[2026-03-10 12:00:00Z]
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    Repo.update_all(from(r in Run, where: r.id == ^started.id),
+      set: [last_heartbeat_at: DateTime.add(now, -20, :minute)]
+    )
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "heartbeat_run",
+               issue: issue,
+               run: Repo.get!(Run, started.id),
+               max_attempts: 1,
+               stale_threshold_minutes: 5
+             })
+
+    assert {:ok, lease} = Recovery.claim_case(case_row, now: now)
+    assert {:ok, exhausted} = Recovery.record_failure(lease, :temporary, now: now)
+
+    assert {:error, :invalid_stale_threshold} =
+             Recovery.exhaust_case(exhausted,
+               now: now,
+               stale_threshold_minutes: 15
+             )
+
+    assert Repo.get!(RecoveryCase, case_row.id).stale_threshold_minutes == 5
+    refute Repo.get_by(Cympho.BoardApprovals.BoardApproval, recovery_case_id: case_row.id)
+  end
+
+  test "due processing uses a child case's persisted five-minute threshold" do
+    {company, agent, issue} = recovery_source("due-child-threshold")
+    now = ~U[2026-03-10 13:00:00Z]
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    Repo.update_all(from(r in Run, where: r.id == ^started.id),
+      set: [last_heartbeat_at: DateTime.add(now, -10, :minute)]
+    )
+
+    stale = Repo.get!(Run, started.id)
+
+    assert {:ok, child} =
+             Recovery.ensure_case(%{
+               source_type: "heartbeat_run",
+               issue: issue,
+               run: stale,
+               stale_threshold_minutes: 5
+             })
+
+    assert child.stale_threshold_minutes == 5
+
+    assert %{checked: 1, recovered: 1, scheduled: 0, failed: 0} =
+             Recovery.process_due(now: now, limit: 1)
+
+    assert Repo.get!(RecoveryCase, child.id).state == "recovered"
+    assert Repo.get!(Run, run.id).status == "failed"
+  end
+
+  test "conflicting due threshold fails before claiming an attempt" do
+    {_company, _agent, issue} = recovery_source("due-threshold-conflict")
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "issue_checkout",
+               issue: issue,
+               stale_threshold_minutes: 5
+             })
+
+    result = Recovery.process_due(now: DateTime.utc_now(), stale_threshold_minutes: 15, limit: 1)
+    assert result.claimed == 0
+    assert result.failed == 1
+    assert Repo.get!(RecoveryCase, case_row.id).attempt_count == 0
+    refute Repo.exists?(from(a in RecoveryAttempt, where: a.recovery_case_id == ^case_row.id))
+  end
+
+  test "due exhaustion reuses the supplied stale cutoff" do
+    {company, agent, issue} = recovery_source("due-exhaustion-cutoff")
+    now = ~U[2026-03-10 13:00:00Z]
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    Repo.update_all(from(r in Run, where: r.id == ^started.id),
+      set: [last_heartbeat_at: DateTime.add(now, -10, :minute)]
+    )
+
+    stale = Repo.get!(Run, started.id)
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "heartbeat_run",
+               issue: issue,
+               run: stale,
+               max_attempts: 1,
+               stale_threshold_minutes: 5
+             })
+
+    assert {:ok, lease} = Recovery.claim_case(case_row, now: now)
+    assert {:ok, exhausted} = Recovery.record_failure(lease, :temporary, now: now)
+    assert exhausted.state == "exhausted"
+
+    assert %{checked: 1, exhausted: 1, failed: 0} =
+             Recovery.process_due(
+               now: now,
+               limit: 1,
+               stale_threshold_minutes: 5
+             )
+
+    assert Repo.get!(RecoveryCase, case_row.id).state == "escalated"
+    assert Repo.get!(Issue, issue.id).status == :blocked
+
+    assert Repo.get_by!(Cympho.BoardApprovals.BoardApproval,
+             recovery_case_id: case_row.id
+           ).status == "pending"
+  end
+
+  test "an exhausted direct claim reuses the supplied stale cutoff" do
+    {company, agent, issue} = recovery_source("direct-exhaustion-cutoff")
+    now = ~U[2026-03-10 14:00:00Z]
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    Repo.update_all(from(r in Run, where: r.id == ^started.id),
+      set: [last_heartbeat_at: DateTime.add(now, -10, :minute)]
+    )
+
+    stale = Repo.get!(Run, started.id)
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "heartbeat_run",
+               issue: issue,
+               run: stale,
+               max_attempts: 1,
+               stale_threshold_minutes: 5
+             })
+
+    assert {:ok, lease} = Recovery.claim_case(case_row, now: now)
+    assert {:ok, exhausted} = Recovery.record_failure(lease, :temporary, now: now)
+
+    assert {:error, :exhausted} =
+             Recovery.claim_case(exhausted,
+               now: now,
+               stale_threshold_minutes: 5
+             )
+
+    assert Repo.get!(RecoveryCase, case_row.id).state == "escalated"
+    assert Repo.get!(Issue, issue.id).status == :blocked
+  end
+
+  test "a final due failure reuses the supplied stale cutoff for escalation" do
+    {company, agent, issue} = recovery_source("failed-due-exhaustion-cutoff")
+    now = ~U[2026-03-10 15:00:00Z]
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    Repo.update_all(from(r in Run, where: r.id == ^started.id),
+      set: [last_heartbeat_at: DateTime.add(now, -10, :minute)]
+    )
+
+    stale = Repo.get!(Run, started.id)
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "heartbeat_run",
+               issue: issue,
+               run: stale,
+               max_attempts: 1,
+               stale_threshold_minutes: 5
+             })
+
+    with_mock HeartbeatEngine, [:passthrough],
+      recover_run_if_current: fn _run, _guard, _kind, _opts -> {:error, :temporary} end do
+      assert %{checked: 1, exhausted: 1, failed: 0} =
+               Recovery.process_due(
+                 now: now,
+                 limit: 1,
+                 stale_threshold_minutes: 5
+               )
+    end
+
+    assert Repo.get!(RecoveryCase, case_row.id).state == "escalated"
+    assert Repo.get!(Issue, issue.id).status == :blocked
+  end
+
+  test "the final run CAS defers exact cutoff equality" do
+    {company, agent, issue} = recovery_source("exact-cutoff")
+    now = ~U[2026-03-11 12:00:00Z]
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    Repo.update_all(from(r in Run, where: r.id == ^started.id),
+      set: [last_heartbeat_at: DateTime.add(now, -15, :minute)]
+    )
+
+    exact = Repo.get!(Run, started.id)
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{source_type: "heartbeat_run", issue: issue, run: exact})
+
+    assert {:error, :recovery_deferred} =
+             HeartbeatEngine.recover_run_if_current(
+               exact,
+               run_guard(case_row, :stale),
+               :stale,
+               now: now,
+               stale_threshold_minutes: 15
+             )
+
+    assert Repo.get!(Run, run.id).status == "running"
+  end
+
+  test "an exact young due source keeps its case and recovers after the cutoff" do
+    {company, agent, issue} = recovery_source("young-exact-due")
+    now = ~U[2026-03-12 12:00:00Z]
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    Repo.update_all(from(r in Run, where: r.id == ^started.id),
+      set: [last_heartbeat_at: DateTime.add(now, -10, :minute)]
+    )
+
+    young = Repo.get!(Run, started.id)
+
+    assert {:ok, case_row} =
+             Recovery.ensure_case(%{
+               source_type: "heartbeat_run",
+               issue: issue,
+               run: young,
+               base_delay: 1,
+               max_delay: 1
+             })
+
+    assert %{checked: 1, scheduled: 1, superseded: 0, recovered: 0, failed: 0} =
+             Recovery.process_due(
+               now: now,
+               limit: 1,
+               base_delay: 1,
+               max_delay: 1,
+               stale_threshold_minutes: 15
+             )
+
+    deferred = Repo.get!(RecoveryCase, case_row.id)
+    assert deferred.state == "scheduled"
+    assert deferred.attempt_count == 0
+    assert Repo.get!(Run, run.id).status == "running"
+
+    assert Repo.get_by!(RecoveryAttempt, recovery_case_id: case_row.id).status == "skipped"
+
+    assert %{checked: 1, scheduled: 0, superseded: 0, recovered: 1, failed: 0} =
+             Recovery.process_due(
+               now: DateTime.add(now, 6, :minute),
+               limit: 1,
+               base_delay: 1,
+               max_delay: 1,
+               stale_threshold_minutes: 15
+             )
+
+    assert Repo.get!(RecoveryCase, case_row.id).state == "recovered"
+    assert Repo.get!(Run, run.id).status == "failed"
+
+    assert Repo.aggregate(
+             from(a in RecoveryAttempt, where: a.recovery_case_id == ^case_row.id),
+             :count
+           ) == 2
+  end
+
+  test "invalid stale thresholds fail closed before recovery history" do
+    {company, agent, issue} = recovery_source("invalid-threshold")
+
+    assert {:ok, run} =
+             HeartbeatEngine.create_run(%{
+               company_id: company.id,
+               agent_id: agent.id,
+               issue_id: issue.id,
+               adapter: "claude_code"
+             })
+
+    assert {:ok, started} = HeartbeatEngine.start_run(run)
+
+    assert {:error, :invalid_stale_threshold} =
+             Recovery.recover_stale_run(started, stale_threshold_minutes: 0)
+
+    assert Repo.get!(Run, run.id).status == "running"
+    refute Repo.get_by(RecoveryCase, source_id: run.id)
+  end
+
   defp run_guard(case_row, kind) do
     %{
       source_type: case_row.source_type,
@@ -1803,6 +2370,7 @@ defmodule Cympho.RecoveryAdapterTest do
       source_status: case_row.source_status,
       source_fingerprint: case_row.source_fingerprint,
       fingerprint_version: case_row.fingerprint_version,
+      source_snapshot: case_row.source_snapshot,
       liveness_at: case_row.source_snapshot["liveness_at"],
       recovery_kind: kind
     }
@@ -2339,6 +2907,25 @@ defmodule Cympho.RecoveryDueTest do
     with_mock Cympho.Workspaces, [:passthrough],
       cancel_and_release_for_issue: fn issue, _opts ->
         if issue.id == bad_issue.id, do: exit(:injected_recovery_exit), else: :ok
+      end do
+      assert %{checked: 2, claimed: 2, scheduled: 1, recovered: 1, failed: 0} =
+               Recovery.process_due(now: now, limit: 2, base_delay: 1)
+    end
+
+    assert Repo.get!(RecoveryCase, bad_case.id).state == "scheduled"
+    assert Repo.get!(RecoveryCase, healthy_case.id).state == "recovered"
+    assert Repo.get_by!(RecoveryAttempt, recovery_case_id: bad_case.id).status == "failed"
+  end
+
+  test "a thrown source mutation is contained and later due rows still run" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    [{bad_issue, bad_case}, {_healthy_issue, healthy_case}] =
+      ordered_due_cases("thrown-source", 2, now, %{base_delay: 1})
+
+    with_mock Cympho.Workspaces, [:passthrough],
+      cancel_and_release_for_issue: fn issue, _opts ->
+        if issue.id == bad_issue.id, do: throw(:injected_recovery_throw), else: :ok
       end do
       assert %{checked: 2, claimed: 2, scheduled: 1, recovered: 1, failed: 0} =
                Recovery.process_due(now: now, limit: 2, base_delay: 1)

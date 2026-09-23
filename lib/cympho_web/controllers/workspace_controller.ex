@@ -3,6 +3,14 @@ defmodule CymphoWeb.WorkspaceController do
 
   alias Cympho.{Issues, Projects, Workspaces}
 
+  alias Cympho.Workspaces.{
+    EnvironmentLease,
+    ExecutionWorkspace,
+    ProjectWorkspace,
+    RuntimeService,
+    WorkspaceOperation
+  }
+
   @execution_workspace_writable_fields ~w(
     mode
     strategy_type
@@ -33,19 +41,19 @@ defmodule CymphoWeb.WorkspaceController do
   def index(conn, %{"project_id" => project_id}) do
     with {:ok, project} <- Projects.get_company_project(company_id(conn), project_id) do
       workspaces = Workspaces.list_project_workspaces(project.id)
-      json(conn, %{data: workspaces})
+      json(conn, %{data: encode_records(workspaces)})
     end
   end
 
   def index(conn, _params) do
     workspaces = Workspaces.list_project_workspaces_for_company(company_id(conn))
-    json(conn, %{data: workspaces})
+    json(conn, %{data: encode_records(workspaces)})
   end
 
   def show(conn, %{"id" => id}) do
     case Workspaces.get_company_project_workspace(company_id(conn), id) do
       {:ok, workspace} ->
-        json(conn, %{data: workspace})
+        json(conn, %{data: encode_records(workspace)})
 
       {:error, :not_found} ->
         conn
@@ -61,7 +69,7 @@ defmodule CymphoWeb.WorkspaceController do
         {:ok, workspace} ->
           conn
           |> put_status(:created)
-          |> json(%{data: workspace})
+          |> json(%{data: encode_records(workspace)})
 
         {:error, changeset} ->
           conn
@@ -76,7 +84,7 @@ defmodule CymphoWeb.WorkspaceController do
       {:ok, workspace} ->
         case Workspaces.update_project_workspace(workspace, workspace_params) do
           {:ok, updated} ->
-            json(conn, %{data: updated})
+            json(conn, %{data: encode_records(updated)})
 
           {:error, changeset} ->
             conn
@@ -127,7 +135,7 @@ defmodule CymphoWeb.WorkspaceController do
   def show_exec_workspace(conn, %{"id" => id}) do
     case Workspaces.get_company_execution_workspace(company_id(conn), id) do
       {:ok, workspace} ->
-        json(conn, %{data: workspace})
+        json(conn, %{data: encode_records(workspace)})
 
       {:error, :not_found} ->
         conn
@@ -155,7 +163,7 @@ defmodule CymphoWeb.WorkspaceController do
         {:ok, workspace} ->
           conn
           |> put_status(:created)
-          |> json(%{data: workspace})
+          |> json(%{data: encode_records(workspace)})
 
         {:error, changeset} ->
           conn
@@ -173,7 +181,7 @@ defmodule CymphoWeb.WorkspaceController do
                Map.take(workspace_params, @execution_workspace_writable_fields)
              ) do
           {:ok, updated} ->
-            json(conn, %{data: updated})
+            json(conn, %{data: encode_records(updated)})
 
           {:error, changeset} ->
             conn
@@ -218,8 +226,8 @@ defmodule CymphoWeb.WorkspaceController do
     with {:ok, project_workspace} <-
            Workspaces.get_company_project_workspace(company_id(conn), pw_id) do
       case Workspaces.detect_default_branch(project_workspace.id) do
-        {:ok, result} ->
-          json(conn, %{data: result})
+        {:ok, %{project_workspace: workspace} = result} ->
+          json(conn, %{data: %{result | project_workspace: encode_records(workspace)}})
 
         {:error, :not_found} ->
           conn
@@ -238,7 +246,7 @@ defmodule CymphoWeb.WorkspaceController do
            Workspaces.get_company_project_workspace(company_id(conn), pw_id) do
       case Workspaces.update_worktree_config(project_workspace.id, config) do
         {:ok, workspace} ->
-          json(conn, %{data: workspace})
+          json(conn, %{data: encode_records(workspace)})
 
         {:error, :not_found} ->
           conn
@@ -257,7 +265,7 @@ defmodule CymphoWeb.WorkspaceController do
       {:ok, workspace} ->
         case Workspaces.seed_worktree(workspace, seed_config) do
           {:ok, updated} ->
-            json(conn, %{data: updated})
+            json(conn, %{data: encode_records(updated)})
 
           {:error, changeset} ->
             conn
@@ -281,7 +289,7 @@ defmodule CymphoWeb.WorkspaceController do
       {:ok, workspace} ->
         case Workspaces.inject_secrets(workspace, secret_mappings) do
           {:ok, updated} ->
-            json(conn, %{data: updated})
+            json(conn, %{data: encode_records(updated)})
 
           {:error, changeset} ->
             conn
@@ -521,15 +529,118 @@ defmodule CymphoWeb.WorkspaceController do
 
   defp encode_records(records) when is_list(records), do: Enum.map(records, &encode_records/1)
 
-  defp encode_records(%{__struct__: _} = record) do
-    record
-    |> Map.from_struct()
-    |> Enum.reject(fn
-      {:__meta__, _} -> true
-      {_, %Ecto.Association.NotLoaded{}} -> true
-      _ -> false
-    end)
-    |> Map.new()
+  defp encode_records(%ProjectWorkspace{} = workspace) do
+    Map.take(workspace, [
+      :id,
+      :company_id,
+      :project_id,
+      :name,
+      :cwd,
+      :repo_ref,
+      :default_ref,
+      :is_primary,
+      :source_type,
+      :visibility,
+      :remote_provider,
+      :inserted_at,
+      :updated_at
+    ])
+  end
+
+  defp encode_records(%ExecutionWorkspace{} = workspace) do
+    Map.take(workspace, [
+      :id,
+      :company_id,
+      :project_id,
+      :project_workspace_id,
+      :source_issue_id,
+      :derived_from_execution_workspace_id,
+      :mode,
+      :strategy_type,
+      :name,
+      :status,
+      :cwd,
+      :base_ref,
+      :branch_name,
+      :provider_type,
+      :last_used_at,
+      :opened_at,
+      :closed_at,
+      :cleanup_eligible_at,
+      :cleanup_reason,
+      :inserted_at,
+      :updated_at
+    ])
+  end
+
+  defp encode_records(%RuntimeService{} = service) do
+    Map.take(service, [
+      :id,
+      :company_id,
+      :project_id,
+      :project_workspace_id,
+      :issue_id,
+      :execution_workspace_id,
+      :scope_type,
+      :scope_id,
+      :service_name,
+      :reuse_key,
+      :status,
+      :lifecycle,
+      :cwd,
+      :port,
+      :preview_ref,
+      :provider,
+      :owner_agent_id,
+      :started_by_run_id,
+      :last_used_at,
+      :started_at,
+      :stopped_at,
+      :health_status,
+      :inserted_at,
+      :updated_at
+    ])
+  end
+
+  defp encode_records(%WorkspaceOperation{} = operation) do
+    Map.take(operation, [
+      :id,
+      :company_id,
+      :execution_workspace_id,
+      :phase,
+      :cwd,
+      :status,
+      :exit_code,
+      :log_store,
+      :log_bytes,
+      :log_sha256,
+      :log_compressed,
+      :started_at,
+      :finished_at,
+      :inserted_at,
+      :updated_at
+    ])
+  end
+
+  defp encode_records(%EnvironmentLease{} = lease) do
+    Map.take(lease, [
+      :id,
+      :company_id,
+      :environment_id,
+      :execution_workspace_id,
+      :issue_id,
+      :status,
+      :lease_policy,
+      :provider,
+      :acquired_at,
+      :last_used_at,
+      :expires_at,
+      :released_at,
+      :failure_reason,
+      :cleanup_status,
+      :inserted_at,
+      :updated_at
+    ])
   end
 
   defp translate_errors(changeset) do

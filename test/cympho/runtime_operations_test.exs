@@ -2321,6 +2321,14 @@ defmodule Cympho.RuntimeOperationsTest do
     test "includes PR quality failures in contract health" do
       {:ok, company} = Companies.create_company(%{name: "PR Ops Co", slug: unique_slug()})
 
+      {:ok, project} =
+        Cympho.Projects.create_project(%{
+          name: "PR Ops Project",
+          prefix: "PROP",
+          company_id: company.id,
+          repo_url: "https://github.com/acme/app"
+        })
+
       {:ok, agent} =
         Agents.create_agent(%{
           name: "PR Agent",
@@ -2338,6 +2346,7 @@ defmodule Cympho.RuntimeOperationsTest do
           status: :in_progress,
           priority: :high,
           company_id: company.id,
+          project_id: project.id,
           assignee_id: agent.id,
           github_pr_url: "https://github.com/acme/app/pull/42",
           monitor_state: %{

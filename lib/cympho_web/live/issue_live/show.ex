@@ -444,6 +444,15 @@ defmodule CymphoWeb.IssueLive.Show do
            )
            |> put_flash(:info, "PR link saved.")}
 
+        {:error, %Ecto.Changeset{} = changeset} ->
+          message =
+            case changeset.errors[:github_pr_url] do
+              {message, _opts} -> message
+              _ -> "Failed to save PR link."
+            end
+
+          {:noreply, put_flash(socket, :error, message)}
+
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Failed to save PR link.")}
       end

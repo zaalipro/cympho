@@ -29,6 +29,8 @@ defmodule Cympho.Orchestrator do
     :runtime_context,
     :runtime_admission_token,
     :runtime_admission_class,
+    :heartbeat_timer,
+    :heartbeat_token,
     :status,
     :fallback_profile_ids,
     no_work_retry_count: 0,
@@ -160,6 +162,42 @@ defmodule Cympho.Orchestrator do
 
       pid ->
         stop_with_deadline(pid, reason)
+    end
+  end
+
+  @doc "Stops only the exact orchestrator process still owning an agent run."
+  def stop_owned(pid, agent_id, run_id, reason) when is_pid(pid) do
+    monitor = Process.monitor(pid)
+
+    try do
+      case GenServer.call(pid, {:stop_if_owner, agent_id, run_id, reason}, @stop_timeout) do
+        :ok ->
+          receive do
+            {:DOWN, ^monitor, :process, ^pid, _} ->
+              case Cympho.AdapterSessions.owners_for_controller(pid) do
+                {:ok, []} -> :ok
+                _ -> {:error, :cleanup_pending}
+              end
+          after
+            @stop_timeout ->
+              Process.exit(pid, :kill)
+
+              receive do
+                {:DOWN, ^monitor, :process, ^pid, _} -> :ok
+              after
+                @adapter_cleanup_timeout_ms -> :ok
+              end
+
+              {:error, :cleanup_pending}
+          end
+
+        error ->
+          error
+      end
+    catch
+      :exit, _ -> {:error, :not_running}
+    after
+      Process.demonitor(monitor, [:flush])
     end
   end
 
@@ -439,9 +477,44 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def handle_info(:heartbeat_tick, %__MODULE__{run_id: run_id} = session) when run_id != nil do
+  def handle_info({:heartbeat_tick, token}, %__MODULE__{heartbeat_token: token} = session)
+      when is_reference(token) do
+    session = %{session | heartbeat_timer: nil, heartbeat_token: nil}
+    handle_heartbeat_tick(session, true)
+  end
+
+  def handle_info({:heartbeat_tick, _stale_token}, %__MODULE__{} = session),
+    do: {:noreply, session}
+
+  def handle_info(:heartbeat_tick, %__MODULE__{} = session),
+    do: handle_heartbeat_tick(session, false)
+
+  def handle_info({:stop_orchestrator, reason}, session) do
+    {:stop, reason, session}
+  end
+
+  def handle_info(msg, state) do
+    issue_id =
+      case state do
+        %__MODULE__{issue: %{id: id}} -> id
+        _ -> nil
+      end
+
+    Logger.warning(
+      "[Orchestrator] Unexpected message (issue_id=#{inspect(issue_id)}): #{inspect(msg)}"
+    )
+
+    {:noreply, state}
+  end
+
+  defp handle_heartbeat_tick(%__MODULE__{run_id: run_id} = session, timer_fired?)
+       when run_id != nil do
     record_heartbeat(session)
-    schedule_heartbeat_tick()
+
+    session =
+      if timer_fired? or is_nil(session.heartbeat_timer),
+        do: schedule_heartbeat_tick(session),
+        else: session
 
     case check_company_status(session) do
       :ok ->
@@ -469,27 +542,7 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  def handle_info(:heartbeat_tick, session) do
-    {:noreply, session}
-  end
-
-  def handle_info({:stop_orchestrator, reason}, session) do
-    {:stop, reason, session}
-  end
-
-  def handle_info(msg, state) do
-    issue_id =
-      case state do
-        %__MODULE__{issue: %{id: id}} -> id
-        _ -> nil
-      end
-
-    Logger.warning(
-      "[Orchestrator] Unexpected message (issue_id=#{inspect(issue_id)}): #{inspect(msg)}"
-    )
-
-    {:noreply, state}
-  end
+  defp handle_heartbeat_tick(session, _timer_fired?), do: {:noreply, session}
 
   # The orchestrator records a run heartbeat on every tick, which masks the
   # run from the watchdog's stale detection — so a dead adapter worker (one
@@ -712,6 +765,14 @@ defmodule Cympho.Orchestrator do
        status: session.status,
        turn_count: session.turn_count
      }, session}
+  end
+
+  def handle_call({:stop_if_owner, agent_id, run_id, reason}, _from, %__MODULE__{} = session) do
+    if session.agent_id == agent_id and session.run_id == run_id do
+      {:stop, reason, :ok, session}
+    else
+      {:reply, {:error, :not_running}, session}
+    end
   end
 
   @impl true
@@ -1064,7 +1125,7 @@ defmodule Cympho.Orchestrator do
           consume_pending_wakes(session.agent_id, session.issue.id)
         end
 
-        schedule_heartbeat_tick()
+        session = schedule_heartbeat_tick(session)
 
         opts =
           session
@@ -1956,8 +2017,13 @@ defmodule Cympho.Orchestrator do
 
   defp session_adapter_name(_session), do: nil
 
-  defp schedule_heartbeat_tick do
-    Process.send_after(self(), :heartbeat_tick, @heartbeat_tick_interval)
+  defp schedule_heartbeat_tick(%__MODULE__{} = session) do
+    if is_reference(session.heartbeat_timer),
+      do: Process.cancel_timer(session.heartbeat_timer)
+
+    token = make_ref()
+    timer = Process.send_after(self(), {:heartbeat_tick, token}, @heartbeat_tick_interval)
+    %{session | heartbeat_timer: timer, heartbeat_token: token}
   end
 
   defp check_company_status(%__MODULE__{issue: %Issue{company_id: nil}}), do: :ok

@@ -240,6 +240,14 @@ defmodule Cympho.ReviewNudgesTest do
   test "queues a targeted PR quality nudge from the contract gap planner" do
     company = nudge_company()
 
+    {:ok, project} =
+      Cympho.Projects.create_project(%{
+        name: "PR nudge project",
+        prefix: "PNDG",
+        company_id: company.id,
+        repo_url: "https://github.com/acme/app"
+      })
+
     {:ok, engineer} =
       Agents.create_agent(%{
         name: "PR Fixer",
@@ -257,6 +265,7 @@ defmodule Cympho.ReviewNudgesTest do
         status: :in_progress,
         assignee_id: engineer.id,
         company_id: company.id,
+        project_id: project.id,
         github_pr_url: "https://github.com/acme/app/pull/7",
         monitor_state: %{
           "pr_quality" => %{

@@ -46,15 +46,23 @@ defmodule CymphoWeb.CompanyLive.Show do
       memberships = Companies.list_memberships(socket.assigns.company.id)
       membership = Enum.find(memberships, fn membership -> membership.id == membership_id end)
 
-      if membership do
-        {:ok, _} = Companies.delete_membership(membership)
+      case membership &&
+             Companies.delete_membership_for_actor(
+               socket.assigns.current_user.id,
+               socket.assigns.company.id,
+               membership.id
+             ) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> assign(:memberships, Companies.list_memberships(socket.assigns.company.id))
+           |> put_flash(:info, "Membership removed")}
 
-        {:noreply,
-         socket
-         |> assign(:memberships, Companies.list_memberships(socket.assigns.company.id))
-         |> put_flash(:info, "Membership removed")}
-      else
-        {:noreply, put_flash(socket, :error, "Membership not found")}
+        {:error, :last_owner} ->
+          {:noreply, put_flash(socket, :error, "Cannot remove the last owner")}
+
+        _ ->
+          {:noreply, put_flash(socket, :error, "Membership not found")}
       end
     end)
   end

@@ -746,13 +746,20 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
   } do
     issue = issue!(company, agent, "Heartbeat retry")
 
+    stale_at =
+      DateTime.utc_now()
+      |> DateTime.add(-20, :minute)
+      |> DateTime.truncate(:second)
+
     run =
       Repo.insert!(%Run{
         company_id: company.id,
         agent_id: agent.id,
         issue_id: issue.id,
         status: "running",
-        adapter: "codex"
+        adapter: "codex",
+        last_heartbeat_at: stale_at,
+        inserted_at: stale_at
       })
 
     {fingerprint, snapshot} = Fingerprint.for_run(run, issue)
@@ -791,7 +798,316 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
     {expected_fingerprint, expected_snapshot} = Fingerprint.for_run(run, reopened)
     assert child.source_fingerprint == expected_fingerprint
     assert child.source_snapshot == expected_snapshot
-    assert child.source_status == "todo"
+    assert child.source_status == "running"
+
+    assert %{checked: 1, recovered: 1, superseded: 0, failed: 0} =
+             Recovery.process_due(now: DateTime.utc_now(), limit: 1)
+
+    assert Repo.get!(RecoveryCase, child.id).state == "recovered"
+    assert Repo.get!(Run, run.id).status == "failed"
+  end
+
+  test "approved pending and queued heartbeat children retain run status and recover", %{
+    company: company,
+    agent: agent
+  } do
+    for status <- ["pending", "queued"] do
+      {issue, run, _parent, approval} =
+        escalated_heartbeat_recovery!(company, agent, "Heartbeat child #{status}", status)
+
+      assert {:ok, child} = Recovery.apply_board_action(approval)
+      assert child.source_status == status
+      assert child.source_snapshot["run_status"] == status
+
+      assert %{checked: 1, recovered: 1, superseded: 0, failed: 0} =
+               Recovery.process_due(now: DateTime.utc_now(), limit: 1)
+
+      assert Repo.get!(RecoveryCase, child.id).state == "recovered"
+      assert Repo.get!(Run, run.id).status == "cancelled"
+      assert Repo.get!(Issue, issue.id).status == :todo
+    end
+  end
+
+  test "approved heartbeat retry rejects every corrupted case authority field", %{
+    company: company,
+    agent: agent
+  } do
+    variants = [
+      source_id: fn _fixture -> Ecto.UUID.generate() end,
+      agent_id: fn fixture -> fixture.other_agent.id end,
+      source_status: fn _fixture -> "pending" end,
+      fingerprint_version: fn _fixture -> 1 end,
+      source_snapshot: fn fixture -> Map.put(fixture.parent.source_snapshot, "extra", true) end
+    ]
+
+    for {field, corrupt_value} <- variants do
+      other_agent =
+        agent!(company, "Corruption peer #{field} #{System.unique_integer([:positive])}")
+
+      {issue, run, parent, approval} =
+        escalated_heartbeat_recovery!(company, agent, "Corrupt retry #{field}", "running")
+
+      fixture = %{
+        issue: issue,
+        run: run,
+        parent: parent,
+        approval: approval,
+        other_agent: other_agent
+      }
+
+      Repo.update_all(from(c in RecoveryCase, where: c.id == ^parent.id),
+        set: [{field, corrupt_value.(fixture)}]
+      )
+
+      assert {:error, :stale_recovery_proposal} = Recovery.apply_board_action(approval)
+      assert Repo.get!(RecoveryCase, parent.id).state == "escalated"
+      assert Repo.get!(Issue, issue.id).status == :blocked
+      assert Repo.get!(Run, run.id).status == "running"
+
+      refute Repo.exists?(from(c in RecoveryCase, where: c.parent_case_id == ^parent.id))
+    end
+  end
+
+  test "approved heartbeat retry rejects a fresh liveness token", %{
+    company: company,
+    agent: agent
+  } do
+    {issue, run, parent, approval} =
+      escalated_heartbeat_recovery!(company, agent, "Fresh retry heartbeat", "running")
+
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [last_heartbeat_at: DateTime.utc_now() |> DateTime.truncate(:second)]
+    )
+
+    assert {:error, :stale_recovery_proposal} = Recovery.apply_board_action(approval)
+    assert Repo.get!(RecoveryCase, parent.id).state == "escalated"
+    assert Repo.get!(Issue, issue.id).status == :blocked
+    assert Repo.get!(Run, run.id).status == "running"
+    refute Repo.exists?(from(c in RecoveryCase, where: c.parent_case_id == ^parent.id))
+  end
+
+  test "approved heartbeat retry rejects an exact source that is still too young", %{
+    company: company,
+    agent: agent
+  } do
+    {issue, run, parent, approval} =
+      escalated_heartbeat_recovery!(company, agent, "Young exact retry source", "running")
+
+    fresh_at = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [last_heartbeat_at: fresh_at]
+    )
+
+    fresh_run = Repo.get!(Run, run.id)
+    {fresh_fingerprint, fresh_snapshot} = Fingerprint.for_run(fresh_run, issue)
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^parent.id),
+      set: [source_fingerprint: fresh_fingerprint, source_snapshot: fresh_snapshot]
+    )
+
+    proposal = Map.put(approval.proposal_data, "fingerprint", fresh_fingerprint)
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [proposal_data: proposal]
+    )
+
+    assert {:error, :recovery_deferred} =
+             Recovery.apply_board_action(Repo.get!(BoardApproval, approval.id))
+
+    assert Repo.get!(RecoveryCase, parent.id).state == "escalated"
+    assert Repo.get!(Issue, issue.id).status == :blocked
+    assert Repo.get!(Run, run.id).status == "running"
+    refute Repo.exists?(from(c in RecoveryCase, where: c.parent_case_id == ^parent.id))
+  end
+
+  test "executor-path defer rolls back the effect and retries the same approval later", %{
+    company: company,
+    agent: agent
+  } do
+    {issue, run, parent, approval} =
+      escalated_heartbeat_recovery!(company, agent, "Young executor retry", "running")
+
+    fresh_at = DateTime.utc_now() |> DateTime.truncate(:second)
+    Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [last_heartbeat_at: fresh_at])
+
+    fresh_run = Repo.get!(Run, run.id)
+    {fresh_fingerprint, fresh_snapshot} = Fingerprint.for_run(fresh_run, issue)
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^parent.id),
+      set: [source_fingerprint: fresh_fingerprint, source_snapshot: fresh_snapshot]
+    )
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [proposal_data: Map.put(approval.proposal_data, "fingerprint", fresh_fingerprint)]
+    )
+
+    approved = Repo.get!(BoardApproval, approval.id)
+    state = %{initial_recovery?: false}
+
+    assert {:noreply, ^state} =
+             Cympho.BoardApprovals.BoardApprovalActionExecutor.handle_info(
+               {:board_approval_resolved, approved},
+               state
+             )
+
+    assert Repo.aggregate(
+             from(e in BoardApprovalEffect, where: e.board_approval_id == ^approval.id),
+             :count
+           ) == 0
+
+    assert %BoardApproval{executed_at: nil, execution_state: nil} =
+             Repo.get!(BoardApproval, approval.id)
+
+    assert Repo.get!(RecoveryCase, parent.id).state == "escalated"
+    refute Repo.exists?(from(c in RecoveryCase, where: c.parent_case_id == ^parent.id))
+
+    assert_receive {:retry_approval, %BoardApproval{id: approval_id}, 0}, 1_500
+    assert approval_id == approval.id
+
+    old_at = DateTime.utc_now() |> DateTime.add(-30, :minute) |> DateTime.truncate(:second)
+    Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [last_heartbeat_at: old_at])
+
+    old_run = Repo.get!(Run, run.id)
+    {old_fingerprint, old_snapshot} = Fingerprint.for_run(old_run, issue)
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^parent.id),
+      set: [source_fingerprint: old_fingerprint, source_snapshot: old_snapshot]
+    )
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [proposal_data: Map.put(approved.proposal_data, "fingerprint", old_fingerprint)]
+    )
+
+    assert {:noreply, ^state} =
+             Cympho.BoardApprovals.BoardApprovalActionExecutor.handle_info(
+               {:retry_approval, Repo.get!(BoardApproval, approval.id), 0},
+               state
+             )
+
+    assert Repo.aggregate(
+             from(e in BoardApprovalEffect, where: e.board_approval_id == ^approval.id),
+             :count
+           ) == 1
+
+    assert %BoardApproval{execution_state: "executed", executed_at: %DateTime{}} =
+             Repo.get!(BoardApproval, approval.id)
+  end
+
+  test "async approved retry uses the durable non-default stale threshold", %{
+    company: company,
+    agent: agent
+  } do
+    {issue, run, parent, approval} =
+      escalated_heartbeat_recovery!(company, agent, "Durable five minute cutoff", "running")
+
+    ten_minutes_old =
+      DateTime.utc_now() |> DateTime.add(-10, :minute) |> DateTime.truncate(:second)
+
+    Repo.update_all(from(r in Run, where: r.id == ^run.id),
+      set: [last_heartbeat_at: ten_minutes_old]
+    )
+
+    current_run = Repo.get!(Run, run.id)
+    {fingerprint, snapshot} = Fingerprint.for_run(current_run, issue)
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^parent.id),
+      set: [
+        source_fingerprint: fingerprint,
+        source_snapshot: snapshot,
+        stale_threshold_minutes: 5
+      ]
+    )
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [proposal_data: Map.put(approval.proposal_data, "fingerprint", fingerprint)]
+    )
+
+    assert {:ok, child} =
+             BoardApprovals.execute_approved_action(Repo.get!(BoardApproval, approval.id))
+
+    assert child.stale_threshold_minutes == 5
+    assert Repo.get!(RecoveryCase, parent.id).state == "resolved"
+  end
+
+  test "approved checkout retry rejects a changed current liveness token", %{
+    company: company,
+    agent: agent
+  } do
+    issue = issue!(company, agent, "Checkout liveness authority")
+    checked_out_at = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id),
+      set: [checked_out_at: checked_out_at]
+    )
+
+    source_issue = Repo.get!(Issue, issue.id)
+    parent = exhausted_case!(source_issue, max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(parent, reason: "timeout")
+
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id),
+      set: [checked_out_at: DateTime.add(checked_out_at, 1, :second)]
+    )
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [status: "approved"]
+    )
+
+    assert {:error, :stale_recovery_proposal} =
+             Recovery.apply_board_action(Repo.get!(BoardApproval, approval.id))
+
+    assert Repo.get!(RecoveryCase, parent.id).state == "escalated"
+    refute Repo.exists?(from(c in RecoveryCase, where: c.parent_case_id == ^parent.id))
+  end
+
+  test "approved checkout retry rejects a case source_run that differs from the checkout", %{
+    company: company,
+    agent: agent
+  } do
+    issue = issue!(company, agent, "Checkout source-run authority")
+
+    original_run =
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "codex"
+      })
+
+    replacement_run =
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "codex"
+      })
+
+    checked_out_at = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.update_all(from(i in Issue, where: i.id == ^issue.id),
+      set: [checkout_run_id: original_run.id, checked_out_at: checked_out_at]
+    )
+
+    parent = exhausted_case!(Repo.get!(Issue, issue.id), max_attempts: 1)
+    {:ok, approval} = Recovery.exhaust_case(parent, reason: "timeout")
+
+    proposal = Map.put(approval.proposal_data, "source_run_id", replacement_run.id)
+
+    Repo.update_all(from(c in RecoveryCase, where: c.id == ^parent.id),
+      set: [source_run_id: replacement_run.id]
+    )
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [status: "approved", proposal_data: proposal]
+    )
+
+    approved = Repo.get!(BoardApproval, approval.id)
+    assert {:error, :stale_recovery_proposal} = Recovery.apply_board_action(approved)
+    assert Repo.get!(RecoveryCase, parent.id).state == "escalated"
+    assert Repo.get!(Issue, issue.id).status == :blocked
+    refute Repo.exists?(from(c in RecoveryCase, where: c.parent_case_id == ^parent.id))
   end
 
   test "approved retry resumes a paused runtime and clears the exact failed checkout", %{
@@ -1100,6 +1416,54 @@ defmodule Cympho.BoardApprovals.RecoveryActionTest do
         Map.new(attrs)
       )
     )
+  end
+
+  defp escalated_heartbeat_recovery!(company, agent, title, status) do
+    issue = issue!(company, agent, title)
+
+    stale_at =
+      DateTime.utc_now()
+      |> DateTime.add(-20, :minute)
+      |> DateTime.truncate(:second)
+
+    run =
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: status,
+        adapter: "codex",
+        inserted_at: stale_at,
+        last_heartbeat_at: if(status == "running", do: stale_at, else: nil)
+      })
+
+    {fingerprint, snapshot} = Fingerprint.for_run(run, issue)
+
+    parent =
+      recovery_case!(%{
+        company_id: company.id,
+        issue_id: issue.id,
+        agent_id: agent.id,
+        source_run_id: run.id,
+        source_type: "heartbeat_run",
+        source_id: run.id,
+        source_status: status,
+        source_fingerprint: fingerprint,
+        fingerprint_version: Fingerprint.version(),
+        source_snapshot: snapshot,
+        state: "exhausted",
+        attempt_count: 1,
+        max_attempts: 1,
+        policy_snapshot: complete_policy(1)
+      })
+
+    {:ok, approval} = Recovery.exhaust_case(parent, reason: "network")
+
+    Repo.update_all(from(a in BoardApproval, where: a.id == ^approval.id),
+      set: [status: "approved"]
+    )
+
+    {issue, run, parent, Repo.get!(BoardApproval, approval.id)}
   end
 
   defp recovery_case!(attrs) do

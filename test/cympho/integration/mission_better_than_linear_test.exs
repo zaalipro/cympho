@@ -31,6 +31,7 @@ defmodule Cympho.Integration.MissionBetterThanLinearTest do
     {:ok,
      %{
        company: company,
+       project: project,
        agents: [ceo, cto, engineer | _],
        goal: goal,
        seed_issues: seed_issues
@@ -40,6 +41,9 @@ defmodule Cympho.Integration.MissionBetterThanLinearTest do
         issue_prefix: "LIN",
         engineer_count: 1
       })
+
+    {:ok, _} =
+      Cympho.Projects.update_project(project, %{repo_url: "https://github.com/owner/repo"})
 
     # Cancel the onboarding seed issues so the company starts truly idle.
     Enum.each(seed_issues, fn i ->

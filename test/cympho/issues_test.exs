@@ -37,6 +37,73 @@ defmodule Cympho.IssuesTest do
     %{issue: issue, company: company}
   end
 
+  describe "PR link repository authority" do
+    test "create with an invalid project reference and PR link returns a validation error" do
+      assert {:error, changeset} =
+               Issues.create_issue(%{
+                 title: "Invalid PR project",
+                 project_id: "not-a-uuid",
+                 github_pr_url: "https://github.com/acme/app/pull/4"
+               })
+
+      assert errors_on(changeset).github_pr_url ==
+               ["requires a configured GitHub project repository"]
+    end
+
+    test "invalid project reference with a PR link returns a validation error", %{issue: issue} do
+      assert {:error, changeset} =
+               Issues.update_issue(issue, %{
+                 project_id: "not-a-uuid",
+                 github_pr_url: "https://github.com/acme/app/pull/4"
+               })
+
+      assert errors_on(changeset).github_pr_url ==
+               ["requires a configured GitHub project repository"]
+    end
+
+    test "project changes cannot retain a foreign PR, but unlink and unrelated legacy updates work",
+         %{
+           issue: issue,
+           company: company
+         } do
+      {:ok, first} =
+        Projects.create_project(%{
+          name: "First PR repo",
+          prefix: "FPR",
+          company_id: company.id,
+          repo_url: "https://github.com/acme/app"
+        })
+
+      {:ok, second} =
+        Projects.create_project(%{
+          name: "Second PR repo",
+          prefix: "SPR",
+          company_id: company.id,
+          repo_url: "https://github.com/other/app"
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{project_id: first.id})
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{github_pr_url: "https://github.com/acme/app/pull/4"})
+
+      assert {:error, changeset} = Issues.update_issue(issue, %{project_id: second.id})
+      assert "must belong to the issue's project repository" in errors_on(changeset).github_pr_url
+      assert Issues.get_issue!(issue.id).project_id == first.id
+
+      # Deliberately model a pre-existing corrupt row without going through the public context.
+      legacy =
+        Repo.update!(
+          Ecto.Changeset.change(issue, github_pr_url: "https://github.com/other/app/pull/4")
+        )
+
+      assert {:ok, updated} = Issues.update_issue(legacy, %{title: "Legacy row still editable"})
+      assert updated.github_pr_url == legacy.github_pr_url
+      assert {:ok, unlinked} = Issues.update_issue(updated, %{github_pr_url: nil})
+      assert unlinked.github_pr_url == nil
+    end
+  end
+
   describe "list_issues/0" do
     test "returns all issues", %{issue: issue} do
       issues = Issues.list_issues()
@@ -369,6 +436,14 @@ defmodule Cympho.IssuesTest do
 
   describe "recheck_pr_quality/2" do
     test "stores rich PR quality state and clears a satisfied PR nudge", %{company: company} do
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "PR quality project",
+          prefix: "PQR",
+          company_id: company.id,
+          repo_url: "https://github.com/acme/app"
+        })
+
       {:ok, engineer} =
         Agents.create_agent(%{
           name: "PR Repair Engineer",
@@ -386,6 +461,7 @@ defmodule Cympho.IssuesTest do
           status: :in_progress,
           assignee_id: engineer.id,
           company_id: company.id,
+          project_id: project.id,
           github_pr_url: "https://github.com/acme/app/pull/7",
           monitor_state: %{
             "pr_quality" => %{

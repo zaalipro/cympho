@@ -161,6 +161,32 @@ defmodule CymphoWeb.GithubPrLifecycleTest do
   end
 
   describe "check_run webhook" do
+    test "signed CI event cannot act on a PR outside the issue project repository", %{
+      conn: conn,
+      project: project,
+      issue: issue,
+      engineer: engineer
+    } do
+      # Deliberately model an old cross-repository link that predates link-time validation.
+      issue =
+        Repo.update!(
+          Ecto.Changeset.change(issue,
+            github_pr_url: "https://github.com/other/repo/pull/777"
+          )
+        )
+
+      payload = check_run_payload("completed", "failure", pr_url: issue.github_pr_url)
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
+
+      assert response(conn, :unauthorized) == ""
+      assert pending_wakes(engineer.id, "ci_failed") == []
+
+      refute Repo.exists?(
+               from c in Cympho.Comments.Comment,
+                 where: c.issue_id == ^issue.id and fragment("? LIKE ?", c.body, "[ci] FAILED%")
+             )
+    end
+
     test "failure conclusion fires ci_failed wake on assignee + adds [ci] FAILED comment", %{
       conn: conn,
       project: project,

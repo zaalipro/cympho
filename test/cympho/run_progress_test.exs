@@ -79,6 +79,7 @@ defmodule Cympho.RunProgressTest do
         Path.join(System.tmp_dir!(), "cympho-progress-#{System.unique_integer([:positive])}")
 
       File.mkdir_p!(dir)
+      File.ln_s!(System.find_executable("python3"), Path.join(dir, "python3"))
       on_exit(fn -> File.rm_rf!(dir) end)
 
       command = Path.join(dir, "drip-agent")

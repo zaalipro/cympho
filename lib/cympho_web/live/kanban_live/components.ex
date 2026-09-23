@@ -13,6 +13,7 @@ defmodule CymphoWeb.KanbanLive.Components do
   @soft_overload_threshold 8
 
   attr :issue, :map, required: true
+  attr :digest, :map, default: nil
   attr :status, :atom, required: true
   attr :digest_density, :string, default: "detailed"
   attr :agents, :list, default: []
@@ -64,6 +65,7 @@ defmodule CymphoWeb.KanbanLive.Components do
 
       <.issue_digest_card
         issue={@issue}
+        digest={@digest}
         density={@digest_density}
         variant={if @digest_density == "compact", do: "inline", else: "card"}
         cause_hoisted={@digest_cause_hoisted}

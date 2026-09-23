@@ -163,7 +163,7 @@ defmodule CymphoWeb.RoutineLive.Show do
 
   defp get_scoped_routine(socket, id) do
     case current_company_id(socket) do
-      nil -> Routines.get_routine(id)
+      nil -> {:error, :not_found}
       company_id -> Routines.get_company_routine(company_id, id)
     end
   end

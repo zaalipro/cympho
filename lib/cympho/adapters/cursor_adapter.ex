@@ -14,6 +14,7 @@ defmodule Cympho.Adapters.CursorAdapter do
 
   alias Cympho.Adapters.RunDeadline
   alias Cympho.Adapters.RuntimeTimeout
+  alias Cympho.Adapters.OutputLimit
 
   @default_timeout 300_000
   @max_timeout 3_600_000
@@ -101,31 +102,39 @@ defmodule Cympho.Adapters.CursorAdapter do
       cursor_bin = find_cursor_binary(config)
       timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
       {args, stdin} = build_cursor_invocation(prompt, cursor_bin, config)
+      limit = OutputLimit.effective(opts, config)
+      {shell, shell_args} = OutputLimit.wrapped_command(cursor_bin, args, limit)
 
       env = config |> build_env() |> port_env()
 
       port_opts =
-        [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}] ++
+        [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, shell_args}, {:env, env}] ++
           cursor_cwd_opt(config)
 
-      with_port({:spawn_executable, cursor_bin}, port_opts, session_id, opts, fn port ->
-        send(recipient_pid, {:session_started, session_id})
+      with_port(
+        {:spawn_executable, String.to_charlist(shell)},
+        port_opts,
+        session_id,
+        opts,
+        fn port ->
+          send(recipient_pid, {:session_started, session_id})
 
-        if stdin do
-          write_stdin(port, stdin)
+          if stdin do
+            write_stdin(port, stdin)
+          end
+
+          case collect_output(port, "", timeout, session_id, recipient_pid, limit) do
+            {:ok, raw} ->
+              case Cympho.Adapters.ProviderFailure.detect(raw) do
+                :ok -> parse_cursor_output(raw)
+                {:error, _} = err -> err
+              end
+
+            {:error, _} = err ->
+              err
+          end
         end
-
-        case collect_output(port, "", timeout, session_id, recipient_pid) do
-          {:ok, raw} ->
-            case Cympho.Adapters.ProviderFailure.detect(raw) do
-              :ok -> parse_cursor_output(raw)
-              {:error, _} = err -> err
-            end
-
-          {:error, _} = err ->
-            err
-        end
-      end)
+      )
     rescue
       _exception ->
         {:error, :cursor_process_failed}
@@ -227,19 +236,25 @@ defmodule Cympho.Adapters.CursorAdapter do
     end
   end
 
-  defp collect_output(port, acc, timeout, session_id, recipient_pid) when is_integer(timeout) do
-    collect_output(port, acc, RunDeadline.new(timeout), session_id, recipient_pid)
+  defp collect_output(port, acc, timeout, session_id, recipient_pid, limit)
+       when is_integer(timeout) do
+    collect_output(port, acc, RunDeadline.new(timeout), session_id, recipient_pid, limit)
   end
 
-  defp collect_output(port, acc, %RunDeadline{} = deadline, session_id, recipient_pid) do
+  defp collect_output(port, acc, %RunDeadline{} = deadline, session_id, recipient_pid, limit) do
     receive do
+      {^port, {:data, data}} when byte_size(acc) + byte_size(data) > limit ->
+        close_port(port)
+        {:error, {:output_limit_exceeded, limit, OutputLimit.tail(acc, data)}}
+
       {^port, {:data, data}} ->
         collect_output(
           port,
           acc <> data,
           RunDeadline.observe(deadline, data, session_id, recipient_pid),
           session_id,
-          recipient_pid
+          recipient_pid,
+          limit
         )
 
       {^port, {:exit_status, 0}} ->
@@ -262,7 +277,7 @@ defmodule Cympho.Adapters.CursorAdapter do
         # end a CLI that keeps talking.
         case RunDeadline.expired(deadline) do
           nil ->
-            collect_output(port, acc, deadline, session_id, recipient_pid)
+            collect_output(port, acc, deadline, session_id, recipient_pid, limit)
 
           :max_run ->
             close_port(port)

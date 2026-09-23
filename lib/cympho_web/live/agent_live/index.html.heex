@@ -346,7 +346,7 @@
             "ui-advanced-only truncate text-xs",
             if(group_needs_attention?(agents), do: "text-red-200", else: "text-text-quaternary")
           ]}>
-            {group_pulse(agents)}
+            {group_pulse(agents, @session_progress)}
           </p>
         </div>
 
@@ -380,29 +380,29 @@
                  keeps the pill; simple shows a bare dot (an empty pill with the
                  word removed reads as a stray stub). The label survives as the
                  dot's accessible name. --%>
-            <span class={"ui-advanced-only inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(agent.status)}"}>
+            <span class={"ui-advanced-only inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(agent_runtime_status(@session_progress, agent))}"}>
               <span class={[
                 "h-1.5 w-1.5 shrink-0 rounded-full",
-                agent.status == :running && "cympho-pulse-dot",
-                status_dot_class(agent.status)
+                agent_runtime_status(@session_progress, agent) == :running && "cympho-pulse-dot",
+                status_dot_class(agent_runtime_status(@session_progress, agent))
               ]}>
               </span>
-              {status_label(agent.status)}
+              {status_label(agent_runtime_status(@session_progress, agent))}
             </span>
             <span
               class="ui-simple-only inline-flex items-center"
-              title={status_label(agent.status)}
-              aria-label={status_label(agent.status)}
+              title={status_label(agent_runtime_status(@session_progress, agent))}
+              aria-label={status_label(agent_runtime_status(@session_progress, agent))}
             >
               <span class={[
                 "h-2.5 w-2.5 shrink-0 rounded-full",
-                agent.status == :running && "cympho-pulse-dot",
-                status_dot_class(agent.status)
+                agent_runtime_status(@session_progress, agent) == :running && "cympho-pulse-dot",
+                status_dot_class(agent_runtime_status(@session_progress, agent))
               ]}>
               </span>
             </span>
             <p
-              :if={agent.status == :running && session_progress_note(@session_progress, agent.id)}
+              :if={session_progress_note(@session_progress, agent.id)}
               class="mt-1 truncate text-[11px] text-text-quaternary"
             >
               {session_progress_note(@session_progress, agent.id)}
@@ -481,7 +481,7 @@
                 Edit settings
               </.menu_item>
               <.menu_item
-                :if={agent.status == :running}
+                :if={agent_runtime_status(@session_progress, agent) == :running}
                 phx-click="kill_session"
                 phx-value-id={agent.id}
                 data-confirm="Stop this agent's session?"
@@ -489,7 +489,7 @@
                 Stop session
               </.menu_item>
               <.menu_item
-                :if={agent.status == :idle}
+                :if={agent_runtime_status(@session_progress, agent) == :idle}
                 phx-click="pause_agent"
                 phx-value-id={agent.id}
               >

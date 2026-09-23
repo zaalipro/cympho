@@ -2078,6 +2078,14 @@ defmodule CymphoWeb.OperationsLiveTest do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
       conn = live_session_conn(conn, user, company)
 
+      {:ok, project} =
+        Cympho.Projects.create_project(%{
+          name: "Operations PR project",
+          prefix: "OPPR",
+          company_id: company.id,
+          repo_url: "https://github.com/acme/app"
+        })
+
       {:ok, agent} =
         Agents.create_agent(%{
           name: "PR Quality Agent",
@@ -2095,6 +2103,7 @@ defmodule CymphoWeb.OperationsLiveTest do
           status: :in_progress,
           priority: :high,
           company_id: company.id,
+          project_id: project.id,
           assignee_id: agent.id,
           github_pr_url: "https://github.com/acme/app/pull/42",
           monitor_state: %{

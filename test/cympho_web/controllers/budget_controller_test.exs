@@ -46,6 +46,82 @@ defmodule CymphoWeb.BudgetControllerTest do
     refute Repo.exists?(from b in Budget, where: b.company_id == ^company.id)
   end
 
+  test "create and update return nonempty budgets without Ecto internals", %{
+    conn: conn,
+    company: company
+  } do
+    create =
+      post(conn, ~p"/api/budgets", %{
+        "budget" => %{
+          "name" => "API company cap",
+          "scope_type" => "company",
+          "limit_amount" => "42.50",
+          "currency" => "USD"
+        }
+      })
+
+    assert %{
+             "data" => %{
+               "id" => budget_id,
+               "name" => "API company cap",
+               "company_id" => company_id,
+               "scope_type" => "company",
+               "limit_amount" => "42.50"
+             }
+           } = json_response(create, 201)
+
+    assert company_id == company.id
+    refute create.resp_body =~ "__meta__"
+    refute create.resp_body =~ "NotLoaded"
+
+    update =
+      patch(recycle(conn), ~p"/api/budgets/#{budget_id}", %{
+        "budget" => %{"name" => "Updated company cap", "limit_amount" => "50.00"}
+      })
+
+    assert %{
+             "data" => %{
+               "id" => ^budget_id,
+               "name" => "Updated company cap",
+               "limit_amount" => "50.00"
+             }
+           } =
+             json_response(update, 200)
+
+    refute update.resp_body =~ "__meta__"
+  end
+
+  test "existing read actions project nonempty budgets without associations", %{
+    conn: conn,
+    company: company
+  } do
+    {:ok, budget} =
+      Budgets.create_budget(%{
+        company_id: company.id,
+        name: "Readable company cap",
+        scope_type: "company",
+        scope_id: company.id,
+        limit_amount: Decimal.new("12.00")
+      })
+
+    conn = Plug.Conn.assign(conn, :current_company, company)
+    list = CymphoWeb.BudgetController.index(conn, %{})
+
+    assert %{"data" => [%{"id" => id, "name" => "Readable company cap"}]} =
+             json_response(list, 200)
+
+    assert id == budget.id
+
+    show =
+      conn
+      |> recycle()
+      |> Plug.Conn.assign(:current_company, company)
+      |> CymphoWeb.BudgetController.show(%{"id" => budget.id})
+
+    assert %{"data" => %{"id" => ^id, "limit_amount" => "12.00"}} =
+             json_response(show, 200)
+  end
+
   test "update cannot retarget a current-company budget to another company's agent", %{
     conn: conn,
     company: company,

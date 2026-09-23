@@ -33,12 +33,28 @@ source's bounded durable liveness timestamp as a CAS token: a running run's
 No prompt, credential, provider log, arbitrary metadata, or other timestamp is
 part of that addition.
 
-Direct, due, and exhaustion paths lock and re-read the durable source before a
-destructive change. They require an exact match across company, issue, source
-type and ID, run, agent, active status, fingerprint/liveness token, and the
-applicable final freshness cutoff; a live owner or fresh successor also wins.
-Any stale, incomplete, cross-tenant, or mismatched case is superseded without
-changing the issue or run. Each due row is selected and reserved in one short
+Direct, due, exhaustion, and approved-retry paths lock and re-read the durable
+source before a destructive change. The canonical retained-row order is
+recovery case → board approval → issue → exact run, skipping absent classes;
+terminal run lifecycle paths that need both rows use issue → exact run, while
+run start/heartbeat/metadata updates remain run-only. Recovery approval effect
+execution locks case → approval before checking/inserting its execute-once row.
+They require fingerprint version 2's exact key set and map size plus an exact
+match across company, issue, source type and ID, run, agent, active status,
+fingerprint/liveness token, error family, and the applicable final freshness
+cutoff; a live owner or fresh successor also wins. Any incomplete,
+cross-tenant, or genuinely changed case is superseded without changing the
+issue or run.
+
+The default run threshold is 15 minutes. The effective threshold is persisted
+on each recovery case, so an asynchronous board executor cannot silently fall
+back to a different default. One validated cutoff flows from each
+Watchdog/Dispatcher/Operations selection through successor checks and the
+final locked compare-and-set. Running selection uses
+`COALESCE(last_heartbeat_at, inserted_at) < cutoff`; equality is not stale. An
+exact source that is still too young is deferred on the same lineage and can
+run after the cutoff instead of being poisoned as superseded. The threshold is
+not fingerprint input. Each due row is selected and reserved in one short
 `FOR UPDATE SKIP LOCKED LIMIT 1` transaction. The claim/attempt write commits
 before its callback runs, so concurrent nodes reserve different rows without
 holding database locks across source mutation.
@@ -48,25 +64,33 @@ The default policy is one immediate attempt followed by two bounded retries
 values — maximum attempts, base delay, maximum delay, and lease seconds — are
 validated and persisted once. The snapshot is immutable for the active
 lineage, later conflicting overrides fail closed, and retry children inherit
-the complete policy. Durable attempt rows are append-only with stable ordinals.
+the complete policy. Existing-case calls may repeat a contextually exact
+partial override; scalar validation happens before the locked snapshot supplies
+omitted values. Durable attempt rows are append-only with stable ordinals.
 A deferred claim is closed as skipped and returns its provisional retry-budget
 slot, so audit history remains distinct from the retained budget count used for
-exhaustion and backoff.
+exhaustion and backoff. If a new fingerprint arrives during an unexpired claim,
+the old claimed attempt is closed as `skipped`, its lease/schedule fields are
+cleared, and the linked child is inserted atomically; the old token is stale.
 
 When the cap is exhausted, the non-terminal issue is set to **Blocked** and one
 auditable board approval with category `stranded_work_recovery` is created.
 Automatic recovery does not wake or dispatch exhausted work. An owner must
 review the approval in the board/Owner Decisions queue and choose the explicit
-**Retry** action. An approved retry verifies the company, issue status, source
-fingerprint, and lineage, resolves the exhausted case, reopens the
-still-matching issue to `todo`, and creates a child scheduled case. Denial,
+**Retry** action. An approved retry verifies the authoritative case columns,
+exact snapshot/fingerprint and current locked source, resolves the exhausted
+case, reopens only the still-matching issue to `todo`, and creates a child
+scheduled case. A heartbeat child retains its locked run status (`running`,
+`pending`, or `queued`) for due-kind selection rather than using the reopened
+issue's `todo` status. Denial,
 expiry, or cancellation locks case → approval and commits the approval outcome
 plus linked case resolution in one transaction. It does not lock or mutate the
 issue; the issue remains blocked from the earlier exhaustion transaction.
-Approved retry and exhaustion acquire the issue after case/approval when their
-mutation requires it. Audit, company/recovery events, PubSub, and OwnerAttention
-publication happen best-effort after commit; there is no durable notification
-outbox.
+Approved retry and exhaustion acquire issue → exact run after case/approval when
+their mutation requires it. Audit, company/recovery events, PubSub, dispatcher
+wakes, workspace/provider cleanup, and OwnerAttention publication remain
+outside the enclosing recovery/governance transaction; there is no durable
+notification outbox.
 
 Dispatcher crash cleanup snapshots and recovers the exact pre-crash run first,
 then considers an unbound checkout. A durably stale run cohort can be recovered
