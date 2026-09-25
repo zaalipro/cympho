@@ -1332,6 +1332,7 @@ rsync -az --delete -e "${RSYNC_RSH}" \
 run_remote_script <<EOF
 _sudo chown -R root:root ${SOURCE_DIR}
 _sudo chmod -R a-w ${SOURCE_DIR}
+_sudo chmod 0555 ${SOURCE_DIR}
 EOF
 
 # --- Preflight rollback attestation -----------------------------------------
