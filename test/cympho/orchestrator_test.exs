@@ -110,7 +110,7 @@ defmodule Cympho.OrchestratorTest do
            [
              resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
            ]},
-          {Cympho.HeartbeatEngine, [],
+          {Cympho.HeartbeatEngine, [:passthrough],
            [
              create_run: fn _ -> {:ok, %{id: run_id}} end,
              get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -183,7 +183,7 @@ defmodule Cympho.OrchestratorTest do
            [
              resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
            ]},
-          {Cympho.HeartbeatEngine, [],
+          {Cympho.HeartbeatEngine, [:passthrough],
            [
              create_run: fn _ -> {:ok, %{id: run_id}} end,
              get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -311,7 +311,7 @@ defmodule Cympho.OrchestratorTest do
       with_mocks([
         {Cympho.Adapters, [],
          [resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id, status: "running"}} end,
@@ -386,7 +386,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
@@ -416,7 +416,7 @@ defmodule Cympho.OrchestratorTest do
 
       with_mocks([
         {Cympho.Adapters, [], [resolve: fn _ -> {:ok, MockAdapter, %{}} end]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id ->
@@ -459,7 +459,7 @@ defmodule Cympho.OrchestratorTest do
 
       with_mocks([
         {Cympho.Adapters, [], [resolve: fn _ -> {:ok, MockAdapter, %{}} end]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _attrs ->
              id = Elixir.Agent.get_and_update(run_ids, fn [next | rest] -> {next, rest} end)
@@ -557,7 +557,7 @@ defmodule Cympho.OrchestratorTest do
 
       with_mocks([
         {Cympho.Adapters, [], [resolve: fn _ -> {:ok, MockAdapter, %{}} end]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _attrs ->
              id = Elixir.Agent.get_and_update(run_ids, fn [next | rest] -> {next, rest} end)
@@ -641,7 +641,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
@@ -706,7 +706,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -777,7 +777,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -842,7 +842,7 @@ defmodule Cympho.OrchestratorTest do
       with_mocks([
         {Cympho.Adapters, [],
          [resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -898,7 +898,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -969,7 +969,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -1630,7 +1630,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -1698,7 +1698,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id, status: "running", agent_id: agent_id}} end,
            get_run: fn ^run_id ->
@@ -2041,7 +2041,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:error, :no_adapter_available} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
@@ -2073,7 +2073,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:error, :no_adapter_available} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
@@ -2126,7 +2126,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:error, {:config_invalid, errors}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
@@ -2163,7 +2163,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
@@ -2195,7 +2195,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
@@ -2240,7 +2240,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
            get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
@@ -2336,7 +2336,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -2384,7 +2384,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -2438,7 +2438,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id, status: "running"}} end,
@@ -2502,7 +2502,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id, status: "running"}} end,
@@ -2572,7 +2572,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -2614,7 +2614,7 @@ defmodule Cympho.OrchestratorTest do
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
-        {Cympho.HeartbeatEngine, [],
+        {Cympho.HeartbeatEngine, [:passthrough],
          [
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
@@ -2654,7 +2654,7 @@ defmodule Cympho.OrchestratorTest do
              [
                resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
              ]},
-            {Cympho.HeartbeatEngine, [],
+            {Cympho.HeartbeatEngine, [:passthrough],
              [
                create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
                get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
@@ -2707,7 +2707,7 @@ defmodule Cympho.OrchestratorTest do
              [
                resolve: fn _ -> {:ok, MockAdapter, %{}} end
              ]},
-            {Cympho.HeartbeatEngine, [],
+            {Cympho.HeartbeatEngine, [:passthrough],
              [
                create_run: fn _ -> {:ok, run} end,
                get_run: fn _ -> {:ok, run} end,

@@ -291,6 +291,101 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
   end
 
   describe "run/4" do
+    test "forwards the configured deadline as Finch request_timeout" do
+      test_pid = self()
+
+      with_mock Finch, [:passthrough],
+        stream_while: fn %Finch.Request{}, Cympho.Finch, initial, reducer, options ->
+          send(test_pid, {:finch_options, options})
+          {:cont, acc} = reducer.({:status, 200}, initial)
+          {:ok, acc}
+        end do
+        session_id =
+          OpenAIChatAdapter.run(
+            %{id: "issue-timeout", title: "Timeout", description: "deadline"},
+            "agent-1",
+            self(),
+            config: %{
+              "endpoint" => "https://example.com/v1",
+              "api_key" => "test-key",
+              "timeout" => 12_345
+            }
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+        assert_receive {:finch_options, options}, 1_000
+        assert options[:request_timeout] == 12_345
+        assert options[:receive_timeout] == 12_345
+      end
+    end
+
+    test "halts Finch streaming when the response exceeds the safety cap" do
+      test_pid = self()
+      oversized_chunk = String.duplicate("x", 2 * 1024 * 1024 + 1)
+
+      with_mock Finch, [:passthrough],
+        stream_while: fn %Finch.Request{}, Cympho.Finch, initial, reducer, _options ->
+          {:cont, acc} = reducer.({:status, 200}, initial)
+          result = reducer.({:data, oversized_chunk}, acc)
+          send(test_pid, {:overflow_reducer_result, result})
+
+          case result do
+            {:halt, halted_acc} -> {:ok, halted_acc}
+            {:cont, continued_acc} -> {:ok, continued_acc}
+          end
+        end do
+        session_id =
+          OpenAIChatAdapter.run(
+            %{id: "issue-overflow", title: "Overflow", description: "response"},
+            "agent-1",
+            self(),
+            config: %{
+              "endpoint" => "https://example.com/v1",
+              "api_key" => "test-key",
+              "timeout" => 10
+            }
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+        assert_receive {:overflow_reducer_result, {:halt, %{overflow: true}}}, 1_000
+        assert_receive {:turn_ended_with_error, ^session_id, :response_too_large}, 1_000
+      end
+    end
+
+    test "ignores response trailers while preserving the provider response" do
+      body =
+        Jason.encode!(%{
+          "choices" => [%{"message" => %{"content" => "trailer-safe"}}]
+        })
+
+      with_mock Finch, [:passthrough],
+        build: fn _, _, _, _ -> :request end,
+        stream_while: fn :request, Cympho.Finch, initial, reducer, _options ->
+          {:cont, acc} = reducer.({:status, 200}, initial)
+          {:cont, acc} = reducer.({:trailers, [{"x-checksum", "ok"}]}, acc)
+          {:cont, acc} = reducer.({:data, body}, acc)
+          {:ok, acc}
+        end do
+        session_id =
+          OpenAIChatAdapter.run(
+            %{id: "issue-trailers", title: "Trailers", description: "response"},
+            "agent-1",
+            self(),
+            config: %{
+              "endpoint" => "https://example.com/v1",
+              "api_key" => "test-key",
+              "timeout" => 10
+            }
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+
+        assert_receive {:turn_completed, ^session_id,
+                        %{"content" => [%{"text" => "trailer-safe"}]}},
+                       1_000
+      end
+    end
+
     test "uses an evidence-oriented default system prompt" do
       test_pid = self()
 
@@ -299,7 +394,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
           send(test_pid, {:chat_request, url, headers, Jason.decode!(body)})
           :request
         end,
-        stream: fn :request, Cympho.Finch, init, fun, receive_timeout: _timeout ->
+        stream_while: fn :request, Cympho.Finch, init, fun, _options ->
           body =
             Jason.encode!(%{
               "choices" => [
@@ -307,8 +402,8 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
               ]
             })
 
-          acc = fun.({:status, 200}, init)
-          acc = fun.({:data, body}, acc)
+          {:cont, acc} = fun.({:status, 200}, init)
+          {:cont, acc} = fun.({:data, body}, acc)
           {:ok, acc}
         end do
         session_id =
@@ -346,7 +441,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
     test "reports Finch stream transport errors instead of crashing" do
       with_mock Finch,
         build: fn _, _, _, _ -> :request end,
-        stream: fn :request, Cympho.Finch, init, _fun, receive_timeout: _timeout ->
+        stream_while: fn :request, Cympho.Finch, init, _fun, _options ->
           {:error, %Mint.TransportError{reason: :timeout}, init}
         end do
         session_id =
@@ -372,15 +467,15 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
 
       with_mock Finch,
         build: fn _, _, _, _ -> :request end,
-        stream: fn :request, Cympho.Finch, init, fun, receive_timeout: _timeout ->
+        stream_while: fn :request, Cympho.Finch, init, fun, _options ->
           body =
             Jason.encode!(%{
               "error" => %{"message" => "Credential #{secret} was rejected"},
               "debug_body" => "raw-provider-body"
             })
 
-          acc = fun.({:status, 401}, init)
-          acc = fun.({:data, body}, acc)
+          {:cont, acc} = fun.({:status, 401}, init)
+          {:cont, acc} = fun.({:data, body}, acc)
           {:ok, acc}
         end do
         session_id =
@@ -409,7 +504,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
 
       with_mock Finch,
         build: fn _, _, _, _ -> :request end,
-        stream: fn :request, Cympho.Finch, _init, _fun, receive_timeout: _timeout ->
+        stream_while: fn :request, Cympho.Finch, _init, _fun, _options ->
           send(test_pid, {:provider_request_started, self()})
 
           receive do

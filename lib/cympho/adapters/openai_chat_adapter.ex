@@ -124,25 +124,31 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
 
     fun = fn
       {:status, status}, acc ->
-        %{acc | status: status}
+        {:cont, %{acc | status: status}}
 
       {:headers, _headers}, acc ->
-        acc
+        {:cont, acc}
+
+      {:trailers, _trailers}, acc ->
+        {:cont, acc}
 
       {:data, _chunk}, %{overflow: true} = acc ->
-        acc
+        {:halt, acc}
 
       {:data, chunk}, acc ->
         size = acc.size + byte_size(chunk)
 
         if size > @max_response_bytes do
-          %{acc | overflow: true}
+          {:halt, %{acc | overflow: true}}
         else
-          %{acc | body: [chunk | acc.body], size: size}
+          {:cont, %{acc | body: [chunk | acc.body], size: size}}
         end
     end
 
-    case Finch.stream(req, Cympho.Finch, init, fun, receive_timeout: timeout) do
+    case Finch.stream_while(req, Cympho.Finch, init, fun,
+           receive_timeout: timeout,
+           request_timeout: timeout
+         ) do
       {:ok, %{overflow: true}} ->
         {:error, :response_too_large}
 

@@ -18,7 +18,9 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   @default_timeout 300_000
   @max_timeout 3_600_000
   @health_timeout 5_000
-  @connect_timeout 30_000
+  @max_response_bytes 5 * 1024 * 1024
+
+  alias Cympho.Adapters.HttpAdapter
 
   @impl true
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
@@ -131,13 +133,12 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   defp maybe_put_context(payload, context), do: put_in(payload, ["task", "context"], context)
 
   defp make_openclaw_request(endpoint, api_key, payload, timeout) do
-    # Ensure inets application is started before using :httpc
-    case Application.ensure_all_started(:inets) do
-      {:ok, _} ->
+    case HttpAdapter.validate_public_url(endpoint) do
+      :ok ->
         do_make_openclaw_request(endpoint, api_key, payload, timeout)
 
       {:error, reason} ->
-        {:error, {:inets_start_failed, reason}}
+        {:error, {:unsafe_endpoint, reason}}
     end
   end
 
@@ -157,34 +158,88 @@ defmodule Cympho.Adapters.OpenClawAdapter do
       end
 
     body = Jason.encode!(payload)
-    http_options = httpc_http_options(timeout)
+    req = Finch.build(:post, url, headers, body)
 
-    case :httpc.request(
-           :post,
-           {url, headers, "application/json", body},
-           http_options,
-           body_format: :binary
-         ) do
-      {:ok, {{_, status_code, _}, _headers, response_body}} when status_code in 200..299 ->
+    case stream_request(req, timeout) do
+      {:ok, %{status: status, body: response_body}} when status in 200..299 ->
         parse_openclaw_response(response_body)
 
-      {:ok, {{_, status_code, _}, _headers, response_body}} ->
-        {:error, {:http_error, status_code, response_body}}
+      {:ok, %{status: status, body: response_body}} ->
+        {:error, {:http_error, status, response_body}}
 
       {:error, :timeout} ->
         {:error, :timeout}
+
+      {:error, :response_too_large} ->
+        {:error, :response_too_large}
 
       {:error, reason} ->
         {:error, {:request_failed, reason}}
     end
   end
 
-  # :httpc has no default timeout — empty options hang forever on a stuck peer.
-  defp httpc_http_options(timeout) when is_integer(timeout) and timeout > 0 do
-    [
-      {:timeout, timeout},
-      {:connect_timeout, min(timeout, @connect_timeout)}
-    ]
+  defp stream_request(req, timeout) do
+    # Finch does not follow redirects; 3xx responses are returned to the caller
+    # instead of allowing an upstream to redirect into a private network.
+    init = %{status: nil, headers: [], body: [], size: 0, overflow: false}
+
+    reducer = fn
+      {:status, status}, acc ->
+        {:cont, %{acc | status: status}}
+
+      {:headers, headers}, acc ->
+        {:cont, %{acc | headers: headers}}
+
+      {:trailers, _trailers}, acc ->
+        {:cont, acc}
+
+      {:data, _chunk}, %{overflow: true} = acc ->
+        {:halt, acc}
+
+      {:data, chunk}, acc ->
+        size = acc.size + byte_size(chunk)
+
+        if size > @max_response_bytes do
+          {:halt, %{acc | overflow: true}}
+        else
+          {:cont, %{acc | body: [chunk | acc.body], size: size}}
+        end
+    end
+
+    case Finch.stream_while(req, Cympho.Finch, init, reducer,
+           receive_timeout: timeout,
+           request_timeout: timeout
+         ) do
+      {:ok, %{overflow: true}} ->
+        {:error, :response_too_large}
+
+      {:ok, %{status: status, body: chunks}} ->
+        {:ok, %{status: status, body: chunks |> Enum.reverse() |> IO.iodata_to_binary()}}
+
+      {:error, %Finch.Error{reason: :timeout}} ->
+        {:error, :timeout}
+
+      {:error, :timeout} ->
+        {:error, :timeout}
+
+      {:error, %Finch.Error{reason: :timeout}, _acc} ->
+        {:error, :timeout}
+
+      {:error, :timeout, _acc} ->
+        {:error, :timeout}
+
+      {:error, %Finch.Error{} = error} ->
+        {:error, Exception.message(error)}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:error, %Finch.Error{} = error, _acc} ->
+        {:error, Exception.message(error)}
+
+      {:error, reason, _acc} ->
+        {:error, reason}
+    end
   end
 
   defp build_openclaw_url(endpoint) do
@@ -236,41 +291,42 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   end
 
   defp check_openclaw_health(endpoint) do
-    health_url = String.trim_trailing(endpoint, "/") <> "/openclaw/v1/health"
-
-    # Ensure inets is started before using :httpc
-    case Application.ensure_all_started(:inets) do
-      {:ok, _} ->
+    case HttpAdapter.validate_public_url(endpoint) do
+      :ok ->
+        health_url = String.trim_trailing(endpoint, "/") <> "/openclaw/v1/health"
         do_health_check_request(health_url)
 
-      {:error, _reason} ->
-        %{
-          status: :unhealthy,
-          message: "Failed to start inets application",
-          checked_at: DateTime.utc_now()
-        }
+      {:error, reason} ->
+        %{status: :unhealthy, message: reason, checked_at: DateTime.utc_now()}
     end
   end
 
   defp do_health_check_request(health_url) do
-    http_options = httpc_http_options(@health_timeout)
+    req = Finch.build(:get, health_url, [])
 
-    case :httpc.request(:get, {health_url, []}, http_options, []) do
-      {:ok, {{_, 200, _}, _, _}} ->
+    case stream_request(req, @health_timeout) do
+      {:ok, %{status: 200}} ->
         %{
           status: :healthy,
           message: "OpenClaw endpoint reachable",
           checked_at: DateTime.utc_now()
         }
 
-      {:ok, {{_, status, _}, _, _}} ->
+      {:ok, %{status: status}} ->
         %{
           status: :degraded,
           message: "OpenClaw endpoint returned #{status}",
           checked_at: DateTime.utc_now()
         }
 
-      {:error, _} ->
+      {:error, :response_too_large} ->
+        %{
+          status: :unhealthy,
+          message: "OpenClaw endpoint response too large",
+          checked_at: DateTime.utc_now()
+        }
+
+      {:error, _reason} ->
         %{
           status: :unhealthy,
           message: "OpenClaw endpoint unreachable",
@@ -389,8 +445,11 @@ defmodule Cympho.Adapters.OpenClawAdapter do
 
   defp validate_endpoint(endpoint) when is_binary(endpoint) do
     case URI.parse(endpoint) do
-      %URI{scheme: scheme} when scheme in ["http", "https"] -> :ok
-      _ -> {:error, "endpoint must be a valid HTTP/HTTPS URL"}
+      %URI{scheme: scheme} when scheme in ["http", "https"] ->
+        HttpAdapter.validate_public_url(endpoint)
+
+      _ ->
+        {:error, "endpoint must be a valid HTTP/HTTPS URL"}
     end
   end
 

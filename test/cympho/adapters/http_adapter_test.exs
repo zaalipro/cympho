@@ -197,6 +197,29 @@ defmodule Cympho.Adapters.HttpAdapterTest do
       assert result.status == :unhealthy
       assert result.message == "url host is not allowed"
     end
+
+    test "halts an oversized health response before accumulating it" do
+      test_pid = self()
+
+      with_mock Finch, [:passthrough],
+        build: fn _, _, _headers -> :health_request end,
+        stream_while: fn :health_request, Cympho.Finch, initial, reducer, _options ->
+          {:cont, acc} = reducer.({:status, 200}, initial)
+          result = reducer.({:data, String.duplicate("x", 5 * 1024 * 1024 + 1)}, acc)
+          send(test_pid, {:health_overflow, result})
+
+          case result do
+            {:halt, halted_acc} -> {:ok, halted_acc}
+            {:cont, continued_acc} -> {:ok, continued_acc}
+          end
+        end do
+        result = HttpAdapter.health_check(%{"url" => "https://example.com"})
+
+        assert_receive {:health_overflow, {:halt, %{overflow: true}}}, 1_000
+        assert result.status == :unhealthy
+        assert result.message == "Endpoint response too large"
+      end
+    end
   end
 
   describe "type/0" do
@@ -212,6 +235,102 @@ defmodule Cympho.Adapters.HttpAdapterTest do
   end
 
   describe "run/4" do
+    test "forwards the configured deadline as Finch request_timeout" do
+      test_pid = self()
+
+      issue = %{id: "issue-timeout", title: "Timeout", description: "deadline"}
+
+      with_mock Finch, [:passthrough],
+        stream_while: fn %Finch.Request{}, Cympho.Finch, initial, reducer, options ->
+          send(test_pid, {:finch_options, options})
+          {:cont, acc} = reducer.({:status, 200}, initial)
+          {:ok, acc}
+        end do
+        session_id =
+          HttpAdapter.run(issue, "agent-1", self(),
+            config: %{"url" => "https://example.com/webhook", "timeout" => 12_345}
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+        assert_receive {:finch_options, options}, 1_000
+        assert options[:request_timeout] == 12_345
+        assert options[:receive_timeout] == 12_345
+      end
+    end
+
+    test "halts Finch streaming when the response exceeds the safety cap" do
+      test_pid = self()
+      issue = %{id: "issue-overflow", title: "Overflow", description: "response"}
+      oversized_chunk = String.duplicate("x", 5 * 1024 * 1024 + 1)
+
+      with_mock Finch, [:passthrough],
+        stream_while: fn %Finch.Request{}, Cympho.Finch, initial, reducer, _options ->
+          {:cont, acc} = reducer.({:status, 200}, initial)
+          result = reducer.({:data, oversized_chunk}, acc)
+          send(test_pid, {:overflow_reducer_result, result})
+
+          case result do
+            {:halt, halted_acc} -> {:ok, halted_acc}
+            {:cont, continued_acc} -> {:ok, continued_acc}
+          end
+        end do
+        session_id =
+          HttpAdapter.run(issue, "agent-1", self(),
+            config: %{"url" => "https://example.com/webhook"}
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+        assert_receive {:overflow_reducer_result, {:halt, %{overflow: true}}}, 1_000
+
+        assert_receive {:turn_ended_with_error, ^session_id, {:http_error, :response_too_large}},
+                       1_000
+      end
+    end
+
+    test "normalizes Finch three-tuple transport errors" do
+      with_mock Finch, [:passthrough],
+        build: fn _, _, _, _ -> :request end,
+        stream_while: fn :request, Cympho.Finch, init, _reducer, _options ->
+          {:error, %Mint.TransportError{reason: :timeout}, init}
+        end do
+        session_id =
+          HttpAdapter.run(
+            %{id: "issue-timeout-error", title: "Timeout", description: "transport"},
+            "agent-1",
+            self(),
+            config: %{"url" => "https://example.com/webhook"}
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:http_error, {:request_error, %Mint.TransportError{reason: :timeout}}}},
+                       1_000
+      end
+    end
+
+    test "ignores response trailers while preserving the response" do
+      with_mock Finch, [:passthrough],
+        build: fn _, _, _, _ -> :request end,
+        stream_while: fn :request, Cympho.Finch, initial, reducer, _options ->
+          {:cont, acc} = reducer.({:status, 200}, initial)
+          {:cont, acc} = reducer.({:trailers, [{"x-checksum", "ok"}]}, acc)
+          {:cont, acc} = reducer.({:data, "ok"}, acc)
+          {:ok, acc}
+        end do
+        session_id =
+          HttpAdapter.run(
+            %{id: "issue-trailers", title: "Trailers", description: "response"},
+            "agent-1",
+            self(),
+            config: %{"url" => "https://example.com/webhook"}
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+        assert_receive {:turn_completed, ^session_id, %{status: 200, body: "ok"}}, 1_000
+      end
+    end
+
     test "returns session reference immediately" do
       issue = %{
         id: "test-issue-1",
@@ -253,8 +372,9 @@ defmodule Cympho.Adapters.HttpAdapterTest do
 
       with_mock Finch,
         build: fn _, _, _, _ -> :request end,
-        stream: fn :request, Cympho.Finch, init, _fun, receive_timeout: timeout ->
-          send(test_pid, {:receive_timeout, timeout})
+        stream_while: fn :request, Cympho.Finch, init, _fun, options ->
+          timeout = Keyword.fetch!(options, :request_timeout)
+          send(test_pid, {:request_timeout, timeout})
           {:ok, %{init | status: 200, body: ["{}"]}}
         end do
         session_id =
@@ -263,7 +383,7 @@ defmodule Cympho.Adapters.HttpAdapterTest do
           )
 
         assert_receive {:session_started, ^session_id}, 500
-        assert_receive {:receive_timeout, 900_000}, 1_000
+        assert_receive {:request_timeout, 900_000}, 1_000
         assert_receive {:turn_completed, ^session_id, %{status: 200, body: "{}"}}, 1_000
       end
     end
@@ -277,7 +397,9 @@ defmodule Cympho.Adapters.HttpAdapterTest do
 
       with_mock Finch,
         build: fn _, _, _, _ -> flunk("Finch.build must not run for a private host") end,
-        stream: fn _, _, _, _, _ -> flunk("Finch.stream must not run for a private host") end do
+        stream_while: fn _, _, _, _, _ ->
+          flunk("Finch.stream_while must not run for a private host")
+        end do
         session_id =
           HttpAdapter.run(issue, "agent-1", self(),
             config: %{"url" => "http://169.254.169.254/latest/meta-data"}
@@ -302,7 +424,7 @@ defmodule Cympho.Adapters.HttpAdapterTest do
 
       with_mock Finch,
         build: fn _, _, _, _ -> :request end,
-        stream: fn :request, Cympho.Finch, _init, _fun, receive_timeout: _timeout ->
+        stream_while: fn :request, Cympho.Finch, _init, _fun, _options ->
           send(test_pid, {:http_request_started, self()})
 
           receive do

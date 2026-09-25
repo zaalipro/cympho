@@ -5,6 +5,7 @@ defmodule Cympho.Agrenting.Client do
 
   @default_base_url "https://www.agrenting.com"
   @default_timeout 30_000
+  @default_max_response_bytes 4 * 1024 * 1024
   @mcp_protocol_version "2024-11-05"
 
   def default_base_url, do: @default_base_url
@@ -49,17 +50,25 @@ defmodule Cympho.Agrenting.Client do
          {:ok, headers} <- headers(config, Keyword.get(opts, :auth?, true)),
          {:ok, encoded} <- encode_body(body) do
       req = Finch.build(method, url, headers, encoded)
-      timeout = config_value(config, "timeout") || @default_timeout
+      timeout_opts = timeout_options(config)
+      max_response_bytes = max_response_bytes(config)
 
-      case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
+      case capped_request(req, config, timeout_opts) do
         {:ok, %Finch.Response{status: status, body: response_body}} when status in 200..299 ->
-          decode_success(response_body)
+          with {:ok, response_body} <- ensure_response_size(response_body, max_response_bytes) do
+            decode_success(response_body)
+          end
 
         {:ok, %Finch.Response{status: status, body: response_body}} ->
-          {:error, {:http_error, status, error_message(response_body)}}
+          with {:ok, response_body} <- ensure_response_size(response_body, max_response_bytes) do
+            {:error, {:http_error, status, error_message(response_body)}}
+          end
 
         {:error, %Finch.Error{} = error} ->
           {:error, {:finch_error, Exception.message(error)}}
+
+        {:error, {:agrenting_response_too_large, _} = error} ->
+          {:error, error}
 
         {:error, reason} ->
           {:error, {:request_error, reason}}
@@ -182,21 +191,43 @@ defmodule Cympho.Agrenting.Client do
          {:ok, headers} <- headers(config, true) do
       headers = [{"accept", "text/event-stream"} | reject_header(headers, "accept")]
       req = Finch.build(:get, url, headers)
-      init = %{buffer: ""}
+      init = %{buffer: "", max_response_bytes: max_response_bytes(config), error: nil}
 
       fun = fn
         {:data, chunk}, acc ->
-          consume_sse_chunk(acc, chunk, parent, ref)
+          case consume_sse_chunk(acc, chunk, parent, ref) do
+            {:ok, next_acc} ->
+              {:cont, next_acc}
+
+            {:error, reason} ->
+              send(parent, {:agrenting_mcp_stream_error, ref, reason})
+              {:halt, %{acc | error: reason}}
+          end
 
         _event, acc ->
-          acc
+          {:cont, acc}
       end
 
-      Finch.stream(req, Cympho.Finch, init, fun, receive_timeout: timeout)
+      case Finch.stream_while(req, Cympho.Finch, init, fun, timeout_options(config, timeout)) do
+        {:error, reason, _acc} = result ->
+          send(parent, {:agrenting_mcp_stream_error, ref, reason})
+          result
+
+        result ->
+          result
+      end
     end
   end
 
   defp consume_sse_chunk(acc, chunk, parent, ref) do
+    if byte_size(acc.buffer) + byte_size(chunk) > acc.max_response_bytes do
+      {:error, {:agrenting_response_too_large, acc.max_response_bytes}}
+    else
+      consume_sse_chunk_within_limit(acc, chunk, parent, ref)
+    end
+  end
+
+  defp consume_sse_chunk_within_limit(acc, chunk, parent, ref) do
     buffer = String.replace(acc.buffer <> chunk, "\r\n", "\n")
     parts = String.split(buffer, "\n\n")
     {frames, [rest]} = Enum.split(parts, -1)
@@ -220,7 +251,7 @@ defmodule Cympho.Agrenting.Client do
       end
     end)
 
-    %{acc | buffer: rest}
+    {:ok, %{acc | buffer: rest}}
   end
 
   defp parse_sse_frame(frame) do
@@ -246,6 +277,7 @@ defmodule Cympho.Agrenting.Client do
   defp receive_mcp_endpoint(ref, timeout) do
     receive do
       {:agrenting_mcp_endpoint, ^ref, endpoint} -> {:ok, endpoint}
+      {:agrenting_mcp_stream_error, ^ref, reason} -> {:error, reason}
     after
       timeout -> {:error, :agrenting_mcp_endpoint_timeout}
     end
@@ -254,6 +286,7 @@ defmodule Cympho.Agrenting.Client do
   defp receive_mcp_response(ref, id, timeout) do
     receive do
       {:agrenting_mcp_response, ^ref, ^id, response} -> {:ok, response}
+      {:agrenting_mcp_stream_error, ^ref, reason} -> {:error, reason}
     after
       timeout -> {:error, {:agrenting_mcp_response_timeout, id}}
     end
@@ -266,7 +299,7 @@ defmodule Cympho.Agrenting.Client do
       headers = [{"content-type", "application/json"} | reject_header(headers, "content-type")]
       req = Finch.build(:post, url, headers, body)
 
-      case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
+      case capped_request(req, config, timeout_options(config, timeout)) do
         {:ok, %Finch.Response{status: status}} when status in 200..299 ->
           :ok
 
@@ -275,6 +308,9 @@ defmodule Cympho.Agrenting.Client do
 
         {:error, %Finch.Error{} = error} ->
           {:error, {:finch_error, Exception.message(error)}}
+
+        {:error, {:agrenting_response_too_large, _} = error} ->
+          {:error, error}
 
         {:error, reason} ->
           {:error, {:request_error, reason}}
@@ -380,4 +416,62 @@ defmodule Cympho.Agrenting.Client do
 
   defp put_if_present(map, _key, value) when value in [nil, ""], do: map
   defp put_if_present(map, key, value), do: Map.put(map, key, value)
+
+  defp timeout_options(config, fallback_timeout \\ nil) do
+    receive_timeout =
+      config_value(config, "receive_timeout") ||
+        config_value(config, "timeout") || fallback_timeout || @default_timeout
+
+    request_timeout =
+      config_value(config, "request_timeout") ||
+        config_value(config, "timeout") || fallback_timeout || @default_timeout
+
+    [receive_timeout: receive_timeout, request_timeout: request_timeout]
+  end
+
+  defp capped_request(req, config, timeout_opts) do
+    max_bytes = max_response_bytes(config)
+    initial = %{status: nil, body: [], size: 0}
+
+    callback = fn
+      {:status, status}, acc ->
+        {:cont, %{acc | status: status}}
+
+      {:data, chunk}, acc when is_binary(chunk) ->
+        if acc.size + byte_size(chunk) > max_bytes do
+          {:halt, {:overflow, max_bytes}}
+        else
+          {:cont, %{acc | body: [chunk | acc.body], size: acc.size + byte_size(chunk)}}
+        end
+
+      _event, acc ->
+        {:cont, acc}
+    end
+
+    case Finch.stream_while(req, Cympho.Finch, initial, callback, timeout_opts) do
+      {:ok, {:overflow, max}} ->
+        {:error, {:agrenting_response_too_large, max}}
+
+      {:ok, %{status: status, body: body}} ->
+        {:ok, %Finch.Response{status: status, body: IO.iodata_to_binary(Enum.reverse(body))}}
+
+      {:error, error, _acc} ->
+        {:error, error}
+    end
+  end
+
+  defp max_response_bytes(config) do
+    case config_value(config, "max_response_bytes") do
+      value when is_integer(value) and value > 0 -> min(value, @default_max_response_bytes)
+      _ -> @default_max_response_bytes
+    end
+  end
+
+  defp ensure_response_size(body, max_bytes) when is_binary(body) do
+    if byte_size(body) <= max_bytes,
+      do: {:ok, body},
+      else: {:error, {:agrenting_response_too_large, max_bytes}}
+  end
+
+  defp ensure_response_size(body, _max_bytes), do: {:ok, body}
 end

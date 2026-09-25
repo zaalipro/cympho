@@ -320,6 +320,39 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert updated.description == "Updated from the unified project page."
     end
 
+    test "ignores a forged company id when saving project settings", %{conn: conn} do
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Foreign Project Save Company",
+          slug: "foreign-project-save-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Tenant Safe Project",
+          prefix: "SAFE",
+          company_id: company.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/projects/#{project.id}")
+
+      render_submit(view, "save", %{
+        "project" => %{
+          "name" => "Tenant Safe Project Updated",
+          "prefix" => "SAFE",
+          "company_id" => other_company.id
+        }
+      })
+
+      updated = Repo.reload!(project)
+      assert updated.name == "Tenant Safe Project Updated"
+      assert updated.company_id == company.id
+      assert Projects.list_projects_by_company(other_company.id) == []
+    end
+
     test "adds project environment variables from the show page", %{conn: conn} do
       {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
 

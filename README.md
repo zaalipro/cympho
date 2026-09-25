@@ -506,7 +506,7 @@ Background execution should be enabled deliberately in production, with adapter 
 
 ## Documentation
 
-- [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md): repository guidance for AI coding agents
+- [`AGENTS.md`](AGENTS.md): repository guidance for AI coding agents
 - [`docs/QUICKSTART.md`](docs/QUICKSTART.md): safe local bootstrap and first controlled autonomy smoke
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md): production configuration, runtime controls, backup, and incident response
 - [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md): opt-in OTLP tracing, correlation fields, and redaction contract

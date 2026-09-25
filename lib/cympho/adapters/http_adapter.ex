@@ -161,25 +161,31 @@ defmodule Cympho.Adapters.HttpAdapter do
 
     fun = fn
       {:status, s}, acc ->
-        %{acc | status: s}
+        {:cont, %{acc | status: s}}
 
       {:headers, hs}, acc ->
-        %{acc | headers: hs}
+        {:cont, %{acc | headers: hs}}
+
+      {:trailers, _trailers}, acc ->
+        {:cont, acc}
 
       {:data, _chunk}, %{overflow: true} = acc ->
-        acc
+        {:halt, acc}
 
       {:data, chunk}, acc ->
         new_size = acc.size + byte_size(chunk)
 
         if new_size > @max_response_bytes do
-          %{acc | overflow: true}
+          {:halt, %{acc | overflow: true}}
         else
-          %{acc | body: [chunk | acc.body], size: new_size}
+          {:cont, %{acc | body: [chunk | acc.body], size: new_size}}
         end
     end
 
-    case Finch.stream(req, Cympho.Finch, init, fun, receive_timeout: timeout) do
+    case Finch.stream_while(req, Cympho.Finch, init, fun,
+           receive_timeout: timeout,
+           request_timeout: timeout
+         ) do
       {:ok, %{overflow: true}} ->
         {:error, :response_too_large}
 
@@ -191,6 +197,12 @@ defmodule Cympho.Adapters.HttpAdapter do
         {:error, {:finch_error, Exception.message(error)}}
 
       {:error, reason} ->
+        {:error, {:request_error, reason}}
+
+      {:error, %Finch.Error{} = error, _acc} ->
+        {:error, {:finch_error, Exception.message(error)}}
+
+      {:error, reason, _acc} ->
         {:error, {:request_error, reason}}
     end
   end
@@ -265,34 +277,34 @@ defmodule Cympho.Adapters.HttpAdapter do
     # Try HEAD first, fall back to GET
     req = Finch.build(:head, url, headers)
 
-    case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
-      {:ok, %Finch.Response{status: status}} when status in 200..299 ->
+    case stream_to_acc(req, timeout) do
+      {:ok, %{status: status}} when status in 200..299 ->
         %{
           status: :healthy,
           message: "Endpoint accessible (HEAD #{status})",
           checked_at: DateTime.utc_now()
         }
 
-      {:ok, %Finch.Response{status: status}} when status in 300..399 ->
+      {:ok, %{status: status}} when status in 300..399 ->
         # Redirect - try GET
         do_get_health_check(url, headers, timeout)
 
-      {:ok, %Finch.Response{status: status}} ->
+      {:ok, %{status: status}} ->
         %{
           status: :unhealthy,
           message: "Endpoint returned error status (HEAD #{status})",
           checked_at: DateTime.utc_now()
         }
 
-      {:error, %Finch.Error{}} ->
-        do_get_health_check(url, headers, timeout)
-
-      {:error, reason} ->
+      {:error, :response_too_large} ->
         %{
           status: :unhealthy,
-          message: "Health check failed: #{inspect(reason)}",
+          message: "Endpoint response too large",
           checked_at: DateTime.utc_now()
         }
+
+      {:error, _reason} ->
+        do_get_health_check(url, headers, timeout)
     end
   end
 
@@ -312,29 +324,36 @@ defmodule Cympho.Adapters.HttpAdapter do
   defp do_public_get_health_check(url, headers, timeout) do
     req = Finch.build(:get, url, headers)
 
-    case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
-      {:ok, %Finch.Response{status: status}} when status in 200..299 ->
+    case stream_to_acc(req, timeout) do
+      {:ok, %{status: status}} when status in 200..299 ->
         %{
           status: :healthy,
           message: "Endpoint accessible (GET #{status})",
           checked_at: DateTime.utc_now()
         }
 
-      {:ok, %Finch.Response{status: status}} ->
+      {:ok, %{status: status}} ->
         %{
           status: :unhealthy,
           message: "Endpoint returned error status (GET #{status})",
           checked_at: DateTime.utc_now()
         }
 
-      {:error, %Finch.Error{} = error} ->
+      {:error, :response_too_large} ->
         %{
           status: :unhealthy,
-          message: "Request failed: #{Exception.message(error)}",
+          message: "Endpoint response too large",
           checked_at: DateTime.utc_now()
         }
 
-      {:error, reason} ->
+      {:error, {:finch_error, reason}} ->
+        %{
+          status: :unhealthy,
+          message: "Request failed: #{inspect(reason)}",
+          checked_at: DateTime.utc_now()
+        }
+
+      {:error, {:request_error, reason}} ->
         %{
           status: :unhealthy,
           message: "Request failed: #{inspect(reason)}",
