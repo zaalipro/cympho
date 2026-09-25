@@ -80,15 +80,22 @@ defmodule Cympho.Adapters.CursorAdapterTest do
     )
 
     File.chmod!(agent_path, 0o755)
-    on_exit(fn -> File.rm_rf!(root) end)
 
     session_id =
       CursorAdapter.run(@issue, "agent-1", self(),
         config: %{command: agent_path, timeout: 30_000}
       )
 
+    on_exit(fn ->
+      try do
+        assert :ok = Cympho.AdapterSessions.cancel_and_wait(session_id, :test_cleanup)
+      after
+        File.rm_rf!(root)
+      end
+    end)
+
     assert Cympho.AdapterSessions.registered?(session_id)
-    assert_receive {:session_started, ^session_id}
+    assert_receive {:session_started, ^session_id}, 3_000
     assert_receive {:turn_progress, ^session_id, _progress}, 2_000
     child_pid = pid_path |> File.read!() |> String.to_integer()
     assert process_alive?(child_pid)

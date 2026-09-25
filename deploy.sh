@@ -400,6 +400,7 @@ run_remote_script_nonfatal() {
 validate_managed_paths() {
   run_remote_script <<EOF
 validate_managed_directory_path() {
+  local path label nearest parent canonical
   path="\$1"; label="\$2"
   if _sudo test -L "\$path" || { _sudo test -e "\$path" && ! _sudo test -d "\$path"; }; then
     echo "\$label is not a canonical directory: \$path" >&2
@@ -427,6 +428,7 @@ validate_managed_directory_path() {
 }
 
 validate_root_owned_ancestor_chain() {
+  local path label nearest parent component owner unsafe
   path="\$1"; label="\$2"
   nearest="\$path"
   while ! _sudo test -e "\$nearest"; do
@@ -450,6 +452,7 @@ validate_root_owned_ancestor_chain() {
 }
 
 validate_managed_file_path() {
+  local path label parent
   path="\$1"; label="\$2"; parent=\$(dirname -- "\$path")
   validate_managed_directory_path "\$parent" "\$label parent"
   if _sudo test -L "\$path" || { _sudo test -e "\$path" && ! _sudo test -f "\$path"; }; then

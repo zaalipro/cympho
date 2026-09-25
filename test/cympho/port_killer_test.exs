@@ -126,7 +126,9 @@ defmodule Cympho.PortKillerTest do
 
     assert process_alive?(grandchild_pid)
 
-    assert :ok = PortKiller.close(port)
+    # A bounded attempt may retain the captured tree for another attempt;
+    # definitive cleanup, not a single-attempt deadline, is the invariant here.
+    assert :ok = PortKiller.close_and_await(port)
     refute process_alive?(parent_pid)
     refute process_alive?(grandchild_pid)
   end

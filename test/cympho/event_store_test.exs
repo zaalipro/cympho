@@ -2,7 +2,8 @@ defmodule Cympho.EventStoreTest do
   use ExUnit.Case, async: false
 
   setup do
-    Cympho.EventStore.purge_old(0)
+    # purge_old/1 only visits 200 topics per call, so it cannot clear a busy suite's store.
+    Cympho.EventStore.purge_topics_with_prefix("")
     :ok
   end
 
