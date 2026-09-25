@@ -204,15 +204,15 @@ defmodule Cympho.ReleaseOperatorIntegrationTest do
     assert @deploy_script =~
              ~S"^/opt/cympho/releases/([0-9]{14}|[0-9]{14}-[0-9a-f]{12}-[0-9a-f]{8})$"
 
-    assert @deploy_script =~ ~S(_sudo test ! -L \"\$target\")
-    assert @deploy_script =~ ~S(_sudo test -d \"\$target\")
-    assert @deploy_script =~ ~S(_sudo stat -c %u -- \"\$target\")
-    assert @deploy_script =~ ~S(_sudo test \"\$owner\" = 0)
+    assert @deploy_script =~ ~S(_sudo test ! -L "\$target")
+    assert @deploy_script =~ ~S(_sudo test -d "\$target")
+    assert @deploy_script =~ ~S(_sudo stat -c %u -- "\$target")
+    assert @deploy_script =~ ~S(_sudo test "\$owner" = 0)
     refute @deploy_script =~ "app_uid="
-    assert @deploy_script =~ ~S(_sudo find \"\$target\" -type l -print -quit)
-    assert @deploy_script =~ ~S|_sudo find \"\$target\" \\( ! -user root -o -perm /022 \\)|
-    assert @deploy_script =~ ~S|_sudo find \"\$target\" ! -group ${APP_USER} -print -quit|
-    assert @deploy_script =~ ~S|case \"\$mode\" in|
+    assert @deploy_script =~ ~S(_sudo find "\$target" -type l -print -quit)
+    assert @deploy_script =~ ~S|_sudo find "\$target" \\( ! -user root -o -perm /022 \\)|
+    assert @deploy_script =~ ~S|_sudo find "\$target" ! -group ${APP_USER} -print -quit|
+    assert @deploy_script =~ ~S|case "\$mode" in|
     assert @deploy_script =~ "440|550"
 
     assert @deploy_script =~

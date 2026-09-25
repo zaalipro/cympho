@@ -1355,33 +1355,33 @@ if [[ -n "${PREVIOUS_RELEASE}" ]]; then
   # require an explicit operator migration rather than automatic adoption.
   if ! run_remote_script <<EOF
 target='${PREVIOUS_RELEASE}'
-_sudo test \"\$(_sudo readlink -- '${CURRENT_LINK}')\" = \"\$target\"
-_sudo test ! -L \"\$target\"
-_sudo test -d \"\$target\"
-_sudo test \"\$(_sudo readlink -f -- \"\$target\")\" = \"\$target\"
-_sudo test -z \"\$(_sudo find \"\$target\" -type l -print -quit)\"
-_sudo test -z \"\$(_sudo find \"\$target\" \\( ! -user root -o -perm /022 \\) -print -quit)\"
-owner=\$(_sudo stat -c %u -- \"\$target\")
-_sudo test \"\$owner\" = 0
-_sudo test -z \"\$(_sudo find \"\$target\" ! -user root -print -quit)\"
-_sudo test -z \"\$(_sudo find \"\$target\" ! -group ${APP_USER} -print -quit)\"
+_sudo test "\$(_sudo readlink -- '${CURRENT_LINK}')" = "\$target"
+_sudo test ! -L "\$target"
+_sudo test -d "\$target"
+_sudo test "\$(_sudo readlink -f -- "\$target")" = "\$target"
+_sudo test -z "\$(_sudo find "\$target" -type l -print -quit)"
+_sudo test -z "\$(_sudo find "\$target" \\( ! -user root -o -perm /022 \\) -print -quit)"
+owner=\$(_sudo stat -c %u -- "\$target")
+_sudo test "\$owner" = 0
+_sudo test -z "\$(_sudo find "\$target" ! -user root -print -quit)"
+_sudo test -z "\$(_sudo find "\$target" ! -group ${APP_USER} -print -quit)"
 while IFS= read -r -d '' entry; do
-  mode=\$(_sudo stat -c %a -- \"\$entry\")
-  if _sudo test -d \"\$entry\"; then
-    [ \"\$mode\" = 550 ] || {
-      echo \"Release directory is not sealed at mode 0550: \$entry\" >&2
+  mode=\$(_sudo stat -c %a -- "\$entry")
+  if _sudo test -d "\$entry"; then
+    [ "\$mode" = 550 ] || {
+      echo "Release directory is not sealed at mode 0550: \$entry" >&2
       exit 1
     }
-  elif _sudo test -f \"\$entry\"; then
-    case \"\$mode\" in
+  elif _sudo test -f "\$entry"; then
+    case "\$mode" in
       440|550) ;;
-      *) echo \"Release file is not sealed at mode 0440 or 0550: \$entry\" >&2; exit 1 ;;
+      *) echo "Release file is not sealed at mode 0440 or 0550: \$entry" >&2; exit 1 ;;
     esac
   else
-    echo \"Release contains an unsupported entry type: \$entry\" >&2
+    echo "Release contains an unsupported entry type: \$entry" >&2
     exit 1
   fi
-done < <(_sudo find \"\$target\" -print0)
+done < <(_sudo find "\$target" -print0)
 EOF
   then
     echo "Current release target failed path or ownership validation; refusing deployment." >&2

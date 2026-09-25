@@ -60,7 +60,7 @@ require("DEPLOY_SESSION_LOCK" not in fence,
 prior_preflight = deploy[deploy.index("# --- Preflight rollback attestation"):
                          deploy.index("# A current release is the only rollback target")]
 require("! -group ${APP_USER}" in prior_preflight and
-        'case \\"\\$mode\\" in' in prior_preflight and
+        'case "\\$mode" in' in prior_preflight and
         "440|550" in prior_preflight,
         "previous releases must be sealed root:app with only 0440/0550 entries")
 
