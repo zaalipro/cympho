@@ -53,7 +53,7 @@ Acceptance gates for any native loop: a deterministic edit-test fixture; at leas
 - `HttpAdapter.validate_public_url/1` blocks literal private/metadata IPs but does not resolve DNS answers; DNS rebinding remains an open SSRF risk requiring request-time, fail-closed resolution and redirect policy.
 - OpenAI Chat still promotes `reasoning_content`/`reasoning`/`thinking` to final output when content is blank. This may expose private reasoning or action-like text; compatibility behavior needs an explicit provider-capability decision and regression test before changing.
 - Local Port adapters have bounded BEAM accumulation but no universal OS-level RSS/CPU containment; a runaway descendant can retain a slot until cleanup/recovery.
-- The full suite remains non-green: this tranche's fresh run had **4,672 tests, 7 failures**. The seven identities are the README `CLAUDE.md` link plus the six pre-existing Orchestrator completion/action-contract failures recorded in the 2026-09-23 baseline; no new failure identity was attributed to this tranche. The focused results below must not be presented as whole-suite green.
+- The initial full run had **4,672 tests, 7 failures**: a stale README `CLAUDE.md` link and six Orchestrator completion/action-contract tests. On the user's request to fix these before release, the existing concurrent fixes were reviewed and included. The mock module had hidden real `HeartbeatEngine` deferred-effect functions; passthrough preserves those functions without weakening assertions. The final full run is green below.
 
 ## Verification recorded
 
@@ -62,7 +62,8 @@ Acceptance gates for any native loop: a deterministic edit-test fixture; at leas
 - GREEN after reducer compatibility fixes: HTTP/OpenAI/OpenClaw adapter run: **64 tests, 0 failures**.
 - Agrenting focused client and adapter runs: **5 and 9 tests, 0 failures** (serialized disposable test DB runner).
 - `mix compile --warnings-as-errors` completed successfully; changed files pass `mix format --check-formatted` and `git diff --check`.
-- Full serialized suite: **4,672 tests, 7 failures**, same seven baseline identities; log `acceptance2-tests-1790337715416214000.log`.
-- No provider credentials, paid model calls, deployment, browser session, cookie, or local-storage changes were used.
-
-After that verification completed, unrelated concurrent edits appeared in `README.md` and `test/cympho/orchestrator_test.exs`; they are intentionally not part of this tranche and were not re-verified here.
+- Initial full serialized suite: **4,672 tests, 7 failures**; log `acceptance2-tests-1790337715416214000.log`.
+- After reviewing the README and Orchestrator test-double fixes: documentation/Orchestrator tests **58/58 passing**; log `integration-tests-1790341045898491000.log`.
+- Final full serialized suite: **4,672 tests, 0 failures**, 224.0 seconds, exit 0; log `acceptance2-tests-1790341143224316000.log`.
+- These results cover commit `ec68b3b`; the subsequent report correction changes documentation only. Deployment is separately authorized by the user and is not claimed by this test report.
+- No paid model calls or browser session, cookie, or local-storage changes were used for verification.
