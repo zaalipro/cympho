@@ -63,7 +63,7 @@ defmodule CymphoWeb.Events do
       {company_id, project_id}
       when is_binary(company_id) and company_id != "" and is_binary(project_id) and
              project_id != "" ->
-        topic = "company:#{company_id}:project:#{project_id}:comments"
+        topic = "company:#{company_id}:project:#{project_id}"
         payload = build_comment_payload(comment, event_type)
         Cympho.RateLimiting.dedup_broadcast(topic, "comment", payload)
 

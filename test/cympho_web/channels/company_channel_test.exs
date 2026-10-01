@@ -167,4 +167,60 @@ defmodule CymphoWeb.CompanyChannelTest do
       assert_push "replay_expired", %{reason: "replay_window_expired"}, 500
     end
   end
+
+  describe "heartbeat safety (VAL-WEB-002)" do
+    test "client heartbeat push acknowledges sender but does not rebroadcast forged payload to peers" do
+      company_id = Ecto.UUID.generate()
+      {:ok, socket1} = connect_jwt(company_id, Ecto.UUID.generate())
+      {:ok, socket2} = connect_jwt(company_id, Ecto.UUID.generate())
+
+      {:ok, _, socket1} =
+        subscribe_and_join(socket1, CymphoWeb.CompanyChannel, "company:#{company_id}")
+
+      {:ok, _, _socket2} =
+        subscribe_and_join(socket2, CymphoWeb.CompanyChannel, "company:#{company_id}")
+
+      forged_payload = %{"forged" => true, "status" => "fake_heartbeat", "agent_id" => "attacker"}
+
+      ref = push(socket1, "heartbeat", forged_payload)
+      assert_reply ref, :ok, _
+
+      # Socket 2 must NOT receive the forged payload
+      refute_push "heartbeat", _, 100
+      refute_broadcast "heartbeat", _
+    end
+
+    test "server-originated heartbeats via Events are preserved" do
+      company_id = Ecto.UUID.generate()
+      agent_id = Ecto.UUID.generate()
+      {:ok, _socket} = connect_jwt(company_id, agent_id)
+
+      issue =
+        Cympho.Repo.insert!(%Cympho.Issues.Issue{
+          company_id: company_id,
+          title: "Heartbeat issue",
+          status: :in_progress
+        })
+
+      topic = "company:#{company_id}:issues:#{issue.id}:heartbeats"
+      Phoenix.PubSub.subscribe(Cympho.PubSub, topic)
+
+      assert :ok =
+               CymphoWeb.Events.broadcast_agent_heartbeat(
+                 issue,
+                 agent_id,
+                 %{healthy: true, step: "working"}
+               )
+
+      assert_receive %Phoenix.Socket.Broadcast{
+        topic: ^topic,
+        event: "heartbeat",
+        payload: %{
+          event_type: :agent_heartbeat,
+          agent_id: ^agent_id,
+          data: %{healthy: true, step: "working"}
+        }
+      }
+    end
+  end
 end

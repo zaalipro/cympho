@@ -90,10 +90,9 @@ defmodule CymphoWeb.CompanyChannel do
   # Phoenix serializes handle_in calls per socket process, so
   # check_heartbeat_throttle/1 does not need its own concurrency guard.
   @impl true
-  def handle_in("heartbeat", payload, socket) do
+  def handle_in("heartbeat", _payload, socket) do
     with {:ok, socket} <- RateLimiting.check_heartbeat_throttle(socket),
          {:ok, socket} <- RateLimiting.check_message_rate(socket) do
-      broadcast(socket, "heartbeat", payload)
       {:reply, :ok, socket}
     else
       {:error, :rate_limited} ->

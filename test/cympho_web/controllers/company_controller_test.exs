@@ -399,6 +399,61 @@ defmodule CymphoWeb.CompanyControllerTest do
     assert updated.issue_counter == company.issue_counter
   end
 
+  describe "company deletion authorization matrix (VAL-WEB-003)" do
+    test "owner can delete company through authorized API route", %{conn: conn} do
+      {conn, _user, company} = register_and_log_in_user(conn, %{role: "owner"})
+
+      response = delete(conn, ~p"/api/companies/#{company.id}")
+      assert response(response, 204)
+      assert Cympho.Repo.get(Companies.Company, company.id) == nil
+    end
+
+    test "admin cannot delete company and receives 403", %{conn: conn} do
+      {conn, _user, company} = register_and_log_in_user(conn, %{role: "admin"})
+
+      response = delete(conn, ~p"/api/companies/#{company.id}")
+      assert %{"errors" => [%{"detail" => "Forbidden"}]} = json_response(response, 403)
+      assert Cympho.Repo.get(Companies.Company, company.id) != nil
+    end
+
+    test "regular member cannot delete company and receives 403", %{conn: conn} do
+      {conn, _user, company} = register_and_log_in_user(conn, %{role: "member"})
+
+      response = delete(conn, ~p"/api/companies/#{company.id}")
+      assert %{"errors" => [%{"detail" => "Forbidden"}]} = json_response(response, 403)
+      assert Cympho.Repo.get(Companies.Company, company.id) != nil
+    end
+
+    test "board member without owner role cannot delete company and receives 403", %{conn: conn} do
+      {conn, _user, company} =
+        register_and_log_in_user(conn, %{role: "member", is_board_member: true})
+
+      response = delete(conn, ~p"/api/companies/#{company.id}")
+      assert %{"errors" => [%{"detail" => "Forbidden"}]} = json_response(response, 403)
+      assert Cympho.Repo.get(Companies.Company, company.id) != nil
+    end
+
+    test "unauthenticated caller cannot delete company and receives 401" do
+      company = other_company()
+
+      response = Phoenix.ConnTest.build_conn() |> delete(~p"/api/companies/#{company.id}")
+
+      assert %{"errors" => [%{"detail" => "Authentication required"}]} =
+               json_response(response, 401)
+
+      assert Cympho.Repo.get(Companies.Company, company.id) != nil
+    end
+
+    test "non-member receives non-disclosing 404 not found", %{conn: conn} do
+      {conn, _user, _company_a} = register_and_log_in_user(conn, %{role: "owner"})
+      company_b = other_company()
+
+      response = delete(conn, ~p"/api/companies/#{company_b.id}")
+      assert %{"errors" => [%{"detail" => "Not found"}]} = json_response(response, 404)
+      assert Cympho.Repo.get(Companies.Company, company_b.id) != nil
+    end
+  end
+
   defp other_company do
     unique = System.unique_integer([:positive])
 
