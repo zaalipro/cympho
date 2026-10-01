@@ -376,6 +376,7 @@ defmodule CymphoWeb.Router do
     post "/exec-workspaces/:id/secrets", WorkspaceController, :inject_secrets
     get "/exec-workspaces/:id/services", WorkspaceController, :list_services
     post "/exec-workspaces/:id/services", WorkspaceController, :create_service
+    get "/services/:id", WorkspaceController, :show_runtime_service
     patch "/services/:id/start", WorkspaceController, :start_service
     patch "/services/:id/stop", WorkspaceController, :stop_service
     patch "/services/:id/restart", WorkspaceController, :restart_service

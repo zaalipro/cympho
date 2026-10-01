@@ -46,6 +46,79 @@ defmodule Cympho.Workspaces.RuntimeServiceTest do
     }
   end
 
+  test "valid creation persists authorized tenant and workspace relationships in database", %{
+    company: company,
+    project: project,
+    project_workspace: project_workspace,
+    execution_workspace: execution_workspace
+  } do
+    assert {:ok, service} =
+             Workspaces.create_runtime_service(execution_workspace, %{
+               "service_name" => "Valid Web App",
+               "command" => "mix phx.server",
+               "cwd" => "/workspace"
+             })
+
+    # Assert returned struct relationships
+    assert service.service_name == "Valid Web App"
+    assert service.status == "stopped"
+    assert service.command == "mix phx.server"
+    assert service.cwd == "/workspace"
+    assert service.company_id == company.id
+    assert service.project_id == project.id
+    assert service.project_workspace_id == project_workspace.id
+    assert service.execution_workspace_id == execution_workspace.id
+
+    # Assert persisted database row directly from Repo
+    persisted = Cympho.Repo.get!(Cympho.Workspaces.RuntimeService, service.id)
+    assert persisted.service_name == "Valid Web App"
+    assert persisted.status == "stopped"
+    assert persisted.command == "mix phx.server"
+    assert persisted.cwd == "/workspace"
+    assert persisted.company_id == company.id
+    assert persisted.project_id == project.id
+    assert persisted.project_workspace_id == project_workspace.id
+    assert persisted.execution_workspace_id == execution_workspace.id
+
+    # Authorized company can look up service
+    assert {:ok, found} = Workspaces.get_company_runtime_service(company.id, service.id)
+    assert found.id == service.id
+  end
+
+  test "cross-company isolation prevents foreign company from accessing runtime service", %{
+    company: company,
+    execution_workspace: execution_workspace
+  } do
+    {:ok, service} =
+      Workspaces.create_runtime_service(execution_workspace, %{
+        service_name: "Isolated service"
+      })
+
+    # Create a foreign company
+    foreign_unique = System.unique_integer([:positive])
+
+    {:ok, foreign_company} =
+      Companies.create_company(%{
+        name: "Foreign company #{foreign_unique}",
+        slug: "foreign-company-#{foreign_unique}"
+      })
+
+    # Foreign company lookup returns not_found
+    assert {:error, :not_found} =
+             Workspaces.get_company_runtime_service(foreign_company.id, service.id)
+
+    # Invalid non-UUID IDs return not_found without raising
+    assert {:error, :not_found} =
+             Workspaces.get_company_runtime_service(company.id, "not-a-real-uuid")
+
+    assert {:error, :not_found} =
+             Workspaces.get_company_runtime_service("not-a-real-uuid", service.id)
+
+    # Authorized lookup succeeds
+    assert {:ok, found} = Workspaces.get_company_runtime_service(company.id, service.id)
+    assert found.id == service.id
+  end
+
   test "registration ignores forged lifecycle, preview port, and ownership", %{
     company: company,
     project: project,
@@ -146,6 +219,29 @@ defmodule Cympho.Workspaces.RuntimeServiceTest do
              Workspaces.get_company_preview_service(company.id, service.id, issued_ref)
 
     assert {:error, :invalid_preview_scope} = Workspaces.issue_service_preview(service, 4330)
+  end
+
+  test "lifecycle mutations transition service status and persisted timestamps", %{
+    execution_workspace: execution_workspace
+  } do
+    {:ok, service} =
+      Workspaces.create_runtime_service(execution_workspace, %{service_name: "Lifecycle test"})
+
+    assert service.status == "stopped"
+
+    assert {:ok, started} = Workspaces.start_service(service)
+    assert started.status == "starting"
+    assert Cympho.Repo.get!(Cympho.Workspaces.RuntimeService, service.id).status == "starting"
+
+    assert {:ok, stopped} = Workspaces.stop_service(started)
+    assert stopped.status == "stopped"
+    refute is_nil(stopped.stopped_at)
+    assert Cympho.Repo.get!(Cympho.Workspaces.RuntimeService, service.id).status == "stopped"
+
+    assert {:ok, restarted} = Workspaces.restart_service(stopped)
+    assert restarted.status == "starting"
+    assert is_nil(restarted.stopped_at)
+    assert Cympho.Repo.get!(Cympho.Workspaces.RuntimeService, service.id).status == "starting"
   end
 
   defp unique_prefix(unique) do

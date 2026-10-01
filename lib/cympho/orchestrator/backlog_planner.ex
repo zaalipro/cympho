@@ -78,6 +78,7 @@ defmodule Cympho.Orchestrator.BacklogPlanner do
           skipped_busy: non_neg_integer(),
           skipped_no_mission: non_neg_integer(),
           skipped_no_ceo: non_neg_integer(),
+          skipped_cooldown: non_neg_integer(),
           errors: non_neg_integer()
         }
   def sweep_companies(opts \\ []) do
@@ -91,6 +92,7 @@ defmodule Cympho.Orchestrator.BacklogPlanner do
         skipped_busy: 0,
         skipped_no_mission: 0,
         skipped_no_ceo: 0,
+        skipped_cooldown: 0,
         errors: 0
       },
       fn company, acc ->
@@ -126,8 +128,18 @@ defmodule Cympho.Orchestrator.BacklogPlanner do
       true ->
         case Agents.get_company_ceo(company_id) do
           {:ok, ceo} ->
-            do_wake_ceo(ceo, company_id, opts)
-            Map.put(base, :waked, 1)
+            case do_wake_ceo(ceo, company_id, opts) do
+              :ok ->
+                Map.put(base, :waked, 1)
+
+              :skip ->
+                Map.put(base, :skipped_cooldown, 1)
+
+              {:error, reason} ->
+                base
+                |> Map.put(:errors, 1)
+                |> Map.put(:error, reason)
+            end
 
           _ ->
             Map.put(base, :skipped_no_ceo, 1)
@@ -336,7 +348,7 @@ defmodule Cympho.Orchestrator.BacklogPlanner do
                 "[BacklogPlanner] wake_for_mission_idle failed for company #{company_id}: #{inspect(reason)}"
               )
 
-              :error
+              {:error, reason}
           end
 
         {:error, reason} ->
@@ -344,7 +356,7 @@ defmodule Cympho.Orchestrator.BacklogPlanner do
             "[BacklogPlanner] ensure_planning_issue failed for company #{company_id}: #{inspect(reason)}"
           )
 
-          :error
+          {:error, reason}
       end
     end
   end
@@ -364,6 +376,12 @@ defmodule Cympho.Orchestrator.BacklogPlanner do
   end
 
   defp merge_counter(acc, delta) do
-    Enum.reduce(delta, acc, fn {k, v}, acc -> Map.update(acc, k, v, &(&1 + v)) end)
+    Enum.reduce(delta, acc, fn {k, v}, acc ->
+      if is_number(v) do
+        Map.update(acc, k, v, &(&1 + v))
+      else
+        acc
+      end
+    end)
   end
 end

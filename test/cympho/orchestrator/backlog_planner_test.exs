@@ -57,18 +57,74 @@ defmodule Cympho.Orchestrator.BacklogPlannerTest do
                BacklogPlanner.plan_one_company(company.id, cooldown_ms: 0)
     end
 
-    test "respects cooldown — second call within window is a no-op",
+    test "respects cooldown — second call within window is a cooldown skip",
          %{company: company, ceo: ceo} do
       cancel_all_issues(company.id)
 
-      assert %{waked: 1} = BacklogPlanner.plan_one_company(company.id, cooldown_ms: 60_000)
+      assert %{checked: 1, waked: 1} =
+               BacklogPlanner.plan_one_company(company.id, cooldown_ms: 60_000)
+
       first = pending_wakes(ceo.id, "mission_idle") |> length()
+      assert first == 1
 
-      # Cooldown is 1 minute; immediate retry must not enqueue another wake.
-      _ = BacklogPlanner.plan_one_company(company.id, cooldown_ms: 60_000)
+      # Cooldown is 1 minute; immediate retry must not enqueue another wake and must report skipped_cooldown.
+      result = BacklogPlanner.plan_one_company(company.id, cooldown_ms: 60_000)
+      assert %{checked: 1, skipped_cooldown: 1} = result
+      refute Map.has_key?(result, :waked)
+
       second = pending_wakes(ceo.id, "mission_idle") |> length()
+      assert second == 1
+    end
 
-      assert second == first
+    test "records errors and does not count as waked when enqueue fails",
+         %{company: company, ceo: ceo} do
+      cancel_all_issues(company.id)
+
+      unless Process.whereis(Cympho.OrchestratorRegistry) do
+        start_supervised!({Registry, keys: :unique, name: Cympho.OrchestratorRegistry})
+      end
+
+      # Seed the planning issue in progress with an active fake orchestrator
+      {:ok, issue} = BacklogPlanner.ensure_planning_issue(company.id, ceo)
+      {:ok, _in_progress} = Issues.update_issue(issue, %{status: :in_progress})
+
+      test_pid = self()
+
+      holder =
+        spawn(fn ->
+          Registry.register(Cympho.OrchestratorRegistry, issue.id, nil)
+          send(test_pid, :registered)
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive :registered, 1_000
+
+      # When ensure_planning_issue fails with :planning_issue_in_use, plan_one_company must report error
+      result = BacklogPlanner.plan_one_company(company.id, cooldown_ms: 0)
+      assert %{checked: 1, errors: 1, error: :planning_issue_in_use} = result
+      refute Map.has_key?(result, :waked)
+
+      Process.exit(holder, :kill)
+      wait_until_unregistered(issue.id)
+    end
+  end
+
+  describe "sweep_companies/1" do
+    test "aggregates successful wakes, cooldown skips, and errors",
+         %{company: company} do
+      cancel_all_issues(company.id)
+
+      # First sweep enqueues 1 wake
+      counters = BacklogPlanner.sweep_companies(company_ids: [company.id], cooldown_ms: 60_000)
+      assert counters.waked == 1
+      assert counters.skipped_cooldown == 0
+      assert counters.errors == 0
+
+      # Second sweep within cooldown counts as skipped_cooldown
+      counters2 = BacklogPlanner.sweep_companies(company_ids: [company.id], cooldown_ms: 60_000)
+      assert counters2.waked == 0
+      assert counters2.skipped_cooldown == 1
+      assert counters2.errors == 0
     end
   end
 

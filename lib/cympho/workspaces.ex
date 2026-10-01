@@ -734,12 +734,23 @@ defmodule Cympho.Workspaces do
     end
   end
 
-  def get_company_runtime_service(company_id, id) do
-    case Repo.one(from rs in RuntimeService, where: rs.id == ^id and rs.company_id == ^company_id) do
-      nil -> {:error, :not_found}
-      service -> {:ok, service}
+  def get_company_runtime_service(company_id, id)
+      when is_binary(company_id) and is_binary(id) do
+    with {:ok, id} <- Ecto.UUID.cast(id),
+         {:ok, company_id} <- Ecto.UUID.cast(company_id) do
+      case Repo.one(
+             from rs in RuntimeService,
+               where: rs.id == ^id and rs.company_id == ^company_id
+           ) do
+        nil -> {:error, :not_found}
+        service -> {:ok, service}
+      end
+    else
+      _ -> {:error, :not_found}
     end
   end
+
+  def get_company_runtime_service(_company_id, _id), do: {:error, :not_found}
 
   def get_company_preview_service(company_id, id, preview_ref)
       when is_binary(company_id) and is_binary(id) and is_binary(preview_ref) do

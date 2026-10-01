@@ -333,6 +333,75 @@ defmodule CymphoWeb.WorkspaceControllerTest do
     assert %{"error" => "Runtime service not found"} = json_response(proxy_conn, 404)
   end
 
+  test "runtime service cross-company isolation prevents read, listing, and lifecycle mutations",
+       %{
+         conn: conn,
+         execution_workspace: execution_workspace
+       } do
+    # Create service for company A
+    {:ok, service} =
+      Workspaces.create_runtime_service(execution_workspace, %{
+        service_name: "Company A Service",
+        command: "mix phx.server"
+      })
+
+    # Authorized company A can view the service
+    show_conn = get(conn, "/api/services/#{service.id}")
+
+    assert %{
+             "data" => %{
+               "id" => service_id,
+               "service_name" => "Company A Service",
+               "status" => "stopped"
+             }
+           } = json_response(show_conn, 200)
+
+    assert service_id == service.id
+
+    # Create another company B and user
+    {other_conn, _other_user, _other_company} =
+      register_and_log_in_user(build_conn(), %{role: "admin"})
+
+    # Company B cannot list services for Company A's execution workspace
+    other_list = get(other_conn, "/api/exec-workspaces/#{execution_workspace.id}/services")
+    assert json_response(other_list, 404)
+
+    # Company B cannot view Company A's runtime service
+    other_show = get(other_conn, "/api/services/#{service.id}")
+    assert json_response(other_show, 404)
+
+    # Company B cannot start Company A's runtime service
+    other_start = patch(other_conn, "/api/services/#{service.id}/start")
+    assert json_response(other_start, 404)
+
+    # Verify service in DB was not modified
+    refreshed = Workspaces.get_runtime_service!(service.id)
+    assert refreshed.status == "stopped"
+
+    # Company B cannot stop Company A's runtime service
+    other_stop = patch(other_conn, "/api/services/#{service.id}/stop")
+    assert json_response(other_stop, 404)
+    assert Workspaces.get_runtime_service!(service.id).status == "stopped"
+
+    # Company B cannot restart Company A's runtime service
+    other_restart = patch(other_conn, "/api/services/#{service.id}/restart")
+    assert json_response(other_restart, 404)
+    assert Workspaces.get_runtime_service!(service.id).status == "stopped"
+
+    # Company A lifecycle operations work as expected
+    start_conn = patch(recycle(conn), "/api/services/#{service.id}/start")
+    assert %{"data" => %{"status" => "starting"}} = json_response(start_conn, 200)
+    assert Workspaces.get_runtime_service!(service.id).status == "starting"
+
+    stop_conn = patch(recycle(conn), "/api/services/#{service.id}/stop")
+    assert %{"data" => %{"status" => "stopped"}} = json_response(stop_conn, 200)
+    assert Workspaces.get_runtime_service!(service.id).status == "stopped"
+
+    restart_conn = patch(recycle(conn), "/api/services/#{service.id}/restart")
+    assert %{"data" => %{"status" => "starting"}} = json_response(restart_conn, 200)
+    assert Workspaces.get_runtime_service!(service.id).status == "starting"
+  end
+
   test "lease creation is bound to the URL workspace and server-owned lifecycle", %{
     conn: conn,
     company: company,
