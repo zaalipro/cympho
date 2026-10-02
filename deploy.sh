@@ -79,6 +79,10 @@ ENV_SNAPSHOT_DIR=""
 ENV_SNAPSHOT_ACTIVE=0
 ENV_SNAPSHOT_CLEANUP_DEBT=0
 PREVIOUS_RELEASE=""
+# Assigned only after a release id exists. The EXIT trap and rollback helpers
+# expand this before that point, so an early failure (migrations included)
+# must see an empty value rather than abort under `set -u` and misreport
+# rollback failure. Do not default this to a guessed release path.
 RELEASE_DIR=""
 
 usage() {

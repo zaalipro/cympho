@@ -210,6 +210,20 @@ require_in(
     "restore_systemd_units under-held-lock",
     "EXIT cleanup must never independently reacquire from a restore helper",
 )
+require(
+    'PREVIOUS_RELEASE=""\n# Assigned only after a release id exists.',
+    "rollback release path must be initialized before any failure can expand it",
+)
+require_before(
+    'RELEASE_DIR=""',
+    "cleanup_local()",
+    "release path initialization must precede the EXIT failure handler",
+)
+require_before(
+    "trap cleanup_local EXIT",
+    'RELEASE_DIR="${RELEASES_DIR}/${RELEASE_ID}"',
+    "the failure handler is installed before a release directory exists",
+)
 require_in(cleanup_body, "restore_transaction_after_lock_loss", "lock loss must restore env and units under one reacquired lock")
 require_in(cleanup_body, "under-held-lock", "cleanup must use non-reacquiring restore mode while original lock is live")
 require_in(cleanup_body, "restore_transaction_after_lock_loss", "cleanup must funnel lock-loss races through one coordinator")
