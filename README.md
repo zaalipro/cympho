@@ -510,6 +510,16 @@ environments retain isolated preview behavior on `preview.localhost`. Existing
 running services without a preview identity remain unavailable until their
 trusted launcher reissues one.
 
+DNS ownership is solely for `cympho.llmotions.com`. Production deployments do
+not require, own, or provision preview DNS records, wildcard subdomains, or
+secondary TLS certificates; operators can safely retire legacy preview DNS
+records. Existing installations migrating from preview-enabled releases are
+handled automatically: `deploy.sh` reconciles the application certificate to
+main-only (`cympho.llmotions.com`) without revoking or deleting valid working
+certificates on failure, and installer recovery (`install.sh`) strips stale
+production `PREVIEW_HOST` entries while preserving `POOL_SIZE=5`, database
+credentials, and unrelated environment configuration.
+
 A production database with no users keeps `/setup` locked unless
 `CYMPHO_BOOTSTRAP_SECRET` is set to at least 32 bytes. Generate it with
 `mix phx.gen.secret`, enter it in the first-owner form, then remove it from the

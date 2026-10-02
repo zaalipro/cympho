@@ -565,6 +565,66 @@ reconcile_production_env_key \
 validate_existing_production_env \
     "$LEGACY_RUNTIME_ENV_FILE" cympho.example.test "$BUILD_REVISION"
 
+# remove_production_env_key safely removes an existing key and ignores absent keys.
+REMOVE_KEY_ENV="$TMP_DIR/.env-remove-key"
+printf 'KEY_ONE=one\nKEY_TWO=two\nKEY_THREE=three\n' > "$REMOVE_KEY_ENV"
+chmod 600 "$REMOVE_KEY_ENV"
+remove_production_env_key "$REMOVE_KEY_ENV" KEY_TWO
+[ "$(grep -c '^KEY_TWO=' "$REMOVE_KEY_ENV")" -eq 0 ] || fail "remove_production_env_key did not remove key"
+[ "$(grep -c '^KEY_ONE=one$' "$REMOVE_KEY_ENV")" -eq 1 ] || fail "remove_production_env_key damaged surrounding keys"
+[ "$(grep -c '^KEY_THREE=three$' "$REMOVE_KEY_ENV")" -eq 1 ] || fail "remove_production_env_key damaged surrounding keys"
+remove_production_env_key "$REMOVE_KEY_ENV" KEY_ABSENT
+[ "$(grep -c '^KEY_ONE=one$' "$REMOVE_KEY_ENV")" -eq 1 ] || fail "remove_production_env_key damaged file on absent key"
+set +e
+remove_symlink_output=$(remove_production_env_key "$TMP_DIR/env-link" KEY_ONE 2>&1)
+remove_symlink_status=$?
+set -e
+[ "$remove_symlink_status" -ne 0 ] || fail "remove_production_env_key accepted a symlink"
+assert_contains "$remove_symlink_output" "non-symlink"
+
+# Installer recovery on an existing environment strips legacy PREVIEW_HOST while
+# preserving POOL_SIZE=5, profile overrides, and other unrelated settings.
+RECOVERED_LEGACY_ENV="$TMP_DIR/.env-legacy-preview-and-pool"
+cat > "$RECOVERED_LEGACY_ENV" <<EOF_RECOVERED
+MIX_ENV=prod
+PORT=4000
+APP_HOST=cympho.example.test
+PREVIEW_HOST=preview.cympho.example.test
+POOL_SIZE=5
+CYMPHO_RESOURCE_PROFILE=throughput
+SECRET_KEY_BASE=secret-key
+LIVE_VIEW_SALT=live-salt
+CYMPHO_ENCRYPTION_KEY=encryption-key
+CYMPHO_USER_JWT_SECRET=user-jwt
+CYMPHO_AGENT_JWT_SECRET=agent-jwt
+CYMPHO_BUILD_REVISION=$BUILD_REVISION
+DATABASE_URL=ecto://cympho_user:$PASSWORD_SENTINEL@localhost/cympho_prod
+CYMPHO_UPLOADS_DIR=/var/lib/cympho/data/uploads
+CYMPHO_IMPORT_SPOOL_DIR=/var/lib/cympho/data/import-transfers
+EOF_RECOVERED
+chmod 600 "$RECOVERED_LEGACY_ENV"
+
+validate_existing_production_env "$RECOVERED_LEGACY_ENV" cympho.example.test "" true true
+reconcile_production_build_revision "$RECOVERED_LEGACY_ENV" "$BUILD_REVISION"
+remove_production_env_key "$RECOVERED_LEGACY_ENV" PREVIEW_HOST
+unset PREVIEW_HOST
+reconcile_production_env_key \
+    "$RECOVERED_LEGACY_ENV" CYMPHO_UPLOADS_DIR /var/lib/cympho/data/uploads
+reconcile_production_env_key \
+    "$RECOVERED_LEGACY_ENV" CYMPHO_IMPORT_SPOOL_DIR /var/lib/cympho/data/import-transfers
+validate_existing_production_env "$RECOVERED_LEGACY_ENV" cympho.example.test "$BUILD_REVISION"
+
+if grep -q '^PREVIEW_HOST=' "$RECOVERED_LEGACY_ENV"; then
+    fail "installer recovery retained legacy PREVIEW_HOST"
+fi
+[ -z "${PREVIEW_HOST:-}" ] || fail "installer recovery left PREVIEW_HOST in shell environment"
+[ "$(grep -c '^POOL_SIZE=5$' "$RECOVERED_LEGACY_ENV")" -eq 1 ] || \
+    fail "installer recovery failed to preserve POOL_SIZE=5"
+[ "$(grep -c '^CYMPHO_RESOURCE_PROFILE=throughput$' "$RECOVERED_LEGACY_ENV")" -eq 1 ] || \
+    fail "installer recovery failed to preserve CYMPHO_RESOURCE_PROFILE"
+[ "$(grep -c '^DATABASE_URL=' "$RECOVERED_LEGACY_ENV")" -eq 1 ] || \
+    fail "installer recovery changed DATABASE_URL"
+
 # Failed legacy preflight must not rewrite even the managed metadata when a
 # required credential is missing.
 INCOMPLETE_LEGACY_ENV_FILE="$TMP_DIR/.env-incomplete-legacy"

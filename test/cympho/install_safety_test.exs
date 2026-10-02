@@ -58,6 +58,9 @@ defmodule Cympho.InstallSafetyTest do
     assert installer =~ "Production release did not become ready at the attested revision."
     assert installer =~ "Python 3 is required to validate the production release manifest."
     assert installer =~ ~r/apt-get install -y[^\n]*\bpython3\b/
+    assert installer =~ "remove_production_env_key"
+    assert installer =~ ~s(remove_production_env_key "$ENV_FILE" PREVIEW_HOST)
+    assert installer =~ "POOL_SIZE"
     assert installer =~ "CYMPHO_UPLOADS_DIR=/var/lib/cympho/data/uploads"
 
     assert installer =~

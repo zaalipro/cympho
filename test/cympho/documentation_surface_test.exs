@@ -119,6 +119,38 @@ defmodule Cympho.DocumentationSurfaceTest do
     assert security =~ ~r/production previews are disabled/i
   end
 
+  test "README and operator docs describe existing-install migration and DNS ownership" do
+    readme = File.read!("README.md")
+    operations = File.read!("docs/OPERATIONS.md")
+
+    assert readme =~ ~r/DNS ownership is solely for `cympho\.llmotions\.com`/
+    assert readme =~ ~r/operators can safely retire legacy preview DNS\s+records/
+    assert readme =~ ~r/reconciles the application certificate to\s+main-only/
+    assert readme =~ ~r/without revoking or deleting valid working\s+certificates/
+    assert readme =~ ~r/strips stale\s+production `PREVIEW_HOST` entries/
+    assert readme =~ ~r/preserving `POOL_SIZE=5`/
+
+    assert operations =~ ~r/Production DNS ownership requires only `cympho\.llmotions\.com`/
+    assert operations =~ ~r/reconciled to main-only by `deploy\.sh`/
+    assert operations =~ ~r/automatically removes legacy `PREVIEW_HOST`/
+  end
+
+  test "deploy.sh safely reconciles application certificate without deleting working certificates" do
+    assert {output, 0} =
+             System.cmd("bash", ["test/shell/deploy_cert_reconciliation_test.sh"],
+               stderr_to_stdout: true
+             )
+
+    assert output =~ "1..4"
+
+    deploy = File.read!("deploy.sh")
+    assert deploy =~ ~S(openssl x509 -in "\$cert" -noout -ext subjectAltName)
+    assert deploy =~ ~S([ "\$cert_sans" = "${DOMAIN}" ])
+    assert deploy =~ ~S(certbot_args="--cert-name ${DOMAIN}")
+    refute deploy =~ "certbot delete"
+    refute deploy =~ "certbot revoke"
+  end
+
   test "operator and security docs preserve the credential boundary" do
     combined =
       ["docs/OPERATIONS.md", "docs/OBSERVABILITY.md", "SECURITY.md"]

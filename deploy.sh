@@ -1938,7 +1938,7 @@ site_avail=/etc/nginx/sites-available/${DOMAIN}
 site_enabled=/etc/nginx/sites-enabled/${DOMAIN}
 
 # Preserve any certbot-managed existing vhost. New installs start HTTP-only;
-# certbot upgrades both isolated hostnames after nginx accepts the config.
+# certbot configures TLS for ${DOMAIN} after nginx accepts the config.
 if ! _sudo test -f "\$site_avail"; then
   tmp=\$(mktemp)
   cat > "\$tmp" <<'NGX'
@@ -1983,10 +1983,21 @@ _sudo nginx -t
 _sudo systemctl reload nginx
 
 cert=/etc/letsencrypt/live/${DOMAIN}/fullchain.pem
-certbot_args=""
+cert_sans=""
 if _sudo test -f "\$cert"; then
+  cert_sans=\$(_sudo openssl x509 -in "\$cert" -noout -ext subjectAltName 2>/dev/null | grep -E -o 'DNS:[^, ]+' | sed 's/^DNS://' || true)
+fi
+
+if _sudo test -f "\$cert" && [ "\$cert_sans" = "${DOMAIN}" ]; then
   echo "Certificate already covers ${DOMAIN}."
 else
+  if _sudo test -f "\$cert"; then
+    echo "Reconciling certificate to cover only ${DOMAIN}..."
+    certbot_args="--cert-name ${DOMAIN}"
+  else
+    certbot_args=""
+  fi
+
   if _sudo certbot --nginx \$certbot_args -d ${DOMAIN} --non-interactive --agree-tos -m ${CERTBOT_EMAIL} --redirect; then
     echo "Certificate now covers ${DOMAIN}."
   else

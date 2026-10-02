@@ -460,6 +460,42 @@ reconcile_production_env_key() {
     }
 }
 
+remove_production_env_key() {
+    local env_file=$1
+    local key=$2
+    local staged_file
+
+    if [ -L "$env_file" ] || [ ! -f "$env_file" ]; then
+        install_error "$env_file must be a regular, non-symlink file."
+        return 1
+    fi
+
+    if [[ ! "$key" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+        install_error "Invalid managed production environment key."
+        return 1
+    fi
+
+    if ! grep -q "^${key}=" "$env_file"; then
+        return 0
+    fi
+
+    staged_file=$(mktemp "${env_file}.cympho-remove-key.XXXXXX") || return 1
+    if ! awk -v key="$key" '
+        index($0, key "=") == 1 { next }
+        { print }
+    ' "$env_file" > "$staged_file"; then
+        rm -f "$staged_file"
+        return 1
+    fi
+
+    chmod --reference="$env_file" "$staged_file" 2>/dev/null || chmod 600 "$staged_file"
+    mv -f -- "$staged_file" "$env_file" || {
+        rm -f "$staged_file"
+        install_error "Could not safely remove $key from $env_file."
+        return 1
+    }
+}
+
 load_production_env_literals() {
     local env_file=$1
     local line
@@ -511,7 +547,7 @@ load_production_env_literals() {
             CYMPHO_START_BOARD_APPROVAL_EXECUTOR|CYMPHO_START_HEALTH_CHECKER|\
             CYMPHO_START_HEARTBEAT_WATCHDOG|CYMPHO_START_OVERSIGHT_PATROL|\
             CYMPHO_START_SCHEDULER|CYMPHO_TRUSTED_PROXY_IPS|CYMPHO_UPLOADS_DIR|\
-            CYMPHO_USER_JWT_SECRET) ;;
+            CYMPHO_USER_JWT_SECRET|POOL_SIZE) ;;
             *)
                 install_error "$env_file contains unsupported key $key."
                 return 1
@@ -566,6 +602,7 @@ validate_existing_production_env() {
     unset CYMPHO_ENCRYPTION_KEY CYMPHO_USER_JWT_SECRET CYMPHO_AGENT_JWT_SECRET
     unset CYMPHO_RESOURCE_PROFILE CYMPHO_TRUSTED_PROXY_IPS DATABASE_URL
     unset CYMPHO_BUILD_REVISION CYMPHO_UPLOADS_DIR CYMPHO_IMPORT_SPOOL_DIR
+    unset POOL_SIZE
 
     load_production_env_literals "$env_file" || return 1
 
@@ -2008,6 +2045,8 @@ if [ "$IS_PROD" -eq 1 ]; then
         chmod 600 "$ENV_FILE"
         validate_existing_production_env "$ENV_FILE" "$DOMAIN" "" true true
         reconcile_production_build_revision "$ENV_FILE" "$BUILD_REVISION"
+        remove_production_env_key "$ENV_FILE" PREVIEW_HOST
+        unset PREVIEW_HOST
         reconcile_production_env_key \
             "$ENV_FILE" CYMPHO_UPLOADS_DIR /var/lib/cympho/data/uploads
         reconcile_production_env_key \

@@ -250,7 +250,13 @@ routes. `PREVIEW_HOST` is optional in production and defaults to disabled
 (`nil`). When unset, the application does not emit preview URLs and returns
 404 on preview proxy paths. Untrusted preview content is never moved onto
 `cympho.llmotions.com`, preserving the application cookie, session, and CSRF
-boundary.
+boundary. Production DNS ownership requires only `cympho.llmotions.com`; preview
+DNS records, wildcard subdomains, and secondary certificates are not required and
+may be retired. Existing installations migrating to the preview-disabled deployment
+model have their application certificate reconciled to main-only by `deploy.sh`
+without destroying existing valid certificates on transient reconciliation failures,
+and installer recovery (`install.sh`) automatically removes legacy `PREVIEW_HOST`
+configuration while preserving `POOL_SIZE`, database settings, and unrelated overrides.
 
 Local development and test environments retain isolated preview behavior on
 `preview.localhost`. If previews are enabled in an isolated non-production
