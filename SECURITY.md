@@ -41,9 +41,12 @@ There is no public bug-bounty commitment.
 - Use unique production values for every required secret in
   `config/runtime.exs`; never reuse development defaults.
 - Put the web endpoint behind TLS and a trusted reverse proxy.
-- Serve runtime previews through the separately configured `PREVIEW_HOST`,
-  route only that exact hostname to the preview proxy, and keep application
-  session cookies host-only. Never collapse previews onto `APP_HOST`.
+- Production previews are disabled entirely to keep untrusted runtime output
+  off the production deployment. If enabled in isolated non-production
+  environments, serve runtime previews through the separately configured
+  `PREVIEW_HOST`, route only that exact hostname to the preview proxy, and
+  keep application session cookies host-only. Never collapse previews onto
+  `APP_HOST` or host preview content under `cympho.llmotions.com`.
 - Keep production force-SSL enabled, restrict trusted forwarded-protocol
   and client-IP assertions to an explicit immediate-proxy IP/CIDR allowlist,
   and never expose the Bandit listener directly when it accepts proxy headers.

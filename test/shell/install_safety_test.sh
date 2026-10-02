@@ -519,7 +519,6 @@ cat > "$ENV_FILE" <<EOF_ENV
 MIX_ENV=prod
 PORT=4000
 APP_HOST=cympho.example.test
-PREVIEW_HOST=preview.cympho.example.test
 SECRET_KEY_BASE=secret-key
 LIVE_VIEW_SALT=live-salt
 CYMPHO_ENCRYPTION_KEY=encryption-key
@@ -534,7 +533,7 @@ EOF_ENV
 [ "$(production_env_state "$ENV_FILE")" = "existing" ] || fail "regular .env was not existing"
 before_checksum=$(cksum "$ENV_FILE")
 validation_output=$(validate_existing_production_env \
-    "$ENV_FILE" cympho.example.test preview.cympho.example.test "$BUILD_REVISION" 2>&1)
+    "$ENV_FILE" cympho.example.test "$BUILD_REVISION" 2>&1)
 after_checksum=$(cksum "$ENV_FILE")
 [ "$before_checksum" = "$after_checksum" ] || fail "rerun validation changed .env"
 [ -z "$validation_output" ] || fail "successful validation printed environment data"
@@ -545,26 +544,26 @@ LEGACY_ENV_FILE="$TMP_DIR/.env-legacy-no-revision"
 grep -v '^CYMPHO_BUILD_REVISION=' "$ENV_FILE" > "$LEGACY_ENV_FILE"
 reconcile_production_build_revision "$LEGACY_ENV_FILE" "$BUILD_REVISION"
 validate_existing_production_env \
-    "$LEGACY_ENV_FILE" cympho.example.test preview.cympho.example.test "$BUILD_REVISION"
+    "$LEGACY_ENV_FILE" cympho.example.test "$BUILD_REVISION"
 
 LEGACY_RUNTIME_ENV_FILE="$TMP_DIR/.env-legacy-runtime-paths"
 grep -Ev '^(CYMPHO_UPLOADS_DIR|CYMPHO_IMPORT_SPOOL_DIR)=' "$ENV_FILE" > "$LEGACY_RUNTIME_ENV_FILE"
 set +e
 legacy_runtime_status=0
 validate_existing_production_env \
-    "$LEGACY_RUNTIME_ENV_FILE" cympho.example.test preview.cympho.example.test \
+    "$LEGACY_RUNTIME_ENV_FILE" cympho.example.test \
     "$BUILD_REVISION" >/dev/null 2>&1 || legacy_runtime_status=$?
 set -e
 [ "$legacy_runtime_status" -ne 0 ] || fail "legacy runtime paths were accepted before reconciliation"
 validate_existing_production_env \
-    "$LEGACY_RUNTIME_ENV_FILE" cympho.example.test preview.cympho.example.test \
+    "$LEGACY_RUNTIME_ENV_FILE" cympho.example.test \
     "$BUILD_REVISION" false true
 reconcile_production_env_key \
     "$LEGACY_RUNTIME_ENV_FILE" CYMPHO_UPLOADS_DIR /var/lib/cympho/data/uploads
 reconcile_production_env_key \
     "$LEGACY_RUNTIME_ENV_FILE" CYMPHO_IMPORT_SPOOL_DIR /var/lib/cympho/data/import-transfers
 validate_existing_production_env \
-    "$LEGACY_RUNTIME_ENV_FILE" cympho.example.test preview.cympho.example.test "$BUILD_REVISION"
+    "$LEGACY_RUNTIME_ENV_FILE" cympho.example.test "$BUILD_REVISION"
 
 # Failed legacy preflight must not rewrite even the managed metadata when a
 # required credential is missing.
@@ -573,7 +572,7 @@ grep -Ev '^(CYMPHO_BUILD_REVISION|SECRET_KEY_BASE)=' "$ENV_FILE" > "$INCOMPLETE_
 incomplete_before=$(cksum "$INCOMPLETE_LEGACY_ENV_FILE")
 set +e
 incomplete_legacy_output=$(validate_existing_production_env \
-    "$INCOMPLETE_LEGACY_ENV_FILE" cympho.example.test preview.cympho.example.test "" true 2>&1)
+    "$INCOMPLETE_LEGACY_ENV_FILE" cympho.example.test "" true 2>&1)
 incomplete_legacy_status=$?
 set -e
 [ "$incomplete_legacy_status" -ne 0 ] || fail "incomplete legacy environment passed preflight"
@@ -594,7 +593,7 @@ reconcile_production_build_revision "$STALE_ENV_FILE" "$BUILD_REVISION"
 [ "$(grep '^DATABASE_URL=' "$STALE_ENV_FILE")" = "$secret_before" ] || \
     fail "revision reconciliation changed a secret"
 validate_existing_production_env \
-    "$STALE_ENV_FILE" cympho.example.test preview.cympho.example.test "$BUILD_REVISION"
+    "$STALE_ENV_FILE" cympho.example.test "$BUILD_REVISION"
 
 # Runtime data stays outside the root-owned release payload. The installer
 # creates only these writable leaves for the service account.
@@ -636,14 +635,14 @@ reconcile_production_env_key \
 assert_contains "$(cat "$CUSTOM_RUNTIME_ENV")" "CYMPHO_UPLOADS_DIR=$RUNTIME_UPLOADS_DIR"
 assert_contains "$(cat "$CUSTOM_RUNTIME_ENV")" "CYMPHO_IMPORT_SPOOL_DIR=$RUNTIME_IMPORT_DIR"
 validate_existing_production_env \
-    "$CUSTOM_RUNTIME_ENV" cympho.example.test preview.cympho.example.test "$BUILD_REVISION"
+    "$CUSTOM_RUNTIME_ENV" cympho.example.test "$BUILD_REVISION"
 
 UNSAFE_RUNTIME_ENV="$TMP_DIR/.env-unsafe-runtime-path"
 sed 's|^CYMPHO_UPLOADS_DIR=.*|CYMPHO_UPLOADS_DIR=/tmp/../release|' \
     "$CUSTOM_RUNTIME_ENV" > "$UNSAFE_RUNTIME_ENV"
 set +e
 unsafe_env_output=$(validate_existing_production_env \
-    "$UNSAFE_RUNTIME_ENV" cympho.example.test preview.cympho.example.test \
+    "$UNSAFE_RUNTIME_ENV" cympho.example.test \
     "$BUILD_REVISION" 2>&1)
 unsafe_env_status=$?
 set -e
@@ -703,7 +702,7 @@ invalid_revision_file="$TMP_DIR/.env-invalid-revision"
 sed 's/^CYMPHO_BUILD_REVISION=.*/CYMPHO_BUILD_REVISION=unknown/' "$ENV_FILE" > "$invalid_revision_file"
 set +e
 invalid_revision_output=$(validate_existing_production_env \
-    "$invalid_revision_file" cympho.example.test preview.cympho.example.test "$BUILD_REVISION" 2>&1)
+    "$invalid_revision_file" cympho.example.test "$BUILD_REVISION" 2>&1)
 invalid_revision_status=$?
 set -e
 [ "$invalid_revision_status" -ne 0 ] || fail "unknown production build revision was accepted"
@@ -715,7 +714,7 @@ MISMATCHED_ENV_FILE="$TMP_DIR/.env-mismatched-port"
 sed 's/^PORT=4000$/PORT=9999/' "$ENV_FILE" > "$MISMATCHED_ENV_FILE"
 set +e
 mismatched_port_output=$(validate_existing_production_env \
-    "$MISMATCHED_ENV_FILE" cympho.example.test preview.cympho.example.test 2>&1)
+    "$MISMATCHED_ENV_FILE" cympho.example.test 2>&1)
 mismatched_port_status=$?
 set -e
 [ "$mismatched_port_status" -ne 0 ] || fail "mismatched production port was accepted"
@@ -795,7 +794,7 @@ cp "$ENV_FILE" "$TMP_DIR/incomplete.env"
 sed -i.bak '/^DATABASE_URL=/d' "$TMP_DIR/incomplete.env"
 set +e
 invalid_output=$(validate_existing_production_env \
-    "$TMP_DIR/incomplete.env" cympho.example.test preview.cympho.example.test 2>&1)
+    "$TMP_DIR/incomplete.env" cympho.example.test 2>&1)
 invalid_status=$?
 set -e
 [ "$invalid_status" -ne 0 ] || fail "incomplete .env passed validation"
@@ -804,12 +803,24 @@ assert_not_contains "$invalid_output" "$PASSWORD_SENTINEL"
 
 set +e
 mismatch_output=$(validate_existing_production_env \
-    "$ENV_FILE" other.example.test preview.cympho.example.test 2>&1)
+    "$ENV_FILE" other.example.test 2>&1)
 mismatch_status=$?
 set -e
 [ "$mismatch_status" -ne 0 ] || fail "mismatched domain passed validation"
 assert_contains "$mismatch_output" "does not match APP_HOST"
 assert_not_contains "$mismatch_output" "$PASSWORD_SENTINEL"
+
+# If an existing environment contains PREVIEW_HOST matching APP_HOST, it fails closed.
+SAME_ORIGIN_ENV="$TMP_DIR/.env-same-origin"
+cp "$ENV_FILE" "$SAME_ORIGIN_ENV"
+printf 'PREVIEW_HOST=cympho.example.test\n' >> "$SAME_ORIGIN_ENV"
+set +e
+same_origin_output=$(validate_existing_production_env \
+    "$SAME_ORIGIN_ENV" cympho.example.test 2>&1)
+same_origin_status=$?
+set -e
+[ "$same_origin_status" -ne 0 ] || fail "PREVIEW_HOST matching APP_HOST was accepted"
+assert_contains "$same_origin_output" "different origin"
 
 # Existing .env is data, never shell code. Command substitutions, quoting,
 # whitespace tricks, unknown keys, and duplicate assignments all fail closed.
@@ -820,7 +831,7 @@ sed -i.bak \
     "$TMP_DIR/malicious.env"
 set +e
 malicious_output=$(validate_existing_production_env \
-    "$TMP_DIR/malicious.env" cympho.example.test preview.cympho.example.test 2>&1)
+    "$TMP_DIR/malicious.env" cympho.example.test 2>&1)
 malicious_status=$?
 set -e
 [ "$malicious_status" -ne 0 ] || fail "command substitution passed validation"
@@ -832,7 +843,7 @@ cp "$ENV_FILE" "$TMP_DIR/export.env"
 sed -i.bak 's/^MIX_ENV=/export MIX_ENV=/' "$TMP_DIR/export.env"
 set +e
 export_output=$(validate_existing_production_env \
-    "$TMP_DIR/export.env" cympho.example.test preview.cympho.example.test 2>&1)
+    "$TMP_DIR/export.env" cympho.example.test 2>&1)
 export_status=$?
 set -e
 [ "$export_status" -ne 0 ] || fail "shell-only export assignment passed validation"
@@ -842,7 +853,7 @@ cp "$ENV_FILE" "$TMP_DIR/duplicate.env"
 printf 'DATABASE_URL=ecto://duplicate.example/cympho\n' >> "$TMP_DIR/duplicate.env"
 set +e
 duplicate_output=$(validate_existing_production_env \
-    "$TMP_DIR/duplicate.env" cympho.example.test preview.cympho.example.test 2>&1)
+    "$TMP_DIR/duplicate.env" cympho.example.test 2>&1)
 duplicate_status=$?
 set -e
 [ "$duplicate_status" -ne 0 ] || fail "duplicate assignment passed validation"
@@ -852,7 +863,7 @@ cp "$ENV_FILE" "$TMP_DIR/unknown.env"
 printf 'PATH=/operator-controlled/path\n' >> "$TMP_DIR/unknown.env"
 set +e
 unknown_output=$(validate_existing_production_env \
-    "$TMP_DIR/unknown.env" cympho.example.test preview.cympho.example.test 2>&1)
+    "$TMP_DIR/unknown.env" cympho.example.test 2>&1)
 unknown_status=$?
 set -e
 [ "$unknown_status" -ne 0 ] || fail "unknown assignment passed validation"
@@ -1097,7 +1108,7 @@ atomic_exchange_caddy_file() {
 }
 
 configure_cympho_caddy \
-    cympho.example.test preview.cympho.example.test \
+    cympho.example.test \
     "$CADDYFILE" "$CADDY_FRAGMENT" >/dev/null
 
 global_config=$(cat "$CADDYFILE")
@@ -1106,7 +1117,7 @@ assert_contains "$global_config" "unrelated.example.test"
 assert_contains "$global_config" "import snippets/*.caddy"
 assert_contains "$global_config" 'respond "keep this site"'
 assert_contains "$fragment_config" "cympho.example.test"
-assert_contains "$fragment_config" "preview.cympho.example.test"
+assert_not_contains "$fragment_config" "preview.cympho.example.test"
 assert_contains "$fragment_config" "reverse_proxy 127.0.0.1:4000"
 [ "$(file_mode "$CADDYFILE")" = 600 ] || fail "Caddyfile metadata was widened"
 [ "$(file_mode "$CADDY_FRAGMENT")" = 640 ] || fail "Caddy fragment metadata was widened"
@@ -1124,7 +1135,7 @@ first_fragment_checksum=$(cksum "$CADDY_FRAGMENT")
 : > "$SYSTEMCTL_LOG"
 : > "$CADDY_COUNT_FILE"
 configure_cympho_caddy \
-    cympho.example.test preview.cympho.example.test \
+    cympho.example.test \
     "$CADDYFILE" "$CADDY_FRAGMENT" >/dev/null
 [ "$first_global_checksum" = "$(cksum "$CADDYFILE")" ] || \
     fail "Caddy global config changed on an identical rerun"
@@ -1143,7 +1154,7 @@ before_failed_fragment=$(cksum "$CADDY_FRAGMENT")
 FAKE_CADDY_FAIL=1
 set +e
 failed_caddy_output=$(configure_cympho_caddy \
-    changed.example.test preview.changed.example.test \
+    changed.example.test \
     "$CADDYFILE" "$CADDY_FRAGMENT" 2>&1)
 failed_caddy_status=$?
 set -e
@@ -1166,7 +1177,7 @@ assert_contains "$failed_caddy_output" "active files were preserved"
 FAKE_CADDY_FAIL_ON_CALL=2
 set +e
 final_path_output=$(configure_cympho_caddy \
-    changed.example.test preview.changed.example.test \
+    changed.example.test \
     "$CADDYFILE" "$CADDY_FRAGMENT" 2>&1)
 final_path_status=$?
 set -e
@@ -1191,7 +1202,7 @@ printf 'disabled\n' > "$CADDY_ENABLE_STATE_FILE"
 printf 'inactive\n' > "$CADDY_ACTIVE_STATE_FILE"
 set +e
 activation_output=$(configure_cympho_caddy \
-    activated.example.test preview.activated.example.test \
+    activated.example.test \
     "$CADDYFILE" "$CADDY_FRAGMENT" 2>&1)
 activation_status=$?
 set -e
@@ -1223,7 +1234,7 @@ printf 'active\n' > "$CADDY_ACTIVE_STATE_FILE"
 FAKE_SYSTEMCTL_FAIL_NEXT_RELOAD=1
 set +e
 active_activation_output=$(configure_cympho_caddy \
-    active.example.test preview.active.example.test \
+    active.example.test \
     "$CADDYFILE" "$CADDY_FRAGMENT" 2>&1)
 active_activation_status=$?
 set -e
@@ -1248,7 +1259,7 @@ printf 'inactive\n' > "$CADDY_ACTIVE_STATE_FILE"
 FAKE_SYSTEMCTL_FAIL_NEXT_RELOAD=1
 set +e
 absent_activation_output=$(configure_cympho_caddy \
-    absent.example.test preview.absent.example.test \
+    absent.example.test \
     "$ABSENT_CADDYFILE" "$ABSENT_CADDY_FRAGMENT" 2>&1)
 absent_activation_status=$?
 set -e
@@ -1277,7 +1288,7 @@ atomic_exchange_caddy_file() {
 }
 set +e
 exchange_output=$(configure_cympho_caddy \
-    exchange.example.test preview.exchange.example.test \
+    exchange.example.test \
     "$CAS_CADDYFILE" "$CAS_CADDY_FRAGMENT" 2>&1)
 exchange_status=$?
 set -e
@@ -1331,7 +1342,7 @@ eval "$CADDY_EXCHANGE_BASE_DEFINITION"
 chmod 0664 "$CAS_CADDYFILE"
 set +e
 metadata_output=$(configure_cympho_caddy \
-    reject.example.test preview.reject.example.test \
+    reject.example.test \
     "$CAS_CADDYFILE" "$CAS_CADDY_FRAGMENT" 2>&1)
 metadata_status=$?
 set -e
@@ -1376,7 +1387,7 @@ mkdir -p "$SYMLINK_CADDY_TARGET"
 ln -s "$SYMLINK_CADDY_TARGET" "$SYMLINK_CADDY_PARENT"
 set +e
 parent_symlink_output=$(configure_cympho_caddy \
-    parent.example.test preview.parent.example.test \
+    parent.example.test \
     "$SYMLINK_CADDY_PARENT/Caddyfile" "$SYMLINK_CADDY_PARENT/cympho.caddy" 2>&1)
 parent_symlink_status=$?
 set -e
@@ -1390,7 +1401,7 @@ NOT_FOUND_CADDYFILE="$CADDY_DIR/not-found-Caddyfile"
 NOT_FOUND_FRAGMENT="$CADDY_DIR/not-found-cympho.caddy"
 set +e
 not_found_output=$(configure_cympho_caddy \
-    missing.example.test preview.missing.example.test \
+    missing.example.test \
     "$NOT_FOUND_CADDYFILE" "$NOT_FOUND_FRAGMENT" 2>&1)
 not_found_status=$?
 set -e

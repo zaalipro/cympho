@@ -81,31 +81,42 @@ defmodule Cympho.DocumentationSurfaceTest do
     refute readme =~ "guarded production reruns"
   end
 
-  test "release deploy generates isolated origins and durable upload storage" do
+  test "release deploy configures single origin and durable upload storage" do
     assert {"", 0} = System.cmd("bash", ["-n", "deploy.sh"], stderr_to_stdout: true)
 
     deploy = File.read!("deploy.sh")
     service = File.read!("deploy/cympho.service")
 
-    assert deploy =~ "PREVIEW_HOST=${PREVIEW_DOMAIN}"
+    refute deploy =~ "PREVIEW_HOST="
+    refute deploy =~ "CYMPHO_PREVIEW_DOMAIN"
     assert deploy =~ "CYMPHO_UPLOADS_DIR=${UPLOADS_DIR}"
     assert deploy =~ "CYMPHO_IMPORT_SPOOL_DIR=${IMPORT_SPOOL_DIR}"
     assert deploy =~ "UPLOADS_DIR=\"${DEPLOY_ROOT}/data/uploads\""
     assert deploy =~ "IMPORT_SPOOL_DIR=\"${DEPLOY_ROOT}/data/import-transfers\""
     assert deploy =~ "install -d -m 0750 -o ${APP_USER} -g ${APP_USER} ${UPLOADS_DIR}"
     assert deploy =~ "install -d -m 0700 -o ${APP_USER} -g ${APP_USER} ${IMPORT_SPOOL_DIR}"
-    assert deploy =~ "-v preview_host='${PREVIEW_DOMAIN}'"
+    refute deploy =~ "-v preview_host="
     assert deploy =~ "-v uploads='${UPLOADS_DIR}'"
     assert deploy =~ "-v spool='${IMPORT_SPOOL_DIR}'"
     refute deploy =~ "CYMPHO_MAX_LOCAL_AGENT_RUNS="
     refute deploy =~ "CYMPHO_LOCAL_AGENT_MEMORY_RESERVE_MB="
-    assert deploy =~ "preview_site_avail=/etc/nginx/sites-available/${PREVIEW_DOMAIN}"
-    assert deploy =~ "cympho-preview-access.log"
-    refute deploy =~ "cp \"\$site_avail\" \"\$tmp\""
-    assert deploy =~ "grep -Fq \"DNS:${PREVIEW_DOMAIN}\""
-    assert deploy =~ "certbot_args=\"--cert-name ${DOMAIN} --expand\""
-    assert deploy =~ ~S(certbot --nginx \$certbot_args -d ${DOMAIN} -d ${PREVIEW_DOMAIN})
+    refute deploy =~ "preview_site_avail"
+    refute deploy =~ "cympho-preview-access.log"
+    refute deploy =~ "DNS:${PREVIEW_DOMAIN}"
+    assert deploy =~ ~S(certbot --nginx \$certbot_args -d ${DOMAIN})
+    refute deploy =~ "-d ${PREVIEW_DOMAIN}"
     refute service =~ "After=docker.service"
+  end
+
+  test "operator docs state production previews are disabled and only cympho.llmotions.com is configured" do
+    readme = File.read!("README.md")
+    operations = File.read!("docs/OPERATIONS.md")
+    security = File.read!("SECURITY.md")
+
+    refute operations =~ ~r/^PREVIEW_HOST$/m
+    assert operations =~ ~r/production previews are disabled/i
+    assert readme =~ ~r/production previews are disabled/i
+    assert security =~ ~r/production previews are disabled/i
   end
 
   test "operator and security docs preserve the credential boundary" do

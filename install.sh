@@ -557,10 +557,9 @@ valid_production_runtime_path() {
 validate_existing_production_env() {
     local env_file=$1
     local requested_domain=$2
-    local requested_preview_domain=$3
-    local expected_revision=${4:-}
-    local allow_missing_revision=${5:-false}
-    local allow_missing_runtime_paths=${6:-false}
+    local expected_revision=${3:-}
+    local allow_missing_revision=${4:-false}
+    local allow_missing_runtime_paths=${5:-false}
     local key
 
     unset MIX_ENV PORT APP_HOST PREVIEW_HOST SECRET_KEY_BASE LIVE_VIEW_SALT
@@ -590,8 +589,8 @@ validate_existing_production_env() {
         return 1
     fi
 
-    if [ "${PREVIEW_HOST:-}" != "$requested_preview_domain" ]; then
-        install_error "The requested preview domain does not match PREVIEW_HOST in $env_file."
+    if [ -n "${PREVIEW_HOST:-}" ] && [ "${PREVIEW_HOST}" = "${APP_HOST:-}" ]; then
+        install_error "PREVIEW_HOST must use a different origin from APP_HOST in $env_file."
         return 1
     fi
 
@@ -1080,15 +1079,10 @@ build_caddy_global_candidate() {
 
 write_cympho_caddy_fragment() {
     local domain=$1
-    local preview_domain=$2
-    local target_file=$3
+    local target_file=$2
 
     cat > "$target_file" <<EOF
 $domain {
-    reverse_proxy 127.0.0.1:4000
-}
-
-$preview_domain {
     reverse_proxy 127.0.0.1:4000
 }
 EOF
@@ -1438,9 +1432,8 @@ restore_caddy_activity() {
 
 configure_cympho_caddy() {
     local domain=$1
-    local preview_domain=$2
-    local caddyfile=${3:-/etc/caddy/Caddyfile}
-    local fragment_file=${4:-/etc/caddy/cympho.caddy}
+    local caddyfile=${2:-/etc/caddy/Caddyfile}
+    local fragment_file=${3:-/etc/caddy/cympho.caddy}
     local work_dir existing_global existing_fragment candidate_global candidate_fragment
     local had_global=0
     local had_fragment=0
@@ -1450,10 +1443,8 @@ configure_cympho_caddy() {
     local caddy_enable_state="not-found"
     local caddy_active_state="inactive"
 
-    if [[ ! "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] ||
-       [[ ! "$preview_domain" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] ||
-       [ "$domain" = "$preview_domain" ]; then
-        install_error "Caddy app and preview domains must be distinct bare hostnames."
+    if [[ ! "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+        install_error "Caddy app domain must be a bare hostname."
         return 1
     fi
     if [[ ! "$caddyfile" =~ ^/[A-Za-z0-9._/-]+$ ]] ||
@@ -1526,7 +1517,7 @@ configure_cympho_caddy() {
         : > "$existing_fragment"
     fi
 
-    write_cympho_caddy_fragment "$domain" "$preview_domain" "$candidate_fragment"
+    write_cympho_caddy_fragment "$domain" "$candidate_fragment"
     if ! build_caddy_global_candidate "$existing_global" "$candidate_global" "$fragment_file"; then
         rm -rf "$work_dir"
         install_error "Existing Caddy managed-import markers are malformed."
@@ -1828,7 +1819,6 @@ echo "==================================================="
 prompt_install_type
 
 DOMAIN=""
-PREVIEW_DOMAIN=""
 if [ "$IS_PROD" -eq 1 ]; then
     read -p "Enter your Domain or Subdomain (e.g., cympho.example.com): " DOMAIN
 
@@ -1837,15 +1827,7 @@ if [ "$IS_PROD" -eq 1 ]; then
         exit 1
     fi
 
-    read -p "Enter the separate Preview Domain (default: preview.$DOMAIN): " PREVIEW_DOMAIN
-    PREVIEW_DOMAIN=${PREVIEW_DOMAIN:-preview.$DOMAIN}
-
-    if [[ ! "$PREVIEW_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || [ "$PREVIEW_DOMAIN" = "$DOMAIN" ]; then
-        echo "Error: Preview Domain must be a different bare hostname from the app Domain."
-        exit 1
-    fi
-
-    echo "Ensure DNS for both $DOMAIN and $PREVIEW_DOMAIN points to this server before Caddy starts."
+    echo "Ensure DNS for $DOMAIN points to this server before Caddy starts."
 fi
 
 echo ""
@@ -2024,13 +2006,13 @@ if [ "$IS_PROD" -eq 1 ]; then
 
     if [ "$PROD_ENV_STATE" = "existing" ]; then
         chmod 600 "$ENV_FILE"
-        validate_existing_production_env "$ENV_FILE" "$DOMAIN" "$PREVIEW_DOMAIN" "" true true
+        validate_existing_production_env "$ENV_FILE" "$DOMAIN" "" true true
         reconcile_production_build_revision "$ENV_FILE" "$BUILD_REVISION"
         reconcile_production_env_key \
             "$ENV_FILE" CYMPHO_UPLOADS_DIR /var/lib/cympho/data/uploads
         reconcile_production_env_key \
             "$ENV_FILE" CYMPHO_IMPORT_SPOOL_DIR /var/lib/cympho/data/import-transfers
-        validate_existing_production_env "$ENV_FILE" "$DOMAIN" "$PREVIEW_DOMAIN" "$BUILD_REVISION"
+        validate_existing_production_env "$ENV_FILE" "$DOMAIN" "$BUILD_REVISION"
         DB_PASS=""
     else
         # Generated values are shell- and URL-safe and are never printed.
@@ -2050,7 +2032,6 @@ if [ "$IS_PROD" -eq 1 ]; then
 MIX_ENV=prod
 PORT=4000
 APP_HOST=$DOMAIN
-PREVIEW_HOST=$PREVIEW_DOMAIN
 CYMPHO_UPLOADS_DIR=/var/lib/cympho/data/uploads
 CYMPHO_IMPORT_SPOOL_DIR=/var/lib/cympho/data/import-transfers
 SECRET_KEY_BASE=$SECRET_KEY_BASE
@@ -2190,7 +2171,7 @@ if [ "$IS_PROD" -eq 1 ] && [ "$MACHINE" == "Linux" ]; then
     # Only expose the proxy after the bootstrap-only unit is published and the
     # service is locally ready. Earlier failures therefore leave Caddy intact.
     echo "Setting up Caddy reverse proxy for $DOMAIN..."
-    configure_cympho_caddy "$DOMAIN" "$PREVIEW_DOMAIN"
+    configure_cympho_caddy "$DOMAIN"
 
     PRODUCTION_SOURCE_ACTIVATED=1
 
@@ -2198,7 +2179,6 @@ if [ "$IS_PROD" -eq 1 ] && [ "$MACHINE" == "Linux" ]; then
     echo "  Production Installation Complete!                "
     echo "  Local exact-revision readiness verified on 127.0.0.1:4000."
     echo "  Verify public HTTPS and Caddy separately: https://$DOMAIN/api/health"
-    echo "  Runtime previews use: https://$PREVIEW_DOMAIN     "
     echo "  Systemd service 'cympho' is running the server.  "
     echo "==================================================="
 else

@@ -167,7 +167,6 @@ Production requires:
 DATABASE_URL
 SECRET_KEY_BASE
 APP_HOST
-PREVIEW_HOST
 LIVE_VIEW_SALT
 CYMPHO_ENCRYPTION_KEY
 CYMPHO_USER_JWT_SECRET
@@ -245,13 +244,21 @@ for node-level diagnosis.
 
 ### Isolated runtime-preview origin
 
-`PREVIEW_HOST` is mandatory in production and must be an exact hostname that
-differs from `APP_HOST`, for example `previews.example.com`. Create DNS records
-for both names and terminate TLS for both at the same trusted reverse proxy;
-route them to the Cympho endpoint while preserving the original `Host` header.
-Cympho enforces the boundary itself: the signed preview-proxy path returns 404
-on the application hostname, and every non-preview path returns 404 on the
-preview hostname.
+Production previews are disabled entirely; production deployments configure
+only `cympho.llmotions.com` without preview DNS records, certificates, or proxy
+routes. `PREVIEW_HOST` is optional in production and defaults to disabled
+(`nil`). When unset, the application does not emit preview URLs and returns
+404 on preview proxy paths. Untrusted preview content is never moved onto
+`cympho.llmotions.com`, preserving the application cookie, session, and CSRF
+boundary.
+
+Local development and test environments retain isolated preview behavior on
+`preview.localhost`. If previews are enabled in an isolated non-production
+environment, `PREVIEW_HOST` must remain an exact hostname that differs from
+`APP_HOST`. Cympho enforces the origin boundary itself: signed preview-proxy
+paths return 404 on the application hostname, and non-preview paths return 404
+on the preview hostname. Never configure a wildcard or parent-domain scope for
+the application session cookie.
 
 Preview links are short-lived signed capabilities (five minutes by default,
 configurable with `PREVIEW_TOKEN_MAX_AGE`) and are revoked whenever a service is

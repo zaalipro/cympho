@@ -494,21 +494,21 @@ Set the usual Phoenix release environment variables, plus a Cympho encryption ke
 ```bash
 SECRET_KEY_BASE=...
 DATABASE_URL=...
-APP_HOST=...
-PREVIEW_HOST=previews.example.com
+APP_HOST=cympho.llmotions.com
 LIVE_VIEW_SALT=...
 CYMPHO_ENCRYPTION_KEY=32-byte-or-longer-secret
 CYMPHO_USER_JWT_SECRET=...
 CYMPHO_AGENT_JWT_SECRET=...
 ```
 
-`PREVIEW_HOST` is required in production and must be a different hostname from
-`APP_HOST`. Point both DNS names at the same trusted reverse proxy and route
-both to Cympho. Runtime preview HTML is available only on `PREVIEW_HOST` through
-short-lived signed URLs; the authenticated application and preview proxy paths
-return 404 on the wrong host. Never configure a wildcard application-session
-cookie that includes the preview host. Existing running services without a
-preview identity remain unavailable until their trusted launcher reissues one.
+Production previews are disabled entirely; production is deployed solely on
+`cympho.llmotions.com` without preview DNS records, certificates, or proxy
+routes. `PREVIEW_HOST` is optional in production and defaults to disabled (`nil`).
+Untrusted preview content is never moved onto `cympho.llmotions.com`, preserving
+the application cookie, session, and CSRF boundary. Local development and test
+environments retain isolated preview behavior on `preview.localhost`. Existing
+running services without a preview identity remain unavailable until their
+trusted launcher reissues one.
 
 A production database with no users keeps `/setup` locked unless
 `CYMPHO_BOOTSTRAP_SECRET` is set to at least 32 bytes. Generate it with

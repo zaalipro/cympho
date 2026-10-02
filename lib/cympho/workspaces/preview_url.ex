@@ -83,6 +83,14 @@ defmodule Cympho.Workspaces.PreviewUrl do
   @doc "Returns the configured cookie-free preview hostname."
   def preview_host, do: Application.get_env(:cympho, :preview_host)
 
+  @doc "Returns true if preview host is configured and previews are enabled."
+  def preview_enabled? do
+    case preview_host() do
+      host when is_binary(host) and host != "" -> true
+      _ -> false
+    end
+  end
+
   @doc """
   Get the Finch target for a runtime service.
 

@@ -382,6 +382,60 @@ defmodule CymphoWeb.PreviewControllerTest do
     end
   end
 
+  describe "disabled production previews" do
+    test "suppresses preview URL generation, disables proxy routes, and preserves main-origin health and auth",
+         %{
+           conn: conn,
+           company: company,
+           project: project,
+           workspace: workspace,
+           execution_workspace: execution_workspace,
+           unique: unique
+         } do
+      {:ok, service} =
+        create_service(company, project, workspace, execution_workspace, unique,
+          status: "running",
+          port: 4329
+        )
+
+      original_preview_host = Application.get_env(:cympho, :preview_host)
+      Application.put_env(:cympho, :preview_host, nil)
+
+      on_exit(fn ->
+        Application.put_env(:cympho, :preview_host, original_preview_host)
+      end)
+
+      # 1. PreviewUrl.generate_preview_url returns nil and preview_enabled? is false
+      assert PreviewUrl.generate_preview_url(service, "http://cympho.llmotions.com") == nil
+      refute PreviewUrl.preview_enabled?()
+
+      # 2. GET /api/preview/:service_id returns data with preview_url: nil
+      show_conn = get(conn, "/api/preview/#{service.id}")
+      assert %{"data" => data} = json_response(show_conn, 200)
+      assert data["preview_url"] == nil
+      assert data["id"] == service.id
+
+      # 3. GET /api/exec-workspaces/:id/previews returns list with preview_url: nil
+      index_conn = get(conn, "/api/exec-workspaces/#{execution_workspace.id}/previews")
+      assert %{"data" => previews} = json_response(index_conn, 200)
+      assert Enum.any?(previews, fn p -> p["id"] == service.id and p["preview_url"] == nil end)
+
+      # 4. A request to the preview proxy route returns 404
+      token = PreviewUrl.sign_capability(service)
+      proxy_conn = get(conn, "/api/preview/#{service.id}/#{token}/proxy/")
+      assert proxy_conn.status == 404
+
+      # 5. Main-origin health check returns 200 without requiring preview configuration
+      health_conn = get(build_conn(), "/api/health")
+      assert health_conn.status == 200
+      assert %{"status" => "ready"} = json_response(health_conn, 200)
+
+      # 6. Main-origin authenticated app session remains reachable
+      dash_conn = get(conn, "/api/dashboard")
+      assert dash_conn.status in [200, 302]
+    end
+  end
+
   defp preview_path(service, suffix \\ "") do
     service
     |> PreviewUrl.generate_preview_url("http://localhost")

@@ -97,7 +97,7 @@ preview_host =
       if config_env() in [:dev, :test] do
         "preview.localhost"
       else
-        raise "PREVIEW_HOST must be set in production to a hostname separate from APP_HOST"
+        nil
       end
 
     value ->
@@ -116,7 +116,7 @@ preview_host =
       value
   end
 
-if String.downcase(String.trim_trailing(host, ".")) == preview_host do
+if preview_host && String.downcase(String.trim_trailing(host, ".")) == preview_host do
   raise "PREVIEW_HOST must use a different origin from APP_HOST"
 end
 

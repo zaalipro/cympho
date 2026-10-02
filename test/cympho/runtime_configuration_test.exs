@@ -206,6 +206,24 @@ defmodule Cympho.RuntimeConfigurationTest do
     assert Keyword.fetch!(cympho, :runtime_admission)[:max_total_runs] == expected_total
   end
 
+  test "production config succeeds when PREVIEW_HOST is unset and disables previews" do
+    config = read_runtime_config(%{"PREVIEW_HOST" => nil})
+    cympho = Keyword.fetch!(config, :cympho)
+    assert Keyword.fetch!(cympho, :preview_host) == nil
+  end
+
+  test "production config treats empty PREVIEW_HOST as disabled" do
+    config = read_runtime_config(%{"PREVIEW_HOST" => ""})
+    cympho = Keyword.fetch!(config, :cympho)
+    assert Keyword.fetch!(cympho, :preview_host) == nil
+  end
+
+  test "production config rejects PREVIEW_HOST matching APP_HOST when set" do
+    assert_raise RuntimeError, ~r/PREVIEW_HOST must use a different origin from APP_HOST/, fn ->
+      read_runtime_config(%{"PREVIEW_HOST" => "cympho.example.test"})
+    end
+  end
+
   defp read_runtime_config(overrides, environment \\ :prod) do
     names = Map.keys(@runtime_env) ++ @profile_env
     previous = Map.new(names, &{&1, System.get_env(&1)})

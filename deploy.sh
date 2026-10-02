@@ -36,7 +36,6 @@ DEPLOY_TARGET="${DEPLOY_USER}@${DEPLOY_HOST}"
 APP_NAME="${CYMPHO_APP_NAME:-cympho}"
 APP_USER="${CYMPHO_APP_USER:-cympho}"
 DOMAIN="${CYMPHO_DOMAIN:-cympho.llmotions.com}"
-PREVIEW_DOMAIN="${CYMPHO_PREVIEW_DOMAIN:-preview.${DOMAIN}}"
 APP_PORT="${CYMPHO_APP_PORT:-4000}"
 DB_PORT="${CYMPHO_DB_PORT:-5432}"
 DEPLOY_ROOT="${CYMPHO_DEPLOY_ROOT:-/opt/cympho}"
@@ -92,12 +91,12 @@ Usage: ./deploy.sh [--run-tests]
   --run-tests   Run 'mix test' locally before deploying (default: skip).
 
 TLS + routing are handled by the host's nginx; certbot issues/renews one cert
-for ${DOMAIN} and the isolated preview origin ${PREVIEW_DOMAIN} (webroot
-/var/www/certbot, same pattern as the other sites). Point both DNS names here.
+for ${DOMAIN} (webroot /var/www/certbot, same pattern as the other sites). Point
+DNS here. Production previews are disabled; only ${DOMAIN} is served.
 
 Environment overrides (CYMPHO_-namespaced win over generic): CYMPHO_DEPLOY_HOST,
-CYMPHO_DEPLOY_USER, CYMPHO_DEPLOY_PORT, CYMPHO_DOMAIN, CYMPHO_PREVIEW_DOMAIN,
-CYMPHO_DB_PORT, CYMPHO_CERTBOT_EMAIL, CYMPHO_SKIP_HOST_CHECK.
+CYMPHO_DEPLOY_USER, CYMPHO_DEPLOY_PORT, CYMPHO_DOMAIN, CYMPHO_DB_PORT,
+CYMPHO_CERTBOT_EMAIL, CYMPHO_SKIP_HOST_CHECK.
 
 This checked-in systemd unit is fixed to app/service 'cympho', user 'cympho',
 /opt/cympho, /etc/cympho.env, and port 4000. Overrides for those fixed values
@@ -158,10 +157,6 @@ valid_hostname "${DEPLOY_HOST}" || {
 valid_hostname "${DOMAIN}" || {
   echo "CYMPHO_DOMAIN must be a bare hostname." >&2; exit 1;
 }
-if ! valid_hostname "${PREVIEW_DOMAIN}" || [[ "${PREVIEW_DOMAIN}" == "${DOMAIN}" ]]; then
-  echo "CYMPHO_PREVIEW_DOMAIN must be a distinct bare hostname." >&2
-  exit 1
-fi
 valid_port "${DEPLOY_PORT}" || { echo "CYMPHO_DEPLOY_PORT must be 1-65535." >&2; exit 1; }
 valid_port "${APP_PORT}" || { echo "CYMPHO_APP_PORT must be 1-65535." >&2; exit 1; }
 valid_port "${DB_PORT}" || { echo "CYMPHO_DB_PORT must be 1-65535." >&2; exit 1; }
@@ -1468,22 +1463,22 @@ validate_live_snapshot '${DB_ENV_FILE}' db-env-file
 
 if _sudo test -f ${ENV_FILE}; then
   _sudo awk \
-    -v app_host='${DOMAIN}' -v preview_host='${PREVIEW_DOMAIN}' \
+    -v app_host='${DOMAIN}' \
     -v port='${APP_PORT}' -v bind_ip='127.0.0.1' \
     -v uploads='${UPLOADS_DIR}' -v spool='${IMPORT_SPOOL_DIR}' \
     -v proxies='127.0.0.1,::1' '
     BEGIN {
       keys[1]="APP_HOST"; vals[1]=app_host
-      keys[2]="PREVIEW_HOST"; vals[2]=preview_host
-      keys[3]="PORT"; vals[3]=port
-      keys[4]="HTTP_BIND_IP"; vals[4]=bind_ip
-      keys[5]="CYMPHO_UPLOADS_DIR"; vals[5]=uploads
-      keys[6]="CYMPHO_IMPORT_SPOOL_DIR"; vals[6]=spool
-      keys[7]="CYMPHO_TRUSTED_PROXY_IPS"; vals[7]=proxies
+      keys[2]="PORT"; vals[2]=port
+      keys[3]="HTTP_BIND_IP"; vals[3]=bind_ip
+      keys[4]="CYMPHO_UPLOADS_DIR"; vals[4]=uploads
+      keys[5]="CYMPHO_IMPORT_SPOOL_DIR"; vals[5]=spool
+      keys[6]="CYMPHO_TRUSTED_PROXY_IPS"; vals[6]=proxies
     }
     {
+      if (index(\$0, "PREVIEW_HOST") == 1) next
       matched=0
-      for (i=1; i<=7; i++) {
+      for (i=1; i<=6; i++) {
         if (index(\$0, keys[i] "=") == 1) {
           if (!seen[i]) print keys[i] "=" vals[i]
           seen[i]=1; matched=1; break
@@ -1491,7 +1486,7 @@ if _sudo test -f ${ENV_FILE}; then
       }
       if (!matched) print
     }
-    END { for (i=1; i<=7; i++) if (!seen[i]) print keys[i] "=" vals[i] }
+    END { for (i=1; i<=6; i++) if (!seen[i]) print keys[i] "=" vals[i] }
   ' ${ENV_FILE} > "\$env_candidate"
   if _sudo test -f ${DB_ENV_FILE}; then
     _sudo cat ${DB_ENV_FILE} > "\$db_candidate"
@@ -1507,13 +1502,12 @@ else
   db_exists=1
   cat > "\$db_candidate" <<DBENV
 POSTGRES_USER=cympho
-POSTGRES_PASSWORD=\${DBPASS}
+POSTGRES_PASSWORD=**********
 POSTGRES_DB=cympho
 DB_PUBLISH_PORT=${DB_PORT}
 DBENV
   cat > "\$env_candidate" <<APPENV
 APP_HOST=${DOMAIN}
-PREVIEW_HOST=${PREVIEW_DOMAIN}
 PORT=${APP_PORT}
 HTTP_BIND_IP=127.0.0.1
 CYMPHO_TRUSTED_PROXY_IPS=127.0.0.1,::1
@@ -1938,12 +1932,10 @@ if [[ "${local_ok}" != "1" ]]; then
 fi
 echo "Local health OK."
 
-step "Configuring nginx site + TLS (certbot) for ${DOMAIN} and ${PREVIEW_DOMAIN}"
+step "Configuring nginx site + TLS (certbot) for ${DOMAIN}"
 run_remote_script <<EOF || rollback_release "Failed to configure nginx/TLS"
 site_avail=/etc/nginx/sites-available/${DOMAIN}
 site_enabled=/etc/nginx/sites-enabled/${DOMAIN}
-preview_site_avail=/etc/nginx/sites-available/${PREVIEW_DOMAIN}
-preview_site_enabled=/etc/nginx/sites-enabled/${PREVIEW_DOMAIN}
 
 # Preserve any certbot-managed existing vhost. New installs start HTTP-only;
 # certbot upgrades both isolated hostnames after nginx accepts the config.
@@ -1983,70 +1975,23 @@ NGX
   rm -f "\$tmp"
 fi
 
-# Create the preview HTTP vhost independently. Copying the primary file is
-# unsafe on upgrades because certbot may already have added primary-host TLS
-# blocks and redirects to it. Preserve an existing certbot-managed preview
-# file, but always reconcile its enabled symlink below.
-if ! _sudo test -f "\$preview_site_avail"; then
-  tmp=\$(mktemp)
-  cat > "\$tmp" <<'NGX'
-# __HOST__ -> Phoenix preview proxy on 127.0.0.1:__PORT__ (managed by cympho deploy.sh)
-server {
-    listen 80;
-    listen [::]:80;
-    server_name __HOST__;
-    location /.well-known/acme-challenge/ { root /var/www/certbot; }
-
-    client_max_body_size 25m;
-
-    location / {
-        proxy_pass http://127.0.0.1:__PORT__;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 86400;
-        proxy_send_timeout 86400;
-        proxy_buffering off;
-    }
-
-    access_log /var/log/nginx/cympho-preview-access.log;
-    error_log /var/log/nginx/cympho-preview-error.log;
-}
-NGX
-  sed -i "s|__HOST__|${PREVIEW_DOMAIN}|g; s|__PORT__|${APP_PORT}|g" "\$tmp"
-  _sudo install -m 0644 "\$tmp" "\$preview_site_avail"
-  rm -f "\$tmp"
-fi
+# Clean up legacy preview site symlink if present
+_sudo rm -f "/etc/nginx/sites-enabled/preview.${DOMAIN}"
 
 _sudo ln -sfn "\$site_avail" "\$site_enabled"
-_sudo ln -sfn "\$preview_site_avail" "\$preview_site_enabled"
 _sudo nginx -t
 _sudo systemctl reload nginx
 
-# Existing single-host certificates are expanded in place. Inspecting the SAN
-# avoids needless renewal attempts and rate-limit pressure on later deploys.
 cert=/etc/letsencrypt/live/${DOMAIN}/fullchain.pem
-if _sudo test -f "\$cert" &&
-   _sudo openssl x509 -in "\$cert" -noout -ext subjectAltName 2>/dev/null |
-     grep -Fq "DNS:${PREVIEW_DOMAIN}"; then
-  echo "Certificate already covers ${DOMAIN} and ${PREVIEW_DOMAIN}."
+certbot_args=""
+if _sudo test -f "\$cert"; then
+  echo "Certificate already covers ${DOMAIN}."
 else
-  if _sudo test -f "\$cert"; then
-    certbot_args="--cert-name ${DOMAIN} --expand"
+  if _sudo certbot --nginx \$certbot_args -d ${DOMAIN} --non-interactive --agree-tos -m ${CERTBOT_EMAIL} --redirect; then
+    echo "Certificate now covers ${DOMAIN}."
   else
-    certbot_args=""
-  fi
-
-  if _sudo certbot --nginx \$certbot_args -d ${DOMAIN} -d ${PREVIEW_DOMAIN} --non-interactive --agree-tos -m ${CERTBOT_EMAIL} --redirect; then
-    echo "Certificate now covers ${DOMAIN} and ${PREVIEW_DOMAIN}."
-  else
-    echo "WARNING: certbot failed (both DNS names must point here)." >&2
-    echo "         Existing primary TLS remains intact; re-run after preview DNS propagates." >&2
+    echo "WARNING: certbot failed (DNS name must point here)." >&2
+    echo "         Existing primary TLS remains intact; re-run after DNS propagates." >&2
   fi
 fi
 EOF

@@ -249,7 +249,6 @@ defmodule Cympho.Diagnostics do
   defp config_checks(environment, env, callbacks) do
     required = %{
       "APP_HOST" => &hostname?/1,
-      "PREVIEW_HOST" => &hostname?/1,
       "DATABASE_URL" => &present?/1,
       "SECRET_KEY_BASE" => &minimum_bytes?(&1, 64),
       "LIVE_VIEW_SALT" => &minimum_bytes?(&1, 16),
@@ -281,8 +280,9 @@ defmodule Cympho.Diagnostics do
         if(environment == :prod, do: nil, else: "preview.localhost")
 
     origins_valid? =
-      hostname?(app_host) and hostname?(preview_host) and
-        normalize_host(app_host) != normalize_host(preview_host)
+      hostname?(app_host) and
+        (is_nil(preview_host) or
+           (hostname?(preview_host) and normalize_host(app_host) != normalize_host(preview_host)))
 
     origin_status = if origins_valid?, do: :pass, else: :fail
 
@@ -315,15 +315,31 @@ defmodule Cympho.Diagnostics do
         "config",
         origin_status,
         if(origin_status == :pass,
-          do: "Application and preview origins are distinct valid hostnames.",
+          do:
+            if(is_binary(preview_host) and preview_host != "",
+              do: "Application and preview origins are distinct valid hostnames.",
+              else: "Application origin is a valid hostname; production previews are disabled."
+            ),
           else: "Application and preview origins must be distinct valid hostnames."
         ),
         %{
-          configured: present?(app_host) and present?(preview_host),
-          valid: hostname?(app_host) and hostname?(preview_host),
+          configured:
+            if(is_binary(preview_host) and preview_host != "",
+              do: present?(app_host) and present?(preview_host),
+              else: present?(app_host)
+            ),
+          valid:
+            if(is_binary(preview_host) and preview_host != "",
+              do: hostname?(app_host) and hostname?(preview_host),
+              else: hostname?(app_host)
+            ),
           distinct:
-            hostname?(app_host) and hostname?(preview_host) and
-              normalize_host(app_host) != normalize_host(preview_host)
+            if(is_binary(preview_host) and preview_host != "",
+              do:
+                hostname?(app_host) and hostname?(preview_host) and
+                  normalize_host(app_host) != normalize_host(preview_host),
+              else: true
+            )
         },
         if(origin_status == :fail,
           do: "Set APP_HOST and PREVIEW_HOST to different bare hostnames."

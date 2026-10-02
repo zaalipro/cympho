@@ -71,7 +71,7 @@ defmodule Cympho.ReleaseOperatorIntegrationTest do
 
     assert @deploy_script =~ "CYMPHO_SERVICE_NAME must be a simple systemd service name."
     assert @deploy_script =~ "CYMPHO_DEPLOY_ROOT must be a safe absolute path."
-    assert @deploy_script =~ "CYMPHO_PREVIEW_DOMAIN must be a distinct bare hostname."
+    refute @deploy_script =~ "CYMPHO_PREVIEW_DOMAIN"
 
     assert @deploy_script =~
              "CYMPHO_DEPLOY_USER must differ from the untrusted application service user."

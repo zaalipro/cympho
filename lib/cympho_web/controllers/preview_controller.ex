@@ -16,14 +16,20 @@ defmodule CymphoWeb.PreviewController do
   @forwarded_resp_headers ~w(accept-ranges cache-control content-range content-type etag last-modified)
 
   def proxy(conn, %{"service_id" => service_id, "token" => token}) do
-    case capability_preview_service(service_id, token) do
-      {:ok, service} ->
-        proxy_to_service(conn, service)
+    if PreviewUrl.preview_enabled?() do
+      case capability_preview_service(service_id, token) do
+        {:ok, service} ->
+          proxy_to_service(conn, service)
 
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Runtime service not found"})
+        {:error, :not_found} ->
+          conn
+          |> put_status(:not_found)
+          |> json(%{error: "Runtime service not found"})
+      end
+    else
+      conn
+      |> put_status(:not_found)
+      |> json(%{error: "Preview proxy is disabled"})
     end
   end
 
@@ -219,7 +225,8 @@ defmodule CymphoWeb.PreviewController do
             status: service.status,
             port: service.port,
             preview_url: preview_url,
-            target_url: PreviewUrl.get_target_url(service)
+            target_url:
+              if(PreviewUrl.preview_enabled?(), do: PreviewUrl.get_target_url(service), else: nil)
           }
         })
 

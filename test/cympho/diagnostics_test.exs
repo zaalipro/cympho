@@ -63,6 +63,19 @@ defmodule Cympho.DiagnosticsTest do
     refute Jason.encode!(report) =~ String.duplicate("a", 32)
   end
 
+  test "production diagnostics pass when PREVIEW_HOST is absent", %{storage_dir: storage_dir} do
+    env = healthy_env(storage_dir) |> Map.delete("PREVIEW_HOST")
+    report = Diagnostics.run(callbacks: healthy_callbacks(storage_dir, env: env))
+
+    runtime_check = find_check(report, "config.runtime")
+    assert runtime_check.status == :pass
+    refute "PREVIEW_HOST" in runtime_check.details.missing
+
+    origin_check = find_check(report, "config.origins")
+    assert origin_check.status == :pass
+    assert origin_check.details.distinct == true
+  end
+
   test "never returns raw origin or upload path values", %{storage_dir: storage_dir} do
     origin_sentinel =
       @sentinel |> String.downcase() |> String.replace("_", "") |> Kernel.<>(".example.test")
