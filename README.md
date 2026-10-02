@@ -298,15 +298,21 @@ Prerequisites are pinned in `.tool-versions`:
 
 - Elixir `1.19.5-otp-28`
 - Erlang `28.4.3`
-- PostgreSQL with the local credentials expected by `config/dev.exs`
+- PostgreSQL on `localhost:5432` (`cympho_dev` for dev, `cympho_test` for test; credentials in `config/dev.exs` and `config/test.exs`)
+- Native execution only: Docker is not required for local development, test suites, or validation gates.
 
 ```bash
 mix setup
-mix phx.server
+PORT=4329 mix phx.server
 ```
 
-Open [http://localhost:4329](http://localhost:4329). Set `PORT=4000` if you
-prefer the conventional Phoenix development port.
+Open [http://localhost:4329](http://localhost:4329). Cympho dev configuration defaults to port `4329` (`config/dev.exs`). Set `PORT=4000` if you prefer the conventional Phoenix development port.
+
+Health check:
+
+```bash
+curl -fsS http://localhost:4329/api/health
+```
 
 For local development, use the dev owner shortcut:
 
@@ -461,6 +467,24 @@ mix test test/path/to_test.exs    # Run one test file
 mix format                        # Format Elixir code
 mix assets.build                  # Build dev assets
 mix assets.deploy                 # Build production assets
+PORT=4329 mix phx.server          # Start dev server on port 4329
+```
+
+## Programmatic Validation Gates
+
+The codebase enforces strict compilation, formatting, test, and static analysis gates:
+
+```bash
+mix format --check-formatted      # Verify Elixir source code formatting
+mix compile --warnings-as-errors  # Compile with warnings treated as fatal errors
+mix test                          # Run full test suite (auto-migrates test DB)
+mix credo                         # Run Credo static code analysis (informational check)
+```
+
+Health endpoint check against a running instance:
+
+```bash
+curl -fsS http://localhost:4329/api/health
 ```
 
 ## Production Notes
@@ -507,6 +531,7 @@ Background execution should be enabled deliberately in production, with adapter 
 ## Documentation
 
 - [`AGENTS.md`](AGENTS.md): repository guidance for AI coding agents
+- [`docs/ARCHITECTURE_REVIEW.md`](docs/ARCHITECTURE_REVIEW.md): architecture review deliverable, candidate triage, bounded simplifications, and review scope limits
 - [`docs/QUICKSTART.md`](docs/QUICKSTART.md): safe local bootstrap and first controlled autonomy smoke
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md): production configuration, runtime controls, backup, and incident response
 - [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md): opt-in OTLP tracing, correlation fields, and redaction contract

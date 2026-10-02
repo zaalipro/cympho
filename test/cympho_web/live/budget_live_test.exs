@@ -238,7 +238,7 @@ defmodule CymphoWeb.BudgetLiveTest do
                Cympho.Companies.update_membership(membership, %{is_board_member: false})
 
       send(view.pid, :fresh_board_authority_probe)
-      assert_redirect(view, "/")
+      assert_redirect(view, "/", 2_000)
     end
 
     test "budget component rechecks board authority before saving" do

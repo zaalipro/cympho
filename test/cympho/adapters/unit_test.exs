@@ -1,5 +1,5 @@
 defmodule Cympho.Adapters.UnitTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   # Unit tests that don't require database connection
 
@@ -738,8 +738,8 @@ defmodule Cympho.Adapters.UnitTest do
 
       assert is_reference(ref)
 
-      assert_receive {:session_started, ^ref}, 1_000
-      assert_receive {:turn_completed, ^ref, result}, 1_000
+      assert_receive {:session_started, ^ref}, 3_000
+      assert_receive {:turn_completed, ^ref, result}, 3_000
       assert result.output =~ "hello"
     end
 

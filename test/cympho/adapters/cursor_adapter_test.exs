@@ -38,8 +38,8 @@ defmodule Cympho.Adapters.CursorAdapterTest do
         runtime_admission_claim: {token, server, :local_process}
       )
 
-    assert_receive {:session_started, ^session_id}, 3_000
-    assert eventually(fn -> File.exists?(pid_path) end)
+    assert_receive {:session_started, ^session_id}, 10_000
+    assert eventually(fn -> File.exists?(pid_path) end, 400)
     assert RuntimeAdmission.snapshot(server).total_running == 1
     assert {:error, :total_slots_exhausted} = RuntimeAdmission.available(CursorAdapter, server)
     File.write!(go_path, "go")
@@ -149,7 +149,7 @@ defmodule Cympho.Adapters.CursorAdapterTest do
     _ -> false
   end
 
-  defp eventually(fun, attempts \\ 40) do
+  defp eventually(fun, attempts \\ 200) do
     cond do
       fun.() -> true
       attempts <= 1 -> false

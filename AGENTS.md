@@ -44,7 +44,7 @@ mix test                     # Run all tests (auto creates/migrates test DB)
 mix test test/path/to_test.exs       # Run a single test file
 mix test test/path/to_test.exs:123   # Run single test at line 123
 mix format                   # Format code
-mix phx.server               # Start dev server (port 4000)
+mix phx.server               # Start dev server (default port 4329)
 iex -S mix phx.server        # Start server with IEx shell
 mix assets.build             # Build CSS/JS for dev
 mix assets.deploy            # Build + minify assets for production

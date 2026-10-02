@@ -1181,8 +1181,7 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       company: company,
       issue: issue
     } do
-      ensure_dispatcher_for_db_tests()
-      dispatcher = Process.whereis(Dispatcher)
+      dispatcher = ensure_dispatcher_for_db_tests()
       # Shared sandbox covers most cases; allow is belt-and-suspenders when
       # the dispatcher GenServer predates this test's owner.
       Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), dispatcher)
@@ -1254,8 +1253,7 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       company: company,
       issue: issue
     } do
-      ensure_dispatcher_for_db_tests()
-      dispatcher = Process.whereis(Dispatcher)
+      dispatcher = ensure_dispatcher_for_db_tests()
       Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), dispatcher)
 
       {:ok, checked_out} = Issues.checkout_issue(issue, agent)
@@ -1318,8 +1316,7 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       company: company,
       issue: issue
     } do
-      ensure_dispatcher_for_db_tests()
-      dispatcher = Process.whereis(Dispatcher)
+      dispatcher = ensure_dispatcher_for_db_tests()
       Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), dispatcher)
 
       {:ok, checked_out} = Issues.checkout_issue(issue, agent)
@@ -1418,8 +1415,7 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       company: company,
       issue: issue
     } do
-      ensure_dispatcher_for_db_tests()
-      dispatcher = Process.whereis(Dispatcher)
+      dispatcher = ensure_dispatcher_for_db_tests()
       Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), dispatcher)
 
       {:ok, checked_out} = Issues.checkout_issue(issue, agent)
@@ -1945,8 +1941,18 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
   end
 
   defp ensure_dispatcher_for_db_tests do
-    unless Process.whereis(Dispatcher) do
-      {:ok, _} = Dispatcher.start_link([])
+    case Process.whereis(Dispatcher) do
+      nil ->
+        {:ok, _} = Dispatcher.start_link([])
+        Process.whereis(Dispatcher)
+
+      pid ->
+        if Process.alive?(pid) do
+          pid
+        else
+          {:ok, _} = Dispatcher.start_link([])
+          Process.whereis(Dispatcher)
+        end
     end
   end
 end

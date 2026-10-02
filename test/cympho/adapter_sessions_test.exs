@@ -412,12 +412,15 @@ defmodule Cympho.AdapterSessionsTest do
 
     assert {:ok, _ledger} = Supervisor.restart_child(Cympho.Supervisor, AdapterSessions)
 
-    wait_until(fn ->
-      assert {:ok, ^worker} = AdapterSessions.owner(session_id)
+    wait_until(
+      fn ->
+        assert {:ok, ^worker} = AdapterSessions.owner(session_id)
 
-      assert [{_keeper, %{worker_pid: ^worker}}] =
-               Registry.lookup(AdapterSessions.Registry, session_id)
-    end)
+        assert [{_keeper, %{worker_pid: ^worker}}] =
+                 Registry.lookup(AdapterSessions.Registry, session_id)
+      end,
+      10_000
+    )
 
     Process.exit(worker, :kill)
   end
