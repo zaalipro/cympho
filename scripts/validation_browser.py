@@ -107,7 +107,11 @@ def start(lock):
         (run_root / name).mkdir(mode=0o700)
     # Do not inherit provider/proxy credentials, telemetry, storage, dev DB,
     # shell startup files, or arbitrary ERL_FLAGS. Test DB credentials only.
-    env = {key: os.environ[key] for key in ("PATH", "LANG") if key in os.environ}
+    env = {
+        key: os.environ[key]
+        for key in ("PATH", "LANG", "MIX_HOME", "MIX_ARCHIVES")
+        if key in os.environ
+    }
     for key in ("TEST_DB_USER", "TEST_DB_PASSWORD"):
         if key in os.environ:
             env[key] = os.environ[key]
@@ -146,7 +150,7 @@ def start(lock):
                   flush=True)
             next_pressure = 0
             while child.poll() is None and not stopped:
-                if time.monotonic() >= deadline - 12:
+                if time.monotonic() >= deadline - 16:
                     break
                 if time.monotonic() >= next_pressure:
                     pressure()
@@ -154,16 +158,22 @@ def start(lock):
                 time.sleep(0.2)
     finally:
         if child is not None:
+            # Let the fixture rollback before any OS signal can stop the VM.
+            (run_root / "stop").touch()
+            try:
+                child.wait(timeout=4)
+            except subprocess.TimeoutExpired:
+                pass
             reap(child)
         clean = run_root.joinpath("cleanup.ok").is_file()
         result = {**state, "sandbox_cleanup_verified": clean,
                   "exit_code": child.returncode if child else None}
         (ROOT / "last.json").write_text(json.dumps(result))
         (ROOT / "active.json").unlink(missing_ok=True)
-        if clean:
+        if clean and child.returncode == 0:
             shutil.rmtree(run_root)
         else:
-            print(f"CLEANUP_UNVERIFIED private diagnostics retained at {run_root}",
+            print(f"Private startup/cleanup diagnostics retained at {run_root}",
                   file=sys.stderr)
     if not clean:
         raise RuntimeError("Sandbox cleanup needs independent verification")

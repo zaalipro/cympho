@@ -1,6 +1,7 @@
 # Executed only by scripts/validation_browser.py, never by test compilation.
 # Passive seeded runs are UI fixtures, not real process or progress evidence.
 defmodule Cympho.BrowserFixtureServer do
+  require Logger
   alias Cympho.{Agents, Authentication, Companies, Inbox, Issues, Projects, Repo, Workspaces}
   alias Cympho.Comments.Comment
   alias Cympho.HeartbeatEngine.Run
@@ -24,6 +25,7 @@ defmodule Cympho.BrowserFixtureServer do
   ]
 
   def run do
+    Logger.configure(level: :warning)
     cfg = Application.fetch_env!(:cympho, Repo)
     root = System.fetch_env!("CYMPHO_BROWSER_ROOT")
 
@@ -101,23 +103,16 @@ defmodule Cympho.BrowserFixtureServer do
     baseline = Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, &counts/0)
     unless Enum.all?(baseline, &(&1 == 0)), do: raise("test fixture tables must be empty")
     owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Repo, shared: true, ownership_timeout: 240_000)
-    owner_pid = self()
-    System.trap_signal(:sigterm, :browser_fixture_term, fn -> send(owner_pid, :stop) end)
 
     try do
+      {:ok, _} = Supervisor.start_child(supervisor, CymphoWeb.Endpoint)
       fixtures = seed(root)
       File.write!(Path.join(root, "fixtures.json"), Jason.encode!(fixtures))
-      {:ok, _} = Supervisor.start_child(supervisor, CymphoWeb.Endpoint)
       %{status: "ready"} = Cympho.Readiness.report()
       File.write!(Path.join(root, "ready"), "127.0.0.1:4329 cympho_test passive\n")
       IO.puts("VALIDATION_SERVER_READY database=cympho_test dispatch=false port=4329")
 
-      # Graceful shutdown gets time to rollback before the wrapper deadline.
-      receive do
-        :stop -> :ok
-      after
-        180_000 -> :ok
-      end
+      wait_for_stop(root, System.monotonic_time(:millisecond) + 180_000)
     after
       Supervisor.terminate_child(supervisor, CymphoWeb.Endpoint)
       Supervisor.terminate_child(supervisor, Cympho.TaskSupervisor)
@@ -134,6 +129,14 @@ defmodule Cympho.BrowserFixtureServer do
   end
 
   defp counts, do: Enum.map(@tables, &Repo.aggregate(&1, :count))
+
+  defp wait_for_stop(root, deadline) do
+    unless File.exists?(Path.join(root, "stop")) or
+             System.monotonic_time(:millisecond) >= deadline do
+      Process.sleep(200)
+      wait_for_stop(root, deadline)
+    end
+  end
 
   defp seed(root) do
     companies =
