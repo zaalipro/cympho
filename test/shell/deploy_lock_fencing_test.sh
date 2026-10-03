@@ -249,26 +249,63 @@ import os, subprocess, time, tempfile, signal, sys
 deploy_sh = sys.argv[1]
 tmp_dir = sys.argv[2]
 
-# 1. Test signals during long owned work (SIGTERM, SIGINT, SIGHUP)
-for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
-        caller_script = os.path.join(td, "caller.sh")
-        caller_context = os.path.join(td, "context")
-        fifo = os.path.join(td, "lock.fifo")
-        os.mkfifo(fifo)
-        os.makedirs(caller_context, exist_ok=True)
+local_holders = []
+local_callers = []
 
-        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+def reap_local_all():
+    for c in local_callers:
+        if c.poll() is None:
+            try:
+                os.killpg(c.pid, signal.SIGKILL)
+            except OSError:
+                try:
+                    c.kill()
+                except OSError:
+                    pass
+            try:
+                c.wait(timeout=1.0)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+    for h in local_holders:
+        if h.poll() is None:
+            try:
+                h.kill()
+                h.wait(timeout=1.0)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
 
-        with open(caller_script, "w") as f:
-            f.write(f"""#!/usr/bin/env bash
+def local_signal_handler(signum, frame):
+    reap_local_all()
+    sys.exit(128 + signum)
+
+signal.signal(signal.SIGINT, local_signal_handler)
+signal.signal(signal.SIGTERM, local_signal_handler)
+signal.signal(signal.SIGHUP, local_signal_handler)
+
+try:
+    # 1. Test signals during long owned work (SIGTERM, SIGINT, SIGHUP)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+            caller_script = os.path.join(td, "caller.sh")
+            caller_context = os.path.join(td, "context")
+            fifo = os.path.join(td, "lock.fifo")
+            os.mkfifo(fifo)
+            os.makedirs(caller_context, exist_ok=True)
+
+            holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+            local_holders.append(holder)
+            caller = None
+
+            try:
+                with open(caller_script, "w") as f:
+                    f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
-source '{deploy_sh}'
-
 export DEPLOY_CONTEXT='{caller_context}'
 export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
 export DEPLOY_LOCK_PID={holder.pid}
+
+source '{deploy_sh}'
 
 exec 8<>'{fifo}'
 close_deploy_lock_fifo() {{
@@ -286,43 +323,59 @@ init_deploy_traps
 printf 'READY:%s\\n' "$$"
 run_owned_op command sleep 30
 """)
-        os.chmod(caller_script, 0o755)
+                os.chmod(caller_script, 0o755)
 
-        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        ready_line = caller.stdout.readline().strip()
-        assert ready_line.startswith("READY:")
-        caller_pid = int(ready_line.split(":")[1])
+                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                local_callers.append(caller)
+                ready_line = caller.stdout.readline().strip()
+                assert ready_line.startswith("READY:")
+                caller_pid = int(ready_line.split(":")[1])
 
-        t0 = time.monotonic()
-        os.kill(caller_pid, sig)
-        caller.wait(timeout=2.0)
-        elapsed = time.monotonic() - t0
-        assert elapsed <= 2.0, f"Signal {sig} release exceeded deadline: {elapsed}s"
-        assert caller.returncode != 0
+                t0 = time.monotonic()
+                os.kill(caller_pid, sig)
+                caller.wait(timeout=2.0)
+                elapsed = time.monotonic() - t0
+                assert elapsed <= 2.0, f"Signal {sig} release exceeded deadline: {elapsed}s"
+                assert caller.returncode != 0
+            finally:
+                if caller and caller.poll() is None:
+                    caller.terminate()
+                    try:
+                        caller.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        caller.kill()
+                        caller.wait(timeout=1.0)
+                if holder.poll() is None:
+                    holder.terminate()
+                    try:
+                        holder.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        holder.kill()
+                        holder.wait(timeout=1.0)
 
-        holder.terminate()
-        holder.wait(timeout=1.0)
+    # 1b. Test signals during foreground subshell / run_local_tests (SIGTERM, SIGINT, SIGHUP)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+            caller_script = os.path.join(td, "caller.sh")
+            caller_context = os.path.join(td, "context")
+            fifo = os.path.join(td, "lock.fifo")
+            os.mkfifo(fifo)
+            os.makedirs(caller_context, exist_ok=True)
 
-# 1b. Test signals during foreground subshell / run_local_tests (SIGTERM, SIGINT, SIGHUP)
-for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
-        caller_script = os.path.join(td, "caller.sh")
-        caller_context = os.path.join(td, "context")
-        fifo = os.path.join(td, "lock.fifo")
-        os.mkfifo(fifo)
-        os.makedirs(caller_context, exist_ok=True)
+            holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+            local_holders.append(holder)
+            caller = None
 
-        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
-
-        with open(caller_script, "w") as f:
-            f.write(f"""#!/usr/bin/env bash
+            try:
+                with open(caller_script, "w") as f:
+                    f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
-source '{deploy_sh}'
-
 export DEPLOY_CONTEXT='{caller_context}'
 export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
 export DEPLOY_LOCK_PID={holder.pid}
+
+source '{deploy_sh}'
 
 exec 8<>'{fifo}'
 close_deploy_lock_fifo() {{
@@ -343,43 +396,59 @@ run_local_tests() {{
 }}
 run_owned_op run_local_tests
 """)
-        os.chmod(caller_script, 0o755)
+                os.chmod(caller_script, 0o755)
 
-        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        ready_line = caller.stdout.readline().strip()
-        assert ready_line.startswith("READY:")
-        caller_pid = int(ready_line.split(":")[1])
+                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                local_callers.append(caller)
+                ready_line = caller.stdout.readline().strip()
+                assert ready_line.startswith("READY:")
+                caller_pid = int(ready_line.split(":")[1])
 
-        t0 = time.monotonic()
-        os.kill(caller_pid, sig)
-        caller.wait(timeout=2.0)
-        elapsed = time.monotonic() - t0
-        assert elapsed <= 2.0, f"Subshell signal {sig} release exceeded deadline: {elapsed}s"
-        assert caller.returncode != 0
+                t0 = time.monotonic()
+                os.kill(caller_pid, sig)
+                caller.wait(timeout=2.0)
+                elapsed = time.monotonic() - t0
+                assert elapsed <= 2.0, f"Subshell signal {sig} release exceeded deadline: {elapsed}s"
+                assert caller.returncode != 0
+            finally:
+                if caller and caller.poll() is None:
+                    caller.terminate()
+                    try:
+                        caller.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        caller.kill()
+                        caller.wait(timeout=1.0)
+                if holder.poll() is None:
+                    holder.terminate()
+                    try:
+                        holder.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        holder.kill()
+                        holder.wait(timeout=1.0)
 
-        holder.terminate()
-        holder.wait(timeout=1.0)
+    # 1c. Test signals during captured operation / command-substitution path (SIGTERM, SIGINT, SIGHUP)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+            caller_script = os.path.join(td, "caller.sh")
+            caller_context = os.path.join(td, "context")
+            fifo = os.path.join(td, "lock.fifo")
+            os.mkfifo(fifo)
+            os.makedirs(caller_context, exist_ok=True)
 
-# 1c. Test signals during captured operation / command-substitution path (SIGTERM, SIGINT, SIGHUP)
-for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
-        caller_script = os.path.join(td, "caller.sh")
-        caller_context = os.path.join(td, "context")
-        fifo = os.path.join(td, "lock.fifo")
-        os.mkfifo(fifo)
-        os.makedirs(caller_context, exist_ok=True)
+            holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+            local_holders.append(holder)
+            caller = None
 
-        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
-
-        with open(caller_script, "w") as f:
-            f.write(f"""#!/usr/bin/env bash
+            try:
+                with open(caller_script, "w") as f:
+                    f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
-source '{deploy_sh}'
-
 export DEPLOY_CONTEXT='{caller_context}'
 export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
 export DEPLOY_LOCK_PID={holder.pid}
+
+source '{deploy_sh}'
 
 exec 8<>'{fifo}'
 close_deploy_lock_fifo() {{
@@ -397,43 +466,59 @@ init_deploy_traps
 printf 'READY:%s\\n' "$$"
 run_owned_op_capture CAPTURED_VAL command sleep 30
 """)
-        os.chmod(caller_script, 0o755)
+                os.chmod(caller_script, 0o755)
 
-        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        ready_line = caller.stdout.readline().strip()
-        assert ready_line.startswith("READY:")
-        caller_pid = int(ready_line.split(":")[1])
+                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                local_callers.append(caller)
+                ready_line = caller.stdout.readline().strip()
+                assert ready_line.startswith("READY:")
+                caller_pid = int(ready_line.split(":")[1])
 
-        t0 = time.monotonic()
-        os.kill(caller_pid, sig)
-        caller.wait(timeout=2.0)
-        elapsed = time.monotonic() - t0
-        assert elapsed <= 2.0, f"Captured op signal {sig} release exceeded deadline: {elapsed}s"
-        assert caller.returncode != 0
+                t0 = time.monotonic()
+                os.kill(caller_pid, sig)
+                caller.wait(timeout=2.0)
+                elapsed = time.monotonic() - t0
+                assert elapsed <= 2.0, f"Captured op signal {sig} release exceeded deadline: {elapsed}s"
+                assert caller.returncode != 0
+            finally:
+                if caller and caller.poll() is None:
+                    caller.terminate()
+                    try:
+                        caller.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        caller.kill()
+                        caller.wait(timeout=1.0)
+                if holder.poll() is None:
+                    holder.terminate()
+                    try:
+                        holder.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        holder.kill()
+                        holder.wait(timeout=1.0)
 
-        holder.terminate()
-        holder.wait(timeout=1.0)
+    # 1d. Test cancellation escalation with TERM-resistant descendant in owned PGID
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        caller_script = os.path.join(td, "caller.sh")
+        caller_context = os.path.join(td, "context")
+        fifo = os.path.join(td, "lock.fifo")
+        pgid_file = os.path.join(td, "pgid.txt")
+        os.mkfifo(fifo)
+        os.makedirs(caller_context, exist_ok=True)
 
-# 1d. Test cancellation escalation with TERM-resistant descendant in owned PGID
-with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
-    caller_script = os.path.join(td, "caller.sh")
-    caller_context = os.path.join(td, "context")
-    fifo = os.path.join(td, "lock.fifo")
-    pgid_file = os.path.join(td, "pgid.txt")
-    os.mkfifo(fifo)
-    os.makedirs(caller_context, exist_ok=True)
+        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+        local_holders.append(holder)
+        caller = None
 
-    holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
-
-    with open(caller_script, "w") as f:
-        f.write(f"""#!/usr/bin/env bash
+        try:
+            with open(caller_script, "w") as f:
+                f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
-source '{deploy_sh}'
-
 export DEPLOY_CONTEXT='{caller_context}'
 export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
 export DEPLOY_LOCK_PID={holder.pid}
+
+source '{deploy_sh}'
 
 exec 8<>'{fifo}'
 close_deploy_lock_fifo() {{
@@ -454,61 +539,77 @@ run_term_resistant_child() {{
 }}
 run_owned_op run_term_resistant_child
 """)
-    os.chmod(caller_script, 0o755)
+            os.chmod(caller_script, 0o755)
 
-    caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    ready_line = caller.stdout.readline().strip()
-    assert ready_line.startswith("READY:")
-    caller_pid = int(ready_line.split(":")[1])
+            caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            local_callers.append(caller)
+            ready_line = caller.stdout.readline().strip()
+            assert ready_line.startswith("READY:")
+            caller_pid = int(ready_line.split(":")[1])
 
-    for _ in range(50):
-        if os.path.exists(pgid_file) and os.path.getsize(pgid_file) > 0:
-            break
-        time.sleep(0.05)
-    with open(pgid_file) as f:
-        op_pgid = int(f.read().strip())
+            for _ in range(50):
+                if os.path.exists(pgid_file) and os.path.getsize(pgid_file) > 0:
+                    break
+                time.sleep(0.05)
+            with open(pgid_file) as f:
+                op_pgid = int(f.read().strip())
 
-    t0 = time.monotonic()
-    os.kill(caller_pid, signal.SIGTERM)
-    caller.wait(timeout=3.0)
-    elapsed = time.monotonic() - t0
-    assert elapsed <= 3.0, f"TERM-resistant child escalation exceeded deadline: {elapsed}s"
-    assert caller.returncode != 0
+            t0 = time.monotonic()
+            os.kill(caller_pid, signal.SIGTERM)
+            caller.wait(timeout=3.0)
+            elapsed = time.monotonic() - t0
+            assert elapsed <= 3.0, f"TERM-resistant child escalation exceeded deadline: {elapsed}s"
+            assert caller.returncode != 0
 
-    time.sleep(0.1)
-    res = subprocess.run(["pgrep", "-g", str(op_pgid)], capture_output=True, text=True)
-    survivors = res.stdout.strip().split()
-    if survivors:
-        for s in survivors:
+            time.sleep(0.1)
+            res = subprocess.run(["pgrep", "-g", str(op_pgid)], capture_output=True, text=True)
+            survivors = res.stdout.strip().split()
+            if survivors:
+                for s in survivors:
+                    try:
+                        os.kill(int(s), signal.SIGKILL)
+                    except OSError:
+                        pass
+                raise AssertionError(f"TERM-resistant descendant survived leader exit in PGID {op_pgid}: {survivors}")
+        finally:
+            if caller and caller.poll() is None:
+                caller.terminate()
+                try:
+                    caller.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    caller.kill()
+                    caller.wait(timeout=1.0)
+            if holder.poll() is None:
+                holder.terminate()
+                try:
+                    holder.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    holder.kill()
+                    holder.wait(timeout=1.0)
+
+    # 1e. Test signals during run_remote_script_capture without subshell deferral
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+            caller_script = os.path.join(td, "caller.sh")
+            caller_context = os.path.join(td, "context")
+            fifo = os.path.join(td, "lock.fifo")
+            os.mkfifo(fifo)
+            os.makedirs(caller_context, exist_ok=True)
+
+            holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+            local_holders.append(holder)
+            caller = None
+
             try:
-                os.kill(int(s), signal.SIGKILL)
-            except OSError:
-                pass
-        raise AssertionError(f"TERM-resistant descendant survived leader exit in PGID {op_pgid}: {survivors}")
-
-    holder.terminate()
-    holder.wait(timeout=1.0)
-
-# 1e. Test signals during run_remote_script_capture without subshell deferral
-for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
-        caller_script = os.path.join(td, "caller.sh")
-        caller_context = os.path.join(td, "context")
-        fifo = os.path.join(td, "lock.fifo")
-        os.mkfifo(fifo)
-        os.makedirs(caller_context, exist_ok=True)
-
-        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
-
-        with open(caller_script, "w") as f:
-            f.write(f"""#!/usr/bin/env bash
+                with open(caller_script, "w") as f:
+                    f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
-source '{deploy_sh}'
-
 export DEPLOY_CONTEXT='{caller_context}'
 export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
 export DEPLOY_LOCK_PID={holder.pid}
+
+source '{deploy_sh}'
 
 exec 8<>'{fifo}'
 close_deploy_lock_fifo() {{
@@ -527,43 +628,60 @@ run_remote_script_capture CAPTURED_PID <<'EOF'
 echo "body"
 EOF
 """)
-        os.chmod(caller_script, 0o755)
+                os.chmod(caller_script, 0o755)
 
-        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        ready_line = caller.stdout.readline().strip()
-        assert ready_line.startswith("READY:")
-        caller_pid = int(ready_line.split(":")[1])
+                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                local_callers.append(caller)
+                ready_line = caller.stdout.readline().strip()
+                assert ready_line.startswith("READY:")
+                caller_pid = int(ready_line.split(":")[1])
 
-        t0 = time.monotonic()
-        os.kill(caller_pid, sig)
-        caller.wait(timeout=2.0)
-        elapsed = time.monotonic() - t0
-        assert elapsed <= 2.0, f"Captured remote script signal {sig} exceeded deadline: {elapsed}s"
-        assert caller.returncode != 0
+                t0 = time.monotonic()
+                os.kill(caller_pid, sig)
+                caller.wait(timeout=2.0)
+                elapsed = time.monotonic() - t0
+                assert elapsed <= 2.0, f"Captured remote script signal {sig} exceeded deadline: {elapsed}s"
+                assert caller.returncode != 0
+            finally:
+                if caller and caller.poll() is None:
+                    caller.terminate()
+                    try:
+                        caller.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        caller.kill()
+                        caller.wait(timeout=1.0)
+                if holder.poll() is None:
+                    holder.terminate()
+                    try:
+                        holder.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        holder.kill()
+                        holder.wait(timeout=1.0)
 
-        holder.terminate()
-        holder.wait(timeout=1.0)
+    # 2. Test snapshot recovery ordering (environment before unit) during interruption
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        caller_script = os.path.join(td, "caller.sh")
+        caller_context = os.path.join(td, "context")
+        order_log = os.path.join(td, "order.log")
+        fifo = os.path.join(td, "lock.fifo")
+        os.mkfifo(fifo)
+        os.makedirs(caller_context, exist_ok=True)
 
-# 2. Test snapshot recovery ordering (environment before unit) during interruption
-with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
-    caller_script = os.path.join(td, "caller.sh")
-    caller_context = os.path.join(td, "context")
-    order_log = os.path.join(td, "order.log")
-    fifo = os.path.join(td, "lock.fifo")
-    os.mkfifo(fifo)
-    os.makedirs(caller_context, exist_ok=True)
+        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+        local_holders.append(holder)
+        caller = None
 
-    holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
-
-    with open(caller_script, "w") as f:
-        f.write(f"""#!/usr/bin/env bash
+        try:
+            with open(caller_script, "w") as f:
+                f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
-source '{deploy_sh}'
-
 export DEPLOY_CONTEXT='{caller_context}'
 export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
 export DEPLOY_LOCK_PID={holder.pid}
+
+source '{deploy_sh}'
+
 export ENV_SNAPSHOT_ACTIVE=1
 export UNIT_SNAPSHOT_ACTIVE=1
 
@@ -587,51 +705,66 @@ init_deploy_traps
 printf 'READY:%s\\n' "$$"
 run_owned_op command sleep 30
 """)
-    os.chmod(caller_script, 0o755)
+            os.chmod(caller_script, 0o755)
 
-    caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    ready_line = caller.stdout.readline().strip()
-    assert ready_line.startswith("READY:")
-    caller_pid = int(ready_line.split(":")[1])
+            caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            local_callers.append(caller)
+            ready_line = caller.stdout.readline().strip()
+            assert ready_line.startswith("READY:")
+            caller_pid = int(ready_line.split(":")[1])
 
-    t0 = time.monotonic()
-    os.kill(caller_pid, signal.SIGTERM)
-    caller.wait(timeout=2.0)
-    elapsed = time.monotonic() - t0
-    assert elapsed <= 2.0
+            t0 = time.monotonic()
+            os.kill(caller_pid, signal.SIGTERM)
+            caller.wait(timeout=2.0)
+            elapsed = time.monotonic() - t0
+            assert elapsed <= 2.0
 
-    holder.terminate()
-    holder.wait(timeout=1.0)
+            with open(order_log) as f:
+                order = f.read().splitlines()
+            assert order == ["RESTORE_ENV", "RESTORE_UNITS"], f"Unexpected restore order: {order}"
+        finally:
+            if caller and caller.poll() is None:
+                caller.terminate()
+                try:
+                    caller.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    caller.kill()
+                    caller.wait(timeout=1.0)
+            if holder.poll() is None:
+                holder.terminate()
+                try:
+                    holder.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    holder.kill()
+                    holder.wait(timeout=1.0)
 
-    with open(order_log) as f:
-        order = f.read().splitlines()
-    assert order == ["RESTORE_ENV", "RESTORE_UNITS"], f"Unexpected restore order: {order}"
+    # 2b. Test remote settlement opens lock through privileged boundary and propagates error
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        caller_script = os.path.join(td, "caller.sh")
+        caller_context = os.path.join(td, "context")
+        fifo = os.path.join(td, "lock.fifo")
+        op_lock = os.path.join(td, "operation.lock")
+        os.mkfifo(fifo)
+        os.makedirs(caller_context, exist_ok=True)
+        with open(op_lock, "w") as f:
+            f.write("")
 
-# 2b. Test remote settlement opens lock through privileged boundary and propagates error
-with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
-    caller_script = os.path.join(td, "caller.sh")
-    caller_context = os.path.join(td, "context")
-    fifo = os.path.join(td, "lock.fifo")
-    op_lock = os.path.join(td, "operation.lock")
-    os.mkfifo(fifo)
-    os.makedirs(caller_context, exist_ok=True)
-    with open(op_lock, "w") as f:
-        f.write("")
+        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+        local_holders.append(holder)
 
-    holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
-
-    with open(caller_script, "w") as f:
-        f.write(f"""#!/usr/bin/env bash
+        try:
+            with open(caller_script, "w") as f:
+                f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
 export CYMPHO_DEPLOY_SETTLE_REMOTE=1
-source '{deploy_sh}'
-
 export DEPLOY_CONTEXT='{caller_context}'
 export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
 export DEPLOY_LOCK_PID={holder.pid}
 export DEPLOY_TARGET='dummy-target'
 export DEPLOY_OPERATION_LOCK='{op_lock}'
+
+source '{deploy_sh}'
 
 # Mock run_ssh to verify privileged invocation and propagate errors
 run_ssh() {{
@@ -661,35 +794,42 @@ if settle_remote_operation; then
 fi
 echo "SETTLE_OK"
 """)
-    os.chmod(caller_script, 0o755)
-    caller = subprocess.run([caller_script], capture_output=True, text=True)
-    assert caller.returncode == 0, f"Settlement test failed: {caller.stderr}\n{caller.stdout}"
-    assert "SETTLE_OK" in caller.stdout
+            os.chmod(caller_script, 0o755)
+            caller = subprocess.run([caller_script], capture_output=True, text=True)
+            assert caller.returncode == 0, f"Settlement test failed: {caller.stderr}\n{caller.stdout}"
+            assert "SETTLE_OK" in caller.stdout
+        finally:
+            if holder.poll() is None:
+                holder.terminate()
+                try:
+                    holder.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    holder.kill()
+                    holder.wait(timeout=1.0)
 
-    holder.terminate()
-    holder.wait(timeout=1.0)
+    # 2c. Test failed initial previous-release discovery aborts rather than assuming first deployment
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        caller_script = os.path.join(td, "caller.sh")
+        caller_context = os.path.join(td, "context")
+        fifo = os.path.join(td, "lock.fifo")
+        os.mkfifo(fifo)
+        os.makedirs(caller_context, exist_ok=True)
 
-# 2c. Test failed initial previous-release discovery aborts rather than assuming first deployment
-with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
-    caller_script = os.path.join(td, "caller.sh")
-    caller_context = os.path.join(td, "context")
-    fifo = os.path.join(td, "lock.fifo")
-    os.mkfifo(fifo)
-    os.makedirs(caller_context, exist_ok=True)
+        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+        local_holders.append(holder)
 
-    holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
-
-    with open(caller_script, "w") as f:
-        f.write(f"""#!/usr/bin/env bash
+        try:
+            with open(caller_script, "w") as f:
+                f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
-source '{deploy_sh}'
-
 export DEPLOY_CONTEXT='{caller_context}'
 export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
 export DEPLOY_LOCK_PID={holder.pid}
 export DEPLOY_TARGET='dummy-target'
 export CURRENT_LINK='/opt/cympho/current'
+
+source '{deploy_sh}'
 
 # Mock run_ssh_capture to simulate discovery failure
 run_ssh_capture() {{
@@ -704,33 +844,41 @@ if ! run_ssh_capture PREVIOUS_RELEASE "if sudo test -L '${{CURRENT_LINK}}'; then
 fi
 echo "DISCOVERY_UNEXPECTEDLY_SUCCEEDED"
 """)
-    os.chmod(caller_script, 0o755)
-    caller = subprocess.run([caller_script], capture_output=True, text=True)
-    assert caller.returncode == 1, f"Expected abort on discovery failure: {caller.stderr}\n{caller.stdout}"
-    assert "Failed to discover current release" in caller.stderr
+            os.chmod(caller_script, 0o755)
+            caller = subprocess.run([caller_script], capture_output=True, text=True)
+            assert caller.returncode == 1, f"Expected abort on discovery failure: {caller.stderr}\n{caller.stdout}"
+            assert "Failed to discover current release" in caller.stderr
+        finally:
+            if holder.poll() is None:
+                holder.terminate()
+                try:
+                    holder.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    holder.kill()
+                    holder.wait(timeout=1.0)
 
-    holder.terminate()
-    holder.wait(timeout=1.0)
+    # 3. Test transport loss (holder process termination triggers monitor signal to caller)
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        caller_script = os.path.join(td, "caller.sh")
+        caller_context = os.path.join(td, "context")
+        fifo = os.path.join(td, "lock.fifo")
+        os.mkfifo(fifo)
+        os.makedirs(caller_context, exist_ok=True)
 
-# 3. Test transport loss (holder process termination triggers monitor signal to caller)
-with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
-    caller_script = os.path.join(td, "caller.sh")
-    caller_context = os.path.join(td, "context")
-    fifo = os.path.join(td, "lock.fifo")
-    os.mkfifo(fifo)
-    os.makedirs(caller_context, exist_ok=True)
+        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+        local_holders.append(holder)
+        caller = None
 
-    holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
-
-    with open(caller_script, "w") as f:
-        f.write(f"""#!/usr/bin/env bash
+        try:
+            with open(caller_script, "w") as f:
+                f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
-source '{deploy_sh}'
-
 export DEPLOY_CONTEXT='{caller_context}'
 export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
 export DEPLOY_LOCK_PID={holder.pid}
+
+source '{deploy_sh}'
 
 exec 8<>'{fifo}'
 close_deploy_lock_fifo() {{
@@ -748,19 +896,37 @@ init_deploy_traps
 printf 'READY:%s\\n' "$$"
 run_owned_op command sleep 30
 """)
-    os.chmod(caller_script, 0o755)
+            os.chmod(caller_script, 0o755)
 
-    caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    ready_line = caller.stdout.readline().strip()
-    assert ready_line.startswith("READY:")
-    caller_pid = int(ready_line.split(":")[1])
+            caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            local_callers.append(caller)
+            ready_line = caller.stdout.readline().strip()
+            assert ready_line.startswith("READY:")
+            caller_pid = int(ready_line.split(":")[1])
 
-    t0 = time.monotonic()
-    holder.kill()
-    holder.wait()
-    caller.wait(timeout=2.0)
-    elapsed = time.monotonic() - t0
-    assert elapsed <= 2.0
+            t0 = time.monotonic()
+            holder.kill()
+            holder.wait(timeout=1.0)
+            caller.wait(timeout=2.0)
+            elapsed = time.monotonic() - t0
+            assert elapsed <= 2.0
+        finally:
+            if caller and caller.poll() is None:
+                caller.terminate()
+                try:
+                    caller.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    caller.kill()
+                    caller.wait(timeout=1.0)
+            if holder.poll() is None:
+                holder.terminate()
+                try:
+                    holder.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    holder.kill()
+                    holder.wait(timeout=1.0)
+finally:
+    reap_local_all()
 PY
 
 printf 'ok - local caller interrupt lifecycle reaps owned work and releases holder on signals and transport loss\n'
@@ -803,46 +969,103 @@ ssh_opts += [target]
 
 spawned_callers = []
 spawned_temp_dirs = []
+spawned_pgids = []
+tracked_remote_pids = []
+tracked_remote_pgids = []
 
 def reap_local_processes():
+    for pgid in spawned_pgids:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            pass
     for caller in spawned_callers:
         if caller.poll() is None:
             try:
-                os.killpg(caller.pid, signal.SIGTERM)
+                caller.terminate()
             except (OSError, ProcessLookupError):
-                try:
-                    caller.terminate()
-                except (OSError, ProcessLookupError):
-                    pass
+                pass
+    for caller in spawned_callers:
+        try:
+            caller.wait(timeout=1.0)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+    for pgid in spawned_pgids:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+    for caller in spawned_callers:
+        if caller.poll() is None:
             try:
-                caller.wait(timeout=1.0)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(caller.pid, signal.SIGKILL)
-                except (OSError, ProcessLookupError):
-                    try:
-                        caller.kill()
-                    except (OSError, ProcessLookupError):
-                        pass
-                caller.wait(timeout=1.0)
+                caller.kill()
+            except (OSError, ProcessLookupError):
+                pass
+        try:
+            caller.wait(timeout=1.0)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
 
 def cleanup_local_dirs():
     for td in spawned_temp_dirs:
-        shutil.rmtree(td, ignore_errors=True)
+        if os.path.exists(td):
+            try:
+                shutil.rmtree(td)
+            except Exception:
+                try:
+                    for root, dirs, files in os.walk(td):
+                        for d in dirs:
+                            os.chmod(os.path.join(root, d), 0o700)
+                        for f in files:
+                            os.chmod(os.path.join(root, f), 0o600)
+                    shutil.rmtree(td)
+                except Exception:
+                    pass
+            assert not os.path.exists(td), f"Local directory {td} was not removed during teardown!"
 
 def cleanup_remote():
-    # Targeted remote kill of processes associated with fixture_dir, avoiding self-matching
     cleanup_cmd = f"""
-set +e
-for pid in $(lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true); do
+set -euo pipefail
+pids="$(lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true)"
+for pid in $pids; do
   if [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ]; then
-    kill -9 "$pid" 2>/dev/null || true
+    kill -TERM "$pid" 2>/dev/null || true
   fi
+done
+for _ in $(seq 1 20); do
+  alive=0
+  for pid in $pids; do
+    if [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ] && kill -0 "$pid" 2>/dev/null; then
+      alive=1
+      break
+    fi
+  done
+  [ "$alive" -eq 0 ] && break
+  sleep 0.05
+done
+for pid in $pids; do
+  if [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ] && kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+done
+for _ in $(seq 1 20); do
+  alive=0
+  for pid in $pids; do
+    if [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ] && kill -0 "$pid" 2>/dev/null; then
+      alive=1
+      break
+    fi
+  done
+  [ "$alive" -eq 0 ] && break
+  sleep 0.05
 done
 rm -rf '{fixture_dir}'
 test ! -e '{fixture_dir}'
 """
-    subprocess.run(ssh_opts + [cleanup_cmd], capture_output=True, text=True, timeout=10)
+    res = subprocess.run(ssh_opts + [cleanup_cmd], capture_output=True, text=True, timeout=15)
+    assert res.returncode == 0, f"Remote cleanup failed: {res.stderr}\n{res.stdout}"
+    check = subprocess.run(ssh_opts + [f'test ! -e "{fixture_dir}"'], capture_output=True, text=True, timeout=5)
+    assert check.returncode == 0, f"Remote fixture directory {fixture_dir} was not removed!"
 
 def full_teardown(signum=None, frame=None):
     reap_local_processes()
@@ -850,7 +1073,8 @@ def full_teardown(signum=None, frame=None):
     try:
         cleanup_remote()
     except Exception:
-        pass
+        if signum is None:
+            raise
     if signum is not None:
         sys.exit(128 + signum)
 
@@ -858,8 +1082,9 @@ signal.signal(signal.SIGINT, full_teardown)
 signal.signal(signal.SIGTERM, full_teardown)
 signal.signal(signal.SIGHUP, full_teardown)
 
-# Setup remote fixture with explicit privilege substitutions
-setup_cmd = f"""
+try:
+    # Setup remote fixture with explicit privilege substitutions and protected executable
+    setup_cmd = f"""
 set -euo pipefail
 umask 077
 mkdir -p '{fixture_dir}/bin'
@@ -881,13 +1106,26 @@ cat >'{fixture_dir}/bin/chown' <<'EOF'
 #!/bin/bash
 exit 0
 EOF
-chmod +x '{fixture_dir}/bin/sudo' '{fixture_dir}/bin/stat' '{fixture_dir}/bin/chown'
+cat >'{fixture_dir}/bin/protected-payload' <<'EOF'
+#!/bin/bash
+set -euo pipefail
+started_marker="${{1:-}}"
+pid_file="${{2:-}}"
+if [[ -n "${{pid_file}}" ]]; then
+  pgid="$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ' || echo "$$")"
+  printf '%s:%s\\n' "$$" "${{pgid}}" > "${{pid_file}}"
+fi
+if [[ -n "${{started_marker}}" ]]; then
+  touch "${{started_marker}}"
+fi
+exec sleep 60
+EOF
+chmod +x '{fixture_dir}/bin/sudo' '{fixture_dir}/bin/stat' '{fixture_dir}/bin/chown' '{fixture_dir}/bin/protected-payload'
 touch '{fixture_dir}/session.lock' '{fixture_dir}/operation.lock'
 chmod 0600 '{fixture_dir}/session.lock' '{fixture_dir}/operation.lock'
 """
-subprocess.run(ssh_opts + [setup_cmd], check=True, timeout=10)
+    subprocess.run(ssh_opts + [setup_cmd], check=True, timeout=10)
 
-try:
     session_lock = f"{fixture_dir}/session.lock"
     operation_lock = f"{fixture_dir}/operation.lock"
     epoch_file = f"{fixture_dir}/epoch.txt"
@@ -896,9 +1134,11 @@ try:
     normal_marker = f"{fixture_dir}/normal.mutated"
     stale_marker = f"{fixture_dir}/stale.mutated"
     valid_marker = f"{fixture_dir}/valid.mutated"
+    remote_started_marker = f"{fixture_dir}/remote_payload.started"
+    remote_pid_file = f"{fixture_dir}/remote_payload.pid"
 
     def run_caller(mode="hold"):
-        td = tempfile.mkdtemp()
+        td = tempfile.mkdtemp(prefix="cympho-caller-")
         spawned_temp_dirs.append(td)
         caller_script = os.path.join(td, "caller.sh")
         caller_context = os.path.join(td, "context")
@@ -907,6 +1147,7 @@ try:
             f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
+export CYMPHO_DEPLOY_SETTLE_REMOTE=1
 export CYMPHO_DEPLOY_TARGET='{target}'
 export CYMPHO_DEPLOY_PORT=22
 export CYMPHO_DEPLOY_USER='zaali'
@@ -937,14 +1178,15 @@ elif [[ "{mode}" == "normal" ]]; then
   run_owned_op ssh "${{SSH_OPTS[@]}}" "${{DEPLOY_TARGET}}" "${{cmd}}"
   cleanup_local
   exit 0
-elif [[ "{mode}" == "remote_sleep" ]]; then
-  cmd="$(operation_fence_command command sleep 60)"
+elif [[ "{mode}" == "remote_protected" ]]; then
+  cmd="$(operation_fence_command '{fixture_dir}/bin/protected-payload' '{remote_started_marker}' '{remote_pid_file}')"
   run_owned_op ssh "${{SSH_OPTS[@]}}" "${{DEPLOY_TARGET}}" "${{cmd}}"
 fi
 """)
         os.chmod(caller_script, 0o755)
         caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
         spawned_callers.append(caller)
+        spawned_pgids.append(caller.pid)
         ready_line = caller.stdout.readline().strip()
         assert ready_line.startswith("CALLER_READY:"), f"Bad ready line: {ready_line}"
         _, cpid, hpid = ready_line.split(":")
@@ -960,7 +1202,7 @@ fi
         assert len(initial_epoch) > 0
 
         # Launch contender caller attempting actual deploy.sh acquisition
-        contender_td = tempfile.mkdtemp()
+        contender_td = tempfile.mkdtemp(prefix="cympho-contender-")
         spawned_temp_dirs.append(contender_td)
         contender_script = os.path.join(contender_td, "contender.sh")
         contender_context = os.path.join(contender_td, "context")
@@ -1002,9 +1244,12 @@ touch '{contender_marker}'
         assert after_epoch == initial_epoch, f"Contender modified epoch: {initial_epoch} -> {after_epoch}"
 
         # Caller can execute fenced operation using actual operation fence command (proper FD 9 locking)
+        gen_td = tempfile.mkdtemp(prefix="cympho-gen-")
+        spawned_temp_dirs.append(gen_td)
         fence_cmd = subprocess.run(
             ["bash", "-c", f"""
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
+export DEPLOY_CONTEXT='{gen_td}'
 source '{deploy_sh}'
 export DEPLOY_OPERATION_LOCK='{operation_lock}'
 export DEPLOY_EPOCH_FILE='{epoch_file}'
@@ -1038,10 +1283,10 @@ operation_fence_command touch '{live_marker}'
     # Verify session lock was released by normal completion and can be immediately reacquired
     reacq = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5.0)
     assert reacq.returncode == 0, "Lock reacquisition failed after normal completion"
-    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}/' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
-    assert survivors == "", f"Found remote survivors after normal completion: {survivors}"
+    survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    assert survivors == "", f"Found remote processes still referencing fixture dir after normal completion: {survivors}"
 
-    # B. Interruption signals (SIGINT, SIGTERM, SIGHUP)
+    # B. Interruption signals (SIGINT, SIGTERM, SIGHUP) during hold
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         caller, cpid, hpid, td = run_caller("hold")
         t0 = time.monotonic()
@@ -1061,12 +1306,39 @@ operation_fence_command touch '{live_marker}'
         assert (time.monotonic() - t_reacq) <= 5.0, f"Reacquisition exceeded 5s deadline"
 
         # Verify zero remote survivors
-        survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}/' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
-        assert survivors == "", f"Found remote survivors after signal {sig}: {survivors}"
+        survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+        assert survivors == "", f"Found remote processes still referencing fixture dir after signal {sig}: {survivors}"
 
-    # C. Remote protected work cancellation & settlement
-    caller, cpid, hpid, td = run_caller("remote_sleep")
-    time.sleep(1.0)
+    # C. Remote protected work cancellation & settlement with real protected executable and started marker
+    print("# VAL-DEP-002 (C): testing confirmed-running remote protected work cancellation & settlement...", flush=True)
+    subprocess.run(ssh_opts + [f'rm -f "{remote_started_marker}" "{remote_pid_file}"'], timeout=5.0, check=True)
+
+    caller, cpid, hpid, td = run_caller("remote_protected")
+
+    # 1. Poll for test-only started marker emitted by the real protected executable (no arbitrary sleep!)
+    started = False
+    t_start = time.monotonic()
+    while time.monotonic() - t_start < 10.0:
+        res = subprocess.run(ssh_opts + [f'test -f "{remote_started_marker}"'], timeout=5.0)
+        if res.returncode == 0:
+            started = True
+            break
+        time.sleep(0.1)
+    assert started, "Protected remote executable did not emit started marker within deadline!"
+
+    # 2. Read remote PID and PGID
+    pid_res = subprocess.run(ssh_opts + [f'cat "{remote_pid_file}"'], capture_output=True, text=True, timeout=5.0, check=True)
+    remote_payload_pid_str, remote_payload_pgid_str = pid_res.stdout.strip().split(":")
+    remote_payload_pid = int(remote_payload_pid_str)
+    remote_payload_pgid = int(remote_payload_pgid_str)
+    tracked_remote_pids.append(remote_payload_pid)
+    tracked_remote_pgids.append(remote_payload_pgid)
+
+    # 3. Confirm payload process is actively alive right now before signalling
+    alive_check = subprocess.run(ssh_opts + [f'kill -0 {remote_payload_pid}'], timeout=5.0)
+    assert alive_check.returncode == 0, f"Remote payload process {remote_payload_pid} was not alive before interrupt!"
+
+    # 4. Deliver SIGTERM to caller process group to interrupt operation
     t0 = time.monotonic()
     try:
         os.killpg(caller.pid, signal.SIGTERM)
@@ -1075,12 +1347,27 @@ operation_fence_command touch '{live_marker}'
     caller.wait(timeout=5.0)
     elapsed = time.monotonic() - t0
     assert elapsed <= 5.0, f"Caller release after remote op interrupt exceeded 5s: {elapsed}s"
+    assert caller.returncode != 0
 
-    # Verify operation lock was settled and can be immediately reacquired
+    # 5. Verify remote payload PID is dead
+    pid_dead = subprocess.run(ssh_opts + [f'kill -0 {remote_payload_pid} 2>/dev/null'], timeout=5.0)
+    assert pid_dead.returncode != 0, f"Remote payload PID {remote_payload_pid} survived cancellation!"
+
+    # 6. Verify remote payload PGID has no surviving processes
+    pgid_check = subprocess.run(ssh_opts + [f'pgrep -g {remote_payload_pgid} 2>/dev/null || true'], capture_output=True, text=True, timeout=5.0)
+    assert pgid_check.stdout.strip() == "", f"Remote payload PGID {remote_payload_pgid} has surviving processes: {pgid_check.stdout}"
+
+    # 7. Verify operation lock was settled and can be immediately reacquired
     reacq_op = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 76 "{operation_lock}" true'], timeout=5.0)
-    assert reacq_op.returncode == 0, "Operation lock reacquisition failed after remote op interrupt"
-    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}/' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
-    assert survivors == "", f"Found remote survivors after remote op interrupt: {survivors}"
+    assert reacq_op.returncode == 0, "Operation lock reacquisition failed after remote op interrupt and settlement"
+
+    # 8. Verify session lock was released and can be immediately reacquired
+    reacq_sess = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5.0)
+    assert reacq_sess.returncode == 0, "Session lock reacquisition failed after remote op interrupt and settlement"
+
+    # 9. Verify no processes referencing fixture_dir remain
+    survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    assert survivors == "", f"Found remote processes still referencing fixture dir after remote op interrupt: {survivors}"
 
     # VAL-DEP-003: Lost controller input / transport loss permits reacquisition without stale mutations or live-lock loss
     print("# VAL-DEP-003: testing transport loss...", flush=True)
@@ -1096,8 +1383,8 @@ operation_fence_command touch '{live_marker}'
     assert reacq.returncode == 0, "Lock reacquisition failed after transport loss"
     assert (time.monotonic() - t_reacq) <= 5.0
 
-    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}/' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
-    assert survivors == "", f"Found remote survivors after transport loss: {survivors}"
+    survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    assert survivors == "", f"Found remote processes still referencing fixture dir after transport loss: {survivors}"
 
     # VAL-DEP-004: Fencing rejects stale epoch before mutation executes; valid epoch succeeds
     print("# VAL-DEP-004: testing epoch fencing with actual operation_fence_command...", flush=True)
@@ -1106,9 +1393,12 @@ operation_fence_command touch '{live_marker}'
     subprocess.run(ssh_opts + [f'printf "%s\\n" "{current_epoch}" >"{epoch_file}"'], check=True, timeout=5.0)
 
     # Stale epoch test using actual generator
+    gen_td = tempfile.mkdtemp(prefix="cympho-gen-")
+    spawned_temp_dirs.append(gen_td)
     stale_cmd = subprocess.run(
         ["bash", "-c", f"""
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
+export DEPLOY_CONTEXT='{gen_td}'
 source '{deploy_sh}'
 export DEPLOY_OPERATION_LOCK='{operation_lock}'
 export DEPLOY_EPOCH_FILE='{epoch_file}'
@@ -1128,6 +1418,7 @@ operation_fence_command touch '{stale_marker}'
     valid_cmd = subprocess.run(
         ["bash", "-c", f"""
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
+export DEPLOY_CONTEXT='{gen_td}'
 source '{deploy_sh}'
 export DEPLOY_OPERATION_LOCK='{operation_lock}'
 export DEPLOY_EPOCH_FILE='{epoch_file}'
@@ -1148,8 +1439,14 @@ finally:
     full_teardown()
     rem_check = subprocess.run(ssh_opts + [f'test ! -e "{fixture_dir}"'], timeout=5)
     assert rem_check.returncode == 0, "Remote fixture directory was not removed!"
-    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}/' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
-    assert survivors == "", f"Residual survivors found in cleanup: {survivors}"
+    for p in tracked_remote_pids:
+        dead = subprocess.run(ssh_opts + [f'kill -0 {p} 2>/dev/null'], timeout=5.0)
+        assert dead.returncode != 0, f"Tracked remote PID {p} survived teardown!"
+    for pg in tracked_remote_pgids:
+        dead_pg = subprocess.run(ssh_opts + [f'pgrep -g {pg} 2>/dev/null || true'], capture_output=True, text=True, timeout=5.0)
+        assert dead_pg.stdout.strip() == "", f"Tracked remote PGID {pg} survived teardown!"
+    for td in spawned_temp_dirs:
+        assert not os.path.exists(td), f"Local directory {td} was not removed during teardown!"
 PY
   printf 'ok - genuine Linux acceptance verifies VAL-DEP-001 through VAL-DEP-004 on authorized host\n'
 else
