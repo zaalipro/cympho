@@ -223,6 +223,11 @@ BUILD_IMAGE_TAG="${APP_NAME}-build:${BUILD_REVISION:0:12}-${DEPLOY_NONCE}"
 SOURCE_DIR="${SOURCES_DIR}/${BUILD_REVISION:0:12}-${DEPLOY_NONCE}"
 UNIT_SNAPSHOT_DIR="${DEPLOY_ROOT}/unit-snapshots/${BUILD_REVISION:0:12}-${DEPLOY_NONCE}"
 ENV_SNAPSHOT_DIR="${DEPLOY_ROOT}/env-snapshots/${BUILD_REVISION:0:12}-${DEPLOY_NONCE}"
+close_deploy_lock_fifo() {
+  if { true >&8; } 2>/dev/null; then
+    exec 8>&-
+  fi
+}
 cleanup_local() {
   local unit_restore_failed=0
   local env_restore_failed=0
@@ -267,9 +272,11 @@ cleanup_local() {
         cleanup_remote_source_dir >/dev/null 2>&1 || true
       fi
     fi
+    close_deploy_lock_fifo
     kill "${DEPLOY_LOCK_PID}" 2>/dev/null || true
     wait "${DEPLOY_LOCK_PID}" 2>/dev/null || true
   fi
+  close_deploy_lock_fifo
   rm -rf -- "${DEPLOY_CONTEXT}"
 }
 trap cleanup_local EXIT
@@ -1109,6 +1116,7 @@ restore_transaction_after_lock_loss() {
     fi
     if ! kill -0 "${recovery_pid}" 2>/dev/null; then
       wait "${recovery_pid}" 2>/dev/null || true
+      close_deploy_lock_fifo
       cat "${recovery_output}" >&2
       return 1
     fi
@@ -1116,6 +1124,7 @@ restore_transaction_after_lock_loss() {
   done
   kill "${recovery_pid}" 2>/dev/null || true
   wait "${recovery_pid}" 2>/dev/null || true
+  close_deploy_lock_fifo
   echo "Timed out waiting for bounded deploy recovery lock." >&2
   return 1
 }
@@ -1151,8 +1160,17 @@ public_readiness_matches() {
 }
 
 # Acquire the session/admission lock, briefly acquire the permanent operation
-# lock to publish a fresh epoch, then release operation before ACK. The SSH
-# process remains alive (and owns only the session lock) until the deploy ends.
+# lock to publish a fresh epoch, then release operation before ACK. The caller
+# maintains the controlling input stream via a private FIFO on FD 8.
+#
+# Bounded release deadlines:
+# 1. Normal completion or interrupt signals (SIGINT, SIGTERM, SIGHUP) trigger
+#    cleanup_local, which closes FD 8 and reaps the local monitor/holder.
+#    The remote cat process receives EOF and exits within 5 seconds (typically <0.5s),
+#    releasing the session flock for immediate reacquisition.
+# 2. Lost transport or controller termination closes the SSH channel.
+#    Remote cat receives EOF/HUP and exits within 5 seconds, preventing orphan
+#    lock retention.
 start_deploy_lock_holder() {
   local mode="${1:?lock-holder mode required}"
   local lock_ack="${2:?lock-holder ACK required}"
@@ -1167,10 +1185,13 @@ start_deploy_lock_holder() {
     return 1
   fi
 
-  : >"${output}"
-  ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" \
-    "sudo flock ${lock_args} --conflict-exit-code 75 '${DEPLOY_SESSION_LOCK}' bash -s" \
-    >"${output}" 2>&1 <<EOF &
+  local fifo="${output}.fifo"
+  rm -f -- "${fifo}"
+  mkfifo "${fifo}"
+  close_deploy_lock_fifo
+  exec 8<>"${fifo}"
+
+  cat >&8 <<EOF
 set -euo pipefail
 session_lock='${DEPLOY_SESSION_LOCK}'
 operation_lock='${DEPLOY_OPERATION_LOCK}'
@@ -1222,8 +1243,13 @@ sync -d "\$(dirname -- "\$epoch_file")"
 flock --unlock 9
 lock_ack='${lock_ack}'
 printf '%s\\n' "\$lock_ack"
-exec sleep infinity
+exec cat >/dev/null
 EOF
+
+  : >"${output}"
+  ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" \
+    "sudo flock ${lock_args} --conflict-exit-code 75 '${DEPLOY_SESSION_LOCK}' bash -s" \
+    8>&- <"${fifo}" >"${output}" 2>&1 &
   STARTED_DEPLOY_LOCK_PID=$!
 }
 
@@ -1237,12 +1263,13 @@ acquire_deploy_lock() {
       (
         while kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null; do sleep 0.2; done
         kill -TERM "${DEPLOY_MAIN_PID}" 2>/dev/null || true
-      ) &
+      ) 8>&- &
       DEPLOY_LOCK_MONITOR_PID=$!
       return 0
     fi
     if ! kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null; then
       wait "${DEPLOY_LOCK_PID}" 2>/dev/null || true
+      close_deploy_lock_fifo
       echo "Refusing concurrent deploy: the host deploy lock is held or unavailable." >&2
       cat "${DEPLOY_LOCK_OUTPUT}" >&2
       return 1
@@ -1250,6 +1277,9 @@ acquire_deploy_lock() {
     sleep 0.1
   done
 
+  kill "${DEPLOY_LOCK_PID}" 2>/dev/null || true
+  wait "${DEPLOY_LOCK_PID}" 2>/dev/null || true
+  close_deploy_lock_fifo
   echo "Timed out acquiring the host deploy lock." >&2
   return 1
 }
