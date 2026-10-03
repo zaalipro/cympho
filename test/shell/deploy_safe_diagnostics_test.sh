@@ -187,6 +187,14 @@ exit 0
 EOF
 chmod +x "$FAKE_BIN/curl"
 
+# Mock journalctl to ensure any raw journal fallback emits sentinel and fails assertion
+cat >"$FAKE_BIN/journalctl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "$SENTINEL_JOURNAL"
+exit 0
+EOF
+chmod +x "$FAKE_BIN/journalctl"
+
 cat >"$TMP_DIR/release-info.json" <<EOF
 {
   "schema_version": 1,
@@ -337,4 +345,108 @@ assert_no_sentinels "$NO_SYSTEMD_OUT" "missing supervisor diagnostic path"
 
 printf 'ok - missing supervisor tool is handled without raw fallback\n'
 
-printf '1..5\n'
+# Test 6: Sealed manifest permission layout — unreadable release-info.json
+# Under normal production permissions (0550 / 0440 root:cympho), DEPLOY_USER cannot read release-info.json.
+# Diagnostics supplied with trusted attested revision must report ready service and not fail on absent manifest.
+chmod 000 "$RELEASE_DIR/release-info.json" 2>/dev/null || chmod -r "$RELEASE_DIR/release-info.json"
+export MOCK_MISSING_SYSTEMCTL=0
+export MOCK_SYSTEMD_STATE="active"
+export MOCK_HEALTH_STATUS="ready"
+export MOCK_APP_CHECK="ready"
+export MOCK_DB_CHECK="ready"
+export MOCK_MIG_CHECK="ready"
+export MOCK_REVISION="111111111111"
+export BUILD_REVISION="111111111111"
+
+set +e
+SEALED_OUT="$(emit_service_diagnostics "${BUILD_REVISION}" 2>&1)"
+SEALED_CODE=$?
+set -e
+
+[[ "$SEALED_OUT" == *"Cympho is ready (version 0.1.0, revision 111111111111)."* ]] ||
+  fail "sealed manifest with trusted revision must report ready service"
+[[ "$SEALED_OUT" != *"the local release identity manifest is"* ]] ||
+  fail "sealed manifest with trusted revision must not falsely diagnose missing manifest"
+[[ "$SEALED_OUT" != *"release_identity_absent"* ]] ||
+  fail "sealed manifest must not report release_identity_absent"
+assert_no_sentinels "$SEALED_OUT" "sealed manifest success path"
+
+printf 'ok - sealed manifest success path reports ready without unreadable manifest failure\n'
+
+# Test 7: Sealed manifest with revision mismatch fails closed and diagnoses mismatch
+export MOCK_REVISION="222222222222"
+
+set +e
+MISMATCH_OUT="$(emit_service_diagnostics "${BUILD_REVISION}" 2>&1)"
+MISMATCH_CODE=$?
+set -e
+
+[[ "$MISMATCH_OUT" == *"revision 222222222222 does not match expected 111111111111"* ]] ||
+  fail "revision mismatch under sealed manifest must be diagnosed accurately"
+assert_no_sentinels "$MISMATCH_OUT" "sealed manifest revision mismatch"
+
+printf 'ok - revision mismatch under sealed manifest fails closed with accurate diagnosis\n'
+
+# Test 8: Rollback diagnostics with attested previous revision under sealed manifest
+PREV_RELEASE_DIR="$TMP_DIR/mock-prev-release"
+mkdir -p "$PREV_RELEASE_DIR"
+cat >"$PREV_RELEASE_DIR/release-info.json" <<EOF
+{
+  "schema_version": 1,
+  "service": "cympho",
+  "release": {
+    "version": "0.1.0",
+    "revision": "333333333333"
+  }
+}
+EOF
+chmod 000 "$PREV_RELEASE_DIR/release-info.json" 2>/dev/null || chmod -r "$PREV_RELEASE_DIR/release-info.json"
+export PREVIOUS_REVISION="333333333333"
+export MOCK_REVISION="333333333333"
+
+set +e
+ROLLBACK_OUT="$(emit_service_diagnostics "${PREVIOUS_REVISION}" 2>&1)"
+ROLLBACK_CODE=$?
+set -e
+
+[[ "$ROLLBACK_OUT" == *"Cympho is ready (version 0.1.0, revision 333333333333)."* ]] ||
+  fail "rollback diagnostics with trusted previous revision must report ready"
+[[ "$ROLLBACK_OUT" != *"the local release identity manifest is"* ]] ||
+  fail "rollback diagnostics must not falsely diagnose missing manifest"
+assert_no_sentinels "$ROLLBACK_OUT" "rollback diagnostics path"
+
+printf 'ok - rollback diagnostics use trusted previous revision and succeed under sealed manifest\n'
+
+# Test 9: Deployment failure path preserves failure exit and emits safe diagnostics
+# Simulates deploy.sh local health failure block: emit diagnostics then rollback_release
+deploy_health_fail_block() {
+  local local_ok=0
+  if [[ "${local_ok}" != "1" ]]; then
+    emit_service_diagnostics "${BUILD_REVISION}" "${RELEASE_DIR}/release-info.json"
+    echo "ERROR: Service failed local health check" >&2
+    return 1
+  fi
+  return 0
+}
+
+export MOCK_HEALTH_STATUS="not_ready"
+export MOCK_APP_CHECK="unavailable"
+export MOCK_REVISION="111111111111"
+set +e
+FAIL_BLOCK_OUT="$(deploy_health_fail_block 2>&1)"
+FAIL_BLOCK_CODE=$?
+set -e
+
+[[ "$FAIL_BLOCK_CODE" == 1 ]] || fail "failure path must exit nonzero"
+[[ "$FAIL_BLOCK_OUT" == *"Service failed local health check"* ]] ||
+  fail "failure path must record rollback reason"
+[[ "$FAIL_BLOCK_OUT" == *"the managed service is active but not ready"* ]] ||
+  fail "failure path must emit operational diagnostic"
+assert_no_sentinels "$FAIL_BLOCK_OUT" "deploy failure path"
+
+printf 'ok - deployment failure block emits safe diagnostics and preserves exit 1\n'
+
+# Restore manifest permission for cleanup
+chmod 644 "$RELEASE_DIR/release-info.json" "$PREV_RELEASE_DIR/release-info.json" 2>/dev/null || true
+
+printf '1..9\n'

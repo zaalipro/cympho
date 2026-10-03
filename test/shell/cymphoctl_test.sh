@@ -274,8 +274,37 @@ rm -f "${STATE_DIR}/release-info.json"
 run_cli service status --json
 assert_eq 1 "$CLI_STATUS" "missing local release identity fails service status"
 assert_json "$CLI_STDOUT" 'd["status"] == "not_ready" and d["health_error"] == "release_identity_absent"' "missing identity fails closed"
-write_release_info aaaaaaa
 pass "service status requires a local release identity to match"
+
+# Explicit expected revision bypasses absent/unreadable local manifest without false filesystem attestation
+run_cli service status --json --expect-revision aaaaaaa
+assert_eq 0 "$CLI_STATUS" "service status with explicit expected revision succeeds even when manifest is absent"
+assert_json "$CLI_STDOUT" 'd["status"] == "ready" and d["expected_revision"] == "aaaaaaa"' "explicit expected revision is reported without filesystem manifest"
+assert_eq "" "$CLI_STDERR" "explicit expected revision does not diagnose missing manifest"
+pass "service status accepts explicit expected revision when manifest is unreadable"
+
+run_cli service status --expect-revision aaaaaaa
+assert_eq 0 "$CLI_STATUS" "human service status with explicit revision succeeds"
+assert_contains "$CLI_STDOUT" "Cympho is ready (version 0.1.0, revision aaaaaaa)." "human status reports ready"
+pass "human service status with explicit revision reports ready"
+
+run_cli service status --json --expect-revision bbbbbbb
+assert_eq 1 "$CLI_STATUS" "service status with revision mismatch exits nonzero"
+assert_json "$CLI_STDOUT" 'd["status"] == "not_ready" and d["health_error"] == "revision_mismatch" and d["expected_revision"] == "bbbbbbb"' "revision mismatch is machine readable"
+assert_contains "$CLI_STDERR" "does not match expected revision" "revision mismatch is diagnosed on stderr"
+pass "service status diagnoses revision mismatch accurately"
+
+run_cli service status --expect-revision 'bad!rev'
+assert_eq 64 "$CLI_STATUS" "invalid expected revision format is rejected with usage error"
+pass "service status rejects invalid expected revision format"
+
+export CYMPHOCTL_EXPECTED_REVISION="aaaaaaa"
+run_cli service status --json
+assert_eq 0 "$CLI_STATUS" "CYMPHOCTL_EXPECTED_REVISION succeeds even when manifest is absent"
+unset CYMPHOCTL_EXPECTED_REVISION
+pass "CYMPHOCTL_EXPECTED_REVISION environment override is accepted"
+
+write_release_info aaaaaaa
 
 run_cli service logs -n 250 -f
 assert_eq 0 "$CLI_STATUS" "valid log request succeeds"
@@ -302,4 +331,4 @@ assert_contains "$CLI_STDERR" "simple systemd service name" "unsafe service name
 unset CYMPHOCTL_SERVICE_NAME
 pass "service override is constrained to a simple unit name"
 
-printf '1..17\n'
+printf '1..22\n'

@@ -10,6 +10,7 @@ defmodule Cympho.CymphoctlScriptTest do
         "deploy_env_transaction_behavior_test.sh",
         "deploy_env_transaction_test.sh",
         "deploy_lock_fencing_test.sh",
+        "deploy_safe_diagnostics_test.sh",
         "deploy_unit_rollback_test.sh"
       ] do
     @script script

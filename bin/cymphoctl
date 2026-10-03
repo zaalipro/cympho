@@ -18,6 +18,7 @@ CONNECT_TIMEOUT="${CYMPHOCTL_CONNECT_TIMEOUT_SECONDS:-1}"
 MAX_TIME="${CYMPHOCTL_MAX_TIME_SECONDS:-3}"
 RELEASE_INFO_FILE="${CYMPHOCTL_RELEASE_INFO_FILE:-${SCRIPT_DIR}/../release-info.json}"
 HEALTH_VALIDATOR="${CYMPHOCTL_HEALTH_VALIDATOR:-${SCRIPT_DIR}/cympho-health-validator}"
+EXPECTED_REVISION="${CYMPHOCTL_EXPECTED_REVISION:-}"
 
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cymphoctl.XXXXXX")"
 HEALTH_BODY_FILE=""
@@ -43,7 +44,7 @@ usage() {
 Usage:
   cymphoctl version [--json]
   cymphoctl readiness [--json] [--expect-revision REV]
-  cymphoctl service status [--json]
+  cymphoctl service status [--json] [--expect-revision REV]
   cymphoctl service logs [-n N|--lines N] [-f|--follow]
 
 Read-only environment overrides:
@@ -51,6 +52,7 @@ Read-only environment overrides:
   CYMPHOCTL_HEALTH_PORT              loopback HTTP port (default: 4000)
   CYMPHOCTL_APP_HOST                 Host header (default: APP_HOST or localhost)
   CYMPHOCTL_RELEASE_INFO_FILE        local release identity manifest
+  CYMPHOCTL_EXPECTED_REVISION        expected revision for health/status checks
   CYMPHOCTL_CONNECT_TIMEOUT_SECONDS  curl connect timeout, 1-10 (default: 1)
   CYMPHOCTL_MAX_TIME_SECONDS         curl total timeout, 1-30 (default: 3)
 EOF
@@ -118,6 +120,11 @@ validate_runtime_configuration() {
 
   if ! valid_positive_integer "$MAX_TIME" 30; then
     diagnose "CYMPHOCTL_MAX_TIME_SECONDS must be an integer from 1 to 30"
+    return 1
+  fi
+
+  if [[ -n "$EXPECTED_REVISION" ]] && ! validate_revision "$EXPECTED_REVISION"; then
+    diagnose "CYMPHOCTL_EXPECTED_REVISION must be a 7-64 character hexadecimal revision, development, or unknown"
     return 1
   fi
 }
@@ -306,7 +313,7 @@ command_version() {
 
 command_readiness() {
   local json=false
-  local expected_revision=""
+  local expected_revision="$EXPECTED_REVISION"
   local option
 
   while (($# > 0)); do
@@ -318,7 +325,7 @@ command_readiness() {
         ;;
       --expect-revision)
         (($# >= 2)) || die_usage "--expect-revision requires a value"
-        [[ -z "$expected_revision" ]] || die_usage "--expect-revision may be supplied only once"
+        [[ -z "$expected_revision" || "$expected_revision" == "$EXPECTED_REVISION" ]] || die_usage "--expect-revision may be supplied only once"
         expected_revision="$2"
         shift 2
         ;;
@@ -441,8 +448,10 @@ command_service_status() {
   local installed=false
   local active=false
   local enabled=false
-  local expected_revision=""
+  local expected_revision="$EXPECTED_REVISION"
+  local identity_source=""
   local service_ready=false
+  local option
 
   LOAD_STATE="unknown"
   ACTIVE_STATE="unknown"
@@ -450,13 +459,36 @@ command_service_status() {
   MAIN_PID="0"
 
   while (($# > 0)); do
-    case "$1" in
-      --json) json=true ;;
-      -h|--help) usage; return 0 ;;
-      *) die_usage "unknown service status option: $1" ;;
+    option="$1"
+    case "$option" in
+      --json)
+        json=true
+        shift
+        ;;
+      --expect-revision)
+        (($# >= 2)) || die_usage "--expect-revision requires a value"
+        [[ -z "$expected_revision" || "$expected_revision" == "$EXPECTED_REVISION" ]] || die_usage "--expect-revision may be supplied only once"
+        expected_revision="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        die_usage "unknown service status option: $option"
+        ;;
     esac
-    shift
   done
+
+  if [[ -n "$expected_revision" ]]; then
+    if ! validate_revision "$expected_revision"; then
+      die_usage "--expect-revision must be a 7-64 character hexadecimal revision, development, or unknown"
+    fi
+    identity_source="explicit"
+  else
+    identity_source="manifest"
+  fi
 
   unit="$(service_unit)"
   make_temp_file status_file
@@ -472,16 +504,24 @@ command_service_status() {
     supervisor_available=false
   fi
 
-  resolve_local_expected_revision
-  expected_revision="$LOCAL_EXPECTED_REVISION"
-  if probe_health "$expected_revision"; then
-    if [[ "$installed" == true && "$active" == true && "$LOCAL_IDENTITY_STATE" == "valid" ]]; then
-      service_ready=true
+  if [[ "$identity_source" == "manifest" ]]; then
+    resolve_local_expected_revision
+    expected_revision="$LOCAL_EXPECTED_REVISION"
+    if probe_health "$expected_revision"; then
+      if [[ "$installed" == true && "$active" == true && "$LOCAL_IDENTITY_STATE" == "valid" ]]; then
+        service_ready=true
+      fi
     fi
-  fi
 
-  if [[ "$LOCAL_IDENTITY_STATE" != "valid" ]]; then
-    HEALTH_STATE="release_identity_${LOCAL_IDENTITY_STATE}"
+    if [[ "$LOCAL_IDENTITY_STATE" != "valid" ]]; then
+      HEALTH_STATE="release_identity_${LOCAL_IDENTITY_STATE}"
+    fi
+  else
+    if probe_health "$expected_revision"; then
+      if [[ "$installed" == true && "$active" == true ]]; then
+        service_ready=true
+      fi
+    fi
   fi
 
   if [[ "$json" == true ]]; then
@@ -502,7 +542,7 @@ command_service_status() {
     return 0
   fi
 
-  if [[ "$LOCAL_IDENTITY_STATE" != "valid" ]]; then
+  if [[ "$identity_source" == "manifest" && "$LOCAL_IDENTITY_STATE" != "valid" ]]; then
     diagnose "the local release identity manifest is ${LOCAL_IDENTITY_STATE}"
   elif [[ "$active" != true && "$HEALTH_STATE" == "ready" ]]; then
     diagnose "the managed service is inactive even though a Cympho responder is ready on the loopback port"
@@ -512,6 +552,8 @@ command_service_status() {
     diagnose "the managed service is not installed"
   elif [[ "$active" != true ]]; then
     diagnose "the managed service is not active"
+  elif [[ "$HEALTH_STATE" == "revision_mismatch" ]]; then
+    diagnose "running revision ${HEALTH_ACTUAL_REVISION} does not match expected revision ${expected_revision}"
   else
     diagnose "the managed service is active but not ready"
   fi

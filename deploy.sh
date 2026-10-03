@@ -66,9 +66,12 @@ DEPLOY_MAIN_PID="$$"
 DEPLOY_ACTIVE_OP_PID=""
 DEPLOY_LOCK_OUTPUT=""
 STARTED_DEPLOY_LOCK_PID=""
-DEPLOY_SESSION_LOCK="${CYMPHO_DEPLOY_SESSION_LOCK:-/var/lock/cympho-deploy.lock}"
-DEPLOY_OPERATION_LOCK="${CYMPHO_DEPLOY_OPERATION_LOCK:-/var/lock/cympho-deploy-operation.lock}"
-DEPLOY_EPOCH_FILE="${CYMPHO_DEPLOY_EPOCH_FILE:-/var/lock/cympho-deploy.epoch}"
+DEPLOY_SESSION_LOCK="/var/lock/cympho-deploy.lock"
+DEPLOY_SESSION_LOCK="${CYMPHO_DEPLOY_SESSION_LOCK:-${DEPLOY_SESSION_LOCK}}"
+DEPLOY_OPERATION_LOCK="/var/lock/cympho-deploy-operation.lock"
+DEPLOY_OPERATION_LOCK="${CYMPHO_DEPLOY_OPERATION_LOCK:-${DEPLOY_OPERATION_LOCK}}"
+DEPLOY_EPOCH_FILE="/var/lock/cympho-deploy.epoch"
+DEPLOY_EPOCH_FILE="${CYMPHO_DEPLOY_EPOCH_FILE:-${DEPLOY_EPOCH_FILE}}"
 DEPLOY_REMOTE_COMMAND_PREFIX="${CYMPHO_DEPLOY_REMOTE_COMMAND_PREFIX:-}"
 DEPLOY_EPOCH=""
 DEPLOY_NONCE=""
@@ -1833,10 +1836,24 @@ RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-${BUILD_REVISION:0:12}-${DEPLOY_NONCE}"
 RELEASE_DIR="${RELEASES_DIR}/${RELEASE_ID}"
 
 emit_service_diagnostics() {
-  local release_manifest="${1:-${RELEASE_DIR}/release-info.json}"
+  local expected_revision="${1:-${BUILD_REVISION:-}}"
+  local release_manifest="${RELEASE_DIR}/release-info.json"
+  local extra_args=""
 
   if [[ -z "${SOURCE_DIR}" ]]; then
     return 0
+  fi
+
+  # Support callers passing a manifest file path or revision
+  if [[ "$expected_revision" == *"/"* || "$expected_revision" == *".json"* ]]; then
+    release_manifest="$expected_revision"
+    expected_revision="${2:-${BUILD_REVISION:-}}"
+  elif [[ -n "${2:-}" ]]; then
+    release_manifest="$2"
+  fi
+
+  if [[ -n "${expected_revision}" ]]; then
+    extra_args="--expect-revision '${expected_revision}'"
   fi
 
   # Run read-only operator CLI for secret-safe service and readiness diagnostics.
@@ -1847,7 +1864,7 @@ emit_service_diagnostics() {
                CYMPHOCTL_APP_HOST='${DOMAIN}' \
                CYMPHOCTL_HEALTH_VALIDATOR='${SOURCE_DIR}/bin/cympho-health-validator' \
                CYMPHOCTL_RELEASE_INFO_FILE='${release_manifest}' \
-               '${SOURCE_DIR}/bin/cymphoctl' service status" || true
+               ${expected_revision:+CYMPHOCTL_EXPECTED_REVISION='${expected_revision}' }'${SOURCE_DIR}/bin/cymphoctl' service status ${extra_args}" || true
 }
 
 rollback_release() {
@@ -1928,7 +1945,7 @@ rollback_release() {
       echo "This verifies boot compatibility only; database migrations were not reversed." >&2
     else
       echo "CRITICAL: rollback did not become ready at its recorded revision." >&2
-      emit_service_diagnostics "${PREVIOUS_RELEASE}/release-info.json"
+      emit_service_diagnostics "${PREVIOUS_REVISION}" "${PREVIOUS_RELEASE}/release-info.json"
     fi
   else
     if [[ "${current_target}" == "${RELEASE_DIR}" ]]; then
@@ -2063,7 +2080,7 @@ EOF
   sleep 2
 done
 if [[ "${local_ok}" != "1" ]]; then
-  emit_service_diagnostics "${RELEASE_DIR}/release-info.json"
+  emit_service_diagnostics "${BUILD_REVISION}" "${RELEASE_DIR}/release-info.json"
   rollback_release "Service failed local health check"
 fi
 echo "Local health OK."
@@ -2144,7 +2161,7 @@ fi
 EOF
 
 step "Remote service status"
-emit_service_diagnostics "${RELEASE_DIR}/release-info.json"
+emit_service_diagnostics "${BUILD_REVISION}" "${RELEASE_DIR}/release-info.json"
 
 step "Public attested readiness (${PUBLIC_READINESS_URL}) — TLS may take ~30s to settle"
 public_ok=0
@@ -2153,7 +2170,7 @@ for _ in 1 2 3 4 5 6; do
   sleep 10
 done
 if [[ "${public_ok}" != "1" ]]; then
-  emit_service_diagnostics "${RELEASE_DIR}/release-info.json"
+  emit_service_diagnostics "${BUILD_REVISION}" "${RELEASE_DIR}/release-info.json"
 fi
 if [[ "${public_ok}" == "1" ]]; then
   echo "Public HTTPS readiness verified at revision ${BUILD_REVISION}."
