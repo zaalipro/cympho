@@ -73,6 +73,24 @@ require("! -group ${APP_USER}" in prior_preflight and
         'case "\\$mode" in' in prior_preflight and
         "440|550" in prior_preflight,
         "previous releases must be sealed root:app with only 0440/0550 entries")
+prev_discovery_line = next(line for line in prior_preflight.splitlines() if "PREVIOUS_RELEASE" in line and "run_ssh_capture" in line)
+require("|| true" not in prev_discovery_line,
+        "previous-release discovery must abort on failure rather than suppressing error with || true")
+
+require("run_remote_script_capture deployed_main_pid" in deploy,
+        "deployed_main_pid must use run_remote_script_capture without subshell command substitution")
+require('deployed_main_pid="$(' not in deploy,
+        "deployed_main_pid must not use subshell command substitution")
+
+settle_func = function("settle_remote_operation", "cleanup_local")
+require("sudo" in settle_func,
+        "settle_remote_operation must open the operation lock through the privileged boundary")
+require("|| true" not in settle_func,
+        "settle_remote_operation must propagate errors rather than suppressing with || true")
+
+reap_func = function("reap_active_operation", "handle_deploy_signal")
+require("op_pgid" in reap_func and "kill -KILL" in reap_func,
+        "reap_active_operation must escalate to KILL on owned process group")
 
 runner = function("run_remote_script", "validate_managed_paths")
 require("run_fenced_ssh" in runner,
@@ -396,6 +414,136 @@ run_owned_op_capture CAPTURED_VAL command sleep 30
         holder.terminate()
         holder.wait(timeout=1.0)
 
+# 1d. Test cancellation escalation with TERM-resistant descendant in owned PGID
+with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+    caller_script = os.path.join(td, "caller.sh")
+    caller_context = os.path.join(td, "context")
+    fifo = os.path.join(td, "lock.fifo")
+    pgid_file = os.path.join(td, "pgid.txt")
+    os.mkfifo(fifo)
+    os.makedirs(caller_context, exist_ok=True)
+
+    holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+
+    with open(caller_script, "w") as f:
+        f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
+
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_LOCK_PID={holder.pid}
+
+exec 8<>'{fifo}'
+close_deploy_lock_fifo() {{
+  if {{ true >&8; }} 2>/dev/null; then exec 8>&-; fi
+}}
+
+init_deploy_traps
+
+printf 'READY:%s\\n' "$$"
+run_term_resistant_child() {{
+  (
+    trap '' TERM
+    command sleep 30
+  ) &
+  child_pid=$!
+  printf '%s\\n' "$$" > '{pgid_file}'
+  wait "$child_pid"
+}}
+run_owned_op run_term_resistant_child
+""")
+    os.chmod(caller_script, 0o755)
+
+    caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    ready_line = caller.stdout.readline().strip()
+    assert ready_line.startswith("READY:")
+    caller_pid = int(ready_line.split(":")[1])
+
+    for _ in range(50):
+        if os.path.exists(pgid_file) and os.path.getsize(pgid_file) > 0:
+            break
+        time.sleep(0.05)
+    with open(pgid_file) as f:
+        op_pgid = int(f.read().strip())
+
+    t0 = time.monotonic()
+    os.kill(caller_pid, signal.SIGTERM)
+    caller.wait(timeout=3.0)
+    elapsed = time.monotonic() - t0
+    assert elapsed <= 3.0, f"TERM-resistant child escalation exceeded deadline: {elapsed}s"
+    assert caller.returncode != 0
+
+    time.sleep(0.1)
+    res = subprocess.run(["pgrep", "-g", str(op_pgid)], capture_output=True, text=True)
+    survivors = res.stdout.strip().split()
+    if survivors:
+        for s in survivors:
+            try:
+                os.kill(int(s), signal.SIGKILL)
+            except OSError:
+                pass
+        raise AssertionError(f"TERM-resistant descendant survived leader exit in PGID {op_pgid}: {survivors}")
+
+    holder.terminate()
+    holder.wait(timeout=1.0)
+
+# 1e. Test signals during run_remote_script_capture without subshell deferral
+for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        caller_script = os.path.join(td, "caller.sh")
+        caller_context = os.path.join(td, "context")
+        fifo = os.path.join(td, "lock.fifo")
+        os.mkfifo(fifo)
+        os.makedirs(caller_context, exist_ok=True)
+
+        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+
+        with open(caller_script, "w") as f:
+            f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
+
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_LOCK_PID={holder.pid}
+
+exec 8<>'{fifo}'
+close_deploy_lock_fifo() {{
+  if {{ true >&8; }} 2>/dev/null; then exec 8>&-; fi
+}}
+
+init_deploy_traps
+
+run_fenced_ssh() {{
+  run_owned_op command sleep 30
+}}
+
+printf 'READY:%s\\n' "$$"
+CAPTURED_PID=""
+run_remote_script_capture CAPTURED_PID <<'EOF'
+echo "body"
+EOF
+""")
+        os.chmod(caller_script, 0o755)
+
+        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ready_line = caller.stdout.readline().strip()
+        assert ready_line.startswith("READY:")
+        caller_pid = int(ready_line.split(":")[1])
+
+        t0 = time.monotonic()
+        os.kill(caller_pid, sig)
+        caller.wait(timeout=2.0)
+        elapsed = time.monotonic() - t0
+        assert elapsed <= 2.0, f"Captured remote script signal {sig} exceeded deadline: {elapsed}s"
+        assert caller.returncode != 0
+
+        holder.terminate()
+        holder.wait(timeout=1.0)
+
 # 2. Test snapshot recovery ordering (environment before unit) during interruption
 with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
     caller_script = os.path.join(td, "caller.sh")
@@ -458,6 +606,111 @@ run_owned_op command sleep 30
     with open(order_log) as f:
         order = f.read().splitlines()
     assert order == ["RESTORE_ENV", "RESTORE_UNITS"], f"Unexpected restore order: {order}"
+
+# 2b. Test remote settlement opens lock through privileged boundary and propagates error
+with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+    caller_script = os.path.join(td, "caller.sh")
+    caller_context = os.path.join(td, "context")
+    fifo = os.path.join(td, "lock.fifo")
+    op_lock = os.path.join(td, "operation.lock")
+    os.mkfifo(fifo)
+    os.makedirs(caller_context, exist_ok=True)
+    with open(op_lock, "w") as f:
+        f.write("")
+
+    holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+
+    with open(caller_script, "w") as f:
+        f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+export CYMPHO_DEPLOY_SETTLE_REMOTE=1
+source '{deploy_sh}'
+
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_LOCK_PID={holder.pid}
+export DEPLOY_TARGET='dummy-target'
+export DEPLOY_OPERATION_LOCK='{op_lock}'
+
+# Mock run_ssh to verify privileged invocation and propagate errors
+run_ssh() {{
+  local cmd="$1"
+  if [[ "$cmd" != *"sudo"* ]]; then
+    echo "SETTLE_NOT_PRIVILEGED" >&2
+    return 77
+  fi
+  if [[ "${{MOCK_SETTLE_FAIL:-0}}" == "1" ]]; then
+    echo "SETTLE_TIMEOUT_OR_PERMISSION_ERROR" >&2
+    return 76
+  fi
+  return 0
+}}
+
+# Test 1: Successful settlement
+if ! settle_remote_operation; then
+  echo "Expected successful settle" >&2
+  exit 1
+fi
+
+# Test 2: Settlement error propagation
+export MOCK_SETTLE_FAIL=1
+if settle_remote_operation; then
+  echo "Expected settle_remote_operation to fail and propagate error" >&2
+  exit 1
+fi
+echo "SETTLE_OK"
+""")
+    os.chmod(caller_script, 0o755)
+    caller = subprocess.run([caller_script], capture_output=True, text=True)
+    assert caller.returncode == 0, f"Settlement test failed: {caller.stderr}\n{caller.stdout}"
+    assert "SETTLE_OK" in caller.stdout
+
+    holder.terminate()
+    holder.wait(timeout=1.0)
+
+# 2c. Test failed initial previous-release discovery aborts rather than assuming first deployment
+with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+    caller_script = os.path.join(td, "caller.sh")
+    caller_context = os.path.join(td, "context")
+    fifo = os.path.join(td, "lock.fifo")
+    os.mkfifo(fifo)
+    os.makedirs(caller_context, exist_ok=True)
+
+    holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+
+    with open(caller_script, "w") as f:
+        f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
+
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_LOCK_PID={holder.pid}
+export DEPLOY_TARGET='dummy-target'
+export CURRENT_LINK='/opt/cympho/current'
+
+# Mock run_ssh_capture to simulate discovery failure
+run_ssh_capture() {{
+  return 1
+}}
+
+# Execute discovery logic: must fail closed and exit 1
+PREVIOUS_RELEASE=""
+if ! run_ssh_capture PREVIOUS_RELEASE "if sudo test -L '${{CURRENT_LINK}}'; then sudo readlink -- '${{CURRENT_LINK}}'; elif sudo test -e '${{CURRENT_LINK}}'; then printf '%s' INVALID_CURRENT_LINK; fi"; then
+  echo "Failed to discover current release on ${{DEPLOY_TARGET}}; refusing deployment." >&2
+  exit 1
+fi
+echo "DISCOVERY_UNEXPECTEDLY_SUCCEEDED"
+""")
+    os.chmod(caller_script, 0o755)
+    caller = subprocess.run([caller_script], capture_output=True, text=True)
+    assert caller.returncode == 1, f"Expected abort on discovery failure: {caller.stderr}\n{caller.stdout}"
+    assert "Failed to discover current release" in caller.stderr
+
+    holder.terminate()
+    holder.wait(timeout=1.0)
 
 # 3. Test transport loss (holder process termination triggers monitor signal to caller)
 with tempfile.TemporaryDirectory(dir=tmp_dir) as td:

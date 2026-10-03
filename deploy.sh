@@ -237,13 +237,20 @@ close_deploy_lock_fifo() {
 }
 
 reap_active_operation() {
-  if [[ -n "${DEPLOY_ACTIVE_OP_PID}" ]] && kill -0 "${DEPLOY_ACTIVE_OP_PID}" 2>/dev/null; then
-    local op_pid="${DEPLOY_ACTIVE_OP_PID}"
-    DEPLOY_ACTIVE_OP_PID=""
-    kill -TERM -"${op_pid}" 2>/dev/null || kill -TERM "${op_pid}" 2>/dev/null || true
+  local op_pid="${DEPLOY_ACTIVE_OP_PID:-}"
+  local op_pgid="${DEPLOY_ACTIVE_OP_PGID:-${op_pid}}"
+  DEPLOY_ACTIVE_OP_PID=""
+  DEPLOY_ACTIVE_OP_PGID=""
+  if [[ -n "${op_pid}" || -n "${op_pgid}" ]] && ( { [[ -n "${op_pid}" ]] && kill -0 "${op_pid}" 2>/dev/null; } || { [[ -n "${op_pgid}" ]] && kill -0 -"${op_pgid}" 2>/dev/null; } ); then
+    if [[ -n "${op_pgid}" ]]; then
+      kill -TERM -"${op_pgid}" 2>/dev/null || true
+    fi
+    if [[ -n "${op_pid}" ]]; then
+      kill -TERM "${op_pid}" 2>/dev/null || true
+    fi
     if command -v pgrep >/dev/null 2>&1; then
       local child_pids
-      child_pids="$(pgrep -P "${op_pid}" 2>/dev/null || true)"
+      child_pids="$( { [[ -n "${op_pgid}" ]] && pgrep -g "${op_pgid}" 2>/dev/null; } || { [[ -n "${op_pid}" ]] && pgrep -P "${op_pid}" 2>/dev/null; } || true )"
       if [[ -n "${child_pids}" ]]; then
         for cp in ${child_pids}; do
           kill -TERM "${cp}" 2>/dev/null || true
@@ -251,24 +258,43 @@ reap_active_operation() {
       fi
     fi
     for _ in $(seq 1 20); do
-      if ! kill -0 "${op_pid}" 2>/dev/null; then break; fi
+      local still_alive=0
+      if [[ -n "${op_pid}" ]] && kill -0 "${op_pid}" 2>/dev/null; then still_alive=1; fi
+      if [[ -n "${op_pgid}" ]] && kill -0 -"${op_pgid}" 2>/dev/null; then still_alive=1; fi
+      if [[ "${still_alive}" == "0" ]]; then break; fi
       command sleep 0.05
     done
-    if kill -0 "${op_pid}" 2>/dev/null; then
-      kill -KILL -"${op_pid}" 2>/dev/null || kill -KILL "${op_pid}" 2>/dev/null || true
+    local needs_kill=0
+    if [[ -n "${op_pid}" ]] && kill -0 "${op_pid}" 2>/dev/null; then needs_kill=1; fi
+    if [[ -n "${op_pgid}" ]] && kill -0 -"${op_pgid}" 2>/dev/null; then needs_kill=1; fi
+    if [[ "${needs_kill}" == "1" ]]; then
+      if [[ -n "${op_pgid}" ]]; then
+        kill -KILL -"${op_pgid}" 2>/dev/null || true
+      fi
+      if [[ -n "${op_pid}" ]]; then
+        kill -KILL "${op_pid}" 2>/dev/null || true
+      fi
       if command -v pgrep >/dev/null 2>&1; then
         local child_pids
-        child_pids="$(pgrep -P "${op_pid}" 2>/dev/null || true)"
+        child_pids="$( { [[ -n "${op_pgid}" ]] && pgrep -g "${op_pgid}" 2>/dev/null; } || { [[ -n "${op_pid}" ]] && pgrep -P "${op_pid}" 2>/dev/null; } || true )"
         if [[ -n "${child_pids}" ]]; then
           for cp in ${child_pids}; do
             kill -KILL "${cp}" 2>/dev/null || true
           done
         fi
       fi
+      for _ in $(seq 1 20); do
+        local still_alive_kill=0
+        if [[ -n "${op_pid}" ]] && kill -0 "${op_pid}" 2>/dev/null; then still_alive_kill=1; fi
+        if [[ -n "${op_pgid}" ]] && kill -0 -"${op_pgid}" 2>/dev/null; then still_alive_kill=1; fi
+        if [[ "${still_alive_kill}" == "0" ]]; then break; fi
+        command sleep 0.05
+      done
     fi
-    wait "${op_pid}" 2>/dev/null || true
+    if [[ -n "${op_pid}" ]]; then
+      wait "${op_pid}" 2>/dev/null || true
+    fi
   fi
-  DEPLOY_ACTIVE_OP_PID=""
 }
 
 handle_deploy_signal() {
@@ -279,13 +305,14 @@ handle_deploy_signal() {
 }
 
 run_owned_op() {
-  if [[ -n "${DEPLOY_ACTIVE_OP_PID}" ]] && kill -0 "${DEPLOY_ACTIVE_OP_PID}" 2>/dev/null; then
+  if [[ -n "${DEPLOY_ACTIVE_OP_PID}" ]] && ( kill -0 "${DEPLOY_ACTIVE_OP_PID}" 2>/dev/null || { [[ -n "${DEPLOY_ACTIVE_OP_PGID:-}" ]] && kill -0 -"${DEPLOY_ACTIVE_OP_PGID}" 2>/dev/null; } ); then
     "$@"
     return $?
   fi
   set -m
   "$@" 0<&0 &
   DEPLOY_ACTIVE_OP_PID=$!
+  DEPLOY_ACTIVE_OP_PGID=$!
   set +m
   local status=0
   set +e
@@ -293,6 +320,7 @@ run_owned_op() {
   status=$?
   set -e
   DEPLOY_ACTIVE_OP_PID=""
+  DEPLOY_ACTIVE_OP_PGID=""
   return "${status}"
 }
 
@@ -320,21 +348,38 @@ sleep() {
 }
 
 settle_remote_operation() {
-  if [[ "${CYMPHO_DEPLOY_SOURCE_ONLY:-0}" == "1" ]]; then
+  if [[ "${CYMPHO_DEPLOY_SOURCE_ONLY:-0}" == "1" && "${CYMPHO_DEPLOY_SETTLE_REMOTE:-0}" != "1" ]]; then
     return 0
   fi
-  if [[ -n "${DEPLOY_LOCK_PID}" ]] && kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null && [[ -n "${DEPLOY_TARGET:-}" ]]; then
-    run_ssh "exec 9>>'${DEPLOY_OPERATION_LOCK}' && flock --exclusive --wait 10 9 && flock --unlock 9" >/dev/null 2>&1 || true
+  if [[ -n "${DEPLOY_LOCK_PID:-}" ]] && kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null && [[ -n "${DEPLOY_TARGET:-}" ]]; then
+    local lock_path="${DEPLOY_OPERATION_LOCK}"
+    local settle_body
+    settle_body="operation_lock=\"\$1\"
+[ ! -L \"\$operation_lock\" ] && [ -f \"\$operation_lock\" ] || { echo \"invalid deploy operation lock for settlement\" >&2; exit 76; }
+[ \"\$(stat -c %u -- \"\$operation_lock\")\" = 0 ] || { echo \"deploy operation lock is not root-owned for settlement\" >&2; exit 76; }
+exec 9>>\"\$operation_lock\"
+flock --exclusive --wait 10 9 || { echo \"timed out waiting to settle deploy operation lock\" >&2; exit 76; }
+flock --unlock 9"
+    local settle_cmd
+    settle_cmd="sudo bash -c $(shell_quote "${settle_body}") cympho-settle $(shell_quote "${lock_path}")"
+    if ! run_ssh "${settle_cmd}"; then
+      echo "Failed to settle remote operation lock on ${DEPLOY_TARGET}." >&2
+      return 1
+    fi
   fi
+  return 0
 }
 
 cleanup_local() {
   local unit_restore_failed=0
   local env_restore_failed=0
   local recovery_attempted=0
+  local settle_failed=0
 
   reap_active_operation
-  settle_remote_operation
+  if ! settle_remote_operation; then
+    settle_failed=1
+  fi
 
   if [[ -n "${DEPLOY_LOCK_MONITOR_PID}" ]]; then
     kill "${DEPLOY_LOCK_MONITOR_PID}" 2>/dev/null || true
@@ -342,7 +387,11 @@ cleanup_local() {
     DEPLOY_LOCK_MONITOR_PID=""
   fi
   if [[ "${ENV_SNAPSHOT_ACTIVE}" == "1" || "${UNIT_SNAPSHOT_ACTIVE}" == "1" ]]; then
-    if [[ -n "${DEPLOY_LOCK_PID}" ]] && kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null; then
+    if [[ "${settle_failed}" == "1" ]]; then
+      echo "CRITICAL: remote operation settlement failed before recovery; preserving deployment evidence." >&2
+      [[ "${ENV_SNAPSHOT_ACTIVE}" == "1" ]] && env_restore_failed=1
+      [[ "${UNIT_SNAPSHOT_ACTIVE}" == "1" ]] && unit_restore_failed=1
+    elif [[ -n "${DEPLOY_LOCK_PID}" ]] && kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null; then
       if [[ "${ENV_SNAPSHOT_ACTIVE}" == "1" ]] && ! restore_runtime_env under-held-lock; then env_restore_failed=1; fi
       if [[ "${UNIT_SNAPSHOT_ACTIVE}" == "1" && "${env_restore_failed}" != "1" ]] && ! restore_systemd_units under-held-lock; then unit_restore_failed=1; fi
     else
@@ -372,7 +421,8 @@ cleanup_local() {
     if kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null; then
       if [[ "${SOURCE_DIR_SAFE}" == "1" &&
             "${unit_restore_failed}" != "1" && "${env_restore_failed}" != "1" &&
-            "${UNIT_SNAPSHOT_CLEANUP_DEBT}" != "1" && "${ENV_SNAPSHOT_CLEANUP_DEBT}" != "1" ]]; then
+            "${UNIT_SNAPSHOT_CLEANUP_DEBT}" != "1" && "${ENV_SNAPSHOT_CLEANUP_DEBT}" != "1" &&
+            "${settle_failed}" != "1" ]]; then
         cleanup_remote_source_dir >/dev/null 2>&1 || true
       fi
     fi
@@ -479,6 +529,7 @@ actual_epoch=\$(cat -- \"\$epoch_file\")
 [ \"\$actual_epoch\" = \"\$expected_epoch\" ] || { echo \"stale deploy epoch; refusing remote mutation\" >&2; exit 76; }
 
 child_pid=\"\"
+child_pgid=\"\"
 watcher_pid=\"\"
 cleanup_remote_op() {
   trap '' HUP INT TERM EXIT
@@ -487,16 +538,68 @@ cleanup_remote_op() {
     wait \"\${watcher_pid}\" 2>/dev/null || true
     watcher_pid=\"\"
   fi
-  if [ -n \"\${child_pid:-}\" ] && kill -0 \"\${child_pid}\" 2>/dev/null; then
-    kill -TERM -- -\"\${child_pid}\" 2>/dev/null || kill -TERM \"\${child_pid}\" 2>/dev/null || true
-    for _ in \$(seq 1 20); do
-      if ! kill -0 \"\${child_pid}\" 2>/dev/null; then break; fi
-      command sleep 0.05
-    done
-    if kill -0 \"\${child_pid}\" 2>/dev/null; then
-      kill -KILL -- -\"\${child_pid}\" 2>/dev/null || kill -KILL \"\${child_pid}\" 2>/dev/null || true
+  local c_pid=\"\${child_pid:-}\"
+  local c_pgid=\"\${child_pgid:-\${c_pid}}\"
+  child_pid=\"\"
+  child_pgid=\"\"
+  if [ -n \"\${c_pid}\" ] || [ -n \"\${c_pgid}\" ]; then
+    local is_alive=0
+    if [ -n \"\${c_pid}\" ] && kill -0 \"\${c_pid}\" 2>/dev/null; then is_alive=1; fi
+    if [ -n \"\${c_pgid}\" ] && kill -0 -- -\"\${c_pgid}\" 2>/dev/null; then is_alive=1; fi
+    if [ \"\${is_alive}\" = 1 ]; then
+      if [ -n \"\${c_pgid}\" ]; then
+        kill -TERM -- -\"\${c_pgid}\" 2>/dev/null || true
+      fi
+      if [ -n \"\${c_pid}\" ]; then
+        kill -TERM \"\${c_pid}\" 2>/dev/null || true
+      fi
+      if command -v pgrep >/dev/null 2>&1; then
+        local cpids
+        cpids=\"\$( { [ -n \"\${c_pgid}\" ] && pgrep -g \"\${c_pgid}\" 2>/dev/null; } || { [ -n \"\${c_pid}\" ] && pgrep -P \"\${c_pid}\" 2>/dev/null; } || true )\"
+        if [ -n \"\${cpids}\" ]; then
+          for cp in \${cpids}; do
+            kill -TERM \"\${cp}\" 2>/dev/null || true
+          done
+        fi
+      fi
+      for _ in \$(seq 1 20); do
+        local alive=0
+        if [ -n \"\${c_pid}\" ] && kill -0 \"\${c_pid}\" 2>/dev/null; then alive=1; fi
+        if [ -n \"\${c_pgid}\" ] && kill -0 -- -\"\${c_pgid}\" 2>/dev/null; then alive=1; fi
+        if [ \"\${alive}\" = 0 ]; then break; fi
+        command sleep 0.05
+      done
+      local needs_kill=0
+      if [ -n \"\${c_pid}\" ] && kill -0 \"\${c_pid}\" 2>/dev/null; then needs_kill=1; fi
+      if [ -n \"\${c_pgid}\" ] && kill -0 -- -\"\${c_pgid}\" 2>/dev/null; then needs_kill=1; fi
+      if [ \"\${needs_kill}\" = 1 ]; then
+        if [ -n \"\${c_pgid}\" ]; then
+          kill -KILL -- -\"\${c_pgid}\" 2>/dev/null || true
+        fi
+        if [ -n \"\${c_pid}\" ]; then
+          kill -KILL \"\${c_pid}\" 2>/dev/null || true
+        fi
+        if command -v pgrep >/dev/null 2>&1; then
+          local cpids
+          cpids=\"\$( { [ -n \"\${c_pgid}\" ] && pgrep -g \"\${c_pgid}\" 2>/dev/null; } || { [ -n \"\${c_pid}\" ] && pgrep -P \"\${c_pid}\" 2>/dev/null; } || true )\"
+          if [ -n \"\${cpids}\" ]; then
+            for cp in \${cpids}; do
+              kill -KILL \"\${cp}\" 2>/dev/null || true
+            done
+          fi
+        fi
+        for _ in \$(seq 1 20); do
+          local alive=0
+          if [ -n \"\${c_pid}\" ] && kill -0 \"\${c_pid}\" 2>/dev/null; then alive=1; fi
+          if [ -n \"\${c_pgid}\" ] && kill -0 -- -\"\${c_pgid}\" 2>/dev/null; then alive=1; fi
+          if [ \"\${alive}\" = 0 ]; then break; fi
+          command sleep 0.05
+        done
+      fi
+      if [ -n \"\${c_pid}\" ]; then
+        wait \"\${c_pid}\" 2>/dev/null || true
+      fi
     fi
-    wait \"\${child_pid}\" 2>/dev/null || true
   fi
 }
 trap 'cleanup_remote_op; exit 1' HUP INT TERM
@@ -516,6 +619,7 @@ watcher_pid=\$!
 set -m
 sudo -u $(shell_quote "${DEPLOY_USER}") -- \"\$@\" 0<&0 &
 child_pid=\$!
+child_pgid=\$!
 set +m
 status=0
 set +e
@@ -581,6 +685,30 @@ run_remote_script_nonfatal() {
   } > "${script_file}"
   local status=0
   run_fenced_ssh_nonfatal < "${script_file}" || status=$?
+  rm -f -- "${script_file}"
+  return "${status}"
+}
+
+run_remote_script_capture() {
+  local __var_name="$1"
+  shift
+  local body
+  body="$(cat)"
+  local script_file="${DEPLOY_CONTEXT}/remote-script-capture.$$.${RANDOM}.tmp"
+  {
+    printf '%s\n' 'set -euo pipefail'
+    printf '%s\n' '_sudo() { sudo "$@"; }'
+    printf '%s\n' "${body}"
+  } > "${script_file}"
+  local status=0
+  local command
+  require_deploy_lock
+  command="$(operation_fence_command bash -s)"
+  if run_owned_op_capture "${__var_name}" ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "${command}" < "${script_file}"; then
+    status=0
+  else
+    status=$?
+  fi
   rm -f -- "${script_file}"
   return "${status}"
 }
@@ -1568,7 +1696,10 @@ EOF
 # replacement. An existing current release must remain a trustworthy rollback
 # target through every later step.
 PREVIOUS_RELEASE=""
-run_ssh_capture PREVIOUS_RELEASE "if sudo test -L '${CURRENT_LINK}'; then sudo readlink -- '${CURRENT_LINK}'; elif sudo test -e '${CURRENT_LINK}'; then printf '%s' INVALID_CURRENT_LINK; fi" || true
+if ! run_ssh_capture PREVIOUS_RELEASE "if sudo test -L '${CURRENT_LINK}'; then sudo readlink -- '${CURRENT_LINK}'; elif sudo test -e '${CURRENT_LINK}'; then printf '%s' INVALID_CURRENT_LINK; fi"; then
+  echo "Failed to discover current release on ${DEPLOY_TARGET}; refusing deployment." >&2
+  exit 1
+fi
 PREVIOUS_REVISION=""
 
 if [[ -n "${PREVIOUS_RELEASE}" ]]; then
@@ -2147,8 +2278,7 @@ EOF
 step "Attested readiness check (${LOCAL_READINESS_URL})"
 deployed_main_pid=""
 for _ in $(seq 1 15); do
-  deployed_main_pid="$(
-    run_remote_script <<EOF || true
+  run_remote_script_capture deployed_main_pid <<EOF || true
 pid_before=\$(_sudo systemctl show '${SERVICE_NAME}' -p MainPID --value)
 case "\$pid_before" in ''|*[!0-9]*|0) exit 1 ;; esac
 _sudo systemctl is-active --quiet '${SERVICE_NAME}'
@@ -2158,7 +2288,6 @@ pid_after=\$(_sudo systemctl show '${SERVICE_NAME}' -p MainPID --value)
 _sudo systemctl is-active --quiet '${SERVICE_NAME}'
 printf '%s' "\$pid_before"
 EOF
-  )"
   if [[ "${deployed_main_pid}" =~ ^[1-9][0-9]*$ ]]; then break; fi
   deployed_main_pid=""
   sleep 1
