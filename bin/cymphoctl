@@ -497,9 +497,13 @@ command_service_status() {
     supervisor_available=false
   elif read_service_status "$unit" "$status_file"; then
     parse_service_status "$status_file"
-    [[ "$LOAD_STATE" == "loaded" ]] && installed=true
-    [[ "$ACTIVE_STATE" == "active" ]] && active=true
-    case "$UNIT_FILE_STATE" in enabled|enabled-runtime) enabled=true ;; esac
+    if [[ "$LOAD_STATE" == "unknown" || "$ACTIVE_STATE" == "unknown" ]]; then
+      supervisor_available=false
+    else
+      [[ "$LOAD_STATE" == "loaded" ]] && installed=true
+      [[ "$ACTIVE_STATE" == "active" ]] && active=true
+      case "$UNIT_FILE_STATE" in enabled|enabled-runtime) enabled=true ;; esac
+    fi
   else
     supervisor_available=false
   fi
@@ -544,12 +548,12 @@ command_service_status() {
 
   if [[ "$identity_source" == "manifest" && "$LOCAL_IDENTITY_STATE" != "valid" ]]; then
     diagnose "the local release identity manifest is ${LOCAL_IDENTITY_STATE}"
-  elif [[ "$active" != true && "$HEALTH_STATE" == "ready" ]]; then
-    diagnose "the managed service is inactive even though a Cympho responder is ready on the loopback port"
   elif [[ "$supervisor_available" != true ]]; then
     diagnose "systemd service status is unavailable"
   elif [[ "$installed" != true ]]; then
     diagnose "the managed service is not installed"
+  elif [[ "$active" != true && "$HEALTH_STATE" == "ready" ]]; then
+    diagnose "the managed service is inactive even though a Cympho responder is ready on the loopback port"
   elif [[ "$active" != true ]]; then
     diagnose "the managed service is not active"
   elif [[ "$HEALTH_STATE" == "revision_mismatch" ]]; then

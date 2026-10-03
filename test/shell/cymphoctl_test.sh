@@ -259,6 +259,74 @@ assert_contains "$CLI_STDERR" "inactive even though" "inactive service with a re
 pass "service status does not attribute a healthy foreign process to systemd"
 unset FAKE_ACTIVE_STATE FAKE_MAIN_PID
 
+export FAKE_SYSTEMCTL_EXIT=1
+run_cli service status --expect-revision aaaaaaa
+assert_eq 1 "$CLI_STATUS" "supervisor failure with ready health exits nonzero"
+assert_contains "$CLI_STDOUT" "Cympho is ready (version 0.1.0, revision aaaaaaa)." "ready health is reported on stdout when supervisor fails"
+assert_contains "$CLI_STDERR" "systemd service status is unavailable" "supervisor failure with ready health diagnoses supervisor unavailability"
+if [[ "$CLI_STDERR" == *"inactive even though"* ]]; then
+  fail "supervisor failure with ready health must not diagnose inactive service"
+fi
+run_cli service status --json --expect-revision aaaaaaa
+assert_eq 1 "$CLI_STATUS" "supervisor failure with ready health exits nonzero in JSON mode"
+assert_json "$CLI_STDOUT" 'd["status"] == "not_ready" and d["supervisor"]["available"] is False and d["health"]["status"] == "ready"' "JSON status reports supervisor unavailable with ready health"
+assert_contains "$CLI_STDERR" "systemd service status is unavailable" "supervisor failure with ready health diagnoses supervisor unavailability in JSON mode"
+if [[ "$CLI_STDERR" == *"inactive even though"* ]]; then
+  fail "supervisor failure with ready health must not diagnose inactive service in JSON mode"
+fi
+
+# Manifest mode also reports supervisor unavailable, not inactive
+run_cli service status
+assert_eq 1 "$CLI_STATUS" "manifest mode supervisor failure with ready health exits nonzero"
+assert_contains "$CLI_STDERR" "systemd service status is unavailable" "manifest mode supervisor failure diagnoses unavailability"
+if [[ "$CLI_STDERR" == *"inactive even though"* ]]; then
+  fail "manifest mode supervisor failure must not diagnose inactive service"
+fi
+unset FAKE_SYSTEMCTL_EXIT
+pass "ready health with unavailable supervisor metadata is not reported inactive"
+
+# Uninstalled unit reports not installed
+export FAKE_LOAD_STATE=not-found
+export FAKE_ACTIVE_STATE=inactive
+export FAKE_MAIN_PID=0
+run_cli service status --expect-revision aaaaaaa
+assert_eq 1 "$CLI_STATUS" "uninstalled service status exits nonzero"
+assert_contains "$CLI_STDERR" "the managed service is not installed" "uninstalled service is diagnosed as not installed"
+unset FAKE_LOAD_STATE FAKE_ACTIVE_STATE FAKE_MAIN_PID
+pass "uninstalled unit is diagnosed as not installed"
+
+# Active service with unhealthy responder reports active but not ready
+write_health not_ready aaaaaaa unavailable pending
+export FAKE_HTTP_STATUS=503
+run_cli service status --expect-revision aaaaaaa
+assert_eq 1 "$CLI_STATUS" "active service with unhealthy responder exits nonzero"
+assert_contains "$CLI_STDERR" "the managed service is active but not ready" "active service with unhealthy responder is diagnosed"
+unset FAKE_HTTP_STATUS
+write_health ready aaaaaaa
+pass "active service with unhealthy responder is diagnosed as active but not ready"
+
+# Active service with curl transport error reports active but not ready
+export FAKE_CURL_EXIT=7
+run_cli service status --expect-revision aaaaaaa
+assert_eq 1 "$CLI_STATUS" "active service with curl transport error exits nonzero"
+assert_contains "$CLI_STDERR" "the managed service is active but not ready" "active service with transport error is diagnosed as active but not ready"
+
+# Inactive service with curl transport error reports not active
+export FAKE_ACTIVE_STATE=inactive
+export FAKE_MAIN_PID=0
+run_cli service status --expect-revision aaaaaaa
+assert_eq 1 "$CLI_STATUS" "inactive service with curl transport error exits nonzero"
+assert_contains "$CLI_STDERR" "the managed service is not active" "inactive service with transport error is diagnosed as not active"
+unset FAKE_ACTIVE_STATE FAKE_MAIN_PID
+
+# Supervisor unavailable with curl transport error reports supervisor unavailable
+export FAKE_SYSTEMCTL_EXIT=1
+run_cli service status --expect-revision aaaaaaa
+assert_eq 1 "$CLI_STATUS" "supervisor unavailable with curl transport error exits nonzero"
+assert_contains "$CLI_STDERR" "systemd service status is unavailable" "supervisor unavailable with transport error is diagnosed as supervisor unavailable"
+unset FAKE_SYSTEMCTL_EXIT FAKE_CURL_EXIT
+pass "genuine inactive, unhealthy, and unavailable responder cases remain accurate"
+
 printf '{"schema_version":1,"service":"cympho","release":{"version":"bad version","revision":"aaaaaaa"}}\n' \
   >"${STATE_DIR}/release-info.json"
 run_cli version --json
@@ -331,4 +399,4 @@ assert_contains "$CLI_STDERR" "simple systemd service name" "unsafe service name
 unset CYMPHOCTL_SERVICE_NAME
 pass "service override is constrained to a simple unit name"
 
-printf '1..22\n'
+printf '1..26\n'

@@ -132,6 +132,9 @@ cat >"$FAKE_BIN/systemctl" <<EOF
 if [[ "\${MOCK_MISSING_SYSTEMCTL:-0}" == "1" ]]; then
   exit 127
 fi
+if [[ "\${MOCK_FAILING_SYSTEMCTL:-0}" == "1" ]]; then
+  exit 1
+fi
 for arg in "\$@"; do
   if [[ "\$arg" == "--property="* ]]; then
     printf 'LoadState=loaded\\n'
@@ -446,7 +449,35 @@ assert_no_sentinels "$FAIL_BLOCK_OUT" "deploy failure path"
 
 printf 'ok - deployment failure block emits safe diagnostics and preserves exit 1\n'
 
+# Test 10: Ready health with unavailable supervisor metadata is not reported inactive
+export MOCK_MISSING_SYSTEMCTL=0
+export MOCK_FAILING_SYSTEMCTL=1
+export MOCK_HEALTH_STATUS="ready"
+export MOCK_APP_CHECK="ready"
+export MOCK_DB_CHECK="ready"
+export MOCK_MIG_CHECK="ready"
+export MOCK_REVISION="111111111111"
+export BUILD_REVISION="111111111111"
+
+set +e
+SUPERVISOR_UNAVAIL_OUT="$(emit_service_diagnostics "${BUILD_REVISION}" 2>&1)"
+SUPERVISOR_UNAVAIL_CODE=$?
+set -e
+
+[[ "$SUPERVISOR_UNAVAIL_OUT" == *"systemd service status is unavailable"* ]] ||
+  fail "supervisor query failure must diagnose supervisor unavailability"
+[[ "$SUPERVISOR_UNAVAIL_OUT" != *"the managed service is inactive"* ]] ||
+  fail "supervisor query failure with ready health must not falsely diagnose inactive service"
+[[ "$SUPERVISOR_UNAVAIL_OUT" != *"inactive even though"* ]] ||
+  fail "supervisor query failure with ready health must not claim inactive foreign responder"
+[[ "$SUPERVISOR_UNAVAIL_OUT" == *"Cympho is ready (version 0.1.0, revision 111111111111)."* ]] ||
+  fail "ready health responder output must remain visible when supervisor fails"
+assert_no_sentinels "$SUPERVISOR_UNAVAIL_OUT" "supervisor query failure diagnostic path"
+
+export MOCK_FAILING_SYSTEMCTL=0
+printf 'ok - ready health with unavailable supervisor is diagnosed as unavailable and not inactive\n'
+
 # Restore manifest permission for cleanup
 chmod 644 "$RELEASE_DIR/release-info.json" "$PREV_RELEASE_DIR/release-info.json" 2>/dev/null || true
 
-printf '1..9\n'
+printf '1..10\n'
