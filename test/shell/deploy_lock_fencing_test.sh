@@ -244,35 +244,179 @@ printf 'ok - deploy admission and lock-loss recovery preserve lock and restore o
 
 # --- Local holder/caller protocol lifecycle test ---
 python3 - "$DEPLOY_SCRIPT" "$TMP_DIR" <<'PY' || fail "local caller lifecycle test failed"
-import os, subprocess, time, tempfile, signal, sys
+import os, subprocess, time, tempfile, signal, sys, select
 
 deploy_sh = sys.argv[1]
 tmp_dir = sys.argv[2]
 
 local_holders = []
 local_callers = []
+local_sids = set()
+local_pgids = set()
 
-def reap_local_all():
-    for c in local_callers:
-        if c.poll() is None:
+def read_line_bounded(stream, timeout=5.0):
+    r, _, _ = select.select([stream], [], [], timeout)
+    if not r:
+        raise TimeoutError(f"Timed out waiting {timeout}s for ready line")
+    line = stream.readline()
+    if not line:
+        raise EOFError("Stream reached EOF before ready line")
+    return line.strip()
+
+def get_session_pgids(sids):
+    target_sids = set(sids)
+    found_pgids = set()
+    if not target_sids:
+        return found_pgids
+    try:
+        ps_out = subprocess.run(["ps", "-A", "-o", "pid,pgid"], capture_output=True, text=True, timeout=2.0).stdout
+        for line in ps_out.splitlines()[1:]:
+            parts = line.strip().split()
+            if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+                pid = int(parts[0])
+                pgid = int(parts[1])
+                try:
+                    if os.getsid(pid) in target_sids:
+                        found_pgids.add(pgid)
+                except (OSError, ProcessLookupError):
+                    pass
+    except Exception:
+        pass
+    return found_pgids
+
+def reap_owned_pgids(pgids_to_reap):
+    valid_pgids = [p for p in pgids_to_reap if p > 1]
+    if not valid_pgids:
+        return
+    for pgid in valid_pgids:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            pass
+    deadline = time.monotonic() + 0.3
+    while time.monotonic() < deadline:
+        alive = False
+        for pgid in valid_pgids:
             try:
-                os.killpg(c.pid, signal.SIGKILL)
-            except OSError:
+                os.killpg(pgid, 0)
+                alive = True
+                break
+            except (OSError, ProcessLookupError):
+                pass
+        if not alive:
+            break
+        time.sleep(0.05)
+    for pgid in valid_pgids:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+    deadline = time.monotonic() + 0.3
+    while time.monotonic() < deadline:
+        alive = False
+        for pgid in valid_pgids:
+            try:
+                os.killpg(pgid, 0)
+                alive = True
+                break
+            except (OSError, ProcessLookupError):
+                pass
+        if not alive:
+            break
+        time.sleep(0.05)
+    survivors = []
+    for pgid in valid_pgids:
+        try:
+            os.killpg(pgid, 0)
+            survivors.append(pgid)
+        except (OSError, ProcessLookupError):
+            pass
+    assert not survivors, f"Owned process groups survived teardown: {survivors}"
+
+def reap_processes_and_groups(callers, holders, sids, pgids):
+    for c in callers:
+        if c and c.poll() is None:
+            try:
+                c.terminate()
+            except (OSError, ProcessLookupError):
+                pass
+    for h in holders:
+        if h and h.poll() is None:
+            try:
+                h.terminate()
+            except (OSError, ProcessLookupError):
+                pass
+
+    for c in callers:
+        if c:
+            try:
+                c.wait(timeout=0.2)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+    for h in holders:
+        if h:
+            try:
+                h.wait(timeout=0.2)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+
+    all_pgids = set(pgids) | get_session_pgids(sids)
+    reap_owned_pgids(all_pgids)
+
+    for c in callers:
+        if c:
+            if c.poll() is None:
                 try:
                     c.kill()
-                except OSError:
+                except (OSError, ProcessLookupError):
                     pass
             try:
-                c.wait(timeout=1.0)
+                c.wait(timeout=0.2)
             except (subprocess.TimeoutExpired, OSError):
                 pass
-    for h in local_holders:
-        if h.poll() is None:
+            if c.stdout:
+                try:
+                    c.stdout.close()
+                except Exception:
+                    pass
+            if c.stderr:
+                try:
+                    c.stderr.close()
+                except Exception:
+                    pass
+    for h in holders:
+        if h:
+            if h.poll() is None:
+                try:
+                    h.kill()
+                except (OSError, ProcessLookupError):
+                    pass
             try:
-                h.kill()
-                h.wait(timeout=1.0)
+                h.wait(timeout=0.2)
             except (subprocess.TimeoutExpired, OSError):
                 pass
+            if h.stdout:
+                try:
+                    h.stdout.close()
+                except Exception:
+                    pass
+            if h.stderr:
+                try:
+                    h.stderr.close()
+                except Exception:
+                    pass
+
+    survivors = []
+    for pgid in [p for p in all_pgids if p > 1]:
+        try:
+            os.killpg(pgid, 0)
+            survivors.append(pgid)
+        except (OSError, ProcessLookupError):
+            pass
+    assert not survivors, f"Owned process groups survived teardown: {survivors}"
+
+def reap_local_all():
+    reap_processes_and_groups(local_callers, local_holders, local_sids, local_pgids)
 
 def local_signal_handler(signum, frame):
     reap_local_all()
@@ -286,14 +430,20 @@ try:
     # 1. Test signals during long owned work (SIGTERM, SIGINT, SIGHUP)
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+            case_sids = set()
+            case_pgids = set()
             caller_script = os.path.join(td, "caller.sh")
             caller_context = os.path.join(td, "context")
             fifo = os.path.join(td, "lock.fifo")
             os.mkfifo(fifo)
             os.makedirs(caller_context, exist_ok=True)
 
-            holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+            holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
             local_holders.append(holder)
+            local_sids.add(holder.pid)
+            local_pgids.add(holder.pid)
+            case_sids.add(holder.pid)
+            case_pgids.add(holder.pid)
             caller = None
 
             try:
@@ -325,9 +475,13 @@ run_owned_op command sleep 30
 """)
                 os.chmod(caller_script, 0o755)
 
-                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
                 local_callers.append(caller)
-                ready_line = caller.stdout.readline().strip()
+                local_sids.add(caller.pid)
+                local_pgids.add(caller.pid)
+                case_sids.add(caller.pid)
+                case_pgids.add(caller.pid)
+                ready_line = read_line_bounded(caller.stdout, timeout=5.0)
                 assert ready_line.startswith("READY:")
                 caller_pid = int(ready_line.split(":")[1])
 
@@ -338,32 +492,25 @@ run_owned_op command sleep 30
                 assert elapsed <= 2.0, f"Signal {sig} release exceeded deadline: {elapsed}s"
                 assert caller.returncode != 0
             finally:
-                if caller and caller.poll() is None:
-                    caller.terminate()
-                    try:
-                        caller.wait(timeout=1.0)
-                    except subprocess.TimeoutExpired:
-                        caller.kill()
-                        caller.wait(timeout=1.0)
-                if holder.poll() is None:
-                    holder.terminate()
-                    try:
-                        holder.wait(timeout=1.0)
-                    except subprocess.TimeoutExpired:
-                        holder.kill()
-                        holder.wait(timeout=1.0)
+                reap_processes_and_groups([caller] if caller else [], [holder], case_sids, case_pgids)
 
     # 1b. Test signals during foreground subshell / run_local_tests (SIGTERM, SIGINT, SIGHUP)
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+            case_sids = set()
+            case_pgids = set()
             caller_script = os.path.join(td, "caller.sh")
             caller_context = os.path.join(td, "context")
             fifo = os.path.join(td, "lock.fifo")
             os.mkfifo(fifo)
             os.makedirs(caller_context, exist_ok=True)
 
-            holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+            holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
             local_holders.append(holder)
+            local_sids.add(holder.pid)
+            local_pgids.add(holder.pid)
+            case_sids.add(holder.pid)
+            case_pgids.add(holder.pid)
             caller = None
 
             try:
@@ -398,9 +545,13 @@ run_owned_op run_local_tests
 """)
                 os.chmod(caller_script, 0o755)
 
-                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
                 local_callers.append(caller)
-                ready_line = caller.stdout.readline().strip()
+                local_sids.add(caller.pid)
+                local_pgids.add(caller.pid)
+                case_sids.add(caller.pid)
+                case_pgids.add(caller.pid)
+                ready_line = read_line_bounded(caller.stdout, timeout=5.0)
                 assert ready_line.startswith("READY:")
                 caller_pid = int(ready_line.split(":")[1])
 
@@ -411,32 +562,25 @@ run_owned_op run_local_tests
                 assert elapsed <= 2.0, f"Subshell signal {sig} release exceeded deadline: {elapsed}s"
                 assert caller.returncode != 0
             finally:
-                if caller and caller.poll() is None:
-                    caller.terminate()
-                    try:
-                        caller.wait(timeout=1.0)
-                    except subprocess.TimeoutExpired:
-                        caller.kill()
-                        caller.wait(timeout=1.0)
-                if holder.poll() is None:
-                    holder.terminate()
-                    try:
-                        holder.wait(timeout=1.0)
-                    except subprocess.TimeoutExpired:
-                        holder.kill()
-                        holder.wait(timeout=1.0)
+                reap_processes_and_groups([caller] if caller else [], [holder], case_sids, case_pgids)
 
     # 1c. Test signals during captured operation / command-substitution path (SIGTERM, SIGINT, SIGHUP)
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+            case_sids = set()
+            case_pgids = set()
             caller_script = os.path.join(td, "caller.sh")
             caller_context = os.path.join(td, "context")
             fifo = os.path.join(td, "lock.fifo")
             os.mkfifo(fifo)
             os.makedirs(caller_context, exist_ok=True)
 
-            holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+            holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
             local_holders.append(holder)
+            local_sids.add(holder.pid)
+            local_pgids.add(holder.pid)
+            case_sids.add(holder.pid)
+            case_pgids.add(holder.pid)
             caller = None
 
             try:
@@ -468,9 +612,13 @@ run_owned_op_capture CAPTURED_VAL command sleep 30
 """)
                 os.chmod(caller_script, 0o755)
 
-                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
                 local_callers.append(caller)
-                ready_line = caller.stdout.readline().strip()
+                local_sids.add(caller.pid)
+                local_pgids.add(caller.pid)
+                case_sids.add(caller.pid)
+                case_pgids.add(caller.pid)
+                ready_line = read_line_bounded(caller.stdout, timeout=5.0)
                 assert ready_line.startswith("READY:")
                 caller_pid = int(ready_line.split(":")[1])
 
@@ -481,23 +629,12 @@ run_owned_op_capture CAPTURED_VAL command sleep 30
                 assert elapsed <= 2.0, f"Captured op signal {sig} release exceeded deadline: {elapsed}s"
                 assert caller.returncode != 0
             finally:
-                if caller and caller.poll() is None:
-                    caller.terminate()
-                    try:
-                        caller.wait(timeout=1.0)
-                    except subprocess.TimeoutExpired:
-                        caller.kill()
-                        caller.wait(timeout=1.0)
-                if holder.poll() is None:
-                    holder.terminate()
-                    try:
-                        holder.wait(timeout=1.0)
-                    except subprocess.TimeoutExpired:
-                        holder.kill()
-                        holder.wait(timeout=1.0)
+                reap_processes_and_groups([caller] if caller else [], [holder], case_sids, case_pgids)
 
     # 1d. Test cancellation escalation with TERM-resistant descendant in owned PGID
     with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        case_sids = set()
+        case_pgids = set()
         caller_script = os.path.join(td, "caller.sh")
         caller_context = os.path.join(td, "context")
         fifo = os.path.join(td, "lock.fifo")
@@ -505,8 +642,12 @@ run_owned_op_capture CAPTURED_VAL command sleep 30
         os.mkfifo(fifo)
         os.makedirs(caller_context, exist_ok=True)
 
-        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+        holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
         local_holders.append(holder)
+        local_sids.add(holder.pid)
+        local_pgids.add(holder.pid)
+        case_sids.add(holder.pid)
+        case_pgids.add(holder.pid)
         caller = None
 
         try:
@@ -541,9 +682,13 @@ run_owned_op run_term_resistant_child
 """)
             os.chmod(caller_script, 0o755)
 
-            caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
             local_callers.append(caller)
-            ready_line = caller.stdout.readline().strip()
+            local_sids.add(caller.pid)
+            local_pgids.add(caller.pid)
+            case_sids.add(caller.pid)
+            case_pgids.add(caller.pid)
+            ready_line = read_line_bounded(caller.stdout, timeout=5.0)
             assert ready_line.startswith("READY:")
             caller_pid = int(ready_line.split(":")[1])
 
@@ -553,6 +698,8 @@ run_owned_op run_term_resistant_child
                 time.sleep(0.05)
             with open(pgid_file) as f:
                 op_pgid = int(f.read().strip())
+            case_pgids.add(op_pgid)
+            local_pgids.add(op_pgid)
 
             t0 = time.monotonic()
             os.kill(caller_pid, signal.SIGTERM)
@@ -572,32 +719,25 @@ run_owned_op run_term_resistant_child
                         pass
                 raise AssertionError(f"TERM-resistant descendant survived leader exit in PGID {op_pgid}: {survivors}")
         finally:
-            if caller and caller.poll() is None:
-                caller.terminate()
-                try:
-                    caller.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    caller.kill()
-                    caller.wait(timeout=1.0)
-            if holder.poll() is None:
-                holder.terminate()
-                try:
-                    holder.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    holder.kill()
-                    holder.wait(timeout=1.0)
+            reap_processes_and_groups([caller] if caller else [], [holder], case_sids, case_pgids)
 
     # 1e. Test signals during run_remote_script_capture without subshell deferral
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+            case_sids = set()
+            case_pgids = set()
             caller_script = os.path.join(td, "caller.sh")
             caller_context = os.path.join(td, "context")
             fifo = os.path.join(td, "lock.fifo")
             os.mkfifo(fifo)
             os.makedirs(caller_context, exist_ok=True)
 
-            holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+            holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
             local_holders.append(holder)
+            local_sids.add(holder.pid)
+            local_pgids.add(holder.pid)
+            case_sids.add(holder.pid)
+            case_pgids.add(holder.pid)
             caller = None
 
             try:
@@ -630,9 +770,13 @@ EOF
 """)
                 os.chmod(caller_script, 0o755)
 
-                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
                 local_callers.append(caller)
-                ready_line = caller.stdout.readline().strip()
+                local_sids.add(caller.pid)
+                local_pgids.add(caller.pid)
+                case_sids.add(caller.pid)
+                case_pgids.add(caller.pid)
+                ready_line = read_line_bounded(caller.stdout, timeout=5.0)
                 assert ready_line.startswith("READY:")
                 caller_pid = int(ready_line.split(":")[1])
 
@@ -643,23 +787,12 @@ EOF
                 assert elapsed <= 2.0, f"Captured remote script signal {sig} exceeded deadline: {elapsed}s"
                 assert caller.returncode != 0
             finally:
-                if caller and caller.poll() is None:
-                    caller.terminate()
-                    try:
-                        caller.wait(timeout=1.0)
-                    except subprocess.TimeoutExpired:
-                        caller.kill()
-                        caller.wait(timeout=1.0)
-                if holder.poll() is None:
-                    holder.terminate()
-                    try:
-                        holder.wait(timeout=1.0)
-                    except subprocess.TimeoutExpired:
-                        holder.kill()
-                        holder.wait(timeout=1.0)
+                reap_processes_and_groups([caller] if caller else [], [holder], case_sids, case_pgids)
 
     # 2. Test snapshot recovery ordering (environment before unit) during interruption
     with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        case_sids = set()
+        case_pgids = set()
         caller_script = os.path.join(td, "caller.sh")
         caller_context = os.path.join(td, "context")
         order_log = os.path.join(td, "order.log")
@@ -667,8 +800,12 @@ EOF
         os.mkfifo(fifo)
         os.makedirs(caller_context, exist_ok=True)
 
-        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+        holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
         local_holders.append(holder)
+        local_sids.add(holder.pid)
+        local_pgids.add(holder.pid)
+        case_sids.add(holder.pid)
+        case_pgids.add(holder.pid)
         caller = None
 
         try:
@@ -707,9 +844,13 @@ run_owned_op command sleep 30
 """)
             os.chmod(caller_script, 0o755)
 
-            caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
             local_callers.append(caller)
-            ready_line = caller.stdout.readline().strip()
+            local_sids.add(caller.pid)
+            local_pgids.add(caller.pid)
+            case_sids.add(caller.pid)
+            case_pgids.add(caller.pid)
+            ready_line = read_line_bounded(caller.stdout, timeout=5.0)
             assert ready_line.startswith("READY:")
             caller_pid = int(ready_line.split(":")[1])
 
@@ -723,23 +864,12 @@ run_owned_op command sleep 30
                 order = f.read().splitlines()
             assert order == ["RESTORE_ENV", "RESTORE_UNITS"], f"Unexpected restore order: {order}"
         finally:
-            if caller and caller.poll() is None:
-                caller.terminate()
-                try:
-                    caller.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    caller.kill()
-                    caller.wait(timeout=1.0)
-            if holder.poll() is None:
-                holder.terminate()
-                try:
-                    holder.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    holder.kill()
-                    holder.wait(timeout=1.0)
+            reap_processes_and_groups([caller] if caller else [], [holder], case_sids, case_pgids)
 
     # 2b. Test remote settlement opens lock through privileged boundary and propagates error
     with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        case_sids = set()
+        case_pgids = set()
         caller_script = os.path.join(td, "caller.sh")
         caller_context = os.path.join(td, "context")
         fifo = os.path.join(td, "lock.fifo")
@@ -749,8 +879,12 @@ run_owned_op command sleep 30
         with open(op_lock, "w") as f:
             f.write("")
 
-        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+        holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
         local_holders.append(holder)
+        local_sids.add(holder.pid)
+        local_pgids.add(holder.pid)
+        case_sids.add(holder.pid)
+        case_pgids.add(holder.pid)
 
         try:
             with open(caller_script, "w") as f:
@@ -795,28 +929,28 @@ fi
 echo "SETTLE_OK"
 """)
             os.chmod(caller_script, 0o755)
-            caller = subprocess.run([caller_script], capture_output=True, text=True)
+            caller = subprocess.run([caller_script], capture_output=True, text=True, timeout=10.0)
             assert caller.returncode == 0, f"Settlement test failed: {caller.stderr}\n{caller.stdout}"
             assert "SETTLE_OK" in caller.stdout
         finally:
-            if holder.poll() is None:
-                holder.terminate()
-                try:
-                    holder.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    holder.kill()
-                    holder.wait(timeout=1.0)
+            reap_processes_and_groups([], [holder], case_sids, case_pgids)
 
     # 2c. Test failed initial previous-release discovery aborts rather than assuming first deployment
     with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        case_sids = set()
+        case_pgids = set()
         caller_script = os.path.join(td, "caller.sh")
         caller_context = os.path.join(td, "context")
         fifo = os.path.join(td, "lock.fifo")
         os.mkfifo(fifo)
         os.makedirs(caller_context, exist_ok=True)
 
-        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+        holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
         local_holders.append(holder)
+        local_sids.add(holder.pid)
+        local_pgids.add(holder.pid)
+        case_sids.add(holder.pid)
+        case_pgids.add(holder.pid)
 
         try:
             with open(caller_script, "w") as f:
@@ -845,28 +979,28 @@ fi
 echo "DISCOVERY_UNEXPECTEDLY_SUCCEEDED"
 """)
             os.chmod(caller_script, 0o755)
-            caller = subprocess.run([caller_script], capture_output=True, text=True)
+            caller = subprocess.run([caller_script], capture_output=True, text=True, timeout=10.0)
             assert caller.returncode == 1, f"Expected abort on discovery failure: {caller.stderr}\n{caller.stdout}"
             assert "Failed to discover current release" in caller.stderr
         finally:
-            if holder.poll() is None:
-                holder.terminate()
-                try:
-                    holder.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    holder.kill()
-                    holder.wait(timeout=1.0)
+            reap_processes_and_groups([], [holder], case_sids, case_pgids)
 
     # 3. Test transport loss (holder process termination triggers monitor signal to caller)
     with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        case_sids = set()
+        case_pgids = set()
         caller_script = os.path.join(td, "caller.sh")
         caller_context = os.path.join(td, "context")
         fifo = os.path.join(td, "lock.fifo")
         os.mkfifo(fifo)
         os.makedirs(caller_context, exist_ok=True)
 
-        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+        holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
         local_holders.append(holder)
+        local_sids.add(holder.pid)
+        local_pgids.add(holder.pid)
+        case_sids.add(holder.pid)
+        case_pgids.add(holder.pid)
         caller = None
 
         try:
@@ -898,9 +1032,13 @@ run_owned_op command sleep 30
 """)
             os.chmod(caller_script, 0o755)
 
-            caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
             local_callers.append(caller)
-            ready_line = caller.stdout.readline().strip()
+            local_sids.add(caller.pid)
+            local_pgids.add(caller.pid)
+            case_sids.add(caller.pid)
+            case_pgids.add(caller.pid)
+            ready_line = read_line_bounded(caller.stdout, timeout=5.0)
             assert ready_line.startswith("READY:")
             caller_pid = int(ready_line.split(":")[1])
 
@@ -911,20 +1049,7 @@ run_owned_op command sleep 30
             elapsed = time.monotonic() - t0
             assert elapsed <= 2.0
         finally:
-            if caller and caller.poll() is None:
-                caller.terminate()
-                try:
-                    caller.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    caller.kill()
-                    caller.wait(timeout=1.0)
-            if holder.poll() is None:
-                holder.terminate()
-                try:
-                    holder.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    holder.kill()
-                    holder.wait(timeout=1.0)
+            reap_processes_and_groups([caller] if caller else [], [holder], case_sids, case_pgids)
 finally:
     reap_local_all()
 PY
