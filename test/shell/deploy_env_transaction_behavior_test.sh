@@ -6,6 +6,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPLOY_SCRIPT="${CYMPHO_DEPLOY_SCRIPT_UNDER_TEST:-$ROOT/deploy.sh}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cympho-env-rollback-behavior.XXXXXX")"
 trap 'rm -rf -- "$TMP_DIR"' EXIT
+chgrp "$(id -g)" "$TMP_DIR" 2>/dev/null || true
 
 fail() {
   printf 'not ok - %s\n' "$1" >&2

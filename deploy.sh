@@ -1745,6 +1745,24 @@ EOF
 RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-${BUILD_REVISION:0:12}-${DEPLOY_NONCE}"
 RELEASE_DIR="${RELEASES_DIR}/${RELEASE_ID}"
 
+emit_service_diagnostics() {
+  local release_manifest="${1:-${RELEASE_DIR}/release-info.json}"
+
+  if [[ -z "${SOURCE_DIR}" ]]; then
+    return 0
+  fi
+
+  # Run read-only operator CLI for secret-safe service and readiness diagnostics.
+  # Emits only allowlisted operational fields and strictly avoids raw status or
+  # journal dumps that could disclose cookies, environment, CLI args, or secrets.
+  run_ssh "env CYMPHOCTL_SERVICE_NAME='${SERVICE_NAME}' \
+               CYMPHOCTL_HEALTH_PORT='${APP_PORT}' \
+               CYMPHOCTL_APP_HOST='${DOMAIN}' \
+               CYMPHOCTL_HEALTH_VALIDATOR='${SOURCE_DIR}/bin/cympho-health-validator' \
+               CYMPHOCTL_RELEASE_INFO_FILE='${release_manifest}' \
+               '${SOURCE_DIR}/bin/cymphoctl' service status" || true
+}
+
 rollback_release() {
   local rollback_ready=0
   local current_target=""
@@ -1823,6 +1841,7 @@ rollback_release() {
       echo "This verifies boot compatibility only; database migrations were not reversed." >&2
     else
       echo "CRITICAL: rollback did not become ready at its recorded revision." >&2
+      emit_service_diagnostics "${PREVIOUS_RELEASE}/release-info.json"
     fi
   else
     if [[ "${current_target}" == "${RELEASE_DIR}" ]]; then
@@ -1957,7 +1976,7 @@ EOF
   sleep 2
 done
 if [[ "${local_ok}" != "1" ]]; then
-  run_ssh "sudo journalctl -u ${SERVICE_NAME} -n 60 --no-pager" || true
+  emit_service_diagnostics "${RELEASE_DIR}/release-info.json"
   rollback_release "Service failed local health check"
 fi
 echo "Local health OK."
@@ -2038,7 +2057,7 @@ fi
 EOF
 
 step "Remote service status"
-run_ssh "sudo systemctl status ${SERVICE_NAME} --no-pager -l | sed -n '1,12p'" || true
+emit_service_diagnostics "${RELEASE_DIR}/release-info.json"
 
 step "Public attested readiness (${PUBLIC_READINESS_URL}) — TLS may take ~30s to settle"
 public_ok=0
@@ -2046,6 +2065,9 @@ for _ in 1 2 3 4 5 6; do
   if public_readiness_matches; then public_ok=1; break; fi
   sleep 10
 done
+if [[ "${public_ok}" != "1" ]]; then
+  emit_service_diagnostics "${RELEASE_DIR}/release-info.json"
+fi
 if [[ "${public_ok}" == "1" ]]; then
   echo "Public HTTPS readiness verified at revision ${BUILD_REVISION}."
   # Logical commit happens before either best-effort evidence deletion so a

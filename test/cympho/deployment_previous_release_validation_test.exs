@@ -18,6 +18,8 @@ defmodule Cympho.DeploymentPreviousReleaseValidationTest do
       )
 
     File.mkdir_p!(base)
+    {user_group, 0} = System.cmd("id", ["-gn"])
+    System.cmd("chgrp", [String.trim(user_group), base])
     {canonical_base, 0} = System.cmd("realpath", [base])
     base = String.trim(canonical_base)
     release = Path.join(base, "release")
