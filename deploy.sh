@@ -63,11 +63,13 @@ DEPLOY_CONTEXT=""
 DEPLOY_LOCK_PID=""
 DEPLOY_LOCK_MONITOR_PID=""
 DEPLOY_MAIN_PID="$$"
+DEPLOY_ACTIVE_OP_PID=""
 DEPLOY_LOCK_OUTPUT=""
 STARTED_DEPLOY_LOCK_PID=""
-DEPLOY_SESSION_LOCK="/var/lock/cympho-deploy.lock"
-DEPLOY_OPERATION_LOCK="/var/lock/cympho-deploy-operation.lock"
-DEPLOY_EPOCH_FILE="/var/lock/cympho-deploy.epoch"
+DEPLOY_SESSION_LOCK="${CYMPHO_DEPLOY_SESSION_LOCK:-/var/lock/cympho-deploy.lock}"
+DEPLOY_OPERATION_LOCK="${CYMPHO_DEPLOY_OPERATION_LOCK:-/var/lock/cympho-deploy-operation.lock}"
+DEPLOY_EPOCH_FILE="${CYMPHO_DEPLOY_EPOCH_FILE:-/var/lock/cympho-deploy.epoch}"
+DEPLOY_REMOTE_COMMAND_PREFIX="${CYMPHO_DEPLOY_REMOTE_COMMAND_PREFIX:-}"
 DEPLOY_EPOCH=""
 DEPLOY_NONCE=""
 BUILD_IMAGE_TAG=""
@@ -104,16 +106,6 @@ are rejected rather than silently installing an inconsistent unit.
 EOF
 }
 
-while (($# > 0)); do
-  case "$1" in
-    --run-tests) SKIP_TESTS=0 ;;
-    --skip-tests) SKIP_TESTS=1 ;;
-    -h|--help) usage; exit 0 ;;
-    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
-  esac
-  shift
-done
-
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
 }
@@ -139,86 +131,98 @@ new_deploy_epoch() {
   python3 -c 'import secrets; print(secrets.token_hex(16))'
 }
 
-[[ "${APP_NAME}" =~ ^[a-z][a-z0-9_]{0,63}$ ]] || {
-  echo "CYMPHO_APP_NAME must be a safe lowercase release name." >&2; exit 1;
-}
-[[ "${APP_USER}" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || {
-  echo "CYMPHO_APP_USER must be a safe Unix account name." >&2; exit 1;
-}
-[[ "${DEPLOY_USER}" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || {
-  echo "CYMPHO_DEPLOY_USER must be a safe Unix account name." >&2; exit 1;
-}
-[[ "${SERVICE_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$ ]] || {
-  echo "CYMPHO_SERVICE_NAME must be a simple systemd service name." >&2; exit 1;
-}
-valid_hostname "${DEPLOY_HOST}" || {
-  echo "CYMPHO_DEPLOY_HOST must be a bare hostname or IPv4 address." >&2; exit 1;
-}
-valid_hostname "${DOMAIN}" || {
-  echo "CYMPHO_DOMAIN must be a bare hostname." >&2; exit 1;
-}
-valid_port "${DEPLOY_PORT}" || { echo "CYMPHO_DEPLOY_PORT must be 1-65535." >&2; exit 1; }
-valid_port "${APP_PORT}" || { echo "CYMPHO_APP_PORT must be 1-65535." >&2; exit 1; }
-valid_port "${DB_PORT}" || { echo "CYMPHO_DB_PORT must be 1-65535." >&2; exit 1; }
-valid_absolute_path "${DEPLOY_ROOT}" || {
-  echo "CYMPHO_DEPLOY_ROOT must be a safe absolute path." >&2; exit 1;
-}
-valid_absolute_path "${ENV_FILE}" || {
-  echo "CYMPHO_ENV_FILE must be a safe absolute path." >&2; exit 1;
-}
-[[ "${CERTBOT_EMAIL}" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$ ]] || {
-  echo "CYMPHO_CERTBOT_EMAIL must be a simple email address." >&2; exit 1;
-}
+if [[ "${CYMPHO_DEPLOY_SOURCE_ONLY:-0}" != "1" ]]; then
+  while (($# > 0)); do
+    case "$1" in
+      --run-tests) SKIP_TESTS=0 ;;
+      --skip-tests) SKIP_TESTS=1 ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+    esac
+    shift
+  done
 
-if [[ "${APP_NAME}" != "cympho" || "${APP_USER}" != "cympho" ||
-      "${SERVICE_NAME}" != "cympho" || "${DEPLOY_ROOT}" != "/opt/cympho" ||
-      "${ENV_FILE}" != "/etc/cympho.env" || "${APP_PORT}" != "4000" ]]; then
-  echo "This deployment unit requires app/service/user cympho, /opt/cympho, /etc/cympho.env, and port 4000." >&2
-  exit 1
+  [[ "${APP_NAME}" =~ ^[a-z][a-z0-9_]{0,63}$ ]] || {
+    echo "CYMPHO_APP_NAME must be a safe lowercase release name." >&2; exit 1;
+  }
+  [[ "${APP_USER}" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || {
+    echo "CYMPHO_APP_USER must be a safe Unix account name." >&2; exit 1;
+  }
+  [[ "${DEPLOY_USER}" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || {
+    echo "CYMPHO_DEPLOY_USER must be a safe Unix account name." >&2; exit 1;
+  }
+  [[ "${SERVICE_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$ ]] || {
+    echo "CYMPHO_SERVICE_NAME must be a simple systemd service name." >&2; exit 1;
+  }
+  valid_hostname "${DEPLOY_HOST}" || {
+    echo "CYMPHO_DEPLOY_HOST must be a bare hostname or IPv4 address." >&2; exit 1;
+  }
+  valid_hostname "${DOMAIN}" || {
+    echo "CYMPHO_DOMAIN must be a bare hostname." >&2; exit 1;
+  }
+  valid_port "${DEPLOY_PORT}" || { echo "CYMPHO_DEPLOY_PORT must be 1-65535." >&2; exit 1; }
+  valid_port "${APP_PORT}" || { echo "CYMPHO_APP_PORT must be 1-65535." >&2; exit 1; }
+  valid_port "${DB_PORT}" || { echo "CYMPHO_DB_PORT must be 1-65535." >&2; exit 1; }
+  valid_absolute_path "${DEPLOY_ROOT}" || {
+    echo "CYMPHO_DEPLOY_ROOT must be a safe absolute path." >&2; exit 1;
+  }
+  valid_absolute_path "${ENV_FILE}" || {
+    echo "CYMPHO_ENV_FILE must be a safe absolute path." >&2; exit 1;
+  }
+  [[ "${CERTBOT_EMAIL}" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$ ]] || {
+    echo "CYMPHO_CERTBOT_EMAIL must be a simple email address." >&2; exit 1;
+  }
+
+  if [[ "${APP_NAME}" != "cympho" || "${APP_USER}" != "cympho" ||
+        "${SERVICE_NAME}" != "cympho" || "${DEPLOY_ROOT}" != "/opt/cympho" ||
+        "${ENV_FILE}" != "/etc/cympho.env" || "${APP_PORT}" != "4000" ]]; then
+    echo "This deployment unit requires app/service/user cympho, /opt/cympho, /etc/cympho.env, and port 4000." >&2
+    exit 1
+  fi
+  if [[ "${DEPLOY_USER}" == "${APP_USER}" ]]; then
+    echo "CYMPHO_DEPLOY_USER must differ from the untrusted application service user." >&2
+    exit 1
+  fi
+
+  require_cmd ssh
+  require_cmd rsync
+  require_cmd curl
+  require_cmd git
+  require_cmd tar
+  require_cmd python3
+
+  SOURCE_REVISION="$(git --no-replace-objects -C "${REPO_DIR}" rev-parse --verify HEAD)"
+  if [[ -z "${BUILD_REVISION}" ]]; then BUILD_REVISION="${SOURCE_REVISION}"; fi
+
+  if [[ ! "${BUILD_REVISION}" =~ ^[0-9a-fA-F]{7,64}$ ]]; then
+    echo "CYMPHO_BUILD_REVISION must be a 7-64 character hexadecimal revision." >&2
+    exit 1
+  fi
+
+  if [[ "${BUILD_REVISION}" != "${SOURCE_REVISION}" ]]; then
+    echo "Refusing to attest the synced source as ${BUILD_REVISION}: HEAD is ${SOURCE_REVISION}." >&2
+    exit 1
+  fi
+
+  if ! git --no-replace-objects -C "${REPO_DIR}" diff --quiet -- ||
+     ! git --no-replace-objects -C "${REPO_DIR}" diff --cached --quiet -- ||
+     [[ -n "$(git --no-replace-objects -C "${REPO_DIR}" ls-files --others --exclude-standard)" ]]; then
+    echo "Refusing to deploy while the working tree, index, or untracked build inputs differ from HEAD." >&2
+    echo "Commit or remove those changes so the deployed revision matches operator intent." >&2
+    exit 1
+  fi
+
+  if git --no-replace-objects -C "${REPO_DIR}" ls-files -s |
+     awk '$1 == 120000 { found=1 } END { exit(found ? 0 : 1) }'; then
+    echo "Refusing to deploy: tracked symlinks are not permitted in deployment source." >&2
+    exit 1
+  fi
 fi
-if [[ "${DEPLOY_USER}" == "${APP_USER}" ]]; then
-  echo "CYMPHO_DEPLOY_USER must differ from the untrusted application service user." >&2
-  exit 1
-fi
 
-require_cmd ssh
-require_cmd rsync
-require_cmd curl
-require_cmd git
-require_cmd tar
-require_cmd python3
-
-SOURCE_REVISION="$(git --no-replace-objects -C "${REPO_DIR}" rev-parse --verify HEAD)"
-if [[ -z "${BUILD_REVISION}" ]]; then BUILD_REVISION="${SOURCE_REVISION}"; fi
-
-if [[ ! "${BUILD_REVISION}" =~ ^[0-9a-fA-F]{7,64}$ ]]; then
-  echo "CYMPHO_BUILD_REVISION must be a 7-64 character hexadecimal revision." >&2
-  exit 1
-fi
-
-if [[ "${BUILD_REVISION}" != "${SOURCE_REVISION}" ]]; then
-  echo "Refusing to attest the synced source as ${BUILD_REVISION}: HEAD is ${SOURCE_REVISION}." >&2
-  exit 1
-fi
-
-if ! git --no-replace-objects -C "${REPO_DIR}" diff --quiet -- ||
-   ! git --no-replace-objects -C "${REPO_DIR}" diff --cached --quiet -- ||
-   [[ -n "$(git --no-replace-objects -C "${REPO_DIR}" ls-files --others --exclude-standard)" ]]; then
-  echo "Refusing to deploy while the working tree, index, or untracked build inputs differ from HEAD." >&2
-  echo "Commit or remove those changes so the deployed revision matches operator intent." >&2
-  exit 1
-fi
-
-if git --no-replace-objects -C "${REPO_DIR}" ls-files -s |
-   awk '$1 == 120000 { found=1 } END { exit(found ? 0 : 1) }'; then
-  echo "Refusing to deploy: tracked symlinks are not permitted in deployment source." >&2
-  exit 1
-fi
-
-DEPLOY_CONTEXT="$(mktemp -d "${TMPDIR:-/tmp}/cympho-deploy.XXXXXX")"
-DEPLOY_LOCK_OUTPUT="${DEPLOY_CONTEXT}/deploy-lock.out"
-DEPLOY_EPOCH="$(new_deploy_epoch)"
-DEPLOY_NONCE="$(python3 -c 'import secrets; print(secrets.token_hex(4))')"
+DEPLOY_CONTEXT="${DEPLOY_CONTEXT:-$(mktemp -d "${TMPDIR:-/tmp}/cympho-deploy.XXXXXX")}"
+DEPLOY_LOCK_OUTPUT="${DEPLOY_LOCK_OUTPUT:-${DEPLOY_CONTEXT}/deploy-lock.out}"
+DEPLOY_EPOCH="${DEPLOY_EPOCH:-$(new_deploy_epoch)}"
+DEPLOY_NONCE="${DEPLOY_NONCE:-$(python3 -c 'import secrets; print(secrets.token_hex(4))')}"
 BUILD_IMAGE_TAG="${APP_NAME}-build:${BUILD_REVISION:0:12}-${DEPLOY_NONCE}"
 SOURCE_DIR="${SOURCES_DIR}/${BUILD_REVISION:0:12}-${DEPLOY_NONCE}"
 UNIT_SNAPSHOT_DIR="${DEPLOY_ROOT}/unit-snapshots/${BUILD_REVISION:0:12}-${DEPLOY_NONCE}"
@@ -228,14 +232,62 @@ close_deploy_lock_fifo() {
     exec 8>&-
   fi
 }
+
+reap_active_operation() {
+  if [[ -n "${DEPLOY_ACTIVE_OP_PID}" ]] && kill -0 "${DEPLOY_ACTIVE_OP_PID}" 2>/dev/null; then
+    local op_pid="${DEPLOY_ACTIVE_OP_PID}"
+    DEPLOY_ACTIVE_OP_PID=""
+    kill -TERM "${op_pid}" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      if ! kill -0 "${op_pid}" 2>/dev/null; then break; fi
+      command sleep 0.05
+    done
+    if kill -0 "${op_pid}" 2>/dev/null; then
+      kill -KILL "${op_pid}" 2>/dev/null || true
+    fi
+    wait "${op_pid}" 2>/dev/null || true
+  fi
+  DEPLOY_ACTIVE_OP_PID=""
+}
+
+handle_deploy_signal() {
+  local sig="${1:-TERM}"
+  trap '' HUP INT TERM
+  reap_active_operation
+  exit 1
+}
+
+run_owned_op() {
+  if [[ -n "${DEPLOY_ACTIVE_OP_PID}" ]] && kill -0 "${DEPLOY_ACTIVE_OP_PID}" 2>/dev/null; then
+    "$@"
+    return $?
+  fi
+  "$@" 0<&0 &
+  DEPLOY_ACTIVE_OP_PID=$!
+  local status=0
+  set +e
+  wait "${DEPLOY_ACTIVE_OP_PID}"
+  status=$?
+  set -e
+  DEPLOY_ACTIVE_OP_PID=""
+  return "${status}"
+}
+
+sleep() {
+  run_owned_op command sleep "$@"
+}
+
 cleanup_local() {
   local unit_restore_failed=0
   local env_restore_failed=0
   local recovery_attempted=0
 
+  reap_active_operation
+
   if [[ -n "${DEPLOY_LOCK_MONITOR_PID}" ]]; then
     kill "${DEPLOY_LOCK_MONITOR_PID}" 2>/dev/null || true
     wait "${DEPLOY_LOCK_MONITOR_PID}" 2>/dev/null || true
+    DEPLOY_LOCK_MONITOR_PID=""
   fi
   if [[ "${ENV_SNAPSHOT_ACTIVE}" == "1" || "${UNIT_SNAPSHOT_ACTIVE}" == "1" ]]; then
     if [[ -n "${DEPLOY_LOCK_PID}" ]] && kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null; then
@@ -275,29 +327,38 @@ cleanup_local() {
     close_deploy_lock_fifo
     kill "${DEPLOY_LOCK_PID}" 2>/dev/null || true
     wait "${DEPLOY_LOCK_PID}" 2>/dev/null || true
+    DEPLOY_LOCK_PID=""
   fi
   close_deploy_lock_fifo
   rm -rf -- "${DEPLOY_CONTEXT}"
 }
-trap cleanup_local EXIT
-trap 'exit 1' HUP INT TERM
-git --no-replace-objects -C "${REPO_DIR}" archive --format=tar "${SOURCE_REVISION}^{commit}" |
-  tar -xf - -C "${DEPLOY_CONTEXT}"
-if find "${DEPLOY_CONTEXT}" -xdev -type l -print -quit | grep -q .; then
-  echo "Refusing to deploy: symlinks are not permitted in the extracted source archive." >&2
-  exit 1
-fi
+init_deploy_traps() {
+  trap cleanup_local EXIT
+  trap 'handle_deploy_signal HUP' HUP
+  trap 'handle_deploy_signal INT' INT
+  trap 'handle_deploy_signal TERM' TERM
+}
 
-# Safety guard: the domain must point at the deploy host. If it doesn't, we're
-# almost certainly aimed at the wrong machine — abort. Best-effort (needs dig).
-if [[ "${CYMPHO_SKIP_HOST_CHECK:-0}" != "1" ]] && command -v dig >/dev/null 2>&1; then
-  domain_ip="$(dig +short "${DOMAIN}" A | tail -1)"
-  host_ip="$(dig +short "${DEPLOY_HOST}" A | tail -1)"
-  [[ -z "${host_ip}" ]] && host_ip="${DEPLOY_HOST}"  # DEPLOY_HOST is already an IP
-  if [[ -n "${domain_ip}" && "${domain_ip}" != "${host_ip}" ]]; then
-    echo "Refusing to deploy: ${DOMAIN} resolves to ${domain_ip}, but deploy host" >&2
-    echo "${DEPLOY_HOST} is ${host_ip}. Wrong target? Set CYMPHO_SKIP_HOST_CHECK=1 to override." >&2
+if [[ "${CYMPHO_DEPLOY_SOURCE_ONLY:-0}" != "1" ]]; then
+  init_deploy_traps
+  git --no-replace-objects -C "${REPO_DIR}" archive --format=tar "${SOURCE_REVISION}^{commit}" |
+    tar -xf - -C "${DEPLOY_CONTEXT}"
+  if find "${DEPLOY_CONTEXT}" -xdev -type l -print -quit | grep -q .; then
+    echo "Refusing to deploy: symlinks are not permitted in the extracted source archive." >&2
     exit 1
+  fi
+
+  # Safety guard: the domain must point at the deploy host. If it doesn't, we're
+  # almost certainly aimed at the wrong machine — abort. Best-effort (needs dig).
+  if [[ "${CYMPHO_SKIP_HOST_CHECK:-0}" != "1" ]] && command -v dig >/dev/null 2>&1; then
+    domain_ip="$(dig +short "${DOMAIN}" A | tail -1)"
+    host_ip="$(dig +short "${DEPLOY_HOST}" A | tail -1)"
+    [[ -z "${host_ip}" ]] && host_ip="${DEPLOY_HOST}"  # DEPLOY_HOST is already an IP
+    if [[ -n "${domain_ip}" && "${domain_ip}" != "${host_ip}" ]]; then
+      echo "Refusing to deploy: ${DOMAIN} resolves to ${domain_ip}, but deploy host" >&2
+      echo "${DEPLOY_HOST} is ${host_ip}. Wrong target? Set CYMPHO_SKIP_HOST_CHECK=1 to override." >&2
+      exit 1
+    fi
   fi
 fi
 
@@ -313,7 +374,11 @@ RSYNC_RSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTi
 
 run_ssh() {
   require_deploy_lock
-  ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "$@"
+  if [[ -n "${DEPLOY_REMOTE_COMMAND_PREFIX:-}" ]]; then
+    run_owned_op ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "${DEPLOY_REMOTE_COMMAND_PREFIX}$*"
+  else
+    run_owned_op ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "$@"
+  fi
 }
 
 shell_quote() {
@@ -352,7 +417,7 @@ actual_epoch=\$(cat -- \"\$epoch_file\")
 # Do not exec the deploy-user child: sudo may close inherited descriptors,
 # while this root wrapper must retain FD 9 until the entire body exits.
 sudo -u $(shell_quote "${DEPLOY_USER}") -- \"\$@\""
-  command="sudo bash -c $(shell_quote "${fence_body}") cympho-deploy-operation${quoted_args}"
+  command="${DEPLOY_REMOTE_COMMAND_PREFIX:-}sudo bash -c $(shell_quote "${fence_body}") cympho-deploy-operation${quoted_args}"
   printf '%s\n' "${command}"
 }
 
@@ -360,7 +425,7 @@ run_fenced_ssh() {
   local command
   require_deploy_lock
   command="$(operation_fence_command bash -s)"
-  ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "${command}"
+  run_owned_op ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "${command}"
 }
 
 run_fenced_ssh_nonfatal() {
@@ -370,7 +435,7 @@ run_fenced_ssh_nonfatal() {
     return 1
   fi
   command="$(operation_fence_command bash -s)"
-  ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "${command}"
+  run_owned_op ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "${command}"
 }
 
 require_deploy_lock() {
@@ -386,21 +451,31 @@ require_deploy_lock() {
 run_remote_script() {
   local body
   body="$(cat)"
+  local script_file="${DEPLOY_CONTEXT}/remote-script.$$.${RANDOM}.tmp"
   {
     printf '%s\n' 'set -euo pipefail'
     printf '%s\n' '_sudo() { sudo "$@"; }'
     printf '%s\n' "${body}"
-  } | run_fenced_ssh
+  } > "${script_file}"
+  local status=0
+  run_fenced_ssh < "${script_file}" || status=$?
+  rm -f -- "${script_file}"
+  return "${status}"
 }
 
 run_remote_script_nonfatal() {
   local body
   body="$(cat)"
+  local script_file="${DEPLOY_CONTEXT}/remote-script-nonfatal.$$.${RANDOM}.tmp"
   {
     printf '%s\n' 'set -euo pipefail'
     printf '%s\n' '_sudo() { sudo "$@"; }'
     printf '%s\n' "${body}"
-  } | run_fenced_ssh_nonfatal
+  } > "${script_file}"
+  local status=0
+  run_fenced_ssh_nonfatal < "${script_file}" || status=$?
+  rm -f -- "${script_file}"
+  return "${status}"
 }
 
 validate_managed_paths() {
@@ -576,6 +651,7 @@ EOF
 run_remote_script_with_current_link_cas() {
   local body
   body="$(cat)"
+  local script_file="${DEPLOY_CONTEXT}/remote-script-cas.$$.${RANDOM}.tmp"
   # The old run_ssh_nonfatal path is intentionally replaced by this
   # operation-fenced equivalent; it still returns admission loss to recovery.
   {
@@ -599,7 +675,11 @@ if [ "\$observed_current" != "\$previous_release" ] &&
 fi
 EOF
     printf '%s\n' "${body}"
-  } | run_fenced_ssh_nonfatal
+  } > "${script_file}"
+  local status=0
+  run_fenced_ssh_nonfatal < "${script_file}" || status=$?
+  rm -f -- "${script_file}"
+  return "${status}"
 }
 
 atomic_current_link() {
@@ -1163,14 +1243,17 @@ public_readiness_matches() {
 # lock to publish a fresh epoch, then release operation before ACK. The caller
 # maintains the controlling input stream via a private FIFO on FD 8.
 #
-# Bounded release deadlines:
+# Finite implementation and fixture release bounds:
 # 1. Normal completion or interrupt signals (SIGINT, SIGTERM, SIGHUP) trigger
-#    cleanup_local, which closes FD 8 and reaps the local monitor/holder.
-#    The remote cat process receives EOF and exits within 5 seconds (typically <0.5s),
-#    releasing the session flock for immediate reacquisition.
+#    handle_deploy_signal and cleanup_local, which reap active owned operations,
+#    stop the monitor, execute ordered snapshot recovery when active, close FD 8,
+#    and reap the holder. Remote cat receives EOF/HUP and terminates, releasing
+#    the session flock for immediate reacquisition within finite fixture watchdog bounds
+#    (typically under 1 second; fixture assertions bound release within finite
+#    implementation and test deadlines).
 # 2. Lost transport or controller termination closes the SSH channel.
-#    Remote cat receives EOF/HUP and exits within 5 seconds, preventing orphan
-#    lock retention.
+#    Remote cat receives EOF/HUP and terminates within finite fixture bounds,
+#    preventing orphan lock retention.
 start_deploy_lock_holder() {
   local mode="${1:?lock-holder mode required}"
   local lock_ack="${2:?lock-holder ACK required}"
@@ -1248,7 +1331,7 @@ EOF
 
   : >"${output}"
   ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" \
-    "sudo flock ${lock_args} --conflict-exit-code 75 '${DEPLOY_SESSION_LOCK}' bash -s" \
+    "${DEPLOY_REMOTE_COMMAND_PREFIX:-}sudo flock ${lock_args} --conflict-exit-code 75 '${DEPLOY_SESSION_LOCK}' bash -s" \
     8>&- <"${fifo}" >"${output}" 2>&1 &
   STARTED_DEPLOY_LOCK_PID=$!
 }
@@ -1261,7 +1344,7 @@ acquire_deploy_lock() {
   for _ in $(seq 1 650); do
     if grep -Fxq 'CYMPHO_DEPLOY_LOCKED' "${DEPLOY_LOCK_OUTPUT}"; then
       (
-        while kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null; do sleep 0.2; done
+        while kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null; do command sleep 0.2; done
         kill -TERM "${DEPLOY_MAIN_PID}" 2>/dev/null || true
       ) 8>&- &
       DEPLOY_LOCK_MONITOR_PID=$!
@@ -1274,7 +1357,7 @@ acquire_deploy_lock() {
       cat "${DEPLOY_LOCK_OUTPUT}" >&2
       return 1
     fi
-    sleep 0.1
+    command sleep 0.1
   done
 
   kill "${DEPLOY_LOCK_PID}" 2>/dev/null || true
@@ -1289,6 +1372,10 @@ step() { echo; echo "==> $*"; }
 
 # ---------------------------------------------------------------------------
 
+if [[ "${CYMPHO_DEPLOY_SOURCE_ONLY:-0}" == "1" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 echo "Deploy target: ${DEPLOY_TARGET}"
 echo "Domain:        ${DOMAIN}"
 echo "Deploy root:   ${DEPLOY_ROOT}"
@@ -1301,7 +1388,7 @@ acquire_deploy_lock
 
 if [[ "${SKIP_TESTS}" != "1" ]]; then
   step "Running local tests"
-  ( cd "${REPO_DIR}" && mix test ) || { echo "Local tests failed. Aborting." >&2; exit 1; }
+  ( cd "${REPO_DIR}" && run_owned_op mix test ) || { echo "Local tests failed. Aborting." >&2; exit 1; }
 fi
 
 step "Validating managed deployment paths"
@@ -1355,7 +1442,7 @@ SOURCE_DIR_SAFE=1
 step "Syncing the exact Git tree ${SOURCE_REVISION} to ${SOURCE_DIR}"
 require_deploy_lock
 RSYNC_PATH="$(operation_fence_command rsync)"
-rsync -az --delete -e "${RSYNC_RSH}" \
+run_owned_op rsync -az --delete -e "${RSYNC_RSH}" \
   --rsync-path="${RSYNC_PATH}" \
   "${DEPLOY_CONTEXT}/" "${DEPLOY_TARGET}:${SOURCE_DIR}/"
 run_remote_script <<EOF

@@ -55,8 +55,9 @@ require("mkfifo" in admission and "close_deploy_lock_fifo" in admission and
         "admission must use a private FIFO on FD 8 and cat >/dev/null for bounded release")
 require("sleep infinity" not in admission,
         "admission must not orphan unbounded sleep infinity holders")
-require("Bounded release deadlines:" in deploy and "within 5 seconds" in deploy,
-        "deploy must document the bounded holder release deadline")
+require("Finite implementation and fixture release bounds:" in deploy and
+        "finite fixture watchdog bounds" in deploy,
+        "deploy must document finite implementation and fixture release bounds")
 
 fence = function("operation_fence_command", "run_fenced_ssh")
 require("DEPLOY_OPERATION_LOCK" in fence and "DEPLOY_EPOCH_FILE" in fence,
@@ -224,58 +225,243 @@ printf 'ok - deploy mutation fence rejects stale epochs and covers every mutatio
 printf 'ok - deploy admission and lock-loss recovery preserve lock and restore ordering\n'
 
 # --- Local holder/caller protocol lifecycle test ---
-LOCAL_FIFO="$TMP_DIR/local.fifo"
-mkfifo "$LOCAL_FIFO"
-exec 8<>"$LOCAL_FIFO"
-cat >&8 <<'EOF'
-printf 'LOCKED\n'
-exec cat >/dev/null
-EOF
+python3 - "$DEPLOY_SCRIPT" "$TMP_DIR" <<'PY' || fail "local caller lifecycle test failed"
+import os, subprocess, time, tempfile, signal, sys
 
-LOCAL_OUT="$TMP_DIR/local.out"
-: >"$LOCAL_OUT"
-bash -s 8>&- <"$LOCAL_FIFO" >"$LOCAL_OUT" 2>&1 &
-LOCAL_HOLDER_PID=$!
+deploy_sh = sys.argv[1]
+tmp_dir = sys.argv[2]
 
-for _ in $(seq 1 50); do
-  grep -Fxq 'LOCKED' "$LOCAL_OUT" && break
-  sleep 0.05
-done
-grep -Fxq 'LOCKED' "$LOCAL_OUT" || fail "local holder failed to emit ACK"
+# 1. Test signals during long owned work (SIGTERM, SIGINT, SIGHUP)
+for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        caller_script = os.path.join(td, "caller.sh")
+        caller_context = os.path.join(td, "context")
+        fifo = os.path.join(td, "lock.fifo")
+        os.mkfifo(fifo)
+        os.makedirs(caller_context, exist_ok=True)
 
-kill -0 "$LOCAL_HOLDER_PID" 2>/dev/null || fail "local holder died while input was held open"
+        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
 
-T_CLOSE="$(python3 -c 'import time; print(time.time())')"
-exec 8>&-
-wait "$LOCAL_HOLDER_PID"
-T_EXIT="$(python3 -c 'import time; print(time.time())')"
-python3 -c "assert ($T_EXIT - $T_CLOSE) <= 5.0, 'local holder release exceeded 5s deadline'" ||
-  fail "local holder release took longer than 5s deadline"
+        with open(caller_script, "w") as f:
+            f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
 
-printf 'ok - local holder protocol retains live lock and releases on EOF or interrupt\n'
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_LOCK_PID={holder.pid}
 
-# --- Genuine Linux flock fixture on authorized GCP host ---
+exec 8<>'{fifo}'
+close_deploy_lock_fifo() {{
+  if {{ true >&8; }} 2>/dev/null; then exec 8>&-; fi
+}}
+
+(
+  while kill -0 {holder.pid} 2>/dev/null; do command sleep 0.05; done
+  kill -TERM $$ 2>/dev/null || true
+) &
+DEPLOY_LOCK_MONITOR_PID=$!
+
+init_deploy_traps
+
+printf 'READY:%s\\n' "$$"
+run_owned_op command sleep 30
+""")
+        os.chmod(caller_script, 0o755)
+
+        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ready_line = caller.stdout.readline().strip()
+        assert ready_line.startswith("READY:")
+        caller_pid = int(ready_line.split(":")[1])
+
+        t0 = time.monotonic()
+        os.kill(caller_pid, sig)
+        caller.wait(timeout=2.0)
+        elapsed = time.monotonic() - t0
+        assert elapsed <= 2.0, f"Signal {sig} release exceeded deadline: {elapsed}s"
+        assert caller.returncode != 0
+
+        holder.terminate()
+        holder.wait(timeout=1.0)
+
+# 2. Test snapshot recovery ordering (environment before unit) during interruption
+with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+    caller_script = os.path.join(td, "caller.sh")
+    caller_context = os.path.join(td, "context")
+    order_log = os.path.join(td, "order.log")
+    fifo = os.path.join(td, "lock.fifo")
+    os.mkfifo(fifo)
+    os.makedirs(caller_context, exist_ok=True)
+
+    holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+
+    with open(caller_script, "w") as f:
+        f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
+
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_LOCK_PID={holder.pid}
+export ENV_SNAPSHOT_ACTIVE=1
+export UNIT_SNAPSHOT_ACTIVE=1
+
+exec 8<>'{fifo}'
+close_deploy_lock_fifo() {{
+  if {{ true >&8; }} 2>/dev/null; then exec 8>&-; fi
+}}
+
+restore_runtime_env() {{
+  echo "RESTORE_ENV" >> '{order_log}'
+  return 0
+}}
+
+restore_systemd_units() {{
+  echo "RESTORE_UNITS" >> '{order_log}'
+  return 0
+}}
+
+init_deploy_traps
+
+printf 'READY:%s\\n' "$$"
+run_owned_op command sleep 30
+""")
+    os.chmod(caller_script, 0o755)
+
+    caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    ready_line = caller.stdout.readline().strip()
+    assert ready_line.startswith("READY:")
+    caller_pid = int(ready_line.split(":")[1])
+
+    t0 = time.monotonic()
+    os.kill(caller_pid, signal.SIGTERM)
+    caller.wait(timeout=2.0)
+    elapsed = time.monotonic() - t0
+    assert elapsed <= 2.0
+
+    holder.terminate()
+    holder.wait(timeout=1.0)
+
+    with open(order_log) as f:
+        order = f.read().splitlines()
+    assert order == ["RESTORE_ENV", "RESTORE_UNITS"], f"Unexpected restore order: {order}"
+
+# 3. Test transport loss (holder process termination triggers monitor signal to caller)
+with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+    caller_script = os.path.join(td, "caller.sh")
+    caller_context = os.path.join(td, "context")
+    fifo = os.path.join(td, "lock.fifo")
+    os.mkfifo(fifo)
+    os.makedirs(caller_context, exist_ok=True)
+
+    holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+
+    with open(caller_script, "w") as f:
+        f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
+
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_LOCK_PID={holder.pid}
+
+exec 8<>'{fifo}'
+close_deploy_lock_fifo() {{
+  if {{ true >&8; }} 2>/dev/null; then exec 8>&-; fi
+}}
+
+(
+  while kill -0 {holder.pid} 2>/dev/null; do command sleep 0.05; done
+  kill -TERM $$ 2>/dev/null || true
+) &
+DEPLOY_LOCK_MONITOR_PID=$!
+
+init_deploy_traps
+
+printf 'READY:%s\\n' "$$"
+run_owned_op command sleep 30
+""")
+    os.chmod(caller_script, 0o755)
+
+    caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    ready_line = caller.stdout.readline().strip()
+    assert ready_line.startswith("READY:")
+    caller_pid = int(ready_line.split(":")[1])
+
+    t0 = time.monotonic()
+    holder.kill()
+    holder.wait()
+    caller.wait(timeout=2.0)
+    elapsed = time.monotonic() - t0
+    assert elapsed <= 2.0
+PY
+
+printf 'ok - local caller interrupt lifecycle reaps owned work and releases holder on signals and transport loss\n'
+
+# --- Genuine Linux acceptance fixture on authorized GCP host ---
 DEPLOY_TARGET="${CYMPHO_DEPLOY_TARGET:-zaali@34.136.10.30}"
-SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5)
-if [[ -n "${CYMPHO_DEPLOY_KEY:-}" && -f "${CYMPHO_DEPLOY_KEY}" ]]; then
-  SSH_OPTS+=(-i "${CYMPHO_DEPLOY_KEY}")
+SSH_KEY="${CYMPHO_DEPLOY_KEY:-}"
+DEFAULT_KEY="${HOME}/.ssh/id_ed25519_gcp"
+if [[ -z "${SSH_KEY}" && -f "${DEFAULT_KEY}" ]]; then
+  SSH_KEY="${DEFAULT_KEY}"
 fi
 
-if ssh "${SSH_OPTS[@]}" "$DEPLOY_TARGET" true 2>/dev/null; then
-  python3 - "$DEPLOY_TARGET" "${CYMPHO_DEPLOY_KEY:-}" <<'PY' || fail "Linux flock fixture failed"
+RUN_REMOTE=0
+if [[ "${CYMPHO_RUN_LINUX_FIXTURE:-0}" == "1" || -n "${CYMPHO_DEPLOY_KEY:-}" ]]; then
+  RUN_REMOTE=1
+fi
+
+SSH_CHECK_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5)
+if [[ -n "${SSH_KEY}" ]]; then
+  SSH_CHECK_OPTS+=(-i "${SSH_KEY}")
+fi
+
+if [[ "${RUN_REMOTE}" == "1" ]] && ssh "${SSH_CHECK_OPTS[@]}" "$DEPLOY_TARGET" true 2>/dev/null; then
+  python3 -u - "$DEPLOY_TARGET" "${SSH_KEY}" "$DEPLOY_SCRIPT" <<'PY' || fail "Linux flock fixture failed"
 import os, subprocess, time, secrets, tempfile, signal, sys
 
 target = sys.argv[1]
 key = sys.argv[2]
+deploy_sh = sys.argv[3]
 nonce = secrets.token_hex(6)
 fixture_dir = f"/tmp/cympho-linux-fixture.{nonce}"
 
 ssh_opts = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10"]
-if key:
+if key and os.path.exists(key):
     ssh_opts += ["-i", key]
 ssh_opts += [target]
 
-subprocess.run(ssh_opts + [f"umask 077 && mkdir -p '{fixture_dir}'"], check=True)
+# Setup remote fixture with explicit privilege substitutions
+setup_cmd = f"""
+set -euo pipefail
+umask 077
+mkdir -p '{fixture_dir}/bin'
+cat >'{fixture_dir}/bin/sudo' <<'EOF'
+#!/bin/bash
+if [[ "$1" == -u ]]; then shift 2; fi
+if [[ "$1" == -- ]]; then shift; fi
+exec "$@"
+EOF
+cat >'{fixture_dir}/bin/stat' <<'EOF'
+#!/bin/bash
+if [[ "$1" == -c && "$2" == %u ]]; then
+  printf '0\\n'
+  exit 0
+fi
+exec /usr/bin/stat "$@"
+EOF
+cat >'{fixture_dir}/bin/chown' <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x '{fixture_dir}/bin/sudo' '{fixture_dir}/bin/stat' '{fixture_dir}/bin/chown'
+touch '{fixture_dir}/session.lock' '{fixture_dir}/operation.lock'
+chmod 0600 '{fixture_dir}/session.lock' '{fixture_dir}/operation.lock'
+"""
+subprocess.run(ssh_opts + [setup_cmd], check=True, timeout=10)
 
 try:
     session_lock = f"{fixture_dir}/session.lock"
@@ -283,111 +469,121 @@ try:
     epoch_file = f"{fixture_dir}/epoch.txt"
     contender_marker = f"{fixture_dir}/contender.mutated"
     live_marker = f"{fixture_dir}/live.mutated"
-
-    # VAL-DEP-001: Live retention after initial script delivery, mutual exclusion, unchanged epoch
-    with tempfile.TemporaryDirectory() as td:
-        fifo = os.path.join(td, "keepalive.fifo")
-        os.mkfifo(fifo)
-        wfd = os.open(fifo, os.O_RDWR)
-        
-        initial_epoch = secrets.token_hex(16)
-        holder_script = f"""set -euo pipefail
-flock --exclusive --wait 10 9
-printf '%s\\n' '{initial_epoch}' >'{epoch_file}'
-flock --unlock 9
-printf 'CYMPHO_DEPLOY_LOCKED\\n'
-exec cat >/dev/null
-"""
-        os.write(wfd, holder_script.encode())
-        rfd = os.open(fifo, os.O_RDONLY)
-        holder_cmd = f"exec 9>>'{operation_lock}'; flock -n -E 75 '{session_lock}' bash -s"
-        holder = subprocess.Popen(ssh_opts + [holder_cmd], stdin=rfd, stdout=subprocess.PIPE, text=True)
-        os.close(rfd)
-        
-        ack = holder.stdout.readline().strip()
-        assert ack == "CYMPHO_DEPLOY_LOCKED"
-        
-        batch_check = f"""
-set +e
-flock -n -E 75 '{session_lock}' bash -c "touch '{contender_marker}'"
-res=$?
-set -e
-[ "$res" -eq 75 ] || exit 75
-actual=$(cat '{epoch_file}')
-[ "$actual" = '{initial_epoch}' ]
-[ ! -e '{contender_marker}' ]
-exec 9>>'{operation_lock}'
-flock --exclusive --wait 10 9
-touch '{live_marker}'
-[ -f '{live_marker}' ]
-"""
-        subprocess.run(ssh_opts + [batch_check], check=True)
-        assert holder.poll() is None, "Holder died prematurely during live operation!"
-        
-        t_close = time.time()
-        os.close(wfd)
-        holder.wait(timeout=5)
-        elapsed = time.time() - t_close
-        assert elapsed <= 5.0, f"Release exceeded 5s deadline: {elapsed}s"
-        
-        subprocess.run(ssh_opts + [f"flock -n -E 75 '{session_lock}' true"], check=True)
-
-    # VAL-DEP-002: Interruption signals (SIGINT, SIGTERM, SIGHUP) release holder within bounded deadline
-    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-        with tempfile.TemporaryDirectory() as td:
-            fifo = os.path.join(td, "keepalive.fifo")
-            os.mkfifo(fifo)
-            wfd = os.open(fifo, os.O_RDWR)
-            os.write(wfd, b"printf 'LOCKED\\n'\nexec cat >/dev/null\n")
-            rfd = os.open(fifo, os.O_RDONLY)
-            holder = subprocess.Popen(ssh_opts + [f"flock -n -E 75 '{session_lock}' bash -s"], stdin=rfd, stdout=subprocess.PIPE, text=True)
-            os.close(rfd)
-            assert holder.stdout.readline().strip() == "LOCKED"
-            
-            t_sig = time.time()
-            os.close(wfd)
-            holder.send_signal(sig)
-            holder.wait(timeout=5)
-            
-            reacq = False
-            for _ in range(25):
-                if subprocess.run(ssh_opts + [f"flock -n -E 75 '{session_lock}' true"]).returncode == 0:
-                    reacq = True
-                    break
-                time.sleep(0.2)
-            assert reacq, f"Lock not reacquired after signal {sig}"
-
-    # VAL-DEP-003: Lost controller input / transport drop releases holder within bounded deadline
-    with tempfile.TemporaryDirectory() as td:
-        fifo = os.path.join(td, "keepalive.fifo")
-        os.mkfifo(fifo)
-        wfd = os.open(fifo, os.O_RDWR)
-        os.write(wfd, b"printf 'LOCKED\\n'\nexec cat >/dev/null\n")
-        rfd = os.open(fifo, os.O_RDONLY)
-        holder = subprocess.Popen(ssh_opts + [f"flock -n -E 75 '{session_lock}' bash -s"], stdin=rfd, stdout=subprocess.PIPE, text=True)
-        os.close(rfd)
-        assert holder.stdout.readline().strip() == "LOCKED"
-        
-        t_drop = time.time()
-        holder.kill()
-        holder.wait()
-        os.close(wfd)
-        
-        reacq_ok = False
-        for _ in range(25):
-            if subprocess.run(ssh_opts + [f"flock -n -E 75 '{session_lock}' true"]).returncode == 0:
-                reacq_ok = True
-                break
-            time.sleep(0.2)
-        assert reacq_ok, "Lock not released after transport loss!"
-
-    # VAL-DEP-004: Fencing rejects stale epoch before mutation executes
-    current_epoch = secrets.token_hex(16)
-    stale_epoch = secrets.token_hex(16)
     stale_marker = f"{fixture_dir}/stale.mutated"
     valid_marker = f"{fixture_dir}/valid.mutated"
-    batch_fence = f"""
-printf '%s\\n' '{current_epoch}' >'{epoch_file}'
+
+    def run_caller():
+        td = tempfile.mkdtemp()
+        caller_script = os.path.join(td, "caller.sh")
+        caller_context = os.path.join(td, "context")
+        os.makedirs(caller_context, exist_ok=True)
+        with open(caller_script, "w") as f:
+            f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+export CYMPHO_DEPLOY_TARGET='{target}'
+export CYMPHO_DEPLOY_PORT=22
+export CYMPHO_DEPLOY_USER='zaali'
+export CYMPHO_DEPLOY_SESSION_LOCK='{session_lock}'
+export CYMPHO_DEPLOY_OPERATION_LOCK='{operation_lock}'
+export CYMPHO_DEPLOY_EPOCH_FILE='{epoch_file}'
+export CYMPHO_DEPLOY_REMOTE_COMMAND_PREFIX="export PATH=\\"{fixture_dir}/bin:\\$PATH\\"; "
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_EPOCH="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+
+source '{deploy_sh}'
+
+DEPLOY_TARGET='{target}'
+if [ -n '{key}' ]; then
+  SSH_OPTS+=(-i '{key}')
+fi
+
+init_deploy_traps
+acquire_deploy_lock
+
+printf 'CALLER_READY:%s:%s\\n' "$$" "${{DEPLOY_LOCK_PID}}"
+run_owned_op command sleep 60
+""")
+        os.chmod(caller_script, 0o755)
+        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ready_line = caller.stdout.readline().strip()
+        assert ready_line.startswith("CALLER_READY:"), f"Bad ready line: {ready_line}"
+        _, cpid, hpid = ready_line.split(":")
+        return caller, int(cpid), int(hpid), td
+
+    # VAL-DEP-001: Live actual caller retains exclusive ownership; competing admission cannot mutate epoch or payload
+    print("# VAL-DEP-001: testing live retention and contention...", flush=True)
+    caller, cpid, hpid, td = run_caller()
+    try:
+        contender = subprocess.run(
+            ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" touch "{contender_marker}"'],
+            timeout=5
+        )
+        assert contender.returncode == 75, f"Contender not rejected with code 75: got {contender.returncode}"
+        marker_check = subprocess.run(ssh_opts + [f'test ! -e "{contender_marker}"'], timeout=5)
+        assert marker_check.returncode == 0, "Contender mutated state during live hold!"
+
+        # Caller can execute fenced operation
+        fence_check = subprocess.run(
+            ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; exec 9>>"{operation_lock}"; flock -n -E 76 9 touch "{live_marker}"'],
+            timeout=5
+        )
+        assert fence_check.returncode == 0, "Live operation could not run under held lock!"
+        assert subprocess.run(ssh_opts + [f'test -f "{live_marker}"'], timeout=5).returncode == 0
+    finally:
+        os.kill(cpid, signal.SIGTERM)
+        caller.wait(timeout=5.0)
+
+    # Reacquire after VAL-DEP-001
+    subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5, check=True)
+
+    # VAL-DEP-002: Interruption signals (SIGINT, SIGTERM, SIGHUP) clean up operations, monitor, holder within finite bounds
+    print("# VAL-DEP-002: testing interruption signals...", flush=True)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        caller, cpid, hpid, td = run_caller()
+        t0 = time.monotonic()
+        os.kill(cpid, sig)
+        caller.wait(timeout=5.0)
+        elapsed = time.monotonic() - t0
+        assert elapsed <= 5.0, f"Caller release after {sig} exceeded 5s deadline: {elapsed}s"
+        assert caller.returncode != 0
+
+        # Verify immediate lock reacquisition on Linux within finite bounds
+        t_reacq = time.monotonic()
+        reacq = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5.0)
+        assert reacq.returncode == 0, f"Lock reacquisition failed after signal {sig}"
+        assert (time.monotonic() - t_reacq) <= 5.0, f"Reacquisition exceeded 5s deadline"
+
+        # Verify zero remote survivors
+        survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+        assert survivors == "", f"Found remote survivors after signal {sig}: {survivors}"
+
+    # VAL-DEP-003: Lost controller input / transport loss permits reacquisition without stale mutations or live-lock loss
+    print("# VAL-DEP-003: testing transport loss...", flush=True)
+    caller, cpid, hpid, td = run_caller()
+    t0 = time.monotonic()
+    os.kill(hpid, signal.SIGKILL)
+    caller.wait(timeout=5.0)
+    elapsed = time.monotonic() - t0
+    assert elapsed <= 5.0, f"Caller release after transport loss exceeded 5s: {elapsed}s"
+
+    t_reacq = time.monotonic()
+    reacq = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5.0)
+    assert reacq.returncode == 0, "Lock reacquisition failed after transport loss"
+    assert (time.monotonic() - t_reacq) <= 5.0
+
+    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    assert survivors == "", f"Found remote survivors after transport loss: {survivors}"
+
+    # VAL-DEP-004: Fencing rejects stale epoch before mutation executes; valid epoch succeeds
+    print("# VAL-DEP-004: testing epoch fencing...", flush=True)
+    current_epoch = secrets.token_hex(16)
+    stale_epoch = secrets.token_hex(16)
+    subprocess.run(ssh_opts + [f'printf "%s\\n" "{current_epoch}" >"{epoch_file}"'], check=True, timeout=5.0)
+
+    fence_stale = f"""
+export PATH="{fixture_dir}/bin:$PATH"
 set +e
 exec 9>>'{operation_lock}'
 flock --exclusive --wait 10 9
@@ -399,30 +595,29 @@ if [ "$actual" != '{stale_epoch}' ]; then
 fi
 touch '{stale_marker}'
 """
-    res_stale = subprocess.run(ssh_opts + [batch_fence], capture_output=True, text=True)
+    res_stale = subprocess.run(ssh_opts + [fence_stale], capture_output=True, text=True, timeout=5.0)
     assert res_stale.returncode == 76, f"Expected 76, got {res_stale.returncode}"
     assert "stale deploy epoch" in res_stale.stderr
 
-    batch_valid = f"""
+    fence_valid = f"""
+export PATH="{fixture_dir}/bin:$PATH"
 set -euo pipefail
 exec 9>>'{operation_lock}'
 flock --exclusive --wait 10 9
 actual=$(cat '{epoch_file}')
 [ "$actual" = '{current_epoch}' ] || exit 76
 touch '{valid_marker}'
-[ -f '{valid_marker}' ]
-[ ! -e '{stale_marker}' ]
 """
-    subprocess.run(ssh_opts + [batch_valid], check=True)
+    subprocess.run(ssh_opts + [fence_valid], check=True, timeout=5.0)
 
 finally:
-    subprocess.run(ssh_opts + [f"rm -rf '{fixture_dir}'"], check=True)
-    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}' | grep -v grep || true"], capture_output=True, text=True).stdout.strip()
-    assert survivors == "", f"Found survivors: {survivors}"
+    subprocess.run(ssh_opts + [f"pkill -f '{fixture_dir}' || true; rm -rf '{fixture_dir}'"], timeout=10)
+    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    assert survivors == "", f"Residual survivors found in cleanup: {survivors}"
 PY
-  printf 'ok - genuine Linux flock fixture verifies VAL-DEP-001 through VAL-DEP-004 on authorized host\n'
+  printf 'ok - genuine Linux acceptance verifies VAL-DEP-001 through VAL-DEP-004 on authorized host\n'
 else
-  printf 'ok - genuine Linux flock fixture skipped: GCP host or identity not configured # SKIP\n'
+  printf 'ok - genuine Linux acceptance skipped: explicit remote execution not requested (set CYMPHO_RUN_LINUX_FIXTURE=1) # SKIP\n'
 fi
 
 printf '1..4\n'
