@@ -240,13 +240,31 @@ reap_active_operation() {
   if [[ -n "${DEPLOY_ACTIVE_OP_PID}" ]] && kill -0 "${DEPLOY_ACTIVE_OP_PID}" 2>/dev/null; then
     local op_pid="${DEPLOY_ACTIVE_OP_PID}"
     DEPLOY_ACTIVE_OP_PID=""
-    kill -TERM "${op_pid}" 2>/dev/null || true
+    kill -TERM -"${op_pid}" 2>/dev/null || kill -TERM "${op_pid}" 2>/dev/null || true
+    if command -v pgrep >/dev/null 2>&1; then
+      local child_pids
+      child_pids="$(pgrep -P "${op_pid}" 2>/dev/null || true)"
+      if [[ -n "${child_pids}" ]]; then
+        for cp in ${child_pids}; do
+          kill -TERM "${cp}" 2>/dev/null || true
+        done
+      fi
+    fi
     for _ in $(seq 1 20); do
       if ! kill -0 "${op_pid}" 2>/dev/null; then break; fi
       command sleep 0.05
     done
     if kill -0 "${op_pid}" 2>/dev/null; then
-      kill -KILL "${op_pid}" 2>/dev/null || true
+      kill -KILL -"${op_pid}" 2>/dev/null || kill -KILL "${op_pid}" 2>/dev/null || true
+      if command -v pgrep >/dev/null 2>&1; then
+        local child_pids
+        child_pids="$(pgrep -P "${op_pid}" 2>/dev/null || true)"
+        if [[ -n "${child_pids}" ]]; then
+          for cp in ${child_pids}; do
+            kill -KILL "${cp}" 2>/dev/null || true
+          done
+        fi
+      fi
     fi
     wait "${op_pid}" 2>/dev/null || true
   fi
@@ -265,8 +283,10 @@ run_owned_op() {
     "$@"
     return $?
   fi
+  set -m
   "$@" 0<&0 &
   DEPLOY_ACTIVE_OP_PID=$!
+  set +m
   local status=0
   set +e
   wait "${DEPLOY_ACTIVE_OP_PID}"
@@ -276,8 +296,36 @@ run_owned_op() {
   return "${status}"
 }
 
+run_owned_op_capture() {
+  local __var_name="$1"
+  shift
+  local __out_file="${DEPLOY_CONTEXT}/capture.$$.${RANDOM}_${DEPLOY_NONCE}.out"
+  local __status=0
+  if run_owned_op "$@" > "${__out_file}"; then
+    __status=0
+  else
+    __status=$?
+  fi
+  if [[ -f "${__out_file}" ]]; then
+    printf -v "${__var_name}" '%s' "$(<"${__out_file}")"
+    rm -f -- "${__out_file}"
+  else
+    printf -v "${__var_name}" ''
+  fi
+  return "${__status}"
+}
+
 sleep() {
   run_owned_op command sleep "$@"
+}
+
+settle_remote_operation() {
+  if [[ "${CYMPHO_DEPLOY_SOURCE_ONLY:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ -n "${DEPLOY_LOCK_PID}" ]] && kill -0 "${DEPLOY_LOCK_PID}" 2>/dev/null && [[ -n "${DEPLOY_TARGET:-}" ]]; then
+    run_ssh "exec 9>>'${DEPLOY_OPERATION_LOCK}' && flock --exclusive --wait 10 9 && flock --unlock 9" >/dev/null 2>&1 || true
+  fi
 }
 
 cleanup_local() {
@@ -286,6 +334,7 @@ cleanup_local() {
   local recovery_attempted=0
 
   reap_active_operation
+  settle_remote_operation
 
   if [[ -n "${DEPLOY_LOCK_MONITOR_PID}" ]]; then
     kill "${DEPLOY_LOCK_MONITOR_PID}" 2>/dev/null || true
@@ -384,6 +433,17 @@ run_ssh() {
   fi
 }
 
+run_ssh_capture() {
+  local __var_name="$1"
+  shift
+  require_deploy_lock
+  if [[ -n "${DEPLOY_REMOTE_COMMAND_PREFIX:-}" ]]; then
+    run_owned_op_capture "${__var_name}" ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "${DEPLOY_REMOTE_COMMAND_PREFIX}$*"
+  else
+    run_owned_op_capture "${__var_name}" ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "$@"
+  fi
+}
+
 shell_quote() {
   local quoted="" rest="${1-}" prefix
   while [[ "${rest}" == *"'"* ]]; do
@@ -417,9 +477,53 @@ flock --exclusive --wait 60 9 || { echo \"timed out waiting for deploy operation
 [ \"\$(stat -c %u -- \"\$epoch_file\")\" = 0 ] || { echo \"deploy epoch file is not root-owned\" >&2; exit 76; }
 actual_epoch=\$(cat -- \"\$epoch_file\")
 [ \"\$actual_epoch\" = \"\$expected_epoch\" ] || { echo \"stale deploy epoch; refusing remote mutation\" >&2; exit 76; }
+
+child_pid=\"\"
+watcher_pid=\"\"
+cleanup_remote_op() {
+  trap '' HUP INT TERM EXIT
+  if [ -n \"\${watcher_pid:-}\" ]; then
+    kill \"\${watcher_pid}\" 2>/dev/null || true
+    wait \"\${watcher_pid}\" 2>/dev/null || true
+    watcher_pid=\"\"
+  fi
+  if [ -n \"\${child_pid:-}\" ] && kill -0 \"\${child_pid}\" 2>/dev/null; then
+    kill -TERM -- -\"\${child_pid}\" 2>/dev/null || kill -TERM \"\${child_pid}\" 2>/dev/null || true
+    for _ in \$(seq 1 20); do
+      if ! kill -0 \"\${child_pid}\" 2>/dev/null; then break; fi
+      command sleep 0.05
+    done
+    if kill -0 \"\${child_pid}\" 2>/dev/null; then
+      kill -KILL -- -\"\${child_pid}\" 2>/dev/null || kill -KILL \"\${child_pid}\" 2>/dev/null || true
+    fi
+    wait \"\${child_pid}\" 2>/dev/null || true
+  fi
+}
+trap 'cleanup_remote_op; exit 1' HUP INT TERM
+trap 'cleanup_remote_op' EXIT
+
+ppid=\$PPID
+(
+  while kill -0 \"\$ppid\" 2>/dev/null && [ \"\$(ps -o ppid= -p \"\$\$\" 2>/dev/null | tr -d ' ')\" = \"\$ppid\" ]; do
+    command sleep 0.1
+  done
+  kill -HUP \"\$\$\" 2>/dev/null || true
+) &
+watcher_pid=\$!
+
 # Do not exec the deploy-user child: sudo may close inherited descriptors,
 # while this root wrapper must retain FD 9 until the entire body exits.
-sudo -u $(shell_quote "${DEPLOY_USER}") -- \"\$@\""
+set -m
+sudo -u $(shell_quote "${DEPLOY_USER}") -- \"\$@\" 0<&0 &
+child_pid=\$!
+set +m
+status=0
+set +e
+wait \"\${child_pid}\"
+status=\$?
+set -e
+cleanup_remote_op
+exit \"\${status}\""
   command="${DEPLOY_REMOTE_COMMAND_PREFIX:-}sudo bash -c $(shell_quote "${fence_body}") cympho-deploy-operation${quoted_args}"
   printf '%s\n' "${command}"
 }
@@ -1389,9 +1493,13 @@ run_ssh "command -v flock >/dev/null 2>&1" || {
 }
 acquire_deploy_lock
 
+run_local_tests() {
+  ( cd "${REPO_DIR}" && exec mix test )
+}
+
 if [[ "${SKIP_TESTS}" != "1" ]]; then
   step "Running local tests"
-  ( cd "${REPO_DIR}" && run_owned_op mix test ) || { echo "Local tests failed. Aborting." >&2; exit 1; }
+  run_owned_op run_local_tests || { echo "Local tests failed. Aborting." >&2; exit 1; }
 fi
 
 step "Validating managed deployment paths"
@@ -1459,9 +1567,8 @@ EOF
 # environment, mutating systemd units, checking Postgres, or building a
 # replacement. An existing current release must remain a trustworthy rollback
 # target through every later step.
-PREVIOUS_RELEASE="$(
-  run_ssh "if sudo test -L '${CURRENT_LINK}'; then sudo readlink -- '${CURRENT_LINK}'; elif sudo test -e '${CURRENT_LINK}'; then printf '%s' INVALID_CURRENT_LINK; fi"
-)"
+PREVIOUS_RELEASE=""
+run_ssh_capture PREVIOUS_RELEASE "if sudo test -L '${CURRENT_LINK}'; then sudo readlink -- '${CURRENT_LINK}'; elif sudo test -e '${CURRENT_LINK}'; then printf '%s' INVALID_CURRENT_LINK; fi" || true
 PREVIOUS_REVISION=""
 
 if [[ -n "${PREVIOUS_RELEASE}" ]]; then
@@ -1508,9 +1615,7 @@ EOF
     exit 1
   fi
 
-  PREVIOUS_REVISION="$(
-    run_ssh "sudo python3 '${SOURCE_DIR}/bin/cympho-health-validator' release-revision '${PREVIOUS_RELEASE}/release-info.json'" || true
-  )"
+  run_ssh_capture PREVIOUS_REVISION "sudo python3 '${SOURCE_DIR}/bin/cympho-health-validator' release-revision '${PREVIOUS_RELEASE}/release-info.json'" || true
   if [[ ! "${PREVIOUS_REVISION}" =~ ^[0-9a-fA-F]{7,64}$ ]]; then
     PREVIOUS_REVISION=""
   fi
@@ -1519,15 +1624,14 @@ EOF
       echo "Current release requires a regular runtime environment file; refusing deployment." >&2
       exit 1
     fi
-    PREVIOUS_COMPILED_REVISION="$(
-      run_ssh "sudo systemd-run --wait --pipe --collect --quiet \\
+    PREVIOUS_COMPILED_REVISION=""
+    run_ssh_capture PREVIOUS_COMPILED_REVISION "sudo systemd-run --wait --pipe --collect --quiet \\
         --unit=cympho-previous-identity-${DEPLOY_NONCE} \\
         --property=RuntimeMaxSec=30s \\
         --property=EnvironmentFile=${ENV_FILE} \\
         --working-directory=${PREVIOUS_RELEASE} \\
         --uid=${APP_USER} --gid=${APP_USER} \\
         ${PREVIOUS_RELEASE}/bin/${APP_NAME} eval 'IO.write(Cympho.BuildInfo.revision())'" || true
-    )"
     if [[ "${PREVIOUS_COMPILED_REVISION}" != "${PREVIOUS_REVISION}" ]]; then
       echo "Current release compiled identity does not match its trusted manifest; refusing deployment." >&2
       exit 1
@@ -1876,10 +1980,10 @@ rollback_release() {
   local prior_active_state=""
 
   echo "ERROR: $1" >&2
-  current_target="$(run_ssh "readlink -f '${CURRENT_LINK}' 2>/dev/null || true" || true)"
+  run_ssh_capture current_target "readlink -f '${CURRENT_LINK}' 2>/dev/null || true" || true
 
   if [[ -n "${PREVIOUS_RELEASE}" && "${PREVIOUS_RELEASE}" != "${RELEASE_DIR}" ]]; then
-    prior_active_state="$(run_ssh "sudo cat '${UNIT_SNAPSHOT_DIR}/main-unit.active' 2>/dev/null || true" || true)"
+    run_ssh_capture prior_active_state "sudo cat '${UNIT_SNAPSHOT_DIR}/main-unit.active' 2>/dev/null || true" || true
     case "${prior_active_state}" in
       active|inactive) ;;
       *) echo "CRITICAL: saved prior service active state is unavailable or invalid." >&2; exit 1 ;;
@@ -1919,7 +2023,8 @@ rollback_release() {
     fi
 
     if [[ "${prior_active_state}" == "inactive" ]]; then
-      observed_active="$(run_ssh "sudo systemctl is-active '${SERVICE_NAME}' 2>/dev/null || true" || true)"
+      local observed_active=""
+      run_ssh_capture observed_active "sudo systemctl is-active '${SERVICE_NAME}' 2>/dev/null || true" || true
       if [[ "${observed_active}" != "inactive" ]]; then
         echo "CRITICAL: rollback did not restore the previously inactive service state." >&2
       else

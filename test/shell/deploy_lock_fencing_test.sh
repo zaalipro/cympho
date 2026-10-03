@@ -285,6 +285,117 @@ run_owned_op command sleep 30
         holder.terminate()
         holder.wait(timeout=1.0)
 
+# 1b. Test signals during foreground subshell / run_local_tests (SIGTERM, SIGINT, SIGHUP)
+for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        caller_script = os.path.join(td, "caller.sh")
+        caller_context = os.path.join(td, "context")
+        fifo = os.path.join(td, "lock.fifo")
+        os.mkfifo(fifo)
+        os.makedirs(caller_context, exist_ok=True)
+
+        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+
+        with open(caller_script, "w") as f:
+            f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
+
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_LOCK_PID={holder.pid}
+
+exec 8<>'{fifo}'
+close_deploy_lock_fifo() {{
+  if {{ true >&8; }} 2>/dev/null; then exec 8>&-; fi
+}}
+
+(
+  while kill -0 {holder.pid} 2>/dev/null; do command sleep 0.05; done
+  kill -TERM $$ 2>/dev/null || true
+) &
+DEPLOY_LOCK_MONITOR_PID=$!
+
+init_deploy_traps
+
+printf 'READY:%s\\n' "$$"
+run_local_tests() {{
+  ( cd /tmp && exec sleep 30 )
+}}
+run_owned_op run_local_tests
+""")
+        os.chmod(caller_script, 0o755)
+
+        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ready_line = caller.stdout.readline().strip()
+        assert ready_line.startswith("READY:")
+        caller_pid = int(ready_line.split(":")[1])
+
+        t0 = time.monotonic()
+        os.kill(caller_pid, sig)
+        caller.wait(timeout=2.0)
+        elapsed = time.monotonic() - t0
+        assert elapsed <= 2.0, f"Subshell signal {sig} release exceeded deadline: {elapsed}s"
+        assert caller.returncode != 0
+
+        holder.terminate()
+        holder.wait(timeout=1.0)
+
+# 1c. Test signals during captured operation / command-substitution path (SIGTERM, SIGINT, SIGHUP)
+for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+        caller_script = os.path.join(td, "caller.sh")
+        caller_context = os.path.join(td, "context")
+        fifo = os.path.join(td, "lock.fifo")
+        os.mkfifo(fifo)
+        os.makedirs(caller_context, exist_ok=True)
+
+        holder = subprocess.Popen(["bash", "-c", f"cat >/dev/null <'{fifo}'"])
+
+        with open(caller_script, "w") as f:
+            f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
+
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_LOCK_PID={holder.pid}
+
+exec 8<>'{fifo}'
+close_deploy_lock_fifo() {{
+  if {{ true >&8; }} 2>/dev/null; then exec 8>&-; fi
+}}
+
+(
+  while kill -0 {holder.pid} 2>/dev/null; do command sleep 0.05; done
+  kill -TERM $$ 2>/dev/null || true
+) &
+DEPLOY_LOCK_MONITOR_PID=$!
+
+init_deploy_traps
+
+printf 'READY:%s\\n' "$$"
+run_owned_op_capture CAPTURED_VAL command sleep 30
+""")
+        os.chmod(caller_script, 0o755)
+
+        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ready_line = caller.stdout.readline().strip()
+        assert ready_line.startswith("READY:")
+        caller_pid = int(ready_line.split(":")[1])
+
+        t0 = time.monotonic()
+        os.kill(caller_pid, sig)
+        caller.wait(timeout=2.0)
+        elapsed = time.monotonic() - t0
+        assert elapsed <= 2.0, f"Captured op signal {sig} release exceeded deadline: {elapsed}s"
+        assert caller.returncode != 0
+
+        holder.terminate()
+        holder.wait(timeout=1.0)
+
 # 2. Test snapshot recovery ordering (environment before unit) during interruption
 with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
     caller_script = os.path.join(td, "caller.sh")
@@ -419,9 +530,12 @@ if [[ -n "${SSH_KEY}" ]]; then
   SSH_CHECK_OPTS+=(-i "${SSH_KEY}")
 fi
 
-if [[ "${RUN_REMOTE}" == "1" ]] && ssh "${SSH_CHECK_OPTS[@]}" "$DEPLOY_TARGET" true 2>/dev/null; then
+if [[ "${RUN_REMOTE}" == "1" ]]; then
+  if ! ssh "${SSH_CHECK_OPTS[@]}" "$DEPLOY_TARGET" true 2>/dev/null; then
+    fail "Explicitly requested Linux acceptance failed: SSH probe to $DEPLOY_TARGET was unreachable or rejected"
+  fi
   python3 -u - "$DEPLOY_TARGET" "${SSH_KEY}" "$DEPLOY_SCRIPT" <<'PY' || fail "Linux flock fixture failed"
-import os, subprocess, time, secrets, tempfile, signal, sys
+import os, subprocess, time, secrets, tempfile, signal, sys, shutil, traceback
 
 target = sys.argv[1]
 key = sys.argv[2]
@@ -433,6 +547,63 @@ ssh_opts = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-ne
 if key and os.path.exists(key):
     ssh_opts += ["-i", key]
 ssh_opts += [target]
+
+spawned_callers = []
+spawned_temp_dirs = []
+
+def reap_local_processes():
+    for caller in spawned_callers:
+        if caller.poll() is None:
+            try:
+                os.killpg(caller.pid, signal.SIGTERM)
+            except (OSError, ProcessLookupError):
+                try:
+                    caller.terminate()
+                except (OSError, ProcessLookupError):
+                    pass
+            try:
+                caller.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(caller.pid, signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    try:
+                        caller.kill()
+                    except (OSError, ProcessLookupError):
+                        pass
+                caller.wait(timeout=1.0)
+
+def cleanup_local_dirs():
+    for td in spawned_temp_dirs:
+        shutil.rmtree(td, ignore_errors=True)
+
+def cleanup_remote():
+    # Targeted remote kill of processes associated with fixture_dir, avoiding self-matching
+    cleanup_cmd = f"""
+set +e
+for pid in $(lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true); do
+  if [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ]; then
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+done
+rm -rf '{fixture_dir}'
+test ! -e '{fixture_dir}'
+"""
+    subprocess.run(ssh_opts + [cleanup_cmd], capture_output=True, text=True, timeout=10)
+
+def full_teardown(signum=None, frame=None):
+    reap_local_processes()
+    cleanup_local_dirs()
+    try:
+        cleanup_remote()
+    except Exception:
+        pass
+    if signum is not None:
+        sys.exit(128 + signum)
+
+signal.signal(signal.SIGINT, full_teardown)
+signal.signal(signal.SIGTERM, full_teardown)
+signal.signal(signal.SIGHUP, full_teardown)
 
 # Setup remote fixture with explicit privilege substitutions
 setup_cmd = f"""
@@ -469,11 +640,13 @@ try:
     epoch_file = f"{fixture_dir}/epoch.txt"
     contender_marker = f"{fixture_dir}/contender.mutated"
     live_marker = f"{fixture_dir}/live.mutated"
+    normal_marker = f"{fixture_dir}/normal.mutated"
     stale_marker = f"{fixture_dir}/stale.mutated"
     valid_marker = f"{fixture_dir}/valid.mutated"
 
-    def run_caller():
+    def run_caller(mode="hold"):
         td = tempfile.mkdtemp()
+        spawned_temp_dirs.append(td)
         caller_script = os.path.join(td, "caller.sh")
         caller_context = os.path.join(td, "context")
         os.makedirs(caller_context, exist_ok=True)
@@ -503,10 +676,22 @@ init_deploy_traps
 acquire_deploy_lock
 
 printf 'CALLER_READY:%s:%s\\n' "$$" "${{DEPLOY_LOCK_PID}}"
-run_owned_op command sleep 60
+
+if [[ "{mode}" == "hold" ]]; then
+  run_owned_op command sleep 60
+elif [[ "{mode}" == "normal" ]]; then
+  cmd="$(operation_fence_command touch '{normal_marker}')"
+  run_owned_op ssh "${{SSH_OPTS[@]}}" "${{DEPLOY_TARGET}}" "${{cmd}}"
+  cleanup_local
+  exit 0
+elif [[ "{mode}" == "remote_sleep" ]]; then
+  cmd="$(operation_fence_command command sleep 60)"
+  run_owned_op ssh "${{SSH_OPTS[@]}}" "${{DEPLOY_TARGET}}" "${{cmd}}"
+fi
 """)
         os.chmod(caller_script, 0o755)
-        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        caller = subprocess.Popen([caller_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        spawned_callers.append(caller)
         ready_line = caller.stdout.readline().strip()
         assert ready_line.startswith("CALLER_READY:"), f"Bad ready line: {ready_line}"
         _, cpid, hpid = ready_line.split(":")
@@ -514,36 +699,103 @@ run_owned_op command sleep 60
 
     # VAL-DEP-001: Live actual caller retains exclusive ownership; competing admission cannot mutate epoch or payload
     print("# VAL-DEP-001: testing live retention and contention...", flush=True)
-    caller, cpid, hpid, td = run_caller()
+    caller, cpid, hpid, td = run_caller("hold")
     try:
-        contender = subprocess.run(
-            ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" touch "{contender_marker}"'],
-            timeout=5
-        )
-        assert contender.returncode == 75, f"Contender not rejected with code 75: got {contender.returncode}"
-        marker_check = subprocess.run(ssh_opts + [f'test ! -e "{contender_marker}"'], timeout=5)
-        assert marker_check.returncode == 0, "Contender mutated state during live hold!"
+        # Read initial epoch published by caller
+        initial_epoch_res = subprocess.run(ssh_opts + [f'cat "{epoch_file}"'], capture_output=True, text=True, timeout=5, check=True)
+        initial_epoch = initial_epoch_res.stdout.strip()
+        assert len(initial_epoch) > 0
 
-        # Caller can execute fenced operation
-        fence_check = subprocess.run(
-            ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; exec 9>>"{operation_lock}"; flock -n -E 76 9 touch "{live_marker}"'],
-            timeout=5
-        )
+        # Launch contender caller attempting actual deploy.sh acquisition
+        contender_td = tempfile.mkdtemp()
+        spawned_temp_dirs.append(contender_td)
+        contender_script = os.path.join(contender_td, "contender.sh")
+        contender_context = os.path.join(contender_td, "context")
+        os.makedirs(contender_context, exist_ok=True)
+        with open(contender_script, "w") as f:
+            f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+export CYMPHO_DEPLOY_TARGET='{target}'
+export CYMPHO_DEPLOY_PORT=22
+export CYMPHO_DEPLOY_USER='zaali'
+export CYMPHO_DEPLOY_SESSION_LOCK='{session_lock}'
+export CYMPHO_DEPLOY_OPERATION_LOCK='{operation_lock}'
+export CYMPHO_DEPLOY_EPOCH_FILE='{epoch_file}'
+export CYMPHO_DEPLOY_REMOTE_COMMAND_PREFIX="export PATH=\\"{fixture_dir}/bin:\\$PATH\\"; "
+export DEPLOY_CONTEXT='{contender_context}'
+export DEPLOY_LOCK_OUTPUT='{contender_context}/deploy-lock.out'
+export DEPLOY_EPOCH="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+
+source '{deploy_sh}'
+
+DEPLOY_TARGET='{target}'
+if [ -n '{key}' ]; then
+  SSH_OPTS+=(-i '{key}')
+fi
+
+init_deploy_traps
+acquire_deploy_lock
+touch '{contender_marker}'
+""")
+        os.chmod(contender_script, 0o755)
+        contender = subprocess.run([contender_script], capture_output=True, text=True, timeout=10)
+        assert contender.returncode != 0, f"Contender unexpectedly succeeded: exit code {contender.returncode}"
+        assert subprocess.run(ssh_opts + [f'test ! -e "{contender_marker}"'], timeout=5).returncode == 0, "Contender mutated state during live hold!"
+
+        # Verify epoch file was not modified by contender
+        after_epoch_res = subprocess.run(ssh_opts + [f'cat "{epoch_file}"'], capture_output=True, text=True, timeout=5, check=True)
+        after_epoch = after_epoch_res.stdout.strip()
+        assert after_epoch == initial_epoch, f"Contender modified epoch: {initial_epoch} -> {after_epoch}"
+
+        # Caller can execute fenced operation using actual operation fence command (proper FD 9 locking)
+        fence_cmd = subprocess.run(
+            ["bash", "-c", f"""
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
+export DEPLOY_OPERATION_LOCK='{operation_lock}'
+export DEPLOY_EPOCH_FILE='{epoch_file}'
+export DEPLOY_EPOCH='{initial_epoch}'
+export DEPLOY_USER='zaali'
+export DEPLOY_REMOTE_COMMAND_PREFIX="export PATH=\\"{fixture_dir}/bin:\\$PATH\\"; "
+operation_fence_command touch '{live_marker}'
+"""], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+        fence_check = subprocess.run(ssh_opts + [fence_cmd], timeout=5)
         assert fence_check.returncode == 0, "Live operation could not run under held lock!"
         assert subprocess.run(ssh_opts + [f'test -f "{live_marker}"'], timeout=5).returncode == 0
     finally:
-        os.kill(cpid, signal.SIGTERM)
+        try:
+            os.killpg(caller.pid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            pass
         caller.wait(timeout=5.0)
 
     # Reacquire after VAL-DEP-001
     subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5, check=True)
 
     # VAL-DEP-002: Interruption signals (SIGINT, SIGTERM, SIGHUP) clean up operations, monitor, holder within finite bounds
-    print("# VAL-DEP-002: testing interruption signals...", flush=True)
+    print("# VAL-DEP-002: testing normal completion, signals, and remote cancellation...", flush=True)
+    # A. Normal completion: caller executes fenced op, runs cleanup_local, exits 0
+    normal_caller, ncpid, nhpid, ntd = run_caller("normal")
+    out, err = normal_caller.communicate(timeout=10.0)
+    assert normal_caller.returncode == 0, f"Normal caller failed with returncode {normal_caller.returncode}. Out: {out} Err: {err}"
+    assert subprocess.run(ssh_opts + [f'test -f "{normal_marker}"'], timeout=5).returncode == 0
+    # Verify session lock was released by normal completion and can be immediately reacquired
+    reacq = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5.0)
+    assert reacq.returncode == 0, "Lock reacquisition failed after normal completion"
+    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}/' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    assert survivors == "", f"Found remote survivors after normal completion: {survivors}"
+
+    # B. Interruption signals (SIGINT, SIGTERM, SIGHUP)
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-        caller, cpid, hpid, td = run_caller()
+        caller, cpid, hpid, td = run_caller("hold")
         t0 = time.monotonic()
-        os.kill(cpid, sig)
+        try:
+            os.killpg(caller.pid, sig)
+        except (OSError, ProcessLookupError):
+            os.kill(cpid, sig)
         caller.wait(timeout=5.0)
         elapsed = time.monotonic() - t0
         assert elapsed <= 5.0, f"Caller release after {sig} exceeded 5s deadline: {elapsed}s"
@@ -556,12 +808,30 @@ run_owned_op command sleep 60
         assert (time.monotonic() - t_reacq) <= 5.0, f"Reacquisition exceeded 5s deadline"
 
         # Verify zero remote survivors
-        survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+        survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}/' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
         assert survivors == "", f"Found remote survivors after signal {sig}: {survivors}"
+
+    # C. Remote protected work cancellation & settlement
+    caller, cpid, hpid, td = run_caller("remote_sleep")
+    time.sleep(1.0)
+    t0 = time.monotonic()
+    try:
+        os.killpg(caller.pid, signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        os.kill(cpid, signal.SIGTERM)
+    caller.wait(timeout=5.0)
+    elapsed = time.monotonic() - t0
+    assert elapsed <= 5.0, f"Caller release after remote op interrupt exceeded 5s: {elapsed}s"
+
+    # Verify operation lock was settled and can be immediately reacquired
+    reacq_op = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 76 "{operation_lock}" true'], timeout=5.0)
+    assert reacq_op.returncode == 0, "Operation lock reacquisition failed after remote op interrupt"
+    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}/' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    assert survivors == "", f"Found remote survivors after remote op interrupt: {survivors}"
 
     # VAL-DEP-003: Lost controller input / transport loss permits reacquisition without stale mutations or live-lock loss
     print("# VAL-DEP-003: testing transport loss...", flush=True)
-    caller, cpid, hpid, td = run_caller()
+    caller, cpid, hpid, td = run_caller("hold")
     t0 = time.monotonic()
     os.kill(hpid, signal.SIGKILL)
     caller.wait(timeout=5.0)
@@ -573,46 +843,59 @@ run_owned_op command sleep 60
     assert reacq.returncode == 0, "Lock reacquisition failed after transport loss"
     assert (time.monotonic() - t_reacq) <= 5.0
 
-    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}/' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
     assert survivors == "", f"Found remote survivors after transport loss: {survivors}"
 
     # VAL-DEP-004: Fencing rejects stale epoch before mutation executes; valid epoch succeeds
-    print("# VAL-DEP-004: testing epoch fencing...", flush=True)
+    print("# VAL-DEP-004: testing epoch fencing with actual operation_fence_command...", flush=True)
     current_epoch = secrets.token_hex(16)
     stale_epoch = secrets.token_hex(16)
     subprocess.run(ssh_opts + [f'printf "%s\\n" "{current_epoch}" >"{epoch_file}"'], check=True, timeout=5.0)
 
-    fence_stale = f"""
-export PATH="{fixture_dir}/bin:$PATH"
-set +e
-exec 9>>'{operation_lock}'
-flock --exclusive --wait 10 9
-actual=$(cat '{epoch_file}')
-if [ "$actual" != '{stale_epoch}' ]; then
-  echo "stale deploy epoch; refusing remote mutation" >&2
-  flock --unlock 9
-  exit 76
-fi
-touch '{stale_marker}'
-"""
-    res_stale = subprocess.run(ssh_opts + [fence_stale], capture_output=True, text=True, timeout=5.0)
+    # Stale epoch test using actual generator
+    stale_cmd = subprocess.run(
+        ["bash", "-c", f"""
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
+export DEPLOY_OPERATION_LOCK='{operation_lock}'
+export DEPLOY_EPOCH_FILE='{epoch_file}'
+export DEPLOY_EPOCH='{stale_epoch}'
+export DEPLOY_USER='zaali'
+export DEPLOY_REMOTE_COMMAND_PREFIX="export PATH=\\"{fixture_dir}/bin:\\$PATH\\"; "
+operation_fence_command touch '{stale_marker}'
+"""], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    res_stale = subprocess.run(ssh_opts + [stale_cmd], capture_output=True, text=True, timeout=5.0)
     assert res_stale.returncode == 76, f"Expected 76, got {res_stale.returncode}"
     assert "stale deploy epoch" in res_stale.stderr
+    assert subprocess.run(ssh_opts + [f'test ! -e "{stale_marker}"'], timeout=5).returncode == 0, "Stale epoch executed mutation!"
 
-    fence_valid = f"""
-export PATH="{fixture_dir}/bin:$PATH"
-set -euo pipefail
-exec 9>>'{operation_lock}'
-flock --exclusive --wait 10 9
-actual=$(cat '{epoch_file}')
-[ "$actual" = '{current_epoch}' ] || exit 76
-touch '{valid_marker}'
-"""
-    subprocess.run(ssh_opts + [fence_valid], check=True, timeout=5.0)
+    # Valid epoch test using actual generator
+    valid_cmd = subprocess.run(
+        ["bash", "-c", f"""
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+source '{deploy_sh}'
+export DEPLOY_OPERATION_LOCK='{operation_lock}'
+export DEPLOY_EPOCH_FILE='{epoch_file}'
+export DEPLOY_EPOCH='{current_epoch}'
+export DEPLOY_USER='zaali'
+export DEPLOY_REMOTE_COMMAND_PREFIX="export PATH=\\"{fixture_dir}/bin:\\$PATH\\"; "
+operation_fence_command touch '{valid_marker}'
+"""], capture_output=True, text=True, check=True
+    ).stdout.strip()
 
+    subprocess.run(ssh_opts + [valid_cmd], check=True, timeout=5.0)
+    assert subprocess.run(ssh_opts + [f'test -f "{valid_marker}"'], timeout=5).returncode == 0
+
+except Exception as e:
+    traceback.print_exc()
+    raise
 finally:
-    subprocess.run(ssh_opts + [f"pkill -f '{fixture_dir}' || true; rm -rf '{fixture_dir}'"], timeout=10)
-    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    full_teardown()
+    rem_check = subprocess.run(ssh_opts + [f'test ! -e "{fixture_dir}"'], timeout=5)
+    assert rem_check.returncode == 0, "Remote fixture directory was not removed!"
+    survivors = subprocess.run(ssh_opts + [f"ps -eo pid,cmd | grep '{fixture_dir}/' | grep -v grep || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
     assert survivors == "", f"Residual survivors found in cleanup: {survivors}"
 PY
   printf 'ok - genuine Linux acceptance verifies VAL-DEP-001 through VAL-DEP-004 on authorized host\n'
