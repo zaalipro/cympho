@@ -235,7 +235,7 @@ defmodule Cympho.AgentPrompt do
         id: :owner_revision,
         type: :optional,
         category: "owner_revision",
-        content: owner_revision_block(history, role)
+        content: owner_revision_block(history, role, issue)
       },
       older_feedback,
       latest_feedback,
@@ -1619,73 +1619,226 @@ defmodule Cympho.AgentPrompt do
   ## the engineer can scan the open feedback in chronological order, even
   ## across many rounds.
 
-  defp build_review_feedback_sections(_issue, role) when role in [:ceo, :cto], do: {nil, nil}
+  defp build_review_feedback_sections(issue, role) do
+    latest_human = load_latest_required_human_comment(issue)
+    review_comments = load_review_comments(issue)
 
-  defp build_review_feedback_sections(issue, _role) do
-    comments = load_review_comments(issue)
+    all_reviews =
+      cond do
+        is_nil(latest_human) ->
+          review_comments
 
-    case comments do
-      [] ->
-        {nil, nil}
+        Enum.any?(review_comments, &same_comment?(&1, latest_human)) ->
+          review_comments
 
-      [single] ->
-        latest_feedback = %{
-          id: :latest_review_feedback,
-          type: :protected,
-          category: "latest_review_feedback",
-          content: single_review_block(single)
-        }
+        true ->
+          Enum.sort_by(
+            [latest_human | review_comments],
+            &{&1.inserted_at, &1.id},
+            {:asc, DateTime}
+          )
+      end
 
-        {nil, latest_feedback}
+    case role do
+      role when role in [:ceo, :cto] ->
+        case latest_human do
+          nil ->
+            {nil, nil}
 
-      multiple ->
-        latest = List.last(multiple)
-        older = Enum.slice(multiple, 0..-2//1)
+          human_comment ->
+            older_human =
+              all_reviews
+              |> Enum.filter(&(&1.author_type == "user" and not same_comment?(&1, human_comment)))
 
-        older_feedback = %{
-          id: :older_review_feedback,
-          type: :optional,
-          category: "older_review_feedback",
-          count: length(older),
-          content: older_review_rows(older)
-        }
+            older_feedback =
+              if older_human != [] do
+                %{
+                  id: :older_review_feedback,
+                  type: :optional,
+                  category: "older_review_feedback",
+                  count: length(older_human),
+                  content: older_review_rows(older_human)
+                }
+              else
+                nil
+              end
 
-        latest_feedback = %{
-          id: :latest_review_feedback,
-          type: :protected,
-          category: "latest_review_feedback",
-          content: latest_review_row(latest)
-        }
+            latest_feedback =
+              if older_feedback do
+                %{
+                  id: :latest_review_feedback,
+                  type: :protected,
+                  category: "latest_review_feedback",
+                  content: latest_review_row(human_comment)
+                }
+              else
+                %{
+                  id: :latest_review_feedback,
+                  type: :protected,
+                  category: "latest_review_feedback",
+                  content: single_review_block(human_comment)
+                }
+              end
 
-        {older_feedback, latest_feedback}
+            {older_feedback, latest_feedback}
+        end
+
+      _other_role ->
+        cond do
+          latest_human != nil ->
+            other_comments = Enum.reject(all_reviews, &same_comment?(&1, latest_human))
+
+            older_feedback =
+              if other_comments != [] do
+                %{
+                  id: :older_review_feedback,
+                  type: :optional,
+                  category: "older_review_feedback",
+                  count: length(other_comments),
+                  content: older_review_rows(other_comments)
+                }
+              else
+                nil
+              end
+
+            latest_feedback =
+              if older_feedback do
+                %{
+                  id: :latest_review_feedback,
+                  type: :protected,
+                  category: "latest_review_feedback",
+                  content: latest_review_row(latest_human)
+                }
+              else
+                %{
+                  id: :latest_review_feedback,
+                  type: :protected,
+                  category: "latest_review_feedback",
+                  content: single_review_block(latest_human)
+                }
+              end
+
+            {older_feedback, latest_feedback}
+
+          all_reviews == [] ->
+            {nil, nil}
+
+          length(all_reviews) == 1 ->
+            single = hd(all_reviews)
+
+            latest_feedback = %{
+              id: :latest_review_feedback,
+              type: :protected,
+              category: "latest_review_feedback",
+              content: single_review_block(single)
+            }
+
+            {nil, latest_feedback}
+
+          true ->
+            latest = List.last(all_reviews)
+            older = Enum.slice(all_reviews, 0..-2//1)
+
+            older_feedback = %{
+              id: :older_review_feedback,
+              type: :optional,
+              category: "older_review_feedback",
+              count: length(older),
+              content: older_review_rows(older)
+            }
+
+            latest_feedback = %{
+              id: :latest_review_feedback,
+              type: :protected,
+              category: "latest_review_feedback",
+              content: latest_review_row(latest)
+            }
+
+            {older_feedback, latest_feedback}
+        end
     end
   end
 
   @doc false
-  def open_review_feedback_block(_issue, role) when role in [:ceo, :cto], do: nil
+  def open_review_feedback_block(issue, role) do
+    latest_human = load_latest_required_human_comment(issue)
+    review_comments = load_review_comments(issue)
 
-  @doc false
-  def open_review_feedback_block(issue, _role) do
-    comments = load_review_comments(issue)
+    all_reviews =
+      cond do
+        is_nil(latest_human) ->
+          review_comments
 
-    case comments do
-      [] ->
-        nil
+        Enum.any?(review_comments, &same_comment?(&1, latest_human)) ->
+          review_comments
 
-      [single] ->
-        single_review_block(single)
+        true ->
+          Enum.sort_by(
+            [latest_human | review_comments],
+            &{&1.inserted_at, &1.id},
+            {:asc, DateTime}
+          )
+      end
 
-      multiple ->
-        older = Enum.slice(multiple, 0..-2//1)
-        latest = List.last(multiple)
+    case role do
+      role when role in [:ceo, :cto] ->
+        case latest_human do
+          nil ->
+            nil
 
-        """
-        ## Open review feedback
-        Reviewer feedback that landed on this issue, oldest → newest. Address each item before your next `submit_review`, then summarize what changed in your `[delivery]` note.
-        #{older_review_rows(older)}
-        #{latest_review_row(latest)}
-        """
-        |> String.trim()
+          human_comment ->
+            older_human =
+              all_reviews
+              |> Enum.filter(&(&1.author_type == "user" and not same_comment?(&1, human_comment)))
+
+            if older_human != [] do
+              """
+              ## Open review feedback
+              Reviewer feedback that landed on this issue, oldest → newest. Address each item before your next `submit_review`, then summarize what changed in your `[delivery]` note.
+              #{older_review_rows(older_human)}
+              #{latest_review_row(human_comment)}
+              """
+              |> String.trim()
+            else
+              single_review_block(human_comment)
+            end
+        end
+
+      _other_role ->
+        cond do
+          latest_human != nil ->
+            other_comments = Enum.reject(all_reviews, &same_comment?(&1, latest_human))
+
+            if other_comments != [] do
+              """
+              ## Open review feedback
+              Reviewer feedback that landed on this issue, oldest → newest. Address each item before your next `submit_review`, then summarize what changed in your `[delivery]` note.
+              #{older_review_rows(other_comments)}
+              #{latest_review_row(latest_human)}
+              """
+              |> String.trim()
+            else
+              single_review_block(latest_human)
+            end
+
+          all_reviews == [] ->
+            nil
+
+          length(all_reviews) == 1 ->
+            single_review_block(hd(all_reviews))
+
+          true ->
+            latest = List.last(all_reviews)
+            older = Enum.slice(all_reviews, 0..-2//1)
+
+            """
+            ## Open review feedback
+            Reviewer feedback that landed on this issue, oldest → newest. Address each item before your next `submit_review`, then summarize what changed in your `[delivery]` note.
+            #{older_review_rows(older)}
+            #{latest_review_row(latest)}
+            """
+            |> String.trim()
+        end
     end
   end
 
@@ -1723,6 +1876,68 @@ defmodule Cympho.AgentPrompt do
   defp load_review_comments(%{id: id}) when is_binary(id), do: load_review_comments(id)
   defp load_review_comments(_), do: []
 
+  defp load_latest_required_human_comment(%{id: id} = issue) when is_binary(id) do
+    case query_latest_required_human_comment(id) do
+      %Comment{} = comment ->
+        comment
+
+      nil ->
+        case Map.get(issue, :comments) do
+          comments when is_list(comments) ->
+            comments
+            |> Enum.filter(&(&1.author_type == "user"))
+            |> Enum.sort_by(&{&1.inserted_at, &1.id}, {:desc, DateTime})
+            |> Enum.find(&required_human_feedback?/1)
+
+          _ ->
+            nil
+        end
+    end
+  end
+
+  defp load_latest_required_human_comment(issue_id) when is_binary(issue_id) do
+    query_latest_required_human_comment(issue_id)
+  end
+
+  defp load_latest_required_human_comment(_), do: nil
+
+  defp query_latest_required_human_comment(issue_id) when is_binary(issue_id) do
+    Comment
+    |> where([c], c.issue_id == ^issue_id and c.author_type == "user")
+    |> order_by([c], desc: c.inserted_at, desc: c.id)
+    |> limit(50)
+    |> Repo.all()
+    |> Enum.find(&required_human_feedback?/1)
+  rescue
+    _ -> nil
+  end
+
+  defp required_human_feedback?(%Comment{author_type: "user"} = comment) do
+    text = (comment.body || "") |> String.downcase()
+
+    owner_revision_comment?(comment) or
+      review_feedback_comment?(comment) or
+      String.contains?(text, "feedback") or
+      String.contains?(text, "request") or
+      String.contains?(text, "reason") or
+      String.contains?(text, "fix") or
+      String.contains?(text, "reject") or
+      String.contains?(text, "reopen") or
+      IssueDigest.comment_category(comment) in [:review, :owner_input, :owner_update, :decision]
+  end
+
+  defp required_human_feedback?(_), do: false
+
+  defp same_comment?(%Comment{id: id1}, %Comment{id: id2})
+       when is_binary(id1) and is_binary(id2),
+       do: id1 == id2
+
+  defp same_comment?(%Comment{} = c1, %Comment{} = c2) do
+    c1 == c2 or (c1.body == c2.body and c1.author_id == c2.author_id)
+  end
+
+  defp same_comment?(_, _), do: false
+
   defp review_feedback_comment?(%Comment{} = comment) do
     category = IssueDigest.comment_category(comment)
     text = (comment.body || "") |> String.downcase()
@@ -1735,7 +1950,9 @@ defmodule Cympho.AgentPrompt do
       String.starts_with?(text, "request changes:") or
       (comment.author_type == "user" and
          (String.contains?(text, "change") or String.contains?(text, "review") or
-            String.contains?(text, "rework")))
+            String.contains?(text, "rework") or
+            String.contains?(text, @owner_revision_marker) or
+            category in [:review, :owner_input, :owner_update, :decision]))
   end
 
   defp review_comment_author_label(%Comment{author_type: "system"}), do: "system"
@@ -1815,8 +2032,18 @@ defmodule Cympho.AgentPrompt do
 
   defp role_completion_contract_block(role), do: AgentPromptContract.prompt_block(role)
 
-  defp owner_revision_block(%{comments: comments}, :ceo) do
-    case latest_owner_revision_comment(comments) do
+  defp owner_revision_block(history, :ceo, issue) do
+    comments =
+      case Map.get(history, :comments) do
+        list when is_list(list) -> list
+        _ -> []
+      end
+
+    comment =
+      latest_owner_revision_comment(comments) ||
+        load_latest_owner_revision_comment(issue)
+
+    case comment do
       nil ->
         nil
 
@@ -1831,13 +2058,48 @@ defmodule Cympho.AgentPrompt do
         - If more work is needed, create or delegate the missing work, then `block_issue` with a `[blocked]` note that names the dependency and Restart packet.
         - Do not repeat the previous owner update unchanged.
 
-        Owner review: #{truncate(body, 700)}
+        Owner review: #{body}
         """
         |> String.trim()
     end
   end
 
-  defp owner_revision_block(_history, _role), do: nil
+  defp owner_revision_block(_history, _role, _issue), do: nil
+
+  defp load_latest_owner_revision_comment(%{id: id} = issue) when is_binary(id) do
+    case query_latest_owner_revision_comment(id) do
+      %Comment{} = comment ->
+        comment
+
+      nil ->
+        case Map.get(issue, :comments) do
+          comments when is_list(comments) ->
+            comments
+            |> Enum.reverse()
+            |> Enum.find(&owner_revision_comment?/1)
+
+          _ ->
+            nil
+        end
+    end
+  end
+
+  defp load_latest_owner_revision_comment(issue_id) when is_binary(issue_id) do
+    query_latest_owner_revision_comment(issue_id)
+  end
+
+  defp load_latest_owner_revision_comment(_), do: nil
+
+  defp query_latest_owner_revision_comment(issue_id) when is_binary(issue_id) do
+    Comment
+    |> where([c], c.issue_id == ^issue_id and c.author_type == "user")
+    |> order_by([c], desc: c.inserted_at, desc: c.id)
+    |> limit(50)
+    |> Repo.all()
+    |> Enum.find(&owner_revision_comment?/1)
+  rescue
+    _ -> nil
+  end
 
   defp latest_owner_revision_comment(comments) do
     comments
