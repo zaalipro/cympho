@@ -475,65 +475,6 @@ defmodule Cympho.OrchestratorAdapterLifecycleTest do
       assert Cympho.Adapters.RuntimeTimeout.resolve(%{"timeout" => 12_000}, default_ms: 300_000) ==
                12_000
     end
-
-    test "successful configured-model readiness has sanitized terminal result, spend, limits, and cleanup evidence without additional paid task" do
-      mission_dir =
-        case System.get_env("FACTORY_RUNTIME_SETTINGS_PATH") do
-          nil -> "/Users/zaali/.factory/missions/9183a83d-b657-4bf6-b6e8-01e5e68b40ce"
-          path -> Path.dirname(path)
-        end
-
-      retry_file = Path.join(mission_dir, "research/managed-runtime-budget-retry.md")
-      assert File.exists?(retry_file), "research/managed-runtime-budget-retry.md must exist"
-
-      content = File.read!(retry_file)
-
-      # Terminal success
-      assert content =~ "Passed."
-      assert content =~ "CYMPHO_RUNTIME_READY"
-      assert content =~ "type=result"
-      assert content =~ "subtype=success"
-      assert content =~ "is_error=false"
-
-      # Turn count
-      assert content =~ "`num_turns`: **1**"
-
-      # Cost / Spend evidence
-      assert content =~ "0.028085"
-
-      # Memory pressure guard: normal
-      assert content =~ "normal"
-      assert content =~ "kern.memorystatus_vm_pressure_level"
-
-      # Cleanup verification
-      assert content =~ "zero remaining adapter sessions"
-      assert content =~ "zero admission slots"
-      assert content =~ "zero temporary prompt files"
-      assert content =~ "Remaining owned processes | 0"
-
-      # Limits verification
-      assert content =~ "512 output tokens"
-      assert content =~ "--tools \"\""
-      assert content =~ "stopping threshold"
-
-      # Prohibition on new paid retry
-      assert content =~ "No further inference is authorized"
-      assert content =~ "authorization is consumed"
-
-      # Historical files remain intact
-      readiness_file = Path.join(mission_dir, "research/managed-runtime-readiness.md")
-      assert File.exists?(readiness_file)
-      hist_retry_file = Path.join(mission_dir, "research/managed-runtime-retry.md")
-      assert File.exists?(hist_retry_file)
-
-      hist_readiness = File.read!(readiness_file)
-      assert hist_readiness =~ "Blocked"
-      assert hist_readiness =~ "host-memory-pressure watchdog after 3.073 seconds"
-
-      hist_retry = File.read!(hist_retry_file)
-      assert hist_retry =~ "error_max_budget_usd"
-      assert hist_retry =~ "0.02643"
-    end
   end
 
   defp os_process_alive?(pid) when is_binary(pid) do

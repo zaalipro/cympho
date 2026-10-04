@@ -30,7 +30,7 @@ defmodule Cympho.RoutineConcurrencyTest do
     on_exit(fn ->
       Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
         Repo.delete_all(from(c in Cympho.Companies.Company, where: c.id == ^company.id))
-        Cympho.TestDatabaseGuard.verify_owned_fixture_cleanup!(Repo, company.id)
+        Cympho.DataCase.verify_owned_fixture_cleanup!(Repo, company.id)
       end)
     end)
 
@@ -197,7 +197,13 @@ defmodule Cympho.RoutineConcurrencyTest do
              :count
            ) == 1
 
-    # on_exit verifies complete cleanup via TestDatabaseGuard.verify_owned_fixture_cleanup!
+    # on_exit verifies complete cleanup via Cympho.DataCase.verify_owned_fixture_cleanup!
+  end
+
+  test "verify_owned_fixture_cleanup! detects uncleaned fixtures", context do
+    assert_raise RuntimeError, ~r/Owned fixture cleanup incomplete/, fn ->
+      Cympho.DataCase.verify_owned_fixture_cleanup!(Repo, context.company.id)
+    end
   end
 
   defp create_routine(context, concurrency_policy) do

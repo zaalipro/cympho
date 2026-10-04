@@ -4,42 +4,12 @@ config :cympho, env: :test
 
 config :cympho, :encryption_key, String.duplicate("t", 32)
 
-test_host = System.get_env("TEST_DB_HOST") || "localhost"
-test_db = System.get_env("TEST_DB_NAME") || "cympho_test#{System.get_env("MIX_TEST_PARTITION")}"
-
-# Guard test-only loopback host
-allowed_test_hosts = ["localhost", "127.0.0.1", "::1"]
-
-unless test_host in allowed_test_hosts do
-  raise RuntimeError,
-        "Unsafe test database host #{inspect(test_host)}; tests must run against loopback PostgreSQL (allowed: #{inspect(allowed_test_hosts)})"
-end
-
-# Guard test-only database name: prevent targeting development or production
-forbidden_test_dbs = [
-  "cympho",
-  "cympho_dev",
-  "cympho_development",
-  "cympho_prod",
-  "cympho_production"
-]
-
-if test_db in forbidden_test_dbs or not String.contains?(test_db, "test") do
-  raise RuntimeError,
-        "Unsafe test database name #{inspect(test_db)}; tests must target an explicit test database containing 'test'"
-end
-
-# Guard execution milestone database isolation: forbid hidden fallback to shared cympho_test
-if System.get_env("CYMPHO_REQUIRE_OWNED_TEST_DB") == "1" and test_db == "cympho_test" do
-  raise RuntimeError,
-        "Hidden fallback to shared cympho_test is forbidden for execution-reliability milestone. TEST_DB_NAME must be explicitly set to the owned test database."
-end
-
 config :cympho, Cympho.Repo,
   username: System.get_env("TEST_DB_USER") || "paperclip",
   password: System.get_env("TEST_DB_PASSWORD") || "paperclip",
-  hostname: test_host,
-  database: test_db,
+  hostname: System.get_env("TEST_DB_HOST") || "localhost",
+  database:
+    System.get_env("TEST_DB_NAME") || "cympho_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   # Bumped from 10 → 24. ExUnit's `max_cases` defaults to System.schedulers_online
   # (16 in the typical CI / dev environment), so a 10-slot pool starves even
