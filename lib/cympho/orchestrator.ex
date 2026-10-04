@@ -69,7 +69,11 @@ defmodule Cympho.Orchestrator do
   alias Cympho.Issues.Issue
 
   @heartbeat_tick_interval 30_000
-  @adapter_cleanup_timeout_ms 500
+  @adapter_cleanup_timeout_ms Application.compile_env(
+                                :cympho,
+                                :adapter_cleanup_timeout_ms,
+                                2_000
+                              )
   # Consecutive heartbeat ticks (30s apart) the adapter session may be
   # missing from AdapterSessions after having been seen, before we treat
   # the worker as dead. Two ticks tolerates a race with late registration
@@ -2093,10 +2097,23 @@ defmodule Cympho.Orchestrator do
   ## Private — original helpers
 
   # The claude CLI's `--output-format json` envelope carries the agent's text
-  # in "result"; the Messages-API shape carries a "content" block list. Falling
+  # in "result"; the Messages-API shape carries a "content" block list. Process
+  # and other adapters may return "output" or atom-keyed maps. Falling
   # through to inspect/1 would escape the quotes/newlines inside the agent's
-  # cympho-actions block, making it unparseable — so try both real shapes first.
+  # cympho-actions block, making it unparseable — so try structured text shapes first.
   defp extract_result_content(%{"result" => text}) when is_binary(text) and text != "" do
+    text
+  end
+
+  defp extract_result_content(%{result: text}) when is_binary(text) and text != "" do
+    text
+  end
+
+  defp extract_result_content(%{"output" => text}) when is_binary(text) and text != "" do
+    text
+  end
+
+  defp extract_result_content(%{output: text}) when is_binary(text) and text != "" do
     text
   end
 
