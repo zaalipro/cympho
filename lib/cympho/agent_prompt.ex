@@ -24,12 +24,34 @@ defmodule Cympho.AgentPrompt do
 
   alias Cympho.{Agents, Attachments, IssueBriefReadiness, IssueDigest, PullRequestContract, Repo}
   alias Cympho.Agents.{Agent, RolePlaybook}
+  alias Cympho.AgentPromptBudget
   alias Cympho.AgentPromptContract
   alias Cympho.Comments.Comment
   alias Cympho.Decisions.Decision
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues.Issue
   alias Cympho.WorkProducts.IssueWorkProduct
+
+  defmodule InputBudgetOverflowError do
+    defexception [:message, :budget_bytes, :required_bytes, :excess_bytes]
+
+    @impl true
+    def exception(details) when is_map(details) do
+      budget = details[:budget_bytes] || details["budget_bytes"]
+      required = details[:required_bytes] || details["required_bytes"]
+      excess = details[:excess_bytes] || details["excess_bytes"]
+
+      msg =
+        "Prompt input budget exceeded: protected content (#{required} bytes) exceeds the configured input budget (#{budget} bytes) by #{excess} bytes."
+
+      %__MODULE__{
+        message: msg,
+        budget_bytes: budget,
+        required_bytes: required,
+        excess_bytes: excess
+      }
+    end
+  end
 
   @recent_comments_limit 10
   @recent_decisions_limit 3
@@ -51,8 +73,6 @@ defmodule Cympho.AgentPrompt do
   ]
   @max_children 25
   @max_siblings 25
-  @open_review_comment_limit 20
-  @open_review_query_limit 60
   @owner_revision_marker "owner reopened the ceo verification update"
   @ceo_core_delegation_roles [:cto, :product_manager, :designer, :engineer, :qa_engineer]
   @cto_core_delegation_roles [:engineer, :qa_engineer, :release_engineer]
@@ -62,42 +82,215 @@ defmodule Cympho.AgentPrompt do
 
   @doc """
   Builds a prompt for an issue and optional agent.
+  Applies prompt input budgeting according to the configured or default budget.
+  Raises `Cympho.AgentPrompt.InputBudgetOverflowError` if protected content alone exceeds the budget.
   """
   def build(issue, agent_or_id \\ nil, opts \\ []) do
+    case build_budgeted(issue, agent_or_id, opts) do
+      {:ok, prompt, _meta} ->
+        prompt
+
+      {:error, {:prompt_input_budget_exceeded, details}} ->
+        raise InputBudgetOverflowError.exception(details)
+    end
+  end
+
+  @doc """
+  Builds a budgeted prompt for an issue and optional agent.
+  Returns `{:ok, prompt, metadata}` or `{:error, {:prompt_input_budget_exceeded, details}}`.
+  """
+  def build_budgeted(issue, agent_or_id \\ nil, opts \\ []) do
+    budget_bytes = AgentPromptBudget.resolve_budget(opts, Keyword.get(opts, :config, %{}))
+    sections = build_sections(issue, agent_or_id, opts)
+    AgentPromptBudget.budget_sections(sections, budget_bytes, opts)
+  end
+
+  @doc """
+  Returns the structured prompt sections (protected and optional) before budgeting.
+  """
+  def build_sections(issue, agent_or_id \\ nil, opts \\ []) do
     skills = Keyword.get(opts, :skills, [])
     agent = resolve_agent(agent_or_id)
     history = load_history(issue, current_run_id(opts))
     wake_context = Keyword.get(opts, :wake_context)
+    role = role_of(agent)
+
+    {older_feedback, latest_feedback} = build_review_feedback_sections(issue, role)
 
     [
-      current_task_block(issue, agent),
-      work_mode_block(issue),
-      wake_context_block(wake_context, agent),
-      triggering_comment_block(issue, wake_context),
-      attachments_block(issue),
-      external_intake_block(issue, role_of(agent)),
-      owner_brief_readiness_block(issue, role_of(agent)),
-      agent_block(agent_or_id, agent),
-      context_block(issue),
-      company_operating_brief_block(issue),
-      decomposition_depth_block(issue, role_of(agent)),
-      team_status_block(issue, role_of(agent)),
-      manager_coordination_packet_block(role_of(agent)),
-      budget_block(issue, agent),
-      history_block(history),
-      owner_revision_block(history, role_of(agent)),
-      open_review_feedback_block(issue, role_of(agent)),
-      digest_quality_block(issue, history),
-      role_completion_contract_block(role_of(agent)),
-      pull_request_contract_block(issue, role_of(agent)),
-      runtime_block(Keyword.get(opts, :runtime_context)),
-      action_contract_block(role_of(agent)),
-      skills_block(skills)
+      %{
+        id: :current_task,
+        type: :protected,
+        category: "current_task",
+        content: current_task_block(issue, agent)
+      },
+      %{
+        id: :work_mode,
+        type: :protected,
+        category: "work_mode",
+        content: work_mode_block(issue)
+      },
+      %{
+        id: :wake_context,
+        type: :optional,
+        category: "wake_context",
+        content: wake_context_block(wake_context, agent)
+      },
+      %{
+        id: :triggering_comment,
+        type: :optional,
+        category: "triggering_comment",
+        content: triggering_comment_block(issue, wake_context)
+      },
+      %{
+        id: :attachments,
+        type: :optional,
+        category: "attachments",
+        content: attachments_block(issue),
+        count: count_attachments(issue)
+      },
+      %{
+        id: :external_intake,
+        type: :optional,
+        category: "external_intake",
+        content: external_intake_block(issue, role)
+      },
+      %{
+        id: :owner_brief_readiness,
+        type: :optional,
+        category: "owner_brief_readiness",
+        content: owner_brief_readiness_block(issue, role)
+      },
+      %{
+        id: :agent,
+        type: :protected,
+        category: "agent_instructions",
+        content: agent_block(agent_or_id, agent)
+      },
+      %{
+        id: :context,
+        type: :optional,
+        category: "context",
+        content: context_block(issue)
+      },
+      %{
+        id: :company_operating_brief,
+        type: :optional,
+        category: "company_operating_brief",
+        content: company_operating_brief_block(issue)
+      },
+      %{
+        id: :decomposition_depth,
+        type: :optional,
+        category: "decomposition_depth",
+        content: decomposition_depth_block(issue, role)
+      },
+      %{
+        id: :team_status,
+        type: :optional,
+        category: "team_status",
+        content: team_status_block(issue, role)
+      },
+      %{
+        id: :manager_coordination_packet,
+        type: :optional,
+        category: "manager_coordination_packet",
+        content: manager_coordination_packet_block(role)
+      },
+      %{
+        id: :budget,
+        type: :optional,
+        category: "budget",
+        content: budget_block(issue, agent)
+      },
+      %{
+        id: :history_comments,
+        type: :optional,
+        category: "history_comments",
+        content: render_history_comments(history.comments),
+        count: length(history.comments)
+      },
+      %{
+        id: :history_children,
+        type: :optional,
+        category: "history_children",
+        content: render_history_children(history.children),
+        count: length(history.children)
+      },
+      %{
+        id: :history_siblings,
+        type: :optional,
+        category: "history_siblings",
+        content: render_history_siblings(history.siblings),
+        count: length(history.siblings)
+      },
+      %{
+        id: :history_decisions,
+        type: :optional,
+        category: "history_decisions",
+        content: render_history_decisions(history.decisions),
+        count: length(history.decisions)
+      },
+      %{
+        id: :owner_revision,
+        type: :optional,
+        category: "owner_revision",
+        content: owner_revision_block(history, role)
+      },
+      older_feedback,
+      latest_feedback,
+      %{
+        id: :digest_quality,
+        type: :optional,
+        category: "digest_quality",
+        content: digest_quality_block(issue, history)
+      },
+      %{
+        id: :role_completion_contract,
+        type: :protected,
+        category: "role_completion_contract",
+        content: role_completion_contract_block(role)
+      },
+      %{
+        id: :pull_request_contract,
+        type: :protected,
+        category: "pull_request_contract",
+        content: pull_request_contract_block(issue, role)
+      },
+      %{
+        id: :runtime,
+        type: :protected,
+        category: "runtime",
+        content: runtime_block(Keyword.get(opts, :runtime_context))
+      },
+      %{
+        id: :action_contract,
+        type: :protected,
+        category: "action_contract",
+        content: action_contract_block(role)
+      },
+      %{
+        id: :skills,
+        type: :optional,
+        category: "skills",
+        content: skills_block(skills)
+      }
     ]
-    |> Enum.reject(&(&1 in [nil, ""]))
-    |> Enum.join("\n\n")
-    |> String.trim()
+    |> Enum.reject(&is_nil/1)
   end
+
+  defp count_attachments(%{id: id}) when is_binary(id) do
+    Attachments.list_attachments(id) |> length()
+  rescue
+    _ -> 1
+  end
+
+  defp count_attachments(_), do: 1
+
+  defp render_history_comments(comments), do: comments_section(comments)
+  defp render_history_children(children), do: children_section(children)
+  defp render_history_siblings(siblings), do: siblings_section(siblings)
+  defp render_history_decisions(decisions), do: decisions_section(decisions)
 
   # Show the CTO and CEO the engineer pool: who's idle, who's loaded, and
   # the total active assignment count. Without this they fan out work to
@@ -1393,17 +1586,19 @@ defmodule Cympho.AgentPrompt do
 
   ## ── history block ──────────────────────────────────────────────
 
-  defp history_block(%{
-         comments: comments,
-         children: children,
-         siblings: siblings,
-         decisions: decisions
-       })
-       when comments == [] and children == [] and siblings == [] and decisions == [] do
+  @doc false
+  def history_block(%{
+        comments: comments,
+        children: children,
+        siblings: siblings,
+        decisions: decisions
+      })
+      when comments == [] and children == [] and siblings == [] and decisions == [] do
     nil
   end
 
-  defp history_block(history) do
+  @doc false
+  def history_block(history) do
     [
       "## Recent issue history",
       comments_section(history.comments),
@@ -1424,73 +1619,144 @@ defmodule Cympho.AgentPrompt do
   ## the engineer can scan the open feedback in chronological order, even
   ## across many rounds.
 
-  defp open_review_feedback_block(issue, role) when role in @delivery_role_pool do
-    case field(issue, :id) do
-      id when is_binary(id) ->
-        render_open_review_block(id)
+  defp build_review_feedback_sections(_issue, role) when role in [:ceo, :cto], do: {nil, nil}
 
-      _ ->
-        nil
+  defp build_review_feedback_sections(issue, _role) do
+    comments = load_review_comments(issue)
+
+    case comments do
+      [] ->
+        {nil, nil}
+
+      [single] ->
+        latest_feedback = %{
+          id: :latest_review_feedback,
+          type: :protected,
+          category: "latest_review_feedback",
+          content: single_review_block(single)
+        }
+
+        {nil, latest_feedback}
+
+      multiple ->
+        latest = List.last(multiple)
+        older = Enum.slice(multiple, 0..-2//1)
+
+        older_feedback = %{
+          id: :older_review_feedback,
+          type: :optional,
+          category: "older_review_feedback",
+          count: length(older),
+          content: older_review_rows(older)
+        }
+
+        latest_feedback = %{
+          id: :latest_review_feedback,
+          type: :protected,
+          category: "latest_review_feedback",
+          content: latest_review_row(latest)
+        }
+
+        {older_feedback, latest_feedback}
     end
   end
 
-  defp open_review_feedback_block(_issue, _role), do: nil
+  @doc false
+  def open_review_feedback_block(_issue, role) when role in [:ceo, :cto], do: nil
 
-  defp render_open_review_block(issue_id) do
-    comments = load_review_comments(issue_id)
+  @doc false
+  def open_review_feedback_block(issue, _role) do
+    comments = load_review_comments(issue)
 
     case comments do
       [] ->
         nil
 
-      list ->
-        total = length(list)
-        shown = Enum.take(list, @open_review_comment_limit)
-        truncated = total - length(shown)
+      [single] ->
+        single_review_block(single)
 
-        rows =
-          Enum.map(shown, fn c ->
-            "- [#{review_comment_author_label(c)}] #{format_review_body(c.body)}"
-          end)
+      multiple ->
+        older = Enum.slice(multiple, 0..-2//1)
+        latest = List.last(multiple)
 
-        footer =
-          if truncated > 0 do
-            ["", "+ #{truncated} earlier review comment(s) — see the issue Activity log."]
-          else
-            []
-          end
-
-        Enum.join(
-          [
-            "## Open review feedback",
-            "Reviewer feedback that landed on this issue, oldest → newest. Address each item before your next `submit_review`, then summarize what changed in your `[delivery]` note."
-            | rows
-          ] ++ footer,
-          "\n"
-        )
+        """
+        ## Open review feedback
+        Reviewer feedback that landed on this issue, oldest → newest. Address each item before your next `submit_review`, then summarize what changed in your `[delivery]` note.
+        #{older_review_rows(older)}
+        #{latest_review_row(latest)}
+        """
+        |> String.trim()
     end
   end
 
-  defp load_review_comments(issue_id) do
+  defp single_review_block(comment) do
+    """
+    ## Open review feedback
+    Reviewer feedback that landed on this issue, oldest → newest. Address each item before your next `submit_review`, then summarize what changed in your `[delivery]` note.
+    - [#{review_comment_author_label(comment)}] #{comment.body}
+    """
+    |> String.trim()
+  end
+
+  defp older_review_rows(older_comments) do
+    Enum.map_join(older_comments, "\n", fn c ->
+      "- [#{review_comment_author_label(c)}] #{format_review_body(c.body)}"
+    end)
+  end
+
+  defp latest_review_row(comment) do
+    "- [#{review_comment_author_label(comment)}] #{comment.body}"
+  end
+
+  defp load_review_comments(issue_id) when is_binary(issue_id) do
     Comment
     |> where([c], c.issue_id == ^issue_id)
-    |> order_by([c], asc: c.inserted_at)
-    |> limit(@open_review_query_limit)
+    |> order_by([c], desc: c.inserted_at, desc: c.id)
+    |> limit(200)
     |> Repo.all()
-    |> Enum.filter(&(IssueDigest.comment_category(&1) == :review))
+    |> Enum.filter(&review_feedback_comment?/1)
+    |> Enum.reverse()
   rescue
     _ -> []
+  end
+
+  defp load_review_comments(%{id: id}) when is_binary(id), do: load_review_comments(id)
+  defp load_review_comments(_), do: []
+
+  defp review_feedback_comment?(%Comment{} = comment) do
+    category = IssueDigest.comment_category(comment)
+    text = (comment.body || "") |> String.downcase()
+
+    category == :review or
+      String.contains?(text, "[review]") or
+      String.contains?(text, "[request changes]") or
+      String.contains?(text, "[request_changes]") or
+      String.starts_with?(text, "review:") or
+      String.starts_with?(text, "request changes:") or
+      (comment.author_type == "user" and
+         (String.contains?(text, "change") or String.contains?(text, "review") or
+            String.contains?(text, "rework")))
   end
 
   defp review_comment_author_label(%Comment{author_type: "system"}), do: "system"
 
   defp review_comment_author_label(%Comment{author_type: "agent", author_id: id}),
-    do: "agent #{short_id(id)}"
+    do: "agent #{author_label_id(id)}"
 
   defp review_comment_author_label(%Comment{author_type: "user", author_id: id}),
-    do: "user #{short_id(id)}"
+    do: "user #{author_label_id(id)}"
 
   defp review_comment_author_label(_), do: "reviewer"
+
+  defp author_label_id(nil), do: "?"
+
+  defp author_label_id(id) when is_binary(id) do
+    if byte_size(id) == 36 and String.match?(id, ~r/^[0-9a-fA-F-]{36}$/) do
+      String.slice(id, 0, 8)
+    else
+      id
+    end
+  end
 
   defp format_review_body(body) when is_binary(body) do
     body |> String.split("\n") |> Enum.take(20) |> Enum.join("\n")

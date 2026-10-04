@@ -57,11 +57,14 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
     send(recipient_pid, {:session_started, session_id})
 
     prompt =
-      Cympho.AgentPrompt.build(issue, agent_id,
-        skills: Keyword.get(opts, :skills, []),
-        runtime_context: Keyword.get(opts, :runtime_context),
-        wake_context: Keyword.get(opts, :wake_context)
-      )
+      Keyword.get(opts, :budgeted_prompt) ||
+        Cympho.AgentPrompt.build(issue, agent_id,
+          skills: Keyword.get(opts, :skills, []),
+          runtime_context: Keyword.get(opts, :runtime_context),
+          wake_context: Keyword.get(opts, :wake_context),
+          input_budget_bytes:
+            Keyword.get(opts, :input_budget_bytes) || Keyword.get(opts, :max_input_bytes)
+        )
 
     Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "openai_chat"})
 

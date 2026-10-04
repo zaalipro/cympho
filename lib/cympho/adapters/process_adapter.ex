@@ -118,11 +118,15 @@ defmodule Cympho.Adapters.ProcessAdapter do
   defp command(config), do: config[:command] || config["command"]
 
   defp build_prompt(issue, agent_id, opts) do
-    Cympho.AgentPrompt.build(issue, agent_id,
-      skills: Keyword.get(opts, :skills, []),
-      runtime_context: Keyword.get(opts, :runtime_context),
-      wake_context: Keyword.get(opts, :wake_context)
-    )
+    Keyword.get(opts, :budgeted_prompt) ||
+      Cympho.AgentPrompt.build(issue, agent_id,
+        skills: Keyword.get(opts, :skills, []),
+        runtime_context: Keyword.get(opts, :runtime_context),
+        wake_context: Keyword.get(opts, :wake_context),
+        input_budget_bytes:
+          Keyword.get(opts, :input_budget_bytes) || Keyword.get(opts, :max_input_bytes),
+        adapter_additions_bytes: 1
+      )
   rescue
     _ ->
       issue

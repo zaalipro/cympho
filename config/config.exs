@@ -163,6 +163,9 @@ config :cympho, :llm_router_enabled?, true
 config :cympho, :llm_classifier_timeout_ms, 1_500
 config :cympho, :start_execution_policy_advancer?, true
 
+# Prompt input size budget in UTF-8 bytes (independent from output limits)
+config :cympho, :prompt_input_budget_bytes, 100_000
+
 # JWT signing secrets. Dev/test use these fixed, non-secret defaults; production
 # requires CYMPHO_USER_JWT_SECRET / CYMPHO_AGENT_JWT_SECRET (set in runtime.exs),
 # whose absence fails the boot. There is no hardcoded production fallback.

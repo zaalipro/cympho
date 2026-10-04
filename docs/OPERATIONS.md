@@ -242,6 +242,25 @@ co-tenant activity, so instance operators should use `mix cympho.doctor`,
 bounded admission telemetry, and the separately authenticated `/beam` surface
 for node-level diagnosis.
 
+### Prompt input budget and protected context
+
+Prompt input budgeting establishes an explicit size ceiling for runtime prompts, separate from output token and output byte limits (`CYMPHO_AGENT_RUNNER_MAX_OUTPUT_BYTES` or `max_output_bytes`):
+
+- **Accounting unit**: UTF-8 bytes (`:bytes`). Byte size accounts accurately for multibyte characters and template text without relying on provider-specific tokenizer assumptions.
+- **Default budget**: 100,000 UTF-8 bytes. Ordinary representative prompts remain fully valid and untrimmed at this default.
+- **Configuration & Precedence**:
+  1. Per-run options: `opts[:input_budget_bytes]` or `opts[:max_input_bytes]`
+  2. Adapter/runtime configuration: `config["input_budget_bytes"]` or `config["max_input_bytes"]`
+  3. Application environment: `config :cympho, :prompt_input_budget_bytes, 100_000`
+  4. Host environment variable: `CYMPHO_PROMPT_INPUT_BUDGET_BYTES`
+- **Output limit independence**: Modifying `max_output_bytes` or output token limits does not alter the prompt input budget, and vice versa.
+- **Safe fallback & Validation**: Invalid or malformed budget values (zero, negative, or non-numeric strings) log a warning and fall back to the safe default (100,000 bytes) rather than allowing unbounded prompt growth. Direct configuration validation yields an actionable error.
+- **Protected vs. Optional Context**:
+  - **Protected (never trimmed)**: The current task (issue identifier, title, description, role, assignee, work mode), mandatory agent instructions (playbook mandate, operating loop, turn contract, anti-patterns, completion contract), action contracts (`cympho-actions` response format, allowed/forbidden actions), and the latest required human review feedback with attribution and full multiline content.
+  - **Optional (trimmed in stable order)**: Trimming proceeds deterministically in this documented order: attachments, team status, company operating brief, decomposition depth, manager coordination packet, budget tracking, owner revision notes, owner brief readiness, external intake, digest quality checklist, skills, history decisions, history siblings, history children, history comments, older review feedback (leaving newest intact), issue context (parent/goal/lineage), triggering comment, and wake context.
+- **Omission notices & Secret safety**: When optional context is omitted, a concise omission notice identifying omitted categories and item counts (e.g. `- attachments: 1 item(s) omitted`) is injected into the delivered prompt and recorded in run telemetry. Raw omitted text is never logged, stored, or leaked into notices or diagnostics. An untrimmed prompt does not report omissions.
+- **Protected content overflow**: If protected content alone exceeds the configured input budget, execution halts before adapter or model invocation (adapter invocation count: 0). The orchestrator releases the runtime admission claim, cancels workspaces, fails the engine run, and releases the issue checkout lock back to `:todo` with an actionable failure comment.
+
 ### Isolated runtime-preview origin
 
 Production previews are disabled entirely; production deployments configure

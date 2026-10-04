@@ -1121,12 +1121,6 @@ defmodule Cympho.Orchestrator do
       :ok ->
         wake_context = runtime_wake_context(session)
 
-        if initial_runtime_attempt?(session) do
-          consume_pending_wakes(session.agent_id, session.issue.id)
-        end
-
-        session = schedule_heartbeat_tick(session)
-
         opts =
           session
           |> run_opts(config, runtime_context)
@@ -1141,46 +1135,66 @@ defmodule Cympho.Orchestrator do
             }
           )
 
-        try do
-          session_id = module.run(session.issue, session.agent_id, self(), opts)
+        case check_prompt_budget(session, opts) do
+          {:ok, budgeted_prompt, prompt_meta} ->
+            opts =
+              opts
+              |> Keyword.put(:budgeted_prompt, budgeted_prompt)
+              |> Keyword.put(:prompt_meta, prompt_meta)
+              |> Keyword.put(:omissions, prompt_meta.omissions)
 
-          case ensure_worker_adopted(session, session_id) do
-            :ok ->
-              # Reset adapter-session liveness tracking for the new attempt.
-              # Registration is mandatory, but the periodic checker still
-              # distinguishes a later worker disappearance from this startup path.
-              {:ok,
-               %{
-                 session
-                 | session_id: session_id,
-                   runtime_context: runtime_context,
-                   adapter_session_seen?: true,
-                   adapter_session_misses: 0
-               }}
+            if initial_runtime_attempt?(session) do
+              consume_pending_wakes(session.agent_id, session.issue.id)
+            end
 
-            {:error, _reason} ->
-              _ =
-                Cympho.AdapterSessions.cancel_and_wait(
-                  session_id,
-                  :adapter_start_failed,
-                  @adapter_cleanup_timeout_ms
-                )
+            session = schedule_heartbeat_tick(session)
 
-              _ = release_runtime_admission(session)
-              failed_session = %{session | session_id: session_id}
-              fail_engine_run(failed_session, {:adapter_start_failed, :worker_unregistered})
-              {:error, {:adapter_start_failed, :worker_unregistered}}
-          end
-        rescue
-          _exception ->
+            try do
+              session_id = module.run(session.issue, session.agent_id, self(), opts)
+
+              case ensure_worker_adopted(session, session_id) do
+                :ok ->
+                  # Reset adapter-session liveness tracking for the new attempt.
+                  # Registration is mandatory, but the periodic checker still
+                  # distinguishes a later worker disappearance from this startup path.
+                  {:ok,
+                   %{
+                     session
+                     | session_id: session_id,
+                       runtime_context: runtime_context,
+                       adapter_session_seen?: true,
+                       adapter_session_misses: 0
+                   }}
+
+                {:error, _reason} ->
+                  _ =
+                    Cympho.AdapterSessions.cancel_and_wait(
+                      session_id,
+                      :adapter_start_failed,
+                      @adapter_cleanup_timeout_ms
+                    )
+
+                  _ = release_runtime_admission(session)
+                  failed_session = %{session | session_id: session_id}
+                  fail_engine_run(failed_session, {:adapter_start_failed, :worker_unregistered})
+                  {:error, {:adapter_start_failed, :worker_unregistered}}
+              end
+            rescue
+              _exception ->
+                _ = release_runtime_admission(session)
+                fail_engine_run(session, {:adapter_start_failed, :crashed})
+                {:error, {:adapter_start_failed, :crashed}}
+            catch
+              _kind, _reason ->
+                _ = release_runtime_admission(session)
+                fail_engine_run(session, {:adapter_start_failed, :exited})
+                {:error, {:adapter_start_failed, :exited}}
+            end
+
+          {:error, {:prompt_input_budget_exceeded, _details} = error} ->
             _ = release_runtime_admission(session)
-            fail_engine_run(session, {:adapter_start_failed, :crashed})
-            {:error, {:adapter_start_failed, :crashed}}
-        catch
-          _kind, _reason ->
-            _ = release_runtime_admission(session)
-            fail_engine_run(session, {:adapter_start_failed, :exited})
-            {:error, {:adapter_start_failed, :exited}}
+            fail_engine_run(session, error)
+            {:error, error}
         end
 
       {:error, reason} ->
@@ -1223,6 +1237,11 @@ defmodule Cympho.Orchestrator do
     do: true
 
   defp initial_runtime_attempt?(_session), do: false
+
+  defp check_prompt_budget(%__MODULE__{} = session, opts) do
+    merged_opts = Keyword.merge(session.opts || [], opts)
+    Cympho.AgentPrompt.build_budgeted(session.issue, session.agent_id, merged_opts)
+  end
 
   defp maybe_start_provider_fallback(%__MODULE__{} = session, reason) do
     if provider_fallback_failure?(reason) do
@@ -1449,6 +1468,19 @@ defmodule Cympho.Orchestrator do
     create_system_comment(
       session.issue,
       "Runtime run startup failed before adapter dispatch. Work remains queued for retry."
+    )
+
+    set_agent_idle(session.agent_id)
+    {:stop, :normal, session}
+  end
+
+  defp stop_before_adapter_dispatch(
+         %__MODULE__{} = session,
+         {:prompt_input_budget_exceeded, details}
+       ) do
+    create_system_comment(
+      session.issue,
+      "Runtime start aborted: Protected prompt content (#{details.required_bytes} bytes) exceeds the configured input budget (#{details.budget_bytes} bytes) by #{details.excess_bytes} bytes."
     )
 
     set_agent_idle(session.agent_id)

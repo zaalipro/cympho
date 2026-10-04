@@ -88,11 +88,14 @@ defmodule Cympho.Adapters.CodexAdapter do
     prompt_runtime_context = prompt_runtime_context(Keyword.get(opts, :runtime_context))
 
     prompt =
-      Cympho.AgentPrompt.build(issue, agent_id,
-        skills: Keyword.get(opts, :skills, []),
-        runtime_context: prompt_runtime_context,
-        wake_context: Keyword.get(opts, :wake_context)
-      )
+      Keyword.get(opts, :budgeted_prompt) ||
+        Cympho.AgentPrompt.build(issue, agent_id,
+          skills: Keyword.get(opts, :skills, []),
+          runtime_context: prompt_runtime_context,
+          wake_context: Keyword.get(opts, :wake_context),
+          input_budget_bytes:
+            Keyword.get(opts, :input_budget_bytes) || Keyword.get(opts, :max_input_bytes)
+        )
 
     Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "codex"})
 

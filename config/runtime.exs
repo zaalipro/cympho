@@ -91,6 +91,9 @@ config :cympho, Cympho.Finch,
     default: [size: positive_env.("CYMPHO_FINCH_POOL_SIZE", resource_defaults.finch_pool)]
   ]
 
+config :cympho,
+  prompt_input_budget_bytes: positive_env.("CYMPHO_PROMPT_INPUT_BUDGET_BYTES", 100_000)
+
 preview_host =
   case System.get_env("PREVIEW_HOST") do
     value when value in [nil, ""] ->

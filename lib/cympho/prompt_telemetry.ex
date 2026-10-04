@@ -39,14 +39,20 @@ defmodule Cympho.PromptTelemetry do
   def attach_to_run(opts, prompt, attrs \\ %{}) do
     case run_id(opts) do
       run_id when is_binary(run_id) and run_id != "" ->
+        omissions = omissions_metadata(opts, prompt, attrs)
+
         metadata =
           %{
             "prompt_context" =>
               prompt
               |> estimate()
               |> Map.merge(stringify_attrs(attrs))
-              |> Map.put_new("source", "agent_prompt"),
-            "prompt_delivery" => delivery_receipt(prompt, attrs)
+              |> Map.put_new("source", "agent_prompt")
+              |> Map.put("omissions", omissions),
+            "prompt_delivery" =>
+              prompt
+              |> delivery_receipt(attrs)
+              |> Map.put("omissions", omissions)
           }
 
         _ = Cympho.HeartbeatEngine.merge_run_metadata(run_id, metadata)
@@ -56,6 +62,75 @@ defmodule Cympho.PromptTelemetry do
         :ok
     end
   end
+
+  defp omissions_metadata(opts, prompt, attrs) do
+    cond do
+      is_map(attrs[:omissions]) ->
+        attrs[:omissions]
+
+      is_map(attrs["omissions"]) ->
+        attrs["omissions"]
+
+      is_list(opts) and is_map(Keyword.get(opts, :omissions)) ->
+        Keyword.get(opts, :omissions)
+
+      is_map(opts) and is_map(Map.get(opts, :omissions)) ->
+        Map.get(opts, :omissions)
+
+      true ->
+        extract_omissions_from_prompt(prompt)
+    end
+  end
+
+  defp extract_omissions_from_prompt(prompt) when is_binary(prompt) do
+    if String.contains?(prompt, "## Context omissions") do
+      [_before, notice_block] = String.split(prompt, "## Context omissions", parts: 2)
+
+      notice_text =
+        case String.split(notice_block, ~r/\n\n(?=## )/, parts: 2) do
+          [first | _] -> first
+          [] -> notice_block
+        end
+
+      lines =
+        notice_text
+        |> String.split("\n")
+        |> Enum.map(&String.trim/1)
+        |> Enum.filter(&String.starts_with?(&1, "- "))
+
+      parsed =
+        Enum.map(lines, fn line ->
+          case Regex.run(~r/^-\s*([^:]+):\s*(\d+)/, line) do
+            [_, category, count_str] ->
+              {String.trim(category), String.to_integer(count_str)}
+
+            _ ->
+              nil
+          end
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      categories = Enum.map(parsed, fn {cat, _} -> cat end)
+      counts = Map.new(parsed)
+
+      %{
+        "omitted" => true,
+        "categories" => categories,
+        "counts" => counts,
+        "total_omitted_sections" => length(categories)
+      }
+    else
+      %{
+        "omitted" => false,
+        "categories" => [],
+        "counts" => %{},
+        "total_omitted_sections" => 0
+      }
+    end
+  end
+
+  defp extract_omissions_from_prompt(_),
+    do: %{"omitted" => false, "categories" => [], "counts" => %{}, "total_omitted_sections" => 0}
 
   defp run_id(opts) when is_list(opts) do
     Keyword.get(opts, :run_id) ||

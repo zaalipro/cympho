@@ -273,11 +273,11 @@ defmodule Cympho.AgentRunner do
   end
 
   def build_prompt(issue, opts) when is_list(opts) do
-    Cympho.AgentPrompt.build(issue, nil, opts)
+    Keyword.get(opts, :budgeted_prompt) || Cympho.AgentPrompt.build(issue, nil, opts)
   end
 
   def build_prompt(issue, agent_id, opts) when is_list(opts) do
-    Cympho.AgentPrompt.build(issue, agent_id, opts)
+    Keyword.get(opts, :budgeted_prompt) || Cympho.AgentPrompt.build(issue, agent_id, opts)
   end
 
   defp do_run(
