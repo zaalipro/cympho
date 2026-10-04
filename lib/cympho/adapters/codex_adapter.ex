@@ -84,31 +84,56 @@ defmodule Cympho.Adapters.CodexAdapter do
     session_id
   end
 
+  def adapter_additions_bytes(_config \\ %{}), do: 1
+
   defp do_run(session_id, issue, agent_id, recipient_pid, config, opts) do
-    prompt_runtime_context = prompt_runtime_context(Keyword.get(opts, :runtime_context))
+    case build_prompt(issue, agent_id, opts, config) do
+      {:ok, prompt} ->
+        Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "codex"})
 
-    prompt =
-      Keyword.get(opts, :budgeted_prompt) ||
-        Cympho.AgentPrompt.build(issue, agent_id,
-          skills: Keyword.get(opts, :skills, []),
-          runtime_context: prompt_runtime_context,
-          wake_context: Keyword.get(opts, :wake_context),
-          input_budget_bytes:
-            Keyword.get(opts, :input_budget_bytes) || Keyword.get(opts, :max_input_bytes)
+        case run_codex(session_id, issue, prompt, config, opts, recipient_pid) do
+          {:ok, output} ->
+            send(recipient_pid, {:turn_completed, session_id, output})
+
+          {:error, reason} ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+        end
+
+      {:error, {:prompt_input_budget_exceeded, details}} ->
+        send(
+          recipient_pid,
+          {:turn_ended_with_error, session_id, {:prompt_input_budget_exceeded, details}}
         )
-
-    Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "codex"})
-
-    case run_codex(session_id, issue, prompt, config, opts, recipient_pid) do
-      {:ok, output} ->
-        send(recipient_pid, {:turn_completed, session_id, output})
-
-      {:error, reason} ->
-        send(recipient_pid, {:turn_ended_with_error, session_id, reason})
     end
   end
 
-  defp prompt_runtime_context(%Cympho.RuntimeContext{} = context) do
+  defp build_prompt(issue, agent_id, opts, config) do
+    case Keyword.get(opts, :budgeted_prompt) do
+      prompt when is_binary(prompt) ->
+        {:ok, prompt}
+
+      _ ->
+        prompt_runtime_context = prompt_runtime_context(Keyword.get(opts, :runtime_context))
+        additions = Keyword.get(opts, :adapter_additions_bytes, 1)
+
+        prompt_opts =
+          opts
+          |> Keyword.put(:runtime_context, prompt_runtime_context)
+          |> Keyword.put_new(:config, config)
+          |> Keyword.put(:adapter_additions_bytes, additions)
+
+        case Cympho.AgentPrompt.build_budgeted(issue, agent_id, prompt_opts) do
+          {:ok, prompt, _meta} ->
+            {:ok, prompt}
+
+          {:error, {:prompt_input_budget_exceeded, _details} = error} ->
+            {:error, error}
+        end
+    end
+  end
+
+  @doc false
+  def prompt_runtime_context(%Cympho.RuntimeContext{} = context) do
     env =
       context.env
       |> Map.new()
@@ -118,7 +143,7 @@ defmodule Cympho.Adapters.CodexAdapter do
     %{context | cwd: @sandbox_workspace, env: env}
   end
 
-  defp prompt_runtime_context(context), do: context
+  def prompt_runtime_context(context), do: context
 
   defp run_codex(session_id, issue, prompt, config, opts, recipient_pid) do
     try do

@@ -492,6 +492,31 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
     )
   end
 
+  test "protected prompt input budget overflow prevents command execution and does not fallback to JSON" do
+    with_fake_command(
+      "overflow-agent",
+      "printf 'executed\\n'",
+      fn ->
+        session_id =
+          ProcessAdapter.run(@issue, "agent-1", self(),
+            config: %{
+              "command" => "overflow-agent",
+              "timeout" => 5_000,
+              "input_budget_bytes" => 100
+            }
+          )
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:prompt_input_budget_exceeded, details}},
+                       5_000
+
+        assert details.budget_bytes == 100
+        refute_receive {:session_started, ^session_id}, 100
+        refute_receive {:turn_completed, ^session_id, _result}, 100
+      end
+    )
+  end
+
   defp with_fake_command(command, script, fun) do
     dir =
       Path.join(System.tmp_dir!(), "cympho-process-test-#{System.unique_integer([:positive])}")

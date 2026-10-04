@@ -40,25 +40,51 @@ defmodule Cympho.Adapters.AgrentingAdapter do
     session_id
   end
 
+  def adapter_additions_bytes(_config \\ %{}), do: 1
+
   defp do_run(session_id, issue, agent_id, recipient_pid, config, opts) do
     send(recipient_pid, {:session_started, session_id})
 
-    prompt =
-      Keyword.get(opts, :budgeted_prompt) ||
-        Cympho.AgentPrompt.build(issue, agent_id,
-          skills: Keyword.get(opts, :skills, []),
-          runtime_context: Keyword.get(opts, :runtime_context),
-          wake_context: Keyword.get(opts, :wake_context),
-          input_budget_bytes:
-            Keyword.get(opts, :input_budget_bytes) || Keyword.get(opts, :max_input_bytes)
+    case build_prompt(issue, agent_id, opts, config) do
+      {:ok, prompt} ->
+        Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "agrenting"})
+
+        case dispatch_and_wait(issue, agent_id, prompt, config, opts, session_id, recipient_pid) do
+          {:ok, result} ->
+            send(recipient_pid, {:turn_completed, session_id, result})
+
+          {:error, reason} ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+        end
+
+      {:error, {:prompt_input_budget_exceeded, details}} ->
+        send(
+          recipient_pid,
+          {:turn_ended_with_error, session_id, {:prompt_input_budget_exceeded, details}}
         )
+    end
+  end
 
-    case dispatch_and_wait(issue, agent_id, prompt, config, opts, session_id, recipient_pid) do
-      {:ok, result} ->
-        send(recipient_pid, {:turn_completed, session_id, result})
+  defp build_prompt(issue, agent_id, opts, config) do
+    case Keyword.get(opts, :budgeted_prompt) do
+      prompt when is_binary(prompt) ->
+        {:ok, prompt}
 
-      {:error, reason} ->
-        send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+      _ ->
+        additions = Keyword.get(opts, :adapter_additions_bytes, 1)
+
+        prompt_opts =
+          opts
+          |> Keyword.put_new(:config, config)
+          |> Keyword.put(:adapter_additions_bytes, additions)
+
+        case Cympho.AgentPrompt.build_budgeted(issue, agent_id, prompt_opts) do
+          {:ok, prompt, _meta} ->
+            {:ok, prompt}
+
+          {:error, {:prompt_input_budget_exceeded, _details} = error} ->
+            {:error, error}
+        end
     end
   end
 

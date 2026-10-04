@@ -1124,6 +1124,8 @@ defmodule Cympho.Orchestrator do
     case start_engine_run(session) do
       :ok ->
         wake_context = runtime_wake_context(session)
+        prompt_context = project_prompt_runtime_context(module, runtime_context)
+        additions = adapter_additions_bytes(module, config)
 
         opts =
           session
@@ -1139,13 +1141,19 @@ defmodule Cympho.Orchestrator do
             }
           )
 
-        case check_prompt_budget(session, opts) do
+        budget_opts =
+          opts
+          |> Keyword.put(:runtime_context, prompt_context)
+          |> Keyword.put(:adapter_additions_bytes, additions)
+
+        case check_prompt_budget(session, budget_opts) do
           {:ok, budgeted_prompt, prompt_meta} ->
             opts =
               opts
               |> Keyword.put(:budgeted_prompt, budgeted_prompt)
               |> Keyword.put(:prompt_meta, prompt_meta)
               |> Keyword.put(:omissions, prompt_meta.omissions)
+              |> Keyword.put(:adapter_additions_bytes, additions)
 
             if initial_runtime_attempt?(session) do
               consume_pending_wakes(session.agent_id, session.issue.id)
@@ -1245,6 +1253,29 @@ defmodule Cympho.Orchestrator do
   defp check_prompt_budget(%__MODULE__{} = session, opts) do
     merged_opts = Keyword.merge(session.opts || [], opts)
     Cympho.AgentPrompt.build_budgeted(session.issue, session.agent_id, merged_opts)
+  end
+
+  defp project_prompt_runtime_context(module, %Cympho.RuntimeContext{} = context) do
+    if function_exported?(module, :prompt_runtime_context, 1) do
+      module.prompt_runtime_context(context)
+    else
+      context
+    end
+  end
+
+  defp project_prompt_runtime_context(_module, context), do: context
+
+  defp adapter_additions_bytes(module, config) do
+    cond do
+      function_exported?(module, :adapter_additions_bytes, 1) ->
+        module.adapter_additions_bytes(config)
+
+      function_exported?(module, :adapter_additions_bytes, 0) ->
+        module.adapter_additions_bytes()
+
+      true ->
+        1
+    end
   end
 
   defp maybe_start_provider_fallback(%__MODULE__{} = session, reason) do

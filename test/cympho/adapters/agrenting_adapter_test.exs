@@ -179,6 +179,116 @@ defmodule Cympho.Adapters.AgrentingAdapterTest do
     end
   end
 
+  test "persists omission diagnostics and honest no-omission state through PromptTelemetry" do
+    test_pid = self()
+
+    with_mocks([
+      {Client, [],
+       [
+         create_hiring: fn _config, _did, _attrs ->
+           send(test_pid, :client_created)
+           {:ok, %{"id" => "hire-1"}}
+         end,
+         get_hiring: fn _config, _id -> {:ok, %{"id" => "hire-1", "status" => "completed"}} end,
+         cancel_hiring: fn _config, _id -> {:ok, %{}} end,
+         config_value: fn config, key -> Map.get(config, key) end
+       ]},
+      {Cympho.HeartbeatEngine, [:passthrough],
+       [
+         merge_run_metadata: fn run_id, metadata ->
+           send(test_pid, {:run_metadata_merged, run_id, metadata})
+           {:ok, %{}}
+         end
+       ]}
+    ]) do
+      # Case 1: Honest no-omission run
+      session_id =
+        AgrentingAdapter.run(@issue, "agent-1", self(),
+          config: @config,
+          run_id: "run-agrenting-diag-1"
+        )
+
+      assert_receive {:turn_completed, ^session_id, _}, 5_000
+
+      assert_receive {:run_metadata_merged, "run-agrenting-diag-1", metadata}, 2_000
+      prompt_context = metadata["prompt_context"]
+      assert prompt_context["adapter"] == "agrenting"
+      assert prompt_context["omissions"]["omitted"] == false
+      assert prompt_context["omissions"]["categories"] == []
+      assert prompt_context["omissions"]["counts"] == %{}
+
+      # Case 2: Omission diagnostics without raw content
+      omissions_meta = %{
+        "omitted" => true,
+        "categories" => ["history_comments", "attachments"],
+        "counts" => %{"history_comments" => 3, "attachments" => 1},
+        "total_omitted_sections" => 2
+      }
+
+      prompt_with_omission = """
+      ## Current task - do this now
+      Task description
+      ## Context omissions
+      The following optional context was omitted to satisfy the prompt input budget:
+      - history_comments: 3 item(s) omitted
+      - attachments: 1 item(s) omitted
+      """
+
+      session_id2 =
+        AgrentingAdapter.run(@issue, "agent-1", self(),
+          config: @config,
+          run_id: "run-agrenting-diag-2",
+          budgeted_prompt: prompt_with_omission,
+          omissions: omissions_meta
+        )
+
+      assert_receive {:turn_completed, ^session_id2, _}, 5_000
+
+      assert_receive {:run_metadata_merged, "run-agrenting-diag-2", metadata2}, 2_000
+      prompt_context2 = metadata2["prompt_context"]
+      assert prompt_context2["adapter"] == "agrenting"
+      assert prompt_context2["omissions"]["omitted"] == true
+      assert prompt_context2["omissions"]["categories"] == ["history_comments", "attachments"]
+
+      assert prompt_context2["omissions"]["counts"] == %{
+               "history_comments" => 3,
+               "attachments" => 1
+             }
+
+      refute inspect(metadata2) =~ "secret_sensitive_omitted_text"
+    end
+  end
+
+  test "protected prompt input budget overflow prevents hiring creation on Agrenting" do
+    test_pid = self()
+
+    with_mocks([
+      {Client, [],
+       [
+         create_hiring: fn _config, _did, _attrs ->
+           send(test_pid, :client_should_not_be_called)
+           {:ok, %{"id" => "hire-1"}}
+         end,
+         get_hiring: fn _config, _id -> {:ok, %{"id" => "hire-1", "status" => "completed"}} end,
+         cancel_hiring: fn _config, _id -> {:ok, %{}} end,
+         config_value: fn config, key -> Map.get(config, key) end
+       ]}
+    ]) do
+      session_id =
+        AgrentingAdapter.run(@issue, "agent-1", self(),
+          config: Map.put(@config, "input_budget_bytes", 100)
+        )
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:prompt_input_budget_exceeded, details}},
+                     5_000
+
+      assert details.budget_bytes == 100
+      refute_received :client_should_not_be_called
+      refute_receive {:turn_completed, ^session_id, _}, 100
+    end
+  end
+
   defp eventually(fun, attempts \\ 60) do
     cond do
       fun.() -> true

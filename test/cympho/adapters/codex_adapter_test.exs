@@ -1,6 +1,8 @@
 defmodule Cympho.Adapters.CodexAdapterTest do
   use ExUnit.Case, async: false
 
+  import Mock
+
   alias Cympho.Adapters.CodexAdapter
   alias Cympho.RuntimeContext
   alias Cympho.RuntimeAdmission
@@ -774,5 +776,77 @@ defmodule Cympho.Adapters.CodexAdapterTest do
       attempts <= 1 -> false
       true -> Process.sleep(25) && eventually(fun, attempts - 1)
     end
+  end
+
+  test "prompt_runtime_context/1 projects sandbox workspace before prompt construction" do
+    host_context = %RuntimeContext{
+      run_id: "run-codex-1",
+      issue_id: "issue-1",
+      agent_id: "agent-1",
+      adapter: :codex,
+      adapter_config: %{},
+      cwd: "/host/path/to/repo",
+      env: %{"CYMPHO_WORKSPACE" => "/host/path/to/repo", "OTHER_VAR" => "kept"}
+    }
+
+    projected = CodexAdapter.prompt_runtime_context(host_context)
+    assert projected.cwd == "/workspace"
+    assert projected.env["CYMPHO_WORKSPACE"] == "/workspace"
+    assert projected.env["AGENT_HOME"] == "/workspace"
+    assert projected.env["OTHER_VAR"] == "kept"
+  end
+
+  test "protected prompt input budget overflow prevents codex execution" do
+    with_fake_codex("echo executed\nexit 0", fn ->
+      session_id =
+        CodexAdapter.run(@issue, "agent-1", self(),
+          config: %{
+            "timeout" => 5_000,
+            "input_budget_bytes" => 100
+          }
+        )
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:prompt_input_budget_exceeded, details}},
+                     5_000
+
+      assert details.budget_bytes == 100
+      refute_receive {:session_started, ^session_id}, 100
+      refute_receive {:turn_completed, ^session_id, _}, 100
+    end)
+  end
+
+  test "direct CodexAdapter.run builds prompt with projected /workspace runtime context" do
+    host_context = %RuntimeContext{
+      run_id: "run-codex-direct-1",
+      issue_id: "issue-1",
+      agent_id: "agent-1",
+      adapter: :codex,
+      adapter_config: %{},
+      cwd: "/host/path/to/repo",
+      env: %{"CYMPHO_WORKSPACE" => "/host/path/to/repo"}
+    }
+
+    test_pid = self()
+
+    with_fake_codex("echo done\nexit 0", fn ->
+      with_mock Cympho.PromptTelemetry, [:passthrough],
+        attach_to_run: fn _opts, prompt, _attrs ->
+          send(test_pid, {:captured_prompt, prompt})
+          :ok
+        end do
+        session_id =
+          CodexAdapter.run(@issue, "agent-1", self(),
+            config: %{"timeout" => 5_000},
+            runtime_context: host_context
+          )
+
+        assert_receive {:captured_prompt, prompt}, 3_000
+        assert prompt =~ "Workspace: /workspace"
+        refute prompt =~ "/host/path/to/repo"
+
+        assert_receive {:turn_ended_with_error, ^session_id, _}, 5_000
+      end
+    end)
   end
 end

@@ -140,6 +140,46 @@ defmodule Cympho.Adapters.CursorAdapterTest do
     refute Cympho.AdapterSessions.registered?(session_id)
   end
 
+  test "protected prompt input budget overflow prevents cursor invocation and does not rescue into fallback prompt" do
+    root =
+      Path.join(System.tmp_dir!(), "cympho-cursor-overflow-#{System.unique_integer([:positive])}")
+
+    marker = Path.join(root, "executed")
+    agent_path = Path.join(root, "agent")
+    File.mkdir_p!(root)
+
+    File.write!(
+      agent_path,
+      """
+      #!/bin/sh
+      printf executed > #{marker}
+      exit 0
+      """
+    )
+
+    File.chmod!(agent_path, 0o755)
+
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    session_id =
+      CursorAdapter.run(@issue, "agent-1", self(),
+        config: %{
+          command: agent_path,
+          timeout: 5_000,
+          input_budget_bytes: 100
+        }
+      )
+
+    assert_receive {:turn_ended_with_error, ^session_id,
+                    {:prompt_input_budget_exceeded, details}},
+                   5_000
+
+    assert details.budget_bytes == 100
+    refute File.exists?(marker)
+    refute_receive {:session_started, ^session_id}, 100
+    refute_receive {:turn_completed, ^session_id, _}, 100
+  end
+
   defp process_alive?(os_pid) do
     case System.cmd("/bin/kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true) do
       {_output, 0} -> true

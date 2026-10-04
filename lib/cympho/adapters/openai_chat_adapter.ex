@@ -36,6 +36,17 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
   Emit cympho-actions JSON only when requesting Cympho side effects.
   """
 
+  @doc "Returns the default system prompt for OpenAIChatAdapter."
+  @spec default_system_prompt() :: String.t()
+  def default_system_prompt, do: @default_system_prompt
+
+  @doc "Returns the byte size of mandatory additions (system prompt) for OpenAIChatAdapter."
+  @spec adapter_additions_bytes(map()) :: pos_integer()
+  def adapter_additions_bytes(config \\ %{}) do
+    system_prompt = config_value(config, "system_prompt") || @default_system_prompt
+    byte_size(system_prompt)
+  end
+
   @impl true
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
     session_id = make_ref()
@@ -56,26 +67,49 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
   defp do_run(session_id, issue, agent_id, recipient_pid, config, opts) do
     send(recipient_pid, {:session_started, session_id})
 
-    prompt =
-      Keyword.get(opts, :budgeted_prompt) ||
-        Cympho.AgentPrompt.build(issue, agent_id,
-          skills: Keyword.get(opts, :skills, []),
-          runtime_context: Keyword.get(opts, :runtime_context),
-          wake_context: Keyword.get(opts, :wake_context),
-          input_budget_bytes:
-            Keyword.get(opts, :input_budget_bytes) || Keyword.get(opts, :max_input_bytes)
+    case build_prompt(issue, agent_id, opts, config) do
+      {:ok, prompt} ->
+        Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "openai_chat"})
+
+        result =
+          Cympho.AdapterSessions.run_cancellable(session_id, fn ->
+            call_chat_completion(prompt, config)
+          end)
+
+        case result do
+          {:ok, result} -> send(recipient_pid, {:turn_completed, session_id, result})
+          {:error, reason} -> send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+        end
+
+      {:error, {:prompt_input_budget_exceeded, details}} ->
+        send(
+          recipient_pid,
+          {:turn_ended_with_error, session_id, {:prompt_input_budget_exceeded, details}}
         )
+    end
+  end
 
-    Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "openai_chat"})
+  defp build_prompt(issue, agent_id, opts, config) do
+    case Keyword.get(opts, :budgeted_prompt) do
+      prompt when is_binary(prompt) ->
+        {:ok, prompt}
 
-    result =
-      Cympho.AdapterSessions.run_cancellable(session_id, fn ->
-        call_chat_completion(prompt, config)
-      end)
+      _ ->
+        additions =
+          Keyword.get(opts, :adapter_additions_bytes) || adapter_additions_bytes(config)
 
-    case result do
-      {:ok, result} -> send(recipient_pid, {:turn_completed, session_id, result})
-      {:error, reason} -> send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+        prompt_opts =
+          opts
+          |> Keyword.put_new(:config, config)
+          |> Keyword.put(:adapter_additions_bytes, additions)
+
+        case Cympho.AgentPrompt.build_budgeted(issue, agent_id, prompt_opts) do
+          {:ok, prompt, _meta} ->
+            {:ok, prompt}
+
+          {:error, {:prompt_input_budget_exceeded, _details} = error} ->
+            {:error, error}
+        end
     end
   end
 

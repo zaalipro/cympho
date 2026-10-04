@@ -537,5 +537,47 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
         refute_receive {:turn_completed, ^session_id, _result}, 100
       end
     end
+
+    test "adapter_additions_bytes/1 accounts for default and configured system prompts" do
+      default_size = OpenAIChatAdapter.adapter_additions_bytes()
+      assert default_size > 400
+      assert default_size == byte_size(OpenAIChatAdapter.default_system_prompt())
+
+      custom_prompt = "You are a custom assistant for testing."
+      custom_size = OpenAIChatAdapter.adapter_additions_bytes(%{"system_prompt" => custom_prompt})
+      assert custom_size == byte_size(custom_prompt)
+    end
+
+    test "protected prompt input budget overflow prevents chat completion request" do
+      test_pid = self()
+
+      with_mock Finch,
+        build: fn _, _, _, _ -> :request end,
+        stream_while: fn :request, Cympho.Finch, _init, _fun, _options ->
+          send(test_pid, :provider_called)
+          {:ok, :done}
+        end do
+        session_id =
+          OpenAIChatAdapter.run(
+            %{id: "issue-1", title: "Test issue", description: "Test description"},
+            "agent-1",
+            self(),
+            config: %{
+              "endpoint" => "https://dashscope.example.com/compatible-mode/v1",
+              "api_key" => "test-key",
+              "model" => "qwen3.7-plus",
+              "input_budget_bytes" => 100
+            }
+          )
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:prompt_input_budget_exceeded, details}},
+                       5_000
+
+        assert details.budget_bytes == 100
+        refute_received :provider_called
+        refute_receive {:turn_completed, ^session_id, _result}, 100
+      end
+    end
   end
 end

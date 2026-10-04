@@ -52,52 +52,50 @@ defmodule Cympho.Adapters.CursorAdapter do
     session_id
   end
 
+  def adapter_additions_bytes(_config \\ %{}), do: 1
+
   defp do_run(session_id, issue, agent_id, recipient_pid, config, opts) do
-    prompt = build_prompt(issue, agent_id, opts)
-    Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "cursor"})
+    case build_prompt(issue, agent_id, opts, config) do
+      {:ok, prompt} ->
+        Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "cursor"})
 
-    case run_cursor(session_id, prompt, config, opts, recipient_pid) do
-      {:ok, output} ->
-        send(recipient_pid, {:turn_completed, session_id, output})
+        case run_cursor(session_id, prompt, config, opts, recipient_pid) do
+          {:ok, output} ->
+            send(recipient_pid, {:turn_completed, session_id, output})
 
-      {:error, reason} ->
-        send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+          {:error, reason} ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+        end
+
+      {:error, {:prompt_input_budget_exceeded, details}} ->
+        send(
+          recipient_pid,
+          {:turn_ended_with_error, session_id, {:prompt_input_budget_exceeded, details}}
+        )
     end
   end
 
-  defp build_prompt(issue, agent_id, opts) do
-    Keyword.get(opts, :budgeted_prompt) ||
-      Cympho.AgentPrompt.build(issue, agent_id,
-        skills: Keyword.get(opts, :skills, []),
-        runtime_context: Keyword.get(opts, :runtime_context),
-        wake_context: Keyword.get(opts, :wake_context),
-        input_budget_bytes:
-          Keyword.get(opts, :input_budget_bytes) || Keyword.get(opts, :max_input_bytes)
-      )
-  rescue
-    _ ->
-      fallback_prompt(issue, agent_id)
-  end
+  defp build_prompt(issue, agent_id, opts, config) do
+    case Keyword.get(opts, :budgeted_prompt) do
+      prompt when is_binary(prompt) ->
+        {:ok, prompt}
 
-  defp fallback_prompt(issue, agent_id) do
-    id = (is_map(issue) && Map.get(issue, :id)) || Map.get(issue, "id") || issue.id
-    title = (is_map(issue) && Map.get(issue, :title)) || Map.get(issue, "title") || issue.title
+      _ ->
+        additions = Keyword.get(opts, :adapter_additions_bytes, 1)
 
-    description =
-      (is_map(issue) && Map.get(issue, :description)) || Map.get(issue, "description") ||
-        issue.description
+        prompt_opts =
+          opts
+          |> Keyword.put_new(:config, config)
+          |> Keyword.put(:adapter_additions_bytes, additions)
 
-    """
-    You are agent #{agent_id} working on the following issue:
+        case Cympho.AgentPrompt.build_budgeted(issue, agent_id, prompt_opts) do
+          {:ok, prompt, _meta} ->
+            {:ok, prompt}
 
-    Issue ID: #{id}
-    Title: #{title}
-
-    #{description || "No description provided."}
-
-    Please analyze this issue and provide your response.
-    """
-    |> String.trim()
+          {:error, {:prompt_input_budget_exceeded, _details} = error} ->
+            {:error, error}
+        end
+    end
   end
 
   defp run_cursor(session_id, prompt, config, opts, recipient_pid) do
