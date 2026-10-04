@@ -175,6 +175,97 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
         stop_and_wait_session(issue.id, session_id)
       end
     end
+
+    test "refreshes cold memory sampling on startup via bounded admission and stays fail-closed on unavailable memory",
+         %{
+           company: company,
+           local_agent: agent
+         } do
+      # 1. Start an admission server with memory_check?: true and a healthy sampler
+      admission_healthy =
+        start_supervised!(
+          {RuntimeAdmission,
+           name: nil,
+           max_total_runs: 2,
+           max_local_runs: 1,
+           memory_check?: true,
+           sampler: fn ->
+             {:ok,
+              %{
+                available_bytes: 8 * 1024 * 1024 * 1024,
+                total_bytes: 16 * 1024 * 1024 * 1024,
+                source: :host
+              }}
+           end,
+           recover_fun: fn -> [] end},
+          id: {:runtime_admission, System.unique_integer([:positive])}
+        )
+
+      # Snapshot at startup must be :host_memory_unknown (cold sample)
+      init_snapshot = RuntimeAdmission.snapshot(admission_healthy)
+      assert init_snapshot.status == :unavailable
+      assert init_snapshot.reason == :host_memory_unknown
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Cold start local work candidate",
+          description: "Needs healthy refreshed sample",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id,
+          assigned_role: "engineer"
+        })
+
+      state = State.new(runtime_admission_server: admission_healthy)
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}} end do
+        assert {:noreply, %State{} = after_poll} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state)
+
+        # Candidate must be dispatched because cold memory was refreshed
+        assert MapSet.member?(after_poll.running_issue_ids, issue.id)
+        assert Issues.get_issue!(issue.id).status == :in_progress
+        assert_receive {:adapter_called, :local, session_id}, 1_000
+        stop_and_wait_session(issue.id, session_id)
+      end
+
+      # 2. Unavailable memory stays fail-closed
+      admission_unavail =
+        start_supervised!(
+          {RuntimeAdmission,
+           name: nil,
+           max_total_runs: 2,
+           max_local_runs: 1,
+           memory_check?: true,
+           sampler: fn -> nil end,
+           recover_fun: fn -> [] end},
+          id: {:runtime_admission, System.unique_integer([:positive])}
+        )
+
+      {:ok, issue2} =
+        Issues.create_issue(%{
+          title: "Unavailable memory candidate",
+          description: "Should fail closed",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id,
+          assigned_role: "engineer"
+        })
+
+      state_unavail = State.new(runtime_admission_server: admission_unavail)
+
+      with_mock Adapters,
+        resolve: fn %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}} end do
+        assert {:noreply, %State{} = after_poll_unavail} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state_unavail)
+
+        # Candidate must remain in :todo (fail-closed)
+        assert Issues.get_issue!(issue2.id).status == :todo
+        refute MapSet.member?(after_poll_unavail.running_issue_ids, issue2.id)
+      end
+    end
   end
 
   describe "VAL-EXEC-002: Eligible gateway work is not skipped" do
@@ -262,6 +353,233 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
         refute MapSet.member?(after_poll.running_issue_ids, ineligible_issue.id)
 
         assert :ok = RuntimeAdmission.release(held_token, admission)
+      end
+    end
+
+    test "company poll reaches eligible gateway behind multiple locally saturated candidates",
+         %{
+           admission: admission,
+           company: company,
+           local_agent: local_agent,
+           gateway_agent: gateway_agent
+         } do
+      # Occupy local slot
+      assert {:ok, held_token} = RuntimeAdmission.checkout(LocalAdapter, admission)
+
+      # Create 4 local issues ahead of gateway
+      local_issues =
+        for i <- 1..4 do
+          {:ok, issue} =
+            Issues.create_issue(%{
+              title: "Local issue #{i}",
+              description: "Local",
+              status: :todo,
+              priority: :high,
+              company_id: company.id,
+              assignee_id: local_agent.id,
+              assigned_role: "engineer"
+            })
+
+          issue
+        end
+
+      # Create 1 gateway issue
+      {:ok, gateway_issue} =
+        Issues.create_issue(%{
+          title: "Gateway issue behind 4 locals",
+          description: "Gateway",
+          status: :todo,
+          priority: :low,
+          company_id: company.id,
+          assignee_id: gateway_agent.id,
+          assigned_role: "product_manager"
+        })
+
+      state = State.new(runtime_admission_server: admission)
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn
+          %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}}
+          %{adapter: :http} -> {:ok, GatewayAdapter, %{test_pid: test_pid}}
+        end do
+        assert {:noreply, %State{} = after_poll} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state)
+
+        # All local issues remain :todo
+        for issue <- local_issues do
+          assert Issues.get_issue!(issue.id).status == :todo
+          refute MapSet.member?(after_poll.running_issue_ids, issue.id)
+        end
+
+        # Gateway issue was dispatched!
+        assert Issues.get_issue!(gateway_issue.id).status == :in_progress
+        assert MapSet.member?(after_poll.running_issue_ids, gateway_issue.id)
+        assert_receive {:adapter_called, :gateway, session_id}, 1_000
+        stop_and_wait_session(gateway_issue.id, session_id)
+
+        assert :ok = RuntimeAdmission.release(held_token, admission)
+      end
+    end
+
+    test "global poll reaches eligible gateway behind locally saturated candidate with single-slot window",
+         %{
+           admission: admission,
+           company: company,
+           local_agent: local_agent,
+           gateway_agent: gateway_agent
+         } do
+      # Occupy local slot (total limit: 2, local limit: 1 -> 1 total slot free, 0 local slots free)
+      assert {:ok, held_token} = RuntimeAdmission.checkout(LocalAdapter, admission)
+
+      {:ok, local_issue} =
+        Issues.create_issue(%{
+          title: "Global local issue",
+          description: "Local",
+          status: :todo,
+          priority: :critical,
+          company_id: company.id,
+          assignee_id: local_agent.id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, gateway_issue} =
+        Issues.create_issue(%{
+          title: "Global gateway issue behind local",
+          description: "Gateway",
+          status: :todo,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: gateway_agent.id,
+          assigned_role: "product_manager"
+        })
+
+      state = State.new(runtime_admission_server: admission)
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn
+          %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}}
+          %{adapter: :http} -> {:ok, GatewayAdapter, %{test_pid: test_pid}}
+        end do
+        assert {:noreply, %State{} = after_poll} =
+                 Dispatcher.handle_info(:poll, state)
+
+        # Local issue was deferred
+        assert Issues.get_issue!(local_issue.id).status == :todo
+        refute MapSet.member?(after_poll.running_issue_ids, local_issue.id)
+
+        # Gateway issue was dispatched in global poll
+        assert Issues.get_issue!(gateway_issue.id).status == :in_progress
+        assert MapSet.member?(after_poll.running_issue_ids, gateway_issue.id)
+        assert_receive {:adapter_called, :gateway, session_id}, 1_000
+        stop_and_wait_session(gateway_issue.id, session_id)
+
+        assert :ok = RuntimeAdmission.release(held_token, admission)
+      end
+    end
+
+    test "previews effective runtime config including runtime_config and secret credentials without exposing secrets",
+         %{
+           company: company
+         } do
+      unique = System.unique_integer([:positive])
+
+      # Agent with HTTP adapter where url is in runtime_config, not agent.config
+      {:ok, http_agent} =
+        Agents.create_agent(%{
+          name: "HTTP Runtime Agent #{unique}",
+          role: "engineer",
+          status: :idle,
+          company_id: company.id,
+          adapter: :http,
+          config: %{},
+          runtime_config: %{"url" => "http://127.0.0.1:9999"}
+        })
+
+      # Agent with OpenAIChat where api_key is in Secrets
+      {:ok, secret_agent} =
+        Agents.create_agent(%{
+          name: "Secret OpenAI Agent #{unique}",
+          role: "engineer",
+          status: :idle,
+          company_id: company.id,
+          adapter: :openai_chat,
+          config: %{"endpoint" => "https://api.openai.com/v1"},
+          runtime_config: %{}
+        })
+
+      {:ok, _secret} =
+        Cympho.Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "OPENAI_API_KEY",
+          value: "sk-secret-key-#{unique}"
+        })
+
+      with_mock Adapters,
+        resolve: fn
+          %{adapter: :http, config: %{"url" => "http://127.0.0.1:9999"}} ->
+            {:ok, GatewayAdapter, %{"url" => "http://127.0.0.1:9999"}}
+
+          %{adapter: :openai_chat, config: %{"api_key" => "sk-secret-key-" <> _}} ->
+            {:ok, GatewayAdapter, %{"api_key" => "sk-secret-key-..."}}
+
+          # When effective runtime config or secrets are missing, resolves to local fallback
+          _other ->
+            {:ok, LocalAdapter, %{}}
+        end do
+        assert Dispatcher.execution_class_for_agent(http_agent) == :gateway
+        assert Dispatcher.execution_class_for_agent(secret_agent) == :gateway
+      end
+    end
+
+    test "retains selected gateway execution class after checkout of unassigned issue with single-job capacity",
+         %{
+           admission: admission,
+           company: company
+         } do
+      unique = System.unique_integer([:positive])
+
+      # Gateway CEO agent with max_concurrent_jobs: 1
+      {:ok, _ceo_agent} =
+        Agents.create_agent(%{
+          name: "Gateway CEO #{unique}",
+          role: "ceo",
+          status: :idle,
+          company_id: company.id,
+          adapter: :http,
+          config: %{"url" => "http://127.0.0.1:9999"},
+          max_concurrent_jobs: 1
+        })
+
+      # Unassigned issue (assignee_id: nil) requesting CEO role
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Unassigned CEO issue",
+          description: "Needs gateway CEO",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: nil,
+          assigned_role: "ceo"
+        })
+
+      state = State.new(runtime_admission_server: admission)
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn %{adapter: :http} -> {:ok, GatewayAdapter, %{test_pid: test_pid}} end do
+        assert {:noreply, %State{} = after_poll} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state)
+
+        assert MapSet.member?(after_poll.running_issue_ids, issue.id)
+        assert Issues.get_issue!(issue.id).status == :in_progress
+
+        # CRITICAL ASSERTION: running_classes must retain :gateway, NOT :local_process!
+        assert Map.get(after_poll.running_classes, issue.id) == :gateway
+
+        assert_receive {:adapter_called, :gateway, session_id}, 1_000
+        stop_and_wait_session(issue.id, session_id)
       end
     end
   end

@@ -1669,7 +1669,12 @@ defmodule Cympho.Orchestrator.Dispatcher do
       state
     else
       candidates =
-        fetch_candidate_issues(available_total_slots * 4, company_id, state.poll_cursor)
+        fetch_candidate_issues(
+          available_total_slots * 4,
+          company_id,
+          state.poll_cursor,
+          available_local_slots
+        )
 
       state = %{state | poll_cursor: state.poll_cursor + 1}
       now = :os.system_time(:millisecond)
@@ -1714,8 +1719,11 @@ defmodule Cympho.Orchestrator.Dispatcher do
                   new_state = dispatch_issue(issue, state)
 
                   if MapSet.member?(new_state.running_issue_ids, issue.id) do
+                    dispatched_class =
+                      Map.get(new_state.running_classes, issue.id, execution_class)
+
                     new_local_slots =
-                      if execution_class == :local_process,
+                      if dispatched_class == :local_process,
                         do: max(0, local_slots - 1),
                         else: local_slots
 
@@ -1796,7 +1804,21 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp safe_snapshot(server) do
     if function_exported?(RuntimeAdmission, :snapshot, 1) do
-      RuntimeAdmission.snapshot(server)
+      snapshot = RuntimeAdmission.snapshot(server)
+
+      if snapshot.status == :unavailable and snapshot.reason == :host_memory_unknown do
+        # Healthy cold/stale memory sampling refreshes via existing bounded admission path;
+        # unavailable memory stays fail-closed.
+        case RuntimeAdmission.available(:local_process, server) do
+          :ok ->
+            RuntimeAdmission.snapshot(server)
+
+          _ ->
+            snapshot
+        end
+      else
+        snapshot
+      end
     else
       %{
         status: :available,
@@ -1895,7 +1917,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp server_alive?(_), do: false
 
-  defp count_running_local_processes(%State{running_issue_ids: running, running_classes: classes}) do
+  @doc false
+  def count_running_local_processes(%State{running_issue_ids: running, running_classes: classes}) do
     Enum.count(classes, fn {issue_id, class} ->
       class == :local_process and MapSet.member?(running, issue_id)
     end)
@@ -1915,20 +1938,36 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
       _ ->
         case issue.assignee do
-          %Agent{} = agent -> execution_class_for_agent(agent)
-          _ -> :local_process
+          %Agent{} = agent ->
+            execution_class_for_agent(agent)
+
+          _ ->
+            if is_binary(issue.assignee_id) do
+              case Cympho.Repo.get(Agent, issue.assignee_id) do
+                %Agent{} = agent -> execution_class_for_agent(agent)
+                _ -> :local_process
+              end
+            else
+              :local_process
+            end
         end
     end
   end
 
   @doc false
   def execution_class_for_agent(%Agent{} = agent) do
-    case Adapters.resolve(agent) do
+    case Cympho.Runtime.resolve_adapter_config(agent) do
       {:ok, module, _config} ->
         Adapter.execution_class(module)
 
       _ ->
-        Adapter.execution_class(agent.adapter)
+        case Adapters.resolve(agent) do
+          {:ok, module, _config} ->
+            Adapter.execution_class(module)
+
+          _ ->
+            Adapter.execution_class(agent.adapter)
+        end
     end
   rescue
     _ -> :local_process
@@ -1953,8 +1992,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   # A company-scoped poll has one tenant by definition, so it keeps the plain
   # globally-ordered scan.
-  defp fetch_candidate_issues(limit, company_id, _cursor) when is_binary(company_id) do
-    fetch_runnable(candidate_query(company_id), limit)
+  defp fetch_candidate_issues(limit, company_id, _cursor, available_local_slots)
+       when is_binary(company_id) do
+    fetch_runnable(candidate_query(company_id), limit, available_local_slots)
   end
 
   # Candidates were selected from one globally priority-ordered window. A tenant
@@ -1964,38 +2004,60 @@ defmodule Cympho.Orchestrator.Dispatcher do
   # discovered independently of that order and drawn from round-robin, so one
   # backlog cannot consume the window. Priority order is preserved *within* a
   # company; across companies the policy is fair share, which is the point.
-  defp fetch_candidate_issues(limit, nil, cursor) do
+  defp fetch_candidate_issues(limit, nil, cursor, available_local_slots) do
     per_company = per_company_window(limit)
 
     limit
     |> candidate_company_ids(cursor)
     |> Enum.map(fn company_id ->
-      fetch_runnable(candidate_query(company_id), per_company)
+      fetch_runnable(candidate_query(company_id), per_company, available_local_slots)
     end)
     |> interleave()
     |> Enum.take(limit)
   end
 
-  defp fetch_runnable(query, limit) do
-    Enum.reduce_while(0..(@candidate_pages - 1), [], fn page, acc ->
+  defp fetch_runnable(query, limit, available_local_slots) do
+    Enum.reduce_while(0..(@candidate_pages - 1), {[], 0}, fn page, {acc, local_count} ->
       rows =
         query
         |> limit(^limit)
         |> offset(^(page * limit))
         |> Cympho.Repo.all()
 
+      {page_runnable, new_local_count} =
+        rows
+        |> Enum.filter(&runnable_candidate?/1)
+        |> Enum.reduce({[], local_count}, fn issue, {cand_acc, l_count} ->
+          execution_class = candidate_execution_class(issue)
+
+          cond do
+            execution_class == :local_process and is_integer(available_local_slots) and
+                l_count >= available_local_slots ->
+              # Locally saturated: continue candidate fetching past locally saturated
+              # rows to reach eligible gateways behind them without enlarging the window.
+              {cand_acc, l_count}
+
+            execution_class == :local_process ->
+              {[issue | cand_acc], l_count + 1}
+
+            true ->
+              {[issue | cand_acc], l_count}
+          end
+        end)
+
       runnable =
-        (acc ++ Enum.filter(rows, &runnable_candidate?/1))
+        (acc ++ Enum.reverse(page_runnable))
         |> Enum.uniq_by(& &1.id)
 
       cond do
         # Enough to fill the slots this poll can use.
-        length(runnable) >= limit -> {:halt, Enum.take(runnable, limit)}
+        length(runnable) >= limit -> {:halt, {Enum.take(runnable, limit), new_local_count}}
         # Short page means the candidate set is exhausted.
-        length(rows) < limit -> {:halt, runnable}
-        true -> {:cont, runnable}
+        length(rows) < limit -> {:halt, {runnable, new_local_count}}
+        true -> {:cont, {runnable, new_local_count}}
       end
     end)
+    |> elem(0)
   end
 
   # Every company with work that could dispatch, found without consulting the
@@ -2174,7 +2236,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
             # dispatch, not only on PATCH status.
             _ = Agents.touch_heartbeat(agent)
 
-            execution_class = candidate_execution_class(issue)
+            execution_class = execution_class_for_agent(agent)
 
             %{
               state
