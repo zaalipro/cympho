@@ -30,6 +30,7 @@ defmodule Cympho.RoutineConcurrencyTest do
     on_exit(fn ->
       Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
         Repo.delete_all(from(c in Cympho.Companies.Company, where: c.id == ^company.id))
+        Cympho.TestDatabaseGuard.verify_owned_fixture_cleanup!(Repo, company.id)
       end)
     end)
 
@@ -172,6 +173,31 @@ defmodule Cympho.RoutineConcurrencyTest do
              %RoutineRun{} |> RoutineRun.changeset(attrs) |> Repo.insert()
 
     assert {"has already been taken", _opts} = changeset.errors[:routine_id]
+  end
+
+  test "owned concurrent fixtures clean up without residual unboxed rows", context do
+    {:ok, routine} = create_routine(context, :coalesce_if_active)
+    {:ok, webhook, secret} = RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
+    results =
+      race([
+        fn -> RoutineTriggers.manual_run(routine.id) end,
+        fn -> RoutineTriggers.fire_trigger_by_public_id(webhook.public_id, secret) end
+      ])
+
+    assert Enum.any?(results, &match?({:ok, _}, &1))
+
+    assert Repo.aggregate(
+             from(c in Cympho.Companies.Company, where: c.id == ^context.company.id),
+             :count
+           ) == 1
+
+    assert Repo.aggregate(
+             from(r in Cympho.Routines.Routine, where: r.company_id == ^context.company.id),
+             :count
+           ) == 1
+
+    # on_exit verifies complete cleanup via TestDatabaseGuard.verify_owned_fixture_cleanup!
   end
 
   defp create_routine(context, concurrency_policy) do
