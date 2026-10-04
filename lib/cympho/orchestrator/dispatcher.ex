@@ -29,6 +29,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
   alias Cympho.Companies
   alias Cympho.HeartbeatEngine
   alias Cympho.Runtime
+  alias Cympho.RuntimeAdmission
+  alias Cympho.Adapters
+  alias Cympho.Adapters.Adapter
   alias Cympho.HeartbeatEngine.WakeupQueue
   alias Cympho.Companies.Company
   alias Cympho.Agents.Agent
@@ -214,7 +217,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   # Server
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
     Process.flag(:trap_exit, true)
     :ets.new(@poll_demand_table, [:named_table, :public, :set, write_concurrency: true])
 
@@ -222,7 +225,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     # disabled — so live-node strands and non-dispatcher checkouts do not
     # wait for a manual Ops pass or a full restart. Polling only runs when
     # dispatch is enabled.
-    state = if enabled?(), do: schedule_poll(State.new()), else: State.new()
+    state = if enabled?(), do: schedule_poll(State.new(opts)), else: State.new(opts)
 
     # Hand recovery off to handle_continue so init/1 returns fast even if
     # the recovery scan hits a slow DB. Without this, a stuck Repo blocks
@@ -677,12 +680,15 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   @impl true
   def handle_info({:session_ended, issue_id, _reason}, %State{} = state) do
-    running_issue_ids =
-      if live_orchestrator?(issue_id),
-        do: MapSet.put(state.running_issue_ids, issue_id),
-        else: MapSet.delete(state.running_issue_ids, issue_id)
+    {running_issue_ids, running_classes} =
+      if live_orchestrator?(issue_id) do
+        {MapSet.put(state.running_issue_ids, issue_id), state.running_classes}
+      else
+        {MapSet.delete(state.running_issue_ids, issue_id),
+         Map.delete(state.running_classes, issue_id)}
+      end
 
-    new_state = %{state | running_issue_ids: running_issue_ids}
+    new_state = %{state | running_issue_ids: running_issue_ids, running_classes: running_classes}
     {:noreply, new_state}
   end
 
@@ -696,7 +702,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
     new_state = %{
       state
       | running_issue_ids:
-          MapSet.difference(state.running_issue_ids, MapSet.new(removable_issue_ids))
+          MapSet.difference(state.running_issue_ids, MapSet.new(removable_issue_ids)),
+        running_classes: Map.drop(state.running_classes, removable_issue_ids)
     }
 
     {:noreply, new_state}
@@ -717,7 +724,13 @@ defmodule Cympho.Orchestrator.Dispatcher do
                 do: MapSet.put(state.running_issue_ids, issue_id),
                 else: MapSet.delete(state.running_issue_ids, issue_id)
 
-            {:noreply, %{state | running_issue_ids: running_issue_ids}}
+            running_classes =
+              if issue_id in deferred,
+                do: state.running_classes,
+                else: Map.delete(state.running_classes, issue_id)
+
+            {:noreply,
+             %{state | running_issue_ids: running_issue_ids, running_classes: running_classes}}
 
           {:error, :retry} ->
             Process.send_after(
@@ -812,7 +825,11 @@ defmodule Cympho.Orchestrator.Dispatcher do
               end
 
               {:noreply,
-               %{state | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)}}
+               %{
+                 state
+                 | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id),
+                   running_classes: Map.delete(state.running_classes, issue_id)
+               }}
             end
 
           {:error, :not_started} ->
@@ -995,7 +1012,18 @@ defmodule Cympho.Orchestrator.Dispatcher do
             do: MapSet.put(state.running_issue_ids, issue_id),
             else: MapSet.delete(state.running_issue_ids, issue_id)
 
-        {:noreply, %{state | monitors: monitors, running_issue_ids: running_issue_ids}}
+        running_classes =
+          if issue_id in deferred,
+            do: state.running_classes,
+            else: Map.delete(state.running_classes, issue_id)
+
+        {:noreply,
+         %{
+           state
+           | monitors: monitors,
+             running_issue_ids: running_issue_ids,
+             running_classes: running_classes
+         }}
 
       {:error, :retry} ->
         Process.send_after(
@@ -1624,7 +1652,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
       ids ->
         new_running = MapSet.difference(state.running_issue_ids, MapSet.new(ids))
-        %{state | running_issue_ids: new_running}
+        new_classes = Map.drop(state.running_classes, ids)
+        %{state | running_issue_ids: new_running, running_classes: new_classes}
     end
   end
 
@@ -1632,12 +1661,16 @@ defmodule Cympho.Orchestrator.Dispatcher do
          %State{running_issue_ids: running, retry_attempts: retries} = state,
          company_id
        ) do
-    available_slots = max_concurrent() - MapSet.size(running)
+    admission_server = runtime_admission_server(state)
+    admission_snapshot = safe_snapshot(admission_server)
+    {available_total_slots, available_local_slots} = available_capacity(state, admission_snapshot)
 
-    if available_slots <= 0 do
+    if available_total_slots <= 0 do
       state
     else
-      candidates = fetch_candidate_issues(available_slots * 4, company_id, state.poll_cursor)
+      candidates =
+        fetch_candidate_issues(available_total_slots * 4, company_id, state.poll_cursor)
+
       state = %{state | poll_cursor: state.poll_cursor + 1}
       now = :os.system_time(:millisecond)
 
@@ -1654,25 +1687,44 @@ defmodule Cympho.Orchestrator.Dispatcher do
             (retries[issue.id] && retries[issue.id].next_retry_at > now)
         end)
 
-      {state, _by_company, _slots} =
+      {state, _by_company, _total_slots, _local_slots} =
         Enum.reduce_while(
           ready_candidates,
-          {state, running_by_company, available_slots},
+          {state, running_by_company, available_total_slots, available_local_slots},
           fn
-            _issue, {state, by_co, 0} ->
-              {:halt, {state, by_co, 0}}
+            _issue, {state, by_co, 0, local_slots} ->
+              {:halt, {state, by_co, 0, local_slots}}
 
-            issue, {state, by_co, slots} ->
+            issue, {state, by_co, total_slots, local_slots} ->
               if company_at_capacity?(issue, by_co) do
-                {:cont, {state, by_co, slots}}
+                {:cont, {state, by_co, total_slots, local_slots}}
               else
-                new_state = dispatch_issue(issue, state)
+                execution_class = candidate_execution_class(issue)
 
-                if MapSet.member?(new_state.running_issue_ids, issue.id) do
-                  {:cont,
-                   {new_state, Map.update(by_co, issue.company_id, 1, &(&1 + 1)), slots - 1}}
+                if execution_class == :local_process and local_slots <= 0 do
+                  # Known local slot saturation defers local-process work without
+                  # avoidable cancelled runs, retry increments, or backoff churn.
+                  # Continue scanning for eligible gateway candidates.
+                  Logger.debug(
+                    "[Dispatcher] Local capacity saturated; deferring local issue #{issue.id}"
+                  )
+
+                  {:cont, {state, by_co, total_slots, local_slots}}
                 else
-                  {:cont, {new_state, by_co, slots}}
+                  new_state = dispatch_issue(issue, state)
+
+                  if MapSet.member?(new_state.running_issue_ids, issue.id) do
+                    new_local_slots =
+                      if execution_class == :local_process,
+                        do: max(0, local_slots - 1),
+                        else: local_slots
+
+                    {:cont,
+                     {new_state, Map.update(by_co, issue.company_id, 1, &(&1 + 1)),
+                      total_slots - 1, new_local_slots}}
+                  else
+                    {:cont, {new_state, by_co, total_slots, local_slots}}
+                  end
                 end
               end
           end
@@ -1740,6 +1792,148 @@ defmodule Cympho.Orchestrator.Dispatcher do
   defp default_max_concurrent do
     schedulers = :erlang.system_info(:schedulers_online)
     min(max(schedulers * 2, 4), 32)
+  end
+
+  defp safe_snapshot(server) do
+    if function_exported?(RuntimeAdmission, :snapshot, 1) do
+      RuntimeAdmission.snapshot(server)
+    else
+      %{
+        status: :available,
+        reason: nil,
+        total_running: nil,
+        max_total_runs: nil,
+        local_running: nil,
+        max_local_runs: nil,
+        recovery_status: :ok
+      }
+    end
+  rescue
+    _ ->
+      %{
+        status: :available,
+        reason: nil,
+        total_running: nil,
+        max_total_runs: nil,
+        local_running: nil,
+        max_local_runs: nil,
+        recovery_status: :ok
+      }
+  end
+
+  defp runtime_admission_server(%State{runtime_admission_server: server})
+       when not is_nil(server),
+       do: server
+
+  defp runtime_admission_server(_state) do
+    Application.get_env(:cympho, :runtime_admission_server, Cympho.RuntimeAdmission)
+  end
+
+  defp available_capacity(%State{running_issue_ids: running} = state, snapshot) do
+    dispatcher_total_available = max(0, max_concurrent() - MapSet.size(running))
+
+    cond do
+      snapshot.recovery_status == :recovering ->
+        {0, 0}
+
+      snapshot.status == :unavailable and snapshot.reason == :admission_unavailable ->
+        server = runtime_admission_server(state)
+
+        if server_alive?(server) do
+          {0, 0}
+        else
+          {dispatcher_total_available, default_max_local_runs()}
+        end
+
+      true ->
+        total_admission_available =
+          case snapshot.max_total_runs do
+            max_total when is_integer(max_total) and max_total > 0 ->
+              running_total = snapshot.total_running || 0
+              max(0, max_total - running_total)
+
+            _ ->
+              dispatcher_total_available
+          end
+
+        available_total = min(dispatcher_total_available, total_admission_available)
+
+        max_local =
+          case snapshot.max_local_runs do
+            max_l when is_integer(max_l) and max_l > 0 -> max_l
+            _ -> default_max_local_runs()
+          end
+
+        local_admission_running = snapshot.local_running || 0
+        local_dispatcher_running = count_running_local_processes(state)
+        effective_local_running = max(local_admission_running, local_dispatcher_running)
+
+        available_local =
+          cond do
+            snapshot.reason in [:local_slots_exhausted, :host_memory_low, :host_memory_unknown] ->
+              0
+
+            effective_local_running >= max_local ->
+              0
+
+            true ->
+              max(0, max_local - effective_local_running)
+          end
+
+        {available_total, available_local}
+    end
+  end
+
+  defp server_alive?(server) when is_pid(server), do: Process.alive?(server)
+
+  defp server_alive?(server) when is_atom(server) do
+    case Process.whereis(server) do
+      pid when is_pid(pid) -> Process.alive?(pid)
+      _ -> false
+    end
+  end
+
+  defp server_alive?(_), do: false
+
+  defp count_running_local_processes(%State{running_issue_ids: running, running_classes: classes}) do
+    Enum.count(classes, fn {issue_id, class} ->
+      class == :local_process and MapSet.member?(running, issue_id)
+    end)
+  end
+
+  defp default_max_local_runs do
+    :cympho
+    |> Application.get_env(:runtime_admission, [])
+    |> Keyword.get(:max_local_runs, 1)
+  end
+
+  @doc false
+  def candidate_execution_class(%Issue{} = issue) do
+    case preview_agent_for_issue(issue) do
+      {:ok, %Agent{} = agent} ->
+        execution_class_for_agent(agent)
+
+      _ ->
+        case issue.assignee do
+          %Agent{} = agent -> execution_class_for_agent(agent)
+          _ -> :local_process
+        end
+    end
+  end
+
+  @doc false
+  def execution_class_for_agent(%Agent{} = agent) do
+    case Adapters.resolve(agent) do
+      {:ok, module, _config} ->
+        Adapter.execution_class(module)
+
+      _ ->
+        Adapter.execution_class(agent.adapter)
+    end
+  rescue
+    _ -> :local_process
+  catch
+    _, _ -> :local_process
   end
 
   # Runnability — issue-level runtime pause, an unresolved blocker, low-power
@@ -1937,6 +2131,11 @@ defmodule Cympho.Orchestrator.Dispatcher do
             :ok ->
               checkout_and_start(issue, agent, required_role, state)
 
+            {:error, {:runtime_admission_deferred, _reason}} ->
+              # Known local capacity / admission deferred at preflight time:
+              # defer without retry churn or backoff increment.
+              state
+
             {:error, reason} ->
               Logger.warning(
                 "[Dispatcher] Runtime preflight blocked issue #{issue.id}: #{inspect(reason)}"
@@ -1955,7 +2154,16 @@ defmodule Cympho.Orchestrator.Dispatcher do
   defp checkout_and_start(issue, agent, required_role, %State{} = state) do
     case Issues.checkout_issue(issue, agent, required_role) do
       {:ok, checked_out} ->
-        case Orchestrator.start_and_run(checked_out, agent.id) do
+        start_result =
+          case state.runtime_admission_server do
+            nil ->
+              Orchestrator.start_and_run(checked_out, agent.id)
+
+            server ->
+              Orchestrator.start_and_run(checked_out, agent.id, runtime_admission_server: server)
+          end
+
+        case start_result do
           {:ok, pid} ->
             # Monitor the orchestrator so a brutal kill (which skips
             # terminate/2 and therefore never sends :session_ended) still
@@ -1966,9 +2174,12 @@ defmodule Cympho.Orchestrator.Dispatcher do
             # dispatch, not only on PATCH status.
             _ = Agents.touch_heartbeat(agent)
 
+            execution_class = candidate_execution_class(issue)
+
             %{
               state
               | running_issue_ids: MapSet.put(state.running_issue_ids, issue.id),
+                running_classes: Map.put(state.running_classes, issue.id, execution_class),
                 retry_attempts: Map.delete(state.retry_attempts, issue.id),
                 monitors: Map.put(state.monitors, ref, issue.id)
             }

@@ -1166,6 +1166,7 @@ defmodule Cympho.Orchestrator do
                   @adapter_cleanup_timeout_ms
                 )
 
+              _ = release_runtime_admission(session)
               failed_session = %{session | session_id: session_id}
               fail_engine_run(failed_session, {:adapter_start_failed, :worker_unregistered})
               {:error, {:adapter_start_failed, :worker_unregistered}}
@@ -1862,15 +1863,22 @@ defmodule Cympho.Orchestrator do
       {:error, {:run_start_crashed, Exception.message(e)}}
   end
 
-  defp cancel_pending_engine_run(%__MODULE__{run_id: nil}), do: :ok
+  defp cancel_pending_engine_run(%__MODULE__{run_id: nil} = session) do
+    _ = Issues.release_unbound_checkout(session.issue, :todo)
+    :ok
+  end
 
-  defp cancel_pending_engine_run(%__MODULE__{run_id: run_id}) do
+  defp cancel_pending_engine_run(%__MODULE__{run_id: run_id} = session) do
     with {:ok, %{status: "pending"} = run} <- HeartbeatEngine.get_run(run_id) do
       case HeartbeatEngine.cancel_run(run) do
         {:ok, _cancelled_run} ->
           :ok
 
         {:error, {:invalid_status, _status}} ->
+          _ =
+            Issues.clear_checkout_lock_for_run(session.issue.id, session.agent_id, run_id, :todo)
+
+          _ = Issues.release_unbound_checkout(session.issue, :todo)
           :ok
 
         {:error, reason} ->
@@ -1878,9 +1886,18 @@ defmodule Cympho.Orchestrator do
             run_id: run_id,
             error: inspect(reason)
           )
+
+          _ =
+            Issues.clear_checkout_lock_for_run(session.issue.id, session.agent_id, run_id, :todo)
+
+          _ = Issues.release_unbound_checkout(session.issue, :todo)
+          :ok
       end
     else
-      _ -> :ok
+      _ ->
+        _ = Issues.clear_checkout_lock_for_run(session.issue.id, session.agent_id, run_id, :todo)
+        _ = Issues.release_unbound_checkout(session.issue, :todo)
+        :ok
     end
   rescue
     error ->
@@ -1888,6 +1905,10 @@ defmodule Cympho.Orchestrator do
         run_id: run_id,
         error: Exception.message(error)
       )
+
+      _ = Issues.clear_checkout_lock_for_run(session.issue.id, session.agent_id, run_id, :todo)
+      _ = Issues.release_unbound_checkout(session.issue, :todo)
+      :ok
   end
 
   defp complete_engine_run(%__MODULE__{run_id: nil}, _result), do: :ok

@@ -1120,8 +1120,7 @@ defmodule Cympho.Orchestrator.DispatcherDbTest do
       assert local.assignee_id == local_agent.id
       assert gateway.status == :in_progress
 
-      assert %{attempts: 1, next_retry_at: retry_at} = state.retry_attempts[local.id]
-      assert retry_at > :os.system_time(:millisecond)
+      refute Map.has_key?(state.retry_attempts, local.id)
       refute MapSet.member?(state.running_issue_ids, local.id)
       assert MapSet.member?(state.running_issue_ids, gateway.id)
       assert MapSet.size(state.running_issue_ids) == 1
