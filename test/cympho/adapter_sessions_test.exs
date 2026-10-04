@@ -5,6 +5,14 @@ defmodule Cympho.AdapterSessionsTest do
 
   alias Cympho.AdapterSessions
 
+  setup do
+    on_exit(fn ->
+      assert {:ok, []} = AdapterSessions.active_sessions()
+    end)
+
+    :ok
+  end
+
   test "cancel sends the cancellation message to the registered worker" do
     session_id = make_ref()
     parent = self()
@@ -28,6 +36,7 @@ defmodule Cympho.AdapterSessionsTest do
     assert {:ok, ^worker} = AdapterSessions.owner_for_controller(self())
 
     Process.exit(worker, :kill)
+    wait_until(fn -> refute AdapterSessions.registered?(session_id) end)
   end
 
   test "all workers for one controller and issue remain discoverable" do
@@ -48,6 +57,7 @@ defmodule Cympho.AdapterSessionsTest do
     assert MapSet.new(issue_workers) == MapSet.new(workers)
 
     Enum.each(workers, &Process.exit(&1, :kill))
+    wait_until(fn -> assert {:ok, []} = AdapterSessions.owners_for_controller(self()) end)
   end
 
   test "spawn_registered makes registration visible before worker code starts" do
@@ -60,6 +70,7 @@ defmodule Cympho.AdapterSessionsTest do
       end)
 
     assert_receive {:worker_started, ^worker, {:ok, ^worker}}, 1_000
+    wait_until(fn -> refute AdapterSessions.registered?(session_id) end)
   end
 
   test "controller watcher is installed before registered worker code starts" do
@@ -69,14 +80,19 @@ defmodule Cympho.AdapterSessionsTest do
       spawn(fn ->
         AdapterSessions.spawn_registered(make_ref(), fn ->
           {:monitored_by, monitors} = Process.info(self(), :monitored_by)
-          send(parent, {:worker_monitors, monitors})
-          Process.sleep(:infinity)
+          send(parent, {:worker_monitors, monitors, self()})
+
+          receive do
+            {:cancel_session, _, _} -> :ok
+          end
         end)
       end)
 
-    assert_receive {:worker_monitors, monitors}, 1_000
+    assert_receive {:worker_monitors, monitors, worker}, 1_000
     assert length(monitors) >= 3
+    worker_mon = Process.monitor(worker)
     Process.exit(controller, :kill)
+    assert_receive {:DOWN, ^worker_mon, :process, ^worker, _}, 1_000
   end
 
   test "spawn_registered fails closed when the authoritative ledger is unavailable" do
@@ -398,6 +414,7 @@ defmodule Cympho.AdapterSessionsTest do
 
     assert {:ok, ^worker} = AdapterSessions.owner(session_id)
     Process.exit(worker, :kill)
+    wait_until(fn -> refute AdapterSessions.registered?(session_id) end)
   end
 
   test "overlapping registry and ledger restarts heal a live worker inventory" do
@@ -423,5 +440,6 @@ defmodule Cympho.AdapterSessionsTest do
     )
 
     Process.exit(worker, :kill)
+    wait_until(fn -> refute AdapterSessions.registered?(session_id) end)
   end
 end

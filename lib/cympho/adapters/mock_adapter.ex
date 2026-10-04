@@ -158,6 +158,9 @@ defmodule Cympho.Adapters.MockAdapter do
       {:cancel_session, ^session_id, _reason} ->
         :ok
 
+      {:finish_worker, ^session_id} ->
+        :ok
+
       {:DOWN, ^recipient_monitor, :process, ^recipient_pid, _reason} ->
         :ok
 

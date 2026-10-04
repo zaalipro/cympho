@@ -81,6 +81,7 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
     original = Application.get_env(:cympho, :orchestrator, [])
     Application.put_env(:cympho, :orchestrator, Keyword.put(original, :enabled, true))
     on_exit(fn -> Application.put_env(:cympho, :orchestrator, original) end)
+    on_exit(fn -> assert {:ok, []} = Cympho.AdapterSessions.active_sessions() end)
 
     unique = System.unique_integer([:positive])
 
@@ -170,7 +171,8 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
         # Issue should now be dispatched
         assert MapSet.member?(second_poll.running_issue_ids, issue.id)
         assert Issues.get_issue!(issue.id).status == :in_progress
-        assert_receive {:adapter_called, :local, _session_id}, 1_000
+        assert_receive {:adapter_called, :local, session_id}, 1_000
+        stop_and_wait_session(issue.id, session_id)
       end
     end
   end
@@ -184,7 +186,7 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
            gateway_agent: gateway_agent
          } do
       # Occupy the 1 local slot, leaving 1 total slot (max_total_runs: 2, max_local_runs: 1)
-      assert {:ok, _held_token} = RuntimeAdmission.checkout(LocalAdapter, admission)
+      assert {:ok, held_token} = RuntimeAdmission.checkout(LocalAdapter, admission)
 
       # Candidate 1: Local process candidate (priority high)
       {:ok, local_issue} =
@@ -252,11 +254,14 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
         # Gateway issue was dispatched in the SAME pass
         assert Issues.get_issue!(gateway_issue.id).status == :in_progress
         assert MapSet.member?(after_poll.running_issue_ids, gateway_issue.id)
-        assert_receive {:adapter_called, :gateway, _session_id}, 1_000
+        assert_receive {:adapter_called, :gateway, session_id}, 1_000
+        stop_and_wait_session(gateway_issue.id, session_id)
 
         # Ineligible issue was NOT started
         assert Issues.get_issue!(ineligible_issue.id).status == :todo
         refute MapSet.member?(after_poll.running_issue_ids, ineligible_issue.id)
+
+        assert :ok = RuntimeAdmission.release(held_token, admission)
       end
     end
   end
@@ -419,5 +424,36 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
     |> HeartbeatEngine.list_runs_for_issue()
     |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
     |> List.first()
+  end
+
+  defp stop_and_wait_session(issue_id, session_id) do
+    controller_pid =
+      wait_until(
+        fn ->
+          pid = Orchestrator.whereis(issue_id)
+          assert is_pid(pid)
+          pid
+        end,
+        2_000
+      )
+
+    worker_pid =
+      case Cympho.AdapterSessions.owner(session_id) do
+        {:ok, pid} -> pid
+        _ -> nil
+      end
+
+    controller_mon = Process.monitor(controller_pid)
+    worker_mon = if worker_pid, do: Process.monitor(worker_pid)
+
+    assert :ok = Orchestrator.stop(issue_id, :operator_stop)
+
+    assert_receive {:DOWN, ^controller_mon, :process, ^controller_pid, _}, 2_000
+
+    if worker_mon do
+      assert_receive {:DOWN, ^worker_mon, :process, ^worker_pid, _}, 2_000
+    end
+
+    refute Cympho.AdapterSessions.registered?(session_id)
   end
 end

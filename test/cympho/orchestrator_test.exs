@@ -355,6 +355,85 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
+    test "terminal turn keeps runtime admission claim held until delayed worker exits", %{
+      agent_id: agent_id,
+      agent: agent,
+      issue: issue
+    } do
+      session_id = "session-delayed-worker"
+      run_id = Ecto.UUID.generate()
+      parent = self()
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      before_count = Cympho.RuntimeAdmission.snapshot().total_running
+
+      result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => "Done."
+          }
+        ]
+      }
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end]},
+        {Cympho.HeartbeatEngine, [:passthrough],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id, status: "running"}} end,
+           start_run: fn _ -> :ok end,
+           complete_run: fn _run, _attrs -> {:ok, %{id: run_id}} end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, recipient_pid, opts ->
+             worker =
+               Cympho.AdapterSessions.spawn_registered(session_id, opts, fn ->
+                 receive do
+                   :release_delayed_worker -> :ok
+                 end
+
+                 Cympho.AdapterSessions.unregister(session_id)
+               end)
+
+             send(parent, {:delayed_worker_pid, worker})
+             send(recipient_pid, {:session_started, session_id})
+             session_id
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
+        assert_receive {:delayed_worker_pid, worker}, 1_000
+        assert wait_for_session_id(pid, session_id)
+
+        # Claim was acquired on session start
+        assert Cympho.RuntimeAdmission.snapshot().total_running == before_count + 1
+
+        # Worker sends terminal turn completed message to orchestrator
+        send(pid, {:turn_completed, session_id, result})
+
+        # Process is alive and waiting; Orchestrator is waiting in release_after_adapter_exit
+        Process.sleep(50)
+        assert Process.alive?(worker)
+        assert Process.alive?(pid)
+
+        # Crucial assertion: admission claim remains held while worker is still alive
+        assert Cympho.RuntimeAdmission.snapshot().total_running == before_count + 1
+
+        # Now allow the delayed worker to exit
+        send(worker, :release_delayed_worker)
+
+        # Claim is released once worker exits, and orchestrator terminates
+        wait_until(fn ->
+          assert Cympho.RuntimeAdmission.snapshot().total_running == before_count
+        end)
+
+        assert :ok = wait_until_stopped(pid)
+        refute Cympho.AdapterSessions.registered?(session_id)
+      end
+    end
+
     test "owned stop timeout never acknowledges a controller before its DOWN" do
       controller =
         spawn(fn ->
@@ -725,7 +804,9 @@ defmodule Cympho.OrchestratorTest do
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
         send(pid, {:turn_completed, session_id, result})
+        assert :ok = finish_synthetic_worker(session_id)
         assert :ok = wait_until_stopped(pid)
 
         [work_product] = WorkProducts.list_work_products(issue.id)
@@ -796,7 +877,9 @@ defmodule Cympho.OrchestratorTest do
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
         send(pid, {:turn_completed, session_id, result})
+        assert :ok = finish_synthetic_worker(session_id)
         assert :ok = wait_until_stopped(pid)
 
         assert_receive {:run_completed_attrs, attrs}
@@ -861,7 +944,9 @@ defmodule Cympho.OrchestratorTest do
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
         send(pid, {:turn_completed, session_id, result})
+        assert :ok = finish_synthetic_worker(session_id)
         assert :ok = wait_until_stopped(pid)
 
         assert_receive {:run_completed_attrs, attrs}
@@ -913,7 +998,9 @@ defmodule Cympho.OrchestratorTest do
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
         send(pid, {:turn_completed, session_id, result})
+        assert :ok = finish_synthetic_worker(session_id)
         assert :ok = wait_until_stopped(pid)
 
         comments = Comments.list_comments(issue.id)
@@ -985,7 +1072,9 @@ defmodule Cympho.OrchestratorTest do
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
         send(pid, {:turn_completed, session_id, result})
+        assert :ok = finish_synthetic_worker(session_id)
 
         assert [wake] = wait_for_review_nudges(issue.id)
         assert wake.agent_id == agent_id
@@ -998,6 +1087,8 @@ defmodule Cympho.OrchestratorTest do
                  comment.author_type == "system" and
                    comment.body =~ "Auto-nudge queued for Orchestrator Agent"
                end)
+
+        assert :ok = wait_until_stopped(pid)
       end
     end
 
@@ -1597,6 +1688,7 @@ defmodule Cympho.OrchestratorTest do
         assert map_size(state.tool_traces) > 0
 
         send(pid, {:turn_ended_with_error, session_id, :stall_timeout})
+        assert :ok = finish_synthetic_worker(session_id)
         assert :ok = wait_until_stopped(pid)
 
         assert_received {:resolved_runtime, :claude_code}
@@ -1654,6 +1746,8 @@ defmodule Cympho.OrchestratorTest do
           {:turn_ended_with_error, session_id,
            {:runtime_failure, :permission_blocked, "Commands require approval"}}
         )
+
+        assert :ok = finish_synthetic_worker(session_id)
 
         assert :ok = wait_until_stopped(pid)
         assert Issues.get_issue!(issue.id).status == :blocked
@@ -1719,7 +1813,9 @@ defmodule Cympho.OrchestratorTest do
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
         send(pid, {:turn_completed, session_id, result})
+        assert :ok = finish_synthetic_worker(session_id)
         assert :ok = wait_until_stopped(pid)
 
         comments = Comments.list_comments(issue.id)
@@ -2406,6 +2502,7 @@ defmodule Cympho.OrchestratorTest do
         assert wait_for_session_id(pid, session_id)
 
         send(pid, {:turn_ended_with_error, session_id, {:exit_code, 1}})
+        assert :ok = finish_synthetic_worker(session_id)
         assert :ok = wait_until_stopped(pid)
 
         # Despite the comment failing, the issue must be parked and the
@@ -2588,7 +2685,9 @@ defmodule Cympho.OrchestratorTest do
          ]}
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
         send(pid, {:turn_completed, session_id, result})
+        assert :ok = finish_synthetic_worker(session_id)
         assert :ok = wait_until_stopped(pid)
 
         reloaded = Repo.get!(Agent, agent_id)
@@ -2632,6 +2731,7 @@ defmodule Cympho.OrchestratorTest do
         assert wait_for_session_id(pid, session_id)
 
         send(pid, {:turn_ended_with_error, session_id, {:exit_code, 1}})
+        assert :ok = finish_synthetic_worker(session_id)
         assert :ok = wait_until_stopped(pid)
 
         reloaded = Repo.get!(Agent, agent_id)
@@ -2738,6 +2838,7 @@ defmodule Cympho.OrchestratorTest do
 
       receive do
         {:cancel_session, ^session_id, _reason} -> :ok
+        {:finish_worker, ^session_id} -> :ok
         {:DOWN, ^monitor, :process, ^recipient_pid, _reason} -> :ok
       end
 
@@ -2745,6 +2846,27 @@ defmodule Cympho.OrchestratorTest do
     end)
 
     session_id
+  end
+
+  defp finish_synthetic_worker(session_id) do
+    worker_pid =
+      wait_until(
+        fn ->
+          assert {:ok, pid} = Cympho.AdapterSessions.owner(session_id)
+          pid
+        end,
+        2_000
+      )
+
+    monitor = Process.monitor(worker_pid)
+    send(worker_pid, {:finish_worker, session_id})
+    send(worker_pid, {:cancel_session, session_id, :fixture_worker_exit})
+
+    receive do
+      {:DOWN, ^monitor, :process, ^worker_pid, _reason} -> :ok
+    after
+      2_000 -> {:error, :timeout}
+    end
   end
 
   defp wait_for_review_nudges(issue_id) do
