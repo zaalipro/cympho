@@ -22,7 +22,12 @@ defmodule Cympho.CymphoctlScriptTest do
         System.cmd("bash", [path],
           cd: @project_root,
           stderr_to_stdout: true,
-          env: [{"HOME", System.tmp_dir!()}]
+          env: [
+            {"HOME", System.tmp_dir!()},
+            {"CYMPHO_RUN_LINUX_FIXTURE", "0"},
+            {"CYMPHO_DEPLOY_KEY", nil},
+            {"CYMPHO_DEPLOY_TARGET", nil}
+          ]
         )
 
       assert status == 0, output

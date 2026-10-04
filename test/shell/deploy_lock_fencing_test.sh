@@ -675,7 +675,8 @@ run_term_resistant_child() {{
     command sleep 30
   ) &
   child_pid=$!
-  printf '%s\\n' "$$" > '{pgid_file}'
+  pgid="$(ps -o pgid= -p "$BASHPID" 2>/dev/null | tr -d ' ' || echo "$BASHPID")"
+  printf '%s\\n' "$pgid" > '{pgid_file}'
   wait "$child_pid"
 }}
 run_owned_op run_term_resistant_child
@@ -729,8 +730,20 @@ run_owned_op run_term_resistant_child
             caller_script = os.path.join(td, "caller.sh")
             caller_context = os.path.join(td, "context")
             fifo = os.path.join(td, "lock.fifo")
+            started_marker = os.path.join(caller_context, "synthetic_ssh.started")
             os.mkfifo(fifo)
             os.makedirs(caller_context, exist_ok=True)
+
+            bin_dir = os.path.join(td, "bin")
+            os.makedirs(bin_dir, exist_ok=True)
+            fake_ssh = os.path.join(bin_dir, "ssh")
+            with open(fake_ssh, "w") as f:
+                f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+touch '{started_marker}'
+exec sleep 30
+""")
+            os.chmod(fake_ssh, 0o755)
 
             holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
             local_holders.append(holder)
@@ -744,10 +757,14 @@ run_owned_op run_term_resistant_child
                 with open(caller_script, "w") as f:
                     f.write(f"""#!/usr/bin/env bash
 set -euo pipefail
+export PATH='{bin_dir}':"$PATH"
 export CYMPHO_DEPLOY_SOURCE_ONLY=1
 export DEPLOY_CONTEXT='{caller_context}'
 export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
 export DEPLOY_LOCK_PID={holder.pid}
+export DEPLOY_TARGET='isolated-test-target'
+export DEPLOY_OPERATION_LOCK='{caller_context}/operation.lock'
+export DEPLOY_EPOCH_FILE='{caller_context}/epoch.txt'
 
 source '{deploy_sh}'
 
@@ -757,10 +774,6 @@ close_deploy_lock_fifo() {{
 }}
 
 init_deploy_traps
-
-run_fenced_ssh() {{
-  run_owned_op command sleep 30
-}}
 
 printf 'READY:%s\\n' "$$"
 CAPTURED_PID=""
@@ -779,6 +792,12 @@ EOF
                 ready_line = read_line_bounded(caller.stdout, timeout=5.0)
                 assert ready_line.startswith("READY:")
                 caller_pid = int(ready_line.split(":")[1])
+
+                t_start = time.monotonic()
+                while not os.path.exists(started_marker):
+                    if time.monotonic() - t_start > 5.0:
+                        raise AssertionError("Synthetic work-start was not observed within deadline!")
+                    time.sleep(0.02)
 
                 t0 = time.monotonic()
                 os.kill(caller_pid, sig)
@@ -1065,7 +1084,7 @@ if [[ -z "${SSH_KEY}" && -f "${DEFAULT_KEY}" ]]; then
 fi
 
 RUN_REMOTE=0
-if [[ "${CYMPHO_RUN_LINUX_FIXTURE:-0}" == "1" || -n "${CYMPHO_DEPLOY_KEY:-}" ]]; then
+if [[ "${CYMPHO_RUN_LINUX_FIXTURE:-0}" == "1" ]]; then
   RUN_REMOTE=1
 fi
 
@@ -1217,6 +1236,16 @@ cat >'{fixture_dir}/bin/sudo' <<'EOF'
 #!/bin/bash
 if [[ "$1" == -u ]]; then shift 2; fi
 if [[ "$1" == -- ]]; then shift; fi
+for arg in "$@"; do
+  if [[ "$arg" == "cympho-settle" ]]; then
+    if ! flock -n -E 75 '{fixture_dir}/session.lock' true 2>/dev/null; then
+      printf 'admission_held=1\\n' > '{fixture_dir}/settlement.observed'
+    else
+      printf 'admission_held=0\\n' > '{fixture_dir}/settlement.observed'
+    fi
+    break
+  fi
+done
 exec "$@"
 EOF
 cat >'{fixture_dir}/bin/stat' <<'EOF'
@@ -1359,7 +1388,51 @@ acquire_deploy_lock
 touch '{contender_marker}'
 """)
         os.chmod(contender_script, 0o755)
-        contender = subprocess.run([contender_script], capture_output=True, text=True, timeout=10)
+        contender = subprocess.Popen(
+            [contender_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True
+        )
+        spawned_callers.append(contender)
+        spawned_pgids.append(contender.pid)
+
+        try:
+            c_out, c_err = contender.communicate(timeout=10.0)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(contender.pid, signal.SIGTERM)
+            except (OSError, ProcessLookupError):
+                pass
+            time.sleep(0.1)
+            try:
+                os.killpg(contender.pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass
+            contender.wait()
+            raise AssertionError("Contender timed out waiting for admission lock")
+
+        # Reap exact owned group/children before context removal
+        if contender.poll() is None:
+            try:
+                os.killpg(contender.pid, signal.SIGTERM)
+            except (OSError, ProcessLookupError):
+                pass
+            try:
+                contender.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(contender.pid, signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    pass
+                contender.wait(timeout=2.0)
+
+        # Check no surviving processes in contender PGID
+        time.sleep(0.05)
+        pg_check = subprocess.run(["pgrep", "-g", str(contender.pid)], capture_output=True, text=True)
+        assert pg_check.stdout.strip() == "", f"Contender group {contender.pid} has surviving processes: {pg_check.stdout}"
+
         assert contender.returncode != 0, f"Contender unexpectedly succeeded: exit code {contender.returncode}"
         assert subprocess.run(ssh_opts + [f'test ! -e "{contender_marker}"'], timeout=5).returncode == 0, "Contender mutated state during live hold!"
 
@@ -1415,10 +1488,7 @@ operation_fence_command touch '{live_marker}'
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         caller, cpid, hpid, td = run_caller("hold")
         t0 = time.monotonic()
-        try:
-            os.killpg(caller.pid, sig)
-        except (OSError, ProcessLookupError):
-            os.kill(cpid, sig)
+        os.kill(cpid, sig)
         caller.wait(timeout=5.0)
         elapsed = time.monotonic() - t0
         assert elapsed <= 5.0, f"Caller release after {sig} exceeded 5s deadline: {elapsed}s"
@@ -1436,7 +1506,7 @@ operation_fence_command touch '{live_marker}'
 
     # C. Remote protected work cancellation & settlement with real protected executable and started marker
     print("# VAL-DEP-002 (C): testing confirmed-running remote protected work cancellation & settlement...", flush=True)
-    subprocess.run(ssh_opts + [f'rm -f "{remote_started_marker}" "{remote_pid_file}"'], timeout=5.0, check=True)
+    subprocess.run(ssh_opts + [f'rm -f "{remote_started_marker}" "{remote_pid_file}" "{fixture_dir}/settlement.observed"'], timeout=5.0, check=True)
 
     caller, cpid, hpid, td = run_caller("remote_protected")
 
@@ -1463,12 +1533,9 @@ operation_fence_command touch '{live_marker}'
     alive_check = subprocess.run(ssh_opts + [f'kill -0 {remote_payload_pid}'], timeout=5.0)
     assert alive_check.returncode == 0, f"Remote payload process {remote_payload_pid} was not alive before interrupt!"
 
-    # 4. Deliver SIGTERM to caller process group to interrupt operation
+    # 4. Deliver SIGTERM to caller alone (keeping admission holder alive for settlement)
     t0 = time.monotonic()
-    try:
-        os.killpg(caller.pid, signal.SIGTERM)
-    except (OSError, ProcessLookupError):
-        os.kill(cpid, signal.SIGTERM)
+    os.kill(cpid, signal.SIGTERM)
     caller.wait(timeout=5.0)
     elapsed = time.monotonic() - t0
     assert elapsed <= 5.0, f"Caller release after remote op interrupt exceeded 5s: {elapsed}s"
@@ -1482,11 +1549,16 @@ operation_fence_command touch '{live_marker}'
     pgid_check = subprocess.run(ssh_opts + [f'pgrep -g {remote_payload_pgid} 2>/dev/null || true'], capture_output=True, text=True, timeout=5.0)
     assert pgid_check.stdout.strip() == "", f"Remote payload PGID {remote_payload_pgid} has surviving processes: {pgid_check.stdout}"
 
-    # 7. Verify operation lock was settled and can be immediately reacquired
+    # 7. Verify settlement executed while admission was held
+    settle_res = subprocess.run(ssh_opts + [f'cat "{fixture_dir}/settlement.observed"'], capture_output=True, text=True, timeout=5.0)
+    assert settle_res.returncode == 0, "Settlement was not observed during remote op interrupt!"
+    assert "admission_held=1" in settle_res.stdout, f"Settlement did not run while admission held: {settle_res.stdout}"
+
+    # 8. Verify operation lock was settled and can be immediately reacquired
     reacq_op = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 76 "{operation_lock}" true'], timeout=5.0)
     assert reacq_op.returncode == 0, "Operation lock reacquisition failed after remote op interrupt and settlement"
 
-    # 8. Verify session lock was released and can be immediately reacquired
+    # 9. Verify session lock was released and can be immediately reacquired
     reacq_sess = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5.0)
     assert reacq_sess.returncode == 0, "Session lock reacquisition failed after remote op interrupt and settlement"
 
