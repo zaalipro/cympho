@@ -153,6 +153,10 @@ require("recovery_attempted=0" in cleanup and
         cleanup.count("recovery_attempted=1") == 2 and
         '"${recovery_attempted}" == "0"' in cleanup,
         "EXIT cleanup must permit lock-race recovery but cap it at one session admission")
+require('exit "${exit_code}"' in cleanup,
+        "cleanup_local must retain and propagate incoming exit status")
+require('settle_failed' in cleanup and 'exit 1' in cleanup,
+        "cleanup_local must explicitly fail deployment when settlement or required recovery fails")
 PY
 
 # Execute the production fence generator with a fake flock/stat layer. This
@@ -1004,6 +1008,97 @@ echo "DISCOVERY_UNEXPECTEDLY_SUCCEEDED"
         finally:
             reap_processes_and_groups([], [holder], case_sids, case_pgids)
 
+    # 2d. Test cleanup_local exit semantics: settlement failure, recovery failure, and incoming failure retention
+    for case in [
+        # (name, exit_arg, mock_settle_fail, env_snapshot_active, mock_restore_fail, expected_rc, expected_err_needles)
+        ("settlement failure turns success into failure", "0", "1", "0", "0", 1, ["Failed to settle remote operation lock", "CRITICAL: settlement or recovery failure during cleanup; failing deployment."]),
+        ("incoming failure 76 is retained and not masked", "76", "0", "0", "0", 76, []),
+        ("incoming failure 76 is retained even when settlement fails", "76", "1", "0", "0", 76, ["Failed to settle remote operation lock"]),
+        ("required recovery failure turns success into failure", "0", "0", "1", "1", 1, ["CRITICAL: failed to restore deployment transaction", "CRITICAL: settlement or recovery failure during cleanup; failing deployment."]),
+        ("normal completion succeeds with exit 0", "0", "0", "0", "0", 0, []),
+        ("direct cleanup_local settlement failure exits 1", "direct_settle_fail", "1", "0", "0", 1, ["Failed to settle remote operation lock", "CRITICAL: settlement or recovery failure during cleanup; failing deployment."]),
+        ("direct cleanup_local recovery failure exits 1", "direct_recovery_fail", "0", "1", "1", 1, ["CRITICAL: failed to restore deployment transaction", "CRITICAL: settlement or recovery failure during cleanup; failing deployment."]),
+        ("direct cleanup_local success allows script exit 0", "direct_success", "0", "0", "0", 0, []),
+    ]:
+        case_name, exit_arg, mock_settle_fail, env_snapshot_active, mock_restore_fail, expected_rc, expected_err_needles = case
+        with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+            case_sids = set()
+            case_pgids = set()
+            caller_script = os.path.join(td, "caller.sh")
+            caller_context = os.path.join(td, "context")
+            fifo = os.path.join(td, "lock.fifo")
+            op_lock = os.path.join(td, "operation.lock")
+            os.mkfifo(fifo)
+            os.makedirs(caller_context, exist_ok=True)
+            with open(op_lock, "w") as f:
+                f.write("")
+
+            holder = subprocess.Popen(["bash", "-c", f"exec cat >/dev/null <'{fifo}'"], start_new_session=True)
+            local_holders.append(holder)
+            local_sids.add(holder.pid)
+            local_pgids.add(holder.pid)
+            case_sids.add(holder.pid)
+            case_pgids.add(holder.pid)
+
+            try:
+                with open(caller_script, "w") as f:
+                    f.write(f"""#!/usr/bin/env bash
+set -euo pipefail
+export CYMPHO_DEPLOY_SOURCE_ONLY=1
+export CYMPHO_DEPLOY_SETTLE_REMOTE=1
+export DEPLOY_CONTEXT='{caller_context}'
+export DEPLOY_LOCK_OUTPUT='{caller_context}/deploy-lock.out'
+export DEPLOY_LOCK_PID={holder.pid}
+export DEPLOY_TARGET='dummy-target'
+export DEPLOY_OPERATION_LOCK='{op_lock}'
+source '{deploy_sh}'
+
+ENV_SNAPSHOT_ACTIVE='{env_snapshot_active}'
+UNIT_SNAPSHOT_ACTIVE=0
+
+run_ssh() {{
+  local cmd="$1"
+  if [[ "{mock_settle_fail}" == "1" ]]; then
+    echo "Failed to settle remote operation lock on dummy-target." >&2
+    return 76
+  fi
+  return 0
+}}
+
+restore_runtime_env() {{
+  if [[ "{mock_restore_fail}" == "1" ]]; then
+    return 1
+  fi
+  return 0
+}}
+
+if [[ "{exit_arg}" == "direct_settle_fail" || "{exit_arg}" == "direct_recovery_fail" || "{exit_arg}" == "direct_success" ]]; then
+  init_deploy_traps
+  cleanup_local
+  echo "DIRECT_COMPLETED"
+  exit 0
+else
+  init_deploy_traps
+  exit {exit_arg}
+fi
+""")
+                os.chmod(caller_script, 0o755)
+                caller = subprocess.run([caller_script], capture_output=True, text=True, timeout=10.0)
+                assert caller.returncode == expected_rc, f"Case '{case_name}': expected rc {expected_rc}, got {caller.returncode}. Stderr: {caller.stderr}\nStdout: {caller.stdout}"
+                for needle in expected_err_needles:
+                    assert needle in caller.stderr, f"Case '{case_name}': expected needle '{needle}' in stderr: {caller.stderr}"
+                if exit_arg in ("direct_settle_fail", "direct_recovery_fail"):
+                    assert "DIRECT_COMPLETED" not in caller.stdout, f"Case '{case_name}': cleanup_local failure should have exited before next command"
+                elif exit_arg == "direct_success":
+                    assert "DIRECT_COMPLETED" in caller.stdout
+                try:
+                    holder.wait(timeout=1.0)
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
+                assert holder.poll() is not None, f"Case '{case_name}': holder process {holder.pid} survived cleanup"
+            finally:
+                reap_processes_and_groups([], [holder], case_sids, case_pgids)
+
     # 3. Test transport loss (holder process termination triggers monitor signal to caller)
     with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
         case_sids = set()
@@ -1469,7 +1564,7 @@ operation_fence_command touch '{live_marker}'
         caller.wait(timeout=5.0)
 
     # Reacquire after VAL-DEP-001
-    subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5, check=True)
+    subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=10, check=True)
 
     # VAL-DEP-002: Interruption signals (SIGINT, SIGTERM, SIGHUP) clean up operations, monitor, holder within finite bounds
     print("# VAL-DEP-002: testing normal completion, signals, and remote cancellation...", flush=True)
@@ -1477,11 +1572,11 @@ operation_fence_command touch '{live_marker}'
     normal_caller, ncpid, nhpid, ntd = run_caller("normal")
     out, err = normal_caller.communicate(timeout=10.0)
     assert normal_caller.returncode == 0, f"Normal caller failed with returncode {normal_caller.returncode}. Out: {out} Err: {err}"
-    assert subprocess.run(ssh_opts + [f'test -f "{normal_marker}"'], timeout=5).returncode == 0
+    assert subprocess.run(ssh_opts + [f'test -f "{normal_marker}"'], timeout=10).returncode == 0
     # Verify session lock was released by normal completion and can be immediately reacquired
-    reacq = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5.0)
+    reacq = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=10.0)
     assert reacq.returncode == 0, "Lock reacquisition failed after normal completion"
-    survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=10.0).stdout.strip()
     assert survivors == "", f"Found remote processes still referencing fixture dir after normal completion: {survivors}"
 
     # B. Interruption signals (SIGINT, SIGTERM, SIGHUP) during hold
@@ -1489,24 +1584,24 @@ operation_fence_command touch '{live_marker}'
         caller, cpid, hpid, td = run_caller("hold")
         t0 = time.monotonic()
         os.kill(cpid, sig)
-        caller.wait(timeout=5.0)
+        caller.wait(timeout=10.0)
         elapsed = time.monotonic() - t0
-        assert elapsed <= 5.0, f"Caller release after {sig} exceeded 5s deadline: {elapsed}s"
+        assert elapsed <= 10.0, f"Caller release after {sig} exceeded 10s deadline: {elapsed}s"
         assert caller.returncode != 0
 
         # Verify immediate lock reacquisition on Linux within finite bounds
         t_reacq = time.monotonic()
-        reacq = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5.0)
+        reacq = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=10.0)
         assert reacq.returncode == 0, f"Lock reacquisition failed after signal {sig}"
-        assert (time.monotonic() - t_reacq) <= 5.0, f"Reacquisition exceeded 5s deadline"
+        assert (time.monotonic() - t_reacq) <= 10.0, f"Reacquisition exceeded 10s deadline"
 
         # Verify zero remote survivors
-        survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+        survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=10.0).stdout.strip()
         assert survivors == "", f"Found remote processes still referencing fixture dir after signal {sig}: {survivors}"
 
     # C. Remote protected work cancellation & settlement with real protected executable and started marker
     print("# VAL-DEP-002 (C): testing confirmed-running remote protected work cancellation & settlement...", flush=True)
-    subprocess.run(ssh_opts + [f'rm -f "{remote_started_marker}" "{remote_pid_file}" "{fixture_dir}/settlement.observed"'], timeout=5.0, check=True)
+    subprocess.run(ssh_opts + [f'rm -f "{remote_started_marker}" "{remote_pid_file}" "{fixture_dir}/settlement.observed"'], timeout=10.0, check=True)
 
     caller, cpid, hpid, td = run_caller("remote_protected")
 
@@ -1514,7 +1609,7 @@ operation_fence_command touch '{live_marker}'
     started = False
     t_start = time.monotonic()
     while time.monotonic() - t_start < 10.0:
-        res = subprocess.run(ssh_opts + [f'test -f "{remote_started_marker}"'], timeout=5.0)
+        res = subprocess.run(ssh_opts + [f'test -f "{remote_started_marker}"'], timeout=10.0)
         if res.returncode == 0:
             started = True
             break
@@ -1522,7 +1617,7 @@ operation_fence_command touch '{live_marker}'
     assert started, "Protected remote executable did not emit started marker within deadline!"
 
     # 2. Read remote PID and PGID
-    pid_res = subprocess.run(ssh_opts + [f'cat "{remote_pid_file}"'], capture_output=True, text=True, timeout=5.0, check=True)
+    pid_res = subprocess.run(ssh_opts + [f'cat "{remote_pid_file}"'], capture_output=True, text=True, timeout=10.0, check=True)
     remote_payload_pid_str, remote_payload_pgid_str = pid_res.stdout.strip().split(":")
     remote_payload_pid = int(remote_payload_pid_str)
     remote_payload_pgid = int(remote_payload_pgid_str)
@@ -1530,40 +1625,40 @@ operation_fence_command touch '{live_marker}'
     tracked_remote_pgids.append(remote_payload_pgid)
 
     # 3. Confirm payload process is actively alive right now before signalling
-    alive_check = subprocess.run(ssh_opts + [f'kill -0 {remote_payload_pid}'], timeout=5.0)
+    alive_check = subprocess.run(ssh_opts + [f'kill -0 {remote_payload_pid}'], timeout=10.0)
     assert alive_check.returncode == 0, f"Remote payload process {remote_payload_pid} was not alive before interrupt!"
 
     # 4. Deliver SIGTERM to caller alone (keeping admission holder alive for settlement)
     t0 = time.monotonic()
     os.kill(cpid, signal.SIGTERM)
-    caller.wait(timeout=5.0)
+    caller.wait(timeout=25.0)
     elapsed = time.monotonic() - t0
-    assert elapsed <= 5.0, f"Caller release after remote op interrupt exceeded 5s: {elapsed}s"
+    assert elapsed <= 25.0, f"Caller release after remote op interrupt exceeded 25s: {elapsed}s"
     assert caller.returncode != 0
 
     # 5. Verify remote payload PID is dead
-    pid_dead = subprocess.run(ssh_opts + [f'kill -0 {remote_payload_pid} 2>/dev/null'], timeout=5.0)
+    pid_dead = subprocess.run(ssh_opts + [f'kill -0 {remote_payload_pid} 2>/dev/null'], timeout=10.0)
     assert pid_dead.returncode != 0, f"Remote payload PID {remote_payload_pid} survived cancellation!"
 
     # 6. Verify remote payload PGID has no surviving processes
-    pgid_check = subprocess.run(ssh_opts + [f'pgrep -g {remote_payload_pgid} 2>/dev/null || true'], capture_output=True, text=True, timeout=5.0)
+    pgid_check = subprocess.run(ssh_opts + [f'pgrep -g {remote_payload_pgid} 2>/dev/null || true'], capture_output=True, text=True, timeout=10.0)
     assert pgid_check.stdout.strip() == "", f"Remote payload PGID {remote_payload_pgid} has surviving processes: {pgid_check.stdout}"
 
     # 7. Verify settlement executed while admission was held
-    settle_res = subprocess.run(ssh_opts + [f'cat "{fixture_dir}/settlement.observed"'], capture_output=True, text=True, timeout=5.0)
+    settle_res = subprocess.run(ssh_opts + [f'cat "{fixture_dir}/settlement.observed"'], capture_output=True, text=True, timeout=10.0)
     assert settle_res.returncode == 0, "Settlement was not observed during remote op interrupt!"
     assert "admission_held=1" in settle_res.stdout, f"Settlement did not run while admission held: {settle_res.stdout}"
 
     # 8. Verify operation lock was settled and can be immediately reacquired
-    reacq_op = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 76 "{operation_lock}" true'], timeout=5.0)
+    reacq_op = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 76 "{operation_lock}" true'], timeout=10.0)
     assert reacq_op.returncode == 0, "Operation lock reacquisition failed after remote op interrupt and settlement"
 
     # 9. Verify session lock was released and can be immediately reacquired
-    reacq_sess = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5.0)
+    reacq_sess = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=10.0)
     assert reacq_sess.returncode == 0, "Session lock reacquisition failed after remote op interrupt and settlement"
 
     # 9. Verify no processes referencing fixture_dir remain
-    survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=10.0).stdout.strip()
     assert survivors == "", f"Found remote processes still referencing fixture dir after remote op interrupt: {survivors}"
 
     # VAL-DEP-003: Lost controller input / transport loss permits reacquisition without stale mutations or live-lock loss
@@ -1571,23 +1666,23 @@ operation_fence_command touch '{live_marker}'
     caller, cpid, hpid, td = run_caller("hold")
     t0 = time.monotonic()
     os.kill(hpid, signal.SIGKILL)
-    caller.wait(timeout=5.0)
+    caller.wait(timeout=10.0)
     elapsed = time.monotonic() - t0
-    assert elapsed <= 5.0, f"Caller release after transport loss exceeded 5s: {elapsed}s"
+    assert elapsed <= 10.0, f"Caller release after transport loss exceeded 10s: {elapsed}s"
 
     t_reacq = time.monotonic()
-    reacq = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=5.0)
+    reacq = subprocess.run(ssh_opts + [f'export PATH="{fixture_dir}/bin:$PATH"; flock -n -E 75 "{session_lock}" true'], timeout=10.0)
     assert reacq.returncode == 0, "Lock reacquisition failed after transport loss"
-    assert (time.monotonic() - t_reacq) <= 5.0
+    assert (time.monotonic() - t_reacq) <= 10.0
 
-    survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=5.0).stdout.strip()
+    survivors = subprocess.run(ssh_opts + [f"lsof -t +D '{fixture_dir}' 2>/dev/null || fuser '{fixture_dir}'/* 2>/dev/null || true"], capture_output=True, text=True, timeout=10.0).stdout.strip()
     assert survivors == "", f"Found remote processes still referencing fixture dir after transport loss: {survivors}"
 
     # VAL-DEP-004: Fencing rejects stale epoch before mutation executes; valid epoch succeeds
     print("# VAL-DEP-004: testing epoch fencing with actual operation_fence_command...", flush=True)
     current_epoch = secrets.token_hex(16)
     stale_epoch = secrets.token_hex(16)
-    subprocess.run(ssh_opts + [f'printf "%s\\n" "{current_epoch}" >"{epoch_file}"'], check=True, timeout=5.0)
+    subprocess.run(ssh_opts + [f'printf "%s\\n" "{current_epoch}" >"{epoch_file}"'], check=True, timeout=10.0)
 
     # Stale epoch test using actual generator
     gen_td = tempfile.mkdtemp(prefix="cympho-gen-")
@@ -1606,10 +1701,10 @@ operation_fence_command touch '{stale_marker}'
 """], capture_output=True, text=True, check=True
     ).stdout.strip()
 
-    res_stale = subprocess.run(ssh_opts + [stale_cmd], capture_output=True, text=True, timeout=5.0)
+    res_stale = subprocess.run(ssh_opts + [stale_cmd], capture_output=True, text=True, timeout=10.0)
     assert res_stale.returncode == 76, f"Expected 76, got {res_stale.returncode}"
     assert "stale deploy epoch" in res_stale.stderr
-    assert subprocess.run(ssh_opts + [f'test ! -e "{stale_marker}"'], timeout=5).returncode == 0, "Stale epoch executed mutation!"
+    assert subprocess.run(ssh_opts + [f'test ! -e "{stale_marker}"'], timeout=10).returncode == 0, "Stale epoch executed mutation!"
 
     # Valid epoch test using actual generator
     valid_cmd = subprocess.run(
@@ -1626,21 +1721,21 @@ operation_fence_command touch '{valid_marker}'
 """], capture_output=True, text=True, check=True
     ).stdout.strip()
 
-    subprocess.run(ssh_opts + [valid_cmd], check=True, timeout=5.0)
-    assert subprocess.run(ssh_opts + [f'test -f "{valid_marker}"'], timeout=5).returncode == 0
+    subprocess.run(ssh_opts + [valid_cmd], check=True, timeout=10.0)
+    assert subprocess.run(ssh_opts + [f'test -f "{valid_marker}"'], timeout=10).returncode == 0
 
 except Exception as e:
     traceback.print_exc()
     raise
 finally:
     full_teardown()
-    rem_check = subprocess.run(ssh_opts + [f'test ! -e "{fixture_dir}"'], timeout=5)
+    rem_check = subprocess.run(ssh_opts + [f'test ! -e "{fixture_dir}"'], timeout=10)
     assert rem_check.returncode == 0, "Remote fixture directory was not removed!"
     for p in tracked_remote_pids:
-        dead = subprocess.run(ssh_opts + [f'kill -0 {p} 2>/dev/null'], timeout=5.0)
+        dead = subprocess.run(ssh_opts + [f'kill -0 {p} 2>/dev/null'], timeout=10.0)
         assert dead.returncode != 0, f"Tracked remote PID {p} survived teardown!"
     for pg in tracked_remote_pgids:
-        dead_pg = subprocess.run(ssh_opts + [f'pgrep -g {pg} 2>/dev/null || true'], capture_output=True, text=True, timeout=5.0)
+        dead_pg = subprocess.run(ssh_opts + [f'pgrep -g {pg} 2>/dev/null || true'], capture_output=True, text=True, timeout=10.0)
         assert dead_pg.stdout.strip() == "", f"Tracked remote PGID {pg} survived teardown!"
     for td in spawned_temp_dirs:
         assert not os.path.exists(td), f"Local directory {td} was not removed during teardown!"

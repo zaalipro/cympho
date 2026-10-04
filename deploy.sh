@@ -371,6 +371,10 @@ flock --unlock 9"
 }
 
 cleanup_local() {
+  local exit_code=$?
+  trap '' HUP INT TERM
+  set +e
+
   local unit_restore_failed=0
   local env_restore_failed=0
   local recovery_attempted=0
@@ -433,6 +437,14 @@ cleanup_local() {
   fi
   close_deploy_lock_fifo
   rm -rf -- "${DEPLOY_CONTEXT}"
+
+  if [[ "${exit_code}" != "0" ]]; then
+    exit "${exit_code}"
+  fi
+  if [[ "${settle_failed}" == "1" || "${env_restore_failed}" == "1" || "${unit_restore_failed}" == "1" ]]; then
+    echo "CRITICAL: settlement or recovery failure during cleanup; failing deployment." >&2
+    exit 1
+  fi
 }
 init_deploy_traps() {
   trap cleanup_local EXIT
