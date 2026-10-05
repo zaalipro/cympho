@@ -477,4 +477,32 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert evidence =~ "rotation posture"
     refute output =~ "[debug]"
   end
+
+  test "blocked issue routing detector recognizes both captured and direct guard shapes" do
+    real_source = File.read!("lib/cympho/orchestrator/dispatcher.ex")
+
+    # Current direct guard shape
+    assert {:exceeds, evidence} =
+             Mix.Tasks.Cympho.Compare.check_blocked_issue_routing_guard(real_source)
+
+    assert evidence =~ "Blocked issue routing guard"
+
+    # Prior captured-function shape
+    captured_source =
+      String.replace(real_source, "runnable_candidate?(issue)", "&runnable_candidate?/1")
+
+    assert {:exceeds, evidence} =
+             Mix.Tasks.Cympho.Compare.check_blocked_issue_routing_guard(captured_source)
+
+    assert evidence =~ "Blocked issue routing guard"
+
+    # Missing guard reports gap
+    missing_source =
+      String.replace(real_source, "runnable_candidate?(issue)", "true")
+
+    assert {:gap, gap_evidence} =
+             Mix.Tasks.Cympho.Compare.check_blocked_issue_routing_guard(missing_source)
+
+    assert gap_evidence =~ "blocked issue routing and cancelled-blocker recovery are incomplete"
+  end
 end
