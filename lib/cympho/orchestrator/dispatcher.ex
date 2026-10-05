@@ -1706,7 +1706,16 @@ defmodule Cympho.Orchestrator.Dispatcher do
                     # Routing exclusion occurs before local capacity accounting;
                     # failed candidates do not consume local quota.
                     new_state = dispatch_issue(issue, state)
-                    {:cont, {new_state, by_co, total_slots, local_slots}}
+
+                    {:cont,
+                     record_dispatch_outcome(
+                       new_state,
+                       issue,
+                       :local_process,
+                       by_co,
+                       total_slots,
+                       local_slots
+                     )}
 
                   {:ok, agent} ->
                     case Runtime.dispatchable?(issue, agent) do
@@ -1727,7 +1736,17 @@ defmodule Cympho.Orchestrator.Dispatcher do
                         )
 
                         new_state = dispatch_issue(issue, state)
-                        {:cont, {new_state, by_co, total_slots, local_slots}}
+                        execution_class = execution_class_for_agent(agent)
+
+                        {:cont,
+                         record_dispatch_outcome(
+                           new_state,
+                           issue,
+                           execution_class,
+                           by_co,
+                           total_slots,
+                           local_slots
+                         )}
 
                       :ok ->
                         # Running/backoff/routing/preflight exclusions passed.
@@ -1743,21 +1762,15 @@ defmodule Cympho.Orchestrator.Dispatcher do
                         else
                           new_state = dispatch_issue(issue, state)
 
-                          if MapSet.member?(new_state.running_issue_ids, issue.id) do
-                            dispatched_class =
-                              Map.get(new_state.running_classes, issue.id, execution_class)
-
-                            new_local_slots =
-                              if dispatched_class == :local_process,
-                                do: max(0, local_slots - 1),
-                                else: local_slots
-
-                            {:cont,
-                             {new_state, Map.update(by_co, issue.company_id, 1, &(&1 + 1)),
-                              total_slots - 1, new_local_slots}}
-                          else
-                            {:cont, {new_state, by_co, total_slots, local_slots}}
-                          end
+                          {:cont,
+                           record_dispatch_outcome(
+                             new_state,
+                             issue,
+                             execution_class,
+                             by_co,
+                             total_slots,
+                             local_slots
+                           )}
                         end
                     end
                 end
@@ -1766,6 +1779,36 @@ defmodule Cympho.Orchestrator.Dispatcher do
         )
 
       state
+    end
+  end
+
+  defp record_dispatch_outcome(new_state, issue, fallback_class, by_co, total_slots, local_slots) do
+    if MapSet.member?(new_state.running_issue_ids, issue.id) do
+      dispatched_class = Map.get(new_state.running_classes, issue.id, fallback_class)
+
+      new_local_slots =
+        if dispatched_class == :local_process,
+          do: max(0, local_slots - 1),
+          else: local_slots
+
+      new_by_co =
+        if issue.company_id do
+          Map.update(by_co, issue.company_id, 1, &(&1 + 1))
+        else
+          by_co
+        end
+
+      {new_state, new_by_co, total_slots - 1, new_local_slots}
+    else
+      new_state =
+        if issue.company_id && Map.has_key?(new_state.retry_attempts, issue.id) do
+          new_cursors = Map.update(new_state.company_cursors, issue.company_id, 1, &(&1 + 1))
+          %{new_state | company_cursors: new_cursors}
+        else
+          new_state
+        end
+
+      {new_state, by_co, total_slots, local_slots}
     end
   end
 
@@ -2021,18 +2064,25 @@ defmodule Cympho.Orchestrator.Dispatcher do
   # globally-ordered scan with per-company progress retained across polls.
   defp fetch_candidate_issues(limit, company_id, %State{} = state, available_local_slots)
        when is_binary(company_id) do
-    start_page = Map.get(state.company_cursors, company_id, 0)
+    start_offset = Map.get(state.company_cursors, company_id, 0)
 
-    {candidates, next_page} =
+    {runnable_with_offsets, next_cursor_no_candidates} =
       fetch_runnable(
         candidate_query(company_id),
         limit,
-        start_page,
+        start_offset,
         available_local_slots,
         state
       )
 
-    new_company_cursors = Map.put(state.company_cursors, company_id, next_page)
+    new_cursor =
+      case runnable_with_offsets do
+        [] -> next_cursor_no_candidates
+        [{_first_issue, first_offset} | _] -> first_offset
+      end
+
+    candidates = Enum.map(runnable_with_offsets, fn {issue, _offset} -> issue end)
+    new_company_cursors = Map.put(state.company_cursors, company_id, new_cursor)
     {candidates, %{state | company_cursors: new_company_cursors}}
   end
 
@@ -2044,8 +2094,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
   # backlog cannot consume the window. Priority order is preserved *within* a
   # company; across companies the policy is fair share, which is the point.
   #
-  # Bounded issue scans retain per-company progress across polls so eligible
-  # gateways behind locally saturated predecessors are eventually reachable.
+  # Bounded issue scans retain per-company progress across polls in stable row units
+  # so eligible gateways behind locally saturated predecessors are eventually reachable.
+  # Prefetched candidates that are not considered do not advance the cursor.
   defp fetch_candidate_issues(limit, nil, %State{} = state, available_local_slots) do
     per_company = per_company_window(limit)
 
@@ -2053,18 +2104,25 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
     {candidate_groups, new_company_cursors} =
       Enum.map_reduce(company_ids, state.company_cursors, fn company_id, cursors ->
-        start_page = Map.get(cursors, company_id, 0)
+        start_offset = Map.get(cursors, company_id, 0)
 
-        {runnable, next_page} =
+        {runnable_with_offsets, next_cursor_no_candidates} =
           fetch_runnable(
             candidate_query(company_id),
             per_company,
-            start_page,
+            start_offset,
             available_local_slots,
             state
           )
 
-        {runnable, Map.put(cursors, company_id, next_page)}
+        new_cursor =
+          case runnable_with_offsets do
+            [] -> next_cursor_no_candidates
+            [{_first_issue, first_offset} | _] -> first_offset
+          end
+
+        issues = Enum.map(runnable_with_offsets, fn {issue, _offset} -> issue end)
+        {issues, Map.put(cursors, company_id, new_cursor)}
       end)
 
     candidates =
@@ -2075,15 +2133,14 @@ defmodule Cympho.Orchestrator.Dispatcher do
     {candidates, %{state | company_cursors: new_company_cursors}}
   end
 
-  defp fetch_runnable(query, limit, start_page, available_local_slots, state) do
+  defp fetch_runnable(query, limit, start_offset, available_local_slots, state) do
     now = :os.system_time(:millisecond)
 
     Enum.reduce_while(
       0..(@candidate_pages - 1),
-      {[], start_page},
+      {[], start_offset},
       fn page_offset, {acc, _cursor} ->
-        current_page = start_page + page_offset
-        offset = current_page * limit
+        offset = start_offset + page_offset * limit
 
         rows =
           query
@@ -2093,7 +2150,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
         page_runnable =
           rows
-          |> Enum.filter(fn issue ->
+          |> Enum.with_index()
+          |> Enum.filter(fn {issue, _idx} ->
             runnable_candidate?(issue) and
               not MapSet.member?(state.running_issue_ids, issue.id) and
               not match?(
@@ -2102,15 +2160,16 @@ defmodule Cympho.Orchestrator.Dispatcher do
               ) and
               not locally_saturated?(issue, available_local_slots)
           end)
+          |> Enum.map(fn {issue, idx} -> {issue, offset + idx} end)
 
         runnable =
           (acc ++ page_runnable)
-          |> Enum.uniq_by(& &1.id)
+          |> Enum.uniq_by(fn {issue, _offset} -> issue.id end)
 
         cond do
           # Enough to fill the slots this poll can use.
           length(runnable) >= limit ->
-            next_p = if length(rows) < limit, do: 0, else: current_page + 1
+            next_p = if length(rows) < limit, do: 0, else: offset + limit
             {:halt, {Enum.take(runnable, limit), next_p}}
 
           # Short page means the candidate set is exhausted.
@@ -2118,8 +2177,12 @@ defmodule Cympho.Orchestrator.Dispatcher do
             # Exhaustion-wrap: wrap cursor back to 0.
             {:halt, {runnable, 0}}
 
+          page_offset == @candidate_pages - 1 ->
+            # Reached candidate page scan bound
+            {:halt, {runnable, offset + limit}}
+
           true ->
-            {:cont, {runnable, current_page + 1}}
+            {:cont, {runnable, offset + limit}}
         end
       end
     )

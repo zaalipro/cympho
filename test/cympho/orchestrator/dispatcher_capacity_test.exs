@@ -537,9 +537,9 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
 
         assert Issues.get_issue!(gateway_issue.id).status == :todo
         refute MapSet.member?(poll_1_state.running_issue_ids, gateway_issue.id)
-        assert poll_1_state.company_cursors[company.id] == 5
+        assert poll_1_state.company_cursors[company.id] == 20
 
-        # Second poll resumes at page 5 and reaches the gateway candidate at position 21!
+        # Second poll resumes at offset 20 and reaches the gateway candidate at position 21!
         assert {:noreply, %State{} = poll_2_state} =
                  Dispatcher.handle_info({:poll_company, company.id}, poll_1_state)
 
@@ -791,26 +791,26 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
          } do
       unique = System.unique_integer([:positive])
 
-      # Agent with governance_status "paused" so preflight fails with {:agent_governance_blocked, "paused"}
-      {:ok, paused_agent} =
+      # Agent with governance active so routing succeeds, but preflight fails at Runtime.dispatchable?/2
+      {:ok, preflight_agent} =
         Agents.create_agent(%{
-          name: "Paused Agent #{unique}",
+          name: "Preflight Fail Agent #{unique}",
           role: "engineer",
           status: :idle,
-          governance_status: "paused",
+          governance_status: "active",
           company_id: company.id,
           adapter: :claude_code
         })
 
-      # Candidate 1: Assigned to paused agent
+      # Candidate 1: Passes routing, fails preflight
       {:ok, preflight_fail_issue} =
         Issues.create_issue(%{
           title: "Preflight Fail Issue",
-          description: "Agent paused",
+          description: "Preflight fails",
           status: :todo,
           priority: :critical,
           company_id: company.id,
-          assignee_id: paused_agent.id,
+          assignee_id: preflight_agent.id,
           assigned_role: "engineer"
         })
 
@@ -831,21 +831,350 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
 
       with_mock Adapters,
         resolve: fn %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}} end do
-        assert {:noreply, %State{} = after_poll} =
-                 Dispatcher.handle_info({:poll_company, company.id}, state)
+        with_mock Cympho.Runtime, [:passthrough],
+          dispatchable?: fn issue, agent ->
+            if issue.id == preflight_fail_issue.id do
+              {:error, :preflight_budget_exceeded}
+            else
+              passthrough([issue, agent])
+            end
+          end do
+          assert {:noreply, %State{} = after_poll} =
+                   Dispatcher.handle_info({:poll_company, company.id}, state)
 
-        # Preflight failed issue did not run and was scheduled for retry
-        assert Issues.get_issue!(preflight_fail_issue.id).status == :todo
-        refute MapSet.member?(after_poll.running_issue_ids, preflight_fail_issue.id)
-        assert after_poll.retry_attempts[preflight_fail_issue.id] != nil
+          # Preflight failed issue did not run and was scheduled for retry
+          assert Issues.get_issue!(preflight_fail_issue.id).status == :todo
+          refute MapSet.member?(after_poll.running_issue_ids, preflight_fail_issue.id)
+          assert after_poll.retry_attempts[preflight_fail_issue.id] != nil
 
-        # Ready issue was dispatched!
-        assert Issues.get_issue!(ready_issue.id).status == :in_progress
-        assert MapSet.member?(after_poll.running_issue_ids, ready_issue.id)
-        assert Dispatcher.count_running_local_processes(after_poll) == 1
+          # Ready issue was dispatched!
+          assert Issues.get_issue!(ready_issue.id).status == :in_progress
+          assert MapSet.member?(after_poll.running_issue_ids, ready_issue.id)
+          assert Dispatcher.count_running_local_processes(after_poll) == 1
 
-        assert_receive {:adapter_called, :local, session_id}, 1_000
-        stop_and_wait_session(ready_issue.id, session_id)
+          assert_receive {:adapter_called, :local, session_id}, 1_000
+          stop_and_wait_session(ready_issue.id, session_id)
+        end
+      end
+    end
+
+    test "alternating global and company polls with differing windows do not starve gateway candidate",
+         %{
+           admission: admission,
+           company: company,
+           local_agent: local_agent,
+           gateway_agent: gateway_agent
+         } do
+      # Occupy local slot (total limit: 2, local limit: 1 -> 1 total slot free, 0 local slots free)
+      assert {:ok, held_token} = RuntimeAdmission.checkout(LocalAdapter, admission)
+
+      # In global poll with 1 slot free, limit is 4 and per_company_window is 1 (page size is 1).
+      # Create 5 local issues ahead of gateway (5 pages of size 1 = 5 issues)
+      local_issues =
+        for i <- 1..5 do
+          {:ok, issue} =
+            Issues.create_issue(%{
+              title: "Global local issue #{i}",
+              description: "Local",
+              status: :todo,
+              priority: :critical,
+              company_id: company.id,
+              assignee_id: local_agent.id,
+              assigned_role: "engineer"
+            })
+
+          issue
+        end
+
+      # Create 1 gateway issue at position 6 (offset 5)
+      {:ok, gateway_issue} =
+        Issues.create_issue(%{
+          title: "Gateway issue at offset 5",
+          description: "Gateway",
+          status: :todo,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: gateway_agent.id,
+          assigned_role: "product_manager"
+        })
+
+      state = State.new(runtime_admission_server: admission)
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn
+          %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}}
+          %{adapter: :http} -> {:ok, GatewayAdapter, %{test_pid: test_pid}}
+        end do
+        # Poll 1 is a global poll. It scans 5 pages of size 1 (offsets 0..4, all 5 local issues).
+        # None are dispatched because local capacity is full.
+        assert {:noreply, %State{} = poll_1_state} =
+                 Dispatcher.handle_info(:poll, state)
+
+        for issue <- local_issues do
+          assert Issues.get_issue!(issue.id).status == :todo
+          refute MapSet.member?(poll_1_state.running_issue_ids, issue.id)
+        end
+
+        assert Issues.get_issue!(gateway_issue.id).status == :todo
+        refute MapSet.member?(poll_1_state.running_issue_ids, gateway_issue.id)
+
+        # Poll 2 is a company poll (limit is 4).
+        # With row-based progress, it resumes at offset 5 (inspecting the gateway candidate)
+        # rather than multiplying page 5 * 4 = offset 20 (which would skip the gateway and wrap to 0).
+        assert {:noreply, %State{} = poll_2_state} =
+                 Dispatcher.handle_info({:poll_company, company.id}, poll_1_state)
+
+        assert Issues.get_issue!(gateway_issue.id).status == :in_progress
+        assert MapSet.member?(poll_2_state.running_issue_ids, gateway_issue.id)
+        assert_receive {:adapter_called, :gateway, session_id}, 1_000
+        stop_and_wait_session(gateway_issue.id, session_id)
+
+        assert :ok = RuntimeAdmission.release(held_token, admission)
+      end
+    end
+
+    test "two-company rotation and slot exhaustion do not advance past prefetched but unconsidered gateways",
+         %{
+           admission: admission,
+           company: company_a
+         } do
+      # Create company B
+      unique = System.unique_integer([:positive])
+
+      {:ok, company_b} =
+        Companies.create_company(%{
+          name: "Company B #{unique}",
+          slug: "company-b-#{unique}",
+          description: "Company B"
+        })
+
+      # Ensure co_a.id < co_b.id so on poll_cursor 0, co_a leads
+      {co_a, co_b} =
+        if company_a.id < company_b.id do
+          {company_a, company_b}
+        else
+          {company_b, company_a}
+        end
+
+      {:ok, gw_agent_a} =
+        Agents.create_agent(%{
+          name: "GW Agent A #{unique}",
+          role: "product_manager",
+          status: :idle,
+          company_id: co_a.id,
+          adapter: :http
+        })
+
+      {:ok, gw_agent_b} =
+        Agents.create_agent(%{
+          name: "GW Agent B #{unique}",
+          role: "product_manager",
+          status: :idle,
+          company_id: co_b.id,
+          adapter: :http
+        })
+
+      {:ok, loc_agent_b} =
+        Agents.create_agent(%{
+          name: "Local Agent B #{unique}",
+          role: "engineer",
+          status: :idle,
+          company_id: co_b.id,
+          adapter: :claude_code
+        })
+
+      # Occupy local slot (total limit: 2, local limit: 1 -> 1 total slot free, 0 local slots free)
+      assert {:ok, held_token} = RuntimeAdmission.checkout(LocalAdapter, admission)
+
+      # Company A has 1 eligible gateway issue
+      {:ok, issue_a} =
+        Issues.create_issue(%{
+          title: "Gateway Issue A",
+          description: "Gateway A",
+          status: :todo,
+          priority: :critical,
+          company_id: co_a.id,
+          assignee_id: gw_agent_a.id,
+          assigned_role: "product_manager"
+        })
+
+      # Company B has ordered queue: [eligible gateway, saturated local, saturated local]
+      {:ok, issue_b_gw} =
+        Issues.create_issue(%{
+          title: "Gateway Issue B",
+          description: "Gateway B",
+          status: :todo,
+          priority: :critical,
+          company_id: co_b.id,
+          assignee_id: gw_agent_b.id,
+          assigned_role: "product_manager"
+        })
+
+      {:ok, _issue_b_loc1} =
+        Issues.create_issue(%{
+          title: "Local Issue B 1",
+          description: "Local B 1",
+          status: :todo,
+          priority: :high,
+          company_id: co_b.id,
+          assignee_id: loc_agent_b.id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, _issue_b_loc2} =
+        Issues.create_issue(%{
+          title: "Local Issue B 2",
+          description: "Local B 2",
+          status: :todo,
+          priority: :high,
+          company_id: co_b.id,
+          assignee_id: loc_agent_b.id,
+          assigned_role: "engineer"
+        })
+
+      # Start with poll_cursor: 0 so company A leads in global poll
+      state = %{State.new(runtime_admission_server: admission) | poll_cursor: 0}
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn
+          %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}}
+          %{adapter: :http} -> {:ok, GatewayAdapter, %{test_pid: test_pid}}
+        end do
+        # Poll 1 (A leads):
+        # A's gateway is fetched and fills the 1 free slot.
+        # B's gateway is prefetched, but not considered because total slots is exhausted by A.
+        assert {:noreply, %State{} = poll_1_state} =
+                 Dispatcher.handle_info(:poll, state)
+
+        assert Issues.get_issue!(issue_a.id).status == :in_progress
+        assert MapSet.member?(poll_1_state.running_issue_ids, issue_a.id)
+
+        assert Issues.get_issue!(issue_b_gw.id).status == :todo
+        refute MapSet.member?(poll_1_state.running_issue_ids, issue_b_gw.id)
+
+        assert_receive {:adapter_called, :gateway, session_a}, 1_000
+        stop_and_wait_session(issue_a.id, session_a)
+
+        # Clear running status from state so slot is free for poll 2
+        poll_1_state = %{
+          poll_1_state
+          | running_issue_ids: MapSet.delete(poll_1_state.running_issue_ids, issue_a.id),
+            running_classes: Map.delete(poll_1_state.running_classes, issue_a.id)
+        }
+
+        # Poll 2 (B leads):
+        # Because B's gateway was not considered in Poll 1, B's cursor must NOT have advanced
+        # past issue_b_gw. On B's turn, B's gateway is considered and dispatched!
+        assert {:noreply, %State{} = poll_2_state} =
+                 Dispatcher.handle_info(:poll, poll_1_state)
+
+        assert Issues.get_issue!(issue_b_gw.id).status == :in_progress
+        assert MapSet.member?(poll_2_state.running_issue_ids, issue_b_gw.id)
+
+        assert_receive {:adapter_called, :gateway, session_b}, 1_000
+        stop_and_wait_session(issue_b_gw.id, session_b)
+
+        assert :ok = RuntimeAdmission.release(held_token, admission)
+      end
+    end
+
+    test "successful dispatch on preview-error retry branch updates company concurrency counters",
+         %{
+           admission: admission
+         } do
+      unique = System.unique_integer([:positive])
+
+      # Company with max_concurrent_runs = 1
+      {:ok, capped_company} =
+        Companies.create_company(%{
+          name: "Capped Company #{unique}",
+          slug: "capped-company-#{unique}",
+          governance_config: %{"limits" => %{"max_concurrent_runs" => 1}}
+        })
+
+      {:ok, gw_agent_1} =
+        Agents.create_agent(%{
+          name: "GW Agent 1 #{unique}",
+          role: "product_manager",
+          status: :idle,
+          company_id: capped_company.id,
+          adapter: :http
+        })
+
+      {:ok, gw_agent_2} =
+        Agents.create_agent(%{
+          name: "GW Agent 2 #{unique}",
+          role: "product_manager",
+          status: :idle,
+          company_id: capped_company.id,
+          adapter: :http
+        })
+
+      {:ok, issue_1} =
+        Issues.create_issue(%{
+          title: "Preview Error Candidate 1",
+          description: "Gateway 1",
+          status: :todo,
+          priority: :critical,
+          company_id: capped_company.id,
+          assignee_id: gw_agent_1.id,
+          assigned_role: "product_manager"
+        })
+
+      {:ok, issue_2} =
+        Issues.create_issue(%{
+          title: "Candidate 2",
+          description: "Gateway 2",
+          status: :todo,
+          priority: :high,
+          company_id: capped_company.id,
+          assignee_id: gw_agent_2.id,
+          assigned_role: "product_manager"
+        })
+
+      # We simulate a situation where preview_agent_for_issue on issue_1 returns error
+      # (e.g. transient routing failure during preview), but dispatch_issue succeeds.
+      state = State.new(runtime_admission_server: admission)
+      test_pid = self()
+
+      preview_call_count = :atomics.new(1, [])
+
+      with_mock Adapters,
+        resolve: fn %{adapter: :http} -> {:ok, GatewayAdapter, %{test_pid: test_pid}} end do
+        with_mock Agents, [:passthrough],
+          governance_active?: fn agent ->
+            count = :atomics.add_get(preview_call_count, 1, 1)
+
+            if count == 1 and agent.id == gw_agent_1.id do
+              false
+            else
+              passthrough([agent])
+            end
+          end do
+          assert {:noreply, %State{} = after_poll} =
+                   Dispatcher.handle_info({:poll_company, capped_company.id}, state)
+
+          # Issue 1 succeeded in dispatching despite preview error
+          assert Issues.get_issue!(issue_1.id).status == :in_progress
+          assert MapSet.member?(after_poll.running_issue_ids, issue_1.id)
+
+          assert_receive {:adapter_called, :gateway, session_1}, 1_000
+          stop_and_wait_session(issue_1.id, session_1)
+
+          receive do
+            {:adapter_called, :gateway, session_2} ->
+              stop_and_wait_session(issue_2.id, session_2)
+          after
+            50 -> :ok
+          end
+
+          # Crucially, issue 2 MUST NOT have dispatched in this poll because capped_company
+          # has max_concurrent_runs: 1, and issue 1's dispatch updated by_co!
+          assert Issues.get_issue!(issue_2.id).status == :todo
+          refute MapSet.member?(after_poll.running_issue_ids, issue_2.id)
+        end
       end
     end
 
