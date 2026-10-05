@@ -525,4 +525,393 @@ defmodule Cympho.AgentPromptBudgetTest do
       assert ceo_prompt =~ "lead-owner-99"
     end
   end
+
+  describe "required-human-feedback-selection-repair" do
+    test "timestamp/ID merges do not crash with DateTime comparator on tuples when multiple review comments exist",
+         %{issue: issue, engineer: engineer} do
+      # 1. Human review comment placed early
+      {:ok, _human_c} =
+        Comments.create_comment(%{
+          body: "[review] Critical human review comment that must be preserved.",
+          author_type: "user",
+          author_id: "reviewer-human-1",
+          issue_id: issue.id
+        })
+
+      # 2. Add 205 filler comments from an agent (exceeding the 200 limit of load_review_comments)
+      for i <- 1..205 do
+        {:ok, _} =
+          Comments.create_comment(%{
+            body: "[delivery] Routine progress #{i}.",
+            author_type: "agent",
+            author_id: engineer.id,
+            issue_id: issue.id
+          })
+      end
+
+      # 3. Later agent review comment within the 200 window
+      {:ok, _agent_c} =
+        Comments.create_comment(%{
+          body: "[review] QA bot review note within 200 window.",
+          author_type: "agent",
+          author_id: "qa-bot",
+          issue_id: issue.id
+        })
+
+      # This triggers the merge path of [latest_human | review_comments] with >= 2 elements.
+      # Must not crash with FunctionClauseError on DateTime comparator.
+      prompt = AgentPrompt.build(issue, engineer.id)
+      assert prompt =~ "reviewer-human-1"
+      assert prompt =~ "Critical human review comment that must be preserved."
+
+      # In-memory comments path: issue with 2 user comments must not crash line 1889
+      in_mem_issue = %{
+        id: "mem-issue-#{System.unique_integer([:positive])}",
+        comments: [
+          %Comments.Comment{
+            id: "11111111-1111-1111-1111-111111111111",
+            inserted_at: ~U[2026-10-01 10:00:00Z],
+            author_type: "user",
+            author_id: "u1",
+            body: "[review] Note 1"
+          },
+          %Comments.Comment{
+            id: "22222222-2222-2222-2222-222222222222",
+            inserted_at: ~U[2026-10-01 11:00:00Z],
+            author_type: "user",
+            author_id: "u2",
+            body: "[review] Note 2"
+          }
+        ]
+      }
+
+      sections_mem = AgentPrompt.build_sections(in_mem_issue, engineer.id)
+      assert is_list(sections_mem)
+    end
+
+    test "generic untagged human conversation cannot supersede required human review feedback", %{
+      issue: issue,
+      engineer: engineer,
+      ceo: ceo,
+      cto: cto
+    } do
+      # 1. User posts a required review feedback comment
+      {:ok, _required_comment} =
+        Comments.create_comment(%{
+          body: "[review] Please fix the auth token validation bug before merging.",
+          author_type: "user",
+          author_id: "reviewer-alice",
+          issue_id: issue.id
+        })
+
+      # 2. User later posts several generic untagged conversational comments
+      generic_comments = [
+        "Good morning team, let's sync up on Zoom at 10am.",
+        "I changed my schedule for tomorrow so I will be available afternoon.",
+        "Thanks for the update, looks promising so far.",
+        "Can you request access to the staging database for me?",
+        "For that reason I was late to the standup.",
+        "The prefix is fixed on master branch now.",
+        "Let's review the customer feedback notes from yesterday."
+      ]
+
+      for body <- generic_comments do
+        {:ok, _} =
+          Comments.create_comment(%{
+            body: body,
+            author_type: "user",
+            author_id: "reviewer-alice",
+            issue_id: issue.id
+          })
+      end
+
+      # For Engineer: prompt's latest review feedback MUST be the required review comment,
+      # NOT any of the generic untagged comments!
+      sections = AgentPrompt.build_sections(issue, engineer.id)
+      latest_review = Enum.find(sections, &(&1.id == :latest_review_feedback))
+      older_review = Enum.find(sections, &(&1.id == :older_review_feedback))
+
+      assert latest_review != nil
+      assert latest_review.content =~ "Please fix the auth token validation bug before merging."
+      refute latest_review.content =~ "Good morning team"
+      refute latest_review.content =~ "I changed my schedule"
+      refute latest_review.content =~ "Thanks for the update"
+
+      # Generic conversation must not be classified as older review feedback either
+      if older_review do
+        refute older_review.content =~ "Good morning team"
+        refute older_review.content =~ "I changed my schedule"
+      end
+
+      # Open review feedback block for engineer must preserve the required reason, not generic conversation
+      review_block = AgentPrompt.open_review_feedback_block(issue, :engineer)
+      assert review_block =~ "Please fix the auth token validation bug before merging."
+      refute review_block =~ "Good morning team"
+      refute review_block =~ "I changed my schedule"
+
+      # For CEO: only required human review feedback is shown
+      ceo_sections = AgentPrompt.build_sections(issue, ceo.id)
+      ceo_latest = Enum.find(ceo_sections, &(&1.id == :latest_review_feedback))
+      assert ceo_latest != nil
+      assert ceo_latest.content =~ "Please fix the auth token validation bug before merging."
+      refute ceo_latest.content =~ "Good morning team"
+
+      # For CTO: only required human review feedback is shown
+      cto_sections = AgentPrompt.build_sections(issue, cto.id)
+      cto_latest = Enum.find(cto_sections, &(&1.id == :latest_review_feedback))
+      assert cto_latest != nil
+      assert cto_latest.content =~ "Please fix the auth token validation bug before merging."
+      refute cto_latest.content =~ "Good morning team"
+
+      # Under budget pressure trimming optional history comments, required review feedback survives
+      # while generic conversation from history is trimmed
+      budget = 24_000
+
+      {:ok, trimmed_prompt, meta} =
+        AgentPrompt.build_budgeted(issue, engineer.id, input_budget_bytes: budget)
+
+      assert meta.delivered_bytes <= budget
+      assert trimmed_prompt =~ "Please fix the auth token validation bug before merging."
+      refute trimmed_prompt =~ "Good morning team"
+      refute trimmed_prompt =~ "I changed my schedule"
+    end
+
+    test "supported actual untagged requests remain recognized as required human feedback", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      # User posts an untagged comment that is an actual change request
+      untagged_request =
+        "Changes requested: please validate the input schema in the controller and add tests."
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          body: untagged_request,
+          author_type: "user",
+          author_id: "reviewer-bob",
+          issue_id: issue.id
+        })
+
+      # The untagged change request must be recognized as latest review feedback
+      prompt = AgentPrompt.build(issue, engineer.id)
+      assert prompt =~ "Open review feedback"
+      assert prompt =~ "reviewer-bob"
+      assert prompt =~ "Changes requested: please validate the input schema in the controller"
+
+      # Another supported untagged format: "Please fix ..."
+      another_untagged =
+        "Please fix the memory leak in the dispatcher loop before opening PR."
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          body: another_untagged,
+          author_type: "user",
+          author_id: "reviewer-charlie",
+          issue_id: issue.id
+        })
+
+      prompt_updated = AgentPrompt.build(issue, engineer.id)
+      assert prompt_updated =~ "reviewer-charlie"
+      assert prompt_updated =~ "Please fix the memory leak in the dispatcher loop"
+    end
+
+    test "predicates run before caps: 55 generic user comments cannot hide required review feedback",
+         %{issue: issue, engineer: engineer} do
+      # 1. Required human review comment posted first
+      {:ok, _required} =
+        Comments.create_comment(%{
+          body: "[review] Critical changes requested: sanitize SQL input and prevent injection.",
+          author_type: "user",
+          author_id: "sec-auditor-1",
+          issue_id: issue.id
+        })
+
+      # 2. Add 55 generic user comments after the required review comment (exceeding old limit(50) cap)
+      for i <- 1..55 do
+        {:ok, _} =
+          Comments.create_comment(%{
+            body: "Generic status check note #{i} from user.",
+            author_type: "user",
+            author_id: "chatty-user",
+            issue_id: issue.id
+          })
+      end
+
+      # Must still find and protect the required review comment, NOT return nil or lose it!
+      prompt = AgentPrompt.build(issue, engineer.id)
+      assert prompt =~ "Open review feedback"
+      assert prompt =~ "sec-auditor-1"
+      assert prompt =~ "Critical changes requested: sanitize SQL input and prevent injection."
+    end
+
+    test "CEO owner revision query survives 55 generic user comments without being hidden by cap",
+         %{issue: issue, ceo: ceo} do
+      revision_body =
+        "[review] Verdict: changes requested. What happened: owner reopened the CEO verification update for revision. Evidence inspected: missing metrics."
+
+      {:ok, _rev} =
+        Comments.create_comment(%{
+          body: revision_body,
+          author_type: "user",
+          author_id: "lead-owner-1",
+          issue_id: issue.id
+        })
+
+      # Add 55 generic user comments after the owner revision
+      for i <- 1..55 do
+        {:ok, _} =
+          Comments.create_comment(%{
+            body: "Generic question #{i} about the project.",
+            author_type: "user",
+            author_id: "user-1",
+            issue_id: issue.id
+          })
+      end
+
+      # CEO prompt must preserve the Owner revision request block
+      ceo_prompt = AgentPrompt.build(issue, ceo.id)
+      assert ceo_prompt =~ "Owner revision request"
+      assert ceo_prompt =~ "focused CEO revision"
+      assert ceo_prompt =~ revision_body
+    end
+
+    test "complete multiline attributed reason survives later deliveries, 200-comment bounds and engineer/CEO/CTO merge paths",
+         %{issue: issue, engineer: engineer, ceo: ceo, cto: cto} do
+      multiline_reason = """
+      [review] Critical rework required across leadership and delivery:
+      1. Engineer must address potential SQL injection in query builder.
+      2. CEO must approve the revised resource budget allocation.
+      3. CTO must sign off on the new schema migration plan.
+      Evidence inspected: PR #42, logs, test suite output.
+      Verification: All test cases must pass on test database.
+      """
+
+      {:ok, _human_comment} =
+        Comments.create_comment(%{
+          body: multiline_reason,
+          author_type: "user",
+          author_id: "lead-reviewer-12345678-abcd",
+          issue_id: issue.id
+        })
+
+      # Add 205 delivery comments from an agent (exceeding 200 comments)
+      for i <- 1..205 do
+        {:ok, _} =
+          Comments.create_comment(%{
+            body: "[delivery] Code changes delivered for cycle #{i}.",
+            author_type: "agent",
+            author_id: engineer.id,
+            issue_id: issue.id
+          })
+      end
+
+      # Add a later agent review comment inside the 200 window
+      {:ok, _agent_review} =
+        Comments.create_comment(%{
+          body: "[review] Automated linter check passed with 0 warnings.",
+          author_type: "agent",
+          author_id: "ci-bot",
+          issue_id: issue.id
+        })
+
+      # 1. Engineer prompt: latest_review_feedback is the full human multiline reason with attribution
+      eng_sections = AgentPrompt.build_sections(issue, engineer.id)
+      eng_latest = Enum.find(eng_sections, &(&1.id == :latest_review_feedback))
+      assert eng_latest != nil
+      assert eng_latest.type == :protected
+      assert eng_latest.content =~ "lead-rev"
+      assert eng_latest.content =~ "Critical rework required across leadership and delivery:"
+
+      assert eng_latest.content =~
+               "1. Engineer must address potential SQL injection in query builder."
+
+      assert eng_latest.content =~ "2. CEO must approve the revised resource budget allocation."
+      assert eng_latest.content =~ "3. CTO must sign off on the new schema migration plan."
+      assert eng_latest.content =~ "Evidence inspected: PR #42, logs, test suite output."
+      assert eng_latest.content =~ "Verification: All test cases must pass on test database."
+
+      # Older review feedback has the agent comment
+      eng_older = Enum.find(eng_sections, &(&1.id == :older_review_feedback))
+      assert eng_older != nil
+      assert eng_older.type == :optional
+      assert eng_older.content =~ "Automated linter check passed with 0 warnings."
+
+      # 2. CEO prompt: latest_review_feedback is the human multiline reason
+      ceo_sections = AgentPrompt.build_sections(issue, ceo.id)
+      ceo_latest = Enum.find(ceo_sections, &(&1.id == :latest_review_feedback))
+      assert ceo_latest != nil
+      assert ceo_latest.type == :protected
+      assert ceo_latest.content =~ "lead-rev"
+      assert ceo_latest.content =~ "Critical rework required across leadership and delivery:"
+      assert ceo_latest.content =~ "2. CEO must approve the revised resource budget allocation."
+
+      # 3. CTO prompt: latest_review_feedback is the human multiline reason
+      cto_sections = AgentPrompt.build_sections(issue, cto.id)
+      cto_latest = Enum.find(cto_sections, &(&1.id == :latest_review_feedback))
+      assert cto_latest != nil
+      assert cto_latest.type == :protected
+      assert cto_latest.content =~ "lead-rev"
+      assert cto_latest.content =~ "Critical rework required across leadership and delivery:"
+      assert cto_latest.content =~ "3. CTO must sign off on the new schema migration plan."
+
+      # 4. Under budget pressure trimming optional history: full multiline reason survives
+      {:ok, full_prompt, _} =
+        AgentPrompt.build_budgeted(issue, engineer.id, input_budget_bytes: 200_000)
+
+      budget = byte_size(full_prompt) - 800
+
+      {:ok, trimmed_prompt, meta} =
+        AgentPrompt.build_budgeted(issue, engineer.id, input_budget_bytes: budget)
+
+      assert meta.delivered_bytes <= budget
+      assert trimmed_prompt =~ "lead-rev"
+      assert trimmed_prompt =~ "Critical rework required across leadership and delivery:"
+
+      assert trimmed_prompt =~
+               "1. Engineer must address potential SQL injection in query builder."
+
+      assert trimmed_prompt =~ "2. CEO must approve the revised resource budget allocation."
+      assert trimmed_prompt =~ "3. CTO must sign off on the new schema migration plan."
+
+      # 5. Protected overflow remains explicit
+      assert {:error, {:prompt_input_budget_exceeded, details}} =
+               AgentPrompt.build_budgeted(issue, engineer.id, input_budget_bytes: 300)
+
+      assert details.budget_bytes == 300
+      assert details.excess_bytes > 0
+    end
+
+    test "deterministic timestamp/ID ordering selects newest reason when multiple change requests exist",
+         %{issue: issue, engineer: engineer} do
+      # Two change requests at distinct timestamps
+      {:ok, _c1} =
+        Comments.create_comment(%{
+          body: "[review] First change request: fix database pool.",
+          author_type: "user",
+          author_id: "reviewer-1",
+          issue_id: issue.id
+        })
+
+      {:ok, _c2} =
+        Comments.create_comment(%{
+          body: "[review] Second change request: fix timeout handling.",
+          author_type: "user",
+          author_id: "reviewer-2",
+          issue_id: issue.id
+        })
+
+      sections = AgentPrompt.build_sections(issue, engineer.id)
+      latest = Enum.find(sections, &(&1.id == :latest_review_feedback))
+      older = Enum.find(sections, &(&1.id == :older_review_feedback))
+
+      # The newest (c2) must be latest_review_feedback
+      assert latest.content =~ "Second change request: fix timeout handling."
+      assert latest.content =~ "reviewer-2"
+
+      # The older (c1) must be in older_review_feedback
+      assert older != nil
+      assert older.content =~ "First change request: fix database pool."
+      assert older.content =~ "reviewer-1"
+    end
+  end
 end

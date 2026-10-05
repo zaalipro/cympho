@@ -1632,11 +1632,7 @@ defmodule Cympho.AgentPrompt do
           review_comments
 
         true ->
-          Enum.sort_by(
-            [latest_human | review_comments],
-            &{&1.inserted_at, &1.id},
-            {:asc, DateTime}
-          )
+          sort_comments_asc([latest_human | review_comments])
       end
 
     case role do
@@ -1773,11 +1769,7 @@ defmodule Cympho.AgentPrompt do
           review_comments
 
         true ->
-          Enum.sort_by(
-            [latest_human | review_comments],
-            &{&1.inserted_at, &1.id},
-            {:asc, DateTime}
-          )
+          sort_comments_asc([latest_human | review_comments])
       end
 
     case role do
@@ -1876,7 +1868,7 @@ defmodule Cympho.AgentPrompt do
   defp load_review_comments(%{id: id}) when is_binary(id), do: load_review_comments(id)
   defp load_review_comments(_), do: []
 
-  defp load_latest_required_human_comment(%{id: id} = issue) when is_binary(id) do
+  defp load_latest_required_human_comment(%{id: id} = issue) when is_binary(id) and id != "" do
     case query_latest_required_human_comment(id) do
       %Comment{} = comment ->
         comment
@@ -1885,9 +1877,9 @@ defmodule Cympho.AgentPrompt do
         case Map.get(issue, :comments) do
           comments when is_list(comments) ->
             comments
-            |> Enum.filter(&(&1.author_type == "user"))
-            |> Enum.sort_by(&{&1.inserted_at, &1.id}, {:desc, DateTime})
-            |> Enum.find(&required_human_feedback?/1)
+            |> Enum.filter(&(&1.author_type == "user" and required_human_feedback?(&1)))
+            |> sort_comments_desc()
+            |> List.first()
 
           _ ->
             nil
@@ -1895,7 +1887,14 @@ defmodule Cympho.AgentPrompt do
     end
   end
 
-  defp load_latest_required_human_comment(issue_id) when is_binary(issue_id) do
+  defp load_latest_required_human_comment(%{comments: comments}) when is_list(comments) do
+    comments
+    |> Enum.filter(&(&1.author_type == "user" and required_human_feedback?(&1)))
+    |> sort_comments_desc()
+    |> List.first()
+  end
+
+  defp load_latest_required_human_comment(issue_id) when is_binary(issue_id) and issue_id != "" do
     query_latest_required_human_comment(issue_id)
   end
 
@@ -1905,28 +1904,98 @@ defmodule Cympho.AgentPrompt do
     Comment
     |> where([c], c.issue_id == ^issue_id and c.author_type == "user")
     |> order_by([c], desc: c.inserted_at, desc: c.id)
-    |> limit(50)
     |> Repo.all()
     |> Enum.find(&required_human_feedback?/1)
   rescue
     _ -> nil
   end
 
+  @actual_review_request_tags [
+    "[review]",
+    "[request changes]",
+    "[request_changes]",
+    "[changes requested]",
+    "[rework]",
+    "[revision]",
+    "[reject]",
+    "[rejected]"
+  ]
+
+  @actual_review_request_prefixes [
+    "review:",
+    "request changes:",
+    "changes requested:",
+    "rework:",
+    "revision:",
+    "change request:",
+    "verdict: changes requested",
+    "verdict: rejected",
+    "verdict: rework"
+  ]
+
+  @actual_review_request_phrases [
+    "request changes",
+    "requested changes",
+    "requesting changes",
+    "request change",
+    "change request",
+    "changes requested",
+    "changes required",
+    "changes needed",
+    "rework required",
+    "rework needed",
+    "please rework",
+    "needs rework",
+    "executive rework",
+    "technical rework",
+    "revision requested",
+    "revision needed",
+    "needs revision",
+    "please revise",
+    "verdict: changes requested",
+    "verdict: rejected",
+    "verdict: rework",
+    "please fix",
+    "needs to be fixed",
+    "needs fixing",
+    "needs fix",
+    "reopen the issue",
+    "reopening for changes",
+    "reopened for revision",
+    "reopened for rework",
+    "not approved",
+    "cannot approve",
+    "can't approve",
+    "action required",
+    "action needed",
+    "required human feedback",
+    "required review feedback",
+    "review feedback",
+    "reviewer feedback",
+    "review notes",
+    "reviewer notes"
+  ]
+
   defp required_human_feedback?(%Comment{author_type: "user"} = comment) do
     text = (comment.body || "") |> String.downcase()
 
     owner_revision_comment?(comment) or
-      review_feedback_comment?(comment) or
-      String.contains?(text, "feedback") or
-      String.contains?(text, "request") or
-      String.contains?(text, "reason") or
-      String.contains?(text, "fix") or
-      String.contains?(text, "reject") or
-      String.contains?(text, "reopen") or
-      IssueDigest.comment_category(comment) in [:review, :owner_input, :owner_update, :decision]
+      Enum.any?(@actual_review_request_tags, &String.contains?(text, &1)) or
+      Enum.any?(@actual_review_request_prefixes, &String.starts_with?(text, &1)) or
+      Enum.any?(@actual_review_request_phrases, &String.contains?(text, &1)) or
+      (IssueDigest.comment_category(comment) == :review and not generic_human_conversation?(text))
   end
 
   defp required_human_feedback?(_), do: false
+
+  defp generic_human_conversation?(text) when is_binary(text) do
+    not (owner_revision_comment_text?(text) or
+           Enum.any?(@actual_review_request_tags, &String.contains?(text, &1)) or
+           Enum.any?(@actual_review_request_prefixes, &String.starts_with?(text, &1)) or
+           Enum.any?(@actual_review_request_phrases, &String.contains?(text, &1)))
+  end
+
+  defp generic_human_conversation?(_), do: true
 
   defp same_comment?(%Comment{id: id1}, %Comment{id: id2})
        when is_binary(id1) and is_binary(id2),
@@ -1943,16 +2012,64 @@ defmodule Cympho.AgentPrompt do
     text = (comment.body || "") |> String.downcase()
 
     category == :review or
-      String.contains?(text, "[review]") or
-      String.contains?(text, "[request changes]") or
-      String.contains?(text, "[request_changes]") or
-      String.starts_with?(text, "review:") or
-      String.starts_with?(text, "request changes:") or
-      (comment.author_type == "user" and
-         (String.contains?(text, "change") or String.contains?(text, "review") or
-            String.contains?(text, "rework") or
-            String.contains?(text, @owner_revision_marker) or
-            category in [:review, :owner_input, :owner_update, :decision]))
+      Enum.any?(@actual_review_request_tags, &String.contains?(text, &1)) or
+      Enum.any?(@actual_review_request_prefixes, &String.starts_with?(text, &1)) or
+      owner_revision_comment?(comment) or
+      (comment.author_type == "user" and required_human_feedback?(comment))
+  end
+
+  defp sort_comments_asc(comments) do
+    Enum.sort(comments, &compare_comments_asc/2)
+  end
+
+  defp sort_comments_desc(comments) do
+    Enum.sort(comments, &compare_comments_desc/2)
+  end
+
+  defp compare_comments_asc(c1, c2) do
+    t1 = c1.inserted_at
+    t2 = c2.inserted_at
+
+    cond do
+      t1 && t2 ->
+        case DateTime.compare(t1, t2) do
+          :lt -> true
+          :gt -> false
+          :eq -> to_string(c1.id || "") <= to_string(c2.id || "")
+        end
+
+      t1 && is_nil(t2) ->
+        false
+
+      is_nil(t1) && t2 ->
+        true
+
+      true ->
+        to_string(c1.id || "") <= to_string(c2.id || "")
+    end
+  end
+
+  defp compare_comments_desc(c1, c2) do
+    t1 = c1.inserted_at
+    t2 = c2.inserted_at
+
+    cond do
+      t1 && t2 ->
+        case DateTime.compare(t1, t2) do
+          :gt -> true
+          :lt -> false
+          :eq -> to_string(c1.id || "") >= to_string(c2.id || "")
+        end
+
+      t1 && is_nil(t2) ->
+        true
+
+      is_nil(t1) && t2 ->
+        false
+
+      true ->
+        to_string(c1.id || "") >= to_string(c2.id || "")
+    end
   end
 
   defp review_comment_author_label(%Comment{author_type: "system"}), do: "system"
@@ -2066,7 +2183,7 @@ defmodule Cympho.AgentPrompt do
 
   defp owner_revision_block(_history, _role, _issue), do: nil
 
-  defp load_latest_owner_revision_comment(%{id: id} = issue) when is_binary(id) do
+  defp load_latest_owner_revision_comment(%{id: id} = issue) when is_binary(id) and id != "" do
     case query_latest_owner_revision_comment(id) do
       %Comment{} = comment ->
         comment
@@ -2075,8 +2192,9 @@ defmodule Cympho.AgentPrompt do
         case Map.get(issue, :comments) do
           comments when is_list(comments) ->
             comments
-            |> Enum.reverse()
-            |> Enum.find(&owner_revision_comment?/1)
+            |> Enum.filter(&owner_revision_comment?/1)
+            |> sort_comments_desc()
+            |> List.first()
 
           _ ->
             nil
@@ -2084,19 +2202,28 @@ defmodule Cympho.AgentPrompt do
     end
   end
 
-  defp load_latest_owner_revision_comment(issue_id) when is_binary(issue_id) do
+  defp load_latest_owner_revision_comment(%{comments: comments}) when is_list(comments) do
+    comments
+    |> Enum.filter(&owner_revision_comment?/1)
+    |> sort_comments_desc()
+    |> List.first()
+  end
+
+  defp load_latest_owner_revision_comment(issue_id) when is_binary(issue_id) and issue_id != "" do
     query_latest_owner_revision_comment(issue_id)
   end
 
   defp load_latest_owner_revision_comment(_), do: nil
 
   defp query_latest_owner_revision_comment(issue_id) when is_binary(issue_id) do
+    pattern = "%#{@owner_revision_marker}%"
+
     Comment
     |> where([c], c.issue_id == ^issue_id and c.author_type == "user")
+    |> where([c], ilike(c.body, ^pattern))
     |> order_by([c], desc: c.inserted_at, desc: c.id)
-    |> limit(50)
-    |> Repo.all()
-    |> Enum.find(&owner_revision_comment?/1)
+    |> limit(1)
+    |> Repo.one()
   rescue
     _ -> nil
   end
@@ -2104,17 +2231,24 @@ defmodule Cympho.AgentPrompt do
   defp latest_owner_revision_comment(comments) do
     comments
     |> List.wrap()
-    |> Enum.reverse()
-    |> Enum.find(&owner_revision_comment?/1)
+    |> Enum.filter(&owner_revision_comment?/1)
+    |> sort_comments_desc()
+    |> List.first()
   end
 
   defp owner_revision_comment?(%Comment{author_type: "user", body: body}) when is_binary(body) do
+    owner_revision_comment_text?(body)
+  end
+
+  defp owner_revision_comment?(_comment), do: false
+
+  defp owner_revision_comment_text?(body) when is_binary(body) do
     body
     |> String.downcase()
     |> String.contains?(@owner_revision_marker)
   end
 
-  defp owner_revision_comment?(_comment), do: false
+  defp owner_revision_comment_text?(_), do: false
 
   defp pull_request_contract_block(issue, role) when role in @pr_role_pool or role == :cto do
     PullRequestContract.prompt_block(issue)
