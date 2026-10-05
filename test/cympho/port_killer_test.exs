@@ -36,6 +36,12 @@ defmodule Cympho.PortKillerTest do
     # lag well past a second, which flaked this assertion in CI.
     assert_receive {^port, {:data, "ready\n"}}, 5_000
     assert {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(os_pid)
+      File.rm_rf!(tmp_dir)
+    end)
+
     assert process_alive?(os_pid)
 
     assert :ok = PortKiller.close(port)
@@ -76,6 +82,12 @@ defmodule Cympho.PortKillerTest do
     assert_receive {^port, {:data, data}}, 5_000
     grandchild_pid = data |> String.trim() |> String.to_integer()
     assert {:os_pid, parent_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(parent_pid)
+      reap_pid(grandchild_pid)
+      File.rm_rf!(tmp_dir)
+    end)
 
     assert process_alive?(parent_pid)
     assert process_alive?(grandchild_pid)
@@ -123,6 +135,12 @@ defmodule Cympho.PortKillerTest do
     assert_receive {^port, {:data, data}}, 5_000
     grandchild_pid = data |> String.split("\n", trim: true) |> hd() |> String.to_integer()
     assert {:os_pid, parent_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(parent_pid)
+      reap_pid(grandchild_pid)
+      File.rm_rf!(tmp_dir)
+    end)
 
     assert process_alive?(grandchild_pid)
 
@@ -193,6 +211,26 @@ defmodule Cympho.PortKillerTest do
       ])
 
     assert_receive {^port, {:data, "ready\n"}}, 5_000
+    assert {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(os_pid)
+
+      if File.exists?(child_pid_file) do
+        case File.read(child_pid_file) do
+          {:ok, content} ->
+            case Integer.parse(String.trim(content)) do
+              {child_pid, ""} -> reap_pid(child_pid)
+              _ -> :ok
+            end
+
+          _ ->
+            :ok
+        end
+      end
+
+      File.rm_rf!(tmp_dir)
+    end)
 
     # This exercises the fixed-point barrier, not its latency. On a loaded
     # macOS host each identity/state check spawns `ps`, and the first custom
@@ -244,6 +282,26 @@ defmodule Cympho.PortKillerTest do
 
     assert_receive {^port, {:data, "ready\n"}}, 5_000
     assert {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(os_pid)
+
+      if File.exists?(helper_pid_file) do
+        case File.read(helper_pid_file) do
+          {:ok, contents} ->
+            case Integer.parse(String.trim(contents)) do
+              {helper_pid, ""} -> reap_pid(helper_pid)
+              _ -> :ok
+            end
+
+          _ ->
+            :ok
+        end
+      end
+
+      File.rm_rf!(tmp_dir)
+    end)
+
     started = System.monotonic_time(:millisecond)
 
     assert {:error, {:cleanup_timeout, %PortKiller.Cleanup{phase: :snapshot}}} =
@@ -312,6 +370,11 @@ defmodule Cympho.PortKillerTest do
     assert_receive {^port, {:data, "ready\n"}}, 5_000
     assert {:os_pid, os_pid} = Port.info(port, :os_pid)
 
+    on_exit(fn ->
+      reap_pid(os_pid)
+      File.rm_rf!(tmp_dir)
+    end)
+
     task =
       Task.async(fn ->
         :ok =
@@ -365,6 +428,12 @@ defmodule Cympho.PortKillerTest do
     assert_receive {^port, {:data, data}}, 5_000
     child_pid = data |> String.trim() |> String.to_integer()
     assert {:os_pid, root_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(root_pid)
+      reap_pid(child_pid)
+      File.rm_rf!(tmp_dir)
+    end)
 
     # Root discovery finds the child, then the child lookup hangs. This
     # produces a retryable snapshot holding both PIDs without closing the port.
@@ -446,6 +515,27 @@ defmodule Cympho.PortKillerTest do
     # Under full-suite load the fixture shell may take several seconds to
     # publish readiness; this bound does not alter the cleanup deadline.
     assert_receive {^port, {:data, "ready\n"}}, 10_000
+    assert {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(os_pid)
+
+      if File.exists?(helper_child_pid_file) do
+        case File.read(helper_child_pid_file) do
+          {:ok, contents} ->
+            case Integer.parse(String.trim(contents)) do
+              {helper_child_pid, ""} -> reap_pid(helper_child_pid)
+              _ -> :ok
+            end
+
+          _ ->
+            :ok
+        end
+      end
+
+      File.rm_rf!(tmp_dir)
+    end)
+
     started = System.monotonic_time(:millisecond)
 
     task =
@@ -531,6 +621,13 @@ defmodule Cympho.PortKillerTest do
       ])
 
     assert_receive {^port, {:data, "ready\n"}}, 5_000
+    assert {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(os_pid)
+      File.rm_rf!(tmp_dir)
+    end)
+
     identity_calls = :atomics.new(1, [])
 
     identity_reader = fn _pid ->
@@ -642,6 +739,293 @@ defmodule Cympho.PortKillerTest do
     assert :ok = PortKiller.retry_cleanup(cleanup)
     refute File.exists?(signal_log)
   end
+
+  test "transient initial unknown identity is retried and completes cleanup after identity recovery" do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-port-killer-transient-id-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+
+    command = Path.join(tmp_dir, "stubborn")
+
+    File.write!(
+      command,
+      """
+      #!/bin/sh
+      trap '' TERM
+      printf 'ready\\n'
+      while true; do sleep 1; done
+      """
+    )
+
+    File.chmod!(command, 0o755)
+
+    port =
+      Port.open({:spawn_executable, command}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        :stderr_to_stdout
+      ])
+
+    assert_receive {^port, {:data, "ready\n"}}, 5_000
+    assert {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(os_pid)
+      File.rm_rf!(tmp_dir)
+    end)
+
+    calls = :atomics.new(1, [])
+
+    reader = fn
+      pid when pid == os_pid ->
+        if :atomics.add_get(calls, 1, 1) == 1 do
+          :unknown
+        else
+          {:ok, :recovered}
+        end
+
+      _other_pid ->
+        {:ok, :descendant_recovered}
+    end
+
+    # Initial close returns snapshot timeout because first read returned :unknown
+    assert {:error,
+            {:cleanup_timeout, %PortKiller.Cleanup{phase: :snapshot, targets: [target]} = cleanup}} =
+             PortKiller.close(port, identity_reader: reader)
+
+    assert target.pid == os_pid
+    assert target.identity == :unknown
+    assert :atomics.get(calls, 1) == 1
+    assert process_alive?(os_pid)
+
+    # Retrying cleanup retries identity while the port confirms the root PID,
+    # recovers the identity, and completes cleanup.
+    assert :ok = PortKiller.retry_cleanup(cleanup)
+    refute process_alive?(os_pid)
+    assert :atomics.get(calls, 1) > 1
+  end
+
+  test "confirmed child exit while identity is pending completes cleanup without retaining indefinitely" do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-port-killer-pending-exit-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+
+    command = Path.join(tmp_dir, "stubborn")
+
+    File.write!(
+      command,
+      """
+      #!/bin/sh
+      trap '' TERM
+      printf 'ready\\n'
+      while true; do sleep 1; done
+      """
+    )
+
+    File.chmod!(command, 0o755)
+
+    port =
+      Port.open({:spawn_executable, command}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        :stderr_to_stdout
+      ])
+
+    assert_receive {^port, {:data, "ready\n"}}, 5_000
+    assert {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(os_pid)
+      File.rm_rf!(tmp_dir)
+    end)
+
+    reader = fn ^os_pid -> :unknown end
+
+    assert {:error,
+            {:cleanup_timeout, %PortKiller.Cleanup{phase: :snapshot, targets: [target]} = cleanup}} =
+             PortKiller.close(port, identity_reader: reader)
+
+    assert target.pid == os_pid
+    assert target.identity == :unknown
+    assert process_alive?(os_pid)
+
+    # Kill the child so child exit is confirmed
+    System.cmd("kill", ["-KILL", Integer.to_string(os_pid)], stderr_to_stdout: true)
+    wait_until(fn -> refute process_alive?(os_pid) end)
+
+    # Confirmed child exit while identity is pending does not retain cleanup forever
+    assert :ok = PortKiller.retry_cleanup(cleanup)
+  end
+
+  test "confirmed child exit while root identity is pending retains and cleans up descendants" do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-port-killer-descendants-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+
+    command = Path.join(tmp_dir, "parent")
+
+    File.write!(
+      command,
+      """
+      #!/bin/sh
+      sh -c "trap '' TERM; while true; do sleep 1; done" &
+      printf '%s\\n' "$!"
+      trap '' TERM
+      while true; do sleep 1; done
+      """
+    )
+
+    File.chmod!(command, 0o755)
+
+    port =
+      Port.open({:spawn_executable, command}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        :stderr_to_stdout
+      ])
+
+    assert_receive {^port, {:data, data}}, 5_000
+    child_pid = data |> String.trim() |> String.to_integer()
+    assert {:os_pid, root_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(root_pid)
+      reap_pid(child_pid)
+      File.rm_rf!(tmp_dir)
+    end)
+
+    cleanup = %PortKiller.Cleanup{
+      phase: :snapshot,
+      root_pid: root_pid,
+      targets: [
+        %PortKiller.Target{pid: root_pid, identity: :unknown},
+        %PortKiller.Target{pid: child_pid, identity: {:portable_ps, "child_known"}}
+      ],
+      opts: %{
+        cleanup_timeout_ms: 2_000,
+        helper_timeout_ms: 500,
+        helper_paths: %{},
+        identity_reader: fn
+          ^root_pid -> :gone
+          ^child_pid -> {:ok, {:portable_ps, "child_known"}}
+          _ -> :unknown
+        end
+      },
+      port: port
+    }
+
+    # Kill root PID so root exit is confirmed while child is still alive
+    System.cmd("kill", ["-KILL", Integer.to_string(root_pid)], stderr_to_stdout: true)
+    wait_until(fn -> refute process_alive?(root_pid) end)
+    assert process_alive?(child_pid)
+
+    # Retrying cleanup cleans up the retained descendant without hanging
+    assert :ok = PortKiller.retry_cleanup(cleanup)
+    refute process_alive?(child_pid)
+  end
+
+  test "unknown identity is not retried when port no longer confirms root PID" do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-port-killer-no-port-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+
+    command = Path.join(tmp_dir, "stubborn")
+
+    File.write!(
+      command,
+      """
+      #!/bin/sh
+      trap '' TERM
+      printf 'ready\\n'
+      while true; do sleep 1; done
+      """
+    )
+
+    File.chmod!(command, 0o755)
+
+    port =
+      Port.open({:spawn_executable, command}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        :stderr_to_stdout
+      ])
+
+    assert_receive {^port, {:data, "ready\n"}}, 5_000
+    assert {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      reap_pid(os_pid)
+      File.rm_rf!(tmp_dir)
+    end)
+
+    cleanup = %PortKiller.Cleanup{
+      phase: :snapshot,
+      root_pid: os_pid,
+      targets: [%PortKiller.Target{pid: os_pid, identity: :unknown}],
+      opts: %{
+        cleanup_timeout_ms: 200,
+        helper_timeout_ms: 100,
+        helper_paths: %{},
+        identity_reader: fn _pid -> {:ok, :attacker_replaced} end
+      },
+      # port is nil: port does NOT confirm the root PID
+      port: nil
+    }
+
+    # Must fail closed with cleanup_timeout, never accepting the replacement identity
+    # and never signalling the unverified PID
+    assert {:error, {:cleanup_timeout, %PortKiller.Cleanup{targets: [retained]}}} =
+             PortKiller.retry_cleanup(cleanup)
+
+    assert retained.identity == :unknown
+    assert process_alive?(os_pid)
+  end
+
+  test "earliest known identity is never replaced by a later observation" do
+    target_early = %PortKiller.Target{pid: 50_001, identity: :early_known}
+    target_late = %PortKiller.Target{pid: 50_001, identity: :late_replacement}
+    target_unknown = %PortKiller.Target{pid: 50_002, identity: :unknown}
+    target_recovered = %PortKiller.Target{pid: 50_002, identity: :recovered_known}
+
+    # Known identity is never replaced by later observation
+    retained_known = %{50_001 => target_early}
+    discovered_changed = %{50_001 => target_late}
+    merged1 = PortKiller.merge_target_maps(retained_known, discovered_changed)
+    assert Map.get(merged1, 50_001).identity == :early_known
+
+    # Unknown identity is resolved by authoritative discovered identity
+    retained_unknown = %{50_002 => target_unknown}
+    discovered_known = %{50_002 => target_recovered}
+    merged2 = PortKiller.merge_target_maps(retained_unknown, discovered_known)
+    assert Map.get(merged2, 50_002).identity == :recovered_known
+
+    # Discovered unknown never replaces retained known
+    discovered_unknown = %{50_001 => target_unknown}
+    merged3 = PortKiller.merge_target_maps(retained_known, discovered_unknown)
+    assert Map.get(merged3, 50_001).identity == :early_known
+  end
+
+  defp reap_pid(nil), do: :ok
+
+  defp reap_pid(pid) when is_integer(pid) and pid > 1 do
+    if process_alive?(pid) do
+      System.cmd("kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp reap_pid(_), do: :ok
 
   defp process_alive?(os_pid) do
     case System.cmd("kill", ["-0", "#{os_pid}"], stderr_to_stdout: true) do

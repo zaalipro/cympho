@@ -140,50 +140,145 @@ defmodule Cympho.PortKiller do
   defp attempt(%Cleanup{phase: :snapshot} = cleanup, port) do
     deadline = monotonic_ms() + cleanup.opts.cleanup_timeout_ms
     retained_targets = targets_by_pid(cleanup.targets)
+    root_target = Map.get(retained_targets, cleanup.root_pid)
 
-    case process_tree(
-           cleanup.root_pid,
-           cleanup.opts,
-           deadline,
-           Map.get(retained_targets, cleanup.root_pid)
-         ) do
-      {:ok, targets} ->
-        targets = merge_targets(retained_targets, targets)
+    case resolve_pending_root(root_target, retained_targets, cleanup, port, deadline) do
+      {:child_gone, remaining_targets, cleanup} ->
+        if map_size(remaining_targets) == 0 do
+          :ok
+        else
+          remaining_list = Map.values(remaining_targets)
 
-        case freeze_tree(cleanup.root_pid, targets, cleanup.opts, deadline) do
-          {:ok, frozen_targets} ->
-            close_port(port)
+          case freeze_targets(cleanup.root_pid, remaining_list, deadline, cleanup.opts) do
+            :ok ->
+              terminate_targets(
+                %{cleanup | phase: :kill, targets: remaining_list, port: nil},
+                deadline
+              )
 
-            # Resuming a TERM-ignoring frozen process would reopen the fork
-            # race. Forced cleanup therefore KILLs the fixed-point set while it
-            # remains stopped.
-            terminate_targets(
-              %{
-                cleanup
-                | phase: :kill,
-                  targets: frozen_targets,
-                  port: nil
-              },
-              deadline
-            )
-
-          {:error, frozen_targets} ->
-            {:error, {:cleanup_timeout, %{cleanup | targets: frozen_targets, port: port}}}
+            :timeout ->
+              {:error,
+               {:cleanup_timeout,
+                %{cleanup | phase: :snapshot, targets: remaining_list, port: nil}}}
+          end
         end
 
-      {:error, :timeout, discovered_targets} ->
-        targets =
-          merge_targets(retained_targets, discovered_targets)
+      {:timeout, _root_target, retained_targets, cleanup} ->
+        {:error,
+         {:cleanup_timeout, %{cleanup | targets: Map.values(retained_targets), port: port}}}
 
-        # Even failed discovery must not leave already known provider work
-        # consuming CPU while the registered worker retains its admission.
-        _ = freeze_targets(cleanup.root_pid, targets, deadline, cleanup.opts)
+      {:continue, root_target, retained_targets, cleanup} ->
+        case process_tree(
+               cleanup.root_pid,
+               cleanup.opts,
+               deadline,
+               root_target
+             ) do
+          {:ok, targets} ->
+            targets = merge_targets(retained_targets, targets)
 
-        {:error, {:cleanup_timeout, %{cleanup | targets: targets, port: port}}}
+            case freeze_tree(cleanup.root_pid, targets, cleanup.opts, deadline) do
+              {:ok, frozen_targets} ->
+                close_port(port)
+
+                # Resuming a TERM-ignoring frozen process would reopen the fork
+                # race. Forced cleanup therefore KILLs the fixed-point set while it
+                # remains stopped.
+                terminate_targets(
+                  %{
+                    cleanup
+                    | phase: :kill,
+                      targets: frozen_targets,
+                      port: nil
+                  },
+                  deadline
+                )
+
+              {:error, frozen_targets} ->
+                {:error, {:cleanup_timeout, %{cleanup | targets: frozen_targets, port: port}}}
+            end
+
+          {:error, :timeout, discovered_targets} ->
+            targets =
+              merge_targets(retained_targets, discovered_targets)
+
+            # Even failed discovery must not leave already known provider work
+            # consuming CPU while the registered worker retains its admission.
+            _ = freeze_targets(cleanup.root_pid, targets, deadline, cleanup.opts)
+
+            {:error, {:cleanup_timeout, %{cleanup | targets: targets, port: port}}}
+        end
     end
   end
 
   defp attempt(%Cleanup{} = cleanup, _port), do: terminate_targets(cleanup)
+
+  defp resolve_pending_root(
+         %Target{identity: :unknown} = root_target,
+         retained_targets,
+         cleanup,
+         port,
+         deadline
+       ) do
+    root_pid = cleanup.root_pid
+    timeout = min(cleanup.opts.helper_timeout_ms, max(deadline - monotonic_ms(), 1))
+
+    if is_port(port) and os_pid(port) == root_pid do
+      case target_identity(root_pid, timeout, cleanup.opts) do
+        {:ok, identity} ->
+          if is_port(port) and os_pid(port) == root_pid do
+            resolved = %Target{pid: root_pid, identity: identity}
+            updated_retained = Map.put(retained_targets, root_pid, resolved)
+            updated_cleanup = %{cleanup | targets: Map.values(updated_retained)}
+            {:continue, resolved, updated_retained, updated_cleanup}
+          else
+            handle_pending_exit(root_pid, retained_targets, cleanup, port)
+          end
+
+        :gone ->
+          handle_pending_exit(root_pid, retained_targets, cleanup, port)
+
+        :unknown ->
+          if pid_gone?(root_pid, timeout, cleanup.opts) do
+            handle_pending_exit(root_pid, retained_targets, cleanup, port)
+          else
+            {:timeout, root_target, retained_targets, cleanup}
+          end
+      end
+    else
+      if pid_gone?(root_pid, timeout, cleanup.opts) do
+        handle_pending_exit(root_pid, retained_targets, cleanup, port)
+      else
+        {:timeout, root_target, retained_targets, cleanup}
+      end
+    end
+  end
+
+  defp resolve_pending_root(root_target, retained_targets, cleanup, _port, _deadline) do
+    {:continue, root_target, retained_targets, cleanup}
+  end
+
+  defp handle_pending_exit(root_pid, retained_targets, cleanup, port) do
+    close_port(port)
+    remaining_targets = Map.delete(retained_targets, root_pid)
+    {:child_gone, remaining_targets, cleanup}
+  end
+
+  defp pid_gone?(pid, timeout, opts) do
+    case proc_process_state(pid) do
+      :gone ->
+        true
+
+      state when state in [:running, :stopped, :quiescent] ->
+        false
+
+      :unsupported ->
+        case helper("kill", ["-0", Integer.to_string(pid)], timeout, opts) do
+          {:ok, _output, status} when status != 0 -> true
+          _ -> false
+        end
+    end
+  end
 
   defp terminate_targets(%Cleanup{} = cleanup) do
     deadline = monotonic_ms() + cleanup.opts.cleanup_timeout_ms
@@ -513,7 +608,15 @@ defmodule Cympho.PortKiller do
   defp normalize_identity_result(:gone), do: :gone
   defp normalize_identity_result(_other), do: :unknown
 
-  defp same_target?(%Target{identity: :unknown}, _timeout, _opts), do: :unknown
+  defp same_target?(%Target{pid: pid, identity: :unknown}, timeout, opts) do
+    case target_identity(pid, timeout, opts) do
+      :gone ->
+        false
+
+      _other ->
+        if pid_gone?(pid, timeout, opts), do: false, else: :unknown
+    end
+  end
 
   defp same_target?(%Target{pid: pid, identity: identity}, timeout, opts) do
     case target_identity(pid, timeout, opts) do
@@ -537,8 +640,17 @@ defmodule Cympho.PortKiller do
   end
 
   # The earliest identity wins. A rescan of a reused PID must never replace the
-  # identity token that authorized the original retained target.
-  defp merge_target_maps(retained, discovered), do: Map.merge(discovered, retained)
+  # identity token that authorized the original retained target. Transient initial
+  # unknown identity may only be resolved by an authoritative known identity.
+  @doc false
+  def merge_target_maps(retained, discovered) do
+    Map.merge(discovered, retained, fn _pid, discovered_target, retained_target ->
+      case {retained_target.identity, discovered_target.identity} do
+        {:unknown, known} when known != :unknown -> discovered_target
+        _ -> retained_target
+      end
+    end)
+  end
 
   defp target_process_state(%Target{} = target, timeout, opts) do
     case same_target?(target, timeout, opts) do
@@ -1028,7 +1140,7 @@ defmodule Cympho.PortKiller do
     end
   end
 
-  defp os_pid(port) do
+  defp os_pid(port) when is_port(port) do
     case Port.info(port, :os_pid) do
       {:os_pid, pid} when is_integer(pid) and pid > 1 -> pid
       _ -> nil
@@ -1036,6 +1148,8 @@ defmodule Cympho.PortKiller do
   rescue
     ArgumentError -> nil
   end
+
+  defp os_pid(_port), do: nil
 
   defp close_port(port) when is_port(port) do
     Port.close(port)
