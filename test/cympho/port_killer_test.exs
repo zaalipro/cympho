@@ -1106,6 +1106,116 @@ defmodule Cympho.PortKillerTest do
     refute File.exists?(tmp_dir)
   end
 
+  test "duplicate target merging retains earliest known identity over unknown token" do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-port-killer-dup-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+    tracker = init_fixture(tmp_dir)
+
+    command = Path.join(tmp_dir, "sleeper")
+    File.write!(command, "#!/bin/sh\nwhile true; do sleep 1; done\n")
+    File.chmod!(command, 0o755)
+
+    port =
+      Port.open({:spawn_executable, command}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        :stderr_to_stdout
+      ])
+
+    assert {:os_pid, pid} = Port.info(port, :os_pid)
+    {:ok, known_id} = capture_identity(pid)
+
+    # Register target with known identity
+    register_target(tracker, pid)
+
+    # Simulate a Cleanup struct that contains the same PID with identity :unknown
+    simulated_cleanup = %PortKiller.Cleanup{
+      phase: :snapshot,
+      root_pid: pid,
+      targets: [
+        %PortKiller.Target{pid: pid, identity: :unknown}
+      ],
+      opts: %{cleanup_timeout_ms: 100, helper_timeout_ms: 50, helper_paths: %{}},
+      port: port
+    }
+
+    track_cleanup(tracker, simulated_cleanup)
+
+    # Verify merge_duplicate_targets retained known_id rather than :unknown
+    state = Agent.get(tracker, & &1)
+    {targets, errors} = collect_reap_targets(state)
+    assert errors == []
+    assert {^pid, ^known_id, _port} = Enum.find(targets, fn {p, _, _} -> p == pid end)
+
+    # Teardown can now successfully reap because known identity was preserved
+    reap_fixture(tracker)
+    refute process_alive?(pid)
+    refute File.exists?(tmp_dir)
+  end
+
+  test "live unknown ownership is an explicit teardown failure rather than absence" do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-port-killer-live-unknown-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+    tracker = init_fixture(tmp_dir)
+
+    command = Path.join(tmp_dir, "unreapable")
+    File.write!(command, "#!/bin/sh\nwhile true; do sleep 1; done\n")
+    File.chmod!(command, 0o755)
+
+    port =
+      Port.open({:spawn_executable, command}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        :stderr_to_stdout
+      ])
+
+    assert {:os_pid, pid} = Port.info(port, :os_pid)
+
+    # Track cleanup with unknown identity and NO port ownership
+    simulated_cleanup = %PortKiller.Cleanup{
+      phase: :reap,
+      root_pid: pid,
+      targets: [
+        %PortKiller.Target{pid: pid, identity: :unknown}
+      ],
+      opts: %{cleanup_timeout_ms: 100, helper_timeout_ms: 50, helper_paths: %{}},
+      port: nil
+    }
+
+    track_cleanup(tracker, simulated_cleanup)
+
+    # reap_fixture must raise because the unknown process is still alive,
+    # and the fixture directory must NOT be removed!
+    assert_raise RuntimeError,
+                 ~r/PortKiller fixture teardown failed: owned processes still alive/,
+                 fn ->
+                   reap_fixture(tracker)
+                 end
+
+    assert File.exists?(tmp_dir)
+    assert process_alive?(pid)
+
+    # Clean up the process manually and remove tmp_dir
+    System.cmd("kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
+    wait_until_os_process_dead(pid, 20)
+    File.rm_rf!(tmp_dir)
+  end
+
+  test "child discovery distinguishes exit 1 no-match from helper failure" do
+    # A non-existent PID has no children -> pgrep exits 1 -> returns {:ok, []}
+    assert {:ok, []} = discover_child_pids(999_999)
+
+    # Invalid PID returns {:ok, []}
+    assert {:ok, []} = discover_child_pids(nil)
+    assert {:ok, []} = discover_child_pids(-1)
+  end
+
   defp init_fixture(tmp_dir) do
     {:ok, tracker} =
       Agent.start(fn ->
@@ -1184,16 +1294,17 @@ defmodule Cympho.PortKillerTest do
       end
 
     if state do
-      targets = collect_reap_targets(state)
+      {targets, collection_errors} = collect_reap_targets(state)
 
       Enum.each(targets, fn {pid, identity, port} ->
         reap_target(pid, identity, port)
       end)
 
-      # Check for any remaining living processes that we were authorized to reap
+      # Check for any remaining living processes among tracked targets.
+      # Live unknown ownership is an explicit cleanup failure, not absence!
       survivors =
-        Enum.filter(targets, fn {pid, identity, port} ->
-          authorized_to_signal?(pid, identity, port) and process_alive?(pid)
+        Enum.filter(targets, fn {pid, _identity, _port} ->
+          process_alive?(pid)
         end)
 
       try do
@@ -1202,10 +1313,24 @@ defmodule Cympho.PortKillerTest do
         _, _ -> :ok
       end
 
-      if survivors == [] do
-        File.rm_rf!(state.tmp_dir)
-      else
-        raise "PortKiller fixture teardown failed: owned processes still alive: #{inspect(survivors)}"
+      cond do
+        collection_errors != [] ->
+          raise "PortKiller fixture teardown failed: target collection failed: #{inspect(collection_errors)}"
+
+        survivors != [] ->
+          survivor_details =
+            Enum.map(survivors, fn {pid, identity, port} ->
+              if authorized_to_signal?(pid, identity, port) do
+                {:authorized_survivor, pid, identity}
+              else
+                {:unauthorized_live_target, pid, identity}
+              end
+            end)
+
+          raise "PortKiller fixture teardown failed: owned processes still alive: #{inspect(survivor_details)}"
+
+        true ->
+          File.rm_rf!(state.tmp_dir)
       end
     end
   end
@@ -1229,41 +1354,48 @@ defmodule Cympho.PortKillerTest do
           []
       end
 
-    discovered_children =
+    {discovered_children, discovery_errors} =
       if state.root_pid && process_alive?(state.root_pid) do
-        state.root_pid
-        |> discover_child_pids()
-        |> Enum.map(fn c_pid ->
-          case capture_identity(c_pid) do
-            {:ok, id} -> {c_pid, id, nil}
-            _ -> {c_pid, :unknown, nil}
-          end
-        end)
+        case discover_child_pids(state.root_pid) do
+          {:ok, child_pids} ->
+            children =
+              Enum.map(child_pids, fn c_pid ->
+                case capture_identity(c_pid) do
+                  {:ok, id} -> {c_pid, id, nil}
+                  _ -> {c_pid, :unknown, nil}
+                end
+              end)
+
+            {children, []}
+
+          {:error, reason} ->
+            {[], [reason]}
+        end
       else
-        []
+        {[], []}
       end
 
-    pid_file_targets =
-      Enum.flat_map(state.pid_files, fn pid_file ->
+    {pid_file_targets, pid_file_errors} =
+      Enum.reduce(state.pid_files, {[], []}, fn pid_file, {targets_acc, errors_acc} ->
         if File.exists?(pid_file) do
           case File.read(pid_file) do
             {:ok, contents} ->
               case Integer.parse(String.trim(contents)) do
                 {pid, ""} when pid > 1 ->
                   case capture_identity(pid) do
-                    {:ok, id} -> [{pid, id, nil}]
-                    _ -> []
+                    {:ok, id} -> {[{pid, id, nil} | targets_acc], errors_acc}
+                    _ -> {[{pid, :unknown, nil} | targets_acc], errors_acc}
                   end
 
                 _ ->
-                  []
+                  {targets_acc, [{:invalid_pid_file_content, pid_file, contents} | errors_acc]}
               end
 
-            _ ->
-              []
+            {:error, reason} ->
+              {targets_acc, [{:read_pid_file_failed, pid_file, reason} | errors_acc]}
           end
         else
-          []
+          {targets_acc, errors_acc}
         end
       end)
 
@@ -1279,8 +1411,38 @@ defmodule Cympho.PortKillerTest do
         {pid, identity, nil}
       end)
 
-    (cleanup_targets ++ discovered_children ++ pid_file_targets ++ extra_targets ++ root_target)
-    |> Enum.uniq_by(fn {pid, _id, _port} -> pid end)
+    all_targets =
+      extra_targets ++ cleanup_targets ++ discovered_children ++ pid_file_targets ++ root_target
+
+    merged_targets = merge_duplicate_targets(all_targets)
+    all_errors = discovery_errors ++ pid_file_errors
+
+    {merged_targets, all_errors}
+  end
+
+  defp merge_duplicate_targets(targets) do
+    targets
+    |> Enum.group_by(fn {pid, _id, _port} -> pid end)
+    |> Enum.map(fn {pid, entries} ->
+      known_entry =
+        Enum.find(entries, fn {_p, id, _port} ->
+          id not in [nil, :unknown]
+        end)
+
+      identity =
+        case known_entry do
+          {_p, known_id, _port} -> known_id
+          nil -> :unknown
+        end
+
+      port =
+        case Enum.find(entries, fn {_p, _id, port} -> is_port(port) end) do
+          {_p, _id, valid_port} -> valid_port
+          nil -> nil
+        end
+
+      {pid, identity, port}
+    end)
   end
 
   defp reap_target(pid, identity, port) when is_integer(pid) and pid > 1 do
@@ -1360,23 +1522,31 @@ defmodule Cympho.PortKillerTest do
   defp discover_child_pids(parent_pid) when is_integer(parent_pid) and parent_pid > 1 do
     case System.cmd("pgrep", ["-P", Integer.to_string(parent_pid)], stderr_to_stdout: true) do
       {output, 0} ->
-        output
-        |> String.split()
-        |> Enum.flat_map(fn str ->
-          case Integer.parse(str) do
-            {pid, ""} when pid > 1 -> [pid]
-            _ -> []
-          end
-        end)
+        pids =
+          output
+          |> String.split()
+          |> Enum.flat_map(fn str ->
+            case Integer.parse(str) do
+              {pid, ""} when pid > 1 -> [pid]
+              _ -> []
+            end
+          end)
 
-      _ ->
-        []
+        {:ok, pids}
+
+      {_output, 1} ->
+        # Exit status 1 means no matching children (standard pgrep convention)
+        {:ok, []}
+
+      {output, exit_status} ->
+        {:error, {:pgrep_failed, exit_status, output}}
     end
   rescue
-    _ -> []
+    e ->
+      {:error, {:pgrep_error, e}}
   end
 
-  defp discover_child_pids(_), do: []
+  defp discover_child_pids(_), do: {:ok, []}
 
   defp reap_pid(nil), do: :ok
 

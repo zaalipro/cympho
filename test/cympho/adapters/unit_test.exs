@@ -686,6 +686,52 @@ defmodule Cympho.Adapters.UnitTest do
       # Clean fixture workers check returns :ok
       assert :ok = reap_fixture_workers(self())
     end
+
+    test "fixture teardown refuses to signal unrelated reused PID and fails closed" do
+      tmp_root =
+        Path.join(System.tmp_dir!(), "cursor-reused-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_root)
+      on_exit(fn -> File.rm_rf!(tmp_root) end)
+
+      pid_file = Path.join(tmp_root, "child.pid")
+
+      # BEAM OS PID is alive but its command line does NOT belong to the fixture tmp_root
+      beam_pid = System.pid() |> String.to_integer()
+      File.write!(pid_file, "#{beam_pid}\n")
+
+      # Ownership check refuses to signal and returns error
+      assert {:error, {:unauthorized_or_reused_pid, ^beam_pid}} =
+               reap_exact_owned_os_child(pid_file)
+
+      # BEAM process is alive and was untouched
+      assert os_process_alive?(beam_pid)
+    end
+
+    test "fixture teardown propagates read and parse failures for PID file" do
+      tmp_root =
+        Path.join(System.tmp_dir!(), "cursor-corrupt-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_root)
+      on_exit(fn -> File.rm_rf!(tmp_root) end)
+
+      pid_file = Path.join(tmp_root, "child.pid")
+
+      # Corrupted/non-integer PID content returns error rather than :ok
+      File.write!(pid_file, "garbage-not-a-pid\n")
+
+      assert {:error, {:invalid_pid_file, "garbage-not-a-pid"}} =
+               reap_exact_owned_os_child(pid_file)
+
+      # Empty content returns error rather than :ok
+      File.write!(pid_file, "")
+      assert {:error, {:invalid_pid_file, ""}} = reap_exact_owned_os_child(pid_file)
+    end
+
+    test "descendant cleanup propagates discovery and wait outcomes" do
+      # Non-existent parent pid returns :ok (pgrep exit 1 = no children)
+      assert :ok = reap_child_os_pids(999_999)
+    end
   end
 
   describe "HttpAdapter" do
@@ -1163,15 +1209,63 @@ defmodule Cympho.Adapters.UnitTest do
   end
 
   defp reap_fixture_workers(controller_pid) do
-    session_errors =
-      case Cympho.AdapterSessions.active_sessions() do
-        {:ok, sessions} ->
-          Enum.flat_map(sessions, fn %{session_id: sid, pid: worker_pid, controller_pid: cpid} ->
+    session_res =
+      try do
+        case Cympho.AdapterSessions.active_sessions() do
+          {:ok, sessions} ->
             errors =
-              if cpid == controller_pid and Process.alive?(worker_pid) do
-                Cympho.AdapterSessions.cancel_and_wait(sid, :test_teardown, 1_000)
+              Enum.flat_map(sessions, fn %{session_id: sid, pid: worker_pid, controller_pid: cpid} ->
+                errs =
+                  if cpid == controller_pid and Process.alive?(worker_pid) do
+                    Cympho.AdapterSessions.cancel_and_wait(sid, :test_teardown, 1_000)
 
-                if Process.alive?(worker_pid) do
+                    if Process.alive?(worker_pid) do
+                      ref = Process.monitor(worker_pid)
+                      Process.exit(worker_pid, :kill)
+
+                      receive do
+                        {:DOWN, ^ref, :process, ^worker_pid, _reason} ->
+                          []
+                      after
+                        500 ->
+                          Process.demonitor(ref, [:flush])
+
+                          if Process.alive?(worker_pid),
+                            do: [{:worker_alive, worker_pid}],
+                            else: []
+                      end
+                    else
+                      []
+                    end
+                  else
+                    []
+                  end
+
+                Cympho.AdapterSessions.unregister(sid)
+                errs
+              end)
+
+            {:ok, errors}
+
+          {:error, reason} ->
+            {:error, {:active_sessions_failed, reason}}
+
+          other ->
+            {:error, {:active_sessions_unexpected, other}}
+        end
+      rescue
+        e -> {:error, {:active_sessions_exception, e}}
+      catch
+        kind, reason -> {:error, {:active_sessions_caught, {kind, reason}}}
+      end
+
+    owner_res =
+      try do
+        case Cympho.AdapterSessions.owners_for_controller(controller_pid) do
+          {:ok, worker_pids} when is_list(worker_pids) ->
+            errors =
+              Enum.flat_map(worker_pids, fn worker_pid ->
+                if is_pid(worker_pid) and Process.alive?(worker_pid) do
                   ref = Process.monitor(worker_pid)
                   Process.exit(worker_pid, :kill)
 
@@ -1181,51 +1275,50 @@ defmodule Cympho.Adapters.UnitTest do
                   after
                     500 ->
                       Process.demonitor(ref, [:flush])
-                      if Process.alive?(worker_pid), do: [{:worker_alive, worker_pid}], else: []
+                      if Process.alive?(worker_pid), do: [{:owner_alive, worker_pid}], else: []
                   end
                 else
                   []
                 end
-              else
-                []
-              end
+              end)
 
-            Cympho.AdapterSessions.unregister(sid)
-            errors
-          end)
+            {:ok, errors}
 
-        _ ->
-          []
+          {:error, reason} ->
+            {:error, {:owners_for_controller_failed, reason}}
+
+          other ->
+            {:error, {:owners_for_controller_unexpected, other}}
+        end
+      rescue
+        e -> {:error, {:owners_for_controller_exception, e}}
+      catch
+        kind, reason -> {:error, {:owners_for_controller_caught, {kind, reason}}}
       end
 
-    owner_errors =
-      case Cympho.AdapterSessions.owners_for_controller(controller_pid) do
-        {:ok, worker_pids} when is_list(worker_pids) ->
-          Enum.flat_map(worker_pids, fn worker_pid ->
-            if is_pid(worker_pid) and Process.alive?(worker_pid) do
-              ref = Process.monitor(worker_pid)
-              Process.exit(worker_pid, :kill)
+    case {session_res, owner_res} do
+      {{:ok, []}, {:ok, []}} ->
+        :ok
 
-              receive do
-                {:DOWN, ^ref, :process, ^worker_pid, _reason} ->
-                  []
-              after
-                500 ->
-                  Process.demonitor(ref, [:flush])
-                  if Process.alive?(worker_pid), do: [{:owner_alive, worker_pid}], else: []
-              end
-            else
-              []
-            end
-          end)
+      {{:ok, s_errs}, {:ok, o_errs}} ->
+        {:error, s_errs ++ o_errs}
 
-        _ ->
-          []
-      end
+      {s_res, o_res} ->
+        errs = []
 
-    case session_errors ++ owner_errors do
-      [] -> :ok
-      errors -> {:error, errors}
+        errs =
+          case s_res do
+            {:ok, e} -> errs ++ e
+            {:error, e} -> errs ++ [e]
+          end
+
+        errs =
+          case o_res do
+            {:ok, e} -> errs ++ e
+            {:error, e} -> errs ++ [e]
+          end
+
+        {:error, errs}
     end
   end
 
@@ -1236,64 +1329,252 @@ defmodule Cympho.Adapters.UnitTest do
           trimmed = String.trim(content)
 
           case Integer.parse(trimmed) do
-            {os_pid, ""} when os_pid > 0 ->
-              reap_os_pid(os_pid)
+            {os_pid, ""} when os_pid > 1 ->
+              root = Path.dirname(pid_file)
+              reap_fixture_os_pid(os_pid, root)
 
             _ ->
-              :ok
+              {:error, {:invalid_pid_file, trimmed}}
           end
 
-        _ ->
-          :ok
+        {:error, reason} ->
+          {:error, {:read_pid_file_failed, reason}}
       end
     else
       :ok
     end
   end
 
-  defp reap_os_pid(os_pid) do
-    if os_process_alive?(os_pid) do
-      reap_child_os_pids(os_pid)
+  defp reap_fixture_os_pid(os_pid, root) do
+    case capture_identity(os_pid) do
+      :gone ->
+        if os_process_alive?(os_pid) do
+          if fixture_process_owned?(os_pid, root) do
+            signal_and_wait_os_pid(os_pid)
+          else
+            {:error, {:unauthorized_or_reused_pid, os_pid}}
+          end
+        else
+          :ok
+        end
 
-      System.cmd("/bin/kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
+      {:ok, identity} ->
+        if fixture_process_owned?(os_pid, root) do
+          case reap_child_os_pids(os_pid) do
+            :ok ->
+              signal_identified_os_pid(os_pid, identity)
 
-      if wait_until_os_process_dead(os_pid, 20) do
-        :ok
-      else
-        System.cmd("/bin/kill", ["-KILL", Integer.to_string(os_pid)], stderr_to_stdout: true)
+            {:error, _} = desc_err ->
+              desc_err
+          end
+        else
+          {:error, {:unauthorized_or_reused_pid, os_pid}}
+        end
+
+      :unknown ->
+        if os_process_alive?(os_pid) do
+          {:error, {:identity_capture_failed, os_pid}}
+        else
+          :ok
+        end
+    end
+  end
+
+  defp signal_identified_os_pid(os_pid, identity) do
+    case capture_identity(os_pid) do
+      {:ok, ^identity} ->
+        System.cmd("/bin/kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
 
         if wait_until_os_process_dead(os_pid, 20) do
           :ok
         else
-          {:error, {:os_process_alive, os_pid}}
+          case capture_identity(os_pid) do
+            {:ok, ^identity} ->
+              System.cmd("/bin/kill", ["-KILL", Integer.to_string(os_pid)],
+                stderr_to_stdout: true
+              )
+
+              if wait_until_os_process_dead(os_pid, 20) do
+                :ok
+              else
+                {:error, {:os_process_alive, os_pid}}
+              end
+
+            :gone ->
+              :ok
+
+            _mismatch ->
+              {:error, {:identity_mismatch_before_kill, os_pid}}
+          end
         end
-      end
-    else
-      :ok
+
+      :gone ->
+        :ok
+
+      _mismatch ->
+        {:error, {:identity_mismatch_before_term, os_pid}}
     end
   end
 
-  defp reap_child_os_pids(parent_pid) do
-    case System.cmd("pgrep", ["-P", Integer.to_string(parent_pid)], stderr_to_stdout: true) do
-      {output, 0} ->
-        output
-        |> String.split()
-        |> Enum.each(fn str ->
-          case Integer.parse(str) do
-            {c_pid, ""} when c_pid > 0 ->
-              System.cmd("/bin/kill", ["-KILL", Integer.to_string(c_pid)], stderr_to_stdout: true)
-              wait_until_os_process_dead(c_pid, 10)
+  defp signal_and_wait_os_pid(os_pid) do
+    System.cmd("/bin/kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
 
-            _ ->
-              :ok
-          end
-        end)
+    if wait_until_os_process_dead(os_pid, 20) do
+      :ok
+    else
+      System.cmd("/bin/kill", ["-KILL", Integer.to_string(os_pid)], stderr_to_stdout: true)
 
-      _ ->
+      if wait_until_os_process_dead(os_pid, 20) do
         :ok
+      else
+        {:error, {:os_process_alive, os_pid}}
+      end
+    end
+  end
+
+  defp fixture_process_owned?(os_pid, root) when is_integer(os_pid) and is_binary(root) do
+    agent_path = Path.join(root, "agent")
+    cmdline = process_cmdline(os_pid)
+
+    String.contains?(cmdline, root) or String.contains?(cmdline, agent_path)
+  end
+
+  defp process_cmdline(pid) when is_integer(pid) and pid > 1 do
+    if File.exists?("/proc/#{pid}/cmdline") do
+      case File.read("/proc/#{pid}/cmdline") do
+        {:ok, data} -> String.replace(data, "\0", " ")
+        _ -> ""
+      end
+    else
+      case System.cmd("ps", ["-o", "command=", "-p", Integer.to_string(pid)],
+             stderr_to_stdout: true
+           ) do
+        {output, 0} -> String.trim(output)
+        _ -> ""
+      end
     end
   rescue
-    _ -> :ok
+    _ -> ""
+  end
+
+  defp capture_identity(pid) when is_integer(pid) and pid > 1 do
+    if File.exists?("/proc/#{pid}/stat") do
+      case File.read("/proc/#{pid}/stat") do
+        {:ok, stat} ->
+          case :binary.matches(stat, ") ") |> List.last() do
+            {index, 2} ->
+              fields =
+                stat |> binary_part(index + 2, byte_size(stat) - index - 2) |> String.split()
+
+              case Enum.at(fields, 19) do
+                nil -> :unknown
+                starttime -> {:ok, {:linux_starttime, starttime}}
+              end
+
+            _ ->
+              :unknown
+          end
+
+        {:error, :enoent} ->
+          :gone
+
+        _ ->
+          :unknown
+      end
+    else
+      case System.cmd("ps", ["-o", "lstart=", "-p", Integer.to_string(pid)],
+             stderr_to_stdout: true
+           ) do
+        {output, 0} ->
+          case String.trim(output) do
+            "" -> :gone
+            val -> {:ok, {:portable_ps, val}}
+          end
+
+        _ ->
+          :gone
+      end
+    end
+  rescue
+    _ -> :unknown
+  end
+
+  defp capture_identity(_), do: :unknown
+
+  defp reap_child_os_pids(parent_pid) when is_integer(parent_pid) and parent_pid > 1 do
+    case System.cmd("pgrep", ["-P", Integer.to_string(parent_pid)], stderr_to_stdout: true) do
+      {output, 0} ->
+        child_pids =
+          output
+          |> String.split()
+          |> Enum.flat_map(fn str ->
+            case Integer.parse(str) do
+              {c_pid, ""} when c_pid > 1 -> [c_pid]
+              _ -> []
+            end
+          end)
+
+        reap_child_pid_list(child_pids)
+
+      {_output, 1} ->
+        :ok
+
+      {output, exit_status} ->
+        {:error, {:child_discovery_failed, exit_status, output}}
+    end
+  rescue
+    e ->
+      {:error, {:child_discovery_error, e}}
+  end
+
+  defp reap_child_pid_list(child_pids) do
+    results =
+      Enum.map(child_pids, fn c_pid ->
+        reap_single_descendant(c_pid)
+      end)
+
+    errors =
+      Enum.filter(results, fn
+        :ok -> false
+        {:error, _} -> true
+      end)
+
+    case errors do
+      [] -> :ok
+      errs -> {:error, errs}
+    end
+  end
+
+  defp reap_single_descendant(c_pid) do
+    case capture_identity(c_pid) do
+      {:ok, identity} ->
+        case capture_identity(c_pid) do
+          {:ok, ^identity} ->
+            System.cmd("/bin/kill", ["-KILL", Integer.to_string(c_pid)], stderr_to_stdout: true)
+
+            if wait_until_os_process_dead(c_pid, 20) do
+              :ok
+            else
+              {:error, {:descendant_alive, c_pid}}
+            end
+
+          :gone ->
+            :ok
+
+          _ ->
+            {:error, {:descendant_identity_mismatch, c_pid}}
+        end
+
+      :gone ->
+        :ok
+
+      _other ->
+        if os_process_alive?(c_pid) do
+          {:error, {:descendant_identity_unknown, c_pid}}
+        else
+          :ok
+        end
+    end
   end
 
   defp os_process_alive?(os_pid) when is_integer(os_pid) and os_pid > 0 do
