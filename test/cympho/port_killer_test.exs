@@ -1126,7 +1126,9 @@ defmodule Cympho.PortKillerTest do
       ])
 
     assert {:os_pid, pid} = Port.info(port, :os_pid)
-    {:ok, known_id} = capture_identity(pid)
+    # Register port immediately before any fallible readiness or identity assertions
+    register_port(tracker, port, pid)
+    assert {:ok, known_id} = capture_identity(pid)
 
     # Register target with known identity
     register_target(tracker, pid)
@@ -1216,6 +1218,75 @@ defmodule Cympho.PortKillerTest do
     assert {:ok, []} = discover_child_pids(-1)
   end
 
+  test "reap_fixture retains tracker and directory when target collection fails" do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-port-killer-coll-fail-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+    tracker = init_fixture(tmp_dir)
+
+    # Create an invalid PID file so that collect_reap_targets returns a collection error
+    bad_pid_file = Path.join(tmp_dir, "bad.pid")
+    File.write!(bad_pid_file, "not-a-pid\n")
+    register_pid_file(tracker, bad_pid_file)
+
+    # reap_fixture should raise with path and targets, without stopping tracker or removing tmp_dir
+    assert_raise RuntimeError,
+                 ~r/PortKiller fixture teardown failed: target collection failed/,
+                 fn ->
+                   reap_fixture(tracker)
+                 end
+
+    assert File.exists?(tmp_dir)
+    assert Process.alive?(tracker)
+
+    # A subsequent get on the tracker still returns the state with tmp_dir and pid_files
+    state = Agent.get(tracker, & &1)
+    assert state.tmp_dir == tmp_dir
+    assert state.pid_files == [bad_pid_file]
+
+    # Clean up
+    Agent.stop(tracker, :normal)
+    File.rm_rf!(tmp_dir)
+  end
+
+  test "child discovery is refused when root pid identity is not validated" do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-port-killer-unauth-root-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+    tracker = init_fixture(tmp_dir)
+
+    # Use the BEAM process as a live root PID, but with mismatched identity and no port
+    beam_pid = System.pid() |> String.to_integer()
+
+    Agent.update(tracker, fn state ->
+      %{state | root_pid: beam_pid, root_identity: {:portable_ps, "wrong-identity"}, port: nil}
+    end)
+
+    state = Agent.get(tracker, & &1)
+    {targets, errors} = collect_reap_targets(state)
+
+    assert errors == [{:unauthorized_root_pid_for_child_discovery, beam_pid}]
+    # No children of BEAM should be discovered
+    refute Enum.any?(targets, fn {pid, _, _} -> pid != beam_pid end)
+
+    # reap_fixture must raise without killing BEAM or its children, and without stopping the tracker
+    assert_raise RuntimeError,
+                 ~r/PortKiller fixture teardown failed: target collection failed/,
+                 fn ->
+                   reap_fixture(tracker)
+                 end
+
+    assert File.exists?(tmp_dir)
+    assert Process.alive?(tracker)
+
+    # Clean up tracker and tmp_dir safely
+    Agent.update(tracker, fn s -> %{s | root_pid: nil} end)
+    Agent.stop(tracker, :normal)
+    File.rm_rf!(tmp_dir)
+  end
+
   defp init_fixture(tmp_dir) do
     {:ok, tracker} =
       Agent.start(fn ->
@@ -1296,41 +1367,45 @@ defmodule Cympho.PortKillerTest do
     if state do
       {targets, collection_errors} = collect_reap_targets(state)
 
-      Enum.each(targets, fn {pid, identity, port} ->
-        reap_target(pid, identity, port)
-      end)
-
-      # Check for any remaining living processes among tracked targets.
-      # Live unknown ownership is an explicit cleanup failure, not absence!
-      survivors =
-        Enum.filter(targets, fn {pid, _identity, _port} ->
-          process_alive?(pid)
-        end)
-
-      try do
-        Agent.stop(tracker, :normal)
-      catch
-        _, _ -> :ok
-      end
-
       cond do
         collection_errors != [] ->
-          raise "PortKiller fixture teardown failed: target collection failed: #{inspect(collection_errors)}"
-
-        survivors != [] ->
-          survivor_details =
-            Enum.map(survivors, fn {pid, identity, port} ->
-              if authorized_to_signal?(pid, identity, port) do
-                {:authorized_survivor, pid, identity}
-              else
-                {:unauthorized_live_target, pid, identity}
-              end
-            end)
-
-          raise "PortKiller fixture teardown failed: owned processes still alive: #{inspect(survivor_details)}"
+          # Do NOT reap known targets (which would destroy root needed for child discovery)
+          # and do NOT stop the tracker or delete the directory.
+          # Preserve ownership state in the tracker for diagnosis or subsequent retry.
+          raise "PortKiller fixture teardown failed: target collection failed: #{inspect(collection_errors)}, path: #{inspect(state.tmp_dir)}, targets: #{inspect(targets)}"
 
         true ->
-          File.rm_rf!(state.tmp_dir)
+          Enum.each(targets, fn {pid, identity, port} ->
+            reap_target(pid, identity, port)
+          end)
+
+          # Check for any remaining living processes among tracked targets.
+          # Live unknown ownership is an explicit cleanup failure, not absence!
+          survivors =
+            Enum.filter(targets, fn {pid, _identity, _port} ->
+              process_alive?(pid)
+            end)
+
+          if survivors != [] do
+            survivor_details =
+              Enum.map(survivors, fn {pid, identity, port} ->
+                if authorized_to_signal?(pid, identity, port) do
+                  {:authorized_survivor, pid, identity}
+                else
+                  {:unauthorized_live_target, pid, identity}
+                end
+              end)
+
+            raise "PortKiller fixture teardown failed: owned processes still alive: #{inspect(survivor_details)}, path: #{inspect(state.tmp_dir)}, targets: #{inspect(targets)}"
+          else
+            try do
+              Agent.stop(tracker, :normal)
+            catch
+              _, _ -> :ok
+            end
+
+            File.rm_rf!(state.tmp_dir)
+          end
       end
     end
   end
@@ -1355,24 +1430,31 @@ defmodule Cympho.PortKillerTest do
       end
 
     {discovered_children, discovery_errors} =
-      if state.root_pid && process_alive?(state.root_pid) do
-        case discover_child_pids(state.root_pid) do
-          {:ok, child_pids} ->
-            children =
-              Enum.map(child_pids, fn c_pid ->
-                case capture_identity(c_pid) do
-                  {:ok, id} -> {c_pid, id, nil}
-                  _ -> {c_pid, :unknown, nil}
-                end
-              end)
+      cond do
+        state.root_pid && process_alive?(state.root_pid) &&
+            authorized_to_signal?(state.root_pid, state.root_identity, state.port) ->
+          case discover_child_pids(state.root_pid) do
+            {:ok, child_pids} ->
+              children =
+                Enum.map(child_pids, fn c_pid ->
+                  case capture_identity(c_pid) do
+                    {:ok, id} -> {c_pid, id, nil}
+                    _ -> {c_pid, :unknown, nil}
+                  end
+                end)
 
-            {children, []}
+              {children, []}
 
-          {:error, reason} ->
-            {[], [reason]}
-        end
-      else
-        {[], []}
+            {:error, reason} ->
+              {[], [reason]}
+          end
+
+        state.root_pid && process_alive?(state.root_pid) ->
+          # Root PID is alive but not authorized! Do NOT discover children of an unauthorized process!
+          {[], [{:unauthorized_root_pid_for_child_discovery, state.root_pid}]}
+
+        true ->
+          {[], []}
       end
 
     {pid_file_targets, pid_file_errors} =
@@ -1476,45 +1558,61 @@ defmodule Cympho.PortKillerTest do
   defp authorized_to_signal?(_pid, _identity, _port), do: false
 
   defp capture_identity(pid) when is_integer(pid) and pid > 1 do
-    if File.exists?("/proc/#{pid}/stat") do
-      case File.read("/proc/#{pid}/stat") do
-        {:ok, stat} ->
-          case :binary.matches(stat, ") ") |> List.last() do
-            {index, 2} ->
-              fields =
-                stat |> binary_part(index + 2, byte_size(stat) - index - 2) |> String.split()
-
-              case Enum.at(fields, 19) do
-                nil -> :unknown
-                starttime -> {:ok, {:linux_starttime, starttime}}
-              end
-
-            _ ->
-              :unknown
-          end
-
-        {:error, :enoent} ->
-          :gone
-
-        _ ->
-          :unknown
-      end
+    if not process_alive?(pid) do
+      :gone
     else
-      case System.cmd("ps", ["-o", "lstart=", "-p", Integer.to_string(pid)],
-             stderr_to_stdout: true
-           ) do
-        {output, 0} ->
-          case String.trim(output) do
-            "" -> :gone
-            val -> {:ok, {:portable_ps, val}}
-          end
+      if File.exists?("/proc/#{pid}/stat") do
+        case File.read("/proc/#{pid}/stat") do
+          {:ok, stat} ->
+            case :binary.matches(stat, ") ") |> List.last() do
+              {index, 2} ->
+                fields =
+                  stat |> binary_part(index + 2, byte_size(stat) - index - 2) |> String.split()
 
-        _ ->
-          :gone
+                case Enum.at(fields, 19) do
+                  nil -> :unknown
+                  starttime -> {:ok, {:linux_starttime, starttime}}
+                end
+
+              _ ->
+                :unknown
+            end
+
+          {:error, :enoent} ->
+            if not process_alive?(pid), do: :gone, else: :unknown
+
+          _ ->
+            :unknown
+        end
+      else
+        case System.cmd("ps", ["-o", "lstart=", "-p", Integer.to_string(pid)],
+               stderr_to_stdout: true
+             ) do
+          {output, 0} ->
+            case String.trim(output) do
+              "" ->
+                if not process_alive?(pid), do: :gone, else: :unknown
+
+              val ->
+                {:ok, {:portable_ps, val}}
+            end
+
+          {_output, _status} ->
+            if not process_alive?(pid) do
+              :gone
+            else
+              :unknown
+            end
+        end
       end
     end
   rescue
-    _ -> :unknown
+    _ ->
+      if is_integer(pid) and pid > 1 and not process_alive?(pid) do
+        :gone
+      else
+        :unknown
+      end
   end
 
   defp capture_identity(_), do: :unknown

@@ -732,6 +732,42 @@ defmodule Cympho.Adapters.UnitTest do
       # Non-existent parent pid returns :ok (pgrep exit 1 = no children)
       assert :ok = reap_child_os_pids(999_999)
     end
+
+    test "capture_identity preserves helper failure as unknown on live process and distinguishes confirmed absence" do
+      # Nonexistent process is confirmed absent
+      refute os_process_alive?(999_999)
+      assert :gone = capture_identity(999_999)
+
+      # Invalid PIDs are unknown
+      assert :unknown = capture_identity(-1)
+      assert :unknown = capture_identity(nil)
+
+      # Live process has known identity
+      beam_pid = System.pid() |> String.to_integer()
+      assert os_process_alive?(beam_pid)
+      assert {:ok, _} = capture_identity(beam_pid)
+    end
+
+    test "fixture teardown refuses to signal without validated identity and fails closed" do
+      tmp_root =
+        Path.join(System.tmp_dir!(), "cursor-unknown-id-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_root)
+      on_exit(fn -> File.rm_rf!(tmp_root) end)
+
+      pid_file = Path.join(tmp_root, "child.pid")
+
+      # BEAM OS PID is alive and owned by this BEAM test run, but not part of tmp_root
+      beam_pid = System.pid() |> String.to_integer()
+      File.write!(pid_file, "#{beam_pid}\n")
+
+      # Ownership check refuses to signal and returns error rather than signalling
+      assert {:error, {:unauthorized_or_reused_pid, ^beam_pid}} =
+               reap_exact_owned_os_child(pid_file)
+
+      # Live process remains untouched
+      assert os_process_alive?(beam_pid)
+    end
   end
 
   describe "HttpAdapter" do
@@ -1349,11 +1385,7 @@ defmodule Cympho.Adapters.UnitTest do
     case capture_identity(os_pid) do
       :gone ->
         if os_process_alive?(os_pid) do
-          if fixture_process_owned?(os_pid, root) do
-            signal_and_wait_os_pid(os_pid)
-          else
-            {:error, {:unauthorized_or_reused_pid, os_pid}}
-          end
+          {:error, {:identity_capture_failed, os_pid}}
         else
           :ok
         end
@@ -1401,7 +1433,11 @@ defmodule Cympho.Adapters.UnitTest do
               end
 
             :gone ->
-              :ok
+              if os_process_alive?(os_pid) do
+                {:error, {:identity_capture_failed, os_pid}}
+              else
+                :ok
+              end
 
             _mismatch ->
               {:error, {:identity_mismatch_before_kill, os_pid}}
@@ -1409,26 +1445,14 @@ defmodule Cympho.Adapters.UnitTest do
         end
 
       :gone ->
-        :ok
+        if os_process_alive?(os_pid) do
+          {:error, {:identity_capture_failed, os_pid}}
+        else
+          :ok
+        end
 
       _mismatch ->
         {:error, {:identity_mismatch_before_term, os_pid}}
-    end
-  end
-
-  defp signal_and_wait_os_pid(os_pid) do
-    System.cmd("/bin/kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
-
-    if wait_until_os_process_dead(os_pid, 20) do
-      :ok
-    else
-      System.cmd("/bin/kill", ["-KILL", Integer.to_string(os_pid)], stderr_to_stdout: true)
-
-      if wait_until_os_process_dead(os_pid, 20) do
-        :ok
-      else
-        {:error, {:os_process_alive, os_pid}}
-      end
     end
   end
 
@@ -1458,45 +1482,61 @@ defmodule Cympho.Adapters.UnitTest do
   end
 
   defp capture_identity(pid) when is_integer(pid) and pid > 1 do
-    if File.exists?("/proc/#{pid}/stat") do
-      case File.read("/proc/#{pid}/stat") do
-        {:ok, stat} ->
-          case :binary.matches(stat, ") ") |> List.last() do
-            {index, 2} ->
-              fields =
-                stat |> binary_part(index + 2, byte_size(stat) - index - 2) |> String.split()
-
-              case Enum.at(fields, 19) do
-                nil -> :unknown
-                starttime -> {:ok, {:linux_starttime, starttime}}
-              end
-
-            _ ->
-              :unknown
-          end
-
-        {:error, :enoent} ->
-          :gone
-
-        _ ->
-          :unknown
-      end
+    if not os_process_alive?(pid) do
+      :gone
     else
-      case System.cmd("ps", ["-o", "lstart=", "-p", Integer.to_string(pid)],
-             stderr_to_stdout: true
-           ) do
-        {output, 0} ->
-          case String.trim(output) do
-            "" -> :gone
-            val -> {:ok, {:portable_ps, val}}
-          end
+      if File.exists?("/proc/#{pid}/stat") do
+        case File.read("/proc/#{pid}/stat") do
+          {:ok, stat} ->
+            case :binary.matches(stat, ") ") |> List.last() do
+              {index, 2} ->
+                fields =
+                  stat |> binary_part(index + 2, byte_size(stat) - index - 2) |> String.split()
 
-        _ ->
-          :gone
+                case Enum.at(fields, 19) do
+                  nil -> :unknown
+                  starttime -> {:ok, {:linux_starttime, starttime}}
+                end
+
+              _ ->
+                :unknown
+            end
+
+          {:error, :enoent} ->
+            if not os_process_alive?(pid), do: :gone, else: :unknown
+
+          _ ->
+            :unknown
+        end
+      else
+        case System.cmd("ps", ["-o", "lstart=", "-p", Integer.to_string(pid)],
+               stderr_to_stdout: true
+             ) do
+          {output, 0} ->
+            case String.trim(output) do
+              "" ->
+                if not os_process_alive?(pid), do: :gone, else: :unknown
+
+              val ->
+                {:ok, {:portable_ps, val}}
+            end
+
+          {_output, _status} ->
+            if not os_process_alive?(pid) do
+              :gone
+            else
+              :unknown
+            end
+        end
       end
     end
   rescue
-    _ -> :unknown
+    _ ->
+      if is_integer(pid) and pid > 1 and not os_process_alive?(pid) do
+        :gone
+      else
+        :unknown
+      end
   end
 
   defp capture_identity(_), do: :unknown
@@ -1559,14 +1599,22 @@ defmodule Cympho.Adapters.UnitTest do
             end
 
           :gone ->
-            :ok
+            if os_process_alive?(c_pid) do
+              {:error, {:descendant_alive, c_pid}}
+            else
+              :ok
+            end
 
           _ ->
             {:error, {:descendant_identity_mismatch, c_pid}}
         end
 
       :gone ->
-        :ok
+        if os_process_alive?(c_pid) do
+          {:error, {:descendant_alive, c_pid}}
+        else
+          :ok
+        end
 
       _other ->
         if os_process_alive?(c_pid) do
