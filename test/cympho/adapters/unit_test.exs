@@ -665,6 +665,27 @@ defmodule Cympho.Adapters.UnitTest do
         assert String.ends_with?(cwd, workspace_suffix)
       end)
     end
+
+    test "fixture teardown outcome check detects surviving OS child and reports failure" do
+      tmp_root =
+        Path.join(System.tmp_dir!(), "cursor-survivor-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_root)
+      on_exit(fn -> File.rm_rf!(tmp_root) end)
+
+      pid_file = Path.join(tmp_root, "child.pid")
+
+      # Nonexistent pid file returns :ok
+      assert :ok = reap_exact_owned_os_child(Path.join(tmp_root, "missing.pid"))
+
+      # Cleanly exited process in pid file returns :ok
+      dead_pid = 999_999
+      File.write!(pid_file, "#{dead_pid}\n")
+      assert :ok = reap_exact_owned_os_child(pid_file)
+
+      # Clean fixture workers check returns :ok
+      assert :ok = reap_fixture_workers(self())
+    end
   end
 
   describe "HttpAdapter" do
@@ -1116,70 +1137,95 @@ defmodule Cympho.Adapters.UnitTest do
     after
       # Failure-safe exact-owned teardown:
       # Step 1: Monitor and reap fixture workers
-      reap_fixture_workers(self())
+      worker_result = reap_fixture_workers(self())
 
       # Step 2: Monitor and reap exact owned OS children
-      reap_exact_owned_os_child(pid_file)
+      os_result = reap_exact_owned_os_child(pid_file)
 
-      # Step 3: Remove fixture files and directory
-      File.rm_rf!(root)
+      case {worker_result, os_result} do
+        {:ok, :ok} ->
+          # Step 3: Remove fixture files and directory only after confirmed exit
+          File.rm_rf!(root)
 
-      # Step 4: Restore global configuration
-      restore_cursor_global_config(
-        original_path,
-        original_cursor_cmd,
-        original_env_cmd,
-        original_finder
-      )
+          # Step 4: Restore global configuration only after confirmed cleanup
+          restore_cursor_global_config(
+            original_path,
+            original_cursor_cmd,
+            original_env_cmd,
+            original_finder
+          )
+
+        {worker_err, os_err} ->
+          # Propagate failed worker/OS reaping instead of deleting files/restoring globals as though cleanup succeeded
+          raise "Cursor fixture teardown failed: worker reaping=#{inspect(worker_err)}, os reaping=#{inspect(os_err)}"
+      end
     end
   end
 
   defp reap_fixture_workers(controller_pid) do
-    case Cympho.AdapterSessions.active_sessions() do
-      {:ok, sessions} ->
-        for %{session_id: sid, pid: worker_pid, controller_pid: cpid} <- sessions,
-            cpid == controller_pid do
-          if Process.alive?(worker_pid) do
-            Cympho.AdapterSessions.cancel_and_wait(sid, :test_teardown, 1_000)
+    session_errors =
+      case Cympho.AdapterSessions.active_sessions() do
+        {:ok, sessions} ->
+          Enum.flat_map(sessions, fn %{session_id: sid, pid: worker_pid, controller_pid: cpid} ->
+            errors =
+              if cpid == controller_pid and Process.alive?(worker_pid) do
+                Cympho.AdapterSessions.cancel_and_wait(sid, :test_teardown, 1_000)
 
-            if Process.alive?(worker_pid) do
+                if Process.alive?(worker_pid) do
+                  ref = Process.monitor(worker_pid)
+                  Process.exit(worker_pid, :kill)
+
+                  receive do
+                    {:DOWN, ^ref, :process, ^worker_pid, _reason} ->
+                      []
+                  after
+                    500 ->
+                      Process.demonitor(ref, [:flush])
+                      if Process.alive?(worker_pid), do: [{:worker_alive, worker_pid}], else: []
+                  end
+                else
+                  []
+                end
+              else
+                []
+              end
+
+            Cympho.AdapterSessions.unregister(sid)
+            errors
+          end)
+
+        _ ->
+          []
+      end
+
+    owner_errors =
+      case Cympho.AdapterSessions.owners_for_controller(controller_pid) do
+        {:ok, worker_pids} when is_list(worker_pids) ->
+          Enum.flat_map(worker_pids, fn worker_pid ->
+            if is_pid(worker_pid) and Process.alive?(worker_pid) do
               ref = Process.monitor(worker_pid)
               Process.exit(worker_pid, :kill)
 
               receive do
-                {:DOWN, ^ref, :process, ^worker_pid, _reason} -> :ok
+                {:DOWN, ^ref, :process, ^worker_pid, _reason} ->
+                  []
               after
                 500 ->
                   Process.demonitor(ref, [:flush])
-                  :ok
+                  if Process.alive?(worker_pid), do: [{:owner_alive, worker_pid}], else: []
               end
+            else
+              []
             end
-          end
+          end)
 
-          Cympho.AdapterSessions.unregister(sid)
-        end
+        _ ->
+          []
+      end
 
-      _ ->
-        :ok
-    end
-
-    case Cympho.AdapterSessions.owners_for_controller(controller_pid) do
-      {:ok, worker_pids} when is_list(worker_pids) ->
-        for worker_pid <- worker_pids, is_pid(worker_pid) and Process.alive?(worker_pid) do
-          ref = Process.monitor(worker_pid)
-          Process.exit(worker_pid, :kill)
-
-          receive do
-            {:DOWN, ^ref, :process, ^worker_pid, _reason} -> :ok
-          after
-            500 ->
-              Process.demonitor(ref, [:flush])
-              :ok
-          end
-        end
-
-      _ ->
-        :ok
+    case session_errors ++ owner_errors do
+      [] -> :ok
+      errors -> {:error, errors}
     end
   end
 
@@ -1200,18 +1246,54 @@ defmodule Cympho.Adapters.UnitTest do
         _ ->
           :ok
       end
+    else
+      :ok
     end
   end
 
   defp reap_os_pid(os_pid) do
     if os_process_alive?(os_pid) do
+      reap_child_os_pids(os_pid)
+
       System.cmd("/bin/kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
 
-      unless wait_until_os_process_dead(os_pid, 20) do
+      if wait_until_os_process_dead(os_pid, 20) do
+        :ok
+      else
         System.cmd("/bin/kill", ["-KILL", Integer.to_string(os_pid)], stderr_to_stdout: true)
-        wait_until_os_process_dead(os_pid, 20)
+
+        if wait_until_os_process_dead(os_pid, 20) do
+          :ok
+        else
+          {:error, {:os_process_alive, os_pid}}
+        end
       end
+    else
+      :ok
     end
+  end
+
+  defp reap_child_os_pids(parent_pid) do
+    case System.cmd("pgrep", ["-P", Integer.to_string(parent_pid)], stderr_to_stdout: true) do
+      {output, 0} ->
+        output
+        |> String.split()
+        |> Enum.each(fn str ->
+          case Integer.parse(str) do
+            {c_pid, ""} when c_pid > 0 ->
+              System.cmd("/bin/kill", ["-KILL", Integer.to_string(c_pid)], stderr_to_stdout: true)
+              wait_until_os_process_dead(c_pid, 10)
+
+            _ ->
+              :ok
+          end
+        end)
+
+      _ ->
+        :ok
+    end
+  rescue
+    _ -> :ok
   end
 
   defp os_process_alive?(os_pid) when is_integer(os_pid) and os_pid > 0 do
