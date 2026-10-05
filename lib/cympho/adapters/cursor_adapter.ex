@@ -333,15 +333,12 @@ defmodule Cympho.Adapters.CursorAdapter do
   end
 
   defp find_cursor_binary(config) do
-    case config[:command] || config["command"] || config[:cursor_path] || config["cursor_path"] do
+    case resolve_cursor_path(config) do
       nil ->
-        System.find_executable("agent") ||
-          System.find_executable("cursor-agent") ||
-          System.find_executable("cursor") ||
-          raise "Cursor agent binary not found in PATH"
+        raise "Cursor agent binary not found in PATH"
 
       path ->
-        resolve_command_path(path)
+        path
     end
   end
 
@@ -503,21 +500,48 @@ defmodule Cympho.Adapters.CursorAdapter do
   defp config_value(_config, _key), do: nil
 
   defp resolve_cursor_path(config) do
-    case config[:command] || config["command"] || config[:cursor_path] || config["cursor_path"] do
+    case configured_cursor_command(config) do
+      :disabled ->
+        nil
+
       nil ->
-        System.find_executable("agent") ||
-          System.find_executable("cursor-agent") ||
-          System.find_executable("cursor")
+        find_default_cursor_binary()
 
       path ->
         resolve_command_path(path)
     end
   end
 
+  defp configured_cursor_command(config) do
+    case config_value(config, :command) || config_value(config, :cursor_path) do
+      nil ->
+        case Application.get_env(:cympho, :cursor_command) do
+          :disabled -> :disabled
+          cmd when is_binary(cmd) and cmd != "" -> cmd
+          _ -> System.get_env("CYMPHO_CURSOR_COMMAND")
+        end
+
+      path ->
+        path
+    end
+  end
+
+  defp find_default_cursor_binary do
+    finder = executable_finder()
+
+    finder.("agent") ||
+      finder.("cursor-agent") ||
+      finder.("cursor")
+  end
+
+  defp executable_finder do
+    Application.get_env(:cympho, :cursor_executable_finder, &System.find_executable/1)
+  end
+
   defp resolve_command_path(path) when is_binary(path) do
     cond do
       String.starts_with?(path, "/") -> path
-      true -> System.find_executable(path) || path
+      true -> executable_finder().(path) || path
     end
   end
 

@@ -335,6 +335,7 @@ defmodule Cympho.Adapters.UnitTest do
       issue = %{id: "issue-1", title: "Test", description: "Do something"}
       ref = CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test"})
       assert is_reference(ref)
+      assert_receive {:turn_ended_with_error, ^ref, _reason}, 2_000
     end
 
     test "does not announce a session when setup cannot establish containment" do
@@ -342,12 +343,12 @@ defmodule Cympho.Adapters.UnitTest do
       config = %{api_key: "sk-test", timeout: 500}
 
       unless CodexAdapter.available?(config) do
-        _ref = CodexAdapter.run(issue, "agent-1", self(), config: config)
+        ref = CodexAdapter.run(issue, "agent-1", self(), config: config)
 
-        assert_receive {:turn_ended_with_error, session_id, reason}, 2_000
-        assert is_reference(session_id)
+        assert_receive {:turn_ended_with_error, ^ref, reason}, 2_000
+        assert is_reference(ref)
         assert is_binary(reason)
-        refute_receive {:session_started, ^session_id}, 0
+        refute_receive {:session_started, ^ref}, 0
       end
     end
 
@@ -357,11 +358,11 @@ defmodule Cympho.Adapters.UnitTest do
       unless has_codex do
         issue = %{id: "issue-1", title: "Test", description: "Do something"}
 
-        _ref =
+        ref =
           CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
 
-        assert_receive {:turn_ended_with_error, session_id, reason}, 2_000
-        refute_receive {:session_started, ^session_id}, 0
+        assert_receive {:turn_ended_with_error, ^ref, reason}, 2_000
+        refute_receive {:session_started, ^ref}, 0
         assert is_binary(reason)
       end
     end
@@ -373,12 +374,14 @@ defmodule Cympho.Adapters.UnitTest do
         CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
 
       assert is_reference(ref)
+      assert_receive {:turn_ended_with_error, ^ref, _reason}, 2_000
     end
 
     test "works without config" do
       issue = %{id: "issue-1", title: "Test", description: "Do something"}
       ref = CodexAdapter.run(issue, "agent-1", self(), [])
       assert is_reference(ref)
+      assert_receive {:turn_ended_with_error, ^ref, _reason}, 2_000
     end
   end
 
@@ -471,99 +474,176 @@ defmodule Cympho.Adapters.UnitTest do
     end
 
     test "health_check/1 returns well-formed result" do
-      result = CursorAdapter.health_check(%{})
+      with_isolated_cursor_fixture(:none, fn _ ->
+        result = CursorAdapter.health_check(%{})
 
-      assert Map.has_key?(result, :status)
-      assert Map.has_key?(result, :checked_at)
-      assert Map.has_key?(result, :message)
-      assert result.status in [:healthy, :unhealthy]
-      assert %DateTime{} = result.checked_at
+        assert Map.has_key?(result, :status)
+        assert Map.has_key?(result, :checked_at)
+        assert Map.has_key?(result, :message)
+        assert result.status in [:healthy, :unhealthy]
+        assert %DateTime{} = result.checked_at
+      end)
     end
 
     test "health_check/1 without cursor binary reports unhealthy" do
-      unless cursor_entrypoint_available?() do
-        assert CursorAdapter.health_check(%{}).status == :unhealthy
-      end
+      with_isolated_cursor_fixture(:none, fn _ ->
+        result = CursorAdapter.health_check(%{})
+        assert result.status == :unhealthy
+        assert result.message =~ "not found"
+      end)
     end
 
     test "health_check/1 with nonexistent cursor_path reports unhealthy" do
-      result = CursorAdapter.health_check(%{cursor_path: "/nonexistent/path"})
-      assert result.status == :unhealthy
+      with_isolated_cursor_fixture(:none, fn _ ->
+        result = CursorAdapter.health_check(%{cursor_path: "/nonexistent/path"})
+        assert result.status == :unhealthy
+      end)
     end
 
     test "available?/1 without cursor binary returns false" do
-      unless cursor_entrypoint_available?() do
+      with_isolated_cursor_fixture(:none, fn _ ->
         assert CursorAdapter.available?(%{}) == false
-      end
+      end)
     end
 
     test "available?/1 with nonexistent cursor_path returns false" do
-      assert CursorAdapter.available?(%{cursor_path: "/nonexistent/path"}) == false
+      with_isolated_cursor_fixture(:none, fn _ ->
+        assert CursorAdapter.available?(%{cursor_path: "/nonexistent/path"}) == false
+      end)
     end
 
     test "available?/0 delegates to available?/1" do
-      assert CursorAdapter.available?() == CursorAdapter.available?(%{})
+      with_isolated_cursor_fixture(:none, fn _ ->
+        assert CursorAdapter.available?() == CursorAdapter.available?(%{})
+      end)
     end
 
-    test "run/4 returns a reference" do
-      issue = %{id: "issue-1", title: "Test", description: "Do something"}
-      ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 500})
-      assert is_reference(ref)
+    test "cannot resolve installed agent executable from inherited PATH or runtime configuration" do
+      with_isolated_cursor_fixture(:none, fn _ ->
+        assert System.find_executable("agent") == nil
+        assert System.find_executable("cursor-agent") == nil
+        assert System.find_executable("cursor") == nil
+        assert CursorAdapter.available?(%{}) == false
+
+        issue = %{id: "issue-1", title: "Test", description: "Do something"}
+        ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 500})
+        assert is_reference(ref)
+        assert_receive {:turn_ended_with_error, ^ref, :cursor_process_failed}, 2_000
+        refute_receive {:session_started, ^ref}, 100
+        refute Cympho.AdapterSessions.registered?(ref)
+      end)
+    end
+
+    test "run/4 returns a reference and completes turn successfully" do
+      with_isolated_cursor_fixture(:success, fn _ ->
+        issue = %{id: "issue-1", title: "Test", description: "Do something"}
+        ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 5_000})
+        assert is_reference(ref)
+        assert_receive {:session_started, ^ref}, 2_000
+        assert_receive {:turn_completed, ^ref, output}, 2_000
+        assert is_map(output)
+        assert output["status"] == "success"
+      end)
     end
 
     test "run/4 sends session_started message" do
-      issue = %{id: "issue-1", title: "Test", description: "Do something"}
-      _ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 500})
-      assert_receive {:session_started, session_id}, 1000
-      assert is_reference(session_id)
+      with_isolated_cursor_fixture(:success, fn _ ->
+        issue = %{id: "issue-1", title: "Test", description: "Do something"}
+        ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 5_000})
+        assert_receive {:session_started, session_id}, 2_000
+        assert session_id == ref
+        assert_receive {:turn_completed, ^ref, _output}, 2_000
+      end)
     end
 
     test "run/4 sends error when cursor binary not available" do
-      unless cursor_entrypoint_available?() do
+      with_isolated_cursor_fixture(:none, fn _ ->
         issue = %{id: "issue-1", title: "Test", description: "Do something"}
-        _ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 500})
+        ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 500})
 
-        assert_receive {:session_started, _session_id}, 1000
-        assert_receive {:turn_ended_with_error, _session_id, reason}, 2000
-        assert is_binary(reason)
-      end
+        assert is_reference(ref)
+        assert_receive {:turn_ended_with_error, ^ref, :cursor_process_failed}, 2_000
+        refute_receive {:session_started, ^ref}, 100
+        refute Cympho.AdapterSessions.registered?(ref)
+      end)
+    end
+
+    test "run/4 sends turn_ended_with_error on command error exit" do
+      with_isolated_cursor_fixture(:error, fn _ ->
+        issue = %{id: "issue-1", title: "Test", description: "Do something"}
+        ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 5_000})
+
+        assert is_reference(ref)
+        assert_receive {:session_started, ^ref}, 2_000
+        assert_receive {:turn_ended_with_error, ^ref, {:exit_code, 2}}, 2_000
+        refute Cympho.AdapterSessions.registered?(ref)
+      end)
+    end
+
+    test "run/4 handles cancellation with monitored child process termination" do
+      with_isolated_cursor_fixture(:cancellation, fn %{pid_file: pid_file} ->
+        issue = %{id: "issue-1", title: "Test", description: "Do something"}
+        ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 30_000})
+
+        assert is_reference(ref)
+        assert_receive {:session_started, ^ref}, 2_000
+
+        assert eventually(
+                 fn ->
+                   File.exists?(pid_file) and
+                     case File.read(pid_file) do
+                       {:ok, content} ->
+                         case Integer.parse(String.trim(content)) do
+                           {pid, ""} -> os_process_alive?(pid)
+                           _ -> false
+                         end
+
+                       _ ->
+                         false
+                     end
+                 end,
+                 100
+               )
+
+        os_pid = pid_file |> File.read!() |> String.trim() |> String.to_integer()
+        assert os_process_alive?(os_pid)
+
+        assert :ok = Cympho.AdapterSessions.cancel(ref, :test_cancellation)
+        assert_receive {:turn_ended_with_error, ^ref, {:cancelled, :test_cancellation}}, 2_000
+        refute Cympho.AdapterSessions.registered?(ref)
+
+        assert eventually(fn -> not os_process_alive?(os_pid) end, 100)
+      end)
     end
 
     test "run/4 works without config" do
-      issue = %{id: "issue-1", title: "Test", description: "Do something"}
-      ref = CursorAdapter.run(issue, "agent-1", self(), [])
-      assert is_reference(ref)
-      assert_receive {:session_started, _session_id}, 1000
+      with_isolated_cursor_fixture(:success, fn _ ->
+        issue = %{id: "issue-1", title: "Test", description: "Do something"}
+        ref = CursorAdapter.run(issue, "agent-1", self(), [])
+        assert is_reference(ref)
+        assert_receive {:session_started, ^ref}, 2_000
+        assert_receive {:turn_completed, ^ref, output}, 2_000
+        assert output["status"] == "success"
+      end)
     end
 
     test "run/4 works with string-keyed issue" do
-      issue = %{"id" => "issue-1", "title" => "Test", "description" => "Do something"}
-      ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 500})
-      assert is_reference(ref)
-      assert_receive {:session_started, _session_id}, 1000
+      with_isolated_cursor_fixture(:success, fn _ ->
+        issue = %{"id" => "issue-1", "title" => "Test", "description" => "Do something"}
+        ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 5_000})
+        assert is_reference(ref)
+        assert_receive {:session_started, ^ref}, 2_000
+        assert_receive {:turn_completed, ^ref, output}, 2_000
+        assert output["status"] == "success"
+      end)
     end
 
     test "run/4 forwards runtime env and uses cwd when workspace_path is absent" do
-      root =
-        Path.join(System.tmp_dir!(), "cympho-cursor-unit-#{System.unique_integer([:positive])}")
+      with_isolated_cursor_fixture(:runtime_env, fn %{root: root, agent_path: agent_path} ->
+        workspace = Path.join(root, "workspace")
+        File.mkdir_p!(workspace)
+        workspace_suffix = "/#{Path.basename(root)}/workspace"
 
-      workspace = Path.join(root, "workspace")
-      File.mkdir_p!(workspace)
-      workspace_suffix = "/#{Path.basename(root)}/workspace"
-
-      agent_path = Path.join(root, "agent")
-
-      File.write!(
-        agent_path,
-        """
-        #!/bin/sh
-        printf '{"cwd":"%s","flag":"%s","run":"%s"}\\n' "$PWD" "$CUSTOM_FLAG" "$CYMPHO_RUN_ID"
-        """
-      )
-
-      File.chmod!(agent_path, 0o755)
-
-      try do
         issue = %{id: "ISSUE-1", title: "Cursor Runtime", description: "Use runtime env."}
 
         ref =
@@ -576,16 +656,14 @@ defmodule Cympho.Adapters.UnitTest do
             }
           )
 
-        assert_receive {:session_started, ^ref}, 1_000
+        assert_receive {:session_started, ^ref}, 2_000
 
         assert_receive {:turn_completed, ^ref,
                         %{"cwd" => cwd, "flag" => "from-runtime", "run" => "run-123"}},
                        2_000
 
         assert String.ends_with?(cwd, workspace_suffix)
-      after
-        File.rm_rf!(root)
-      end
+      end)
     end
   end
 
@@ -928,7 +1006,272 @@ defmodule Cympho.Adapters.UnitTest do
     end
   end
 
-  defp cursor_entrypoint_available? do
-    Enum.any?(~w(agent cursor-agent cursor), &(System.find_executable(&1) != nil))
+  defp with_isolated_cursor_fixture(fixture_type, fun) do
+    original_path = System.get_env("PATH") || ""
+    original_cursor_cmd = Application.get_env(:cympho, :cursor_command)
+    original_env_cmd = System.get_env("CYMPHO_CURSOR_COMMAND")
+    original_finder = Application.get_env(:cympho, :cursor_executable_finder)
+
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "cympho-cursor-fixture-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(root)
+    pid_file = Path.join(root, "child.pid")
+    agent_path = Path.join(root, "agent")
+
+    case fixture_type do
+      :success ->
+        File.write!(
+          agent_path,
+          """
+          #!/bin/sh
+          echo $$ > "#{pid_file}"
+          printf '{"status":"success","result":"ok"}\\n'
+          exit 0
+          """
+        )
+
+        File.chmod!(agent_path, 0o755)
+
+      :error ->
+        File.write!(
+          agent_path,
+          """
+          #!/bin/sh
+          echo $$ > "#{pid_file}"
+          printf 'simulated cursor failure\\n' >&2
+          exit 2
+          """
+        )
+
+        File.chmod!(agent_path, 0o755)
+
+      :cancellation ->
+        File.write!(
+          agent_path,
+          """
+          #!/bin/sh
+          echo $$ > "#{pid_file}"
+          trap 'exit 0' TERM INT HUP
+          while true; do
+            sleep 0.05
+          done
+          """
+        )
+
+        File.chmod!(agent_path, 0o755)
+
+      :runtime_env ->
+        File.write!(
+          agent_path,
+          """
+          #!/bin/sh
+          echo $$ > "#{pid_file}"
+          printf '{"cwd":"%s","flag":"%s","run":"%s"}\\n' "$PWD" "$CUSTOM_FLAG" "$CYMPHO_RUN_ID"
+          exit 0
+          """
+        )
+
+        File.chmod!(agent_path, 0o755)
+
+      :none ->
+        :ok
+    end
+
+    # Clear inherited runtime configuration so host config cannot leak
+    System.delete_env("CYMPHO_CURSOR_COMMAND")
+    Application.delete_env(:cympho, :cursor_command)
+    Application.delete_env(:cympho, :cursor_executable_finder)
+
+    # Sanitize PATH: retain system directories (such as /bin and /usr/bin) but strip
+    # any directory that contains an installed agent/cursor executable.
+    clean_system_paths =
+      original_path
+      |> String.split(":")
+      |> Enum.reject(fn dir ->
+        dir == "" or
+          Enum.any?(~w(agent cursor-agent cursor), fn bin ->
+            File.regular?(Path.join(dir, bin))
+          end)
+      end)
+
+    isolated_path =
+      if fixture_type == :none do
+        Enum.join(clean_system_paths, ":")
+      else
+        Enum.join([root | clean_system_paths], ":")
+      end
+
+    System.put_env("PATH", isolated_path)
+
+    if fixture_type == :none do
+      Application.put_env(:cympho, :cursor_command, :disabled)
+    end
+
+    try do
+      fun.(%{root: root, agent_path: agent_path, pid_file: pid_file})
+    after
+      # Failure-safe exact-owned teardown:
+      # Step 1: Monitor and reap fixture workers
+      reap_fixture_workers(self())
+
+      # Step 2: Monitor and reap exact owned OS children
+      reap_exact_owned_os_child(pid_file)
+
+      # Step 3: Remove fixture files and directory
+      File.rm_rf!(root)
+
+      # Step 4: Restore global configuration
+      restore_cursor_global_config(
+        original_path,
+        original_cursor_cmd,
+        original_env_cmd,
+        original_finder
+      )
+    end
+  end
+
+  defp reap_fixture_workers(controller_pid) do
+    case Cympho.AdapterSessions.active_sessions() do
+      {:ok, sessions} ->
+        for %{session_id: sid, pid: worker_pid, controller_pid: cpid} <- sessions,
+            cpid == controller_pid do
+          if Process.alive?(worker_pid) do
+            Cympho.AdapterSessions.cancel_and_wait(sid, :test_teardown, 1_000)
+
+            if Process.alive?(worker_pid) do
+              ref = Process.monitor(worker_pid)
+              Process.exit(worker_pid, :kill)
+
+              receive do
+                {:DOWN, ^ref, :process, ^worker_pid, _reason} -> :ok
+              after
+                500 ->
+                  Process.demonitor(ref, [:flush])
+                  :ok
+              end
+            end
+          end
+
+          Cympho.AdapterSessions.unregister(sid)
+        end
+
+      _ ->
+        :ok
+    end
+
+    case Cympho.AdapterSessions.owners_for_controller(controller_pid) do
+      {:ok, worker_pids} when is_list(worker_pids) ->
+        for worker_pid <- worker_pids, is_pid(worker_pid) and Process.alive?(worker_pid) do
+          ref = Process.monitor(worker_pid)
+          Process.exit(worker_pid, :kill)
+
+          receive do
+            {:DOWN, ^ref, :process, ^worker_pid, _reason} -> :ok
+          after
+            500 ->
+              Process.demonitor(ref, [:flush])
+              :ok
+          end
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp reap_exact_owned_os_child(pid_file) do
+    if File.exists?(pid_file) do
+      case File.read(pid_file) do
+        {:ok, content} ->
+          trimmed = String.trim(content)
+
+          case Integer.parse(trimmed) do
+            {os_pid, ""} when os_pid > 0 ->
+              reap_os_pid(os_pid)
+
+            _ ->
+              :ok
+          end
+
+        _ ->
+          :ok
+      end
+    end
+  end
+
+  defp reap_os_pid(os_pid) do
+    if os_process_alive?(os_pid) do
+      System.cmd("/bin/kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
+
+      unless wait_until_os_process_dead(os_pid, 20) do
+        System.cmd("/bin/kill", ["-KILL", Integer.to_string(os_pid)], stderr_to_stdout: true)
+        wait_until_os_process_dead(os_pid, 20)
+      end
+    end
+  end
+
+  defp os_process_alive?(os_pid) when is_integer(os_pid) and os_pid > 0 do
+    case System.cmd("/bin/kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true) do
+      {_, 0} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp os_process_alive?(_), do: false
+
+  defp wait_until_os_process_dead(os_pid, attempts) when attempts > 0 do
+    if os_process_alive?(os_pid) do
+      Process.sleep(25)
+      wait_until_os_process_dead(os_pid, attempts - 1)
+    else
+      true
+    end
+  end
+
+  defp wait_until_os_process_dead(_os_pid, 0), do: false
+
+  defp restore_cursor_global_config(
+         original_path,
+         original_cursor_cmd,
+         original_env_cmd,
+         original_finder
+       ) do
+    if original_path do
+      System.put_env("PATH", original_path)
+    else
+      System.delete_env("PATH")
+    end
+
+    if original_cursor_cmd do
+      Application.put_env(:cympho, :cursor_command, original_cursor_cmd)
+    else
+      Application.delete_env(:cympho, :cursor_command)
+    end
+
+    if original_env_cmd do
+      System.put_env("CYMPHO_CURSOR_COMMAND", original_env_cmd)
+    else
+      System.delete_env("CYMPHO_CURSOR_COMMAND")
+    end
+
+    if original_finder do
+      Application.put_env(:cympho, :cursor_executable_finder, original_finder)
+    else
+      Application.delete_env(:cympho, :cursor_executable_finder)
+    end
+  end
+
+  defp eventually(fun, attempts) do
+    cond do
+      fun.() -> true
+      attempts <= 1 -> false
+      true -> Process.sleep(25) && eventually(fun, attempts - 1)
+    end
   end
 end
