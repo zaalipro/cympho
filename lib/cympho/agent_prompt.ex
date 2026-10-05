@@ -1914,17 +1914,25 @@ defmodule Cympho.AgentPrompt do
     "[review]",
     "[request changes]",
     "[request_changes]",
+    "[change request]",
+    "[change_request]",
     "[changes requested]",
     "[rework]",
     "[revision]",
     "[reject]",
     "[rejected]",
     "[required human feedback]",
+    "[required_human_feedback]",
     "[required review feedback]",
+    "[required_review_feedback]",
     "[review feedback]",
+    "[review_feedback]",
     "[reviewer feedback]",
+    "[reviewer_feedback]",
     "[review notes]",
-    "[reviewer notes]"
+    "[review_notes]",
+    "[reviewer notes]",
+    "[reviewer_notes]"
   ]
 
   @actual_review_request_prefixes [
@@ -1979,17 +1987,26 @@ defmodule Cympho.AgentPrompt do
     "cannot approve",
     "can't approve",
     "action required",
-    "action needed",
-    "required human feedback",
-    "required review feedback"
+    "action needed"
   ]
+
+  defp comment_has_prefix?(text) when is_binary(text) do
+    text
+    |> String.split("\n")
+    |> Enum.any?(fn line ->
+      trimmed_line = String.trim_leading(line)
+      Enum.any?(@actual_review_request_prefixes, &String.starts_with?(trimmed_line, &1))
+    end)
+  end
+
+  defp comment_has_prefix?(_), do: false
 
   defp required_human_feedback?(%Comment{author_type: "user"} = comment) do
     text = (comment.body || "") |> String.downcase()
 
     owner_revision_comment?(comment) or
       Enum.any?(@actual_review_request_tags, &String.contains?(text, &1)) or
-      Enum.any?(@actual_review_request_prefixes, &String.starts_with?(text, &1)) or
+      comment_has_prefix?(text) or
       Enum.any?(@actual_review_request_phrases, &String.contains?(text, &1)) or
       (IssueDigest.comment_category(comment) == :review and not generic_human_conversation?(text))
   end
@@ -1999,7 +2016,7 @@ defmodule Cympho.AgentPrompt do
   defp generic_human_conversation?(text) when is_binary(text) do
     not (owner_revision_comment_text?(text) or
            Enum.any?(@actual_review_request_tags, &String.contains?(text, &1)) or
-           Enum.any?(@actual_review_request_prefixes, &String.starts_with?(text, &1)) or
+           comment_has_prefix?(text) or
            Enum.any?(@actual_review_request_phrases, &String.contains?(text, &1)))
   end
 
@@ -2021,7 +2038,7 @@ defmodule Cympho.AgentPrompt do
 
     category == :review or
       Enum.any?(@actual_review_request_tags, &String.contains?(text, &1)) or
-      Enum.any?(@actual_review_request_prefixes, &String.starts_with?(text, &1)) or
+      comment_has_prefix?(text) or
       owner_revision_comment?(comment) or
       (comment.author_type == "user" and required_human_feedback?(comment))
   end

@@ -823,6 +823,175 @@ defmodule Cympho.AgentPromptBudgetTest do
       assert details.excess_bytes > 0
     end
 
+    test "topic-label acknowledgements mentioning required human/review feedback do not supersede actual required reasons",
+         %{issue: issue, engineer: engineer, ceo: ceo, cto: cto} do
+      # 1. User Alice posts an actual required review reason
+      {:ok, _required} =
+        Comments.create_comment(%{
+          body: "[review] Please fix the auth token validation bug before merging.",
+          author_type: "user",
+          author_id: "reviewer-alice",
+          issue_id: issue.id
+        })
+
+      # 2. Users post various topic-label acknowledgement variants (not change requests)
+      acknowledgement_variants = [
+        {"assignee-bob",
+         "Thanks for the required review feedback; I will be offline this afternoon."},
+        {"assignee-charlie",
+         "Thanks for the required human feedback; I will check them tomorrow."},
+        {"assignee-dave", "Acknowledging the required review feedback, will update later."},
+        {"assignee-eve", "Acknowledged required human feedback."},
+        {"assignee-frank", "Received the required review feedback; will begin soon."},
+        {"assignee-grace", "Noted the required human feedback."},
+        {"assignee-heidi", "I saw the required review feedback notes."},
+        {"assignee-ivan", "Regarding the required human feedback, will review shortly."}
+      ]
+
+      for {author_id, body} <- acknowledgement_variants do
+        {:ok, _} =
+          Comments.create_comment(%{
+            body: body,
+            author_type: "user",
+            author_id: author_id,
+            issue_id: issue.id
+          })
+      end
+
+      # For Engineer: latest_review_feedback MUST be Alice's required reason, not any acknowledgement
+      eng_sections = AgentPrompt.build_sections(issue, engineer.id)
+      eng_latest = Enum.find(eng_sections, &(&1.id == :latest_review_feedback))
+      assert eng_latest != nil
+      assert eng_latest.type == :protected
+      assert eng_latest.content =~ "Please fix the auth token validation bug before merging."
+      assert eng_latest.content =~ "reviewer-alice"
+
+      for {_author, body} <- acknowledgement_variants do
+        refute eng_latest.content =~ body
+      end
+
+      # Optional history presence: acknowledgements are in history_comments, not latest_review_feedback
+      eng_history = Enum.find(eng_sections, &(&1.id == :history_comments))
+      assert eng_history != nil
+      assert eng_history.type == :optional
+      assert eng_history.content =~ "Thanks for the required review feedback"
+
+      # For CEO: latest_review_feedback is Alice's required reason
+      ceo_sections = AgentPrompt.build_sections(issue, ceo.id)
+      ceo_latest = Enum.find(ceo_sections, &(&1.id == :latest_review_feedback))
+      assert ceo_latest != nil
+      assert ceo_latest.type == :protected
+      assert ceo_latest.content =~ "Please fix the auth token validation bug before merging."
+
+      for {_author, body} <- acknowledgement_variants do
+        refute ceo_latest.content =~ body
+      end
+
+      # For CTO: latest_review_feedback is Alice's required reason
+      cto_sections = AgentPrompt.build_sections(issue, cto.id)
+      cto_latest = Enum.find(cto_sections, &(&1.id == :latest_review_feedback))
+      assert cto_latest != nil
+      assert cto_latest.type == :protected
+      assert cto_latest.content =~ "Please fix the auth token validation bug before merging."
+
+      for {_author, body} <- acknowledgement_variants do
+        refute cto_latest.content =~ body
+      end
+
+      # Under budget pressure: optional history is trimmed, protected required reason remains intact
+      budget = 24_000
+
+      {:ok, trimmed_prompt, meta} =
+        AgentPrompt.build_budgeted(issue, engineer.id, input_budget_bytes: budget)
+
+      assert meta.delivered_bytes <= budget
+      assert "history_comments" in meta.omissions["categories"]
+      assert trimmed_prompt =~ "Please fix the auth token validation bug before merging."
+      refute trimmed_prompt =~ "Thanks for the required review feedback"
+      refute trimmed_prompt =~ "offline this afternoon"
+    end
+
+    test "required reason stays protected through busy-thread limits when followed by required feedback acknowledgements",
+         %{issue: issue, engineer: engineer, ceo: ceo, cto: cto} do
+      # 1. User Alice posts a multiline required change request
+      multiline_reason = """
+      [review] Required database refactoring:
+      1. Add connection pooling timeout to prevent resource exhaustion.
+      2. Ensure query retry backoff honors jitter limits.
+      """
+
+      {:ok, _required} =
+        Comments.create_comment(%{
+          body: multiline_reason,
+          author_type: "user",
+          author_id: "sec-alice",
+          issue_id: issue.id
+        })
+
+      # 2. Add 205 delivery comments (exceeding 200 comments)
+      for i <- 1..205 do
+        {:ok, _} =
+          Comments.create_comment(%{
+            body: "[delivery] Code changes delivered for cycle #{i}.",
+            author_type: "agent",
+            author_id: engineer.id,
+            issue_id: issue.id
+          })
+      end
+
+      # 3. Add acknowledgements mentioning required review feedback and required human feedback
+      {:ok, _ack1} =
+        Comments.create_comment(%{
+          body: "Thanks for the required review feedback; I will be offline this afternoon.",
+          author_type: "user",
+          author_id: "assignee-bob",
+          issue_id: issue.id
+        })
+
+      {:ok, _ack2} =
+        Comments.create_comment(%{
+          body: "Thanks for the required human feedback; will follow up tomorrow.",
+          author_type: "user",
+          author_id: "assignee-charlie",
+          issue_id: issue.id
+        })
+
+      # For Engineer: latest_review_feedback must STILL be Alice's required reason across 200-comment bound
+      eng_sections = AgentPrompt.build_sections(issue, engineer.id)
+      eng_latest = Enum.find(eng_sections, &(&1.id == :latest_review_feedback))
+      assert eng_latest != nil
+      assert eng_latest.type == :protected
+      assert eng_latest.content =~ "Required database refactoring:"
+      assert eng_latest.content =~ "sec-alice"
+      refute eng_latest.content =~ "Thanks for the required review feedback"
+      refute eng_latest.content =~ "Thanks for the required human feedback"
+
+      # For CEO: latest_review_feedback preserves the required reason
+      ceo_sections = AgentPrompt.build_sections(issue, ceo.id)
+      ceo_latest = Enum.find(ceo_sections, &(&1.id == :latest_review_feedback))
+      assert ceo_latest != nil
+      assert ceo_latest.type == :protected
+      assert ceo_latest.content =~ "Required database refactoring:"
+      refute ceo_latest.content =~ "Thanks for the required review feedback"
+      refute ceo_latest.content =~ "Thanks for the required human feedback"
+
+      # For CTO: latest_review_feedback preserves the required reason
+      cto_sections = AgentPrompt.build_sections(issue, cto.id)
+      cto_latest = Enum.find(cto_sections, &(&1.id == :latest_review_feedback))
+      assert cto_latest != nil
+      assert cto_latest.type == :protected
+      assert cto_latest.content =~ "Required database refactoring:"
+      refute cto_latest.content =~ "Thanks for the required review feedback"
+      refute cto_latest.content =~ "Thanks for the required human feedback"
+
+      # Protected overflow remains explicit when budget cannot fit protected content
+      assert {:error, {:prompt_input_budget_exceeded, details}} =
+               AgentPrompt.build_budgeted(issue, engineer.id, input_budget_bytes: 300)
+
+      assert details.budget_bytes == 300
+      assert details.excess_bytes > 0
+    end
+
     test "supported actual untagged requests remain recognized as required human feedback", %{
       issue: issue,
       engineer: engineer
@@ -898,6 +1067,50 @@ defmodule Cympho.AgentPromptBudgetTest do
       assert latest_tag.type == :protected
       assert latest_tag.content =~ "[review notes] Please add regression test cases"
       assert latest_tag.content =~ "reviewer-eve"
+
+      # Supported structured tags and prefixes for required feedback:
+      # "[required human feedback] ...", "Required human feedback: ..."
+      struct_tag_comment =
+        "[required human feedback] Ensure all foreign keys are indexed before deploying."
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          body: struct_tag_comment,
+          author_type: "user",
+          author_id: "reviewer-frank",
+          issue_id: issue.id
+        })
+
+      sections_struct_tag = AgentPrompt.build_sections(issue, engineer.id)
+      latest_struct_tag = Enum.find(sections_struct_tag, &(&1.id == :latest_review_feedback))
+      assert latest_struct_tag != nil
+      assert latest_struct_tag.type == :protected
+      assert latest_struct_tag.content =~ "[required human feedback] Ensure all foreign keys"
+      assert latest_struct_tag.content =~ "reviewer-frank"
+
+      struct_prefix_comment =
+        "Required review feedback: enforce strict rate limits on public API endpoints."
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          body: struct_prefix_comment,
+          author_type: "user",
+          author_id: "reviewer-grace",
+          issue_id: issue.id
+        })
+
+      sections_struct_prefix = AgentPrompt.build_sections(issue, engineer.id)
+
+      latest_struct_prefix =
+        Enum.find(sections_struct_prefix, &(&1.id == :latest_review_feedback))
+
+      assert latest_struct_prefix != nil
+      assert latest_struct_prefix.type == :protected
+
+      assert latest_struct_prefix.content =~
+               "Required review feedback: enforce strict rate limits"
+
+      assert latest_struct_prefix.content =~ "reviewer-grace"
     end
 
     test "predicates run before caps: 55 generic user comments cannot hide required review feedback",
