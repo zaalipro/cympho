@@ -1918,7 +1918,13 @@ defmodule Cympho.AgentPrompt do
     "[rework]",
     "[revision]",
     "[reject]",
-    "[rejected]"
+    "[rejected]",
+    "[required human feedback]",
+    "[required review feedback]",
+    "[review feedback]",
+    "[reviewer feedback]",
+    "[review notes]",
+    "[reviewer notes]"
   ]
 
   @actual_review_request_prefixes [
@@ -1930,7 +1936,13 @@ defmodule Cympho.AgentPrompt do
     "change request:",
     "verdict: changes requested",
     "verdict: rejected",
-    "verdict: rework"
+    "verdict: rework",
+    "required human feedback:",
+    "required review feedback:",
+    "review feedback:",
+    "reviewer feedback:",
+    "review notes:",
+    "reviewer notes:"
   ]
 
   @actual_review_request_phrases [
@@ -1969,11 +1981,7 @@ defmodule Cympho.AgentPrompt do
     "action required",
     "action needed",
     "required human feedback",
-    "required review feedback",
-    "review feedback",
-    "reviewer feedback",
-    "review notes",
-    "reviewer notes"
+    "required review feedback"
   ]
 
   defp required_human_feedback?(%Comment{author_type: "user"} = comment) do

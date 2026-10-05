@@ -676,6 +676,153 @@ defmodule Cympho.AgentPromptBudgetTest do
       refute trimmed_prompt =~ "I changed my schedule"
     end
 
+    test "incidental feedback/notes acknowledgements remain optional and cannot supersede newest required reason",
+         %{issue: issue, engineer: engineer, ceo: ceo, cto: cto} do
+      # 1. User Alice posts a real required review reason
+      {:ok, _required} =
+        Comments.create_comment(%{
+          body: "[review] Please fix the auth token validation bug before merging.",
+          author_type: "user",
+          author_id: "reviewer-alice",
+          issue_id: issue.id
+        })
+
+      # 2. Later, user Bob posts an incidental acknowledgement mentioning review feedback
+      {:ok, _ack1} =
+        Comments.create_comment(%{
+          body: "Thanks for the review feedback; I will be offline this afternoon.",
+          author_type: "user",
+          author_id: "assignee-bob",
+          issue_id: issue.id
+        })
+
+      # 3. And another user posts an incidental review notes acknowledgement
+      {:ok, _ack2} =
+        Comments.create_comment(%{
+          body: "Thanks for the review notes; I will check them tomorrow.",
+          author_type: "user",
+          author_id: "assignee-charlie",
+          issue_id: issue.id
+        })
+
+      # For Engineer: latest_review_feedback must be Alice's required reason, not the acknowledgements
+      eng_sections = AgentPrompt.build_sections(issue, engineer.id)
+      eng_latest = Enum.find(eng_sections, &(&1.id == :latest_review_feedback))
+      assert eng_latest != nil
+      assert eng_latest.type == :protected
+      assert eng_latest.content =~ "Please fix the auth token validation bug before merging."
+      assert eng_latest.content =~ "reviewer-alice"
+      refute eng_latest.content =~ "Thanks for the review feedback"
+      refute eng_latest.content =~ "Thanks for the review notes"
+      refute eng_latest.content =~ "offline this afternoon"
+
+      # Optional history presence: the acknowledgements are in history_comments
+      eng_history = Enum.find(eng_sections, &(&1.id == :history_comments))
+      assert eng_history != nil
+      assert eng_history.type == :optional
+
+      assert eng_history.content =~
+               "Thanks for the review feedback; I will be offline this afternoon."
+
+      # For CEO: latest_review_feedback is Alice's required reason
+      ceo_sections = AgentPrompt.build_sections(issue, ceo.id)
+      ceo_latest = Enum.find(ceo_sections, &(&1.id == :latest_review_feedback))
+      assert ceo_latest != nil
+      assert ceo_latest.type == :protected
+      assert ceo_latest.content =~ "Please fix the auth token validation bug before merging."
+      refute ceo_latest.content =~ "Thanks for the review feedback"
+
+      # For CTO: latest_review_feedback is Alice's required reason
+      cto_sections = AgentPrompt.build_sections(issue, cto.id)
+      cto_latest = Enum.find(cto_sections, &(&1.id == :latest_review_feedback))
+      assert cto_latest != nil
+      assert cto_latest.type == :protected
+      assert cto_latest.content =~ "Please fix the auth token validation bug before merging."
+      refute cto_latest.content =~ "Thanks for the review feedback"
+
+      # Under budget pressure: optional history (with acknowledgements) is trimmed, protected reason remains
+      budget = 23_600
+
+      {:ok, trimmed_prompt, meta} =
+        AgentPrompt.build_budgeted(issue, engineer.id, input_budget_bytes: budget)
+
+      assert meta.delivered_bytes <= budget
+      assert "history_comments" in meta.omissions["categories"]
+      assert trimmed_prompt =~ "Please fix the auth token validation bug before merging."
+      refute trimmed_prompt =~ "Thanks for the review feedback"
+      refute trimmed_prompt =~ "offline this afternoon"
+    end
+
+    test "required reason stays protected through busy-thread limits when followed by incidental acknowledgement",
+         %{issue: issue, engineer: engineer, ceo: ceo, cto: cto} do
+      # 1. User Alice posts a multiline required change request
+      multiline_reason = """
+      [review] Required database refactoring:
+      1. Add connection pooling timeout to prevent resource exhaustion.
+      2. Ensure query retry backoff honors jitter limits.
+      """
+
+      {:ok, _required} =
+        Comments.create_comment(%{
+          body: multiline_reason,
+          author_type: "user",
+          author_id: "sec-alice",
+          issue_id: issue.id
+        })
+
+      # 2. Add 205 delivery comments (exceeding 200 comments)
+      for i <- 1..205 do
+        {:ok, _} =
+          Comments.create_comment(%{
+            body: "[delivery] Code changes delivered for cycle #{i}.",
+            author_type: "agent",
+            author_id: engineer.id,
+            issue_id: issue.id
+          })
+      end
+
+      # 3. Add an incidental acknowledgement after the busy thread
+      {:ok, _ack} =
+        Comments.create_comment(%{
+          body: "Thanks for the review feedback; I will be offline this afternoon.",
+          author_type: "user",
+          author_id: "assignee-bob",
+          issue_id: issue.id
+        })
+
+      # For Engineer: latest_review_feedback must STILL be Alice's required reason, not the acknowledgement
+      eng_sections = AgentPrompt.build_sections(issue, engineer.id)
+      eng_latest = Enum.find(eng_sections, &(&1.id == :latest_review_feedback))
+      assert eng_latest != nil
+      assert eng_latest.type == :protected
+      assert eng_latest.content =~ "Required database refactoring:"
+      assert eng_latest.content =~ "sec-alice"
+      refute eng_latest.content =~ "Thanks for the review feedback"
+
+      # For CEO: latest_review_feedback preserves the required reason
+      ceo_sections = AgentPrompt.build_sections(issue, ceo.id)
+      ceo_latest = Enum.find(ceo_sections, &(&1.id == :latest_review_feedback))
+      assert ceo_latest != nil
+      assert ceo_latest.type == :protected
+      assert ceo_latest.content =~ "Required database refactoring:"
+      refute ceo_latest.content =~ "Thanks for the review feedback"
+
+      # For CTO: latest_review_feedback preserves the required reason
+      cto_sections = AgentPrompt.build_sections(issue, cto.id)
+      cto_latest = Enum.find(cto_sections, &(&1.id == :latest_review_feedback))
+      assert cto_latest != nil
+      assert cto_latest.type == :protected
+      assert cto_latest.content =~ "Required database refactoring:"
+      refute cto_latest.content =~ "Thanks for the review feedback"
+
+      # Protected overflow remains explicit when budget cannot fit protected content
+      assert {:error, {:prompt_input_budget_exceeded, details}} =
+               AgentPrompt.build_budgeted(issue, engineer.id, input_budget_bytes: 300)
+
+      assert details.budget_bytes == 300
+      assert details.excess_bytes > 0
+    end
+
     test "supported actual untagged requests remain recognized as required human feedback", %{
       issue: issue,
       engineer: engineer
@@ -713,6 +860,44 @@ defmodule Cympho.AgentPromptBudgetTest do
       prompt_updated = AgentPrompt.build(issue, engineer.id)
       assert prompt_updated =~ "reviewer-charlie"
       assert prompt_updated =~ "Please fix the memory leak in the dispatcher loop"
+
+      # Supported prefix formats: "Review feedback: ...", "Review notes: ..."
+      prefix_comment =
+        "Review feedback: please ensure all inputs are sanitized before database access."
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          body: prefix_comment,
+          author_type: "user",
+          author_id: "reviewer-dave",
+          issue_id: issue.id
+        })
+
+      sections_prefix = AgentPrompt.build_sections(issue, engineer.id)
+      latest_prefix = Enum.find(sections_prefix, &(&1.id == :latest_review_feedback))
+      assert latest_prefix != nil
+      assert latest_prefix.type == :protected
+      assert latest_prefix.content =~ "Review feedback: please ensure all inputs are sanitized"
+      assert latest_prefix.content =~ "reviewer-dave"
+
+      # Supported tag formats: "[review feedback] ...", "[review notes] ..."
+      tag_comment =
+        "[review notes] Please add regression test cases for edge-case boundaries."
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          body: tag_comment,
+          author_type: "user",
+          author_id: "reviewer-eve",
+          issue_id: issue.id
+        })
+
+      sections_tag = AgentPrompt.build_sections(issue, engineer.id)
+      latest_tag = Enum.find(sections_tag, &(&1.id == :latest_review_feedback))
+      assert latest_tag != nil
+      assert latest_tag.type == :protected
+      assert latest_tag.content =~ "[review notes] Please add regression test cases"
+      assert latest_tag.content =~ "reviewer-eve"
     end
 
     test "predicates run before caps: 55 generic user comments cannot hide required review feedback",
@@ -742,6 +927,17 @@ defmodule Cympho.AgentPromptBudgetTest do
       assert prompt =~ "Open review feedback"
       assert prompt =~ "sec-auditor-1"
       assert prompt =~ "Critical changes requested: sanitize SQL input and prevent injection."
+
+      # Directly assert the protected section itself
+      sections = AgentPrompt.build_sections(issue, engineer.id)
+      latest_review = Enum.find(sections, &(&1.id == :latest_review_feedback))
+      assert latest_review != nil
+      assert latest_review.type == :protected
+
+      assert latest_review.content =~
+               "Critical changes requested: sanitize SQL input and prevent injection."
+
+      assert latest_review.content =~ "sec-auditor-1"
     end
 
     test "CEO owner revision query survives 55 generic user comments without being hidden by cap",
@@ -912,6 +1108,55 @@ defmodule Cympho.AgentPromptBudgetTest do
       assert older != nil
       assert older.content =~ "First change request: fix database pool."
       assert older.content =~ "reviewer-1"
+    end
+
+    test "timestamp tie-breaker safely orders by ID when inserted_at is identical",
+         %{issue: issue, engineer: engineer} do
+      fixed_time = ~U[2026-10-05 10:00:00Z]
+
+      # Create two comments with identical inserted_at timestamps
+      {:ok, c1} =
+        Comments.create_comment(%{
+          body: "[review] Alpha change request: fix connection leak.",
+          author_type: "user",
+          author_id: "reviewer-1",
+          issue_id: issue.id
+        })
+
+      {:ok, c2} =
+        Comments.create_comment(%{
+          body: "[review] Beta change request: fix timeout value.",
+          author_type: "user",
+          author_id: "reviewer-2",
+          issue_id: issue.id
+        })
+
+      # Update both to the exact same inserted_at
+      import Ecto.Query
+
+      Cympho.Repo.update_all(
+        from(c in Cympho.Comments.Comment, where: c.id in ^[c1.id, c2.id]),
+        set: [inserted_at: fixed_time]
+      )
+
+      # Determine which ID is lexicographically greater
+      {expected_latest, expected_older} =
+        if to_string(c1.id) >= to_string(c2.id) do
+          {c1, c2}
+        else
+          {c2, c1}
+        end
+
+      sections = AgentPrompt.build_sections(issue, engineer.id)
+      latest = Enum.find(sections, &(&1.id == :latest_review_feedback))
+      older = Enum.find(sections, &(&1.id == :older_review_feedback))
+
+      assert latest != nil
+      assert latest.type == :protected
+      assert latest.content =~ expected_latest.body
+      assert older != nil
+      assert older.type == :optional
+      assert older.content =~ expected_older.body
     end
   end
 end
