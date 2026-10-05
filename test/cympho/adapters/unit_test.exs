@@ -735,17 +735,34 @@ defmodule Cympho.Adapters.UnitTest do
 
     test "capture_identity preserves helper failure as unknown on live process and distinguishes confirmed absence" do
       # Nonexistent process is confirmed absent
+      assert :confirmed_absence = os_process_liveness(999_999)
       refute os_process_alive?(999_999)
       assert :gone = capture_identity(999_999)
+      assert wait_until_os_process_dead(999_999, 1)
 
-      # Invalid PIDs are unknown
+      # PID 1 is alive with permission denied, never confirmed absence
+      assert {:alive, :permission_denied} = os_process_liveness(1)
+      assert os_process_alive?(1)
+      assert :unknown = capture_identity(1)
+      refute wait_until_os_process_dead(1, 1)
+
+      # Invalid PIDs are unknown / error
+      assert {:error, :invalid_pid} = os_process_liveness(-1)
+      assert {:error, :invalid_pid} = os_process_liveness(nil)
       assert :unknown = capture_identity(-1)
       assert :unknown = capture_identity(nil)
+      refute wait_until_os_process_dead(-1, 1)
 
       # Live process has known identity
       beam_pid = System.pid() |> String.to_integer()
+      assert :alive = os_process_liveness(beam_pid)
       assert os_process_alive?(beam_pid)
       assert {:ok, _} = capture_identity(beam_pid)
+      refute wait_until_os_process_dead(beam_pid, 1)
+
+      # Descendant reap refuses to report clean on live process with unknown identity
+      assert {:error, {:descendant_identity_unknown, 1}} = reap_single_descendant(1)
+      assert :ok = reap_single_descendant(999_999)
     end
 
     test "fixture teardown refuses to signal without validated identity and fails closed" do
@@ -1384,10 +1401,9 @@ defmodule Cympho.Adapters.UnitTest do
   defp reap_fixture_os_pid(os_pid, root) do
     case capture_identity(os_pid) do
       :gone ->
-        if os_process_alive?(os_pid) do
-          {:error, {:identity_capture_failed, os_pid}}
-        else
-          :ok
+        case os_process_liveness(os_pid) do
+          :confirmed_absence -> :ok
+          _ -> {:error, {:identity_capture_failed, os_pid}}
         end
 
       {:ok, identity} ->
@@ -1403,11 +1419,10 @@ defmodule Cympho.Adapters.UnitTest do
           {:error, {:unauthorized_or_reused_pid, os_pid}}
         end
 
-      :unknown ->
-        if os_process_alive?(os_pid) do
-          {:error, {:identity_capture_failed, os_pid}}
-        else
-          :ok
+      _other ->
+        case os_process_liveness(os_pid) do
+          :confirmed_absence -> :ok
+          _ -> {:error, {:identity_capture_failed, os_pid}}
         end
     end
   end
@@ -1433,10 +1448,9 @@ defmodule Cympho.Adapters.UnitTest do
               end
 
             :gone ->
-              if os_process_alive?(os_pid) do
-                {:error, {:identity_capture_failed, os_pid}}
-              else
-                :ok
+              case os_process_liveness(os_pid) do
+                :confirmed_absence -> :ok
+                _ -> {:error, {:identity_capture_failed, os_pid}}
               end
 
             _mismatch ->
@@ -1445,10 +1459,9 @@ defmodule Cympho.Adapters.UnitTest do
         end
 
       :gone ->
-        if os_process_alive?(os_pid) do
-          {:error, {:identity_capture_failed, os_pid}}
-        else
-          :ok
+        case os_process_liveness(os_pid) do
+          :confirmed_absence -> :ok
+          _ -> {:error, {:identity_capture_failed, os_pid}}
         end
 
       _mismatch ->
@@ -1482,57 +1495,62 @@ defmodule Cympho.Adapters.UnitTest do
   end
 
   defp capture_identity(pid) when is_integer(pid) and pid > 1 do
-    if not os_process_alive?(pid) do
-      :gone
-    else
-      if File.exists?("/proc/#{pid}/stat") do
-        case File.read("/proc/#{pid}/stat") do
-          {:ok, stat} ->
-            case :binary.matches(stat, ") ") |> List.last() do
-              {index, 2} ->
-                fields =
-                  stat |> binary_part(index + 2, byte_size(stat) - index - 2) |> String.split()
+    case os_process_liveness(pid) do
+      :confirmed_absence ->
+        :gone
 
-                case Enum.at(fields, 19) do
-                  nil -> :unknown
-                  starttime -> {:ok, {:linux_starttime, starttime}}
-                end
+      :alive ->
+        if File.exists?("/proc/#{pid}/stat") do
+          case File.read("/proc/#{pid}/stat") do
+            {:ok, stat} ->
+              case :binary.matches(stat, ") ") |> List.last() do
+                {index, 2} ->
+                  fields =
+                    stat |> binary_part(index + 2, byte_size(stat) - index - 2) |> String.split()
 
-              _ ->
-                :unknown
-            end
+                  case Enum.at(fields, 19) do
+                    nil -> :unknown
+                    starttime -> {:ok, {:linux_starttime, starttime}}
+                  end
 
-          {:error, :enoent} ->
-            if not os_process_alive?(pid), do: :gone, else: :unknown
+                _ ->
+                  :unknown
+              end
 
-          _ ->
-            :unknown
-        end
-      else
-        case System.cmd("ps", ["-o", "lstart=", "-p", Integer.to_string(pid)],
-               stderr_to_stdout: true
-             ) do
-          {output, 0} ->
-            case String.trim(output) do
-              "" ->
-                if not os_process_alive?(pid), do: :gone, else: :unknown
+            {:error, :enoent} ->
+              if os_process_liveness(pid) == :confirmed_absence, do: :gone, else: :unknown
 
-              val ->
-                {:ok, {:portable_ps, val}}
-            end
-
-          {_output, _status} ->
-            if not os_process_alive?(pid) do
-              :gone
-            else
+            _ ->
               :unknown
-            end
+          end
+        else
+          case System.cmd("ps", ["-o", "lstart=", "-p", Integer.to_string(pid)],
+                 stderr_to_stdout: true
+               ) do
+            {output, 0} ->
+              case String.trim(output) do
+                "" ->
+                  if os_process_liveness(pid) == :confirmed_absence, do: :gone, else: :unknown
+
+                val ->
+                  {:ok, {:portable_ps, val}}
+              end
+
+            {_output, _status} ->
+              if os_process_liveness(pid) == :confirmed_absence do
+                :gone
+              else
+                :unknown
+              end
+          end
         end
-      end
+
+      _other ->
+        :unknown
     end
   rescue
     _ ->
-      if is_integer(pid) and pid > 1 and not os_process_alive?(pid) do
+      if is_integer(pid) and pid > 1 and os_process_liveness(pid) == :confirmed_absence do
         :gone
       else
         :unknown
@@ -1599,10 +1617,9 @@ defmodule Cympho.Adapters.UnitTest do
             end
 
           :gone ->
-            if os_process_alive?(c_pid) do
-              {:error, {:descendant_alive, c_pid}}
-            else
-              :ok
+            case os_process_liveness(c_pid) do
+              :confirmed_absence -> :ok
+              _ -> {:error, {:descendant_alive, c_pid}}
             end
 
           _ ->
@@ -1610,38 +1627,69 @@ defmodule Cympho.Adapters.UnitTest do
         end
 
       :gone ->
-        if os_process_alive?(c_pid) do
-          {:error, {:descendant_alive, c_pid}}
-        else
-          :ok
+        case os_process_liveness(c_pid) do
+          :confirmed_absence -> :ok
+          _ -> {:error, {:descendant_alive, c_pid}}
         end
 
       _other ->
-        if os_process_alive?(c_pid) do
-          {:error, {:descendant_identity_unknown, c_pid}}
-        else
-          :ok
+        case os_process_liveness(c_pid) do
+          :confirmed_absence -> :ok
+          _ -> {:error, {:descendant_identity_unknown, c_pid}}
         end
     end
   end
 
-  defp os_process_alive?(os_pid) when is_integer(os_pid) and os_pid > 0 do
-    case System.cmd("/bin/kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true) do
-      {_, 0} -> true
-      _ -> false
+  defp os_process_liveness(os_pid) when is_integer(os_pid) and os_pid > 0 do
+    kill_cmd = System.find_executable("kill") || "/bin/kill"
+
+    case System.cmd(kill_cmd, ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true) do
+      {_, 0} ->
+        :alive
+
+      {output, _status} ->
+        lower = String.downcase(output)
+
+        cond do
+          String.contains?(lower, "no such process") or
+            String.contains?(lower, "esrch") or
+              String.contains?(lower, "cannot find process") ->
+            :confirmed_absence
+
+          String.contains?(lower, "operation not permitted") or
+            String.contains?(lower, "not permitted") or
+              String.contains?(lower, "eperm") ->
+            {:alive, :permission_denied}
+
+          true ->
+            {:error, {:unexpected_kill_output, output}}
+        end
     end
   rescue
-    _ -> false
+    e ->
+      {:error, e}
+  end
+
+  defp os_process_liveness(_), do: {:error, :invalid_pid}
+
+  defp os_process_alive?(os_pid) when is_integer(os_pid) and os_pid > 0 do
+    case os_process_liveness(os_pid) do
+      :alive -> true
+      {:alive, _} -> true
+      _ -> false
+    end
   end
 
   defp os_process_alive?(_), do: false
 
   defp wait_until_os_process_dead(os_pid, attempts) when attempts > 0 do
-    if os_process_alive?(os_pid) do
-      Process.sleep(25)
-      wait_until_os_process_dead(os_pid, attempts - 1)
-    else
-      true
+    case os_process_liveness(os_pid) do
+      :confirmed_absence ->
+        true
+
+      _ ->
+        Process.sleep(25)
+        wait_until_os_process_dead(os_pid, attempts - 1)
     end
   end
 

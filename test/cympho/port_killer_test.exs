@@ -1178,8 +1178,24 @@ defmodule Cympho.PortKillerTest do
       ])
 
     assert {:os_pid, pid} = Port.info(port, :os_pid)
+    # Register real allocated port and root immediately before any fallible assertions
+    register_port(tracker, port, pid)
 
-    # Track cleanup with unknown identity and NO port ownership
+    # Exercise intentionally unknown ownership on a simulation tracker
+    # where the target has unknown identity and no port ownership
+    {:ok, sim_tracker} =
+      Agent.start(fn ->
+        %{
+          tmp_dir: tmp_dir,
+          port: nil,
+          root_pid: nil,
+          root_identity: nil,
+          cleanup: nil,
+          extra_targets: %{},
+          pid_files: []
+        }
+      end)
+
     simulated_cleanup = %PortKiller.Cleanup{
       phase: :reap,
       root_pid: pid,
@@ -1190,10 +1206,116 @@ defmodule Cympho.PortKillerTest do
       port: nil
     }
 
-    track_cleanup(tracker, simulated_cleanup)
+    track_cleanup(sim_tracker, simulated_cleanup)
 
-    # reap_fixture must raise because the unknown process is still alive,
-    # and the fixture directory must NOT be removed!
+    # reap_fixture on sim_tracker must refuse to signal unauthorized target and raise,
+    # leaving the process alive and the fixture directory intact.
+    assert_raise RuntimeError,
+                 ~r/PortKiller fixture teardown failed: owned processes still alive/,
+                 fn ->
+                   reap_fixture(sim_tracker)
+                 end
+
+    assert File.exists?(tmp_dir)
+    assert process_alive?(pid)
+
+    Agent.stop(sim_tracker, :normal)
+
+    # Real tracker safely reaps the registered port and root on normal teardown
+    reap_fixture(tracker)
+    refute process_alive?(pid)
+    refute File.exists?(tmp_dir)
+  end
+
+  test "process_liveness distinguishes confirmed absence from alive/permission and helper errors" do
+    beam_pid = System.pid() |> String.to_integer()
+
+    # Live BEAM process is alive
+    assert :alive = process_liveness(beam_pid)
+    assert process_alive?(beam_pid)
+    refute wait_until_os_process_dead(beam_pid, 1)
+
+    # PID 1 is alive with permission denied, not absence!
+    assert {:alive, :permission_denied} = process_liveness(1)
+    assert process_alive?(1)
+    refute wait_until_os_process_dead(1, 1)
+
+    # Nonexistent process is confirmed absence
+    assert :confirmed_absence = process_liveness(999_999)
+    refute process_alive?(999_999)
+    assert wait_until_os_process_dead(999_999, 1)
+
+    # Invalid PID is error
+    assert {:error, :invalid_pid} = process_liveness(-1)
+    assert {:error, :invalid_pid} = process_liveness(nil)
+    refute process_alive?(-1)
+    refute wait_until_os_process_dead(-1, 1)
+  end
+
+  test "reap_fixture retains collected child targets in tracker before root destruction and on retry" do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-port-killer-retain-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+    tracker = init_fixture(tmp_dir)
+
+    command = Path.join(tmp_dir, "spawner")
+
+    File.write!(command, """
+    #!/bin/sh
+    sh -c 'while true; do sleep 1; done' &
+    while true; do sleep 1; done
+    """)
+
+    File.chmod!(command, 0o755)
+
+    port =
+      Port.open({:spawn_executable, command}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        :stderr_to_stdout
+      ])
+
+    assert {:os_pid, root_pid} = Port.info(port, :os_pid)
+    register_port(tracker, port, root_pid)
+
+    # Wait until child is spawned
+    wait_until(fn ->
+      assert {:ok, [_ | _]} = discover_child_pids(root_pid)
+    end)
+
+    {:ok, [child_pid | _]} = discover_child_pids(root_pid)
+    assert process_alive?(child_pid)
+
+    # Simulate failed ps identity lookup for discovered child so it cannot be authorized to signal
+    Agent.update(tracker, fn state ->
+      %{state | identity_overrides: Map.put(state.identity_overrides, child_pid, :unknown)}
+    end)
+
+    # reap_fixture will reap the authorized root (via port), but refuse to reap the unauthorized child.
+    # It must raise and retain the tracker and tmp_dir.
+    assert_raise RuntimeError,
+                 ~r/PortKiller fixture teardown failed: owned processes still alive/,
+                 fn ->
+                   reap_fixture(tracker)
+                 end
+
+    # Root is dead
+    refute process_alive?(root_pid)
+    # Child is still alive (reparented)
+    assert process_alive?(child_pid)
+    assert File.exists?(tmp_dir)
+
+    # The tracker in-memory state MUST have retained child_pid in extra_targets before root was killed!
+    state = Agent.get(tracker, & &1)
+    assert Map.has_key?(state.extra_targets, child_pid)
+
+    # Root is now dead, so discover_child_pids(root_pid) returns no children
+    assert {:ok, []} = discover_child_pids(root_pid)
+
+    # But on a retry of reap_fixture(tracker), the reparented child is STILL tracked from extra_targets
+    # and teardown fails again rather than reporting false clean success!
     assert_raise RuntimeError,
                  ~r/PortKiller fixture teardown failed: owned processes still alive/,
                  fn ->
@@ -1201,12 +1323,12 @@ defmodule Cympho.PortKillerTest do
                  end
 
     assert File.exists?(tmp_dir)
-    assert process_alive?(pid)
 
-    # Clean up the process manually and remove tmp_dir
-    System.cmd("kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
-    wait_until_os_process_dead(pid, 20)
-    File.rm_rf!(tmp_dir)
+    # Clean up child manually and verify final reap completes
+    System.cmd("kill", ["-KILL", Integer.to_string(child_pid)], stderr_to_stdout: true)
+    wait_until_os_process_dead(child_pid, 20)
+    reap_fixture(tracker)
+    refute File.exists?(tmp_dir)
   end
 
   test "child discovery distinguishes exit 1 no-match from helper failure" do
@@ -1297,7 +1419,8 @@ defmodule Cympho.PortKillerTest do
           root_identity: nil,
           cleanup: nil,
           extra_targets: %{},
-          pid_files: []
+          pid_files: [],
+          identity_overrides: %{}
         }
       end)
 
@@ -1367,6 +1490,30 @@ defmodule Cympho.PortKillerTest do
     if state do
       {targets, collection_errors} = collect_reap_targets(state)
 
+      # Merge newly collected targets into tracker state before any destructive reaping!
+      try do
+        Agent.update(tracker, fn current_state ->
+          updated_extra =
+            Enum.reduce(targets, current_state.extra_targets, fn {pid, identity, _port}, acc ->
+              case Map.get(acc, pid) do
+                nil ->
+                  Map.put(acc, pid, identity)
+
+                existing_id
+                when existing_id in [nil, :unknown] and identity not in [nil, :unknown] ->
+                  Map.put(acc, pid, identity)
+
+                _ ->
+                  acc
+              end
+            end)
+
+          %{current_state | extra_targets: updated_extra}
+        end)
+      catch
+        :exit, _ -> :ok
+      end
+
       cond do
         collection_errors != [] ->
           # Do NOT reap known targets (which would destroy root needed for child discovery)
@@ -1380,19 +1527,28 @@ defmodule Cympho.PortKillerTest do
           end)
 
           # Check for any remaining living processes among tracked targets.
-          # Live unknown ownership is an explicit cleanup failure, not absence!
+          # Live unknown ownership or helper error is an explicit cleanup failure, not absence!
           survivors =
             Enum.filter(targets, fn {pid, _identity, _port} ->
-              process_alive?(pid)
+              case process_liveness(pid) do
+                :confirmed_absence -> false
+                _ -> true
+              end
             end)
 
           if survivors != [] do
             survivor_details =
               Enum.map(survivors, fn {pid, identity, port} ->
-                if authorized_to_signal?(pid, identity, port) do
-                  {:authorized_survivor, pid, identity}
-                else
-                  {:unauthorized_live_target, pid, identity}
+                case process_liveness(pid) do
+                  {:error, reason} ->
+                    {:liveness_helper_error, pid, reason}
+
+                  _ ->
+                    if authorized_to_signal?(pid, identity, port) do
+                      {:authorized_survivor, pid, identity}
+                    else
+                      {:unauthorized_live_target, pid, identity}
+                    end
                 end
               end)
 
@@ -1431,13 +1587,20 @@ defmodule Cympho.PortKillerTest do
 
     {discovered_children, discovery_errors} =
       cond do
-        state.root_pid && process_alive?(state.root_pid) &&
-            authorized_to_signal?(state.root_pid, state.root_identity, state.port) ->
+        state.root_pid &&
+          authorized_to_signal?(state.root_pid, state.root_identity, state.port) &&
+            process_alive?(state.root_pid) ->
           case discover_child_pids(state.root_pid) do
             {:ok, child_pids} ->
               children =
                 Enum.map(child_pids, fn c_pid ->
-                  case capture_identity(c_pid) do
+                  id_result =
+                    case Map.get(Map.get(state, :identity_overrides, %{}), c_pid) do
+                      override when override in [:unknown, :gone] -> override
+                      _ -> capture_identity(c_pid)
+                    end
+
+                  case id_result do
                     {:ok, id} -> {c_pid, id, nil}
                     _ -> {c_pid, :unknown, nil}
                   end
@@ -1449,9 +1612,14 @@ defmodule Cympho.PortKillerTest do
               {[], [reason]}
           end
 
-        state.root_pid && process_alive?(state.root_pid) ->
-          # Root PID is alive but not authorized! Do NOT discover children of an unauthorized process!
-          {[], [{:unauthorized_root_pid_for_child_discovery, state.root_pid}]}
+        state.root_pid && process_liveness(state.root_pid) != :confirmed_absence ->
+          case process_liveness(state.root_pid) do
+            {:error, reason} ->
+              {[], [{:root_pid_liveness_error, state.root_pid, reason}]}
+
+            _ ->
+              {[], [{:unauthorized_root_pid_for_child_discovery, state.root_pid}]}
+          end
 
         true ->
           {[], []}
@@ -1490,7 +1658,22 @@ defmodule Cympho.PortKillerTest do
 
     extra_targets =
       Enum.map(state.extra_targets, fn {pid, identity} ->
-        {pid, identity, nil}
+        current_identity =
+          cond do
+            Map.get(Map.get(state, :identity_overrides, %{}), pid) == :unknown ->
+              :unknown
+
+            identity in [nil, :unknown] ->
+              case capture_identity(pid) do
+                {:ok, id} -> id
+                _ -> identity
+              end
+
+            true ->
+              identity
+          end
+
+        {pid, current_identity, nil}
       end)
 
     all_targets =
@@ -1558,57 +1741,62 @@ defmodule Cympho.PortKillerTest do
   defp authorized_to_signal?(_pid, _identity, _port), do: false
 
   defp capture_identity(pid) when is_integer(pid) and pid > 1 do
-    if not process_alive?(pid) do
-      :gone
-    else
-      if File.exists?("/proc/#{pid}/stat") do
-        case File.read("/proc/#{pid}/stat") do
-          {:ok, stat} ->
-            case :binary.matches(stat, ") ") |> List.last() do
-              {index, 2} ->
-                fields =
-                  stat |> binary_part(index + 2, byte_size(stat) - index - 2) |> String.split()
+    case process_liveness(pid) do
+      :confirmed_absence ->
+        :gone
 
-                case Enum.at(fields, 19) do
-                  nil -> :unknown
-                  starttime -> {:ok, {:linux_starttime, starttime}}
-                end
+      :alive ->
+        if File.exists?("/proc/#{pid}/stat") do
+          case File.read("/proc/#{pid}/stat") do
+            {:ok, stat} ->
+              case :binary.matches(stat, ") ") |> List.last() do
+                {index, 2} ->
+                  fields =
+                    stat |> binary_part(index + 2, byte_size(stat) - index - 2) |> String.split()
 
-              _ ->
-                :unknown
-            end
+                  case Enum.at(fields, 19) do
+                    nil -> :unknown
+                    starttime -> {:ok, {:linux_starttime, starttime}}
+                  end
 
-          {:error, :enoent} ->
-            if not process_alive?(pid), do: :gone, else: :unknown
+                _ ->
+                  :unknown
+              end
 
-          _ ->
-            :unknown
-        end
-      else
-        case System.cmd("ps", ["-o", "lstart=", "-p", Integer.to_string(pid)],
-               stderr_to_stdout: true
-             ) do
-          {output, 0} ->
-            case String.trim(output) do
-              "" ->
-                if not process_alive?(pid), do: :gone, else: :unknown
+            {:error, :enoent} ->
+              if process_liveness(pid) == :confirmed_absence, do: :gone, else: :unknown
 
-              val ->
-                {:ok, {:portable_ps, val}}
-            end
-
-          {_output, _status} ->
-            if not process_alive?(pid) do
-              :gone
-            else
+            _ ->
               :unknown
-            end
+          end
+        else
+          case System.cmd("ps", ["-o", "lstart=", "-p", Integer.to_string(pid)],
+                 stderr_to_stdout: true
+               ) do
+            {output, 0} ->
+              case String.trim(output) do
+                "" ->
+                  if process_liveness(pid) == :confirmed_absence, do: :gone, else: :unknown
+
+                val ->
+                  {:ok, {:portable_ps, val}}
+              end
+
+            {_output, _status} ->
+              if process_liveness(pid) == :confirmed_absence do
+                :gone
+              else
+                :unknown
+              end
+          end
         end
-      end
+
+      _other ->
+        :unknown
     end
   rescue
     _ ->
-      if is_integer(pid) and pid > 1 and not process_alive?(pid) do
+      if is_integer(pid) and pid > 1 and process_liveness(pid) == :confirmed_absence do
         :gone
       else
         :unknown
@@ -1660,23 +1848,56 @@ defmodule Cympho.PortKillerTest do
 
   defp reap_pid(_, _identity, _port), do: :ok
 
-  defp process_alive?(os_pid) when is_integer(os_pid) and os_pid > 1 do
-    case System.cmd("kill", ["-0", "#{os_pid}"], stderr_to_stdout: true) do
-      {_output, 0} -> true
-      _ -> false
+  defp process_liveness(os_pid) when is_integer(os_pid) and os_pid > 0 do
+    kill_cmd = System.find_executable("kill") || "/bin/kill"
+
+    case System.cmd(kill_cmd, ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true) do
+      {_, 0} ->
+        :alive
+
+      {output, _status} ->
+        lower = String.downcase(output)
+
+        cond do
+          String.contains?(lower, "no such process") or
+            String.contains?(lower, "esrch") or
+              String.contains?(lower, "cannot find process") ->
+            :confirmed_absence
+
+          String.contains?(lower, "operation not permitted") or
+            String.contains?(lower, "not permitted") or
+              String.contains?(lower, "eperm") ->
+            {:alive, :permission_denied}
+
+          true ->
+            {:error, {:unexpected_kill_output, output}}
+        end
     end
   rescue
-    _ -> false
+    e ->
+      {:error, e}
+  end
+
+  defp process_liveness(_), do: {:error, :invalid_pid}
+
+  defp process_alive?(os_pid) when is_integer(os_pid) and os_pid > 0 do
+    case process_liveness(os_pid) do
+      :alive -> true
+      {:alive, _} -> true
+      _ -> false
+    end
   end
 
   defp process_alive?(_), do: false
 
   defp wait_until_os_process_dead(os_pid, attempts) when attempts > 0 do
-    if process_alive?(os_pid) do
-      Process.sleep(25)
-      wait_until_os_process_dead(os_pid, attempts - 1)
-    else
-      true
+    case process_liveness(os_pid) do
+      :confirmed_absence ->
+        true
+
+      _ ->
+        Process.sleep(25)
+        wait_until_os_process_dead(os_pid, attempts - 1)
     end
   end
 
