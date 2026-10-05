@@ -1657,10 +1657,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
-  defp fetch_and_dispatch(
-         %State{running_issue_ids: running, retry_attempts: retries} = state,
-         company_id
-       ) do
+  defp fetch_and_dispatch(%State{} = state, company_id) do
     admission_server = runtime_admission_server(state)
     admission_snapshot = safe_snapshot(admission_server)
     {available_total_slots, available_local_slots} = available_capacity(state, admission_snapshot)
@@ -1668,11 +1665,11 @@ defmodule Cympho.Orchestrator.Dispatcher do
     if available_total_slots <= 0 do
       state
     else
-      candidates =
+      {candidates, state} =
         fetch_candidate_issues(
           available_total_slots * 4,
           company_id,
-          state.poll_cursor,
+          state,
           available_local_slots
         )
 
@@ -1684,12 +1681,12 @@ defmodule Cympho.Orchestrator.Dispatcher do
       # `max_concurrent_runs` limit. The count is updated as dispatches
       # succeed within this poll so a single poll cannot burst a company past
       # its cap.
-      running_by_company = running_issues_by_company(running)
+      running_by_company = running_issues_by_company(state.running_issue_ids)
 
       ready_candidates =
         Enum.reject(candidates, fn issue ->
-          MapSet.member?(running, issue.id) ||
-            (retries[issue.id] && retries[issue.id].next_retry_at > now)
+          MapSet.member?(state.running_issue_ids, issue.id) ||
+            match?(%{next_retry_at: t} when t > now, Map.get(state.retry_attempts, issue.id))
         end)
 
       {state, _by_company, _total_slots, _local_slots} =
@@ -1704,35 +1701,65 @@ defmodule Cympho.Orchestrator.Dispatcher do
               if company_at_capacity?(issue, by_co) do
                 {:cont, {state, by_co, total_slots, local_slots}}
               else
-                execution_class = candidate_execution_class(issue)
-
-                if execution_class == :local_process and local_slots <= 0 do
-                  # Known local slot saturation defers local-process work without
-                  # avoidable cancelled runs, retry increments, or backoff churn.
-                  # Continue scanning for eligible gateway candidates.
-                  Logger.debug(
-                    "[Dispatcher] Local capacity saturated; deferring local issue #{issue.id}"
-                  )
-
-                  {:cont, {state, by_co, total_slots, local_slots}}
-                else
-                  new_state = dispatch_issue(issue, state)
-
-                  if MapSet.member?(new_state.running_issue_ids, issue.id) do
-                    dispatched_class =
-                      Map.get(new_state.running_classes, issue.id, execution_class)
-
-                    new_local_slots =
-                      if dispatched_class == :local_process,
-                        do: max(0, local_slots - 1),
-                        else: local_slots
-
-                    {:cont,
-                     {new_state, Map.update(by_co, issue.company_id, 1, &(&1 + 1)),
-                      total_slots - 1, new_local_slots}}
-                  else
+                case preview_agent_for_issue(issue) do
+                  {:error, :no_agent_available} ->
+                    # Routing exclusion occurs before local capacity accounting;
+                    # failed candidates do not consume local quota.
+                    new_state = dispatch_issue(issue, state)
                     {:cont, {new_state, by_co, total_slots, local_slots}}
-                  end
+
+                  {:ok, agent} ->
+                    case Runtime.dispatchable?(issue, agent) do
+                      {:error, {:runtime_admission_deferred, _reason}} ->
+                        # Known local capacity / admission deferred at preflight time:
+                        # defer without retry churn or backoff increment.
+                        Logger.debug(
+                          "[Dispatcher] Runtime admission deferred local issue #{issue.id}"
+                        )
+
+                        {:cont, {state, by_co, total_slots, local_slots}}
+
+                      {:error, reason} ->
+                        # Preflight exclusion occurs before local capacity accounting;
+                        # failed candidates do not consume local quota.
+                        Logger.warning(
+                          "[Dispatcher] Runtime preflight blocked issue #{issue.id}: #{inspect(reason)}"
+                        )
+
+                        new_state = dispatch_issue(issue, state)
+                        {:cont, {new_state, by_co, total_slots, local_slots}}
+
+                      :ok ->
+                        # Running/backoff/routing/preflight exclusions passed.
+                        # Now local capacity accounting:
+                        execution_class = execution_class_for_agent(agent)
+
+                        if execution_class == :local_process and local_slots <= 0 do
+                          Logger.debug(
+                            "[Dispatcher] Local capacity saturated; deferring local issue #{issue.id}"
+                          )
+
+                          {:cont, {state, by_co, total_slots, local_slots}}
+                        else
+                          new_state = dispatch_issue(issue, state)
+
+                          if MapSet.member?(new_state.running_issue_ids, issue.id) do
+                            dispatched_class =
+                              Map.get(new_state.running_classes, issue.id, execution_class)
+
+                            new_local_slots =
+                              if dispatched_class == :local_process,
+                                do: max(0, local_slots - 1),
+                                else: local_slots
+
+                            {:cont,
+                             {new_state, Map.update(by_co, issue.company_id, 1, &(&1 + 1)),
+                              total_slots - 1, new_local_slots}}
+                          else
+                            {:cont, {new_state, by_co, total_slots, local_slots}}
+                          end
+                        end
+                    end
                 end
               end
           end
@@ -1991,10 +2018,22 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @companies_per_poll 25
 
   # A company-scoped poll has one tenant by definition, so it keeps the plain
-  # globally-ordered scan.
-  defp fetch_candidate_issues(limit, company_id, _cursor, available_local_slots)
+  # globally-ordered scan with per-company progress retained across polls.
+  defp fetch_candidate_issues(limit, company_id, %State{} = state, available_local_slots)
        when is_binary(company_id) do
-    fetch_runnable(candidate_query(company_id), limit, available_local_slots)
+    start_page = Map.get(state.company_cursors, company_id, 0)
+
+    {candidates, next_page} =
+      fetch_runnable(
+        candidate_query(company_id),
+        limit,
+        start_page,
+        available_local_slots,
+        state
+      )
+
+    new_company_cursors = Map.put(state.company_cursors, company_id, next_page)
+    {candidates, %{state | company_cursors: new_company_cursors}}
   end
 
   # Candidates were selected from one globally priority-ordered window. A tenant
@@ -2004,60 +2043,108 @@ defmodule Cympho.Orchestrator.Dispatcher do
   # discovered independently of that order and drawn from round-robin, so one
   # backlog cannot consume the window. Priority order is preserved *within* a
   # company; across companies the policy is fair share, which is the point.
-  defp fetch_candidate_issues(limit, nil, cursor, available_local_slots) do
+  #
+  # Bounded issue scans retain per-company progress across polls so eligible
+  # gateways behind locally saturated predecessors are eventually reachable.
+  defp fetch_candidate_issues(limit, nil, %State{} = state, available_local_slots) do
     per_company = per_company_window(limit)
 
-    limit
-    |> candidate_company_ids(cursor)
-    |> Enum.map(fn company_id ->
-      fetch_runnable(candidate_query(company_id), per_company, available_local_slots)
-    end)
-    |> interleave()
-    |> Enum.take(limit)
+    company_ids = candidate_company_ids(limit, state.poll_cursor)
+
+    {candidate_groups, new_company_cursors} =
+      Enum.map_reduce(company_ids, state.company_cursors, fn company_id, cursors ->
+        start_page = Map.get(cursors, company_id, 0)
+
+        {runnable, next_page} =
+          fetch_runnable(
+            candidate_query(company_id),
+            per_company,
+            start_page,
+            available_local_slots,
+            state
+          )
+
+        {runnable, Map.put(cursors, company_id, next_page)}
+      end)
+
+    candidates =
+      candidate_groups
+      |> interleave()
+      |> Enum.take(limit)
+
+    {candidates, %{state | company_cursors: new_company_cursors}}
   end
 
-  defp fetch_runnable(query, limit, available_local_slots) do
-    Enum.reduce_while(0..(@candidate_pages - 1), {[], 0}, fn page, {acc, local_count} ->
-      rows =
-        query
-        |> limit(^limit)
-        |> offset(^(page * limit))
-        |> Cympho.Repo.all()
+  defp fetch_runnable(query, limit, start_page, available_local_slots, state) do
+    now = :os.system_time(:millisecond)
 
-      {page_runnable, new_local_count} =
-        rows
-        |> Enum.filter(&runnable_candidate?/1)
-        |> Enum.reduce({[], local_count}, fn issue, {cand_acc, l_count} ->
-          execution_class = candidate_execution_class(issue)
+    Enum.reduce_while(
+      0..(@candidate_pages - 1),
+      {[], start_page},
+      fn page_offset, {acc, _cursor} ->
+        current_page = start_page + page_offset
+        offset = current_page * limit
 
-          cond do
-            execution_class == :local_process and is_integer(available_local_slots) and
-                l_count >= available_local_slots ->
-              # Locally saturated: continue candidate fetching past locally saturated
-              # rows to reach eligible gateways behind them without enlarging the window.
-              {cand_acc, l_count}
+        rows =
+          query
+          |> limit(^limit)
+          |> offset(^offset)
+          |> Cympho.Repo.all()
 
-            execution_class == :local_process ->
-              {[issue | cand_acc], l_count + 1}
+        page_runnable =
+          rows
+          |> Enum.filter(fn issue ->
+            runnable_candidate?(issue) and
+              not MapSet.member?(state.running_issue_ids, issue.id) and
+              not match?(
+                %{next_retry_at: t} when t > now,
+                Map.get(state.retry_attempts, issue.id)
+              ) and
+              not locally_saturated?(issue, available_local_slots)
+          end)
 
-            true ->
-              {[issue | cand_acc], l_count}
-          end
-        end)
+        runnable =
+          (acc ++ page_runnable)
+          |> Enum.uniq_by(& &1.id)
 
-      runnable =
-        (acc ++ Enum.reverse(page_runnable))
-        |> Enum.uniq_by(& &1.id)
+        cond do
+          # Enough to fill the slots this poll can use.
+          length(runnable) >= limit ->
+            next_p = if length(rows) < limit, do: 0, else: current_page + 1
+            {:halt, {Enum.take(runnable, limit), next_p}}
 
-      cond do
-        # Enough to fill the slots this poll can use.
-        length(runnable) >= limit -> {:halt, {Enum.take(runnable, limit), new_local_count}}
-        # Short page means the candidate set is exhausted.
-        length(rows) < limit -> {:halt, {runnable, new_local_count}}
-        true -> {:cont, {runnable, new_local_count}}
+          # Short page means the candidate set is exhausted.
+          length(rows) < limit ->
+            # Exhaustion-wrap: wrap cursor back to 0.
+            {:halt, {runnable, 0}}
+
+          true ->
+            {:cont, {runnable, current_page + 1}}
+        end
       end
-    end)
-    |> elem(0)
+    )
+  end
+
+  defp locally_saturated?(issue, available_local_slots) do
+    if is_integer(available_local_slots) and available_local_slots <= 0 do
+      case preview_agent_for_issue(issue) do
+        {:ok, agent} ->
+          if execution_class_for_agent(agent) == :local_process do
+            case Runtime.dispatchable?(issue, agent) do
+              :ok -> true
+              {:error, {:runtime_admission_deferred, _}} -> true
+              _ -> false
+            end
+          else
+            false
+          end
+
+        _ ->
+          false
+      end
+    else
+      false
+    end
   end
 
   # Every company with work that could dispatch, found without consulting the

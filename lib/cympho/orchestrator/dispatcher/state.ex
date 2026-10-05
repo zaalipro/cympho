@@ -12,6 +12,7 @@ defmodule Cympho.Orchestrator.Dispatcher.State do
           poll_timer: reference() | nil,
           poll_token: reference() | nil,
           poll_cursor: non_neg_integer(),
+          company_cursors: %{String.t() => non_neg_integer()},
           runtime_admission_server: GenServer.server() | nil
         }
 
@@ -21,6 +22,10 @@ defmodule Cympho.Orchestrator.Dispatcher.State do
   #
   # `poll_cursor` rotates which companies a global poll looks at first, so a
   # bounded per-poll slice still gives every tenant a turn.
+  #
+  # `company_cursors` tracks bounded issue-scan progress per company across polls
+  # so eligible gateways behind locally saturated predecessors are reachable,
+  # wrapping back to 0 upon queue exhaustion.
   defstruct [
     :running_issue_ids,
     :retry_attempts,
@@ -29,6 +34,7 @@ defmodule Cympho.Orchestrator.Dispatcher.State do
     poll_timer: nil,
     poll_token: nil,
     poll_cursor: 0,
+    company_cursors: %{},
     runtime_admission_server: nil
   ]
 
@@ -42,6 +48,7 @@ defmodule Cympho.Orchestrator.Dispatcher.State do
       poll_timer: nil,
       poll_token: nil,
       poll_cursor: 0,
+      company_cursors: %{},
       runtime_admission_server: Keyword.get(opts, :runtime_admission_server)
     }
   end

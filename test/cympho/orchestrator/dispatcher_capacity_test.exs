@@ -479,6 +479,376 @@ defmodule Cympho.Orchestrator.DispatcherCapacityTest do
       end
     end
 
+    test "company poll reaches eligible gateway beyond bounded scan budget across multiple polls",
+         %{
+           admission: admission,
+           company: company,
+           local_agent: local_agent,
+           gateway_agent: gateway_agent
+         } do
+      # Occupy local slot
+      assert {:ok, held_token} = RuntimeAdmission.checkout(LocalAdapter, admission)
+
+      # Create 20 local issues ahead of gateway (page size is 4, 5 pages = 20 issues)
+      local_issues =
+        for i <- 1..20 do
+          {:ok, issue} =
+            Issues.create_issue(%{
+              title: "Local issue #{i}",
+              description: "Local",
+              status: :todo,
+              priority: :high,
+              company_id: company.id,
+              assignee_id: local_agent.id,
+              assigned_role: "engineer"
+            })
+
+          issue
+        end
+
+      # Create 1 gateway issue at position 21
+      {:ok, gateway_issue} =
+        Issues.create_issue(%{
+          title: "Gateway issue behind 20 locals",
+          description: "Gateway",
+          status: :todo,
+          priority: :low,
+          company_id: company.id,
+          assignee_id: gateway_agent.id,
+          assigned_role: "product_manager"
+        })
+
+      state = State.new(runtime_admission_server: admission)
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn
+          %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}}
+          %{adapter: :http} -> {:ok, GatewayAdapter, %{test_pid: test_pid}}
+        end do
+        # First poll scans pages 0..4 (20 local issues). None are dispatched because local capacity is full.
+        assert {:noreply, %State{} = poll_1_state} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state)
+
+        for issue <- local_issues do
+          assert Issues.get_issue!(issue.id).status == :todo
+          refute MapSet.member?(poll_1_state.running_issue_ids, issue.id)
+        end
+
+        assert Issues.get_issue!(gateway_issue.id).status == :todo
+        refute MapSet.member?(poll_1_state.running_issue_ids, gateway_issue.id)
+        assert poll_1_state.company_cursors[company.id] == 5
+
+        # Second poll resumes at page 5 and reaches the gateway candidate at position 21!
+        assert {:noreply, %State{} = poll_2_state} =
+                 Dispatcher.handle_info({:poll_company, company.id}, poll_1_state)
+
+        assert Issues.get_issue!(gateway_issue.id).status == :in_progress
+        assert MapSet.member?(poll_2_state.running_issue_ids, gateway_issue.id)
+        assert_receive {:adapter_called, :gateway, session_id}, 1_000
+        stop_and_wait_session(gateway_issue.id, session_id)
+
+        assert :ok = RuntimeAdmission.release(held_token, admission)
+      end
+    end
+
+    test "global poll reaches eligible gateway beyond bounded scan budget across multiple polls",
+         %{
+           admission: admission,
+           company: company,
+           local_agent: local_agent,
+           gateway_agent: gateway_agent
+         } do
+      # Occupy local slot (total limit: 2, local limit: 1 -> 1 total slot free, 0 local slots free)
+      # In global poll with 1 slot free, limit is 4 and per_company_window is 1 (page size is 1).
+      assert {:ok, held_token} = RuntimeAdmission.checkout(LocalAdapter, admission)
+
+      # Create 5 local issues ahead of gateway (5 pages of size 1 = 5 issues)
+      local_issues =
+        for i <- 1..5 do
+          {:ok, issue} =
+            Issues.create_issue(%{
+              title: "Global local issue #{i}",
+              description: "Local",
+              status: :todo,
+              priority: :critical,
+              company_id: company.id,
+              assignee_id: local_agent.id,
+              assigned_role: "engineer"
+            })
+
+          issue
+        end
+
+      # Create 1 gateway issue at position 6
+      {:ok, gateway_issue} =
+        Issues.create_issue(%{
+          title: "Global gateway issue behind 5 locals",
+          description: "Gateway",
+          status: :todo,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: gateway_agent.id,
+          assigned_role: "product_manager"
+        })
+
+      state = State.new(runtime_admission_server: admission)
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn
+          %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}}
+          %{adapter: :http} -> {:ok, GatewayAdapter, %{test_pid: test_pid}}
+        end do
+        # First poll scans pages 0..4 (5 local issues). None are dispatched because local capacity is full.
+        assert {:noreply, %State{} = poll_1_state} =
+                 Dispatcher.handle_info(:poll, state)
+
+        for issue <- local_issues do
+          assert Issues.get_issue!(issue.id).status == :todo
+          refute MapSet.member?(poll_1_state.running_issue_ids, issue.id)
+        end
+
+        assert Issues.get_issue!(gateway_issue.id).status == :todo
+        refute MapSet.member?(poll_1_state.running_issue_ids, gateway_issue.id)
+        assert poll_1_state.company_cursors[company.id] == 5
+
+        # Second poll resumes at page 5 and reaches the gateway candidate at position 6!
+        assert {:noreply, %State{} = poll_2_state} =
+                 Dispatcher.handle_info(:poll, poll_1_state)
+
+        assert Issues.get_issue!(gateway_issue.id).status == :in_progress
+        assert MapSet.member?(poll_2_state.running_issue_ids, gateway_issue.id)
+        assert_receive {:adapter_called, :gateway, session_id}, 1_000
+        stop_and_wait_session(gateway_issue.id, session_id)
+
+        assert :ok = RuntimeAdmission.release(held_token, admission)
+      end
+    end
+
+    test "company poll wraps cursor back to 0 on queue exhaustion",
+         %{
+           admission: admission,
+           company: company,
+           local_agent: local_agent
+         } do
+      # Occupy local slot so local issues are deferred
+      assert {:ok, held_token} = RuntimeAdmission.checkout(LocalAdapter, admission)
+
+      # Create 6 local issues (1 page of 4 + 1 short page of 2)
+      for i <- 1..6 do
+        {:ok, _issue} =
+          Issues.create_issue(%{
+            title: "Local issue #{i}",
+            description: "Local",
+            status: :todo,
+            priority: :high,
+            company_id: company.id,
+            assignee_id: local_agent.id,
+            assigned_role: "engineer"
+          })
+      end
+
+      # Initial state starting at page 1 (which will hit the short page of 2 rows and exhaust)
+      state = %{
+        State.new(runtime_admission_server: admission)
+        | company_cursors: %{company.id => 1}
+      }
+
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}} end do
+        assert {:noreply, %State{} = after_poll} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state)
+
+        # Candidate set was exhausted on page 1, so cursor wrapped back to 0!
+        assert after_poll.company_cursors[company.id] == 0
+
+        assert :ok = RuntimeAdmission.release(held_token, admission)
+      end
+    end
+
+    test "free local slot dispatches ready local issue behind unroutable candidate without consuming local quota",
+         %{
+           admission: admission,
+           company: company,
+           local_agent: local_agent
+         } do
+      # 1 free local slot, 1 free total slot (nothing held)
+      # Candidate 1: Critical unassigned CEO issue where company has no CEO agent
+      {:ok, ceo_issue} =
+        Issues.create_issue(%{
+          title: "Unassigned CEO Issue",
+          description: "CEO needed",
+          status: :todo,
+          priority: :critical,
+          company_id: company.id,
+          assignee_id: nil,
+          assigned_role: "ceo"
+        })
+
+      # Candidate 2: High priority local engineer issue with idle engineer agent
+      {:ok, engineer_issue} =
+        Issues.create_issue(%{
+          title: "Ready Engineer Issue",
+          description: "Engineer work",
+          status: :todo,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: local_agent.id,
+          assigned_role: "engineer"
+        })
+
+      state = State.new(runtime_admission_server: admission)
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}} end do
+        assert {:noreply, %State{} = after_poll} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state)
+
+        # CEO issue failed routing with :no_agent, did not run, and has backoff scheduled
+        assert Issues.get_issue!(ceo_issue.id).status == :todo
+        refute MapSet.member?(after_poll.running_issue_ids, ceo_issue.id)
+        assert after_poll.retry_attempts[ceo_issue.id] != nil
+
+        # Engineer issue was dispatched into the free local slot!
+        assert Issues.get_issue!(engineer_issue.id).status == :in_progress
+        assert MapSet.member?(after_poll.running_issue_ids, engineer_issue.id)
+        assert Dispatcher.count_running_local_processes(after_poll) == 1
+
+        assert_receive {:adapter_called, :local, session_id}, 1_000
+        stop_and_wait_session(engineer_issue.id, session_id)
+      end
+    end
+
+    test "free local slot dispatches ready local issue behind backing-off candidate",
+         %{
+           admission: admission,
+           company: company,
+           local_agent: local_agent
+         } do
+      # Candidate 1: High priority local engineer issue 1 in active backoff
+      {:ok, backoff_issue} =
+        Issues.create_issue(%{
+          title: "Backing-off Issue",
+          description: "In retry backoff",
+          status: :todo,
+          priority: :critical,
+          company_id: company.id,
+          assignee_id: local_agent.id,
+          assigned_role: "engineer"
+        })
+
+      # Candidate 2: Ready local engineer issue 2
+      {:ok, ready_issue} =
+        Issues.create_issue(%{
+          title: "Ready Issue Behind Backoff",
+          description: "Should run",
+          status: :todo,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: local_agent.id,
+          assigned_role: "engineer"
+        })
+
+      now = :os.system_time(:millisecond)
+
+      state = %{
+        State.new(runtime_admission_server: admission)
+        | retry_attempts: %{
+            backoff_issue.id => %{attempts: 1, next_retry_at: now + 60_000}
+          }
+      }
+
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}} end do
+        assert {:noreply, %State{} = after_poll} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state)
+
+        # Backing-off issue was excluded before local capacity accounting
+        assert Issues.get_issue!(backoff_issue.id).status == :todo
+        refute MapSet.member?(after_poll.running_issue_ids, backoff_issue.id)
+
+        # Ready issue was dispatched into the free local slot!
+        assert Issues.get_issue!(ready_issue.id).status == :in_progress
+        assert MapSet.member?(after_poll.running_issue_ids, ready_issue.id)
+        assert Dispatcher.count_running_local_processes(after_poll) == 1
+
+        assert_receive {:adapter_called, :local, session_id}, 1_000
+        stop_and_wait_session(ready_issue.id, session_id)
+      end
+    end
+
+    test "free local slot dispatches ready local issue behind preflight-failed candidate without consuming local quota",
+         %{
+           admission: admission,
+           company: company,
+           local_agent: local_agent
+         } do
+      unique = System.unique_integer([:positive])
+
+      # Agent with governance_status "paused" so preflight fails with {:agent_governance_blocked, "paused"}
+      {:ok, paused_agent} =
+        Agents.create_agent(%{
+          name: "Paused Agent #{unique}",
+          role: "engineer",
+          status: :idle,
+          governance_status: "paused",
+          company_id: company.id,
+          adapter: :claude_code
+        })
+
+      # Candidate 1: Assigned to paused agent
+      {:ok, preflight_fail_issue} =
+        Issues.create_issue(%{
+          title: "Preflight Fail Issue",
+          description: "Agent paused",
+          status: :todo,
+          priority: :critical,
+          company_id: company.id,
+          assignee_id: paused_agent.id,
+          assigned_role: "engineer"
+        })
+
+      # Candidate 2: Assigned to healthy local agent
+      {:ok, ready_issue} =
+        Issues.create_issue(%{
+          title: "Ready Issue Behind Preflight Fail",
+          description: "Should run",
+          status: :todo,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: local_agent.id,
+          assigned_role: "engineer"
+        })
+
+      state = State.new(runtime_admission_server: admission)
+      test_pid = self()
+
+      with_mock Adapters,
+        resolve: fn %{adapter: :claude_code} -> {:ok, LocalAdapter, %{test_pid: test_pid}} end do
+        assert {:noreply, %State{} = after_poll} =
+                 Dispatcher.handle_info({:poll_company, company.id}, state)
+
+        # Preflight failed issue did not run and was scheduled for retry
+        assert Issues.get_issue!(preflight_fail_issue.id).status == :todo
+        refute MapSet.member?(after_poll.running_issue_ids, preflight_fail_issue.id)
+        assert after_poll.retry_attempts[preflight_fail_issue.id] != nil
+
+        # Ready issue was dispatched!
+        assert Issues.get_issue!(ready_issue.id).status == :in_progress
+        assert MapSet.member?(after_poll.running_issue_ids, ready_issue.id)
+        assert Dispatcher.count_running_local_processes(after_poll) == 1
+
+        assert_receive {:adapter_called, :local, session_id}, 1_000
+        stop_and_wait_session(ready_issue.id, session_id)
+      end
+    end
+
     test "previews effective runtime config including runtime_config and secret credentials without exposing secrets",
          %{
            company: company
