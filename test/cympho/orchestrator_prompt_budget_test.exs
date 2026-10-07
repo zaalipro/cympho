@@ -10,6 +10,7 @@ defmodule Cympho.OrchestratorPromptBudgetTest do
     HeartbeatEngine,
     Issues,
     Orchestrator,
+    Runtime,
     RuntimeAdmission
   }
 
@@ -30,6 +31,10 @@ defmodule Cympho.OrchestratorPromptBudgetTest do
     on_exit(fn -> MockAdapter.clear() end)
 
     %{company: company, agent: agent, issue: issue}
+  end
+
+  setup context do
+    if context[:codex_preflight], do: Cympho.CodexPreflightFixture.setup!(), else: :ok
   end
 
   describe "VAL-EXEC-007: Protected overflow fails before model execution" do
@@ -159,8 +164,9 @@ defmodule Cympho.OrchestratorPromptBudgetTest do
       end
     end
 
-    test "projects Codex sandbox workspace to /workspace before prompt construction and budgeting",
-         %{agent: agent, issue: issue} do
+    @tag :codex_preflight
+    test "projects Codex sandbox workspace and preserves the first preflight after mock teardown",
+         %{agent: agent, issue: issue, codex_path: codex_path, cli_invocation_marker: marker} do
       test_pid = self()
       now = DateTime.utc_now() |> DateTime.truncate(:second)
 
@@ -172,34 +178,58 @@ defmodule Cympho.OrchestratorPromptBudgetTest do
           started_at: now
         })
 
-      with_mocks([
-        {Adapters, [], [resolve: fn _ -> {:ok, Adapters.CodexAdapter, %{}} end]},
-        {Adapters.CodexAdapter, [:passthrough],
-         [
-           run: fn _issue, _agent_id, recipient_pid, opts ->
-             send(test_pid, {:codex_invoked, opts})
-             session_id = make_ref()
-             send(recipient_pid, {:session_started, session_id})
-             send(recipient_pid, {:turn_completed, session_id, %{}})
-             session_id
-           end
-         ]}
-      ]) do
-        {:ok, pid} =
-          Orchestrator.start_and_run(checked_out, agent.id,
-            adapter: :codex,
-            adapter_config: %{}
-          )
+      try do
+        with_mocks([
+          {Adapters, [], [resolve: fn _ -> {:ok, Adapters.CodexAdapter, %{}} end]},
+          {Adapters.CodexAdapter, [:passthrough],
+           [
+             run: fn _issue, _agent_id, recipient_pid, opts ->
+               send(test_pid, {:codex_invoked, opts})
+               session_id = make_ref()
+               send(recipient_pid, {:session_started, session_id})
+               send(recipient_pid, {:turn_completed, session_id, %{}})
+               session_id
+             end
+           ]}
+        ]) do
+          {:ok, pid} =
+            Orchestrator.start_and_run(checked_out, agent.id,
+              adapter: :codex,
+              adapter_config: %{}
+            )
 
-        ref = Process.monitor(pid)
-        assert_receive {:codex_invoked, opts}, 3_000
-        budgeted_prompt = Keyword.get(opts, :budgeted_prompt)
-        assert is_binary(budgeted_prompt)
-        assert budgeted_prompt =~ "Workspace: /workspace"
-        refute budgeted_prompt =~ Cympho.Workspace.workspace_path(issue.id)
+          ref = Process.monitor(pid)
+          assert_receive {:codex_invoked, opts}, 3_000
+          budgeted_prompt = Keyword.get(opts, :budgeted_prompt)
+          assert is_binary(budgeted_prompt)
+          assert budgeted_prompt =~ "Workspace: /workspace"
+          refute budgeted_prompt =~ Cympho.Workspace.workspace_path(issue.id)
 
-        assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 3_000
+          assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 3_000
+        end
+      after
+        # Meck unloads the module, so the next availability probe must see available?/1.
+        Code.ensure_loaded!(Adapters.CodexAdapter)
       end
+
+      codex_agent = %{
+        agent
+        | adapter: :codex,
+          config: %{
+            "api_key" => "codex-preflight-test-key",
+            "base_url" => "https://cli.llmotions.com/v1",
+            "model" => "gpt-5.6-terra",
+            "repo_capable" => true
+          },
+          runtime_config: %{}
+      }
+
+      assert System.find_executable("codex") == codex_path
+      result = Runtime.preflight(issue, codex_agent)
+      refute File.exists?(marker), "preflight must not invoke a CLI"
+      assert {:ok, context} = result
+      assert context.adapter == Adapters.CodexAdapter
+      assert context.adapter_config["api_key"] == "codex-preflight-test-key"
     end
   end
 end

@@ -58,6 +58,10 @@ defmodule Cympho.RuntimeTest do
     %{company: company, agent: agent, issue: issue}
   end
 
+  setup context do
+    if context[:codex_preflight], do: Cympho.CodexPreflightFixture.setup!(), else: :ok
+  end
+
   test "preflight returns adapter, cwd, and runtime context", %{agent: agent, issue: issue} do
     run_id = Ecto.UUID.generate()
 
@@ -391,20 +395,12 @@ defmodule Cympho.RuntimeTest do
     assert context.adapter_config["env"]["LLMOTIONS_API_KEY"] == "llmotions-test-key"
   end
 
+  @tag :codex_preflight
   test "preflight injects an LLMotions secret into a Codex LLMotions config", %{
-    company: company
+    company: company,
+    codex_path: codex_path,
+    cli_invocation_marker: marker
   } do
-    original_bwrap = Application.get_env(:cympho, :codex_bwrap_path)
-    Application.put_env(:cympho, :codex_bwrap_path, "/usr/bin/true")
-
-    on_exit(fn ->
-      if original_bwrap do
-        Application.put_env(:cympho, :codex_bwrap_path, original_bwrap)
-      else
-        Application.delete_env(:cympho, :codex_bwrap_path)
-      end
-    end)
-
     repo_dir = local_git_repo!()
     on_exit(fn -> File.rm_rf!(repo_dir) end)
 
@@ -451,7 +447,10 @@ defmodule Cympho.RuntimeTest do
 
     on_exit(fn -> File.rm_rf!(Workspace.workspace_path(issue.id)) end)
 
-    assert {:ok, context} = Runtime.preflight(issue, engineer)
+    assert System.find_executable("codex") == codex_path
+    result = Runtime.preflight(issue, engineer)
+    refute File.exists?(marker), "preflight must not invoke a CLI"
+    assert {:ok, context} = result
     assert context.adapter == Cympho.Adapters.CodexAdapter
     assert context.adapter_config["api_key"] == "llmotions-codex-test-key"
     assert context.adapter_config["base_url"] == "https://cli.llmotions.com/v1"
