@@ -32,6 +32,9 @@ defmodule Cympho.Issues.HumanReview do
         validate_wake(review_wakes, Keyword.get(opts, :wake_id))
 
         if decision == :approve do
+          if Issues.active_blockers_exist?(issue.id),
+            do: Repo.rollback(:blocked_by_active_issues)
+
           ensure_ok(Issues.validate_review_transition(issue, :done))
 
           if ExecutionState.active?(ExecutionState.normalize(issue.execution_state)),

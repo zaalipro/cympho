@@ -241,10 +241,14 @@ defmodule Cympho.BrowserFixtureServer do
           for {key, status} <- [
                 {"queue_approval", :in_review},
                 {"inbox_approval", :in_review},
+                {"queue_linked_blocker", :in_review},
+                {"inbox_linked_blocker", :in_review},
                 {"queue_feedback", :in_review},
                 {"inbox_feedback", :in_review},
                 {"missing_evidence", :in_review},
                 {"rework", :todo},
+                {"rework_latest_human", :todo},
+                {"rework_latest_agent", :todo},
                 {"blocked", :blocked},
                 {"running", :in_progress},
                 {"stale", :in_progress},
@@ -266,11 +270,42 @@ defmodule Cympho.BrowserFixtureServer do
                 status: status,
                 assigned_role: if(status == :in_review, do: "cto", else: "researcher"),
                 assignee_id: if(status == :in_review, do: reviewer.id, else: worker.id),
-                last_reviewer_id: if(key == "rework", do: reviewer.id, else: nil)
+                last_reviewer_id:
+                  if(String.starts_with?(key, "rework"), do: reviewer.id, else: nil)
               })
 
-            if key in ~w(queue_approval inbox_approval) do
+            if key in ~w(queue_approval inbox_approval queue_linked_blocker inbox_linked_blocker) do
               evidence(issue, worker, reviewer)
+            end
+
+            if key in ~w(rework_latest_human rework_latest_agent) do
+              issue
+              |> Ecto.Changeset.change(last_human_reviewer_id: logins["owner"].user_id)
+              |> Repo.update!()
+
+              human_time = ~U[2026-11-01 12:02:00.100000Z]
+
+              agent_time =
+                if key == "rework_latest_human",
+                  do: ~U[2026-10-31 12:01:00.900000Z],
+                  else: ~U[2026-11-01 12:03:00.200000Z]
+
+              for {type, id, body, timestamp} <- [
+                    {"user", logins["owner"].user_id,
+                     "[review] Verdict: changes requested.\nReason: Synthetic human feedback.",
+                     human_time},
+                    {"agent", reviewer.id,
+                     "Review: Evidence inspected: synthetic document. Required changes: correct the gap. Verification required: inspect the document. Next action: resubmit.",
+                     agent_time}
+                  ] do
+                Repo.insert!(%Comment{
+                  issue_id: issue.id,
+                  author_type: type,
+                  author_id: id,
+                  body: body,
+                  inserted_at: timestamp
+                })
+              end
             end
 
             if status == :in_review do
@@ -306,6 +341,14 @@ defmodule Cympho.BrowserFixtureServer do
 
             {key, issue.id}
           end
+
+        for key <- ~w(queue_linked_blocker inbox_linked_blocker) do
+          {:ok, _} =
+            Issues.add_blocker(
+              Repo.get!(Issues.Issue, issues[key]),
+              Repo.get!(Issues.Issue, issues["blocked"])
+            )
+        end
 
         {label, %{company_id: company.id, project_id: project.id, issues: issues}}
       end

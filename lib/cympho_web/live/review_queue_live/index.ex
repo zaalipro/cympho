@@ -473,8 +473,8 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
   defp latest_reviewer_name(issue) do
     latest_review =
       issue.comments
-      |> Enum.filter(&String.starts_with?(&1.body, "[review]"))
-      |> Enum.max_by(&{&1.inserted_at, &1.id}, fn -> nil end)
+      |> Enum.filter(&(IssueDigest.comment_category(&1) == :review))
+      |> Enum.max_by(&{DateTime.to_unix(&1.inserted_at, :microsecond), &1.id}, fn -> nil end)
 
     reviewer =
       if match?(%{author_type: "user"}, latest_review),

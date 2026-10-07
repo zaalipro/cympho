@@ -3224,7 +3224,8 @@ defmodule Cympho.Issues do
     Repo.one(from i in Issue, where: i.id == ^issue_id, lock: "FOR UPDATE")
   end
 
-  defp active_blockers_exist?(issue_id) do
+  @doc false
+  def active_blockers_exist?(issue_id) do
     Repo.exists?(
       from bb in "issue_blockers",
         join: blocker in Issue,

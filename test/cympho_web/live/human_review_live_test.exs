@@ -1,6 +1,6 @@
 defmodule CymphoWeb.HumanReviewLiveTest do
   use CymphoWeb.LiveCase, async: true
-  alias Cympho.{Agents, Comments, Companies, Issues, Repo, WorkProducts}
+  alias Cympho.{Activities, AgentActions, Agents, Comments, Companies, Issues, Repo, WorkProducts}
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Wakes.AgentWake
 
@@ -185,6 +185,21 @@ defmodule CymphoWeb.HumanReviewLiveTest do
           description: "Reviewed document"
         })
 
+      {:ok, blocker} = Issues.create_issue(scoped_attrs(%{title: "Active dependency"}))
+      {:ok, _} = Issues.add_blocker(issue, blocker)
+      before_issue = Repo.get!(Issues.Issue, issue.id)
+      before_comments = Comments.list_comments(issue.id)
+      before_activities = Activities.list_activities(issue.id)
+
+      {:ok, blocked_view, _} = live(ctx.conn, unquote(path))
+      render_hook(blocked_view, "approve_review", params)
+      assert render(blocked_view) =~ "Resolve active blockers before closing"
+      assert Repo.get!(Issues.Issue, issue.id) == before_issue
+      assert Comments.list_comments(issue.id) == before_comments
+      assert Activities.list_activities(issue.id) == before_activities
+      assert Repo.get!(AgentWake, ctx.wake.id).status == "pending"
+
+      {:ok, _} = Issues.update_issue(blocker, %{status: :cancelled})
       {:ok, ready_view, _} = live(ctx.conn, unquote(path))
       render_hook(ready_view, "approve_review", params)
       updated = Issues.get_issue!(issue.id)
@@ -218,6 +233,106 @@ defmodule CymphoWeb.HumanReviewLiveTest do
       assert Issues.get_issue!(ctx.issue.id).status == :in_review
       assert Comments.list_comments(ctx.issue.id) == []
       assert Repo.get!(AgentWake, ctx.wake.id).status == "pending"
+    end
+  end
+
+  for {label, older, newer} <- [
+        {"month boundary", ~U[2026-10-31 12:00:00.000000Z], ~U[2026-11-01 12:00:00.000000Z]},
+        {"minute boundary", ~U[2026-11-01 12:01:00.900000Z], ~U[2026-11-01 12:02:00.100000Z]}
+      ] do
+    test "latest reviewer uses chronological ordering across #{label}", ctx do
+      {:ok, agent_comment} =
+        Comments.create_comment(%{
+          issue_id: ctx.issue.id,
+          author_type: "agent",
+          author_id: ctx.issue.last_reviewer_id,
+          body: "[review] Required changes: earlier agent feedback."
+        })
+
+      {:ok, _} =
+        Issues.review_issue(ctx.issue, current_company_id(), ctx.user_id, :request_changes,
+          reason: "Latest human feedback."
+        )
+
+      human_comment = Enum.find(Comments.list_comments(ctx.issue.id), &(&1.author_type == "user"))
+
+      Repo.update!(
+        Ecto.Changeset.change(agent_comment, inserted_at: unquote(Macro.escape(older)))
+      )
+
+      Repo.update!(
+        Ecto.Changeset.change(human_comment, inserted_at: unquote(Macro.escape(newer)))
+      )
+
+      {:ok, _view, html} = live(ctx.conn, "/reviews")
+      assert html =~ "last reviewed by Live User"
+      refute html =~ "last reviewed by Older agent reviewer"
+    end
+  end
+
+  for {agent_id, expected} <- [
+        {"00000000-0000-0000-0000-000000000001", "Live User"},
+        {"ffffffff-ffff-ffff-ffff-ffffffffffff", "Older agent reviewer"}
+      ] do
+    test "equal review timestamps use deterministic ID ordering with agent #{agent_id}", ctx do
+      {:ok, _} =
+        Issues.review_issue(ctx.issue, current_company_id(), ctx.user_id, :request_changes,
+          reason: "Human feedback."
+        )
+
+      [human_comment] = Comments.list_comments(ctx.issue.id)
+      timestamp = ~U[2026-11-01 12:00:00.000000Z]
+      Repo.update!(Ecto.Changeset.change(human_comment, inserted_at: timestamp))
+
+      Repo.insert!(%Comments.Comment{
+        id: unquote(agent_id),
+        issue_id: ctx.issue.id,
+        author_type: "agent",
+        author_id: ctx.issue.last_reviewer_id,
+        body: "[review] Required changes: agent feedback.",
+        inserted_at: timestamp
+      })
+
+      {:ok, _view, html} = live(ctx.conn, "/reviews")
+      assert html =~ "last reviewed by " <> unquote(expected)
+    end
+  end
+
+  for prefix <- ["[Review]", "review:", "REVIEW:", "Decision packet: [REVIEW]"] do
+    test "newer supported #{prefix} agent feedback supersedes historical human attribution",
+         ctx do
+      {:ok, human} =
+        Issues.review_issue(ctx.issue, current_company_id(), ctx.user_id, :request_changes,
+          reason: "Historical human feedback."
+        )
+
+      [human_comment] = Comments.list_comments(ctx.issue.id)
+
+      Repo.update!(
+        Ecto.Changeset.change(human_comment, inserted_at: ~U[2026-01-01 00:00:00.000000Z])
+      )
+
+      {:ok, ready} = Issues.update_issue(human, %{status: :in_review, assigned_role: "cto"})
+      reviewer = Agents.get_agent!(ctx.issue.last_reviewer_id)
+
+      reason =
+        unquote(prefix) <>
+          " Evidence inspected: review document. Required changes: correct the gap. Verification required: run the focused test. Next action: resubmit for review."
+
+      assert {:ok, _} =
+               AgentActions.execute(ready, reviewer, [
+                 %{"type" => "request_changes", "role" => "engineer", "reason" => reason}
+               ])
+
+      assert Enum.any?(Comments.list_comments(ready.id), &(&1.body == reason))
+      final = Issues.get_issue!(ready.id)
+      assert final.last_reviewer_id == reviewer.id
+      assert final.last_human_reviewer_id == ctx.user_id
+      assert Repo.get!(Comments.Comment, human_comment.id).author_id == ctx.user_id
+
+      {:ok, _view, html} = live(ctx.conn, "/reviews")
+      assert html =~ "last reviewed by Older agent reviewer"
+      refute html =~ "last reviewed by Live User"
     end
   end
 end

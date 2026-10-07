@@ -224,6 +224,62 @@ defmodule Cympho.HumanReviewTest do
     refute Process.get(:cympho_agent_actions_defer_terminal_effects, false)
   end
 
+  test "active linked blockers reject evidence-ready approval without partial effects", ctx do
+    add_evidence(ctx)
+    {:ok, blocker} = Issues.create_issue(scoped_attrs(%{title: "Unresolved dependency"}))
+    {:ok, _} = Issues.add_blocker(ctx.issue, blocker)
+    snapshot = Repo.get!(Issues.Issue, ctx.issue.id)
+    assert %Ecto.Association.NotLoaded{} = snapshot.blocked_by
+
+    other =
+      Repo.insert!(
+        AgentWake.changeset(%AgentWake{}, %{
+          agent_id: ctx.reviewer.id,
+          issue_id: snapshot.id,
+          reason: "manual_dispatch",
+          triggered_by_type: "system"
+        })
+      )
+
+    before_comments = Comments.list_comments(snapshot.id)
+    before_activities = Activities.list_activities(snapshot.id)
+
+    assert {:error, :blocked_by_active_issues} =
+             Issues.review_issue(snapshot, current_company_id(), ctx.user_id, :approve,
+               wake_id: ctx.wake.id
+             )
+
+    assert Repo.get!(Issues.Issue, snapshot.id) == snapshot
+    assert Comments.list_comments(snapshot.id) == before_comments
+    assert Activities.list_activities(snapshot.id) == before_activities
+    assert Repo.get!(AgentWake, ctx.wake.id).status == "pending"
+    assert Repo.get!(AgentWake, other.id).status == "pending"
+  end
+
+  for status <- [:done, :cancelled] do
+    test "#{status} linked blockers allow evidence-ready human approval", ctx do
+      add_evidence(ctx)
+
+      {:ok, blocker} =
+        Issues.create_issue(
+          scoped_attrs(%{title: "Resolved dependency", status: unquote(status)})
+        )
+
+      {:ok, _} = Issues.add_blocker(ctx.issue, blocker)
+      snapshot = Repo.get!(Issues.Issue, ctx.issue.id)
+
+      assert {:ok, closed} =
+               Issues.review_issue(snapshot, current_company_id(), ctx.user_id, :approve,
+                 wake_id: ctx.wake.id
+               )
+
+      assert closed.status == :done
+      assert closed.last_human_reviewer_id == ctx.user_id
+      assert closed.last_reviewer_id == ctx.reviewer.id
+      assert Repo.get!(AgentWake, ctx.wake.id).status == "consumed"
+    end
+  end
+
   test "agent, human and later agent rounds preserve distinct identities and routing", ctx do
     reason =
       "Evidence inspected: review document. Required changes: correct the acceptance gap. Verification required: run the focused test. Next action: resubmit for review."
