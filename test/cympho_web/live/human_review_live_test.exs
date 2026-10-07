@@ -298,6 +298,29 @@ defmodule CymphoWeb.HumanReviewLiveTest do
     end
   end
 
+  test "human review mentioning a secondary note tag supersedes older agent feedback", ctx do
+    {:ok, agent_comment} =
+      Comments.create_comment(%{
+        issue_id: ctx.issue.id,
+        author_type: "agent",
+        author_id: ctx.issue.last_reviewer_id,
+        body: "[review] Required changes: earlier agent feedback."
+      })
+
+    Repo.update!(
+      Ecto.Changeset.change(agent_comment, inserted_at: ~U[2026-01-01 00:00:00.000000Z])
+    )
+
+    {:ok, _} =
+      Issues.review_issue(ctx.issue, current_company_id(), ctx.user_id, :request_changes,
+        reason: "Add the missing [owner_update] summary before resubmitting."
+      )
+
+    {:ok, _view, html} = live(ctx.conn, "/reviews")
+    assert html =~ "last reviewed by Live User"
+    refute html =~ "last reviewed by Older agent reviewer"
+  end
+
   for prefix <- ["[Review]", "review:", "REVIEW:", "Decision packet: [REVIEW]"] do
     test "newer supported #{prefix} agent feedback supersedes historical human attribution",
          ctx do
@@ -317,7 +340,7 @@ defmodule CymphoWeb.HumanReviewLiveTest do
 
       reason =
         unquote(prefix) <>
-          " Evidence inspected: review document. Required changes: correct the gap. Verification required: run the focused test. Next action: resubmit for review."
+          " Evidence inspected: review document. Required changes: add the missing [owner_update] summary. Verification required: run the focused test. Next action: resubmit for review."
 
       assert {:ok, _} =
                AgentActions.execute(ready, reviewer, [
