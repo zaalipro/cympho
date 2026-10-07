@@ -108,6 +108,7 @@ defmodule CymphoWeb.Router do
       live "/", DashboardLive.Index, :home
       live "/dashboard", DashboardLive.Index
       live "/operations", OperationsLive.Index
+      live "/overview", MultiCompanyOverviewLive.Index
       live "/issues", IssueLive.Index
       live "/issues/new", IssueLive.New
       live "/issues/:id", IssueLive.Show

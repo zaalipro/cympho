@@ -148,6 +148,19 @@ defmodule Cympho.BrowserFixtureServer do
          System.monotonic_time(:millisecond) >= deadline do
       Cympho.BrowserProgressFixture.stop(progress)
     else
+      revoke_marker = Path.join(root, "revoke-overview-b")
+
+      if File.exists?(revoke_marker) do
+        membership =
+          Companies.get_membership(
+            fixtures.actors["owner"].user_id,
+            fixtures.companies["B"].company_id
+          )
+
+        if membership, do: Repo.delete!(membership)
+        File.rename!(revoke_marker, Path.join(root, "overview-b-revoked"))
+      end
+
       marker = Path.join(root, "start-progress")
 
       progress =

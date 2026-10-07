@@ -29,6 +29,7 @@ defmodule CymphoWeb.Components.NavRail do
   attr :inbox_count, :integer, default: 0
   attr :approval_count, :integer, default: 0
   attr :current_company, :any, default: nil
+  attr :company_count, :integer, default: 0
   attr :runtime_controls_allowed, :boolean, default: false
   attr :rest, :global
 
@@ -50,6 +51,13 @@ defmodule CymphoWeb.Components.NavRail do
         to={~p"/dashboard"}
         label="Home"
         icon="hero-squares-2x2-mini"
+        current_path={@current_path}
+      />
+      <.nav_link
+        :if={@company_count > 1}
+        to={~p"/overview"}
+        label="Company overview"
+        icon="hero-building-office-2-mini"
         current_path={@current_path}
       />
       <.nav_link

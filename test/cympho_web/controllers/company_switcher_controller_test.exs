@@ -35,6 +35,33 @@ defmodule CymphoWeb.CompanySwitcherControllerTest do
   end
 
   describe "switch/2 return_to handling" do
+    test "overview workflow links switch authorized companies only", %{
+      conn: conn,
+      user: user,
+      company: company
+    } do
+      unique = System.unique_integer([:positive])
+      {:ok, b} = Companies.create_company(%{name: "Authorized B", slug: "authorized-b-#{unique}"})
+
+      {:ok, c} =
+        Companies.create_company(%{name: "Unauthorized C", slug: "unauthorized-c-#{unique}"})
+
+      {:ok, membership} =
+        Companies.create_membership(%{user_id: user.id, company_id: b.id, role: "viewer"})
+
+      conn = put_session(conn, :company_id, company.id)
+      switched = get(conn, "/switch-company/#{b.id}?return_to=%2Fissues")
+      assert redirected_to(switched) == "/issues"
+      assert get_session(switched, :company_id) == b.id
+      forged = get(conn, "/switch-company/#{c.id}?return_to=%2Fissues%2F#{Ecto.UUID.generate()}")
+      assert redirected_to(forged) == "/"
+      assert get_session(forged, :company_id) == company.id
+      Cympho.Repo.delete!(membership)
+      revoked = get(conn, "/switch-company/#{b.id}?return_to=%2Freviews")
+      assert redirected_to(revoked) == "/"
+      assert get_session(revoked, :company_id) == company.id
+    end
+
     test "follows a genuine relative path", %{conn: conn, company: company} do
       conn = get(conn, ~p"/switch-company/#{company.id}", %{"return_to" => "/issues"})
       assert redirected_to(conn) == "/issues"
