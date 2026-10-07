@@ -5,7 +5,7 @@ defmodule Cympho.PortKillerTest do
 
   alias Cympho.PortKiller
 
-  test "close terminates a stubborn port OS process" do
+  test "close and await terminate a stubborn port OS process" do
     tmp_dir = Path.join(System.tmp_dir!(), "cympho-port-killer-#{System.unique_integer()}")
     File.mkdir_p!(tmp_dir)
     tracker = init_fixture(tmp_dir)
@@ -41,8 +41,16 @@ defmodule Cympho.PortKillerTest do
 
     assert process_alive?(os_pid)
 
-    assert :ok = track_close(tracker, PortKiller.close(port))
-    refute process_alive?(os_pid)
+    # A bounded attempt may time out under load; retain its owned tree and await
+    # definitive cleanup rather than requiring first-attempt snapshot success.
+    result = track_close(tracker, PortKiller.close(port))
+
+    case result do
+      :ok -> :ok
+      {:error, {:cleanup_timeout, cleanup}} -> assert :ok = PortKiller.await_cleanup(cleanup)
+    end
+
+    assert :confirmed_absence = process_liveness(os_pid)
   end
 
   test "close reaps the descendant tree without signalling the caller's group" do

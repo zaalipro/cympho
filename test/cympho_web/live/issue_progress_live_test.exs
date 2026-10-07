@@ -85,7 +85,7 @@ defmodule CymphoWeb.IssueProgressLiveTest do
   test "ignores foreign nil other-issue and prior-run scope", %{issue: issue, run: run} do
     {:ok, view, _} = live(conn(), "/issues/#{issue.id}")
     send_progress(view, issue, run, %{bytes: 12, chunks: 2})
-    before = progress(view)
+    before = progress_without_elapsed(view)
 
     for changes <- [
           %{company_id: Ecto.UUID.generate()},
@@ -96,7 +96,7 @@ defmodule CymphoWeb.IssueProgressLiveTest do
           %{run_id: nil}
         ] do
       send_progress(view, issue, run, Map.merge(%{bytes: 900, chunks: 99}, changes))
-      assert progress(view) == before
+      assert progress_without_elapsed(view) == before
     end
   end
 
@@ -106,7 +106,7 @@ defmodule CymphoWeb.IssueProgressLiveTest do
   } do
     {:ok, view, _} = live(conn(), "/issues/#{issue.id}")
     send_progress(view, issue, run, %{bytes: 12, chunks: 2})
-    before = progress(view)
+    before = progress_without_elapsed(view)
 
     for changes <- [
           %{bytes: "13"},
@@ -120,17 +120,17 @@ defmodule CymphoWeb.IssueProgressLiveTest do
           %{bytes: 1, chunks: 1}
         ] do
       send_progress(view, issue, run, Map.merge(%{bytes: 13, chunks: 3}, changes))
-      assert progress(view) == before
+      assert progress_without_elapsed(view) == before
     end
 
     for event <- ["run_progress", "run_status"],
         payload <- [nil, [], "bad", %{}, DateTime.utc_now()] do
       send(view.pid, %Phoenix.Socket.Broadcast{event: event, payload: payload})
-      assert progress(view) == before
+      assert progress_without_elapsed(view) == before
     end
 
     send(view.pid, {:unexpected, "UNEXPECTED_SECRET_SENTINEL"})
-    assert progress(view) == before
+    assert progress_without_elapsed(view) == before
   end
 
   test "checkout run wins an ambiguous same-second history order", %{
@@ -302,6 +302,10 @@ defmodule CymphoWeb.IssueProgressLiveTest do
       |> render()
       |> Floki.parse_document!()
       |> Floki.text()
+
+  # Rejected telemetry cannot change status, detail or counters; wall time still advances.
+  defp progress_without_elapsed(view),
+    do: view |> progress() |> String.replace(~r/Elapsed \d+s/, "Elapsed")
 
   defp send_progress(view, issue, run, changes) do
     payload =
