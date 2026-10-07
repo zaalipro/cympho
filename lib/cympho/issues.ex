@@ -1978,6 +1978,18 @@ defmodule Cympho.Issues do
     transition_issue(issue, new_status, nil)
   end
 
+  @doc "Commits a human review using the authenticated user's identity and current company."
+  defdelegate review_issue(issue, company_id, user_id, decision, opts \\ []),
+    to: Cympho.Issues.HumanReview,
+    as: :decide
+
+  @doc false
+  def publish_human_review(issue, updated, attrs) do
+    publish_issue_update_effects(issue, updated, attrs)
+    _ = cleanup_terminal_issue_runtime(issue, updated)
+    finish_transition(issue, updated)
+  end
+
   @doc """
   Transitions an issue through the owner-facing review readiness gates.
 
@@ -2002,6 +2014,15 @@ defmodule Cympho.Issues do
     # CTO/CEO reviewer role).
     acting_agent_id = Keyword.get(opts, :acting_agent_id, agent_id)
 
+    with :ok <- validate_review_transition(issue, new_status, acting_agent_id) do
+      if is_binary(agent_id),
+        do: transition_issue(issue, new_status, agent_id),
+        else: transition_issue(issue, new_status)
+    end
+  end
+
+  @doc false
+  def validate_review_transition(%Issue{} = issue, new_status, acting_agent_id \\ nil) do
     cond do
       new_status == :done and is_blocked?(issue) ->
         {:error, :blocked_by_active_issues}
@@ -2018,11 +2039,8 @@ defmodule Cympho.Issues do
             message: IssueDigest.review_status_block_message(new_status, blockers)
           }}}
 
-      is_binary(agent_id) ->
-        transition_issue(issue, new_status, agent_id)
-
       true ->
-        transition_issue(issue, new_status)
+        :ok
     end
   end
 

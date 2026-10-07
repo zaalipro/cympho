@@ -1,6 +1,8 @@
 defmodule CymphoWeb.ReviewQueueLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.{HeartbeatEngine, IssueDigest, Issues, Repo, WorkProducts}
+  alias CymphoWeb.Live.ReviewChanges
+  alias Cympho.Issues.HumanReview
 
   @impl true
   def mount(_params, _session, socket) do
@@ -11,6 +13,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
     {:ok,
      socket
      |> assign(:page_title, "Review queue")
+     |> assign(:review_changes, nil)
      |> load_lanes()}
   end
 
@@ -27,42 +30,31 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
 
   @impl true
   def handle_event("approve_review", %{"id" => id}, socket) do
-    with {:ok, issue} <- get_scoped_issue(socket, id),
-         {:ok, _updated} <- Issues.transition_issue_with_review_gates(issue, :done) do
+    with %{} = issue <- Enum.find(socket.assigns.awaiting_review, &(&1.id == id)),
+         {:ok, _updated} <- ReviewChanges.decide(socket, issue, :approve) do
       {:noreply,
        socket
        |> put_flash(:info, "Review approved and issue closed.")
        |> load_lanes()}
     else
-      {:error, {:review_gates_blocked, %{message: message}}} ->
-        {:noreply, put_flash(socket, :error, message)}
-
-      {:error, :blocked_by_active_issues} ->
-        {:noreply, put_flash(socket, :error, "Resolve active blockers before closing.")}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Issue not found.")}
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, HumanReview.error_message(reason))}
 
       _ ->
-        {:noreply, put_flash(socket, :error, "Could not approve this review.")}
+        {:noreply, put_flash(socket, :error, HumanReview.error_message(:not_found))}
     end
   end
 
   def handle_event("request_changes", %{"id" => id}, socket) do
-    with {:ok, issue} <- get_scoped_issue(socket, id),
-         {:ok, reopened} <- Issues.transition_issue(issue, :todo),
-         {:ok, _updated} <- Issues.update_issue(reopened, request_changes_attrs(issue)) do
-      {:noreply,
-       socket
-       |> put_flash(:info, "Review returned to To Do for changes.")
-       |> load_lanes()}
-    else
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Issue not found.")}
+    ReviewChanges.open(socket, id)
+  end
 
-      _ ->
-        {:noreply, put_flash(socket, :error, "Could not return this issue for changes.")}
-    end
+  def handle_event("cancel_review_changes", _params, socket) do
+    {:noreply, assign(socket, :review_changes, nil)}
+  end
+
+  def handle_event("submit_review_changes", params, socket) do
+    ReviewChanges.submit(socket, params, &load_lanes/1, "Review returned to To Do for changes.")
   end
 
   def handle_event("approve_spec", %{"id" => id}, socket) do
@@ -135,10 +127,14 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
 
     Cympho.Issues.Issue
     |> where([i], i.company_id == ^company_id)
-    |> where([i], i.status == :todo and not is_nil(i.last_reviewer_id))
+    |> where(
+      [i],
+      i.status == :todo and
+        (not is_nil(i.last_reviewer_id) or not is_nil(i.last_human_reviewer_id))
+    )
     |> order_by([i], asc: i.updated_at)
     |> Repo.all()
-    |> Repo.preload([:assignee, :project, :last_reviewer])
+    |> Repo.preload([:assignee, :project, :last_reviewer, :last_human_reviewer, :comments])
   end
 
   defp list_spec_review(company_id) do
@@ -474,20 +470,19 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
     do:
       "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
 
-  defp request_changes_attrs(issue) do
-    %{
-      assignee_id: nil,
-      assigned_role: return_role(issue.assigned_role),
-      checkout_run_id: nil,
-      checked_out_at: nil,
-      last_reviewer_id: issue.assignee_id || issue.last_reviewer_id
-    }
-  end
+  defp latest_reviewer_name(issue) do
+    latest_review =
+      issue.comments
+      |> Enum.filter(&String.starts_with?(&1.body, "[review]"))
+      |> Enum.max_by(&{&1.inserted_at, &1.id}, fn -> nil end)
 
-  defp return_role("ceo"), do: "cto"
-  defp return_role("cto"), do: "engineer"
-  defp return_role(role) when is_binary(role) and role != "", do: role
-  defp return_role(_), do: "engineer"
+    reviewer =
+      if match?(%{author_type: "user"}, latest_review),
+        do: issue.last_human_reviewer,
+        else: issue.last_reviewer || issue.last_human_reviewer
+
+    if reviewer, do: reviewer.name || reviewer.id
+  end
 
   defp clear_spec_review(issue) do
     issue.monitor_state

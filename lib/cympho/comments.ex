@@ -71,7 +71,8 @@ defmodule Cympho.Comments do
     end
   end
 
-  defp publish_comment_effects(comment) do
+  @doc false
+  def publish_comment_effects(comment) do
     Activities.log_activity(%{
       issue_id: comment.issue_id,
       actor_type: comment.author_type,

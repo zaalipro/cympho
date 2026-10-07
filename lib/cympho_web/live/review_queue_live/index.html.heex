@@ -42,6 +42,8 @@
       {@flash["info"]}
     </div>
 
+    <CymphoWeb.Live.ReviewChanges.reason_form review_changes={@review_changes} />
+
     <%!-- With nothing in any lane these four cards read 0 four times directly
          above three panels that already name their lane and say it is empty. --%>
     <div
@@ -392,7 +394,6 @@
                     type="button"
                     phx-click="request_changes"
                     phx-value-id={issue.id}
-                    data-confirm="Return this work for changes? The assignee will be cleared and the issue sent back to To Do."
                     class="btn-press rounded-lg border border-red-500/25 bg-red-500/10 px-3.5 py-2 text-xs font-590 text-red-300 transition-colors hover:bg-red-500/20"
                   >
                     Request changes
@@ -441,8 +442,8 @@
                     {issue.title}
                   </.app_link>
                   <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-quaternary">
-                    <span :if={issue.last_reviewer}>
-                      last reviewed by {issue.last_reviewer.name || issue.last_reviewer.id}
+                    <span :if={latest_reviewer_name(issue)}>
+                      last reviewed by {latest_reviewer_name(issue)}
                     </span>
                     <span :if={issue.assigned_role}>fix role: {issue.assigned_role}</span>
                     <span :if={issue.project}>{issue.project.name}</span>

@@ -82,6 +82,7 @@ defmodule Cympho.Issues.Issue do
     belongs_to :project_workspace, Cympho.Workspaces.ProjectWorkspace
     belongs_to :execution_workspace, Cympho.Workspaces.ExecutionWorkspace
     belongs_to :last_reviewer, Agent, foreign_key: :last_reviewer_id
+    belongs_to :last_human_reviewer, Cympho.Users.User, foreign_key: :last_human_reviewer_id
 
     # Ordered so a preload cannot hand the receipt audit its comments in
     # whatever order the planner produced.
@@ -165,6 +166,7 @@ defmodule Cympho.Issues.Issue do
     |> foreign_key_constraint(:project_workspace_id)
     |> foreign_key_constraint(:execution_workspace_id)
     |> foreign_key_constraint(:last_reviewer_id)
+    |> foreign_key_constraint(:last_human_reviewer_id)
     |> prepare_changes(&validate_association_scope/1)
   end
 

@@ -6,6 +6,8 @@ defmodule CymphoWeb.InboxLive.Index do
   alias Cympho.Inbox
   alias Cympho.IssueThreadInteractions
   alias Cympho.OwnerAttention
+  alias CymphoWeb.Live.ReviewChanges
+  alias Cympho.Issues.HumanReview
 
   # "all" is the explicit unified feed; missing status defaults to "action"
   # (Needs you = full OwnerAttention set, reviews included) so Simple first
@@ -23,6 +25,7 @@ defmodule CymphoWeb.InboxLive.Index do
     socket =
       socket
       |> assign(:page_title, "Inbox")
+      |> assign(:review_changes, nil)
       |> assign(:agents, agents)
       |> assign(:selected_agent_id, nil)
       |> assign(:selected_agent, nil)
@@ -226,7 +229,7 @@ defmodule CymphoWeb.InboxLive.Index do
         %{"issue_id" => issue_id, "wake_id" => wake_id},
         socket
       ) do
-    handle_review_action(socket, issue_id, wake_id, :done, "Issue approved and closed.")
+    handle_review_action(socket, issue_id, wake_id)
   end
 
   def handle_event(
@@ -234,13 +237,15 @@ defmodule CymphoWeb.InboxLive.Index do
         %{"issue_id" => issue_id, "wake_id" => wake_id},
         socket
       ) do
-    handle_review_action(
-      socket,
-      issue_id,
-      wake_id,
-      :todo,
-      "Sent back to engineering for changes."
-    )
+    ReviewChanges.open(socket, issue_id, wake_id)
+  end
+
+  def handle_event("cancel_review_changes", _params, socket) do
+    {:noreply, assign(socket, :review_changes, nil)}
+  end
+
+  def handle_event("submit_review_changes", params, socket) do
+    ReviewChanges.submit(socket, params, &load_inbox/1, "Sent back to engineering for changes.")
   end
 
   def handle_event("select_agent", %{"agent_id" => "all"}, socket) do
@@ -332,14 +337,16 @@ defmodule CymphoWeb.InboxLive.Index do
     end
   end
 
-  defp handle_review_action(socket, issue_id, wake_id, target_status, ok_message) do
-    with {:ok, issue} <- scoped_get_issue(socket, issue_id),
-         {:ok, wake} <- scoped_wake_if_present(wake_id, issue),
-         {:ok, _} <- transition_for_review(issue, target_status),
-         :ok <- consume_wake_if_present(wake) do
+  defp handle_review_action(socket, issue_id, wake_id) do
+    with %{issue: issue} when not is_nil(issue) <-
+           Enum.find(
+             socket.assigns.owner_attention_items,
+             &(&1.issue_id == issue_id and Map.get(&1, :kind) == :review_queue)
+           ),
+         {:ok, _} <- ReviewChanges.decide(socket, issue, :approve, wake_id: wake_id) do
       {:noreply,
        socket
-       |> put_flash(:info, ok_message)
+       |> put_flash(:info, "Issue approved and closed.")
        |> load_inbox()}
     else
       {:error, reason} ->
@@ -347,8 +354,11 @@ defmodule CymphoWeb.InboxLive.Index do
          put_flash(
            socket,
            :error,
-           "Could not complete review action: #{inspect(reason)}"
+           HumanReview.error_message(reason)
          )}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, HumanReview.error_message(:not_found))}
     end
   end
 
@@ -531,46 +541,6 @@ defmodule CymphoWeb.InboxLive.Index do
     case socket.assigns[:current_user] do
       %{id: id} -> to_string(id)
       _ -> nil
-    end
-  end
-
-  # `transition_issue_with_review_gates/3` runs the same quality gates an
-  # agent's approve_issue action hits, so a human approving from the inbox
-  # gets the same enforcement.
-  defp transition_for_review(issue, :done) do
-    Cympho.Issues.transition_issue_with_review_gates(issue, :done, nil)
-  end
-
-  defp transition_for_review(issue, :todo) do
-    Cympho.Issues.transition_issue(issue, :todo)
-  end
-
-  defp scoped_wake_if_present(nil, _issue), do: {:ok, nil}
-  defp scoped_wake_if_present("", _issue), do: {:ok, nil}
-
-  defp scoped_wake_if_present(wake_id, issue) do
-    case Cympho.Wakes.get_agent_wake(wake_id) do
-      {:ok, %{issue_id: issue_id} = wake} when issue_id == issue.id ->
-        {:ok, wake}
-
-      _ ->
-        {:error, :wake_not_found}
-    end
-  end
-
-  defp consume_wake_if_present(nil), do: :ok
-
-  defp consume_wake_if_present(wake) do
-    case Cympho.Wakes.consume_wake(wake) do
-      {:ok, _wake} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp scoped_get_issue(socket, issue_id) do
-    case socket.assigns[:current_company] do
-      %{id: company_id} -> Cympho.Issues.get_company_issue(company_id, issue_id)
-      _ -> Cympho.Issues.get_issue(issue_id)
     end
   end
 

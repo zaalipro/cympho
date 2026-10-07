@@ -263,6 +263,13 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
       |> element("button[phx-click='request_changes']", "Request changes")
       |> render_click()
 
+    assert html =~ "Reason for requesting changes"
+
+    html =
+      view
+      |> element("#review-changes-form")
+      |> render_submit(%{"review" => %{"reason" => "Fix the missing verification."}})
+
     assert html =~ "Review returned to To Do for changes."
     assert html =~ "Sent back for rework"
     assert html =~ "Needs reviewer changes"

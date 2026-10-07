@@ -1,5 +1,13 @@
 <.page size="wide" data-ui-complex-page data-density={@digest_density} class="ember-aurora">
   <div class="relative z-10">
+    <p
+      :if={@flash["error"]}
+      role="alert"
+      class="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+    >
+      {@flash["error"]}
+    </p>
+    <CymphoWeb.Live.ReviewChanges.reason_form review_changes={@review_changes} />
     <div class="mb-5 px-1 pt-2">
       <%!-- Row 1: identity (left) + agent scope & density (right) --%>
       <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
