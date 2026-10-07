@@ -20,6 +20,7 @@
         timeline={@timeline}
         gate_resolution={gate_resolution}
       />
+      <CymphoWeb.IssueLive.Show.ProgressPanel.run_progress progress={@run_progress} />
       <div
         :if={@flash["info"]}
         class="mx-4 mt-4 rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-sm text-brand lg:mx-6"

@@ -1058,6 +1058,16 @@ defmodule CymphoWeb.IssueLiveTest do
     end
 
     test "a run_status broadcast updates the view without crashing it", %{issue: issue} do
+      {:ok, agent} = create_agent(%{name: "Status agent", role: :engineer})
+
+      run =
+        Repo.insert!(%Run{
+          issue_id: issue.id,
+          company_id: issue.company_id,
+          agent_id: agent.id,
+          status: "completed"
+        })
+
       {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
       # Regression: broadcast_run_status delivers a
@@ -1066,7 +1076,8 @@ defmodule CymphoWeb.IssueLiveTest do
       # every run start/fail terminated the LiveView on prod.
       payload = %{
         event_type: :run_completed,
-        resource_id: Ecto.UUID.generate(),
+        company_id: issue.company_id,
+        resource_id: run.id,
         issue_id: issue.id,
         agent_id: Ecto.UUID.generate(),
         status: "completed",

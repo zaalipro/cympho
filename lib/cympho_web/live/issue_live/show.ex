@@ -19,6 +19,7 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.ReviewNudges
   alias Cympho.ToolCallTraces
   alias Cympho.WorkProducts
+  alias CymphoWeb.IssueLive.Show.RunProgress
 
   @timeline_filters ~w(signal comments runs artifacts all)
   @repo_delivery_roles Cympho.Agents.Agent.pr_delivery_roles() |> Enum.map(&Atom.to_string/1)
@@ -42,6 +43,7 @@ defmodule CymphoWeb.IssueLive.Show do
 
     case get_scoped_issue(socket, id) do
       {:ok, issue} ->
+        if connected?(socket), do: Process.send_after(self(), :refresh_run_progress, 5_000)
         # Auto-mark as read for the current user
         if current_user do
           IssueReadStates.ensure_read(current_user.id, issue.id)
@@ -82,6 +84,7 @@ defmodule CymphoWeb.IssueLive.Show do
            assignee_search: "",
            runs: runs,
            run_history: run_history,
+           run_progress: RunProgress.load(current_user.id, issue.company_id, issue.id),
            interactions: interactions,
            work_products: work_products,
            child_issues: child_issues,
@@ -129,6 +132,7 @@ defmodule CymphoWeb.IssueLive.Show do
         |> assign(:page_title, issue.title)
         |> assign(:issue, issue)
         |> assign(:route_issue_id, issue.id)
+        |> reconcile_run_progress()
         |> assign_child_rollup(issue.id)
         |> assign_swarm_events(issue)
 
@@ -1389,44 +1393,81 @@ defmodule CymphoWeb.IssueLive.Show do
     {:noreply, socket}
   end
 
-  def handle_info({:turn_ended_with_error, _session_id, reason}, socket) do
-    {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
+  def handle_info({:turn_ended_with_error, _session_id, _reason}, socket) do
+    {:noreply, put_flash(socket, :error, "Agent run failed")}
   end
 
-  def handle_info(%Phoenix.Socket.Broadcast{event: "run_status", payload: payload}, socket) do
+  def handle_info(
+        %Phoenix.Socket.Broadcast{event: "run_progress", payload: payload, topic: topic},
+        socket
+      ) do
+    if topic == "company:#{socket.assigns.current_company.id}:runs" and
+         scoped_run_event?(socket, payload) and CymphoWeb.Events.valid_progress_counters?(payload) do
+      socket = reconcile_run_progress(socket)
+      progress = RunProgress.accept(socket.assigns.run_progress, payload)
+      {:noreply, assign(socket, :run_progress, progress)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info(:refresh_run_progress, socket) do
+    Process.send_after(self(), :refresh_run_progress, 5_000)
+    {:noreply, reconcile_run_progress(socket)}
+  end
+
+  def handle_info(
+        %Phoenix.Socket.Broadcast{event: "run_status", payload: payload, topic: topic},
+        socket
+      )
+      when is_map(payload) and not is_struct(payload) do
     issue_id = socket.assigns.issue.id
 
     cond do
-      payload[:issue_id] == issue_id ->
-        {message, type} =
-          case payload[:status] do
-            "running" -> {"Run started", "info"}
-            "completed" -> {"Run completed successfully", "success"}
-            "failed" -> {"Run failed", "error"}
-            "cancelled" -> {"Run cancelled", "warning"}
-            _ -> {"Run status updated", "info"}
-          end
+      topic != "company:#{socket.assigns.current_company.id}:runs" ->
+        {:noreply, socket}
 
-        {runs, run_history} = load_issue_run_history(issue_id)
+      scoped_run_event?(socket, payload) and is_binary(payload[:resource_id]) ->
+        socket = reconcile_run_progress(socket)
+        progress = socket.assigns.run_progress
 
-        socket =
-          socket
-          |> assign(runs: runs, run_history: run_history)
-          |> push_event("toast", %{
-            message: message,
-            type: type,
-            key: "run_#{issue_id}_#{payload[:status]}"
-          })
+        if progress && progress.run_id == payload[:resource_id] do
+          {message, type} =
+            case progress.status do
+              "running" -> {"Run started", "info"}
+              "completed" -> {"Run completed successfully", "success"}
+              "failed" -> {"Run failed", "error"}
+              "cancelled" -> {"Run cancelled", "warning"}
+              _ -> {"Run status updated", "info"}
+            end
 
-        {:noreply, maybe_rebuild_timeline(socket)}
+          {runs, run_history} = load_issue_run_history(issue_id)
 
-      child_issue_id?(socket, payload[:issue_id]) ->
+          socket =
+            socket
+            |> assign(runs: runs, run_history: run_history)
+            |> push_event("toast", %{
+              message: message,
+              type: type,
+              key: "run_#{issue_id}_#{progress.status}"
+            })
+
+          {:noreply, maybe_rebuild_timeline(socket)}
+        else
+          {:noreply, socket}
+        end
+
+      payload[:company_id] == socket.assigns.current_company.id and
+          child_issue_id?(socket, payload[:issue_id]) ->
         {:noreply, assign_child_rollup(socket, issue_id)}
 
       true ->
         {:noreply, socket}
     end
   end
+
+  def handle_info(%Phoenix.Socket.Broadcast{event: event}, socket)
+      when event in ["run_status", "run_progress"], do: {:noreply, socket}
 
   def handle_info({:swarm_event_created, event}, socket) do
     if event.parent_issue_id == SwarmEvents.parent_issue_id(socket.assigns.issue) do
@@ -1449,10 +1490,41 @@ defmodule CymphoWeb.IssueLive.Show do
 
   # Defensive catch-all: an unrecognized PubSub/Broadcast message must never
   # crash the live issue view. Log it so shape mismatches stay visible.
-  def handle_info(msg, socket) do
+  def handle_info(_msg, socket) do
     require Logger
-    Logger.warning("Unhandled message in IssueLive.Show", message: inspect(msg))
+    Logger.warning("Unhandled message in IssueLive.Show", component: "issue_progress")
     {:noreply, socket}
+  end
+
+  defp scoped_run_event?(socket, payload) when is_map(payload) and not is_struct(payload) do
+    company_id = socket.assigns.current_company.id
+
+    is_binary(company_id) and payload[:company_id] == company_id and
+      payload[:issue_id] == socket.assigns.issue.id
+  end
+
+  defp scoped_run_event?(_socket, _payload), do: false
+
+  defp reconcile_run_progress(socket) do
+    previous = socket.assigns[:run_progress]
+
+    progress =
+      RunProgress.load(
+        socket.assigns.current_user.id,
+        socket.assigns.current_company.id,
+        socket.assigns.issue.id,
+        previous
+      )
+
+    socket = assign(socket, :run_progress, progress)
+
+    if progress &&
+         (!previous || progress.run_id != previous.run_id || progress.status != previous.status) do
+      {runs, run_history} = load_issue_run_history(socket.assigns.issue.id)
+      socket |> assign(runs: runs, run_history: run_history) |> maybe_rebuild_timeline()
+    else
+      socket
+    end
   end
 
   defp draft_owner_brief_repair(socket, opts \\ []) do

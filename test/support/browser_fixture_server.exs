@@ -1,5 +1,7 @@
 # Executed only by scripts/validation_browser.py, never by test compilation.
 # Passive seeded runs are UI fixtures, not real process or progress evidence.
+Code.require_file("browser_progress_fixture.exs", __DIR__)
+
 defmodule Cympho.BrowserFixtureServer do
   require Logger
   alias Cympho.{Agents, Authentication, Companies, Inbox, Issues, Projects, Repo, Workspaces}
@@ -121,7 +123,7 @@ defmodule Cympho.BrowserFixtureServer do
       File.write!(Path.join(root, "ready"), "127.0.0.1:4329 #{database} passive\n")
       IO.puts("VALIDATION_SERVER_READY database=#{database} dispatch=false port=4329")
 
-      wait_for_stop(root, System.monotonic_time(:millisecond) + 180_000)
+      wait_for_stop(root, System.monotonic_time(:millisecond) + 180_000, fixtures, nil)
     after
       Supervisor.terminate_child(supervisor, CymphoWeb.Endpoint)
       Supervisor.terminate_child(supervisor, Cympho.TaskSupervisor)
@@ -139,11 +141,25 @@ defmodule Cympho.BrowserFixtureServer do
 
   defp counts, do: Enum.map(@tables, &Repo.aggregate(&1, :count))
 
-  defp wait_for_stop(root, deadline) do
-    unless File.exists?(Path.join(root, "stop")) or
-             System.monotonic_time(:millisecond) >= deadline do
+  defp wait_for_stop(root, deadline, fixtures, progress) do
+    progress = Cympho.BrowserProgressFixture.receive_event(progress)
+
+    if File.exists?(Path.join(root, "stop")) or
+         System.monotonic_time(:millisecond) >= deadline do
+      Cympho.BrowserProgressFixture.stop(progress)
+    else
+      marker = Path.join(root, "start-progress")
+
+      progress =
+        if is_nil(progress) and File.exists?(marker) do
+          File.rename!(marker, Path.join(root, "progress-started"))
+          Cympho.BrowserProgressFixture.start(root, fixtures)
+        else
+          progress
+        end
+
       Process.sleep(200)
-      wait_for_stop(root, deadline)
+      wait_for_stop(root, deadline, fixtures, progress)
     end
   end
 

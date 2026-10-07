@@ -147,6 +147,7 @@ defmodule Cympho.RunProgressTest do
 
       assert_receive {:run_progress, payload}, 2_000
       assert payload.issue_id == issue.id
+      assert payload.company_id == issue.company_id
       assert payload.run_id == run_id
       assert payload.bytes == 2048
       assert payload.chunks == 7
@@ -167,6 +168,52 @@ defmodule Cympho.RunProgressTest do
       :ok = Phoenix.PubSub.subscribe(Cympho.PubSub, "company::runs")
       assert :ok = Events.broadcast_run_progress(unscoped, nil, %{bytes: 1, chunks: 1})
       refute_receive %Phoenix.Socket.Broadcast{event: "run_progress"}, 200
+    end
+
+    test "does not deliver malformed counters or a missing run identifier", %{issue: issue} do
+      :ok = Cympho.Orchestrator.subscribe(issue.id)
+
+      for {run_id, progress} <- [
+            {nil, %{bytes: 1, chunks: 1}},
+            {"", %{bytes: 1, chunks: 1}},
+            {Ecto.UUID.generate(), %{bytes: "1", chunks: 1}},
+            {Ecto.UUID.generate(), %{bytes: 1, chunks: -1}},
+            {Ecto.UUID.generate(), %{bytes: 1}},
+            {Ecto.UUID.generate(), %{bytes: 10_000_000_000_000_000_000, chunks: 1}}
+          ] do
+        assert :ok = Events.broadcast_run_progress(issue, run_id, progress)
+      end
+
+      refute_receive {:run_progress, _}, 200
+    end
+
+    test "delivers only allowlisted counters and scope", %{issue: issue} do
+      :ok = Cympho.Orchestrator.subscribe(issue.id)
+
+      Events.broadcast_run_progress(issue, Ecto.UUID.generate(), %{
+        bytes: 10,
+        chunks: 1,
+        stdout: "RAW_SENTINEL",
+        reasoning: "REASONING_SENTINEL",
+        prompt: "PROMPT_SENTINEL",
+        metadata: %{"secret" => "SECRET_SENTINEL"}
+      })
+
+      assert_receive {:run_progress, payload}
+
+      assert Map.keys(payload) |> Enum.sort() ==
+               Enum.sort([
+                 :event_type,
+                 :company_id,
+                 :issue_id,
+                 :run_id,
+                 :bytes,
+                 :chunks,
+                 :timestamp
+               ])
+
+      for sentinel <- ~w(RAW_SENTINEL REASONING_SENTINEL PROMPT_SENTINEL SECRET_SENTINEL),
+          do: refute(inspect(payload) =~ sentinel)
     end
   end
 

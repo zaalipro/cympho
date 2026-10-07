@@ -80,7 +80,7 @@ defmodule CymphoWeb.Events do
     case Repo.one(from i in Issue, where: i.id == ^issue_id, select: i.company_id) do
       company_id when is_binary(company_id) and company_id != "" ->
         topic = "company:#{company_id}:runs"
-        payload = build_run_payload(run, event_type)
+        payload = build_run_payload(run, event_type, company_id)
 
         result = Cympho.RateLimiting.dedup_broadcast(topic, "run_status", payload)
 
@@ -114,15 +114,19 @@ defmodule CymphoWeb.Events do
   def broadcast_run_progress(
         %Issue{company_id: company_id, id: issue_id},
         run_id,
-        %{} = progress
+        %{bytes: bytes, chunks: chunks}
       )
-      when is_binary(company_id) and company_id != "" and is_binary(issue_id) and issue_id != "" do
+      when is_binary(company_id) and company_id != "" and is_binary(issue_id) and issue_id != "" and
+             is_binary(run_id) and run_id != "" and
+             is_integer(bytes) and bytes >= 0 and bytes <= 9_007_199_254_740_991 and
+             is_integer(chunks) and chunks >= 0 and chunks <= 9_007_199_254_740_991 do
     payload = %{
       event_type: :run_progress,
+      company_id: company_id,
       issue_id: issue_id,
       run_id: run_id,
-      bytes: Map.get(progress, :bytes, 0),
-      chunks: Map.get(progress, :chunks, 0),
+      bytes: bytes,
+      chunks: chunks,
       timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
     }
 
@@ -137,6 +141,14 @@ defmodule CymphoWeb.Events do
 
   # Refuse a "company::runs" leak from an unscoped issue.
   def broadcast_run_progress(_issue, _run_id, _progress), do: :ok
+
+  @doc false
+  def valid_progress_counters?(%{bytes: bytes, chunks: chunks}) do
+    is_integer(bytes) and bytes >= 0 and bytes <= 9_007_199_254_740_991 and
+      is_integer(chunks) and chunks >= 0 and chunks <= 9_007_199_254_740_991
+  end
+
+  def valid_progress_counters?(_), do: false
 
   @doc """
   Broadcast an agent heartbeat event to WebSocket clients.
@@ -247,10 +259,12 @@ defmodule CymphoWeb.Events do
            issue_id: issue_id,
            agent_id: agent_id
          },
-         event_type
+         event_type,
+         company_id
        ) do
     %{
       event_type: event_type,
+      company_id: company_id,
       resource_id: run_id,
       issue_id: issue_id,
       agent_id: agent_id,
