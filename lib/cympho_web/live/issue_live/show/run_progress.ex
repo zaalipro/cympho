@@ -27,6 +27,7 @@ defmodule CymphoWeb.IssueLive.Show.RunProgress do
                 i.checkout_run_id,
                 r.status
               ),
+            desc_nulls_last: r.creation_ordinal,
             desc: r.inserted_at,
             desc_nulls_last: r.started_at,
             desc_nulls_last: r.completed_at,

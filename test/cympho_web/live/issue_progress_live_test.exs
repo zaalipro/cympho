@@ -1,9 +1,10 @@
 defmodule CymphoWeb.IssueProgressLiveTest do
   use CymphoWeb.LiveCase, async: true
 
-  alias Cympho.{Agents, Companies, Issues, Repo}
+  alias Cympho.{Agents, Companies, HeartbeatEngine, Issues, Repo}
   alias Cympho.HeartbeatEngine.Run
   alias CymphoWeb.Events
+  alias CymphoWeb.IssueLive.Show.RunProgress
 
   setup do
     {:ok, issue} =
@@ -133,26 +134,16 @@ defmodule CymphoWeb.IssueProgressLiveTest do
     assert progress_without_elapsed(view) == before
   end
 
-  test "checkout run wins an ambiguous same-second history order", %{
+  test "older running checkout wins until release then newest tied terminal attempt wins", %{
     issue: issue,
     agent: agent,
     run: run
   } do
     Repo.delete!(run)
 
-    Repo.insert!(%Run{
-      id: "ffffffff-ffff-4fff-afff-ffffffffffff",
-      company_id: issue.company_id,
-      issue_id: issue.id,
-      agent_id: agent.id,
-      status: "completed",
-      inserted_at: run.inserted_at,
-      started_at: run.started_at
-    })
-
-    current =
+    previous =
       Repo.insert!(%Run{
-        id: "00000000-0000-4000-a000-000000000001",
+        id: "ffffffff-ffff-4fff-afff-ffffffffffff",
         company_id: issue.company_id,
         issue_id: issue.id,
         agent_id: agent.id,
@@ -161,25 +152,142 @@ defmodule CymphoWeb.IssueProgressLiveTest do
         started_at: run.started_at
       })
 
-    Repo.update!(Ecto.Changeset.change(issue, checkout_run_id: current.id))
-    {:ok, view, _} = live(conn(), "/issues/#{issue.id}")
-    send_progress(view, issue, current, %{bytes: 44, chunks: 4})
-    assert progress(view) =~ "44 bytes"
-    previous = Repo.get!(Run, "ffffffff-ffff-4fff-afff-ffffffffffff")
-    Repo.update!(Ecto.Changeset.change(previous, status: "failed", completed_at: run.started_at))
+    current =
+      Repo.insert!(%Run{
+        id: "00000000-0000-4000-a000-000000000001",
+        company_id: issue.company_id,
+        issue_id: issue.id,
+        agent_id: agent.id,
+        status: "completed",
+        inserted_at: run.inserted_at,
+        started_at: run.started_at,
+        completed_at: run.started_at
+      })
 
     Repo.update!(
-      Ecto.Changeset.change(current,
-        status: "completed",
-        completed_at: DateTime.add(run.started_at, 2)
+      Ecto.Changeset.change(issue,
+        checkout_run_id: previous.id,
+        assignee_id: agent.id,
+        checked_out_at: run.started_at
       )
     )
 
-    Repo.update!(Ecto.Changeset.change(Repo.get!(Issues.Issue, issue.id), checkout_run_id: nil))
+    {:ok, view, _} = live(conn(), "/issues/#{issue.id}")
+    send_progress(view, issue, previous, %{bytes: 44, chunks: 4})
+    assert progress(view) =~ "44 bytes"
+    assert authoritative_progress(issue).run_id == previous.id
+    {:ok, _failed} = HeartbeatEngine.fail_run(previous, :stall_timeout)
+    Repo.update!(Ecto.Changeset.change(previous, status: "failed", completed_at: run.started_at))
+
+    assert is_nil(Repo.get!(Issues.Issue, issue.id).checkout_run_id)
     send(view.pid, :refresh_run_progress)
     assert progress(view) =~ "Completed"
+    assert authoritative_progress(issue).run_id == current.id
+    send_status(view, issue, previous, "failed")
+    send_progress(view, issue, previous, %{bytes: 999, chunks: 99})
+    assert progress(view) =~ "Completed"
+    refute progress(view) =~ "999 bytes"
     {:ok, reconnected, _} = live(conn(), "/issues/#{issue.id}")
     assert progress(reconnected) =~ "Completed"
+  end
+
+  for {attempt, retry_count} <- [{"retry", 1}, {"fresh session", 0}] do
+    test "direct context #{attempt} wins tied timestamps despite reversed UUID and retry order",
+         %{
+           issue: issue,
+           agent: agent,
+           run: run
+         } do
+      Repo.delete!(run)
+
+      previous =
+        Repo.insert!(%Run{
+          id: "ffffffff-ffff-4fff-afff-ffffffffffff",
+          company_id: issue.company_id,
+          issue_id: issue.id,
+          agent_id: agent.id,
+          status: "failed",
+          retry_count: 7,
+          inserted_at: run.inserted_at,
+          started_at: run.started_at,
+          completed_at: run.started_at
+        })
+
+      {:ok, current} =
+        HeartbeatEngine.create_run(%{
+          company_id: issue.company_id,
+          issue_id: issue.id,
+          agent_id: agent.id,
+          adapter: "process"
+        })
+
+      current =
+        Repo.update!(
+          Ecto.Changeset.change(current,
+            id: "00000000-0000-4000-a000-000000000001",
+            status: "completed",
+            retry_count: unquote(retry_count),
+            inserted_at: run.inserted_at,
+            started_at: run.started_at,
+            completed_at: run.started_at
+          )
+        )
+
+      assert previous.id > current.id
+      assert previous.inserted_at == current.inserted_at
+      assert previous.started_at == current.started_at
+      assert previous.completed_at == current.completed_at
+      assert is_nil(Repo.get!(Issues.Issue, issue.id).checkout_run_id)
+      assert authoritative_progress(issue).run_id == current.id
+      {:ok, view, _} = live(conn(), "/issues/#{issue.id}")
+      assert progress(view) =~ "Completed"
+      send(view.pid, :refresh_run_progress)
+      assert progress(view) =~ "Completed"
+      send_status(view, issue, previous, "running")
+      send_progress(view, issue, previous, %{bytes: 999, chunks: 99})
+      assert progress(view) =~ "Completed"
+      refute progress(view) =~ "999 bytes"
+      {:ok, remounted, _} = live(conn(), "/issues/#{issue.id}")
+      assert progress(remounted) =~ "Completed"
+    end
+  end
+
+  test "legacy history retains timestamp fallback without invented exact-tie chronology", %{
+    issue: issue,
+    agent: agent,
+    run: run
+  } do
+    assert is_integer(Map.get(run, :creation_ordinal))
+
+    previous =
+      Repo.update!(
+        Ecto.Changeset.change(run,
+          creation_ordinal: nil,
+          status: "failed",
+          completed_at: run.started_at
+        )
+      )
+
+    current = insert_run(issue, agent, DateTime.add(run.inserted_at, 2))
+
+    current =
+      Repo.update!(
+        Ecto.Changeset.change(current,
+          creation_ordinal: nil,
+          status: "completed",
+          started_at: run.started_at,
+          completed_at: run.started_at
+        )
+      )
+
+    assert authoritative_progress(issue).run_id == current.id
+    # Legacy fallback is deterministic, not recovered creation chronology.
+    expected_id = max(previous.id, current.id)
+    Repo.update!(Ecto.Changeset.change(current, inserted_at: previous.inserted_at))
+    assert authoritative_progress(issue).run_id == expected_id
+
+    newer = insert_run(issue, agent, DateTime.add(run.inserted_at, -2))
+    assert authoritative_progress(issue).run_id == newer.id
   end
 
   test "malformed run scope in persistence cannot supply progress", %{issue: issue, run: run} do
@@ -302,6 +410,9 @@ defmodule CymphoWeb.IssueProgressLiveTest do
       |> render()
       |> Floki.parse_document!()
       |> Floki.text()
+
+  defp authoritative_progress(issue),
+    do: RunProgress.load(Plug.Conn.get_session(conn(), :user_id), issue.company_id, issue.id)
 
   # Rejected telemetry cannot change status, detail or counters; wall time still advances.
   defp progress_without_elapsed(view),

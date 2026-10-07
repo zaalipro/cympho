@@ -5,6 +5,55 @@ defmodule Cympho.HeartbeatEngineTest do
   alias Cympho.HeartbeatEngine.Run
 
   describe "create_run/1" do
+    test "database assigns durable creation order across context schema and bulk inserts" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      attrs = %{agent_id: agent_id, issue_id: insert_issue(), adapter: "process"}
+
+      assert {:ok, first} =
+               HeartbeatEngine.create_run(Map.put(attrs, :creation_ordinal, 0))
+
+      first_ordinal = Map.get(first, :creation_ordinal)
+      assert is_integer(first_ordinal) and first_ordinal > 0
+      assert Repo.reload!(first).creation_ordinal == first_ordinal
+
+      second = Repo.insert!(Run.create_changeset(%Run{}, attrs))
+      assert second.creation_ordinal > first_ordinal
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      assert {1, [third]} =
+               Repo.insert_all(
+                 Run,
+                 [Map.merge(attrs, %{inserted_at: now, updated_at: now})],
+                 returning: true
+               )
+
+      assert third.creation_ordinal > second.creation_ordinal
+    end
+
+    test "caller attributes cannot replace creation order through lifecycle changesets" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      attrs = %{agent_id: agent_id, issue_id: insert_issue(), adapter: "process"}
+      run = Repo.insert!(Run.create_changeset(%Run{}, attrs))
+      ordinal = Map.get(run, :creation_ordinal)
+      assert is_integer(ordinal)
+
+      forged = %{creation_ordinal: 0, workspace_path: "/tmp"}
+
+      for changeset <- [
+            Run.create_changeset(run, forged),
+            Run.start_changeset(run, forged),
+            Run.complete_changeset(run, forged),
+            Run.fail_changeset(run, forged)
+          ] do
+        refute Map.has_key?(changeset.changes, :creation_ordinal)
+        assert Repo.update!(changeset).creation_ordinal == ordinal
+        assert Repo.reload!(run).creation_ordinal == ordinal
+      end
+    end
+
     test "creates a pending run" do
       agent_id = Ecto.UUID.generate()
       issue_id = insert_issue()

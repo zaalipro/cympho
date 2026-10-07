@@ -206,6 +206,13 @@ the running presentation. After 60 seconds without fresh activity it shows
 and a five-second refresh reconcile persisted status; transient counters are
 not a durable transcript and may reset on reconnect.
 
+Apply migration `20261007000001` before running this version (`mix ecto.migrate`
+in the intended environment). New heartbeat runs receive a database-generated
+creation ordinal. An active running checkout takes priority; after release,
+progress selects the newest ordinal, even when timestamps tie. Existing rows
+remain unsequenced and use the timestamp/UUID fallback. Historical exact-tie
+creation order cannot be reconstructed by this migration.
+
 With multiple company memberships, the sidebar exposes **Company overview**
 (`/overview`) in both Simple and Advanced modes. It is optional: single- and
 multi-company users still land on the existing company dashboard, and users

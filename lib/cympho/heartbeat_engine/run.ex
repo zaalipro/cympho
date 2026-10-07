@@ -37,6 +37,7 @@ defmodule Cympho.HeartbeatEngine.Run do
 
     field :error_reason, :string
     field :retry_count, :integer, default: 0
+    field :creation_ordinal, :integer, read_after_writes: true
 
     timestamps(type: :utc_datetime)
   end
