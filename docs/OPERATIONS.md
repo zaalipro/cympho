@@ -20,6 +20,62 @@ Development enables autonomous dispatch only when
 `CYMPHO_DISPATCH_ONLY_ISSUE_ID` for a one-issue smoke before opening the full
 queue.
 
+## Human review and safe progress
+
+Use **Reviews** (`/reviews`, Advanced navigation) or the existing issue-review
+actions in **Inbox** (`/inbox`). **Request changes** opens a reason form.
+Whitespace-only reasons show an error; **Cancel** commits nothing. A valid
+request atomically returns the issue to `todo` rework, clears its assignment
+for the established role-routing workflow, writes the complete user-attributed
+reason into the conversation, and consumes applicable review wakes. Stale,
+duplicate, unauthorized, or failed persistence operations do not leave a
+half-written decision/comment. Notifications publish after commit; this is
+not a durable notification-delivery guarantee.
+
+**Approve** records the authenticated human and closes only a review-ready
+issue. Delivery evidence, unresolved linked blockers, active execution-policy
+gates, and company write permissions still apply. Human decisions use the
+dedicated `last_human_reviewer_id` user reference, not the agent
+`last_reviewer_id`. Existing agent review actions retain their own identity
+and routing. The newest required human reason, including multiline text and
+attribution, is protected in the next budgeted prompt even after a busy thread.
+
+The issue run-progress panel uses persisted current-run ownership and
+allowlisted activity events from the authorized company/issue/run. It displays
+status, elapsed seconds, and supported nonnegative byte/chunk counters, not
+stdout/stderr, prompts, hidden reasoning, or arbitrary event metadata. These
+counters indicate output activity, not useful work or task completion.
+Queued/pending runs are not executing. Completed, failed, cancelled, and
+timed-out states stop the active presentation.
+
+After 60 seconds without fresh activity, **Activity unavailable / Run may
+still be running** distinguishes missing telemetry from a failed run.
+Mount/reconnect and a five-second authoritative refresh reconcile persisted
+state. Transient counters are not persisted and reset on a fresh connection;
+late or malformed events cannot resurrect a terminal run. This panel is not
+a provider liveness guarantee or a transcript.
+
+## Optional company overview
+
+With multiple memberships, **Company overview** (`/overview`) is visible in
+Simple and Advanced sidebar navigation. It is read-only and optional; the
+existing company dashboard remains the landing page, including for
+single-company users. Users without a company retain onboarding.
+
+The query filters current memberships before summarizing each company:
+heartbeat runs with status exactly `running`, issues in review, blocked
+issues, and the existing Costs budget/spend posture. Queued/pending runs are
+excluded from running counts. Comparable company limits may show remaining
+balance; scoped-only controls and unconfigured budgets show no company-wide
+balance. Unpriced usage is labeled because tracked spend may be incomplete.
+The overview never adds unrelated limits or cross-company balances.
+
+Use **Refresh** or reconnect to reload counts and memberships, including
+revocations. It is a snapshot without cross-company live subscriptions.
+Dashboard, Tasks, Reviews, Projects, and Costs links enter the existing
+authenticated company-switch path, which rechecks target membership. The
+overview grants no new mutation permission.
+
 ## Durable stranded-work recovery and escalation
 
 The Dispatcher and Heartbeat Watchdog persist recovery for two source types:
@@ -242,6 +298,14 @@ co-tenant activity, so instance operators should use `mix cympho.doctor`,
 bounded admission telemetry, and the separately authenticated `/beam` surface
 for node-level diagnosis.
 
+Dispatcher capacity snapshots are selection hints, not admission. A known full
+local-process quota defers local work without creating speculative cancelled
+runs, while selection can continue to eligible gateways when total capacity
+remains. Atomic `RuntimeAdmission` still checks capacity at the actual start,
+including concurrent changes. Existing pause/stop/low-power controls and
+eligibility/budget gates remain in the dispatch path. This does not promise
+queue latency or cluster-wide capacity.
+
 ### Prompt input budget and protected context
 
 Prompt input budgeting establishes an explicit size ceiling for runtime prompts, separate from output token and output byte limits (`CYMPHO_AGENT_RUNNER_MAX_OUTPUT_BYTES` or `max_output_bytes`):
@@ -249,17 +313,32 @@ Prompt input budgeting establishes an explicit size ceiling for runtime prompts,
 - **Accounting unit**: UTF-8 bytes (`:bytes`). Byte size accounts accurately for multibyte characters and template text without relying on provider-specific tokenizer assumptions.
 - **Default budget**: 100,000 UTF-8 bytes. Ordinary representative prompts remain fully valid and untrimmed at this default.
 - **Configuration & Precedence**:
-  1. Per-run options: `opts[:input_budget_bytes]` or `opts[:max_input_bytes]`
-  2. Adapter/runtime configuration: `config["input_budget_bytes"]` or `config["max_input_bytes"]`
+  1. Per-run options: `input_budget_bytes`, `max_input_bytes`, or `prompt_input_budget_bytes` (in that order)
+  2. Effective adapter/runtime configuration: the same keys (atom or string)
   3. Application environment: `config :cympho, :prompt_input_budget_bytes, 100_000`
-  4. Host environment variable: `CYMPHO_PROMPT_INPUT_BUDGET_BYTES`
+  4. Resolver fallback: `CYMPHO_PROMPT_INPUT_BUDGET_BYTES` only when the application setting is absent
+
+  Normal startup reads `CYMPHO_PROMPT_INPUT_BUDGET_BYTES` in `config/runtime.exs`
+  into the application setting, defaulting to 100,000. Thus the host variable
+  works without removing the application default; per-run/config overrides
+  still win. For example: `CYMPHO_PROMPT_INPUT_BUDGET_BYTES=120000 mix phx.server`,
+  or adapter/runtime JSON `{"input_budget_bytes": 120000}`.
 - **Output limit independence**: Modifying `max_output_bytes` or output token limits does not alter the prompt input budget, and vice versa.
-- **Safe fallback & Validation**: Invalid or malformed budget values (zero, negative, or non-numeric strings) log a warning and fall back to the safe default (100,000 bytes) rather than allowing unbounded prompt growth. Direct configuration validation yields an actionable error.
+- **Validation**: A malformed host variable (zero, negative, or non-integer) aborts configuration loading with `CYMPHO_PROMPT_INPUT_BUDGET_BYTES must be a positive integer`. The runtime resolver instead warns and falls back to 100,000 for invalid per-run/config/application values; `AgentPromptBudget.validate_budget/1` returns `invalid_input_budget`. Never put secrets into a budget value.
 - **Protected vs. Optional Context**:
   - **Protected (never trimmed)**: The current task (issue identifier, title, description, role, assignee, work mode), mandatory agent instructions (playbook mandate, operating loop, turn contract, anti-patterns, completion contract), action contracts (`cympho-actions` response format, allowed/forbidden actions), and the latest required human review feedback with attribution and full multiline content.
-  - **Optional (trimmed in stable order)**: Trimming proceeds deterministically in this documented order: attachments, team status, company operating brief, decomposition depth, manager coordination packet, budget tracking, owner revision notes, owner brief readiness, external intake, digest quality checklist, skills, history decisions, history siblings, history children, history comments, older review feedback (leaving newest intact), issue context (parent/goal/lineage), triggering comment, and wake context.
-- **Omission notices & Secret safety**: When optional context is omitted, a concise omission notice identifying omitted categories and item counts (e.g. `- attachments: 1 item(s) omitted`) is injected into the delivered prompt and recorded in run telemetry. Raw omitted text is never logged, stored, or leaked into notices or diagnostics. An untrimmed prompt does not report omissions.
-- **Protected content overflow**: If protected content alone exceeds the configured input budget, execution halts before adapter or model invocation (adapter invocation count: 0). The orchestrator releases the runtime admission claim, cancels workspaces, fails the engine run, and releases the issue checkout lock back to `:todo` with an actionable failure comment.
+  - **Optional (trimmed in stable order)**: Whole optional sections are removed, not cut mid-section, in this order: attachments, team status, company operating brief, decomposition depth, manager coordination packet, budget tracking, owner revision notes, owner brief readiness, external intake, digest quality checklist, skills, history decisions, history siblings, history children, history comments, older review feedback (leaving newest intact), issue context (parent/goal/lineage), triggering comment, and wake context. Existing optional-history selection can bound/truncate items before this stage; it does not truncate the latest required reason.
+- **Delivered size**: Accounting includes assembled template/separator text, the omission notice itself, and known mandatory adapter additions, including the OpenAI Chat system message. Codex sandbox workspace projection happens before counting. Required sections and structured action contracts remain intact.
+- **Omission notices & Secret safety**: When context is removed, the prompt gets a `## Context omissions` notice with category/item counts (e.g. `- attachments: 1 item(s) omitted`). Run metadata stores the safe summary at `prompt_context.omissions` and `prompt_delivery.omissions`: `omitted`, `categories`, `counts`, `total_omitted_sections`. Inspect those fields on the authorized run rather than copying prompt bodies into diagnostics. The omission records contain no removed raw text; original issue/comment records are not deleted. An untrimmed prompt reports `omitted: false`. There is no dedicated omission badge in the progress panel.
+- **Protected content overflow**: When protected content plus required notice/adapter additions cannot fit, managed execution fails before adapter dispatch with `prompt_input_budget_exceeded` and required/budget/excess byte counts. The issue receives an actionable failure comment and acquired admission/session/checkout resources are released. Shorten the task or mandatory instructions, or deliberately raise the input budget after checking the provider's limits; changing output limits is not a remedy.
+
+UTF-8 bytes are not provider tokens. Existing `estimated_tokens` telemetry is a
+rough character-based estimate, not the enforcing unit. The budget covers
+known Cympho-constructed input, not arbitrary provider/CLI-added instructions,
+resumed session history, tool results, or subsequent turns. It is not a hard
+provider context-window or spend cap. CLI cost thresholds and reported usage
+also depend on the provider; a stopping threshold is not a per-request billing
+guarantee. Retaining the latest reason does not promise unlimited older history.
 
 ### Isolated runtime-preview origin
 
@@ -419,8 +498,9 @@ bin/cymphoctl service logs --lines 100
 bin/cymphoctl service logs --lines 100 --follow
 ```
 
-The CLI requires Bash, curl, and Python 3. Service status and logs additionally
-require systemd and journal access. Readiness connects only to the configured
+The CLI uses Bash; readiness/status require curl and Python 3. Status additionally
+requires systemctl, and explicit logs require journalctl and journal access.
+Readiness connects only to the configured
 loopback port, does not follow redirects or use proxy configuration, bounds
 connect time, total time, and response size, requires `application/json`, and
 validates the exact schema before emitting allowlisted JSON. With
@@ -433,13 +513,104 @@ contract; `service logs` accepts only a capped positive line count and passes
 fixed arguments directly to `journalctl` without a pager or shell evaluation.
 JSON documents go to stdout and operator diagnostics go to stderr.
 
+**Explicit logs are not redacted.** `service logs` prints raw journal messages
+(100 initial lines by default, at most 10,000). `--follow` continues until
+stopped, so it is not a total-output bound. Keep this output private and review
+it for secrets before sharing. Prefer status/readiness for routine evidence.
+
 `deploy.sh` builds from an exact clean Git archive, embeds its revision into the
 release and identity manifest, keeps release and validation files root-owned,
-and gates cutover on exact-revision readiness. A rollback re-probes the retained
-release revision, but it does **not** reverse database migrations. That probe
+and activates the candidate before local/public exact-revision readiness gates
+acceptance. Handled rollback of a previously active service re-probes the
+retained revision; EXIT snapshot recovery is not itself that readiness probe.
+Rollback does **not** reverse database migrations. A successful rollback probe
 proves only that the old binary booted against the current schema. Use
 expand/contract migrations when a release must remain rollback-compatible;
 restore a verified database backup when a migration is not backward compatible.
+
+### Deployment lock lifecycle and diagnostics
+
+`deploy.sh` is the existing fixed-layout SSH deployment workflow, not an
+installer upgrade command. `install.sh` is first-bootstrap-only once its managed
+systemd unit has been published, even if a later bootstrap readiness/proxy check
+fails. Do not rerun the installer as an updater.
+
+Deployment admission holds an exclusive remote session lock while a private
+FIFO/SSH stdin channel remains open. Initial script delivery does not close that
+channel: the holder acknowledges admission and waits on continued input.
+Closing/loss of controller input releases that holder instead of deliberately
+leaving it detached. A contender cannot publish a new epoch while another live
+deployment owns admission.
+
+Protected mutations also acquire the permanent operation-lock inode and verify
+the current epoch after acquisition; a stale epoch fails with exit 76 before
+the payload executes. The normal session-lock conflict exits 75. Do not delete
+lock files, change their epoch, or manually kill a suspected orphan holder to
+force progress. Any production orphan cleanup needs separately scoped
+authorization and confirmation of ownership.
+
+On normal completion or handled HUP/INT/TERM, the caller reaps its owned
+operation, settles the remote operation lock while retaining admission, and
+then performs eligible snapshot recovery before closing/reaping the holder.
+Settlement failure prevents unsafe snapshot restoration, preserves remote
+recovery evidence, and makes an otherwise-successful exit fail. Snapshot
+restoration also checks publication/ownership and refuses externally changed
+environment/unit state. Once public exact-revision readiness commits the
+release, best-effort snapshot deletion debt does not roll back the healthy
+release. These snapshots are not a whole-host transaction or database rollback.
+
+Implementation waits are finite at specific boundaries: normal admission is
+nominally 65 seconds of caller polling, recovery admission 85 seconds; operation
+lock acquisition is 60 seconds and EXIT settlement lock acquisition is 10
+seconds. SSH uses a 20-second connect timeout and 15-second keepalives with
+three missed replies. Owned operation reaping uses TERM then KILL with short
+poll windows. These do not add up to an end-to-end deployment/cleanup deadline:
+SSH reachability, kernel waits, and remote execution can still require operator
+diagnosis. Linux fixtures use bounded private watchdogs, not a production
+release-latency SLA. A killed/unreachable controller is not proof that all
+remote protected work has already settled.
+
+Automatic deployment success/failure service diagnostics call
+`cymphoctl service status` with the trusted expected revision. The allowlist
+contains systemd `LoadState`, `ActiveState`, `UnitFileState`, `MainPID`, and
+validated health status/service/release version/revision plus
+application/database/migration readiness. Missing/unavailable diagnostics do
+not fall back to `systemctl status`, journal bodies, environment dumps, or
+command-line output, and do not erase the deployment's failure status.
+For sealed manifests unreadable by the operator, pass the trusted revision:
+
+```bash
+bin/cymphoctl service status --json --expect-revision <git-sha>
+```
+
+This is a selected service-diagnostic boundary, not a redaction guarantee for
+the entire deployment transcript: build/migration output and explicit
+`service logs` still need private handling.
+
+Local shell regressions (no production deployment):
+
+```bash
+bash -n deploy.sh install.sh bin/cymphoctl
+bash test/shell/cymphoctl_static_test.sh
+bash test/shell/deploy_env_transaction_test.sh
+bash test/shell/deploy_unit_rollback_test.sh
+bash test/shell/deploy_safe_diagnostics_test.sh
+CYMPHO_RUN_LINUX_FIXTURE=0 bash test/shell/deploy_lock_fencing_test.sh
+```
+
+On macOS, use a private current-user/group-owned `TMPDIR` for shell fixtures
+to avoid inherited `/tmp` group differences. The mission supplies its private
+root in `services.yaml`. Real Linux flock acceptance is a separate explicitly
+authorized private-host fixture (`CYMPHO_RUN_LINUX_FIXTURE=1`), not an ordinary
+local test or permission to touch production locks/services. Focused tests and
+retained single-provider integration evidence do not establish universal
+provider cleanup, production-load reliability, or comparative performance.
+
+Known local validation limitation: on macOS, the diagnostic fixture's static
+`echo ... | grep -q` checks under `pipefail` can report failure when the producer
+receives SIGPIPE after grep finds its match. A failed static check does not run
+the subsequent sentinel checks. Preserve the failed result and investigate the
+fixture separately; finding the helper in source is not a behavioral test pass.
 
 This foundation does not provide managed install, onboard, update, uninstall,
 database-backup, or restore commands. Those remain explicit L5 roadmap work;

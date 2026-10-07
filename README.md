@@ -82,6 +82,9 @@ Cympho now has the pieces needed to feel like an operating system for agents, no
 - **Instruction Studio**: inspect agent instructions before they run, detect weak prompts, tune role playbooks, and preview contract coverage for CEO, CTO, Product, Design, and Engineering roles.
 - **Issue digest and memory**: issue pages now synthesize comments, runs, work products, child issues, failures, and PR state into an owner-readable brief.
 - **Review gates and nudges**: Cympho detects missing delivery notes, work products, verification, PR references, CTO review, and owner updates, then queues targeted follow-ups for the right agent.
+- **Human review feedback**: Reviews and Inbox require a reason for change requests, record the authenticated human separately from agent reviewers, and return the issue to rework with its latest feedback protected in the next prompt.
+- **Safe run progress**: issue pages show current-run status, elapsed time, and supported byte/chunk counters, not raw output or hidden reasoning. Reconnect reloads persisted run state.
+- **Optional company overview**: multi-company users can open a read-only, membership-filtered snapshot of running executions, reviews, blockers, and budget posture without changing their usual home page.
 - **PR quality contract**: agents are guided toward issue-aware branch names, clear PR titles, task-list descriptions, review evidence, and owner-facing status.
 - **Adapter hardening**: Claude Code wrappers, Codex, Cursor, OpenAI-compatible chat endpoints, OpenClaw, HTTP, Process, and Agrenting adapters can be configured per agent with safer runtime env handling.
 - **CLI harness presets**: Process runtimes can be configured for Codex CLI, Claude-compatible CLIs, Cursor CLI, OpenClaw, Antigravity (`agy`), Kimi Code, Cline, Gemini, Aider, OpenCode, or custom commands.
@@ -185,6 +188,35 @@ Cympho summarizes:
 
 When something is missing, Cympho can queue a targeted review nudge for the best agent instead of creating noise for everyone.
 
+### Human review, run progress, and company overview
+
+Open **Reviews** (`/reviews`, available in Advanced navigation) or an issue-review
+item in **Inbox** (`/inbox`). **Request changes** opens a reason form. Blank or
+whitespace-only reasons do not save a decision; **Cancel** leaves the review
+unchanged. A valid reason and the rework transition commit together, with a
+user-attributed conversation entry. Rework returns to `todo` and is routed to the
+appropriate role. **Approve** closes a review-ready issue only when existing
+evidence, active-blocker, and execution-policy gates allow it. Company write
+permission is required. Human and agent reviewer identities remain separate.
+
+The issue's run-progress panel shows the authoritative current run and supported
+output-activity counters. Completed, failed, cancelled, and timed-out runs stop
+the running presentation. After 60 seconds without fresh activity it shows
+**Activity unavailable**, not a claim that execution failed. Mount, reconnect,
+and a five-second refresh reconcile persisted status; transient counters are
+not a durable transcript and may reset on reconnect.
+
+With multiple company memberships, the sidebar exposes **Company overview**
+(`/overview`) in both Simple and Advanced modes. It is optional: single- and
+multi-company users still land on the existing company dashboard, and users
+without a company retain onboarding. Only authorized companies appear.
+**Refresh** or reconnect reloads counts and membership access; this is a
+snapshot, not a cross-company live feed. Running executions exclude queued and
+pending runs. Tasks, Reviews, Projects, and Costs links use the existing company
+switching workflow. Budget labels distinguish comparable company limits,
+scoped-only controls, and no configuration; unpriced usage can make tracked
+spend incomplete. No unrelated limits or company balances are summed.
+
 ## Swarm Mode And Proxies
 
 Swarm mode is designed for work where one agent's answer would be too narrow or too expensive to trust. The owner still writes one issue. An admin can then toggle swarm mode, choose the number of temporary agents, and add the harness/model/reasoning-effort combinations they are willing to pay for. Cympho handles the operating protocol:
@@ -227,6 +259,18 @@ Cympho supports multiple execution backends:
 - **Agrenting**: rent marketplace agents and attach them to Cympho as remote operators.
 
 Each agent can carry its own adapter, model/runtime configuration, concurrency limit, budget, instructions, and environment. Claude-compatible wrappers can source provider variables from `$HOME/.cld` in development, while production should use managed environment variables or the app secret store. Runtime profiles let admins switch between expensive local coding agents, cheaper OpenAI-compatible endpoints, and CLI harnesses without rewriting role instructions.
+
+Prompt input defaults to **100,000 UTF-8 bytes**, independently of output-token
+and output-byte limits. Set `CYMPHO_PROMPT_INPUT_BUDGET_BYTES` for the host or
+`input_budget_bytes` in adapter/runtime configuration. Optional sections are
+removed in a fixed order; the model receives category/count omission notices
+and run metadata records those counts without copying removed text. Current
+task instructions, action contracts, and the latest required human review
+reason with attribution remain protected. If they cannot fit, the run fails
+before adapter dispatch rather than truncating them. This is not a provider
+tokenizer, context-window, or spend guarantee. See the
+[operator guide](docs/OPERATIONS.md#prompt-input-budget-and-protected-context)
+for precedence, trimming order, and failure diagnosis.
 
 ## Rent Remote Agents From Agrenting
 
@@ -303,6 +347,8 @@ Prerequisites are pinned in `.tool-versions`:
 
 ```bash
 mix setup
+mix assets.setup
+mix assets.build
 PORT=4329 mix phx.server
 ```
 
@@ -461,10 +507,11 @@ The web layer lives under `lib/cympho_web/` and uses Phoenix LiveView, controlle
 
 ```bash
 mix setup                         # Install deps, create DB, migrate, seed
-mix ecto.reset                    # Drop, recreate, migrate, seed
+mix ecto.reset                    # Destructive: drop/recreate dev DB, not validation setup
 mix test                          # Run the test suite
 mix test test/path/to_test.exs    # Run one test file
 mix format                        # Format Elixir code
+mix assets.setup                  # Install pinned Tailwind/esbuild binaries
 mix assets.build                  # Build dev assets
 mix assets.deploy                 # Build production assets
 PORT=4329 mix phx.server          # Start dev server on port 4329
@@ -472,14 +519,44 @@ PORT=4329 mix phx.server          # Start dev server on port 4329
 
 ## Programmatic Validation Gates
 
-The codebase enforces strict compilation, formatting, test, and static analysis gates:
+Use these local checks. Credo and Dialyzer are informational, not enforced CI
+gates. `mix test` creates and migrates the selected test database automatically;
+it does not seed or reset it. Defaults are `paperclip` / `paperclip` on
+`localhost:5432`, database `cympho_test` (with `MIX_TEST_PARTITION` appended unless
+`TEST_DB_NAME` is explicit). `TEST_DB_HOST`, `TEST_DB_NAME`, `TEST_DB_USER`, and
+`TEST_DB_PASSWORD` override test connection settings.
 
 ```bash
 mix format --check-formatted      # Verify Elixir source code formatting
-mix compile --warnings-as-errors  # Compile with warnings treated as fatal errors
+MIX_ENV=test mix compile --warnings-as-errors
 mix test                          # Run full test suite (auto-migrates test DB)
 mix credo                         # Run Credo static code analysis (informational check)
+bash -n deploy.sh install.sh bin/cymphoctl
 ```
+
+For focused review/runtime/visibility regressions, use an authorized isolated
+test database on loopback. Do not reset shared development or test data:
+
+```bash
+env -u MIX_TEST_PARTITION ERL_FLAGS='+S 2:2 +SDcpu 1 +SDio 1' \
+  TEST_DB_HOST=127.0.0.1 TEST_DB_NAME=cympho_test_local_validation MIX_ENV=test \
+  mix test --max-cases 1 \
+  test/cympho/agent_prompt_budget_test.exs \
+  test/cympho/human_review_test.exs \
+  test/cympho_web/live/human_review_live_test.exs \
+  test/cympho_web/live/issue_progress_live_test.exs \
+  test/cympho/multi_company_overview_test.exs \
+  test/cympho_web/live/multi_company_overview_live_test.exs \
+  test/cympho_web/live/review_rework_process_test.exs \
+  test/cympho_web/live/overview_issue_isolation_test.exs
+```
+
+Replace the database name with your authorized target. The reliability mission
+uses `cympho_test_review_visibility_9183a83d` for review/visibility checks and
+its private `TMPDIR` from `services.yaml`; its full gate is sequential with
+`--max-cases 1`. Focused passes do not substitute for the final full suite and
+browser acceptance. Shell validation and deployment limits are in the
+[operator guide](docs/OPERATIONS.md#deployment-lock-lifecycle-and-diagnostics).
 
 Health endpoint check against a running instance:
 
@@ -568,6 +645,16 @@ loopback for its local Caddy instance. Keep the Bandit listener private.
 trusted edge enforces HTTPS before requests can reach Cympho.
 
 Background execution should be enabled deliberately in production, with adapter credentials, budgets, governance policies, and project repository settings configured before agents are allowed to run.
+
+`deploy.sh` retains exclusive admission through live protected work and settles
+owned remote operations before rollback or holder release on handled shutdown.
+Epoch fencing rejects stale mutations. Its automatic service diagnostics use
+allowlisted state/readiness fields, never a raw status/journal fallback. Explicit
+`cymphoctl service logs` is different: journal messages may contain secrets.
+Rollback does not reverse migrations, and cleanup/SSH fixture deadlines are not
+a production latency guarantee. Deploy only after validation and authorization;
+never remove a suspected orphan lock or its epoch to force progress. See
+[deployment lifecycle guidance](docs/OPERATIONS.md#deployment-lock-lifecycle-and-diagnostics).
 
 ## Documentation
 

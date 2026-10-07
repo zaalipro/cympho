@@ -21,6 +21,7 @@ setup is not required for the normal build.
 git clone https://github.com/zaalipro/cympho.git
 cd cympho
 mix setup
+mix assets.setup
 mix assets.build
 mix cympho.doctor
 mix phx.server
@@ -37,6 +38,28 @@ http://localhost:4329/dev/login
 
 The seeded company and issues are safe to inspect. Development starts with
 automatic orchestration disabled.
+
+`mix setup` installs dependencies and creates, migrates, and seeds the development
+database; it does not install the asset binaries. Use `mix assets.setup` once
+before the first asset build. Do not use `mix ecto.reset` on a database whose
+contents you need to preserve.
+
+## Review and navigation
+
+Review an issue in **Reviews** (Advanced navigation, `/reviews`) or **Inbox**
+(`/inbox`). Requesting changes requires a reason; cancelling or submitting only
+whitespace saves nothing. A valid decision records your identity and reason in
+the conversation and returns the issue to rework. Approval still requires the
+existing delivery evidence and resolved blockers.
+
+Issue pages show safe current-run progress and elapsed time, not a raw output
+stream. **Activity unavailable** means no recent activity, not necessarily a
+failed run. Refresh/reconnect reloads persisted state.
+
+If you belong to multiple companies, **Company overview** appears in the
+sidebar. It is an optional read-only snapshot with company/workflow links;
+**Refresh** updates counts and access. Your normal dashboard and
+Tasks/Projects flow do not change.
 
 ## Run one controlled autonomy smoke
 
@@ -75,8 +98,20 @@ file. Never paste them into an issue, comment, screenshot, URL, or commit.
 mix cympho.doctor
 mix compile >/dev/null && mix cympho.doctor --json > cympho-doctor.json
 mix test
+MIX_ENV=test mix compile --warnings-as-errors
+mix format --check-formatted
+bash -n deploy.sh install.sh bin/cymphoctl
 mix cympho.compare
 ```
+
+`mix test` creates/migrates the test database without seeding or resetting it.
+It defaults to `paperclip` / `paperclip` at `localhost:5432`, database
+`cympho_test`. Use `TEST_DB_HOST`/`TEST_DB_NAME` for an authorized isolated target
+and clear `MIX_TEST_PARTITION` when an inherited partition is not intended.
+See the [README validation examples](../README.md#programmatic-validation-gates)
+for conservative BEAM settings and focused review/progress/overview tests.
+Credo and Dialyzer remain informational. `mix cympho.compare` is a repository
+regression audit, not a matched competitor benchmark.
 
 The doctor is non-destructive: it does not change application, database, or
 configuration state and does not start the application supervisor, agents, or
@@ -114,3 +149,8 @@ the [operator guide](OPERATIONS.md). For trace export, see
   orchestrator deliberately and inspect the issue readiness panel.
 - **Assets are missing:** run `mix assets.setup` followed by
   `mix assets.build`.
+- **Prompt input budget exceeded:** inspect the required/budget byte counts in
+  the issue's failure comment. Shorten protected task/instruction content or
+  explicitly raise `input_budget_bytes`; changing output limits cannot fix it.
+  The default is 100,000 UTF-8 bytes, not tokens. See
+  [prompt budget guidance](OPERATIONS.md#prompt-input-budget-and-protected-context).
