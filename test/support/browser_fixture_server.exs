@@ -28,10 +28,13 @@ defmodule Cympho.BrowserFixtureServer do
     Logger.configure(level: :warning)
     cfg = Application.fetch_env!(:cympho, Repo)
     root = System.fetch_env!("CYMPHO_BROWSER_ROOT")
+    database = System.get_env("TEST_DB_NAME") || "cympho_test"
 
     unless Mix.env() == :test and Application.fetch_env!(:cympho, :env) == :test and
-             cfg[:database] == "cympho_test" and cfg[:hostname] == "127.0.0.1" and
+             Regex.match?(~r/\Acympho_test(?:_[a-z0-9_]+)?\z/, database) and
+             cfg[:database] == database and cfg[:hostname] == "127.0.0.1" and
              cfg[:pool] == Ecto.Adapters.SQL.Sandbox and cfg[:url] == nil and
+             System.get_env("MIX_TEST_PARTITION") == nil and
              (cfg[:port] || 5432) == 5432 and System.get_env("PORT") == "4329" and
              System.get_env("HTTP_BIND_IP") == "127.0.0.1" and
              String.starts_with?(root, "/tmp/cympho-browser-validation-") and
@@ -100,6 +103,12 @@ defmodule Cympho.BrowserFixtureServer do
 
     {:ok, supervisor} = Supervisor.start_link(children, strategy: :one_for_one)
     Ecto.Adapters.SQL.Sandbox.mode(Repo, :manual)
+
+    %{rows: [[^database]]} =
+      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+        Ecto.Adapters.SQL.query!(Repo, "SELECT current_database()", [])
+      end)
+
     baseline = Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, &counts/0)
     unless Enum.all?(baseline, &(&1 == 0)), do: raise("test fixture tables must be empty")
     owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Repo, shared: true, ownership_timeout: 240_000)
@@ -109,8 +118,8 @@ defmodule Cympho.BrowserFixtureServer do
       fixtures = seed(root)
       File.write!(Path.join(root, "fixtures.json"), Jason.encode!(fixtures))
       %{status: "ready"} = Cympho.Readiness.report()
-      File.write!(Path.join(root, "ready"), "127.0.0.1:4329 cympho_test passive\n")
-      IO.puts("VALIDATION_SERVER_READY database=cympho_test dispatch=false port=4329")
+      File.write!(Path.join(root, "ready"), "127.0.0.1:4329 #{database} passive\n")
+      IO.puts("VALIDATION_SERVER_READY database=#{database} dispatch=false port=4329")
 
       wait_for_stop(root, System.monotonic_time(:millisecond) + 180_000)
     after

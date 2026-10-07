@@ -11,6 +11,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import signal
@@ -95,6 +96,11 @@ def reap(child):
 def start(lock):
     deadline = time.monotonic() + LIFETIME
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    database = os.environ.get("TEST_DB_NAME", "cympho_test")
+    if not re.fullmatch(r"cympho_test(?:_[a-z0-9_]+)?", database):
+        raise RuntimeError("Browser fixture requires a cympho_test database name")
+    if os.environ.get("TEST_DB_HOST", "127.0.0.1") != "127.0.0.1":
+        raise RuntimeError("Browser fixture requires TEST_DB_HOST=127.0.0.1")
     pressure()
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 4329))
@@ -116,7 +122,7 @@ def start(lock):
         if key in os.environ:
             env[key] = os.environ[key]
     env.update(
-        MIX_ENV="test", TEST_DB_HOST="127.0.0.1", TEST_DB_NAME="cympho_test",
+        MIX_ENV="test", TEST_DB_HOST="127.0.0.1", TEST_DB_NAME=database,
         ERL_FLAGS="+S 2:2 +SDcpu 1 +SDio 1",
         HOME=str(run_root / "home"), TMPDIR=str(run_root / "tmp"),
         APP_HOST="127.0.0.1", PORT="4329", HTTP_BIND_IP="127.0.0.1",
@@ -143,7 +149,7 @@ def start(lock):
             )
             state = {
                 "wrapper_pid": os.getpid(), "child_pid": child.pid,
-                "repo": str(REPO), "run_root": str(run_root),
+                "repo": str(REPO), "run_root": str(run_root), "database": database,
             }
             (ROOT / "active.json").write_text(json.dumps(state))
             print(f"HARNESS_PID={os.getpid()} ROOT={run_root} MAX_LIFETIME=210",
@@ -230,7 +236,8 @@ def inspect_service(lock, action):
         or report.get("service") != "cympho"
     ):
         raise RuntimeError("Loopback application health check failed")
-    print("Sandbox browser fixture ready at " + BASE_URL)
+    print("Sandbox browser fixture ready at " + BASE_URL
+          + " database=" + state["database"])
 
 
 def main():

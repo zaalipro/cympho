@@ -487,6 +487,37 @@ Health endpoint check against a running instance:
 curl -fsS http://localhost:4329/api/health
 ```
 
+### Passive browser validation
+
+The rollback-only fixture uses `MIX_ENV=test`, SQL Sandbox, and loopback
+PostgreSQL on `127.0.0.1:5432`. Select an empty, authorized test database with
+`TEST_DB_NAME` (`cympho_test` by default, or `cympho_test_<suffix>`).
+It refuses non-test database names and non-loopback hosts. Do not reset or
+delete existing rows to satisfy its empty-table check.
+
+```bash
+# Set TEST_DB_NAME to your authorized isolated test database first.
+export TEST_DB_HOST=127.0.0.1
+unset MIX_TEST_PARTITION
+export ERL_FLAGS='+S 2:2 +SDcpu 1 +SDio 1'
+MIX_ENV=test mix ecto.create
+MIX_ENV=test mix ecto.migrate
+MIX_ENV=test mix compile --warnings-as-errors
+MIX_ENV=test mix assets.build
+python3 scripts/validation_browser.py start  # Run in a background terminal.
+python3 scripts/validation_browser.py healthcheck
+python3 scripts/validation_browser.py stop
+python3 -B -m unittest discover -s test/scripts -p '*_test.py'
+```
+
+The fixture binds only `127.0.0.1:4329`, reports the selected database, disables
+autonomous dispatch, and strips provider credentials and test partition settings.
+Its private `login.json` is for synthetic login only, never evidence. Close your
+named browser session before stopping. Stop requests rollback before reaping the
+exact owned process group. Failed-start diagnostics are retained; a missing
+`ready` marker alone proves neither that seeding was skipped nor that rollback
+succeeded. A successful cleanup marker and exit are required.
+
 ## Production Notes
 
 Set the usual Phoenix release environment variables, plus a Cympho encryption key:
