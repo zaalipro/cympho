@@ -214,10 +214,10 @@ defmodule Cympho.Workspaces.Drivers.SshTest do
     end
 
     test "times out without leaving the caller blocked", %{config: config} do
-      config = Map.put(config, :command_timeout, 800)
       handle = acquire!(config)
+      timeout_config = Map.put(config, :command_timeout, 800)
 
-      assert {:error, :timeout} = Ssh.execute(handle, "sleep 10", config)
+      assert {:error, :timeout} = Ssh.execute(handle, "sleep 10", timeout_config)
     end
   end
 
