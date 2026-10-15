@@ -465,7 +465,7 @@ defmodule Cympho.RuntimeOperationsTest do
       assert brief =~ "Define company strategy"
       assert brief =~ "Target: Qwen CEO · Claude Code"
       assert brief =~ "Provider model: qwen3.7-plus"
-      assert brief =~ "Owner brief readiness: Too thin for autonomy (1/6 signals)"
+      assert brief =~ "Owner brief readiness: Needs more detail (1/6 signals)"
 
       assert brief =~
                "Next brief prompt: Context: Add the facts that would change the CEO's decision."
@@ -484,7 +484,7 @@ defmodule Cympho.RuntimeOperationsTest do
       assert brief =~ "First turn: Return `[owner_update]`, `[handoff]`, or `[blocked]`"
       assert brief =~ "waiting on delegated sub-work"
       assert snapshot.ceo_flow.primary_candidate.brief == brief
-      assert snapshot.ceo_flow.primary_candidate.brief_readiness_label == "Too thin for autonomy"
+      assert snapshot.ceo_flow.primary_candidate.brief_readiness_label == "Needs more detail"
       assert snapshot.ceo_flow.primary_candidate.brief_readiness_score == "1/6"
       assert snapshot.ceo_flow.primary_candidate.brief_readiness_status == :thin
 

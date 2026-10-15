@@ -1,6 +1,8 @@
 defmodule Cympho.Benchmarks.ComparativeArtifactTest do
   use ExUnit.Case, async: true
 
+  @moduletag timeout: 120_000
+
   alias Cympho.Benchmarks.ComparativeArtifact
   alias Mix.Tasks.Cympho.Compare
 

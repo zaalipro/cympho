@@ -52,7 +52,7 @@ defmodule CymphoWeb.GoalLiveTest do
       assert html =~ "Goals"
       assert html =~ "Compact"
       assert html =~ "Detailed"
-      assert html =~ "Goal command"
+      assert html =~ "Goals Overview"
       refute html =~ "Mission alignment"
     end
 
@@ -98,7 +98,7 @@ defmodule CymphoWeb.GoalLiveTest do
 
       {:ok, view, html} = live(conn, "/goals?density=detailed")
 
-      assert html =~ "Goal command"
+      assert html =~ "Goals Overview"
       assert html =~ "Link floating work to strategy"
       assert html =~ "Open unlinked issue"
       assert html =~ "Attach"

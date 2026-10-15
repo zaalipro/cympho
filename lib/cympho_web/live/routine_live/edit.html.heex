@@ -111,7 +111,7 @@
                 label="Concurrency policy"
                 value={@routine.concurrency_policy}
                 options={[
-                  {"Coalesce if active", "coalesce_if_active"},
+                  {"Combine overlapping runs", "coalesce_if_active"},
                   {"Skip if active", "skip_if_active"},
                   {"Always enqueue", "always_enqueue"}
                 ]}
@@ -119,14 +119,19 @@
               <.input
                 type="select"
                 field={@form[:catch_up_policy]}
-                label="Catch-up policy"
+                label="Missed run handling"
                 value={@routine.catch_up_policy}
                 options={[
                   {"Skip missed", "skip_missed"},
                   {"Enqueue missed with cap", "enqueue_missed_with_cap"}
                 ]}
               />
-              <.input type="number" field={@form[:catch_up_cap]} label="Catch-up cap" min="1" />
+              <.input
+                type="number"
+                field={@form[:catch_up_cap]}
+                label="Maximum missed runs"
+                min="1"
+              />
             </div>
           </section>
         </div>

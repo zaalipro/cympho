@@ -413,7 +413,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ ~s(placeholder="What outcome do you want?")
       assert html =~ "Options"
       assert html =~ "Use a structured template"
-      assert html =~ "Too thin for autonomy"
+      assert html =~ "Needs more detail"
       assert html =~ "0/6"
       assert html =~ "Outcome: Name the owner-visible result"
       assert html =~ "Add enough detail to make the brief ready."
@@ -531,7 +531,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn, "/issues/new")
 
-      assert html =~ "Too thin for autonomy"
+      assert html =~ "Needs more detail"
       assert html =~ "Add enough detail to make the brief ready."
       assert html =~ "Create issue"
       queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
@@ -1087,7 +1087,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       CymphoWeb.Endpoint.broadcast("company:#{current_company_id()}:runs", "run_status", payload)
 
-      assert_push_event(view, "toast", %{message: "Run completed successfully"})
+      assert_push_event(view, "toast", %{message: "Run completed successfully"}, 1_000)
       # View is still alive and rendering.
       assert render(view) =~ issue.title
     end
@@ -2825,8 +2825,8 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "CEO flow checklist"
       assert html =~ "CEO launch packet"
       assert html =~ "Needs operator check"
-      assert html =~ "Too thin for autonomy (0/6 signals)"
-      assert html =~ "Owner brief readiness: Too thin for autonomy (0/6 signals)"
+      assert html =~ "Needs more detail (0/6 signals)"
+      assert html =~ "Owner brief readiness: Needs more detail (0/6 signals)"
       assert html =~ "Complete the owner brief before launching CEO runtime"
       assert html =~ "Observe after launch"
       assert html =~ "Brief repair"

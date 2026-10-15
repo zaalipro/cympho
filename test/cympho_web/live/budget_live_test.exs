@@ -12,14 +12,13 @@ defmodule CymphoWeb.BudgetLiveTest do
 
       {:ok, _view, html} = live(conn, "/budgets")
 
-      assert html =~ "Budget command"
+      assert html =~ "Budget Overview"
       assert html =~ "No spending limit"
       assert html =~ "Set a company runtime budget before scaling agents"
       assert html =~ "No spending limits yet"
       assert html =~ "hard stop"
       assert html =~ ~s(href="/budgets/new")
-      # "Budget Overview" repeated the command strip's four numbers verbatim.
-      refute html =~ "Budget Overview"
+      refute html =~ "Budget command"
     end
 
     test "creates an enforceable company runtime guardrail from the new form", %{
@@ -197,7 +196,7 @@ defmodule CymphoWeb.BudgetLiveTest do
 
       {:ok, _view, html} = live(conn, "/budgets")
 
-      assert html =~ "Budget command"
+      assert html =~ "Budget Overview"
       assert html =~ "Spend watch"
       assert html =~ "Review budgets before approving more runtime"
       assert html =~ "USD 100.00"

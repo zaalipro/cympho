@@ -61,7 +61,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
     {:ok, _live, html} = live(conn, "/reviews")
 
     assert html =~ "Review queue"
-    assert html =~ "Review command"
+    assert html =~ "Review Overview"
     assert html =~ "Resolve review gates"
     assert html =~ "Blocked gates"
     assert html =~ "Open gated issue"
@@ -175,7 +175,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
 
     {:ok, _live, html} = live(conn, "/reviews")
 
-    assert html =~ "Sent back for rework"
+    assert html =~ "Changes requested"
     assert html =~ "Engineer fix needed"
     assert html =~ "last reviewed by"
   end
@@ -208,7 +208,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
     {:ok, _live, html} = live(conn, "/reviews")
 
     assert html =~ "No issues awaiting review."
-    assert html =~ "No issues currently kicked back."
+    assert html =~ "No issues currently have changes requested."
     assert html =~ "No initiatives awaiting CTO spec review."
   end
 
@@ -271,7 +271,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
       |> render_submit(%{"review" => %{"reason" => "Fix the missing verification."}})
 
     assert html =~ "Review returned to To Do for changes."
-    assert html =~ "Sent back for rework"
+    assert html =~ "Changes requested"
     assert html =~ "Needs reviewer changes"
 
     updated = Issues.get_issue!(issue.id)

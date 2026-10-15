@@ -1,156 +1,152 @@
-# Quickstart
+# Quickstart Guide
 
-This path starts Cympho locally in review mode, where you can explore and
-configure the product without launching background agents or spending provider
-credits.
+This guide walks you through setting up and running Cympho locally in **review mode**, allowing you to explore the product, configure agents, test prompt contracts, and review workflows without launching background agents or spending provider credits.
 
-## Prerequisites
+---
 
-- Elixir `1.19.5-otp-28` and Erlang/OTP `28.4.3` (pinned in `.tool-versions`)
-- PostgreSQL reachable at `localhost` with the development credentials in
-  `config/dev.exs`
-- Git and a shell on macOS or Linux
+## 1. Prerequisites
 
-Use `mise`, `asdf`, or your normal package manager to install the pinned
-runtime. Cympho's asset tools are installed through Mix; a global Node project
-setup is not required for the normal build.
+Verify you have the required versions installed (pinned in `.tool-versions`):
+- **Elixir**: `1.19.5-otp-28`
+- **Erlang/OTP**: `28.4.3`
+- **PostgreSQL**: Version 14+ running on `localhost:5432`
+- **Git** and a standard shell (macOS `zsh` or Linux `bash`)
 
-## Start locally
+Use `asdf`, `mise`, or your system package manager to install the runtime. Native execution only: Docker is not required for local development.
+
+---
+
+## 2. Installation & Setup
+
+Clone the repository and run the setup sequence:
 
 ```bash
 git clone https://github.com/zaalipro/cympho.git
 cd cympho
+
+# 1. Install Hex/Rebar dependencies, create dev database, run migrations, seed demo data
 mix setup
+
+# 2. Download pinned Tailwind CSS and esbuild binaries
 mix assets.setup
+
+# 3. Build CSS and JavaScript bundles
 mix assets.build
+
+# 4. Run non-destructive system health check
 mix cympho.doctor
+
+# 5. Start Phoenix development server
 mix phx.server
 ```
 
-Open [http://localhost:4329](http://localhost:4329). To use another port, set
-`PORT`, for example `PORT=4000 mix phx.server`.
+Open [http://localhost:4329](http://localhost:4329) in your browser.
 
-The development-only owner shortcut creates or signs in the local owner:
+> **Note on Ports**: Development defaults to port `4329` (configured in `config/dev.exs`). To run on standard port 4000 instead, pass `PORT=4000 mix phx.server`.
 
+---
+
+## 3. Instant Dev Sign-In
+
+For rapid local exploration, use the development owner shortcut:
 ```text
 http://localhost:4329/dev/login
 ```
+This automatically authenticates you as the company owner without needing to type credentials.
 
-The seeded company and issues are safe to inspect. Development starts with
-automatic orchestration disabled.
+### Seeded Credentials
+If logging in via the standard `/login` screen:
+- **Email**: `owner@cympho.local`
+- **Password**: `password1234`
 
-`mix setup` installs dependencies and creates, migrates, and seeds the development
-database; it does not install the asset binaries. Use `mix assets.setup` once
-before the first asset build. Do not use `mix ecto.reset` on a database whose
-contents you need to preserve.
+---
 
-## Review and navigation
+## 4. Understanding Review Mode
 
-Review an issue in **Reviews** (Advanced navigation, `/reviews`) or **Inbox**
-(`/inbox`). Requesting changes requires a reason; cancelling or submitting only
-whitespace saves nothing. A valid decision records your identity and reason in
-the conversation and returns the issue to rework. Approval still requires the
-existing delivery evidence and resolved blockers.
+By default, Cympho boots in **Review Mode** with automatic orchestration disabled. In this mode:
+- The full web UI, kanban board, issue composer, instruction studio, and settings hub are completely active.
+- Background autonomous agent dispatchers and heartbeat timers are **dormant**.
+- You can inspect issues, test prompts, and create projects without risk of unexpected API token spend.
+- Local execution limits are governed by a named resource profile to prevent host memory pressure during agent execution.
 
-Issue pages show safe current-run progress and elapsed time, not a raw output
-stream. **Activity unavailable** means no recent activity, not necessarily a
-failed run. Refresh/reconnect reloads persisted state.
+### Enabling Controlled Autonomy
+When you are ready to let agents execute work:
 
-If you belong to multiple companies, **Company overview** appears in the
-sidebar. It is an optional read-only snapshot with company/workflow links;
-**Refresh** updates counts and access. Your normal dashboard and
-Tasks/Projects flow do not change.
+1. Configure your adapter credentials (e.g. Anthropic API key, Claude Code CLI, or Agrenting) in **Settings -> Integrations** or the company secret store.
+2. Launch Phoenix with the orchestrator enabled:
+   ```bash
+   CYMPHO_ORCHESTRATOR_ENABLED=1 mix phx.server
+   ```
 
-## Run one controlled autonomy smoke
-
-Autonomous company bootstrap (`Companies.create_autonomous_company/1` and the
-onboarding wizard) always inserts a company-scoped `BudgetPolicy` with
-`action_on_exceed=block`. A positive monthly limit is required (missing defaults
-to $100; explicit `0` is rejected). Runtime hard-stop reads that policy via
-`Finances.check_runtime_budget/2` — not `company.budget_monthly_cents` alone.
-
-Before enabling agents, configure the intended project repository, execution
-workspace, adapter command/model, credentials, and budget in the UI. Then start
-with only the orchestrator enabled:
-
-```bash
-CYMPHO_ORCHESTRATOR_ENABLED=1 mix phx.server
-```
-
-Use the issue page's readiness panel or Operations console to correct any
-missing workspace, runtime, secret, or budget requirement. Keep the company or
-individual issue paused until those checks are green.
-
-For a focused issue, add its UUID:
-
+To run autonomy against a single focused issue for debugging:
 ```bash
 CYMPHO_ORCHESTRATOR_ENABLED=1 \
-CYMPHO_DISPATCH_ONLY_ISSUE_ID=YOUR_ISSUE_UUID \
+CYMPHO_DISPATCH_ONLY_ISSUE_ID=your-issue-uuid-here \
 mix phx.server
 ```
 
-Provider keys belong in Cympho's secret store or a local untracked environment
-file. Never paste them into an issue, comment, screenshot, URL, or commit.
+---
 
-## Verify the checkout
+## 5. Testing the MCP Server
+
+Cympho includes a built-in Model Context Protocol server. Test it locally:
+
+1. Check node health:
+   ```bash
+   curl -fsS http://localhost:4329/api/health
+   ```
+2. For complete MCP tool schemas, inputs, and integration with Claude Code or Cursor, see the [MCP API Reference](MCP_API_REFERENCE.md).
+
+---
+
+## 6. Verification Commands
+
+Run the local quality and test gates:
 
 ```bash
-mix cympho.doctor
-mix compile >/dev/null && mix cympho.doctor --json > cympho-doctor.json
-mix test
-MIX_ENV=test mix compile --warnings-as-errors
+# Verify code formatting
 mix format --check-formatted
+
+# Compile with zero warnings
+MIX_ENV=test mix compile --warnings-as-errors
+
+# Run ExUnit test suite (auto-creates and migrates cympho_test)
+mix test
+
+# Run docs link checker
+mix test test/cympho/docs_link_validation_test.exs
+
+# Verify script syntax
 bash -n deploy.sh install.sh bin/cymphoctl
-mix cympho.compare
 ```
 
-`mix test` creates/migrates the test database without seeding or resetting it.
-It defaults to `paperclip` / `paperclip` at `localhost:5432`, database
-`cympho_test`. Use `TEST_DB_HOST`/`TEST_DB_NAME` for an authorized isolated target
-and clear `MIX_TEST_PARTITION` when an inherited partition is not intended.
-See the [README validation examples](../README.md#programmatic-validation-gates)
-for conservative BEAM settings and focused review/progress/overview tests.
-Credo and Dialyzer remain informational. `mix cympho.compare` is a repository
-regression audit, not a matched competitor benchmark.
+### Test Database Credentials
+By default, tests connect to:
+- **Database**: `cympho_test`
+- **Host**: `localhost:5432`
+- **Credentials**: `paperclip` / `paperclip` (or your local Postgres user)
 
-The doctor is non-destructive: it does not change application, database, or
-configuration state and does not start the application supervisor, agents, or
-providers. It checks PostgreSQL with read-only queries. Its filesystem writes
-are exclusive zero-byte probes in configured local attachment and import-spool
-directories, each immediately removed; it never touches records or payloads.
-Failures exit non-zero; warnings remain successful unless `--strict` is supplied. Add
-`--probe-endpoint` only when you want a bounded TCP listener check; that probe
-does not claim application readiness.
+Override with `TEST_DB_HOST`, `TEST_DB_NAME`, `TEST_DB_USER`, and `TEST_DB_PASSWORD`.
 
-Compile first for JSON automation so Mix's own first-build progress lines
-cannot precede the one JSON document.
+---
 
-Production must set `CYMPHO_IMPORT_SPOOL_DIR` to an absolute persistent,
-service-owned directory even when attachments use S3. Development and test
-retain their temporary local default; `deploy.sh` provisions the production
-directory outside the release payload.
+## 7. Common Troubleshooting
 
-Local development uses an authoritative total slot gate plus a local-process
-sub-limit. Production additionally
-requires readable host or cgroup memory pressure before it starts a new local
-CLI-backed run. The named resource profile supplies the total-run, local-run,
-and memory-reserve defaults; see the operator guide before overriding them.
+- **Database Connection Refused**: Ensure PostgreSQL is running locally (`brew services start postgresql@16` or `sudo systemctl start postgresql`).
+- **Port 4329 in Use**: Another instance is running. Stop it or pass `PORT=4330 mix phx.server`.
+- **Assets Not Loading**: Re-run `mix assets.setup && mix assets.build`.
+- **Prompt Input Budget Exceeded**: If an agent fails with prompt budget errors, check the issue failure comment. The default input budget is 100,000 UTF-8 bytes. Adjust in agent settings or set `CYMPHO_PROMPT_INPUT_BUDGET_BYTES`.
 
-For deployment, backups, runtime controls, and incident handling, continue with
-the [operator guide](OPERATIONS.md). For trace export, see
-[observability](OBSERVABILITY.md).
+---
 
-## Common failures
+## 8. Next Steps & Guide Index
 
-- **Database connection refused:** start PostgreSQL and confirm the local
-  database credentials in `config/dev.exs`.
-- **Port already in use:** start with a different `PORT`.
-- **Agents do not run:** this is expected in review mode; enable the
-  orchestrator deliberately and inspect the issue readiness panel.
-- **Assets are missing:** run `mix assets.setup` followed by
-  `mix assets.build`.
-- **Prompt input budget exceeded:** inspect the required/budget byte counts in
-  the issue's failure comment. Shorten protected task/instruction content or
-  explicitly raise `input_budget_bytes`; changing output limits cannot fix it.
-  The default is 100,000 UTF-8 bytes, not tokens. See
-  [prompt budget guidance](OPERATIONS.md#prompt-input-budget-and-protected-context).
+- [Operations & Production Guide](OPERATIONS.md): Deployment, systemd, database backups, and runtime recovery.
+- [MCP API Reference](MCP_API_REFERENCE.md): Model Context Protocol tools, schemas, and endpoints.
+- [REST API Reference](REST_API.md): Full reference for all JSON endpoints.
+- [Scheduled Routines & Webhooks](ROUTINE_WEBHOOKS.md): Cron automations and signed HMAC webhooks.
+- [Remote Environments & Marketplace Agents](REMOTE_ENVIRONMENTS.md): Agrenting agents and SSH sandboxes.
+- [Portable Company Packages](PORTABLE_PACKAGES.md): Company backups, blueprint exports, and resumable import transfers.
+- [Observability & Diagnostics](OBSERVABILITY.md): Sentry, `/beam` LiveDashboard, tool traces, and OTLP.
+- [Mobile QA Guide](MOBILE_QA.md): Mobile responsive testing and viewport geometry.
+- [Resource Benchmarks](benchmarks.md): Idle fleet performance and concurrency metrics.

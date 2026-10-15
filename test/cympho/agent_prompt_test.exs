@@ -281,7 +281,7 @@ defmodule Cympho.AgentPromptTest do
       engineer_prompt = AgentPrompt.build(Issues.get_issue!(issue.id), engineer.id)
 
       assert ceo_prompt =~ "Owner brief readiness"
-      assert ceo_prompt =~ "Too thin for autonomy (0/6 signals)."
+      assert ceo_prompt =~ "Needs more detail (0/6 signals)."
       assert ceo_prompt =~ "[missing] Outcome"
       assert ceo_prompt =~ "[missing] Context"
       assert ceo_prompt =~ "[missing] Risk/constraint"

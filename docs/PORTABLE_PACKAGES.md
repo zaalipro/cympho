@@ -1,195 +1,161 @@
-# Portable company packages
+# Portable Company Packages
 
-A package is a company's blueprint — its projects, agents, goals, labels, and
-(for a full export) its users, memberships, and issues — in a form you can move
-between installations.
+A **Portable Company Package** is a complete, self-contained blueprint of an autonomous company—its projects, agents, role playbooks, goals, labels, and (for full exports) its issues, memberships, and discussion history. Packages allow operators to back up company state, version-control entire company architectures in Git, or migrate organizations across Cympho installations.
 
-Two things you can do with one:
+---
 
-* **Import** it as a brand-new company (`Cympho.Companies.import_company/2`).
-* **Merge** it into a company that already exists
-  (`Cympho.Companies.PackageMerge`).
+## 1. Package Architecture & Layout
 
-Packages never contain secret values. Export redacts every secret-shaped field,
-and `secret_manifest` carries only the restore checklist an operator works
-through afterwards.
+A package can exist as a single JSON file or as a structured directory. Packages never contain plaintext secrets; all sensitive credentials are automatically redacted during export, producing a restore checklist in `secret_manifest.json`.
 
-## Resumable whole-company import
-
-The board-governed `/companies/import` screen uploads a single-file company
-export through a durable transfer ledger. The browser hashes at most one 4 MiB
-slice at a time, uploads only missing parts, and can resume after a reconnect by
-reselecting the same file. It uses the signed browser session and CSRF token; no
-API bearer token or package body is stored in LiveView or browser storage.
-
-JWT clients use the equivalent `/api/companies/import/transfers` endpoints:
-
-1. `POST /api/companies/import/transfers` with a declaration containing
-   `idempotency_key`, `total_bytes`, `part_size_bytes`, `file_sha256`, immutable
-   `import_options.slug_strategy`, and contiguous part descriptors
-   (`position`, `byte_size`, `sha256`).
-2. `PUT .../:id/parts/:position` as `application/octet-stream`.
-3. `POST .../:id/preview` to validate without consuming the transfer.
-4. `POST .../:id/apply` once the preview is ready, or `DELETE .../:id` to
-   cancel. `GET .../:id` returns actor-scoped progress.
-
-Both route families require a writable board member in the current company.
-Declarations are bound to that company, foreign/malformed transfer identifiers
-return the same 404, and raw reads are capped at 64 KiB. Parts are installed by
-fsync plus atomic rename only after exact size and SHA-256 verification. Apply
-uses a leased claim token; the imported graph and completed receipt commit in
-the same database transaction. Conservative per-actor/global byte and transfer
-admission plus one applying transfer by default bound disk and concurrent apply
-pressure.
-
-Production must set `CYMPHO_IMPORT_SPOOL_DIR` to an absolute persistent path
-owned by the service user. This requirement also applies when attachment
-storage uses S3 because resumable import parts remain local. `deploy.sh` uses
-`/opt/cympho/data/import-transfers`; paths under a checkout, temporary
-directory, timestamped release, or the `current` release symlink are not safe
-for resumable production transfers. Doctor reports only path-posture booleans,
-not the configured path.
-
-This is an import-transport milestone, not full L6 closure. Raw assembly and
-verification are bounded and resumable, but the V1 validator/importer still
-materializes one decoded map (within the 50 MB input cap). Export is not yet a
-resumable transfer, and V1 still omits document history, routines, and skills.
-True constant-memory apply requires a staged record-stream package version.
-
-Portable user rows are not authority to discover or enroll global accounts.
-Only the authenticated importer becomes the new company's owner/board member;
-other recipients become pending invites with privileged roles reduced to
-`member` (or preserved as `viewer`). Import does not change the importer's
-default company.
-
-## Sources
-
-`Cympho.Companies.PortablePackage.load_source/2` accepts:
-
-| Kind | Example |
-| --- | --- |
-| `:json` | `load_source(:json, "{...}")` or an already-decoded map |
-| `:path` | `load_source(:path, "/tmp/acme.json")` |
-| `:dir` | `load_source(:dir, "/tmp/acme-package")` |
-| `:github` | `load_source(:github, {"owner/repo", ref: "<40-char sha>"})` |
-
-`preview/2`, `import/2`, `merge_preview/3`, and `merge/3` all take the same
-source forms directly, so you rarely call `load_source/2` yourself.
-
-## Directory format
-
-```
-acme-package/
-  cympho-package.json     # manifest
-  company.json
-  users.json
-  memberships.json
-  projects.json
-  agents.json
-  issues.json
-  goals.json
-  labels.json
-  secret_manifest.json
+### 1.1 Directory Structure
+```text
+my-company-package/
+├── cympho-package.json     # Format manifest and versioning
+├── company.json            # Company profile, operating brief, and governance config
+├── users.json              # Exported human user accounts (full export only)
+├── memberships.json        # User company roles and permissions (full export only)
+├── projects.json           # Projects, repository settings, and prefixes
+├── agents.json             # Agent definitions, role playbooks, model configs
+├── issues.json             # Issue backlog, status, digest, and comments
+├── goals.json              # Strategic company goals and milestones
+├── labels.json             # Issue categorization labels and colors
+└── secret_manifest.json    # Operator checklist of required credentials
 ```
 
-The manifest declares the format, version, and which collection files exist:
-
+### 1.2 Manifest Format (`cympho-package.json`)
+The manifest declares the schema version and collection file mapping:
 ```json
 {
   "format": "cympho.company.package",
   "version": 1,
-  "exported_at": "2026-08-14T12:00:00Z",
-  "files": {"company": "company.json", "agents": "agents.json"}
+  "exported_at": "2026-10-15T12:00:00Z",
+  "files": {
+    "company": "company.json",
+    "projects": "projects.json",
+    "agents": "agents.json",
+    "goals": "goals.json",
+    "labels": "labels.json"
+  }
 }
 ```
 
-Write one with `PortablePackage.export_dir/3`, which accepts the same
-`:includes` option as `export/2`, so a selective export round-trips.
+---
 
-Safety rules the loader enforces:
+## 2. Exporting Packages
 
-* A manifest may only name collections from the standard set, and each must use
-  its standard filename. A manifest cannot point a collection at another path.
-* Every resolved path must stay inside the package root.
-* Symlinked collection files are refused outright.
-* Files are size-capped (10 MB each) and must be valid JSON. Parse failures
-  report the filename, never the file contents.
+### 2.1 Via Web UI
+Board members can export packages from **Company Settings -> Export** (`/companies/:id/export`).
+Operators can select:
+- **Full Company Export**: Includes issues, users, memberships, and history.
+- **Blueprint Only**: Includes only structural definitions (agents, playbooks, projects, goals, labels) suitable for public sharing or reusable company templates.
 
-## Repository sources
-
+### 2.2 Programmatic Export
+Export directly to a directory using Elixir Mix or IEx:
 ```elixir
-PortablePackage.merge_preview(
-  {:github, {"acme/standards", ref: "9f2b1c...", path: "packages/engineering"}},
+# Export full company
+Cympho.Companies.PortablePackage.export_dir(company_id, "/var/backups/company_export")
+
+# Export selective blueprint
+Cympho.Companies.PortablePackage.export_dir(
   company_id,
-  collision: :skip
+  "/var/backups/blueprint_export",
+  includes: [:projects, :agents, :goals, :labels]
 )
 ```
 
-* **`:ref` is required and must be a 40-character commit SHA.** Branches and
-  tags move, so a package fetched from one is not reproducible. Pass
-  `allow_unpinned: true` to accept a branch during development.
-* `:path` may name a `.json` file (single-file package) or a directory
-  containing `cympho-package.json` (directory package). It defaults to the
-  manifest at the repository root.
-* `:token` authenticates against a private repository and is never logged.
-* Redirects are refused rather than followed — a redirect off the package host
-  could point anywhere.
+---
 
-## Merging into an existing company
+## 3. Resumable Chunked Import Transfer
 
+Importing large packages (which may contain megabytes of issue history or attachments) uses Cympho's resumable chunked transfer protocol.
+
+### 3.1 Browser Import UI (`/companies/import`)
+- Access requires board governance authority.
+- The browser hashes and streams the package file in 4 MiB slices.
+- If network connectivity drops or the page reloads, re-selecting the file resumes from the last confirmed part without re-uploading completed chunks.
+- Validates cryptographic SHA-256 integrity before commit.
+
+### 3.2 REST API Transfer Flow
+JWT clients consume the equivalent transfer endpoints under `/api/companies/import/transfers`:
+
+1. **Declare Manifest**:
+   `POST /api/companies/import/transfers`
+   ```json
+   {
+     "idempotency_key": "import-acme-20261015",
+     "total_bytes": 16777216,
+     "part_size_bytes": 4194304,
+     "file_sha256": "4b82ca...",
+     "import_options": {
+       "slug_strategy": "preserve"
+     },
+     "parts": [
+       {"position": 1, "byte_size": 4194304, "sha256": "e3b0c4..."},
+       {"position": 2, "byte_size": 4194304, "sha256": "8a91cf..."}
+     ]
+   }
+   ```
+2. **Upload Parts**:
+   `PUT /api/companies/import/transfers/:id/parts/:position`
+   - Content-Type: `application/octet-stream`
+   - Raw binary part payload matching the declared SHA-256.
+3. **Inspect Progress**:
+   `GET /api/companies/import/transfers/:id`
+   - Returns upload percentage and received part positions.
+4. **Validation Preview**:
+   `POST /api/companies/import/transfers/:id/preview`
+   - Validates entity relationships, schemas, and references without writing to production tables.
+5. **Atomic Commit**:
+   `POST /api/companies/import/transfers/:id/apply`
+   - Commits the full company graph inside a single database transaction.
+
+### 3.3 Storage & Persistence (`CYMPHO_IMPORT_SPOOL_DIR`)
+Production environments must configure a dedicated persistent directory for upload parts:
+```bash
+CYMPHO_IMPORT_SPOOL_DIR=/opt/cympho/data/import-transfers
+```
+Parts are verified with SHA-256 and installed atomically via `fsync` and atomic file rename.
+
+---
+
+## 4. Merging into an Existing Company
+
+Packages can be merged into an existing company rather than creating a new one:
 ```elixir
-{:ok, plan} = PortablePackage.merge_preview(source, company_id, collision: :skip)
-{:ok, result} = PortablePackage.merge(source, company_id, collision: :skip)
+alias Cympho.Companies.PortablePackage
+
+# Preview plan
+{:ok, plan} = PortablePackage.merge_preview(source, target_company_id, collision: :skip)
+
+# Apply merge
+{:ok, result} = PortablePackage.merge(source, target_company_id, collision: :skip)
 ```
 
-`merge_preview/3` writes nothing. It returns per-collection counts, the exact
-conflicts it found, warnings, and the collections it will not touch.
+### 4.1 Collision Modes
+When an incoming record matches an existing record in the target company (e.g., matching agent name, project prefix, or label name):
 
-### Collision modes
+| Mode | Behavior |
+|---|---|
+| `:skip` (default) | Preserves existing target record. Incoming references remap to the existing record. |
+| `:replace` | Updates existing record with attributes from the incoming package. |
+| `:rename` | Creates a new record with a deduplicated name (e.g., `engineer-2`, project prefix `WEB` → `WEBA`). |
+| `:fail` | Aborts the entire merge before writing and returns the list of conflicting keys. |
 
-Each incoming record is matched against the target company by a natural key —
-label name, project prefix, agent name, goal title — compared case-insensitively.
-When a match exists:
+### 4.2 Merge Scope & Safety Boundaries
+- **Blueprint Only**: Merges only `labels`, `projects`, `goals`, and `agents`.
+- **Identity & Work Isolation**: `users`, `memberships`, and `issues` are excluded from merges to prevent identity spoofing or ticket duplication. Use whole-company import when migrating complete histories.
+- **Safe Agent Landing**: All newly created or updated agents land in **`paused` status with heartbeat timers disabled**. Agents will never begin autonomous execution without deliberate operator resumption.
+- **Atomic Rollback**: Merges run within a single Ecto transaction. Any schema error rolls back all modifications.
 
-| Mode | Behaviour |
-| --- | --- |
-| `:skip` (default) | keep the existing record; package references remap to it |
-| `:replace` | update the existing record from the package; references remap to it |
-| `:rename` | write a new record under a de-duplicated key (`bug-copy`; project prefixes get a letter suffix, `PLAT` → `PLATA`) |
-| `:fail` | abort the whole merge before any write and return the conflicts |
+---
 
-Records with no match are always created.
+## 5. Verification & Testing
 
-### What merges
-
-Only blueprint collections: `labels`, `projects`, `goals`, `agents`.
-
-`users`, `memberships`, `issues`, and `secret_manifest` are reported in the
-plan's `unsupported` list with a reason rather than merged. Matching identity or
-work items by name into a live company would fabricate people or duplicate
-history; use whole-company import when you want those.
-
-### Safety
-
-* The whole merge runs in one transaction. An invalid record rolls everything
-  back with `{:error, {:invalid_record, collection, errors}}`.
-* Packages are structurally validated through `Portability.preview_import/2`
-  before any writer runs.
-* Redacted secret placeholders are stripped, never persisted as literal values.
-* **Created and replaced agents land paused with heartbeat timers disabled.** A
-  merge can never start work in a live company on its own; an operator resumes
-  the agents deliberately.
-* Parent links (goal parents, agent reporting lines) resolve within the merged
-  set. Skipped records keep their existing hierarchy untouched.
-
-## Verifying
-
+Verify package export, import, and merge pipelines:
 ```bash
 mix test test/cympho/companies/package_merge_test.exs \
          test/cympho/companies/package_source_test.exs \
          test/cympho/companies_portability_test.exs
 ```
-
-The repository-source tests run against a real HTTP server on loopback, so
-status handling, redirect refusal, and the HTTP client path are exercised for
-real rather than stubbed.
+These tests run against real database transactions and verify SHA-256 part reassembly, collision handling, and tenant isolation.

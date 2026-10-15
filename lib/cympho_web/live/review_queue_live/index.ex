@@ -182,7 +182,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
   defp empty_review_command do
     %{
       tone: :clear,
-      eyebrow: "Review command",
+      eyebrow: "Review Overview",
       heading: "Review queue is clear",
       detail: "Nothing is waiting on your review right now.",
       action_label: "Open issues",
@@ -209,7 +209,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
 
           %{
             tone: :attention,
-            eyebrow: "Review command",
+            eyebrow: "Review Overview",
             heading: "Resolve review gates",
             detail:
               "#{card.label} cannot close yet. Fix the listed evidence gaps before approving it.",
@@ -224,7 +224,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
 
           %{
             tone: :ready,
-            eyebrow: "Review command",
+            eyebrow: "Review Overview",
             heading: "Accept review-ready work",
             detail:
               "#{card.label} has clear approval gates. Inspect the evidence, then approve or request changes.",
@@ -239,7 +239,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
 
           %{
             tone: :active,
-            eyebrow: "Review command",
+            eyebrow: "Review Overview",
             heading: "Approve CTO spec gate",
             detail:
               "#{issue_label(issue)} is waiting for CTO initiative acceptance before execution starts.",
@@ -254,7 +254,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
 
           %{
             tone: :rework,
-            eyebrow: "Review command",
+            eyebrow: "Review Overview",
             heading: "Track rework loop",
             detail:
               "#{issue_label(issue)} was returned for changes. Watch the assignee until new evidence lands.",

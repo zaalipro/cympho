@@ -5,7 +5,7 @@ defmodule CymphoWeb.WorkspaceLiveTest do
   alias Cympho.Workspaces
 
   describe "Index" do
-    test "shows workspace command and inventory diagnostics", %{
+    test "shows workspace overview and inventory diagnostics", %{
       conn: conn,
       current_company: company
     } do
@@ -22,7 +22,7 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       assert has_element?(view, "[data-testid='workspace-health']")
       assert has_element?(view, "[data-testid='workspace-command']")
       assert has_element?(view, "[data-testid='workspace-list']")
-      assert html =~ "Workspace command"
+      assert html =~ "Workspaces"
       assert html =~ "Watch"
       assert html =~ "Preview gaps"
       assert html =~ "Expose previews"

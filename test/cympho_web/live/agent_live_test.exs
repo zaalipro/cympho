@@ -491,7 +491,8 @@ defmodule CymphoWeb.AgentLiveTest do
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
 
-      assert html =~ "Agent command"
+      assert html =~ "Agent Overview"
+      assert html =~ "agent-overview"
       assert html =~ "Run readiness"
       assert html =~ "Prompt guide"
       assert html =~ "Tune guide"

@@ -69,7 +69,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                  Workspace command
+                  Workspaces
                 </p>
                 <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{workspace_command_badge_class(@workspace_command.tone)}"}>
                   {@workspace_command.badge}

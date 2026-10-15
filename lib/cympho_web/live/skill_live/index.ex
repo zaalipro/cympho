@@ -244,8 +244,8 @@ defmodule CymphoWeb.SkillLive.Index do
 
   def skill_next_action_class(_), do: "border-border bg-surface text-text-secondary"
 
-  def skill_posture_label(:empty), do: "Setup posture"
-  def skill_posture_label(_level), do: "Capability posture"
+  def skill_posture_label(:empty), do: "Setup status"
+  def skill_posture_label(_level), do: "Capability status"
 
   def skill_posture_text(:empty) do
     "No reusable skills exist for this company. Add one narrow skill with a valid manifest before broadening agent capability access."

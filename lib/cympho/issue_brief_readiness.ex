@@ -191,7 +191,7 @@ defmodule Cympho.IssueBriefReadiness do
 
   defp readiness_label(:ready), do: "Ready for CEO launch"
   defp readiness_label(:draft), do: "Needs one more pass"
-  defp readiness_label(:thin), do: "Too thin for autonomy"
+  defp readiness_label(:thin), do: "Needs more detail"
 
   defp readiness_summary(:ready, passed_count, total) do
     "#{passed_count}/#{total} signals present. The CEO should be able to decide, decompose, or hand off."
