@@ -87,6 +87,25 @@ defmodule CymphoWeb.UserAuth do
     end
   end
 
+  def on_mount(:mount_optional_user, _params, session, socket) do
+    socket = assign_current_user(socket, session)
+
+    socket =
+      if is_nil(socket.assigns.current_user) do
+        assign_guest_context(socket)
+      else
+        socket
+        |> assign_user_companies()
+        |> assign_current_company(session)
+        |> assign_sidebar_data()
+        |> subscribe_inbox_badge_updates()
+        |> subscribe_approval_badge_updates()
+        |> subscribe_owner_attention_updates()
+      end
+
+    {:cont, socket}
+  end
+
   # Blocks company-less users from the app proper; they are funneled into
   # /onboarding (its live_session mounts only :default) until they own a
   # company membership. Prevents orphan rows like projects with NULL company.
@@ -95,6 +114,22 @@ defmodule CymphoWeb.UserAuth do
       %{id: _} -> {:cont, socket}
       _ -> {:halt, Phoenix.LiveView.redirect(socket, to: "/onboarding")}
     end
+  end
+
+  defp assign_guest_context(socket) do
+    socket
+    |> assign(:current_user, nil)
+    |> assign(:current_company, nil)
+    |> assign(:current_company_role, nil)
+    |> assign(:runtime_controls_allowed, false)
+    |> assign(:user_companies, [])
+    |> assign(:nav_projects, [])
+    |> assign(:nav_agents, [])
+    |> assign(:nav_goals, [])
+    |> assign(:nav_inbox_count, 0)
+    |> assign(:nav_approval_count, 0)
+    |> assign(:inbox_badge_count, 0)
+    |> assign(:approval_badge_count, 0)
   end
 
   def login_path(return_to) do

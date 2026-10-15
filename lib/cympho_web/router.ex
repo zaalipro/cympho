@@ -78,6 +78,15 @@ defmodule CymphoWeb.Router do
     if Mix.env() in [:dev, :test] do
       get "/dev/login", DevSessionController, :login
     end
+
+    live_session :docs,
+      on_mount: [
+        {CymphoWeb.UserAuth, :mount_optional_user}
+      ] do
+      live "/docs", DocsLive.Index, :index
+      live "/docs/:topic", DocsLive.Index, :topic
+      live "/docs/:topic/:section", DocsLive.Index, :section
+    end
   end
 
   scope "/", CymphoWeb do

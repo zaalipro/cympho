@@ -460,7 +460,8 @@ const GOTO_KEYS = {
   'k': '/kanban',
   'a': '/agents',
   'g': '/goals',
-  'd': '/dashboard',
+  'h': '/dashboard',
+  'd': '/docs',
   's': '/settings/profile',
 };
 

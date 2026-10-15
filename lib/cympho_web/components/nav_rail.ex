@@ -93,6 +93,13 @@ defmodule CymphoWeb.Components.NavRail do
         icon="hero-cog-6-tooth-mini"
         current_path={@current_path}
       />
+      <.nav_link
+        to={~p"/docs"}
+        match="/docs"
+        label="Documentation"
+        icon="hero-book-open-mini"
+        current_path={@current_path}
+      />
 
       <.section_header label="Advanced" advanced_only />
       <.nav_link

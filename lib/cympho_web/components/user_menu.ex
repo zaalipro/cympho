@@ -167,6 +167,12 @@ defmodule CymphoWeb.Components.UserMenu do
             <kbd class="kbd">?</kbd>
           </button>
           <.menu_link
+            to={~p"/docs"}
+            icon="hero-book-open-mini"
+            current={@current_path}
+            label="Documentation"
+          />
+          <.menu_link
             to={~p"/settings/profile"}
             icon="hero-cog-6-tooth-mini"
             current={@current_path}
