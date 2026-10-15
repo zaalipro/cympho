@@ -2302,7 +2302,7 @@ defmodule CymphoWeb.AgentLive.Show do
         target_path: "/settings/secrets",
         target_label: "Open secrets"
       ),
-      required_config_item(config, "agent_did", "Remote agent DID"),
+      required_config_item(config, "agent_did", "Remote Agent ID"),
       required_config_item(config, "capability", "Default capability"),
       required_config_item(config, "max_price", "Max price per run"),
       readiness_item(:ok, "Delivery mode", config["delivery_mode"] || "output")

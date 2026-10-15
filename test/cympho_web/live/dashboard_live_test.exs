@@ -840,7 +840,7 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ ~s(href="/operations#ceo-outcome-monitor")
     end
 
-    test "surfaces launch-ready CEO command lane on dashboard", %{conn: conn} do
+    test "surfaces launch-ready executive overview on dashboard", %{conn: conn} do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
       conn = live_session_conn(conn, user, company)
 
@@ -874,7 +874,7 @@ defmodule CymphoWeb.DashboardLiveTest do
       {:ok, _view, html} = live(conn, "/dashboard")
 
       assert html =~ ~s(data-testid="dashboard-ceo-command-lane")
-      assert html =~ "CEO command lane"
+      assert html =~ "Executive Overview"
       assert html =~ "Ready to launch"
       assert html =~ "First useful CEO result"
       assert html =~ "Dashboard CEO launch packet"

@@ -11,7 +11,7 @@ defmodule CymphoWeb.SearchLiveTest do
       {:ok, _view, html} = live(conn, "/search")
 
       assert html =~ ~s(data-testid="search-command")
-      assert html =~ "Search command"
+      assert html =~ "Search Overview"
       assert html =~ "Ready for scoped company search."
       assert html =~ "New issue"
       assert html =~ "Board"
@@ -88,7 +88,7 @@ defmodule CymphoWeb.SearchLiveTest do
       refute html =~ "command surface"
       assert html =~ "Filters"
       assert html =~ ~s(data-testid="search-command")
-      assert html =~ "Search command"
+      assert html =~ "Search Overview"
       assert html =~ "3 total matches. Top match: Issue. No filters active."
       assert html =~ "Open top result"
       assert html =~ "Focus issues"

@@ -306,8 +306,8 @@ defmodule CymphoWeb.PluginLive.Index do
 
   def plugin_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
 
-  def plugin_posture_label(:empty), do: "Setup posture"
-  def plugin_posture_label(_level), do: "Runtime posture"
+  def plugin_posture_label(:empty), do: "Setup status"
+  def plugin_posture_label(_level), do: "Runtime status"
 
   def plugin_posture_text(:empty) do
     "No extensions are installed yet. Add one plugin, scope its capabilities, then watch worker logs and webhooks here."

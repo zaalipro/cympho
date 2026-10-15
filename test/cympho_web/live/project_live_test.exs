@@ -125,7 +125,7 @@ defmodule CymphoWeb.ProjectLiveTest do
       refute html =~ "Project launch plan"
       refute html =~ "Operating boundary"
       refute html =~ "Workspace posture"
-      assert html =~ "Create the workstream command center"
+      assert html =~ "Create the workstream overview"
 
       assert html =~
                "Describe what belongs in this project so intake and handoffs do not blur together."
@@ -272,7 +272,7 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert has_element?(view, "[data-testid='project-command']")
       assert has_element?(view, "[data-testid='project-readiness']")
       assert has_element?(view, "[data-testid='project-goals']")
-      assert html =~ "Project command"
+      assert html =~ "Project Overview"
       assert html =~ "Project work is moving through execution"
       # "Execution readiness" / "Mission control" were jargon for "Setup" and the
       # goals list; the readiness sentence now rides a ? tooltip.

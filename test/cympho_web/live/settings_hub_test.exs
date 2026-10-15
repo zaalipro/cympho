@@ -46,7 +46,7 @@ defmodule CymphoWeb.SettingsHubTest do
     test "secrets (company derived from current_company, no path param)", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/secrets")
       assert html =~ "Add Secret"
-      assert html =~ "Runtime credential cockpit"
+      assert html =~ "Runtime credentials"
       assert html =~ "0 of 5 ready"
       assert html =~ "LLMotions runtime"
       assert html =~ "No runtime secrets stored yet"
@@ -75,7 +75,7 @@ defmodule CymphoWeb.SettingsHubTest do
 
       {:ok, _view, html} = live(conn, "/settings/secrets")
 
-      assert html =~ "Runtime credential cockpit"
+      assert html =~ "Runtime credentials"
       assert html =~ "1 of 5 ready"
       assert html =~ "CEO Qwen runtime"
       assert html =~ "LLMotions runtime"
@@ -245,7 +245,7 @@ defmodule CymphoWeb.SettingsHubTest do
 
       {:ok, view, html} = live(conn, "/settings/secrets")
 
-      assert html =~ "Rotation posture"
+      assert html =~ "Rotation status"
       assert html =~ "1 of 1 active secrets need rotation attention."
       assert html =~ "Overdue"
       refute html =~ "old-runtime-key"

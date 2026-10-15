@@ -9,7 +9,7 @@
           Review queue
         </h1>
         <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-          Approve finished work, return weak submissions, and clear CTO spec review.
+          Approve finished work, request revisions on incomplete work, and clear CTO spec review.
         </p>
       </div>
       <:actions>
@@ -72,7 +72,7 @@
             Rework
           </span>
           <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-            {length(@kicked_back)} kicked back
+            {length(@kicked_back)} changes requested
           </span>
         </span>
       </div>
@@ -415,7 +415,7 @@
         <section class="rounded-2xl border border-hairline bg-surface-1 shadow-card">
           <div class="border-b border-hairline px-4 py-3">
             <h2 class="text-base font-590 text-text-primary">
-              Sent back for rework
+              Changes requested
               <span class="ml-2 font-mono text-sm text-text-quaternary">
                 {length(@kicked_back)}
               </span>
@@ -426,7 +426,7 @@
             :if={Enum.empty?(@kicked_back)}
             class="px-5 py-8 text-center"
           >
-            <p class="text-sm text-text-secondary">No issues currently kicked back.</p>
+            <p class="text-sm text-text-secondary">No issues currently have changes requested.</p>
           </div>
 
           <div :if={!Enum.empty?(@kicked_back)} class="divide-y divide-hairline">

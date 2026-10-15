@@ -182,7 +182,7 @@ defmodule CymphoWeb.ToolCallTracesLiveTest do
       |> render_click()
 
     assert html =~ "Content hash mismatch at sequence 1"
-    assert html =~ "stale or tampered content hash"
+    assert html =~ "content modified since last review"
   end
 
   test "streams the traces table and appends the next page", %{

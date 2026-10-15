@@ -435,9 +435,9 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "Copy command"
       assert html =~ "CEO launch brief"
       assert html =~ "Owner brief 1/6"
-      assert html =~ "Too thin for autonomy"
+      assert html =~ "Needs more detail"
       assert html =~ "Context: Add the facts"
-      assert html =~ "Owner brief readiness: Too thin for autonomy (1/6 signals)"
+      assert html =~ "Owner brief readiness: Needs more detail (1/6 signals)"
       assert html =~ "Brief repair scaffold"
       assert html =~ "Copy repair scaffold"
       # The scaffold body now sits behind a "Preview" disclosure, so the
@@ -1942,7 +1942,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, view, html} = live(conn, "/operations")
 
-      assert html =~ "Wake Backlog"
+      assert html =~ "Pending Tasks"
       assert html =~ "Old comment wake"
       assert html =~ "Backlog Owner"
       assert html =~ "Clear stale wakes"

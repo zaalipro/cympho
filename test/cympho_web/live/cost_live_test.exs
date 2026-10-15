@@ -5,7 +5,7 @@ defmodule CymphoWeb.CostLiveTest do
   alias Cympho.Finances.{BudgetPolicy, TokenUsage}
   alias Cympho.Repo
 
-  describe "cost command" do
+  describe "cost analytics" do
     test "renders one actionable empty state when no spend exists", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/costs")
 
@@ -32,7 +32,7 @@ defmodule CymphoWeb.CostLiveTest do
 
       {:ok, _view, html} = live(conn, "/costs")
 
-      assert html =~ "Cost command"
+      assert html =~ "Cost Analytics"
       assert html =~ "Unbudgeted spend"
       assert html =~ "Add a company budget before scaling agents"
       assert html =~ "Current period spend: $12.50"
@@ -52,7 +52,7 @@ defmodule CymphoWeb.CostLiveTest do
 
       {:ok, _view, html} = live(conn, "/costs")
 
-      assert html =~ "Cost command"
+      assert html =~ "Cost Analytics"
       assert html =~ "Spend watch"
       assert html =~ "Triage spend before the next run"
       assert html =~ "Top provider: dashscope"

@@ -130,7 +130,7 @@ defmodule CymphoWeb.CompanyExportLive do
 
             <div class="border-t border-border bg-subtle/60 p-6 lg:border-l lg:border-t-0 lg:p-8">
               <div class="text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                Safety posture
+                Safety Status
               </div>
               <div class="mt-4 space-y-4">
                 <div class="flex items-start gap-3">

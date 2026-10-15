@@ -393,7 +393,7 @@ defmodule CymphoWeb.CostLive.Index do
     %{
       tone: :ready,
       badge: "Spend under control",
-      title: "Cost posture is clear for the next run",
+      title: "Cost status is clear for the next run",
       summary: "Spend is inside the active budget envelope for this period.",
       simple_summary: "Spending is inside the limit.",
       action_label: "Review budgets",

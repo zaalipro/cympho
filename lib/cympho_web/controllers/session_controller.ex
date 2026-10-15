@@ -168,7 +168,7 @@ defmodule CymphoWeb.SessionController do
                 Cympho
               </span>
               <h1>Sign in to Cympho</h1>
-              <p>Enter the company cockpit with your real projects, agents, and approvals.</p>
+              <p>Enter the company workspace with your real projects, agents, and approvals.</p>
             </div>
             #{error_html}
             <label>

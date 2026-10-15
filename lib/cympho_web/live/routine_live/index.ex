@@ -363,8 +363,8 @@ defmodule CymphoWeb.RoutineLive.Index do
           >
             <span>{routine_label(@routine.priority)} priority</span>
             <span>{routine_label(@routine.concurrency_policy)}</span>
-            <span>Catch-up: {routine_label(@routine.catch_up_policy)}</span>
-            <span>Cap {@routine.catch_up_cap}</span>
+            <span>Missed runs: {routine_label(@routine.catch_up_policy)}</span>
+            <span>Max {@routine.catch_up_cap}</span>
           </div>
         </div>
 
@@ -497,8 +497,8 @@ defmodule CymphoWeb.RoutineLive.Index do
   def routine_health_badge(:empty), do: "border-border bg-surface text-text-tertiary"
   def routine_health_badge(_), do: "border-border bg-surface text-text-tertiary"
 
-  def routine_posture_label(:empty), do: "Setup posture"
-  def routine_posture_label(_level), do: "Automation posture"
+  def routine_posture_label(:empty), do: "Setup status"
+  def routine_posture_label(_level), do: "Automation status"
 
   def routine_posture_text(:empty) do
     "No recurring automation is configured. Create one routine, attach a trigger, then watch run history here."

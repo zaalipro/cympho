@@ -358,7 +358,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   end
 
   defp integrity_failure_summary({:error, :content_hash_mismatch, sequence}) do
-    "Trace sequence #{sequence} has a stale or tampered content hash. Inspect that row before using exports for audit or governance."
+    "Trace sequence #{sequence} has content modified since last review. Inspect that row before using exports for audit or governance."
   end
 
   defp integrity_failure_summary({:error, :chain_broken, from_sequence, to_sequence}) do

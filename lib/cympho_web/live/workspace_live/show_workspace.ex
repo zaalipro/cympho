@@ -48,11 +48,11 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
       <.header>
         <h1
           class="flex items-center gap-2 text-headline text-text-primary"
-          title="Project workspace command center for execution lanes, previews, and reusable runtime services."
+          title="Project workspace overview for execution lanes, previews, and reusable runtime services."
         >
           <span class="min-w-0 truncate">{@workspace.name}</span>
           <span class="sr-only">
-            — project workspace command center for execution lanes, previews, and reusable runtime services.
+            — project workspace overview for execution lanes, previews, and reusable runtime services.
           </span>
         </h1>
         <:actions>

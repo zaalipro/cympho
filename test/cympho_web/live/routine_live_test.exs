@@ -51,7 +51,7 @@ defmodule CymphoWeb.RoutineLiveTest do
 
       {:ok, _view, html} = live(conn, "/routines")
       assert html =~ "Routines"
-      assert html =~ "Routine command"
+      assert html =~ "Automated Routines"
       assert html =~ "Compact"
       assert html =~ "Detailed"
       refute html =~ "Routine Health"

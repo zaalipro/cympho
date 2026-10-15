@@ -25,7 +25,7 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, _view, html} = live(conn, "/inbox")
 
       assert html =~ "Inbox"
-      assert html =~ "Inbox command"
+      assert html =~ "Inbox Overview"
       assert html =~ "Nothing needs you"
       assert html =~ "Action queue"
       assert html =~ "Reviews"
@@ -535,7 +535,7 @@ defmodule CymphoWeb.InboxLiveTest do
 
       assert html =~ "Define issue for CEO"
       assert html =~ "Runtime launch needed"
-      assert html =~ "Inbox command"
+      assert html =~ "Inbox Overview"
       assert html =~ "Action queue"
       assert html =~ "Runtime / evidence"
       assert html =~ "Needs evidence"

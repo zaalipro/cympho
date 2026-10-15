@@ -214,7 +214,7 @@ defmodule CymphoWeb.ActivityLive.Index do
         :cost,
         "Spend events",
         counts.cost,
-        "Cost and budget-threshold events that can change launch posture.",
+        "Cost and budget-threshold events that can change system status.",
         by_action,
         filtered?
       ),
