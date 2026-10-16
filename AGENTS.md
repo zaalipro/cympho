@@ -87,7 +87,7 @@ The Claude Code adapters source `$HOME/.cld` before checking or invoking the com
 - `Cympho.Adapters.Registry` + `Cympho.AgentAdapters.HealthChecker`
 - `Cympho.PluginRegistry` (Registry) + `Cympho.Plugins.Registry` + `Cympho.Plugins.Supervisor`
 - `Cympho.Skills.HotReloader`
-- `Cympho.RateLimiting.BroadcastDedup`, `Cympho.RateLimiting.IpRateLimiter`
+- `Cympho.RateLimiting.BroadcastDedup`, `Cympho.RateLimiting.IpRateLimiter`, `Cympho.RateLimiting.LoginRateLimiter`
 - `Cympho.EventStore` (ETS event replay buffer)
 - `CymphoWeb.Endpoint`
 
@@ -111,7 +111,7 @@ Company-based. Most schemas have a `company_id` FK. `CymphoWeb.UserAuth` (LiveVi
 ### Authentication
 
 - **Users**: session cookies via `Cympho.Authentication` (Argon2 hashing).
-- **Agents** (three methods via `CymphoWeb.Plugs.AgentAuth`): JWT (Bearer), API key (`X-API-Key`), legacy `X-Agent-ID`.
+- **Agents** (two methods via `CymphoWeb.Plugs.AgentAuth`): JWT (Bearer) and API key (`X-API-Key`).
 - **Board**: `CymphoWeb.Plugs.BoardAuth` verifies board membership for governance mutations.
 - **GitHub webhooks**: GitHub HMAC is verified in `GithubController.verify_signature/2` before any write.
 
@@ -119,7 +119,7 @@ Company-based. Most schemas have a `company_id` FK. `CymphoWeb.UserAuth` (LiveVi
 
 - **LiveViews** in `lib/cympho_web/live/` with `.heex` templates — primary UI. Major areas: issues, kanban, inbox, agents, governance/approvals, execution policies, workspaces (with exec-workspace, services, previews), skills, plugins (incl. marketplace), routines, projects/goals, settings, org chart, onboarding, search, activity, tool-call traces.
 - **Controllers** in `lib/cympho_web/controllers/` — JSON APIs (issues, agents, routines, work products, documents, attachments, MCP, etc.), webhook receivers (`telegram_controller`, `github_controller`), and HTML pages (`page_controller`, `preview_controller`, `company_switcher_controller`).
-- **Channels** are flat files at `lib/cympho_web/*_channel.ex` (not in a `channels/` subdirectory): `activity_channel`, `comments_channel`, `company_channel` (event replay on join), `heartbeats_channel`, `issue_channel`, `issues_channel`, `runs_channel`. Companion modules: `events.ex` (broadcast helper), `rate_limiter.ex` (channel-side token bucket), `socket.ex`. Channels carry high-frequency telemetry (heartbeats, runs, activity) where LiveView diffing isn't a fit.
+- **Channels** are flat files at `lib/cympho_web/*_channel.ex` (not in a `channels/` subdirectory): `activity_channel`, `comments_channel`, `company_channel` (event replay on join), `issue_channel`, `issues_channel`. Companion modules: `events.ex` (broadcast helper), `socket.ex`, `client_ip.ex` (client address behind trusted proxies). Channels carry high-frequency telemetry (heartbeats, runs, activity) where LiveView diffing isn't a fit.
 - **Components** in `lib/cympho_web/components/`: `badge`, `card`, `nav_rail`, `company_rail`, `company_switcher`, `company_switcher_static`, `interaction_card`, plus `core_components.ex`.
 
 ### Key Subsystems
@@ -129,7 +129,7 @@ Company-based. Most schemas have a `company_id` FK. `CymphoWeb.UserAuth` (LiveVi
 - **Inbox** (`Cympho.Inbox`): per-agent unread/dismissed/archived state, broadcast on `inbox:{agent_id}`.
 - **Agent Actions** (`Cympho.AgentActions`): parses a `cympho-actions` JSON block from agent responses to drive side effects (`create_issue`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`).
 - **Auto-Assignment** (`Cympho.Issues.AutoAssignmentReassigner`): supervised GenServer that reassigns queued issues when agents go idle.
-- **Rate Limiting** (`Cympho.RateLimiting`): per-socket token bucket (10 events/sec), broadcast dedup (~500 ms window), IP-based connection throttling. All routed through GenServers — no public ETS handles.
+- **Rate Limiting** (`Cympho.RateLimiting`): per-socket token bucket (10 events/sec), broadcast dedup (~500 ms window), IP-based connection throttling, and failed-login throttling (`LoginRateLimiter`, 10 failures per 5 min per client IP). All routed through GenServers — no public ETS handles.
 - **EventStore** (`Cympho.EventStore`): ETS-backed scoped-topic buffer (~200 events per topic) for WebSocket replay on `after_join`, so reconnecting clients catch up cleanly.
 - **Plugins**: extensible plugin system with capability-gated host services (see `PLUGIN_SDK.md`).
 - **Skills**: skill manifests, loaders, hot-reloader, sandbox execution.

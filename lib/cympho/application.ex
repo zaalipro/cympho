@@ -55,6 +55,7 @@ defmodule Cympho.Application do
       # via BroadcastDedup, which owns an ETS table created in init/1).
       Cympho.RateLimiting.BroadcastDedup,
       Cympho.RateLimiting.IpRateLimiter,
+      Cympho.RateLimiting.LoginRateLimiter,
       Cympho.RateLimiting.AgentActionLimiter,
       Cympho.WebhookDedup,
       Cympho.EventStore,

@@ -10,14 +10,12 @@ defmodule Cympho.Adapters.HttpAdapter do
   @impl true
   def execution_class, do: :gateway
 
-  import Bitwise
-
   alias Cympho.Adapters.RuntimeTimeout
+  alias Cympho.Notifications.WebhookURL
 
   @default_timeout 30_000
   @max_timeout 3_600_000
   @blocked_url_message "url host is not allowed"
-  @metadata_hosts ~w(metadata.google.internal 169.254.169.254)
   @impl true
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
     session_id = make_ref()
@@ -473,9 +471,15 @@ defmodule Cympho.Adapters.HttpAdapter do
 
   @doc """
   Rejects URLs that are missing a host or target a private/metadata address.
+
+  Host rules are shared with `Cympho.Notifications.WebhookURL`. DNS names are
+  resolved and every address must be public, unless `resolve: false` is passed
+  or the `:adapter_url_dns_check?` app env is `false` (the test default).
   """
-  @spec validate_public_url(term()) :: :ok | {:error, String.t()}
-  def validate_public_url(url) when is_binary(url) do
+  @spec validate_public_url(term(), keyword()) :: :ok | {:error, String.t()}
+  def validate_public_url(url, opts \\ [])
+
+  def validate_public_url(url, opts) when is_binary(url) do
     uri = URI.parse(url)
 
     cond do
@@ -485,58 +489,24 @@ defmodule Cympho.Adapters.HttpAdapter do
       is_binary(uri.userinfo) and uri.userinfo != "" ->
         {:error, @blocked_url_message}
 
-      blocked_host?(uri.host) ->
-        {:error, @blocked_url_message}
-
       true ->
-        :ok
+        resolve? =
+          Keyword.get(opts, :resolve, Application.get_env(:cympho, :adapter_url_dns_check?, true))
+
+        case WebhookURL.validate_public_host(uri.host, Keyword.put(opts, :resolve, resolve?)) do
+          :ok -> :ok
+          {:error, _reason} -> {:error, @blocked_url_message}
+        end
     end
   end
 
-  def validate_public_url(_url), do: {:error, @blocked_url_message}
+  def validate_public_url(_url, _opts), do: {:error, @blocked_url_message}
 
   defp public_http_host?(%URI{scheme: scheme, host: host})
        when scheme in ["http", "https"] and is_binary(host) and host != "",
        do: true
 
   defp public_http_host?(_uri), do: false
-
-  defp blocked_host?(host) do
-    host =
-      host
-      |> String.trim()
-      |> String.downcase()
-      |> String.trim_leading("[")
-      |> String.trim_trailing("]")
-
-    host in ["localhost" | @metadata_hosts] or blocked_ip_host?(host)
-  end
-
-  defp blocked_ip_host?(host) do
-    case :inet.parse_strict_address(String.to_charlist(host)) do
-      {:ok, address} -> blocked_ip?(address)
-      {:error, _} -> false
-    end
-  end
-
-  defp blocked_ip?({a, b, c, d})
-       when a in 0..255 and b in 0..255 and c in 0..255 and d in 0..255 do
-    a == 127 or a == 10 or (a == 169 and b == 254) or (a == 192 and b == 168) or
-      (a == 172 and b >= 16 and b <= 31)
-  end
-
-  defp blocked_ip?({0, 0, 0, 0, 0, 65535, hi, lo}) do
-    blocked_ip?({hi >>> 8, hi &&& 0xFF, lo >>> 8, lo &&& 0xFF})
-  end
-
-  defp blocked_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
-
-  defp blocked_ip?({hextet, _, _, _, _, _, _, _}) when hextet >= 0xFE80 and hextet <= 0xFEBF,
-    do: true
-
-  defp blocked_ip?({0xFD00, 0x0EC2, 0, 0, 0, 0, 0, 0x0254}), do: true
-
-  defp blocked_ip?(_address), do: false
 
   defp validate_url(nil), do: {:error, "url is required"}
   defp validate_url(""), do: {:error, "url cannot be empty"}

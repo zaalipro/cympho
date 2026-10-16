@@ -63,6 +63,20 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
       assert %{"error" => "missing webhook secret"} = json_response(conn, 401)
     end
 
+    test "ignores a secret passed in the query string", %{
+      conn: conn,
+      trigger: trigger,
+      secret: secret
+    } do
+      conn =
+        post(
+          conn,
+          "/api/routine-triggers/#{trigger.public_id}/fire?secret=#{URI.encode_www_form(secret)}"
+        )
+
+      assert %{"error" => "missing webhook secret"} = json_response(conn, 401)
+    end
+
     test "rejects invalid secret", %{conn: conn, trigger: trigger} do
       conn =
         conn

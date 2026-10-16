@@ -274,6 +274,20 @@ defmodule Cympho.AgentApprovalWorkflowTest do
       {:ok, approval} = BoardApprovals.get_board_approval(approval_id)
       assert approval.proposal_data["new_role"] == "cto"
     end
+
+    test "returns a changeset error for an unknown string role instead of raising" do
+      company = create_company(%{"required_approvals" => ["agent_promotion"]})
+      agent = create_agent_in_company(company, %{role: :engineer})
+
+      for role <- ["not_a_role_#{System.unique_integer([:positive])}", "ok"] do
+        assert {:error, %Ecto.Changeset{} = changeset} =
+                 Agents.update_agent(agent, %{"role" => role})
+
+        assert Keyword.has_key?(changeset.errors, :role)
+      end
+
+      assert BoardApprovals.list_board_approvals(%{company_id: company.id}) == []
+    end
   end
 
   # --- Executor ---

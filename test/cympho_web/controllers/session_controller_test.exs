@@ -45,6 +45,28 @@ defmodule CymphoWeb.SessionControllerTest do
       assert redirected_to(conn) == "/"
     end
 
+    test "throttles an address after repeated failed sign-ins" do
+      user = registered_user()
+      unique = System.unique_integer([:positive])
+      ip = {198, 18, rem(div(unique, 256), 256), rem(unique, 256)}
+
+      attempt = fn password ->
+        %{build_conn() | remote_ip: ip}
+        |> post("/login", %{"user" => %{"email" => user.email, "password" => password}})
+      end
+
+      for _ <- 1..10 do
+        conn = attempt.("wrong-password")
+        assert redirected_to(conn) == "/login"
+        assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Invalid email or password"
+      end
+
+      conn = attempt.("password1234")
+      assert redirected_to(conn) == "/login"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Too many failed sign-in attempts"
+      refute get_session(conn, :user_id)
+    end
+
     test "rejects backslashes in a return target instead of raising" do
       user = registered_user()
 

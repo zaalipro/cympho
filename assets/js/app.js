@@ -1221,6 +1221,18 @@ document.addEventListener('click', (e) => {
   openCommandPalette();
 });
 
+// Company rail controls. These used inline onclick handlers, which the
+// Content-Security-Policy (script-src with a nonce) now blocks.
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-company-rail-switcher]') && window.openCompanySwitcher) {
+    window.openCompanySwitcher();
+  }
+
+  const menuClose = e.target.closest('[data-runtime-menu-close]');
+  const menu = menuClose && menuClose.closest('details');
+  if (menu) menu.removeAttribute('open');
+});
+
 window.addEventListener('phx:issue:replace_url', (e) => {
   const cleanUrl = e.detail?.url;
   if (!cleanUrl) return;

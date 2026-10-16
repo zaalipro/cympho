@@ -1,6 +1,5 @@
 defmodule CymphoWeb.IssueLive.Show do
   use CymphoWeb, :live_view
-  use CymphoWeb, :html
 
   import CymphoWeb.IssueLive.Show.Helpers
 

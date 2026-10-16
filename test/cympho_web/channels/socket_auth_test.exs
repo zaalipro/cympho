@@ -166,11 +166,22 @@ defmodule CymphoWeb.SocketAuthTest do
   end
 
   describe "extract_ip/1" do
-    test "parses the first x-forwarded-for address from an exact trusted proxy" do
-      configure_transport(trusted_proxy_ips: [{127, 0, 0, 1}])
+    test "uses the rightmost x-forwarded-for hop that is not a trusted proxy" do
+      configure_transport(trusted_proxy_ips: [{127, 0, 0, 1}, {10, 0, 0, 1}])
 
       assert CymphoWeb.Socket.extract_ip(%{
                x_headers: [{"x-forwarded-for", "203.0.113.10, 10.0.0.1"}],
+               peer_data: %{address: {127, 0, 0, 1}}
+             }) == {203, 0, 113, 10}
+    end
+
+    test "ignores client-supplied leftmost x-forwarded-for entries" do
+      configure_transport(trusted_proxy_ips: [{127, 0, 0, 1}])
+
+      # The proxy appends the real client (203.0.113.10) after whatever the
+      # client sent; the spoofed leftmost value must not win.
+      assert CymphoWeb.Socket.extract_ip(%{
+               x_headers: [{"x-forwarded-for", "198.51.100.66, 203.0.113.10"}],
                peer_data: %{address: {127, 0, 0, 1}}
              }) == {203, 0, 113, 10}
     end

@@ -2769,6 +2769,41 @@ defmodule Cympho.AgentActionsTest do
              end)
     end
 
+    test "approve_issue is rejected when the approver submitted the review itself", %{
+      issue: issue,
+      cto: cto
+    } do
+      insert_completed_run(cto, issue)
+      insert_work_product(issue, cto)
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :in_review,
+          monitor_state: %{
+            "last_review_submitter_id" => cto.id,
+            "last_review_submitter_role" => "cto"
+          }
+        })
+
+      assert issue.execution_policy_id == nil
+
+      assert {:error, :self_approval_blocked} =
+               AgentActions.execute(issue, cto, [
+                 %{
+                   "type" => "approve_issue",
+                   "notes" =>
+                     "[owner_update] What happened: approved. Business status: shipped. Evidence inspected: delivery artifact and completed run. Verification: review gates are clear. Remaining risk: none known. Current state: closed. Next decision: none. Owner decision needed: none. Restart packet: issue is closed; no next runtime turn is needed unless reopened."
+                 }
+               ])
+
+      refute Issues.get_issue!(issue.id).status == :done
+
+      assert Enum.any?(Comments.list_comments(issue.id), fn c ->
+               c.author_type == "system" and
+                 String.contains?(c.body, "a different agent must approve it")
+             end)
+    end
+
     test "hidden one-time swarm worker can complete only its own packet", %{
       company: company,
       project: project,

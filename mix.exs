@@ -36,7 +36,7 @@ defmodule Cympho.MixProject do
       {:ecto_sql, "~> 3.10"},
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 4.1"},
-      {:phoenix_live_view, "~> 1.1"},
+      {:phoenix_live_view, "~> 1.1.33"},
       {:phoenix_live_reload, "~> 1.4", only: :dev},
       {:phoenix_live_dashboard, "~> 0.8"},
       {:esbuild, "~> 0.8", runtime: Mix.env() == :dev},
@@ -68,13 +68,12 @@ defmodule Cympho.MixProject do
       {:floki, ">= 0.30.0", only: :test},
       {:lazy_html, "~> 0.1", only: :test},
       {:argon2_elixir, "~> 4.0"},
-      {:guardian, "~> 2.3"},
       {:ex_aws, "~> 2.5"},
       {:ex_aws_s3, "~> 2.5"},
       {:sweet_xml, "~> 0.7"},
       {:file_system, "~> 1.0", only: [:dev, :test]},
       {:mock, "~> 0.3", only: :test},
-      {:earmark, "~> 1.4"},
+      {:mdex, "~> 0.14"},
       {:sentry, "~> 10.0"},
       # Hackney is Sentry's default HTTP client at boot. Even with DSN unset
       # (no events sent), the SDK's Application.start/2 instantiates the

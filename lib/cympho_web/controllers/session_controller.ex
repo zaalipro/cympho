@@ -3,12 +3,16 @@ defmodule CymphoWeb.SessionController do
 
   import Ecto.Query
 
+  require Logger
+
   alias Cympho.Authentication
   alias Cympho.Companies
   alias Cympho.Companies.CompanyMembership
+  alias Cympho.RateLimiting.LoginRateLimiter
   alias Cympho.Repo
   alias Cympho.Users
   alias Cympho.Users.User
+  alias CymphoWeb.ClientIP
   alias CymphoWeb.Endpoint
   alias CymphoWeb.UserAuth
 
@@ -29,13 +33,23 @@ defmodule CymphoWeb.SessionController do
   def create(conn, %{"user" => %{"email" => email, "password" => password}})
       when is_binary(email) and is_binary(password) do
     return_to = UserAuth.safe_return_path(conn.params["return_to"]) || "/"
+    client_ip = ClientIP.from_conn(conn)
 
-    case Authentication.authenticate_user(email, password) do
-      {:ok, %User{} = user} ->
+    with :ok <- LoginRateLimiter.check(client_ip),
+         {:ok, %User{} = user} <- Authentication.authenticate_user(email, password) do
+      LoginRateLimiter.record_success(client_ip)
+
+      conn
+      |> sign_in(user)
+      |> put_flash(:info, "Signed in")
+      |> redirect(to: return_to)
+    else
+      {:error, :rate_limited} ->
+        Logger.warning("sign-in throttled", component: "session_controller")
+
         conn
-        |> sign_in(user)
-        |> put_flash(:info, "Signed in")
-        |> redirect(to: return_to)
+        |> put_flash(:error, "Too many failed sign-in attempts. Try again in a few minutes.")
+        |> redirect(to: "/login")
 
       {:error, :invalid_credentials} ->
         conn

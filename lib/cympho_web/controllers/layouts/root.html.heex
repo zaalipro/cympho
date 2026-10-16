@@ -6,7 +6,7 @@
     <meta name="csrf-token" content={Plug.CSRFProtection.get_csrf_token()} />
     <link rel="icon" type="image/svg+xml" href={~p"/images/favicon.svg"} />
     <.live_title suffix=" · Cympho">{Map.get(assigns, :page_title, "Cympho")}</.live_title>
-    <script>
+    <script nonce={assigns[:csp_nonce]}>
       (() => {
         try {
           const mode = localStorage.getItem("cympho-ui-mode") === "advanced" ? "advanced" : "simple";
@@ -143,7 +143,7 @@
       >
         <.icon name="hero-chevron-double-right-mini" class="h-4 w-4" />
       </button>
-      <script>
+      <script nonce={assigns[:csp_nonce]}>
         (() => {
           const sidebar = document.getElementById("sidebar");
           if (!sidebar) return;

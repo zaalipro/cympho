@@ -158,6 +158,61 @@ defmodule Cympho.Adapters.HttpAdapterTest do
                "callback_url" => "http://169.254.169.254/"
              }) == {:error, "url host is not allowed"}
     end
+
+    test "rejects encoded, unspecified, CGNAT and non-global IPv6 hosts" do
+      for url <- [
+            "http://0.0.0.0/",
+            "http://2130706433/",
+            "http://0x7f000001/",
+            "http://[fc00::1]/",
+            "http://[::]/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://[fd00:ec2::254]/",
+            "http://100.100.100.200/",
+            "http://metadata.google.internal/"
+          ] do
+        assert HttpAdapter.validate_public_url(url, resolve: false) ==
+                 {:error, "url host is not allowed"},
+               "expected #{url} to be blocked"
+      end
+
+      assert HttpAdapter.validate_public_url("https://8.8.8.8/v1", resolve: false) == :ok
+    end
+
+    test "rejects hostnames that resolve to private addresses and fails closed" do
+      loopback = fn
+        _host, :inet -> {:ok, [{127, 0, 0, 1}]}
+        _host, :inet6 -> {:ok, []}
+      end
+
+      mixed = fn
+        _host, :inet -> {:ok, [{93, 184, 215, 14}, {10, 0, 0, 5}]}
+        _, _ -> {:ok, []}
+      end
+
+      public = fn
+        _host, :inet -> {:ok, [{93, 184, 215, 14}]}
+        _host, :inet6 -> {:ok, []}
+      end
+
+      failing = fn _host, _family -> {:error, :timeout} end
+
+      url = "http://127.0.0.1.nip.io/hook"
+
+      assert HttpAdapter.validate_public_url(url, resolve: true, resolver: loopback) ==
+               {:error, "url host is not allowed"}
+
+      assert HttpAdapter.validate_public_url(url, resolve: true, resolver: mixed) ==
+               {:error, "url host is not allowed"}
+
+      assert HttpAdapter.validate_public_url(url, resolve: true, resolver: failing) ==
+               {:error, "url host is not allowed"}
+
+      assert HttpAdapter.validate_public_url("https://api.example.com/v1",
+               resolve: true,
+               resolver: public
+             ) == :ok
+    end
   end
 
   describe "available?/0" do

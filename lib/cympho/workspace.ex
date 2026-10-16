@@ -151,7 +151,7 @@ defmodule Cympho.Workspace do
     root = Path.expand(@workspace_root)
     expanded = Path.expand(path)
 
-    if String.starts_with?(expanded, root) do
+    if expanded == root or String.starts_with?(expanded, root <> "/") do
       :ok
     else
       {:error, :path_outside_workspace}
@@ -161,7 +161,7 @@ defmodule Cympho.Workspace do
   defp clone_repo(project_id, path) do
     case get_repo_url(project_id) do
       {:ok, repo_url} ->
-        System.cmd("git", ["clone", "--quiet", repo_url, path])
+        System.cmd("git", ["clone", "--quiet", "--", repo_url, path])
         |> case do
           {_output, 0} -> {:ok, path}
           {error, exit_code} -> {:error, {:git_clone_failed, exit_code, error}}
@@ -307,8 +307,16 @@ defmodule Cympho.Workspace do
   end
 
   defp legacy_or_fallback_repo_url(%{"repo_url" => url})
-       when is_binary(url) and url != "",
-       do: {:ok, url}
+       when is_binary(url) and url != "" do
+    # `<transport>::<address>` invokes a git remote helper (e.g. `ext::`),
+    # which the scp-style matcher below would otherwise accept.
+    with false <- String.match?(url, ~r/\A\s*[A-Za-z][A-Za-z0-9+.-]*::/),
+         {:ok, _identity} <- normalize_repository_identity(url) do
+      {:ok, url}
+    else
+      _invalid -> fallback_repo_url()
+    end
+  end
 
   defp legacy_or_fallback_repo_url(_settings), do: fallback_repo_url()
 

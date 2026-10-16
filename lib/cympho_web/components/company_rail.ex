@@ -18,7 +18,7 @@ defmodule CymphoWeb.Components.CompanyRail do
       <button
         type="button"
         class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-hover"
-        onclick="window.openCompanySwitcher && window.openCompanySwitcher()"
+        data-company-rail-switcher
       >
         <CymphoWeb.Components.spark class="h-4 w-4 text-brand shrink-0" />
         <.company_display company={@company} />
@@ -118,7 +118,6 @@ defmodule CymphoWeb.Components.CompanyRail do
           />
           <.link
             navigate={~p"/operations"}
-            onclick="this.closest('details').removeAttribute('open')"
             data-runtime-menu-close
             class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface-1 px-2 text-xs font-590 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
           >

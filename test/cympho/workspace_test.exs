@@ -42,6 +42,15 @@ defmodule Cympho.WorkspaceTest do
       result = Workspace.remove_workspace("/etc/passwd")
       assert result == {:error, :path_outside_workspace}
     end
+
+    test "rejects a sibling directory that shares the root as a string prefix" do
+      sibling = Path.expand(Workspace.workspace_root()) <> "-evil"
+      File.mkdir_p!(sibling)
+      on_exit(fn -> File.rm_rf(sibling) end)
+
+      assert Workspace.remove_workspace(sibling) == {:error, :path_outside_workspace}
+      assert File.dir?(sibling)
+    end
   end
 
   describe "repository_fingerprint/1" do
@@ -324,6 +333,35 @@ defmodule Cympho.Workspace.RepoUrlTest do
       end)
 
       assert {:error, :no_repo_configured} = Workspace.get_repo_url(project.id)
+    end
+
+    test "ignores legacy repo_url values that are not repository locations" do
+      original = Application.get_env(:cympho, :workspace_default_repo)
+      Application.delete_env(:cympho, :workspace_default_repo)
+
+      on_exit(fn ->
+        if original do
+          Application.put_env(:cympho, :workspace_default_repo, original)
+        end
+      end)
+
+      for {url, n} <-
+            Enum.with_index([
+              "ext::sh -c touch% /tmp/pwned",
+              "ext::sh",
+              "https://user:token@github.com/example/repo.git",
+              "https://github.com/example/repo.git?x=1"
+            ]) do
+        {:ok, project} =
+          create_project_with_company(%{
+            name: "Unsafe Legacy Repo #{n}",
+            prefix: "UL" <> <<?A + n>>,
+            settings: %{"repo_url" => url}
+          })
+
+        assert {:error, :no_repo_configured} = Workspace.get_repo_url(project.id),
+               "expected #{inspect(url)} to be rejected"
+      end
     end
   end
 

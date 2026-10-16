@@ -365,6 +365,14 @@ defmodule Cympho.AgentActions do
     )
   end
 
+  defp maybe_emit_rejection_comment(%Issue{} = issue, :self_approval_blocked) do
+    system_comment(
+      issue,
+      "approve_issue rejected: you submitted this work for review, so a different agent must approve it. " <>
+        "Wait for the reviewer, or request_changes / block_issue if it is stuck."
+    )
+  end
+
   defp maybe_emit_rejection_comment(
          %Issue{} = issue,
          {:delegate_target_stopped, target_id, governance_status}
@@ -1667,7 +1675,8 @@ defmodule Cympho.AgentActions do
 
         tagged_note = tagged_approval_note(agent, note)
 
-        with :ok <- Validation.ensure_approval_quality(issue, agent),
+        with :ok <- ensure_not_own_review_submission(issue, agent),
+             :ok <- Validation.ensure_approval_quality(issue, agent),
              :ok <- Validation.ensure_approval_note_ready(agent, tagged_note),
              {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_note),
              {:ok, issue_with_comment} <- Issues.get_issue(issue.id),
@@ -3411,6 +3420,17 @@ defmodule Cympho.AgentActions do
     |> Map.put("last_review_submitter_id", id)
     |> Map.put("last_review_submitter_role", Atom.to_string(role))
   end
+
+  # Four-eyes rule that holds even without an execution policy: the agent that
+  # submitted the current review cannot be the one that approves it.
+  defp ensure_not_own_review_submission(
+         %Issue{monitor_state: %{"last_review_submitter_id" => submitter_id}},
+         %Agent{id: submitter_id}
+       )
+       when is_binary(submitter_id),
+       do: {:error, :self_approval_blocked}
+
+  defp ensure_not_own_review_submission(_issue, _agent), do: :ok
 
   # Missing submit-review roles follow the same issue-local reviewer routing
   # used by the executor. Explicit non-blank roles are never overridden.

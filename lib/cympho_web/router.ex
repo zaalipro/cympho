@@ -11,6 +11,7 @@ defmodule CymphoWeb.Router do
     plug :put_root_layout, html: {CymphoWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug CymphoWeb.Plugs.ContentSecurityPolicy
   end
 
   # Session-authenticated JSON actions used by first-party browser code. This
@@ -461,7 +462,8 @@ defmodule CymphoWeb.Router do
 
     live_dashboard "/beam",
       metrics: Cympho.Telemetry.Metrics,
-      ecto_repos: [Cympho.Repo]
+      ecto_repos: [Cympho.Repo],
+      csp_nonce_assign_key: :csp_nonce
   end
 
   defp require_dashboard_operator(conn, _opts) do

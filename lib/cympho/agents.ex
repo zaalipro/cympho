@@ -774,7 +774,7 @@ defmodule Cympho.Agents do
     case attrs[:role] || attrs["role"] do
       nil -> nil
       role when is_atom(role) -> role
-      role when is_binary(role) -> String.to_existing_atom(role)
+      role when is_binary(role) -> Enum.find(Agent.role_options(), &(Atom.to_string(&1) == role))
     end
   end
 

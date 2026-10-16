@@ -8,13 +8,13 @@ defmodule CymphoWeb.RoutineTriggerController do
   action_fallback CymphoWeb.FallbackController
 
   # ── Public webhook fire (no user auth; secret-checked) ──
-  def fire(conn, %{"public_id" => public_id} = params) do
+  def fire(conn, %{"public_id" => public_id}) do
     case RoutineTriggers.get_trigger_by_public_id(public_id) do
       {:ok, %{signing_mode: "hmac_sha256"}} ->
         fire_signed(conn, public_id)
 
       {:ok, _legacy_trigger} ->
-        fire_legacy(conn, public_id, params)
+        fire_legacy(conn, public_id)
 
       {:error, :not_found} ->
         conn |> put_status(:not_found) |> json(%{error: "trigger not found"})
@@ -49,8 +49,11 @@ defmodule CymphoWeb.RoutineTriggerController do
     end
   end
 
-  defp fire_legacy(conn, public_id, params) do
-    secret = get_req_header(conn, "x-webhook-secret") |> List.first() || params["secret"]
+  defp fire_legacy(conn, public_id) do
+    # Query-string secrets are deliberately ignored: URLs end up in proxy and
+    # access logs. Only the header or the request body is accepted.
+    secret =
+      get_req_header(conn, "x-webhook-secret") |> List.first() || conn.body_params["secret"]
 
     if is_nil(secret) do
       conn |> put_status(:unauthorized) |> json(%{error: "missing webhook secret"})

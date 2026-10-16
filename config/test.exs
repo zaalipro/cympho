@@ -76,6 +76,11 @@ config :cympho, :dispatcher_recover_on_boot?, false
 config :cympho, :llm_router_enabled?, false
 config :cympho, :llm_classifier_timeout_ms, 1_500
 
+# Agent HTTP adapters resolve endpoint DNS and reject private addresses. Tests
+# use unresolvable example hostnames with mocked Finch, so the live DNS step is
+# off here; SSRF tests opt in with `resolve: true` and a stub resolver.
+config :cympho, :adapter_url_dns_check?, false
+
 # Auto-ignition fans out assign + wake under Task.Supervisor on every
 # `Issues.create_issue`. Tests create issues by the thousand and expect
 # deterministic state; the autonomous loop test opts back in explicitly.

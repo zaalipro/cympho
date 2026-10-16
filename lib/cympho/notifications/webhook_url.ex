@@ -85,6 +85,33 @@ defmodule Cympho.Notifications.WebhookURL do
     end
   end
 
+  @doc """
+  Checks that `host` is a public DNS name or IP literal.
+
+  Applies the same rules as `validate/1` to the host alone, so callers that
+  allow other schemes (the agent HTTP adapters accept plain `http`) can reuse
+  them. Unless `resolve: false` is given, the host is also resolved and every
+  IPv4/IPv6 address must be public; resolution fails closed.
+
+  This does not pin the resolved address for the later connection, so it
+  narrows but does not eliminate DNS-rebinding races.
+  """
+  @spec validate_public_host(String.t(), keyword()) ::
+          :ok | {:error, :invalid_url | :blocked_webhook_url | :unresolvable_host}
+  def validate_public_host(host, opts \\ []) when is_binary(host) do
+    host = normalize_host(host)
+
+    with :ok <- validate_host(host), do: maybe_validate_resolved(host, opts)
+  end
+
+  defp maybe_validate_resolved(host, opts) do
+    if Keyword.get(opts, :resolve, true) do
+      with {:ok, addresses} <- resolve_host(host, opts), do: validate_addresses(addresses)
+    else
+      :ok
+    end
+  end
+
   defp validate_uri(%URI{
          scheme: "https",
          host: host,
