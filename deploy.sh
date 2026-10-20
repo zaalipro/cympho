@@ -2279,7 +2279,12 @@ EOF
 
 step "Activating release and restarting service"
 run_remote_script <<EOF || rollback_release "Failed to activate/restart"
-observed_current=\$(readlink -f ${CURRENT_LINK} 2>/dev/null || true)
+# readlink -f resolves a missing path to itself, so only resolve one that
+# exists (or dangles); a first install has no current release.
+observed_current=""
+if _sudo test -e '${CURRENT_LINK}' || _sudo test -L '${CURRENT_LINK}'; then
+  observed_current=\$(readlink -f ${CURRENT_LINK} 2>/dev/null || true)
+fi
 if [ "\$observed_current" != "${PREVIOUS_RELEASE}" ]; then
   echo "Current release changed after this deploy began; refusing a stale cutover." >&2
   exit 1
