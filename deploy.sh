@@ -1953,7 +1953,15 @@ unit_is_current() {
   metadata=\$(_sudo stat -c '%a %u %g' -- "\$dst")
   [ "\$metadata" = "644 0 0" ]
 }
-_sudo systemd-analyze verify "\$unit_src" "\$git_agent_src"
+_sudo systemd-analyze verify "\$git_agent_src"
+# The main unit's ExecStart is the release this deploy builds later, so on a
+# first install it does not exist yet and verify would reject the unit. A
+# broken unit still fails the deploy (and rolls back) when the service starts.
+if _sudo test -x ${CURRENT_LINK}/bin/${APP_NAME}; then
+  _sudo systemd-analyze verify "\$unit_src"
+else
+  echo "No release at ${CURRENT_LINK} yet (first install): skipping main unit verify."
+fi
 if ! unit_is_current "\$unit_src" "\$unit_dst"; then
   install_unit "\$unit_src" "\$unit_dst"
   units_changed=1
