@@ -1051,8 +1051,8 @@ defmodule Cympho.Docs.Content do
         5. **`http`**: Dispatches task payloads to external HTTP webhooks or remote agent servers.
         6. **`process`**: Spawns local operating system processes with environment variables and stdin/stdout pipes.
 
-        ### Automatic Failover & Health Checks
-        `Cympho.AgentAdapters.HealthChecker` monitors adapter availability. If an adapter becomes unresponsive or encounters provider rate limits, Cympho can fall back to secondary adapters automatically.
+        ### Failover & Health Checks
+        `Cympho.AgentAdapters.HealthChecker` monitors adapter availability. An agent's selected adapter is final: if it is unavailable or misconfigured, the run is refused with the reason, and Cympho does not switch to another adapter. Only an explicit runtime-profile fallback chain changes runtime, and only after a provider rate limit, a quota error, or a temporary provider failure.
         """
       },
       %DocEntry{
@@ -1087,6 +1087,9 @@ defmodule Cympho.Docs.Content do
         ```
 
         *Note: In production environments, credentials must be configured via environment variables or Cympho Secrets rather than personal dotfiles.*
+
+        ### Codex Process Preset
+        The `process-codex` preset runs `codex exec --json` and reads Codex's JSONL events for the final message and token usage. codex-cli 0.44.0 and later is known to work; older versions are untested. A wrapper command must pass `--json` through and leave stdout unchanged. If a run prints no JSONL event, it fails with "codex exec --json produced no JSONL events; use codex-cli 0.44.0+ and make wrappers forward --json".
         """
       },
       %DocEntry{
@@ -1385,6 +1388,14 @@ defmodule Cympho.Docs.Content do
         - **Budget Ceilings**: Set monthly or per-project dollar caps.
         - **Threshold Alerts**: Automatic warnings fire at 80% and 100% of allocated budget.
         - **Auto-Throttling**: When a budget ceiling is exceeded, Cympho transitions the company to Low Power or Paused mode to prevent surprise invoices.
+
+        ### USD Hard Stops Need a Known Price
+        A hard stop can only count what Cympho can price. While one applies to a run, Cympho refuses to start a runtime whose cost it cannot work out:
+        - **Reports a cost** (Claude Code): counted as reported.
+        - **Reports tokens only** (Codex, OpenAI chat): needs USD rates for the agent's model, or flat rate.
+        - **Reports no usage** (Cursor, HTTP, OpenClaw, Agrenting, generic process commands): needs flat rate.
+
+        Set both on the agent's **Configuration** tab, under **Billing**: choose Metered or Flat rate, and enter input, output, and cached-input USD per million tokens for the current model (set a model first). Flat rate covers only the agent's own runtime, never a fallback runtime. A refused issue stays queued, no run starts, and the agent is not paused. The **Spending limit** readiness item says why, and the dispatcher retries the issue with a growing delay until the agent can be priced.
         """
       },
       %DocEntry{

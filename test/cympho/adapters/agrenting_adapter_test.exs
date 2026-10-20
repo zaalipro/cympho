@@ -289,6 +289,47 @@ defmodule Cympho.Adapters.AgrentingAdapterTest do
     end
   end
 
+  test "a failed health check does not echo the API key" do
+    api_key = "agrenting-sentinel-key-0123"
+
+    with_mocks([
+      {Client, [],
+       [
+         list_agents: fn _config, _params ->
+           {:error, {:http_error, 401, "invalid key #{api_key}"}}
+         end,
+         config_value: fn config, key -> Map.get(config, key) end
+       ]}
+    ]) do
+      result = AgrentingAdapter.health_check(%{"api_key" => api_key})
+
+      assert result.status == :unhealthy
+      assert result.message =~ "Agrenting check failed"
+      assert result.message =~ "[REDACTED]"
+      refute result.message =~ api_key
+    end
+  end
+
+  test "a failed health check does not keep a fragment of a key cut by inspect/1" do
+    api_key = "agrenting-sentinel-key-" <> String.duplicate("K", 20)
+    # The client's inspect/1 keeps 4_096 bytes of the detail and the health
+    # check's own inspect/1 about 4_080, so part of the key survives both.
+    body = Jason.encode!(%{"detail" => String.duplicate("x", 4_060) <> " " <> api_key})
+
+    stream = fn _request, _name, initial, callback, _opts ->
+      {:cont, acc} = callback.({:status, 401}, initial)
+      {:cont, acc} = callback.({:data, body}, acc)
+      {:ok, acc}
+    end
+
+    with_mocks [{Finch, [:passthrough], [stream_while: stream]}] do
+      result = AgrentingAdapter.health_check(%{"api_key" => api_key})
+
+      assert result.message =~ "Agrenting check failed"
+      refute result.message =~ "agrenting-sen"
+    end
+  end
+
   defp eventually(fun, attempts \\ 60) do
     cond do
       fun.() -> true

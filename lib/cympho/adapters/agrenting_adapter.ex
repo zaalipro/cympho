@@ -10,6 +10,7 @@ defmodule Cympho.Adapters.AgrentingAdapter do
 
   alias Cympho.Agrenting.Client
   alias Cympho.Projects
+  alias Cympho.Secrets.Redaction
   alias Cympho.WorkProducts
 
   @default_base_url "https://www.agrenting.com"
@@ -489,6 +490,11 @@ defmodule Cympho.Adapters.AgrentingAdapter do
             }
 
           {:error, reason} ->
+            # Logged by HealthChecker and shown in the agent page, so an
+            # echoed API key must not survive into the message.
+            api_key = config_value(config, "api_key")
+            reason = Redaction.redact_term(reason, Enum.filter([api_key], &is_binary/1))
+
             %{
               status: :unhealthy,
               message: "Agrenting check failed: #{inspect(reason)}",

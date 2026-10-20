@@ -19,9 +19,10 @@ defmodule CymphoWeb.SkillLive.FormHelpers do
     with :ok <- validate_project_ref(company_id, params["project_id"]) do
       base_manifest = opts |> Keyword.get(:skill) |> existing_manifest()
 
+      # company_id is server-owned: drop any client value, then re-add the socket's.
       params =
         params
-        |> Map.drop(["entrypoint", "capabilities"])
+        |> Map.drop(["entrypoint", "capabilities", "company_id"])
         |> maybe_put_company_scope(company_id, Keyword.get(opts, :put_company_scope))
         |> Map.put("manifest", build_manifest(base_manifest, params))
 

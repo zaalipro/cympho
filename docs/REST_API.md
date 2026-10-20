@@ -30,6 +30,8 @@ or
 X-API-Key: <agent_api_key>
 ```
 
+An agent that belongs to no company cannot authenticate. A valid token or key for it returns **HTTP 403 Forbidden** with `{"errors": [{"detail": "Agent is not assigned to a company"}]}`, not 401. To find and repair such agents, see [Upgrade Notes](OPERATIONS.md#11-upgrade-notes) in the Operations guide.
+
 #### 3. Webhook Authentication
 Inbound webhooks use specific signing methods:
 - Routine triggers (`/api/routine-triggers/:public_id/fire`): HMAC-SHA256 signature (`x-cympho-signature`, `x-cympho-timestamp`) or legacy bearer (`x-webhook-secret`).

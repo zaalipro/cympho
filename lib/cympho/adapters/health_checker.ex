@@ -210,6 +210,13 @@ defmodule Cympho.Adapters.HealthChecker do
       {:error, reason} when reason in [:no_adapter, :no_adapter_available, :unknown_adapter] ->
         %{status: :unavailable, message: "Adapter not found", checked_at: DateTime.utc_now()}
 
+      {:error, {:no_adapter_available, [{_type, reason}]}} ->
+        %{
+          status: :unavailable,
+          message: "Adapter unavailable: #{reason}",
+          checked_at: DateTime.utc_now()
+        }
+
       {:error, reason} ->
         %{
           status: :unavailable,

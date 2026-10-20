@@ -27,6 +27,13 @@ defmodule Cympho.OrchestratorPromptBudgetTest do
         engineer_count: 1
       })
 
+    # These synthetic runtimes bill nothing; mark the agent flat-rate so the
+    # onboarding USD hard stop admits runtimes that report no cost.
+    {:ok, agent} =
+      Cympho.Agents.update_agent(agent, %{
+        config: Map.put(agent.config || %{}, "billing_mode", "flat_rate")
+      })
+
     MockAdapter.clear()
     on_exit(fn -> MockAdapter.clear() end)
 
@@ -219,7 +226,8 @@ defmodule Cympho.OrchestratorPromptBudgetTest do
             "api_key" => "codex-preflight-test-key",
             "base_url" => "https://cli.llmotions.com/v1",
             "model" => "gpt-5.6-terra",
-            "repo_capable" => true
+            "repo_capable" => true,
+            "billing_mode" => "flat_rate"
           },
           runtime_config: %{}
       }

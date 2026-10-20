@@ -8,7 +8,6 @@ defmodule Cympho.Adapters do
     - Config validation
   """
 
-  require Logger
   alias Cympho.Adapters.Registry
 
   @default_adapter :claude_code
@@ -129,22 +128,27 @@ defmodule Cympho.Adapters do
   @doc """
   Resolves an agent to its adapter module and config.
 
-  Walks the fallback chain starting from the agent's adapter type.
-  Returns `{:ok, module, config}` when an available adapter is found,
+  Walks the fallback chain starting from the agent's adapter type, skipping
+  types that are not registered. The first registered adapter is final: if it
+  is invalid or unavailable, resolution fails instead of falling back to the
+  default adapter, which would run the agent with the wrong config,
+  credentials, provider and sandboxing.
+  Returns `{:ok, module, config}` when that adapter is valid and available,
   or a specific error:
-    - `{:error, :unknown_adapter}` — adapter type not registered
-    - `{:error, :no_adapter_available}` — adapters registered but none available
-    - `{:error, {:config_invalid, errors}}` — config validation failed for all adapters
+    - `{:error, :unknown_adapter}` — no adapter in the chain is registered
+    - `{:error, {:config_invalid, [{type, reason}]}}` — config validation failed
+    - `{:error, {:no_adapter_available, [{type, reason}]}}` — a prerequisite
+      such as the CLI, credentials, sandbox or endpoint is missing
   """
   @spec resolve(map()) ::
           {:ok, module(), map()}
           | {:error, :unknown_adapter}
-          | {:error, :no_adapter_available}
+          | {:error, {:no_adapter_available, [{atom(), String.t()}]}}
           | {:error, {:config_invalid, [{atom(), String.t()}]}}
   def resolve(%{adapter: adapter_type, config: config}) do
     primary = adapter_type || @default_adapter
     chain = fallback_chain(primary)
-    resolve_chain(chain, config, false, [])
+    resolve_chain(chain, config)
   end
 
   def resolve(%{adapter: adapter_type}) do
@@ -173,51 +177,12 @@ defmodule Cympho.Adapters do
 
   ## Private
 
-  defp resolve_chain([], _config, true, []), do: {:error, :no_adapter_available}
+  defp resolve_chain([], _config), do: {:error, :unknown_adapter}
 
-  defp resolve_chain([], _config, _found_any, config_errors) when config_errors != [],
-    do: {:error, {:config_invalid, Enum.reverse(config_errors)}}
-
-  defp resolve_chain([], _config, false, []), do: {:error, :unknown_adapter}
-
-  defp resolve_chain([type | rest], config, found_any, config_errors) do
+  defp resolve_chain([type | rest], config) do
     case Registry.lookup(type) do
-      {:ok, module} ->
-        if not module_available?(module, config) do
-          resolve_chain(rest, config, true, config_errors)
-        else
-          case module.validate_config(config) do
-            :ok ->
-              if config_errors != [] do
-                Logger.debug("""
-                Adapter #{type} resolved successfully, but previous adapters in fallback chain failed config validation:
-                #{format_config_errors(Enum.reverse(config_errors))}
-                """)
-              end
-
-              {:ok, module, config}
-
-            {:error, reason} ->
-              resolve_chain(rest, config, true, [{type, reason} | config_errors])
-          end
-        end
-
-      :error ->
-        resolve_chain(rest, config, found_any, config_errors)
-    end
-  end
-
-  defp format_config_errors(errors) do
-    errors
-    |> Enum.map(fn {type, reason} -> "- #{type}: #{reason}" end)
-    |> Enum.join("\n")
-  end
-
-  defp module_available?(module, config) do
-    if function_exported?(module, :available?, 1) do
-      module.available?(config)
-    else
-      module.available?()
+      {:ok, module} -> Registry.check_selected(type, module, config, true)
+      :error -> resolve_chain(rest, config)
     end
   end
 end

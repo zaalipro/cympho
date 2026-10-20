@@ -3,6 +3,8 @@ defmodule Cympho.Adapters.Error do
   Normalises adapter/runtime failures into stable categories for storage and UI.
   """
 
+  alias Cympho.Secrets.Redaction
+
   @categories ~w(
     missing_binary
     missing_credentials
@@ -99,7 +101,7 @@ defmodule Cympho.Adapters.Error do
       detail: clean_detail(map_get(map, "detail")),
       hint: map_get(map, "hint") || category_hint(category),
       adapter: map_get(map, "adapter"),
-      raw: map_get(map, "raw")
+      raw: map |> map_get("raw") |> Redaction.redact_credentials()
     }
   end
 
@@ -234,6 +236,15 @@ defmodule Cympho.Adapters.Error do
   defp classify({:request_error, reason}, raw, adapter), do: classify(reason, raw, adapter)
 
   defp classify({:finch_error, message}, raw, adapter), do: classify(message, raw, adapter)
+
+  # Resolution failures carry the adapter's own reason, so say it instead of
+  # reporting an unclassified failure.
+  defp classify({kind, [{_type, _reason} | _] = errors}, _raw, adapter)
+       when kind in [:config_invalid, :no_adapter_available] do
+    text = Enum.map_join(errors, "; ", fn {_type, reason} -> reason_to_string(reason) end)
+    {category, title, _message, _detail, hint} = classify_string(text, adapter)
+    {category, title, String.trim_trailing(text, ".") <> ".", nil, hint}
+  end
 
   defp classify({:config_invalid, reason}, raw, adapter), do: classify(reason, raw, adapter)
 
@@ -605,13 +616,19 @@ defmodule Cympho.Adapters.Error do
 
   defp truncate(nil), do: nil
 
+  # Redact before cutting so a credential straddling the cut is never half
+  # kept. The scan stops shortly past the cut because the rest is discarded.
   defp truncate(value) do
     value = to_string(value)
 
     if String.length(value) > 4_000 do
-      String.slice(value, 0, 4_000) <> "\n…"
-    else
       value
+      |> String.slice(0, 4_100)
+      |> Redaction.redact_credentials()
+      |> String.slice(0, 4_000)
+      |> Kernel.<>("\n…")
+    else
+      Redaction.redact_credentials(value)
     end
   end
 

@@ -246,7 +246,8 @@
           process_preset: @process_preset,
           provider: @runtime_provider,
           secret_count: @secret_count,
-          secret_keys: @secret_keys
+          secret_keys: @secret_keys,
+          spending_limit_items: @spending_limit_items
         }) %>
       <% dashboard_studio =
         instruction_studio(@agent.role, @agent.instructions || "", @selected_adapter, %{
@@ -1665,7 +1666,8 @@
               process_preset: @process_preset,
               provider: @runtime_provider,
               secret_count: @secret_count,
-              secret_keys: @secret_keys
+              secret_keys: @secret_keys,
+              spending_limit_items: @spending_limit_items
             }) %>
           <div class="ui-advanced-only mt-5 border-t border-border pt-4">
             <div class="flex flex-wrap items-start justify-between gap-3">
@@ -2142,6 +2144,71 @@
                 One argument per line. Presets add the model mapping automatically.
               </p>
             </div>
+          </div>
+        </.panel>
+
+        <%!-- Billing: how a USD hard stop counts this agent's runs. Shown in
+             simple mode too, because a refused runtime points the owner here. --%>
+        <.panel id="agent-billing" class="p-5">
+          <% billing_help =
+            "Runtimes that report only token counts need rates for their model before a USD hard stop lets them run." %>
+          <h3
+            class="mb-4 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
+            title={billing_help}
+          >
+            Billing<span class="sr-only"> — {billing_help}</span>
+          </h3>
+          <div class="grid gap-5 sm:grid-cols-2">
+            <div class="space-y-1.5">
+              <label for="agent-billing-mode" class="block text-xs font-510 text-text-secondary">
+                Billing mode
+              </label>
+              <select
+                id="agent-billing-mode"
+                name="agent[billing_mode]"
+                class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              >
+                <option value="metered" selected={@billing["billing_mode"] != "flat_rate"}>
+                  Metered
+                </option>
+                <option value="flat_rate" selected={@billing["billing_mode"] == "flat_rate"}>
+                  Flat rate (subscription)
+                </option>
+              </select>
+              <p class="text-xs text-text-quaternary">
+                Flat rate counts this runtime's tokens at zero cost. It does not cover fallback profiles.
+              </p>
+            </div>
+          </div>
+
+          <p :if={@billing["model"] in [nil, ""]} class="mt-4 text-xs text-text-tertiary">
+            Set a model first
+          </p>
+          <div :if={@billing["model"] not in [nil, ""]} class="mt-4 space-y-3">
+            <input type="hidden" name="agent[pricing][model]" value={@billing["model"]} />
+            <div class="grid gap-5 sm:grid-cols-3">
+              <div :for={{key, label} <- billing_rate_fields()} class="space-y-1.5">
+                <label
+                  for={"agent-billing-#{key}"}
+                  class="block text-xs font-510 text-text-secondary"
+                >
+                  {label}
+                </label>
+                <input
+                  id={"agent-billing-#{key}"}
+                  type="text"
+                  inputmode="decimal"
+                  name={"agent[pricing][#{key}]"}
+                  value={@billing["pricing"][key]}
+                  placeholder={billing_rate_placeholder(@agent, @billing["model"], key)}
+                  spellcheck="false"
+                  class="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                />
+              </div>
+            </div>
+            <p class="text-xs text-text-quaternary">
+              USD per million tokens for {@billing["model"]}. Leave blank to use the profile's rates, shown as placeholders.
+            </p>
           </div>
         </.panel>
 

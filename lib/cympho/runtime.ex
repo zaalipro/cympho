@@ -18,6 +18,7 @@ defmodule Cympho.Runtime do
     Repo,
     RuntimeAdmission,
     RuntimeContext,
+    RuntimeProfiles,
     Secrets,
     Workspace,
     Workspaces
@@ -40,10 +41,12 @@ defmodule Cympho.Runtime do
           | {:agent_unavailable, atom()}
           | :company_mismatch
           | :no_adapter_available
+          | {:no_adapter_available, [{atom(), String.t()}]}
           | :unknown_adapter
           | {:config_invalid, term()}
           | {:adapter_model_mismatch, String.t()}
           | {:budget_blocked, map()}
+          | {:budget_unpriceable_runtime, map()}
           | {:workspace_unavailable, String.t()}
           | {:workspace_error, term()}
           | {:environment_provider_error, term()}
@@ -56,8 +59,25 @@ defmodule Cympho.Runtime do
   def preflight(issue, agent_or_id, opts \\ [])
 
   def preflight(%Issue{} = issue, %Agent{} = agent, opts) do
-    with {:ok, %{env: env, adapter: adapter, adapter_config: adapter_config, budget: budget}} <-
-           verify_eligibility(issue, agent, opts),
+    with {:ok,
+          %{
+            env: env,
+            secret_keys: secret_keys,
+            adapter: adapter,
+            adapter_config: adapter_config,
+            budget: budget
+          }} <- verify_eligibility(issue, agent, opts),
+         # Also checked before checkout (dispatchable?/3, pricing_refusal/3).
+         # Here it covers fallback profiles and changes since that check, and
+         # returns the pricing snapshot the run settles against.
+         {:ok, pricing} <-
+           Finances.check_runtime_priceable(
+             issue,
+             agent,
+             adapter,
+             adapter_config,
+             fallback_pricing_opts(agent, opts)
+           ),
          {:ok, workspace} <- resolve_workspace(issue, opts),
          {:ok, workspace} <- ensure_provider_environment(workspace) do
       runtime_env = Map.merge(env, runtime_identity_env(issue, agent, workspace, opts))
@@ -76,9 +96,10 @@ defmodule Cympho.Runtime do
          execution_workspace: workspace.execution_workspace,
          cwd: workspace.cwd,
          env: runtime_env,
+         secret_keys: secret_keys,
          skills: Keyword.get(opts, :skills, []),
          budget: budget,
-         metadata: runtime_metadata(issue, workspace, opts)
+         metadata: runtime_metadata(issue, workspace, opts, pricing)
        }}
     end
   end
@@ -101,15 +122,48 @@ defmodule Cympho.Runtime do
   work here bought nothing and blocked everyone.
   """
   def dispatchable?(%Issue{} = issue, %Agent{} = agent, opts \\ []) do
-    case verify_eligibility(issue, agent, opts) do
-      {:ok, %{adapter: adapter}} ->
-        case RuntimeAdmission.available(adapter) do
-          :ok -> :ok
-          {:error, reason} -> {:error, {:runtime_admission_deferred, reason}}
-        end
+    # A pricing refusal here keeps the issue queued under dispatcher backoff:
+    # no checkout, no run, no comment.
+    with {:ok, %{adapter: adapter, adapter_config: adapter_config}} <-
+           verify_eligibility(issue, agent, opts),
+         {:ok, _pricing} <-
+           Finances.check_runtime_priceable(issue, agent, adapter, adapter_config) do
+      case RuntimeAdmission.available(adapter) do
+        :ok -> :ok
+        {:error, reason} -> {:error, {:runtime_admission_deferred, reason}}
+      end
+    end
+  end
 
-      {:error, reason} ->
-        {:error, reason}
+  @doc """
+  The pricing refusal `dispatchable?/3` applies, for starts that bypass the
+  dispatcher (manual spawn, legacy direct heartbeat), so they also gate before
+  checkout. Other eligibility failures are left to `preflight/3`.
+  """
+  @spec pricing_refusal(Issue.t(), Agent.t(), keyword()) ::
+          :ok | {:error, {:budget_unpriceable_runtime, map()}}
+  def pricing_refusal(%Issue{} = issue, %Agent{} = agent, opts \\ []) do
+    with {:ok, %{adapter: adapter, adapter_config: adapter_config}} <-
+           verify_eligibility(issue, agent, opts),
+         {:error, {:budget_unpriceable_runtime, _info}} = refusal <-
+           Finances.check_runtime_priceable(issue, agent, adapter, adapter_config) do
+      refusal
+    else
+      _ -> :ok
+    end
+  end
+
+  # A fallback profile is not the agent's own runtime: the agent's flat_rate
+  # does not cover it, and the profile's own pricing backs the agent's rates.
+  defp fallback_pricing_opts(%Agent{} = agent, opts) do
+    case Keyword.get(opts, :runtime_profile_id) do
+      profile_id when is_binary(profile_id) and profile_id != "" ->
+        if profile_id == RuntimeProfiles.from_agent(agent),
+          do: [],
+          else: [fallback?: true, fallback_pricing: RuntimeProfiles.config(profile_id)["pricing"]]
+
+      _ ->
+        []
     end
   end
 
@@ -120,10 +174,17 @@ defmodule Cympho.Runtime do
          :ok <- verify_agent(agent, issue, opts),
          :ok <- verify_repo_delivery_runtime(issue, agent),
          :ok <- verify_stage_gate(issue, agent),
-         {:ok, env} <- resolve_env(agent, opts),
+         {:ok, env, secret_keys} <- resolve_env(agent, opts),
          {:ok, adapter, adapter_config} <- resolve_adapter(agent, env, opts),
          {:ok, budget} <- verify_budget(issue, agent) do
-      {:ok, %{env: env, adapter: adapter, adapter_config: adapter_config, budget: budget}}
+      {:ok,
+       %{
+         env: env,
+         secret_keys: secret_keys,
+         adapter: adapter,
+         adapter_config: adapter_config,
+         budget: budget
+       }}
     end
   end
 
@@ -143,7 +204,7 @@ defmodule Cympho.Runtime do
   @spec resolve_adapter_config(Agent.t(), keyword()) ::
           {:ok, module(), map()} | {:error, term()}
   def resolve_adapter_config(%Agent{} = agent, opts \\ []) do
-    with {:ok, env} <- resolve_env(agent, opts),
+    with {:ok, env, _secret_keys} <- resolve_env(agent, opts),
          {:ok, adapter, adapter_config} <- resolve_adapter(agent, env, opts) do
       {:ok, adapter, adapter_config}
     end
@@ -243,7 +304,10 @@ defmodule Cympho.Runtime do
     profile_env = normalize_env(Keyword.get(opts, :runtime_env, %{}))
     config_env = Cympho.Agents.RuntimeEnv.from_agent(agent)
     secrets_env = safe_resolve_secrets_env(agent.id)
-    {:ok, profile_env |> Map.merge(config_env) |> Map.merge(secrets_env)}
+
+    # The Secrets-store keys travel with the env so diagnostics can redact
+    # every stored value, whatever its name or length.
+    {:ok, profile_env |> Map.merge(config_env) |> Map.merge(secrets_env), Map.keys(secrets_env)}
   end
 
   defp normalize_env(env) when is_map(env) do
@@ -291,9 +355,12 @@ defmodule Cympho.Runtime do
               {:error, reason}
           end
         else
-          case Adapters.Registry.resolve_agent(%{adapter: adapter, config: config}) do
+          case Adapters.Registry.resolve_agent(%{adapter: adapter, config: config},
+                 validate_config?: false
+               ) do
             {:ok, module, resolved_config} -> {:ok, module, resolved_config}
             {:error, :no_adapter} -> {:error, :no_adapter_available}
+            {:error, reason} -> {:error, reason}
           end
         end
     end
@@ -602,9 +669,11 @@ defmodule Cympho.Runtime do
     |> Map.new(fn {key, value} -> {key, to_string(value)} end)
   end
 
-  defp runtime_metadata(%Issue{} = issue, workspace, opts) do
+  # `pricing` is the snapshot admission checked; the run settles against it.
+  defp runtime_metadata(%Issue{} = issue, workspace, opts, pricing) do
     metadata = %{
       "runtime_profile_id" => Keyword.get(opts, :runtime_profile_id),
+      "pricing" => pricing,
       "workspace_source" => workspace.source,
       "preflight_at" => DateTime.utc_now() |> DateTime.to_iso8601()
     }

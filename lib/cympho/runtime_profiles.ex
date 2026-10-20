@@ -115,6 +115,16 @@ defmodule Cympho.RuntimeProfiles do
     "process-codex" => ["codex-mini"]
   }
 
+  # OpenAI standard-tier list price, developers.openai.com/api/docs/models/gpt-5.4-mini,
+  # checked 2026-10-19; regional processing adds 10%.
+  @gpt_5_4_mini_pricing %{
+    "gpt-5.4-mini" => %{
+      "input_usd_per_mtok" => "0.75",
+      "cached_input_usd_per_mtok" => "0.075",
+      "output_usd_per_mtok" => "4.50"
+    }
+  }
+
   def custom_id, do: @custom_id
 
   def all do
@@ -255,7 +265,11 @@ defmodule Cympho.RuntimeProfiles do
         adapter: "codex",
         posture: "Fast/cheap",
         description: "Uses Codex CLI with a smaller model for routine changes and QA passes.",
-        config: %{"provider" => "openai-codex", "model" => "gpt-5.4-mini"},
+        config: %{
+          "provider" => "openai-codex",
+          "model" => "gpt-5.4-mini",
+          "pricing" => @gpt_5_4_mini_pricing
+        },
         runtime_config: %{}
       },
       %{
@@ -302,7 +316,8 @@ defmodule Cympho.RuntimeProfiles do
         config:
           Map.merge(Cympho.Adapters.RuntimeOptions.process_defaults("codex"), %{
             "process_preset" => "codex",
-            "model" => "gpt-5.4-mini"
+            "model" => "gpt-5.4-mini",
+            "pricing" => @gpt_5_4_mini_pricing
           }),
         runtime_config: %{}
       }

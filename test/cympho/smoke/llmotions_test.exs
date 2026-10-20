@@ -33,7 +33,8 @@ defmodule Cympho.Smoke.LLMotionsTest do
                company_name: "LLMotions Smoke Test #{unique}",
                issue_prefix: "LST",
                api_key: "llmotions-secret-value",
-               model: "gemini-3.5-flash-low"
+               model: "gemini-3.5-flash-low",
+               billing: :flat_rate
              )
 
     assert report.endpoint == "https://cli.llmotions.com/v1"
@@ -83,6 +84,10 @@ defmodule Cympho.Smoke.LLMotionsTest do
       assert agent.runtime_config["profile_id"] == Cympho.RuntimeProfiles.custom_id()
     end
 
+    for agent <- Map.values(report.agents) do
+      assert agent.runtime_config["billing_mode"] == "flat_rate"
+    end
+
     assert AgentRuntimeCapabilities.repo_delivery_capable?(report.agents.engineer)
     assert AgentRuntimeCapabilities.repo_delivery_capable?(report.agents.qa)
 
@@ -114,7 +119,8 @@ defmodule Cympho.Smoke.LLMotionsTest do
                  company_name: "LLMotions Missing Secret #{unique}",
                  issue_prefix: "LMK",
                  api_key: nil,
-                 store_secret?: false
+                 store_secret?: false,
+                 billing: :flat_rate
                )
 
       assert report.secret_status == :missing
@@ -138,7 +144,8 @@ defmodule Cympho.Smoke.LLMotionsTest do
                model: "gpt-5.6-terra",
                api_key: nil,
                store_secret?: false,
-               create_workspace?: false
+               create_workspace?: false,
+               billing: :flat_rate
              )
 
     for agent <- [report.agents.ceo, report.agents.cto] do

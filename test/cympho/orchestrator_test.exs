@@ -1301,6 +1301,241 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
+    test "redacts runtime secret values from adapter failure diagnostics", %{
+      agent: agent,
+      agent_id: agent_id,
+      issue: issue
+    } do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+      secret = "runtime-secret-sentinel-0123456789"
+
+      {:ok, _agent} =
+        Agents.update_agent(agent, %{runtime_config: %{"env" => %{"OPENCLAW_API_KEY" => secret}}})
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: {:http_error, 401, "upstream echoed credential #{secret}"}}
+      ])
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          with_mocks([
+            {Cympho.Adapters, [],
+             [resolve: fn %{config: config} -> {:ok, MockAdapter, config} end]}
+          ]) do
+            assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
+            wait_until_stopped(pid)
+          end
+        end)
+
+      assert {:ok, run} = wait_for_latest_run_status(issue.id, "failed")
+      assert run.log_excerpt =~ "[REDACTED]"
+      refute run.log_excerpt =~ secret
+      refute inspect(run.run_metadata["adapter_error"]) =~ secret
+      refute log =~ secret
+      refute Enum.any?(Comments.list_comments(issue.id), &(&1.body =~ secret))
+    end
+
+    test "redacts Secrets-store values of any name or length, including inside error structs",
+         %{company: company, agent_id: agent_id, issue: issue} do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+      deploy = "plain-deploy-sentinel-value"
+      short = "QzX7"
+      put_company_secret(company, "DEPLOY_VALUE", deploy)
+      put_company_secret(company, "OPENCLAW_API_KEY", short)
+
+      {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false])
+      on_exit(fn -> :gen_tcp.close(listen) end)
+      {:ok, port} = :inet.port(listen)
+
+      {:error, %Finch.HTTPError{} = http_error} =
+        Finch.build(:get, "http://127.0.0.1:#{port}/", [{"x-deploy", "#{deploy} #{short}\n"}])
+        |> Finch.request(Cympho.Finch)
+
+      MockAdapter.script(agent_id, issue.id, [%{error: {:request_failed, http_error}}])
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          with_mocks([
+            {Cympho.Adapters, [],
+             [resolve: fn %{config: config} -> {:ok, MockAdapter, config} end]}
+          ]) do
+            assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
+            wait_until_stopped(pid)
+          end
+        end)
+
+      assert {:ok, run} = wait_for_latest_run_status(issue.id, "failed")
+      stored = "#{run.log_excerpt} #{inspect(run.run_metadata)}"
+      comments = Comments.list_comments(issue.id)
+      assert log =~ "[REDACTED]"
+
+      for value <- [deploy, short] do
+        refute log =~ value
+        refute stored =~ value
+        refute Enum.any?(comments, &(&1.body =~ value))
+      end
+    end
+
+    test "redacts short runtime-config credentials and short Secrets-store values inside words",
+         %{agent: agent, company: company, agent_id: agent_id, issue: issue} do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+      put_company_secret(company, "DEPLOY_PIN", "QzX7")
+
+      {:ok, _agent} =
+        Agents.update_agent(agent, %{
+          runtime_config: %{"env" => %{"OPENCLAW_API_KEY" => "Rk9w", "DISABLE_AUTH" => "1"}}
+        })
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: {:http_error, 401, "status 401: credential Rk9w rejected, pin abcQzX7def"}}
+      ])
+
+      {stored, log, comments} = run_failing_mock_session(issue, agent_id)
+
+      # DISABLE_AUTH is a flag, not a credential, so its "1" is left alone.
+      assert stored =~ "status 401"
+
+      for value <- ["Rk9w", "QzX7"] do
+        refute log =~ value
+        refute stored =~ value
+        refute Enum.any?(comments, &(&1.body =~ value))
+      end
+    end
+
+    test "redacts a Secrets-store value used as a key of a structured Agrenting failure",
+         %{company: company, agent_id: agent_id, issue: issue} do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+      secret = "plain-key-sentinel-value"
+      put_company_secret(company, "DEPLOY_VALUE", secret)
+
+      # AgrentingAdapter forwards a failed hiring's structured failed_reason.
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: {:agrenting_hiring_terminal, "failed", %{secret => "rejected"}}}
+      ])
+
+      {stored, log, comments} = run_failing_mock_session(issue, agent_id)
+      assert log =~ "[REDACTED]"
+
+      refute log =~ secret
+      refute stored =~ secret
+      refute Enum.any?(comments, &(&1.body =~ secret))
+    end
+
+    test "redacts the host and application credentials adapters fall back to", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      MockAdapter.clear()
+      original_app = Application.get_env(:cympho, :openclaw_api_key)
+      original_host = System.get_env("CURSOR_API_KEY")
+      Application.put_env(:cympho, :openclaw_api_key, "app-fallback-sentinel-0123")
+      System.put_env("CURSOR_API_KEY", "host-cursor-sentinel-0123")
+
+      on_exit(fn ->
+        MockAdapter.clear()
+
+        if original_app,
+          do: Application.put_env(:cympho, :openclaw_api_key, original_app),
+          else: Application.delete_env(:cympho, :openclaw_api_key)
+
+        if original_host,
+          do: System.put_env("CURSOR_API_KEY", original_host),
+          else: System.delete_env("CURSOR_API_KEY")
+      end)
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: {:http_error, 401, "app-fallback-sentinel-0123 / host-cursor-sentinel-0123"}}
+      ])
+
+      {stored, log, comments} = run_failing_mock_session(issue, agent_id)
+      assert stored =~ "[REDACTED]"
+
+      for value <- ["app-fallback-sentinel", "host-cursor-sentinel"] do
+        refute log =~ value
+        refute stored =~ value
+        refute Enum.any?(comments, &(&1.body =~ value))
+      end
+    end
+
+    test "redacts Secrets-store values from no-work retry comments", %{
+      company: company,
+      agent_id: agent_id,
+      issue: issue
+    } do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+      secret = "plain-parse-sentinel-value"
+      put_company_secret(company, "DEPLOY_VALUE", secret)
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: {:parse_error, "garbage #{secret}"}},
+        %{error: {:parse_error, "garbage #{secret}"}}
+      ])
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
+      with_mocks([
+        {Cympho.Adapters, [], [resolve: fn %{config: config} -> {:ok, MockAdapter, config} end]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
+        assert :ok = wait_until_stopped(pid)
+      end
+
+      comments = Comments.list_comments(issue.id)
+      assert Enum.any?(comments, &(&1.body =~ "retrying once with the same runtime"))
+      assert Enum.any?(comments, &(&1.body =~ "released for redispatch"))
+      assert Enum.any?(comments, &(&1.body =~ "[REDACTED]"))
+      refute Enum.any?(comments, &(&1.body =~ secret))
+    end
+
+    test "redacts Secrets-store values from pending tool traces", %{
+      company: company,
+      agent_id: agent_id,
+      issue: issue
+    } do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+      secret = "plain-trace-sentinel-value"
+      put_company_secret(company, "DEPLOY_VALUE", secret)
+      MockAdapter.script(agent_id, issue.id, [:silent])
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
+      with_mocks([
+        {Cympho.Adapters, [], [resolve: fn %{config: config} -> {:ok, MockAdapter, config} end]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
+
+        session_id =
+          wait_until(fn ->
+            assert sid = :sys.get_state(pid).session_id
+            sid
+          end)
+
+        send(
+          pid,
+          {:tool_call_detected, session_id,
+           %{"id" => "toolu_pending", "name" => "Read", "input" => %{"path" => "lib/foo.ex"}}}
+        )
+
+        assert map_size(:sys.get_state(pid).tool_traces) == 1
+        send(pid, {:turn_ended_with_error, session_id, {:http_error, 500, "echoed #{secret}"}})
+        assert :ok = finish_synthetic_worker(session_id)
+        assert :ok = wait_until_stopped(pid)
+      end
+
+      assert [trace] = Cympho.ToolCallTraces.list_tool_call_traces(issue_id: issue.id)
+      assert trace.status == "error"
+      assert trace.tool_result =~ "[REDACTED]"
+      refute trace.tool_result =~ secret
+    end
+
     test "retries no-output failures once with the same runtime", %{
       agent_id: agent_id,
       issue: issue
@@ -2207,6 +2442,46 @@ defmodule Cympho.OrchestratorTest do
     end
   end
 
+  describe "unavailable adapter error path" do
+    test "comments with the reason, counts toward the circuit breaker and releases the issue",
+         %{agent_id: agent_id, issue: issue} do
+      test_pid = self()
+      reason = "bubblewrap (bwrap) was not found; Codex runs require OS-level containment"
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:error, {:no_adapter_available, [codex: reason]}} end
+         ]},
+        {Cympho.HeartbeatEngine, [:passthrough],
+         [
+           create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
+           get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
+           fail_run: fn _run, _reason, _usage -> :ok end
+         ]},
+        {Cympho.Comments, [],
+         [
+           create_comment: fn attrs ->
+             send(test_pid, {:comment, attrs})
+             {:ok, %{}}
+           end
+         ]}
+      ]) do
+        {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        ref = Process.monitor(pid)
+        assert_receive {:DOWN, ^ref, :process, ^pid, _}, 2_000
+
+        assert_received {:comment, %{body: body}}
+        assert body =~ reason
+
+        # Handled like :no_adapter_available: the issue is released for retry
+        # rather than blocked, and the failure feeds the circuit breaker.
+        assert Issues.get_issue!(issue.id).status == :todo
+        assert Repo.get!(Agent, agent_id).adapter_failure_count >= 1
+      end
+    end
+  end
+
   describe "config_invalid error path" do
     test "comments with validation errors and releases issue for retry", %{
       agent_id: agent_id,
@@ -2846,6 +3121,36 @@ defmodule Cympho.OrchestratorTest do
     end)
 
     session_id
+  end
+
+  # Runs one scripted MockAdapter failure and returns the persisted run
+  # diagnostics, the captured log and the issue's comments.
+  defp run_failing_mock_session(issue, agent_id) do
+    {:ok, checked_out} = Issues.checkout_issue(issue, agent_id)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        with_mocks([
+          {Cympho.Adapters, [], [resolve: fn %{config: config} -> {:ok, MockAdapter, config} end]}
+        ]) do
+          assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent_id)
+          wait_until_stopped(pid)
+        end
+      end)
+
+    assert {:ok, run} = wait_for_latest_run_status(issue.id, "failed")
+    stored = "#{run.log_excerpt} #{inspect(run.run_metadata)}"
+    {stored, log, Comments.list_comments(issue.id)}
+  end
+
+  defp put_company_secret(company, key, value) do
+    {:ok, _secret} =
+      Cympho.Secrets.create_secret(%{
+        company_id: company.id,
+        scope: "company",
+        key: key,
+        value: value
+      })
   end
 
   defp finish_synthetic_worker(session_id) do

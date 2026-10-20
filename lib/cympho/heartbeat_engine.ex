@@ -16,7 +16,7 @@ defmodule Cympho.HeartbeatEngine do
   alias Cympho.Repo
   alias Cympho.Adapters.Error, as: AdapterError
   alias Cympho.Budgets.Budget
-  alias Cympho.Finances.TokenUsage
+  alias Cympho.Finances.{Pricing, TokenUsage}
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Recovery.Fingerprint
   alias Cympho.{Agents, Finances, Issues, Workspace, Workspaces}
@@ -80,7 +80,10 @@ defmodule Cympho.HeartbeatEngine do
   @spec complete_run(Run.t(), map()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
   def complete_run(%Run{status: "running"} = run, result_attrs) do
     run
-    |> finalize_terminal_run(["running"], &Run.complete_changeset(&1, result_attrs))
+    |> finalize_terminal_run(
+      ["running"],
+      &Run.complete_changeset(&1, settle_usage(result_attrs, &1))
+    )
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_completed")
@@ -112,9 +115,11 @@ defmodule Cympho.HeartbeatEngine do
           detail: current.log_excerpt
         )
         |> Map.take([:error_reason, :log_excerpt, :run_metadata])
-        |> Map.merge(Map.take(usage_attrs, [:input_tokens, :output_tokens, :cost_usd]))
+        |> Map.merge(
+          Map.take(usage_attrs, [:input_tokens, :output_tokens, :cost_usd, :cached_input_tokens])
+        )
 
-      Run.fail_changeset(current, attrs)
+      Run.fail_changeset(current, settle_usage(attrs, current))
     end)
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
@@ -125,6 +130,76 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   def fail_run(%Run{status: status}, _, _), do: {:error, {:invalid_status, status}}
+
+  @doc """
+  Settles usage reported after a run already reached a terminal state.
+
+  An owner cancel, watchdog failure, or racing completion can finalize a run
+  before its turn reports. The run keeps its terminal status. Reports are
+  cumulative per run, so each token category only ever rises, and the cost is
+  settled again from the merged totals: a later report can correct a priced
+  estimate (cache details, a reported cost) in either direction, while a
+  repeated or older report changes nothing. The ledger row is settled to match.
+  """
+  @spec record_late_usage(Run.t(), map()) :: {:ok, Run.t()} | {:error, term()}
+  def record_late_usage(%Run{} = run, usage_attrs) do
+    if usage_reported?(usage_attrs) do
+      run
+      |> finalize_run_only(@terminal_run_statuses, fn current ->
+        settled = current |> merge_reported_usage(usage_attrs) |> settle_usage(current)
+
+        change(
+          current,
+          Map.take(settled, [:input_tokens, :output_tokens, :cost_usd, :run_metadata])
+        )
+      end)
+      |> tap_ok(&record_usage_event/1)
+    else
+      {:ok, run}
+    end
+  end
+
+  # A report may cover only some categories, so each one is merged with what
+  # the run already holds before pricing: a later report that omits input or
+  # cache reads neither drops them nor prices them at zero. A cost the runtime
+  # reported is authoritative over a priced estimate, and reported costs are
+  # cumulative, so the highest one stands.
+  defp merge_reported_usage(%Run{} = current, attrs) do
+    accounting = (current.run_metadata || %{})["accounting"] || %{}
+
+    previous_cost =
+      if accounting["cost_source"] == "reported", do: current.cost_usd
+
+    %{
+      input_tokens: max(current.input_tokens || 0, attrs[:input_tokens] || 0),
+      output_tokens: max(current.output_tokens || 0, attrs[:output_tokens] || 0),
+      cached_input_tokens:
+        max(accounting["cached_input_tokens"] || 0, attrs[:cached_input_tokens] || 0),
+      cost_usd:
+        case {previous_cost, attrs[:cost_usd]} do
+          {nil, reported} -> reported
+          {previous, nil} -> previous
+          {previous, reported} -> Decimal.max(previous, reported)
+        end
+    }
+  end
+
+  defp usage_reported?(attrs) do
+    (attrs[:input_tokens] || 0) > 0 or (attrs[:output_tokens] || 0) > 0 or
+      (attrs[:cached_input_tokens] || 0) > 0 or match?(%Decimal{}, attrs[:cost_usd])
+  end
+
+  # Terminal usage writes settle the cost against the run's pricing snapshot,
+  # so cost_usd is always a Decimal and the run records how it was determined.
+  defp settle_usage(attrs, %Run{} = current) do
+    metadata = Map.get(attrs, :run_metadata) || current.run_metadata || %{}
+    {cost, accounting} = Pricing.cost(attrs, metadata["pricing"])
+
+    attrs
+    |> Map.delete(:cached_input_tokens)
+    |> Map.put(:cost_usd, cost)
+    |> Map.put(:run_metadata, Map.put(metadata, "accounting", accounting))
+  end
 
   @doc """
   Records a heartbeat tick on an active run for liveness tracking.
@@ -207,6 +282,7 @@ defmodule Cympho.HeartbeatEngine do
 
     Run
     |> where([r], r.issue_id == ^issue_id and r.status in ["pending", "queued", "running"])
+    |> exclude_acting_run(Process.get(:cympho_agent_actions_acting_run_id))
     |> order_by([r], asc: r.id)
     |> Repo.all()
     |> Enum.reduce({:ok, 0}, fn
@@ -219,6 +295,14 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   def cancel_active_runs_for_issue(_issue_id, _reason), do: {:ok, 0}
+
+  # An action batch that closes its own issue must not cancel the run it is
+  # acting for: the orchestrator finalizes that run with the turn's usage
+  # right after the batch, and a cancelled run would drop the spend.
+  defp exclude_acting_run(query, run_id) when is_binary(run_id),
+    do: where(query, [r], r.id != ^run_id)
+
+  defp exclude_acting_run(query, _run_id), do: query
 
   @doc false
   def flush_deferred_terminal_effects do
@@ -1311,7 +1395,12 @@ defmodule Cympho.HeartbeatEngine do
         where: r.status in ^@terminal_run_statuses,
         where: not is_nil(r.company_id) or not is_nil(issue.company_id),
         where: r.input_tokens > 0 or r.output_tokens > 0 or r.cost_usd > 0,
-        where: is_nil(usage.id),
+        # Late usage can change a run's totals after its ledger row exists. The
+        # ledger keeps full precision; the run's cost column keeps 6 places.
+        where:
+          is_nil(usage.id) or usage.input_tokens < r.input_tokens or
+            usage.output_tokens < r.output_tokens or
+            fragment("round(?, 6)", usage.cost_usd) != r.cost_usd,
         order_by: [asc: r.completed_at, asc: r.id]
 
     if is_binary(company_id) do
@@ -1447,7 +1536,9 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   defp run_usage_attrs(%Run{} = run) do
-    case Repo.get(Issue, run.issue_id) do
+    issue = if is_binary(run.issue_id), do: Repo.get(Issue, run.issue_id)
+
+    case issue do
       %Issue{} = issue ->
         company_id = issue.company_id || run.company_id
 
@@ -1480,11 +1571,15 @@ defmodule Cympho.HeartbeatEngine do
       input_tokens: run.input_tokens || 0,
       output_tokens: run.output_tokens || 0,
       cost_usd: run.cost_usd || Decimal.new("0"),
-      metadata: %{
-        "heartbeat_run_id" => run.id,
-        "run_status" => run.status,
-        "invocation_source" => run.invocation_source
-      }
+      metadata:
+        Map.merge(
+          %{
+            "heartbeat_run_id" => run.id,
+            "run_status" => run.status,
+            "invocation_source" => run.invocation_source
+          },
+          Map.take(run.run_metadata || %{}, ["accounting", "pricing"])
+        )
     }
   end
 

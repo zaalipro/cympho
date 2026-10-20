@@ -13,6 +13,8 @@ defmodule Cympho.Mcp.ToolCallTraceTest do
 
   use Cympho.DataCase, async: false
 
+  import Mock
+
   alias Cympho.Agents
   alias Cympho.Companies
   alias Cympho.Mcp.Server
@@ -90,10 +92,31 @@ defmodule Cympho.Mcp.ToolCallTraceTest do
     refute inspect(trace.tool_arguments) =~ "sk-live-not-this"
   end
 
-  test "a trace failure never breaks the tool call", %{agent: agent} do
-    # An agent with no company cannot produce a company-scoped trace; the call
-    # itself must still answer.
-    assert %{} = Server.call_tool("list_issues", %{}, %{agent | company_id: nil})
+  @tag :capture_log
+  test "a trace failure never breaks the tool call", %{company: company, agent: agent} do
+    with_mock Cympho.ToolCallTraces, [:passthrough],
+      create_tool_call_trace: fn _attrs -> raise "trace store unavailable" end do
+      assert %{issues: _issues} = Server.call_tool("list_issues", %{}, agent)
+    end
+
+    assert traces(company) == []
+  end
+
+  test "an agent with no company is refused instead of reading every tenant", %{
+    company: company,
+    agent: agent
+  } do
+    {:ok, _issue} =
+      Cympho.Issues.create_issue(%{
+        company_id: company.id,
+        title: "Tenant data that must not leak",
+        skip_auto_assign: true
+      })
+
+    result = Server.call_tool("list_issues", %{}, %{agent | company_id: nil})
+
+    assert %{error: "Agent is not assigned to a company"} = result
+    refute Map.has_key?(result, :issues)
   end
 
   test "traces stay scoped to the calling agent's company", %{company: company, agent: agent} do

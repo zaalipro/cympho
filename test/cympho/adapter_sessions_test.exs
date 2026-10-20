@@ -225,6 +225,48 @@ defmodule Cympho.AdapterSessionsTest do
     refute Process.alive?(request_pid)
   end
 
+  test "run_cancellable keeps a result that completed before the cancel was handled" do
+    session_id = make_ref()
+    parent = self()
+
+    worker =
+      spawn(fn ->
+        caller = self()
+
+        result =
+          AdapterSessions.run_cancellable(session_id, fn ->
+            send(parent, {:request_started, self()})
+
+            receive do
+              :finish ->
+                # The request queues the cancel ahead of its own result.
+                send(caller, {:cancel_session, session_id, :operator_stop})
+                {:ok, :billed}
+            end
+          end)
+
+        send(parent, {:request_result, result})
+      end)
+
+    assert_receive {:request_started, request_pid}, 1_000
+
+    # Hold the worker until both messages are queued, so it cannot handle the
+    # cancel before the request's result arrives.
+    true = :erlang.suspend_process(worker)
+    send(request_pid, :finish)
+
+    wait_until(fn ->
+      {:messages, queued} = Process.info(worker, :messages)
+      assert Enum.any?(queued, &match?({:cancel_session, ^session_id, _reason}, &1))
+      assert Enum.any?(queued, &match?({AdapterSessions, :cancellable_result, _pid, _result}, &1))
+    end)
+
+    true = :erlang.resume_process(worker)
+
+    assert_receive {:request_result, {:error, {:cancelled, :operator_stop}, {:ok, :billed}}},
+                   1_000
+  end
+
   test "controller death cancels registered blocking provider work and ends its worker" do
     session_id = make_ref()
     parent = self()

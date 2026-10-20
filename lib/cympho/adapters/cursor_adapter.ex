@@ -106,7 +106,7 @@ defmodule Cympho.Adapters.CursorAdapter do
       limit = OutputLimit.effective(opts, config)
       {shell, shell_args} = OutputLimit.wrapped_command(cursor_bin, args, limit)
 
-      env = config |> build_env() |> port_env()
+      env = config |> build_env() |> Cympho.Adapters.CodexAdapter.clean_port_env()
 
       port_opts =
         [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, shell_args}, {:env, env}] ++
@@ -126,7 +126,9 @@ defmodule Cympho.Adapters.CursorAdapter do
 
           case collect_output(port, "", timeout, session_id, recipient_pid, limit) do
             {:ok, raw} ->
-              case Cympho.Adapters.ProviderFailure.detect(raw) do
+              secrets = Cympho.Secrets.Redaction.runtime_secrets(opts[:runtime_context])
+
+              case Cympho.Adapters.ProviderFailure.detect(raw, secrets) do
                 :ok -> parse_cursor_output(raw)
                 {:error, _} = err -> err
               end
@@ -342,9 +344,18 @@ defmodule Cympho.Adapters.CursorAdapter do
     end
   end
 
+  # Port `{:env, ...}` only extends the BEAM environment, so clean_port_env/1
+  # unsets everything else. Only these host variables (plus TERM and the run's
+  # runtime env) reach the CLI; CURSOR_API_KEY is Cursor's own credential.
   defp build_env(config) do
     runtime_env = config[:env] || config["env"] || %{}
-    [{"TERM", "dumb"} | normalize_env(runtime_env)]
+
+    host_env =
+      ["HOME", "PATH", "USER", "LOGNAME", "CURSOR_API_KEY"]
+      |> Enum.map(fn key -> {key, System.get_env(key)} end)
+      |> Enum.reject(fn {_, val} -> is_nil(val) end)
+
+    host_env ++ [{"TERM", "dumb"} | normalize_env(runtime_env)]
   end
 
   defp normalize_env(env) when is_map(env) do
@@ -353,18 +364,9 @@ defmodule Cympho.Adapters.CursorAdapter do
 
   defp normalize_env(_env), do: []
 
-  defp port_env(env) do
-    Enum.map(env, fn {key, value} ->
-      {env_charlist(key), env_charlist(value)}
-    end)
-  end
-
   defp env_string(value) when is_binary(value), do: value
   defp env_string(value) when is_list(value), do: List.to_string(value)
   defp env_string(value), do: to_string(value)
-
-  defp env_charlist(value) when is_list(value), do: value
-  defp env_charlist(value), do: value |> env_string() |> String.to_charlist()
 
   @impl true
   def health_check(config) do
@@ -474,6 +476,24 @@ defmodule Cympho.Adapters.CursorAdapter do
   @impl true
   def available? do
     available?(%{})
+  end
+
+  # Mirrors resolve_cursor_path/1, so the reason matches why available?/1 failed.
+  @impl true
+  def unavailable_reason(config) do
+    case configured_cursor_command(config) do
+      :disabled ->
+        "Cursor is disabled (cursor_command is set to :disabled)"
+
+      nil ->
+        "Cursor CLI not found in PATH (tried agent, cursor-agent, cursor)"
+
+      "/" <> _ = path ->
+        "Cursor executable #{inspect(path)} does not exist"
+
+      command ->
+        "Cursor command #{inspect(command)} not found in PATH"
+    end
   end
 
   @impl true

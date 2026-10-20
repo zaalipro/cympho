@@ -68,8 +68,15 @@ mise exec -- mix setup
 
 ```bash
 export LLMOTIONS_API_KEY="..."
-mise exec -- mix cympho.llmotions_smoke --yes
+mise exec -- mix cympho.llmotions_smoke --billing flat_rate --yes
 ```
+
+`--billing` is required: `flat_rate` for a subscription or proxy plan, or
+`INPUT,OUTPUT[,CACHED_INPUT]` USD per million tokens (for example
+`--billing 0.10,0.40`). Without it the task stops with
+`:llmotions_billing_required`; see
+[USD Hard Stops & Runtime Pricing](OPERATIONS.md#10-usd-hard-stops--runtime-pricing).
+The commands below use `flat_rate`.
 
 The task creates a timestamped company, stores `LLMOTIONS_API_KEY` as an
 encrypted company-scoped secret, configures CEO/CTO as LLMotions chat agents,
@@ -82,15 +89,15 @@ By default repo-capable agents run against the current directory. Override or
 disable that behavior when needed:
 
 ```bash
-mise exec -- mix cympho.llmotions_smoke --repo-cwd /path/to/repo --yes
-mise exec -- mix cympho.llmotions_smoke --no-workspace --yes
+mise exec -- mix cympho.llmotions_smoke --repo-cwd /path/to/repo --billing flat_rate --yes
+mise exec -- mix cympho.llmotions_smoke --no-workspace --billing flat_rate --yes
 ```
 
 Use alternate executive models for comparison:
 
 ```bash
-mise exec -- mix cympho.llmotions_smoke --model gemini-3.5-flash-low --yes
-mise exec -- mix cympho.llmotions_smoke --model gemini-3.5-flash --yes
+mise exec -- mix cympho.llmotions_smoke --model gemini-3.5-flash-low --billing flat_rate --yes
+mise exec -- mix cympho.llmotions_smoke --model gemini-3.5-flash --billing flat_rate --yes
 ```
 
 3. Start Cympho in normal UI mode if you want to inspect before dispatch:

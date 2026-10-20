@@ -1,6 +1,8 @@
 defmodule Cympho.Adapters.HealthCheckerTest do
   use Cympho.DataCase, async: false
 
+  import Mock
+
   alias Cympho.Agents
   alias Cympho.Adapters.HealthChecker
   alias Cympho.Companies
@@ -237,6 +239,39 @@ defmodule Cympho.Adapters.HealthCheckerTest do
     end
   end
 
+  describe "unavailable adapters" do
+    test "report the missing prerequisite instead of checking a substitute adapter" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Health Unavailable Corp",
+          slug: "health-unavailable-#{System.unique_integer([:positive])}"
+        })
+
+      # OpenClaw has no endpoint, so it is unavailable. The default Claude Code
+      # adapter must not be health-checked on its behalf.
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Gateway Agent Without Endpoint",
+          role: :engineer,
+          adapter: :openclaw,
+          status: :idle,
+          company_id: company.id,
+          config: %{}
+        })
+
+      pid = Process.whereis(HealthChecker)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = HealthChecker.check_agent_now(agent.id)
+          :sys.get_state(pid)
+        end)
+
+      assert log =~ "Adapter unavailable: endpoint is required"
+      assert {:ok, :unavailable} = HealthChecker.get_health_status(agent.id)
+    end
+  end
+
   test "manual checks retain health status and use secret-backed runtime config" do
     {:ok, company} =
       Companies.create_company(%{
@@ -292,5 +327,105 @@ defmodule Cympho.Adapters.HealthCheckerTest do
     after
       HealthChecker.unsubscribe()
     end
+  end
+
+  test "scheduled checks log Agrenting failures without the resolved API key" do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Health Agrenting Corp",
+        slug: "health-agrenting-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Agrenting Health Agent",
+        role: :engineer,
+        adapter: :agrenting,
+        status: :idle,
+        company_id: company.id,
+        config: %{
+          "agent_did" => "did:agrenting:example",
+          "capability" => "code",
+          "max_price" => "10"
+        }
+      })
+
+    api_key = "agrenting-sentinel-key-0123"
+
+    {:ok, _secret} =
+      Secrets.create_secret(%{
+        company_id: company.id,
+        scope: "company",
+        key: "AGRENTING_API_KEY",
+        value: api_key,
+        description: "Agrenting health check credential"
+      })
+
+    pid = Process.whereis(HealthChecker)
+
+    with_mock Cympho.Agrenting.Client, [:passthrough],
+      list_agents: fn config, _params ->
+        {:error, {:http_error, 401, "invalid key #{config["api_key"]}"}}
+      end do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = HealthChecker.check_agent_now(agent.id)
+          :sys.get_state(pid)
+        end)
+
+      assert log =~ "Agrenting check failed"
+      assert log =~ "[REDACTED]"
+      refute log =~ api_key
+    end
+  end
+
+  test "scheduled checks log HTTP transport failures without the sent header value" do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Health HTTP Corp",
+        slug: "health-http-#{System.unique_integer([:positive])}"
+      })
+
+    header_value = "http-header-sentinel-0123\n"
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "HTTP Health Agent",
+        role: :engineer,
+        adapter: :http,
+        status: :idle,
+        company_id: company.id,
+        config: %{"url" => "https://example.com", "headers" => %{"x-api-key" => header_value}}
+      })
+
+    error = invalid_header_error("x-api-key", header_value)
+    pid = Process.whereis(HealthChecker)
+
+    with_mock Finch, [:passthrough],
+      stream_while: fn _request, _name, acc, _fun, _opts -> {:error, error, acc} end do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = HealthChecker.check_agent_now(agent.id)
+          :sys.get_state(pid)
+        end)
+
+      assert log =~ "Request failed"
+      assert log =~ "[REDACTED]"
+      refute log =~ "http-header-sentinel"
+    end
+  end
+
+  # A real Mint error for a header value with a newline. It carries the value.
+  defp invalid_header_error(name, value) do
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false])
+    {:ok, port} = :inet.port(listen)
+
+    {:error, error, _acc} =
+      Finch.build(:get, "http://127.0.0.1:#{port}/", [{name, value}])
+      |> Finch.stream_while(Cympho.Finch, nil, fn _event, acc -> {:cont, acc} end)
+
+    :gen_tcp.close(listen)
+    assert inspect(error) =~ value |> String.trim() |> String.slice(0, 10)
+    error
   end
 end

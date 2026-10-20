@@ -155,8 +155,17 @@ defmodule Cympho.Adapters.ProcessAdapter do
     args = config[:args] || config["args"] || []
     model = config[:model] || config["model"]
 
-    args ++ model_args(config, model) ++ prompt_args(config, prompt)
+    codex_json_args(config, args) ++ model_args(config, model) ++ prompt_args(config, prompt)
   end
+
+  # Hires persisted before the codex preset gained `--json` still run in JSON
+  # mode: only its events carry the turn's token usage.
+  defp codex_json_args(config, args) do
+    if codex_preset?(config) and "--json" not in args, do: args ++ ["--json"], else: args
+  end
+
+  defp codex_preset?(config),
+    do: (config[:process_preset] || config["process_preset"]) == "codex"
 
   defp model_args(_config, model) when model in [nil, ""], do: []
 
@@ -286,7 +295,9 @@ defmodule Cympho.Adapters.ProcessAdapter do
                      recipient_pid,
                      timeout,
                      <<>>,
-                     limit
+                     limit,
+                     config,
+                     Cympho.Secrets.Redaction.runtime_secrets(runtime_opts[:runtime_context])
                    )
                  end
                ) do
@@ -386,7 +397,17 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp wait_for_process(port, monitor, session_id, recipient_pid, timeout, acc, limit)
+  defp wait_for_process(
+         port,
+         monitor,
+         session_id,
+         recipient_pid,
+         timeout,
+         acc,
+         limit,
+         config,
+         secrets
+       )
        when is_integer(timeout) do
     wait_for_process(
       port,
@@ -395,7 +416,9 @@ defmodule Cympho.Adapters.ProcessAdapter do
       recipient_pid,
       RunDeadline.new(timeout),
       acc,
-      limit
+      limit,
+      config,
+      secrets
     )
   end
 
@@ -406,16 +429,24 @@ defmodule Cympho.Adapters.ProcessAdapter do
          recipient_pid,
          %RunDeadline{} = deadline,
          acc,
-         limit
+         limit,
+         config,
+         secrets
        ) do
     receive do
       {^port, {:data, data}} when byte_size(acc) + byte_size(data) > limit ->
         close_port(port, monitor)
 
+        # The relay stops at limit + 1 bytes, so acc <> data stays bounded; this
+        # chunk may complete the usage event.
         send(
           recipient_pid,
-          {:turn_ended_with_error, session_id,
-           {:output_limit_exceeded, limit, OutputLimit.tail(acc, data)}}
+          turn_error(
+            session_id,
+            {:output_limit_exceeded, limit, OutputLimit.tail(acc, data)},
+            acc <> data,
+            config
+          )
         )
 
       {^port, {:data, data}} ->
@@ -426,33 +457,52 @@ defmodule Cympho.Adapters.ProcessAdapter do
           recipient_pid,
           RunDeadline.observe(deadline, data, session_id, recipient_pid),
           acc <> data,
-          limit
+          limit,
+          config,
+          secrets
         )
 
       {:EXIT, ^port, _reason} ->
-        wait_for_process(port, monitor, session_id, recipient_pid, deadline, acc, limit)
+        wait_for_process(
+          port,
+          monitor,
+          session_id,
+          recipient_pid,
+          deadline,
+          acc,
+          limit,
+          config,
+          secrets
+        )
 
       {^port, {:exit_status, 0}} ->
         Process.demonitor(monitor, [:flush])
         output = normalize_output_utf8(acc)
 
-        case Cympho.Adapters.ProviderFailure.detect(output) do
+        case Cympho.Adapters.ProviderFailure.detect(output, secrets) do
           :ok ->
-            result = parse_output(output)
-            send(recipient_pid, {:turn_completed, session_id, result})
+            case parse_process_output(output, config) do
+              {:ok, result} ->
+                send(recipient_pid, {:turn_completed, session_id, result})
+
+              {:error, reason} ->
+                send(recipient_pid, turn_error(session_id, reason, output, config))
+            end
 
           {:error, reason} ->
-            send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+            send(recipient_pid, turn_error(session_id, reason, output, config))
         end
 
       {^port, {:exit_status, code}} ->
         Process.demonitor(monitor, [:flush])
         output = normalize_output_utf8(acc)
-        send(recipient_pid, {:turn_ended_with_error, session_id, {:exit_code, code, output}})
+        send(recipient_pid, turn_error(session_id, {:exit_code, code, output}, output, config))
 
       {:cancel_session, ^session_id, reason} ->
         close_port(port, monitor)
-        send(recipient_pid, {:turn_ended_with_error, session_id, {:cancelled, reason}})
+        # Output delivered before the cancel was handled may hold usage.
+        output = acc <> Cympho.Adapters.CodexAdapter.drain_port_data(port)
+        send(recipient_pid, turn_error(session_id, {:cancelled, reason}, output, config))
 
       {:DOWN, _ref, :process, ^recipient_pid, _reason} ->
         # Owner is gone; nobody to report to and no reason to keep the
@@ -464,15 +514,25 @@ defmodule Cympho.Adapters.ProcessAdapter do
         # otherwise hold its dispatch slot forever.
         case RunDeadline.expired(deadline) do
           nil ->
-            wait_for_process(port, monitor, session_id, recipient_pid, deadline, acc, limit)
+            wait_for_process(
+              port,
+              monitor,
+              session_id,
+              recipient_pid,
+              deadline,
+              acc,
+              limit,
+              config,
+              secrets
+            )
 
           :max_run ->
             close_port(port, monitor)
-            send(recipient_pid, {:turn_ended_with_error, session_id, :max_run_timeout})
+            send(recipient_pid, turn_error(session_id, :max_run_timeout, acc, config))
 
           :stall ->
             close_port(port, monitor)
-            send(recipient_pid, {:turn_ended_with_error, session_id, :timeout})
+            send(recipient_pid, turn_error(session_id, :timeout, acc, config))
         end
     end
   end
@@ -574,6 +634,40 @@ defmodule Cympho.Adapters.ProcessAdapter do
   defp drop_invalid_byte(<<_byte, rest::binary>>), do: rest
   defp drop_invalid_byte(_), do: <<>>
 
+  # The codex preset emits `codex exec --json` events; reuse the Codex
+  # adapter's final-message, error and usage normalization for them.
+  defp parse_process_output(output, config) do
+    if codex_preset?(config),
+      do: output |> Cympho.Adapters.CodexAdapter.parse_codex_output() |> explain_no_events(),
+      else: {:ok, parse_output(output)}
+  end
+
+  # An older codex-cli, or a wrapper that drops `--json` or its stdout, prints
+  # text or nothing that decodes to no event. 0.44.0+ is known good, not a
+  # verified minimum.
+  defp explain_no_events({:error, {:parse_error, raw}} = error) do
+    if raw |> String.split("\n") |> Enum.any?(&match?({:ok, _}, Jason.decode(&1))),
+      do: error,
+      else: no_events_error()
+  end
+
+  defp explain_no_events({:error, :no_output}), do: no_events_error()
+  defp explain_no_events(result), do: result
+
+  defp no_events_error do
+    {:error,
+     {:parse_error,
+      "codex exec --json produced no JSONL events; " <>
+        "use codex-cli 0.44.0+ and make wrappers forward --json"}}
+  end
+
+  # Codex-preset failures keep the usage Codex reported before failing.
+  defp turn_error(session_id, reason, output, config) do
+    if codex_preset?(config),
+      do: Cympho.Adapters.CodexAdapter.turn_error(session_id, reason, output),
+      else: {:turn_ended_with_error, session_id, reason}
+  end
+
   defp parse_output(output) do
     trimmed = String.trim(output)
 
@@ -654,7 +748,8 @@ defmodule Cympho.Adapters.ProcessAdapter do
     try do
       case System.cmd(command, health_check_args,
              stderr_to_stdout: true,
-             cd: config[:cwd] || config["cwd"]
+             cd: config[:cwd] || config["cwd"],
+             env: health_check_env()
            ) do
         {_, 0} ->
           %{
@@ -679,6 +774,15 @@ defmodule Cympho.Adapters.ProcessAdapter do
           message: "Command available (no health check)",
           checked_at: DateTime.utc_now()
         }
+    end
+  end
+
+  # System.cmd's :env only extends the BEAM environment, so unset everything
+  # except the host whitelist that build_env/3 gives real runs.
+  @doc false
+  def health_check_env do
+    for {key, _value} <- System.get_env(), key not in ["HOME", "PATH", "USER", "LOGNAME"] do
+      {key, nil}
     end
   end
 
@@ -789,6 +893,9 @@ defmodule Cympho.Adapters.ProcessAdapter do
   def type, do: :process
 
   @impl true
+  def usage_reporting(config), do: if(codex_preset?(config), do: :tokens, else: :none)
+
+  @impl true
   def available? do
     # Process adapter is always available on Unix-like systems
     true
@@ -806,6 +913,14 @@ defmodule Cympho.Adapters.ProcessAdapter do
         {_, 0} -> true
         _ -> false
       end
+    end
+  end
+
+  @impl true
+  def unavailable_reason(config) do
+    case config[:command] || config["command"] do
+      command when command in [nil, ""] -> "command is required"
+      command -> "command #{inspect(command)} not found in PATH"
     end
   end
 

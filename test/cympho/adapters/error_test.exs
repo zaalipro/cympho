@@ -11,6 +11,26 @@ defmodule Cympho.Adapters.ErrorTest do
     assert error.message =~ "Codex could not start"
   end
 
+  test "explains why an unavailable adapter cannot run" do
+    reason = "bubblewrap binary not found; Codex runs require OS-level containment"
+    unavailable = {:no_adapter_available, [codex: reason]}
+
+    error = Error.normalize(unavailable, adapter: "codex")
+
+    assert error.category == :missing_binary
+    assert error.message == reason <> "."
+    assert Error.comment(unavailable, adapter: "codex") =~ reason
+  end
+
+  test "reports the validation reason when an adapter config is invalid" do
+    invalid = {:config_invalid, [process: "command is required"]}
+
+    error = Error.normalize(invalid, adapter: "process")
+
+    assert error.message == "command is required."
+    assert Error.comment(invalid, adapter: "process") =~ "command is required"
+  end
+
   test "classifies missing credentials" do
     error = Error.normalize("OPENAI_API_KEY not set", adapter: "codex")
 
@@ -109,6 +129,32 @@ defmodule Cympho.Adapters.ErrorTest do
     assert error.category == :nonzero_exit
     assert error.message =~ "status 7"
     assert error.detail == "provider failed"
+  end
+
+  test "redacts credential-shaped values from stored diagnostics" do
+    body =
+      "denied Authorization: Bearer hdr-sentinel-0123456789 x-api-key: xkey-sentinel-0123 " <>
+        "sk-ant-api03-SKSENTINEL0123456789 ?api_key=param-sentinel-0123&token=tok-sentinel-0123 " <>
+        ~s({"x-api-key":"json-sentinel-0123"})
+
+    attrs = Error.run_attrs({:http_error, 401, body}, %{}, adapter: "openclaw")
+    stored = inspect(attrs)
+
+    for sentinel <-
+          ~w(hdr-sentinel xkey-sentinel SKSENTINEL param-sentinel tok-sentinel json-sentinel) do
+      refute stored =~ sentinel
+    end
+
+    assert attrs.log_excerpt =~ "[REDACTED]"
+    assert attrs.run_metadata["adapter_error"]["category"] == "auth_failed"
+  end
+
+  test "redacts before truncating so a secret at the cut is not partially kept" do
+    reason = String.duplicate("x", 3_990) <> " sk-ant-api03-" <> String.duplicate("A", 40)
+    error = Error.normalize(reason, adapter: "codex")
+
+    refute error.raw =~ "sk-"
+    refute error.detail =~ "sk-"
   end
 
   test "serializes and rehydrates run metadata" do

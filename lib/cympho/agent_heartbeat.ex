@@ -16,7 +16,7 @@ defmodule Cympho.AgentHeartbeat do
   require Logger
 
   alias Cympho.AgentHeartbeat.Supervisor
-  alias Cympho.{Orchestrator, Issues, Agents, Activities, Skills, Companies}
+  alias Cympho.{Orchestrator, Issues, Agents, Activities, Skills, Companies, Runtime}
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Issues.Issue
   alias Cympho.Repo
@@ -385,6 +385,10 @@ defmodule Cympho.AgentHeartbeat do
   defp do_heartbeat_for_available_agent(state, agent) do
     agent_id = state.agent_id
     issue = fetch_next_todo_issue(agent)
+
+    # As at dispatch, a pricing refusal keeps the issue queued and assigned:
+    # no checkout, no run, no comment. Readiness reports the refusal.
+    issue = if issue && Runtime.pricing_refusal(issue, agent) == :ok, do: issue
 
     if issue do
       # Checkout the issue

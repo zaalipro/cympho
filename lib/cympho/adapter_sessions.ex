@@ -240,7 +240,15 @@ defmodule Cympho.AdapterSessions do
       {:cancel_session, ^session_id, reason} ->
         Process.exit(pid, :kill)
         flush_request_down(ref, pid)
-        {:error, {:cancelled, reason}}
+
+        # A request that finished before the cancel was handled may already
+        # be billed, so its result rides along for the caller's accounting.
+        receive do
+          {__MODULE__, :cancellable_result, ^pid, result} ->
+            {:error, {:cancelled, reason}, result}
+        after
+          0 -> {:error, {:cancelled, reason}}
+        end
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
         {:error, {:request_process_exit, reason}}

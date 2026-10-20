@@ -197,7 +197,8 @@ defmodule Cympho.RuntimeProfilesTest do
                  "workspace-write",
                  "--skip-git-repo-check",
                  "--color",
-                 "never"
+                 "never",
+                 "--json"
                ]
 
       assert RuntimeProfiles.get!("process-codex").config["timeout_sec"] == 1200

@@ -13,16 +13,37 @@ defmodule Cympho.Adapters.OutputLimit do
     |> Enum.min()
   end
 
+  # Only called once output passed the limit, so the relay cut the last line
+  # and, for longer output, the tail cut the first. A cut can split a secret
+  # that later redaction no longer recognises, so keep only whole lines.
   def tail(acc, data) do
     data_size = byte_size(data)
 
-    if data_size >= @tail_bytes do
-      data
-      |> binary_part(data_size - @tail_bytes, @tail_bytes)
-      |> :binary.copy()
-    else
-      retained = min(byte_size(acc), @tail_bytes - data_size)
-      binary_part(acc, byte_size(acc) - retained, retained) <> data
+    tail =
+      if data_size >= @tail_bytes do
+        data
+        |> binary_part(data_size - @tail_bytes, @tail_bytes)
+        |> :binary.copy()
+      else
+        retained = min(byte_size(acc), @tail_bytes - data_size)
+        binary_part(acc, byte_size(acc) - retained, retained) <> data
+      end
+
+    tail = drop_unfinished_line(tail)
+    if byte_size(acc) + data_size > @tail_bytes, do: drop_partial_line(tail), else: tail
+  end
+
+  defp drop_partial_line(tail) do
+    case :binary.split(tail, "\n") do
+      [_partial, rest] -> rest
+      [_partial] -> ""
+    end
+  end
+
+  defp drop_unfinished_line(tail) do
+    case :binary.matches(tail, "\n") do
+      [] -> ""
+      matches -> binary_part(tail, 0, elem(List.last(matches), 0) + 1)
     end
   end
 

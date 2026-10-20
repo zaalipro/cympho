@@ -3,6 +3,7 @@ defmodule Cympho.AgentRunnerTest do
 
   alias Cympho.AgentRunner
   alias Cympho.AgentRunner.Mock
+  alias Cympho.Secrets.Redaction
 
   @receive_timeout 5_000
 
@@ -594,7 +595,7 @@ defmodule Cympho.AgentRunnerTest do
                       {:output_limit_exceeded, 16_384, tail}},
                      @receive_timeout
 
-      assert byte_size(tail) == 8_192
+      assert byte_size(tail) <= 8_192
       assert tail =~ "tail-marker"
       refute tail =~ ~s({"result":")
       assert eventually(fn -> File.exists?(pid_file) end)
@@ -602,6 +603,208 @@ defmodule Cympho.AgentRunnerTest do
       os_pid = pid_file |> File.read!() |> String.trim()
       assert eventually(fn -> not os_process_alive?(os_pid) end, 60)
       assert eventually(fn -> not Cympho.AdapterSessions.registered?(session_id) end)
+    end
+
+    test "an output limit tail does not start partway through a secret" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-tail-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      command = Path.join(tmp_dir, "fake-claude")
+      secret = "plain-deploy-sentinel-" <> String.duplicate("Q", 178)
+      line = ~s({"result":") <> String.duplicate("x", 689) <> secret
+
+      File.write!(command, """
+      #!/bin/sh
+      printf '%s\\n' '#{line}'
+      while true; do
+        printf 'yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\\n'
+      done
+      """)
+
+      File.chmod!(command, 0o755)
+      issue = %{id: "tail-boundary", title: "Tail boundary", description: "Floods output"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", self(),
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 5_000,
+          max_run_ms: 5_000,
+          max_output_bytes: 9_000
+        )
+
+      assert_receive {:turn_ended_with_error, ^session_id, {:output_limit_exceeded, 9_000, tail}},
+                     @receive_timeout
+
+      refute tail =~ "QQQQ"
+      assert String.starts_with?(tail, "yyy")
+    end
+
+    test "redacts a run secret that spans the provider failure snippet cut" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-snippet-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      command = Path.join(tmp_dir, "fake-claude")
+      secret = "plain-deploy-sentinel-" <> String.duplicate("Q", 20)
+      output = "rate limit exceeded " <> String.duplicate("x", 470) <> " " <> secret <> " done"
+      File.write!(command, "#!/bin/sh\nprintf '%s' '#{output}'\nexit 0\n")
+      File.chmod!(command, 0o755)
+      issue = %{id: "snippet-boundary", title: "Snippet boundary", description: "Rate limited"}
+
+      context = %Cympho.RuntimeContext{
+        issue_id: issue.id,
+        agent_id: "agent-1",
+        adapter: :claude_code,
+        adapter_config: %{},
+        cwd: tmp_dir,
+        env: %{"DEPLOY_VALUE" => secret},
+        secret_keys: ["DEPLOY_VALUE"]
+      }
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", self(),
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          runtime_context: context,
+          stall_timeout: 5_000
+        )
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:provider_failure, :rate_limited, snippet}},
+                     @receive_timeout
+
+      refute snippet =~ "plain-dep"
+      assert snippet =~ "[REDACTE"
+    end
+
+    test "an output limit tail does not end partway through a secret" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-tail-end-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      command = Path.join(tmp_dir, "fake-claude")
+      secret = "plain-deploy-sentinel-" <> String.duplicate("Q", 60)
+      head = ~s({"result":") <> String.duplicate("x", 500)
+      # 512 + 470 bytes leave room for only part of the secret before the
+      # relay's limit + 1 cut at byte 1_001.
+      line = String.duplicate("y", 470) <> secret
+
+      File.write!(command, "#!/bin/sh\nprintf '%s\\n%s\\n' '#{head}' '#{line}'\nsleep 5\n")
+      File.chmod!(command, 0o755)
+      issue = %{id: "tail-end", title: "Tail end", description: "Floods output"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", self(),
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 5_000,
+          max_run_ms: 5_000,
+          max_output_bytes: 1_000
+        )
+
+      assert_receive {:turn_ended_with_error, ^session_id, {:output_limit_exceeded, 1_000, tail}},
+                     @receive_timeout
+
+      assert tail == head <> "\n"
+    end
+
+    test "provider failure text waits for a secret split across output chunks" do
+      {command, context, secret, gate} = split_secret_command("rate limit exceeded")
+      issue = %{id: "split-provider", title: "Split provider", description: "Rate limited"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", self(),
+          cwd: context.cwd,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          runtime_context: context,
+          stall_timeout: 5_000
+        )
+
+      release_after_first_progress(session_id, gate)
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:provider_failure, :rate_limited, snippet}},
+                     @receive_timeout
+
+      assert snippet =~ "[REDACTED]"
+      refute snippet =~ String.slice(secret, 0, 10)
+    end
+
+    test "parse errors wait for a secret split across output chunks" do
+      {command, context, secret, gate} = split_secret_command("shell preamble")
+      issue = %{id: "split-parse", title: "Split parse", description: "Preamble"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", self(),
+          cwd: context.cwd,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          runtime_context: context,
+          stall_timeout: 5_000
+        )
+
+      release_after_first_progress(session_id, gate)
+
+      assert_receive {:turn_ended_with_error, ^session_id, {:parse_error, _output} = reason},
+                     @receive_timeout
+
+      # The orchestrator redacts with the run's secrets; that only works on
+      # the whole value, so the reported output must hold it in full.
+      redacted =
+        inspect(Redaction.redact_term(reason, Redaction.runtime_secrets(context)))
+
+      assert redacted =~ "shell preamble [REDACTED]"
+      refute redacted =~ String.slice(secret, 0, 10)
+    end
+
+    test "an unfinished Thinking line is held, so a secret it splits is never cut" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-thinking-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      # The gate holds the rest back until the line's first write has been
+      # reported as its own chunk, ending partway through a secret; the
+      # result follows the line.
+      command = Path.join(tmp_dir, "fake-claude")
+      gate = Path.join(tmp_dir, "go")
+
+      File.write!(command, """
+      #!/bin/sh
+      printf '%s' 'Thinking about plain-chunk-'
+      while [ ! -e '#{gate}' ]; do sleep 0.01; done
+      printf '%s\\n%s\\n' 'sentinel-value-0123 done' '{"type":"result","result":"Done."}'
+      exit 0
+      """)
+
+      File.chmod!(command, 0o755)
+      issue = %{id: "split-thinking", title: "Split thinking", description: "Thinking"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", self(),
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 5_000
+        )
+
+      release_after_first_progress(session_id, gate)
+
+      assert_receive {:turn_completed, ^session_id, %{"result" => "Done."}}, @receive_timeout
+      refute_received {:turn_ended_with_error, ^session_id, _reason}
     end
 
     test "a clean exit with no output fails with :no_output instead of ending silently" do
@@ -669,6 +872,199 @@ defmodule Cympho.AgentRunnerTest do
       assert_receive {:turn_completed, ^session_id, result}, @receive_timeout
       assert resume_probe_text(result) == "chunked"
     end
+  end
+
+  describe "run/4 failures after a billed result" do
+    test "a stall after the result still reports its usage and cost" do
+      # Long enough that the result always lands before the stall deadline.
+      session_id =
+        run_billed_claude!(~s({"type":"result","result":"Done."}), stall_timeout: 3_000)
+
+      assert_receive {:turn_ended_with_error, ^session_id, :stall_timeout, billed}, 15_000
+      assert billed["total_cost_usd"] == 0.12
+      assert billed["usage"] == %{"input_tokens" => 1000, "output_tokens" => 200}
+    end
+
+    test "cancelling after the result still reports its usage and cost" do
+      session_id = run_billed_claude!(~s({"type":"result","result":"Done."}))
+
+      assert_receive {:turn_progress, ^session_id, _progress}, @receive_timeout
+      assert :ok = Cympho.AdapterSessions.cancel_and_wait(session_id, :operator_stop, 5_000)
+
+      assert_receive {:turn_ended_with_error, ^session_id, {:cancelled, :operator_stop}, billed},
+                     @receive_timeout
+
+      assert billed["total_cost_usd"] == 0.12
+    end
+
+    test "a cancel queued ahead of the result's output still reports its usage and cost" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-queued-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+      gate = Path.join(tmp_dir, "go")
+      started = Path.join(tmp_dir, "started")
+
+      billed =
+        Jason.encode!(%{
+          "type" => "result",
+          "result" => "Done.",
+          "usage" => %{"input_tokens" => 1000, "output_tokens" => 200},
+          "total_cost_usd" => 0.12
+        })
+
+      command = Path.join(tmp_dir, "fake-claude")
+
+      File.write!(command, """
+      #!/bin/sh
+      : > '#{started}'
+      while [ ! -e '#{gate}' ]; do sleep 0.01; done
+      printf '%s\\n' '#{billed}'
+      exec sleep 30
+      """)
+
+      File.chmod!(command, 0o755)
+
+      session_id =
+        AgentRunner.run(
+          %{id: "queued-result", title: "Queued", description: "Queued"},
+          "agent-1",
+          self(),
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 30_000,
+          max_run_ms: 60_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert eventually(fn -> File.exists?(started) end, 400)
+      assert {:ok, worker} = Cympho.AdapterSessions.owner(session_id)
+
+      # Hold the worker so the cancel is queued ahead of the result's output.
+      true = :erlang.suspend_process(worker)
+      assert :ok = Cympho.AdapterSessions.cancel(session_id, :operator_stop)
+      File.touch!(gate)
+
+      assert eventually(
+               fn ->
+                 {:messages, messages} = Process.info(worker, :messages)
+
+                 Enum.any?(messages, fn
+                   {port, {:data, data}} when is_port(port) -> data =~ "total_cost_usd"
+                   _message -> false
+                 end)
+               end,
+               400
+             )
+
+      true = :erlang.resume_process(worker)
+
+      assert_receive {:turn_ended_with_error, ^session_id, {:cancelled, :operator_stop}, result},
+                     @receive_timeout
+
+      assert result["total_cost_usd"] == 0.12
+      refute_received {:turn_completed, ^session_id, _result}
+    end
+
+    test "a rejected result still reports its usage and cost" do
+      session_id =
+        run_billed_claude!(
+          ~s({"type":"result","result":"I am unable to proceed because bash commands require user approval."}),
+          exit: true
+        )
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:runtime_failure, :permission_blocked, _snippet}, billed},
+                     @receive_timeout
+
+      assert billed["total_cost_usd"] == 0.12
+    end
+  end
+
+  # A stand-in Claude CLI that prints `result` with billed usage and cost, then
+  # exits when `exit: true`, else keeps running.
+  defp run_billed_claude!(result, opts \\ []) do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-agent-runner-billed-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+    billed =
+      result
+      |> Jason.decode!()
+      |> Map.merge(%{
+        "usage" => %{"input_tokens" => 1000, "output_tokens" => 200},
+        "total_cost_usd" => 0.12
+      })
+      |> Jason.encode!()
+
+    command = Path.join(tmp_dir, "fake-claude")
+    tail = if opts[:exit], do: "exit 0", else: "exec sleep 30"
+    File.write!(command, "#!/bin/sh\nprintf '%s\\n' '#{billed}'\n#{tail}\n")
+    File.chmod!(command, 0o755)
+
+    session_id =
+      AgentRunner.run(
+        %{id: "billed-command", title: "Billed", description: "Billed"},
+        "agent-1",
+        self(),
+        cwd: tmp_dir,
+        config: %{"command" => command},
+        env: %{"ANTHROPIC_API_KEY" => "test-key"},
+        stall_timeout: Keyword.get(opts, :stall_timeout, 30_000),
+        max_run_ms: 60_000
+      )
+
+    assert_receive {:session_started, ^session_id}, @receive_timeout
+    session_id
+  end
+
+  # Releases a fake CLI held on `gate` once the runner has reported the first
+  # chunk, so the CLI's next write arrives as its own chunk.
+  defp release_after_first_progress(session_id, gate) do
+    assert_receive {:turn_progress, ^session_id, _progress}, @receive_timeout
+    File.touch!(gate)
+  end
+
+  # A CLI that writes `prefix` plus the first half of a run secret, waits for
+  # `gate` so the port delivers it as its own chunk, then writes the rest of
+  # the line and keeps running.
+  defp split_secret_command(prefix) do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "cympho-agent-runner-split-#{System.unique_integer()}")
+
+    File.mkdir_p!(tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+    secret = "plain-chunk-sentinel-value-0123"
+    {first, rest} = String.split_at(secret, 12)
+    command = Path.join(tmp_dir, "fake-claude")
+    gate = Path.join(tmp_dir, "go")
+
+    File.write!(command, """
+    #!/bin/sh
+    printf '%s' '#{prefix} #{first}'
+    while [ ! -e '#{gate}' ]; do sleep 0.01; done
+    printf '%s\\n' '#{rest} done'
+    sleep 5
+    """)
+
+    File.chmod!(command, 0o755)
+
+    context = %Cympho.RuntimeContext{
+      issue_id: "split",
+      agent_id: "agent-1",
+      adapter: :claude_code,
+      adapter_config: %{},
+      cwd: tmp_dir,
+      env: %{"DEPLOY_VALUE" => secret},
+      secret_keys: ["DEPLOY_VALUE"]
+    }
+
+    {command, context, secret, gate}
   end
 
   defp write_resume_probe!(dir) do

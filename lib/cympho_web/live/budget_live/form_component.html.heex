@@ -197,7 +197,7 @@
       >
         <p class="max-w-2xl text-xs leading-5 text-text-tertiary">
           <%= if hard_stop? do %>
-            Saving creates a runtime BudgetPolicy that blocks new agent work when spend hits this cap.
+            Saving creates a runtime BudgetPolicy that blocks new agent work when spend hits this cap. Agents whose cost can't be priced stay queued until you set their Billing.
           <% else %>
             Saving creates a warn-only BudgetPolicy — agents keep spending after this cap.
           <% end %>
@@ -247,7 +247,7 @@
               <p class="text-sm font-590 text-text-primary">Save before launch</p>
               <p class="mt-1 text-xs leading-5 text-text-tertiary">
                 <%= if hard_stop? do %>
-                  Runtime preflight blocks new runs once this BudgetPolicy is exhausted.
+                  Runtime preflight blocks new runs once this BudgetPolicy is exhausted. An agent whose cost can't be priced stays queued until you set its Billing on the agent's Configuration tab.
                 <% else %>
                   Runtime tracks spend and warns — it will not stop agents without hard stop.
                 <% end %>

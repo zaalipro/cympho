@@ -244,7 +244,72 @@ When an operational anomaly or runaway agent is detected:
 
 ---
 
-## 10. Operations Guide Index
+## 10. USD Hard Stops & Runtime Pricing
+
+A hard stop (a budget with **Hard Stop** on) can only count spend that Cympho can price. While one applies to a run, Cympho refuses to start a runtime whose USD cost it cannot work out, so an unpriced runtime cannot bypass the limit.
+
+### 10.1 How a run's cost is known
+Every settled run records `run_metadata["accounting"]["cost_source"]`:
+
+| Value | Meaning | Counts against the stop |
+|---|---|---|
+| `reported` | The runtime printed its own USD cost (Claude Code). | Yes, at that cost. |
+| `priced` | The runtime reported tokens only (Codex, OpenAI chat). Cympho multiplied them by the USD-per-million-token rates set for the model the run used. | Yes. |
+| `flat_rate` | The agent is on subscription or proxy billing. Tokens are counted at zero cost. | No (cost is 0). |
+| `unknown` | The runtime reported no cost, and Cympho had no rates (or no tokens) to price it with. Recorded as 0. | No. |
+
+Under a hard stop, a runtime is only started if its cost can be `reported`, `priced`, or `flat_rate`:
+- **Reports a cost** (Claude Code): always allowed.
+- **Reports tokens only** (Codex, OpenAI chat, the `process-codex` preset): allowed with rates for the agent's model, or flat rate.
+- **Reports no usage** (Cursor, HTTP, OpenClaw, Agrenting, generic process commands): allowed only as flat rate.
+
+### 10.2 Setting pricing: the Billing fieldset
+Open the agent, then **Configuration** and **Billing**:
+- **Billing mode**: Metered (the default) or Flat rate.
+- **Input, output and cached input USD per million tokens**, for the agent's current model. Set a model first; with no model the fieldset says "Set a model first".
+
+Saving a built-in runtime profile keeps these settings. The `process-codex` and `codex-mini` profiles ship with the gpt-5.4-mini list price (input 0.75, cached input 0.075, output 4.50 USD per million tokens: OpenAI standard-tier list price, checked 2026-10-19). Regional (data-residency) processing adds 10%, so enter 1.1x these values if your key is billed that way. If the agent signs in with a ChatGPT subscription rather than an API key, the list price over-counts; switch that agent to Flat rate.
+
+Flat rate covers only the agent's own runtime profile. If a run falls back to another runtime profile, that runtime must be priceable itself: it reports a cost, or rates exist for its model, from the fallback profile or from the agent's own rates (the agent's win). Otherwise the fallback is skipped and the next one is tried.
+
+### 10.3 When an issue is refused
+A refused issue is not blocked. It stays in To Do, no run is created, no comment is posted, and the agent is not paused. The dispatcher retries it with a growing delay (30 seconds up to 10 minutes by default). The **Spending limit** item in the agent's and the issue's readiness list names the policy and what is missing. Once the agent can be priced (add rates or set Flat rate), or the policy is changed, the next retry starts the issue; there is nothing to unblock.
+
+### 10.4 LLMotions smoke setup needs a billing choice
+The LLMotions smoke company always runs under a USD hard stop, and Cympho does not know how your LLMotions plan bills. So `Cympho.Smoke.LLMotions.setup/1` and `mix cympho.llmotions_smoke` need an explicit choice, which they write to all four agents (CEO, CTO, engineer, QA):
+- **Flat rate** (a subscription or proxy plan): `billing: :flat_rate`, or `--billing flat_rate`.
+- **Metered**: `billing: %{"input_usd_per_mtok" => "0.10", "output_usd_per_mtok" => "0.40"}` (optionally `"cached_input_usd_per_mtok"`), or `--billing INPUT,OUTPUT[,CACHED_INPUT]`. Rates are USD per million tokens for the selected model.
+
+With neither, setup stops before it creates anything and returns `{:error, :llmotions_billing_required}`. Rates with a missing input or output value, or a negative or non-numeric one, return `{:error, {:invalid_llmotions_billing, ...}}`. To recover, run it again with the option:
+
+```bash
+LLMOTIONS_API_KEY=... mix cympho.llmotions_smoke --billing flat_rate --yes
+LLMOTIONS_API_KEY=... mix cympho.llmotions_smoke --billing 0.10,0.40 --yes
+```
+
+---
+
+## 11. Upgrade Notes
+
+### 11.1 Agents with no company can no longer use the API
+Agents whose `company_id` is empty now get **HTTP 403** ("Agent is not assigned to a company") on agent API routes and MCP, and their WebSocket connections are refused. They could never run issues, so only integrations that still use an old agent key notice. No migration ships, and `agents.company_id` stays nullable. To list them (read-only):
+
+```sql
+SELECT a.id, a.name, a.adapter, max(k.last_used_at) AS last_key_use
+FROM agents a
+LEFT JOIN agent_api_keys k ON k.agent_id = a.id
+WHERE a.company_id IS NULL
+GROUP BY a.id, a.name, a.adapter;
+```
+
+For each row, either run a one-off `UPDATE agents SET company_id = '<company uuid>' WHERE id = '<agent id>'` to put the agent in the right company, or delete the agent. Nothing in the product edits an agent's company.
+
+### 11.2 A metered Claude run killed before its cost envelope arrives records cost as unknown
+Claude Code reports a run's USD cost in a single result envelope, printed when the turn finishes. If Cympho kills a metered run before that envelope arrives (an operator stop, 5 minutes of silence by default, or the max run time), the run settles as `cost_source = unknown` at 0 USD, so a hard stop does not count it. An envelope that already arrived is kept: the run settles at the cost it reported, even if the process is killed or the turn fails afterwards. `claude_code` is therefore outside the supported Overnight v1 configuration; do not rely on a USD hard stop to bound Claude Code spend yet.
+
+---
+
+## 12. Operations Guide Index
 
 - [Quickstart Guide](QUICKSTART.md): Local development, seeding, and review mode.
 - [MCP API Reference](MCP_API_REFERENCE.md): Model Context Protocol server tools and schemas.

@@ -72,13 +72,28 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
         Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "openai_chat"})
 
         result =
-          Cympho.AdapterSessions.run_cancellable(session_id, fn ->
-            call_chat_completion(prompt, config)
+          session_id
+          |> Cympho.AdapterSessions.run_cancellable(fn ->
+            call_chat_completion(
+              prompt,
+              config,
+              Redaction.runtime_secrets(opts[:runtime_context])
+            )
           end)
+          |> keep_cancelled_usage()
 
         case result do
-          {:ok, result} -> send(recipient_pid, {:turn_completed, session_id, result})
-          {:error, reason} -> send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+          {:ok, result} ->
+            send(recipient_pid, {:turn_completed, session_id, result})
+
+          {:error, reason, usage} when map_size(usage) > 0 ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason, usage})
+
+          {:error, reason, _usage} ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+
+          {:error, reason} ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason})
         end
 
       {:error, {:prompt_input_budget_exceeded, details}} ->
@@ -113,13 +128,43 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
     end
   end
 
-  defp call_chat_completion(prompt, config) do
+  defp call_chat_completion(prompt, config, secrets) do
     with :ok <- validate_config(config),
          {:ok, payload} <- build_payload(prompt, config),
          {:ok, response} <-
-           request(normalize_chat_url(endpoint(config)), api_key(config), payload, config),
-         {:ok, result} <- parse_chat_response(response.body) do
-      {:ok, result}
+           request(
+             normalize_chat_url(endpoint(config)),
+             api_key(config),
+             payload,
+             config,
+             secrets
+           ) do
+      case parse_chat_response(response.body) do
+        {:ok, result} -> {:ok, result}
+        {:error, reason} -> {:error, reason, billed_usage(response.body)}
+      end
+    end
+  end
+
+  # A response that completed before the cancel was handled was still billed:
+  # its usage rides on the cancellation, and its content is not acted on.
+  defp keep_cancelled_usage({:error, {:cancelled, _} = reason, {:ok, result}}),
+    do: {:error, reason, Map.take(result, ["usage", "cost_usd"])}
+
+  defp keep_cancelled_usage({:error, {:cancelled, _} = reason, {:error, _failure, usage}}),
+    do: {:error, reason, usage}
+
+  defp keep_cancelled_usage({:error, {:cancelled, _} = reason, _result}), do: {:error, reason}
+  defp keep_cancelled_usage(result), do: result
+
+  # A response that decoded but carried no usable text was still billed.
+  defp billed_usage(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} when is_map(decoded) ->
+        %{} |> maybe_put_usage(decoded) |> maybe_put_response_cost(decoded)
+
+      _ ->
+        %{}
     end
   end
 
@@ -141,7 +186,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
     {:ok, payload}
   end
 
-  defp request(url, api_key, payload, config) do
+  defp request(url, api_key, payload, config, secrets) do
     with :ok <- HttpAdapter.validate_public_url(url) do
       timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
 
@@ -152,7 +197,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
       ]
 
       Finch.build(:post, url, headers, Jason.encode!(payload))
-      |> stream_to_acc(timeout, Enum.filter([api_key], &(is_binary(&1) and &1 != "")))
+      |> stream_to_acc(timeout, secrets ++ Enum.filter([api_key], &(is_binary(&1) and &1 != "")))
     end
   end
 
@@ -308,13 +353,15 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
 
   defp normalize_content(_), do: {:error, {:parse_error, "message content is not text"}}
 
+  # The run's secrets and credential patterns are redacted before the cut, so
+  # a value spanning it leaves no fragment later redaction cannot match.
   defp error_message(body, secrets) do
     case Jason.decode(body) do
       {:ok, %{"error" => %{"message" => message}}} when is_binary(message) ->
-        message |> Redaction.redact(secrets) |> String.slice(0, 1_000)
+        message |> Redaction.redact_term(secrets) |> String.slice(0, 1_000)
 
       {:ok, %{"message" => message}} when is_binary(message) ->
-        message |> Redaction.redact(secrets) |> String.slice(0, 1_000)
+        message |> Redaction.redact_term(secrets) |> String.slice(0, 1_000)
 
       {:ok, _decoded} ->
         "Provider returned an error response"
@@ -339,11 +386,17 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
         "output_tokens",
         token_count(usage["output_tokens"] || usage["completion_tokens"])
       )
+      |> maybe_put("cached_input_tokens", cached_prompt_tokens(usage))
 
     if map_size(normalized) == 0, do: result, else: Map.put(result, "usage", normalized)
   end
 
   defp maybe_put_usage(result, _decoded), do: result
+
+  defp cached_prompt_tokens(%{"prompt_tokens_details" => %{"cached_tokens" => cached}}),
+    do: token_count(cached)
+
+  defp cached_prompt_tokens(_usage), do: nil
 
   defp maybe_put_response_cost(result, decoded) do
     case normalize_cost(decoded["total_cost_usd"] || decoded["cost_usd"]) do
@@ -464,6 +517,9 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
 
   @impl true
   def type, do: :openai_chat
+
+  @impl true
+  def usage_reporting(_config), do: :tokens
 
   @impl true
   def available?, do: true

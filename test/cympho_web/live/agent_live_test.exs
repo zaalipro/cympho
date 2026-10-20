@@ -343,6 +343,35 @@ defmodule CymphoWeb.AgentLiveTest do
       assert render(view) =~ "Connect Agrenting"
       assert render(view) =~ "/settings/integrations"
     end
+
+    test "does not show an API key echoed in an Agrenting error message", %{
+      conn: conn,
+      current_company: company
+    } do
+      api_key = "agrenting-sentinel-key-0123"
+
+      assert {:ok, _status} =
+               Cympho.Agrenting.save_company_config(company.id, %{
+                 "api_key" => api_key,
+                 "base_url" => "https://agrenting.example.test"
+               })
+
+      body = Jason.encode!(%{"error" => %{"message" => "invalid key #{api_key}"}})
+
+      with_mock Finch, [:passthrough],
+        stream_while: fn _request, _name, initial, callback, _opts ->
+          {:cont, acc} = callback.({:status, 401}, initial)
+          {:cont, acc} = callback.({:data, body}, acc)
+          {:ok, acc}
+        end do
+        {:ok, view, _html} = live(conn, "/agents/remote")
+        html = render(view)
+
+        assert html =~ "Agrenting request failed"
+        assert html =~ "[REDACTED]"
+        refute html =~ api_key
+      end
+    end
   end
 
   describe "Show - Agent Details" do
@@ -698,6 +727,69 @@ defmodule CymphoWeb.AgentLiveTest do
 
   describe "Edit - Agent Configuration" do
     @describetag membership_role: "admin"
+
+    test "manual adapter test does not show an echoed API key", %{conn: conn} do
+      api_key = "agrenting-sentinel-key-0123"
+
+      {:ok, agent} =
+        create_agent(%{
+          name: "Agrenting Preflight Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :agrenting,
+          config: %{
+            "agent_did" => "did:agrenting:example",
+            "capability" => "code",
+            "max_price" => "10"
+          },
+          runtime_config: %{"env" => %{"AGRENTING_API_KEY" => api_key}}
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      with_mock Cympho.Agrenting.Client, [:passthrough],
+        list_agents: fn config, _params ->
+          {:error, {:http_error, 401, "invalid key #{config["api_key"]}"}}
+        end do
+        render_click(view, "test_adapter", %{})
+        message = view |> element("p", "Agrenting check failed") |> render()
+
+        assert message =~ "[REDACTED]"
+        refute message =~ api_key
+      end
+    end
+
+    test "manual adapter test does not show a sent HTTP header value", %{conn: conn} do
+      header_value = "http-header-sentinel-0123\n"
+
+      {:ok, agent} =
+        create_agent(%{
+          name: "HTTP Preflight Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :http,
+          config: %{"url" => "https://example.com", "headers" => %{"x-api-key" => header_value}}
+        })
+
+      {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false])
+      {:ok, port} = :inet.port(listen)
+
+      {:error, error, _acc} =
+        Finch.build(:get, "http://127.0.0.1:#{port}/", [{"x-api-key", header_value}])
+        |> Finch.stream_while(Cympho.Finch, nil, fn _event, acc -> {:cont, acc} end)
+
+      :gen_tcp.close(listen)
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      with_mock Finch, [:passthrough],
+        stream_while: fn _request, _name, acc, _fun, _opts -> {:error, error, acc} end do
+        render_click(view, "test_adapter", %{})
+        message = view |> element("p", "Request failed") |> render()
+
+        assert message =~ "[REDACTED]"
+        refute message =~ "http-header-sentinel"
+      end
+    end
 
     test "renders edit page with max concurrent jobs slider", %{conn: conn} do
       {:ok, agent} =
@@ -1493,6 +1585,50 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
       assert html =~ "Runtime command"
       assert html =~ "cz"
+    end
+
+    test "the Claude command shell probe does not hand server env to ~/.cld", %{conn: conn} do
+      # HOME stands in for the agents' writable HOME; ~/.cld is agent-writable.
+      home = Path.join(System.tmp_dir!(), "agent-live-home-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(home)
+      leak = Path.join(home, "leak")
+      File.write!(Path.join(home, ".cld"), "env >> '#{leak}'\n")
+
+      sentinel_var = "CYMPHO_AGENT_LIVE_SERVER_SECRET"
+      original_home = System.get_env("HOME")
+      System.put_env("HOME", home)
+      System.put_env(sentinel_var, "server-secret-#{System.unique_integer([:positive])}")
+
+      on_exit(fn ->
+        System.put_env("HOME", original_home)
+        System.delete_env(sentinel_var)
+        File.rm_rf!(home)
+      end)
+
+      # Off PATH, so readiness falls through to the `bash -lc` shell probe.
+      command = "agent-live-wrapper-#{System.unique_integer([:positive])}"
+
+      {:ok, agent} =
+        create_agent(%{
+          name: "Wrapper Runtime Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :claude_code,
+          config: %{"command" => command}
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+      assert html =~ "#{command} was not found in PATH or configured shell env."
+      assert File.exists?(leak)
+
+      # Only sentinel lines are compared, so a failure does not print the host env.
+      leaked =
+        leak
+        |> File.read!()
+        |> String.split("\n")
+        |> Enum.filter(&String.starts_with?(&1, sentinel_var <> "="))
+
+      assert leaked == []
     end
 
     test "shows Codex model selector and hides runtime command", %{conn: conn} do

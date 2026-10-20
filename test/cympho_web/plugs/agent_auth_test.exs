@@ -62,6 +62,42 @@ defmodule CymphoWeb.Plugs.AgentAuthTest do
     end
   end
 
+  describe "agents without a company" do
+    # company_id is nullable in the schema; a NULL-company agent would
+    # otherwise carry an unscoped identity into every company-filtered query.
+    setup %{agent: agent} do
+      {:ok, orphan} = agent |> Ecto.Changeset.change(company_id: nil) |> Repo.update()
+      %{orphan: orphan}
+    end
+
+    test "API key is rejected with 403", %{plain_text_key: plain_text_key} do
+      conn =
+        build_conn()
+        |> put_req_header("x-api-key", plain_text_key)
+        |> AgentAuth.call([])
+
+      assert conn.halted
+      assert conn.status == 403
+      assert conn.resp_body =~ "not assigned to a company"
+      refute Map.has_key?(conn.assigns, :current_agent)
+      assert {:error, :invalid_api_key} = Authentication.validate_api_key(plain_text_key)
+    end
+
+    test "run JWT is rejected with 403", %{conn: conn, orphan: orphan, company: company} do
+      run = insert_run(orphan, company)
+      token = token_for(orphan.id, run.id, company.id)
+
+      rejected =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> AgentAuth.call([])
+
+      assert rejected.halted
+      assert rejected.status == 403
+      refute Map.has_key?(rejected.assigns, :current_agent)
+    end
+  end
+
   describe "run JWT authentication" do
     test "assigns the exact active run bound to the agent and company", %{
       conn: conn,

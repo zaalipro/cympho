@@ -12,6 +12,7 @@ defmodule Cympho.Adapters.HttpAdapter do
 
   alias Cympho.Adapters.RuntimeTimeout
   alias Cympho.Notifications.WebhookURL
+  alias Cympho.Secrets.Redaction
 
   @default_timeout 30_000
   @max_timeout 3_600_000
@@ -47,6 +48,10 @@ defmodule Cympho.Adapters.HttpAdapter do
         send(recipient_pid, {:turn_completed, session_id, result})
 
       {:error, reason} ->
+        send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+
+      # Cancelled after the request finished; its result is not acted on.
+      {:error, reason, _result} ->
         send(recipient_pid, {:turn_ended_with_error, session_id, reason})
     end
   end
@@ -352,9 +357,14 @@ defmodule Cympho.Adapters.HttpAdapter do
         }
 
       {:error, {:request_error, reason}} ->
+        # A Mint error can carry a sent header value (an x-api-key with a
+        # stray newline, say), and this message is logged and shown.
+        header_values =
+          for {_key, value} <- headers, is_binary(value), String.trim(value) != "", do: value
+
         %{
           status: :unhealthy,
-          message: "Request failed: #{inspect(reason)}",
+          message: "Request failed: #{inspect(Redaction.redact_term(reason, header_values))}",
           checked_at: DateTime.utc_now()
         }
     end

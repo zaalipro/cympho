@@ -48,6 +48,18 @@ defmodule Cympho.Adapters.ProviderFailureTest do
     assert snippet =~ "unable to proceed"
   end
 
+  test "redacts run secrets before cutting the snippet" do
+    secret = "plain-deploy-sentinel-" <> String.duplicate("Q", 20)
+    output = "rate limit exceeded " <> String.duplicate("x", 470) <> " " <> secret <> " done"
+
+    assert {:error, {:provider_failure, :rate_limited, snippet}} =
+             ProviderFailure.detect(output, [secret])
+
+    refute snippet =~ "plain-dep"
+    assert snippet =~ "[REDACTE"
+    assert String.length(snippet) == 500
+  end
+
   test "detects parsed error-shaped maps" do
     assert {:error, {:provider_failure, :rate_limited, _snippet}} =
              ProviderFailure.detect(%{

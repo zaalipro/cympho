@@ -54,6 +54,20 @@ defmodule Cympho.Adapters.OpenClawAdapter do
 
       {:error, reason} ->
         send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+
+      # Cancelled after the request finished; its result is not acted on, but
+      # a completed response was billed, so its usage rides on the error.
+      {:error, reason, {:ok, result}} when is_map(result) ->
+        case Map.take(result, ["usage", "modelUsage", "total_cost_usd", "cost_usd"]) do
+          usage when map_size(usage) > 0 ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason, usage})
+
+          _none ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+        end
+
+      {:error, reason, _result} ->
+        send(recipient_pid, {:turn_ended_with_error, session_id, reason})
     end
   end
 
@@ -418,10 +432,18 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   def type, do: :openclaw
 
   @impl true
-  def available? do
-    endpoint = Application.get_env(:cympho, :openclaw_endpoint)
-    not is_nil(endpoint)
+  def available?(config) do
+    endpoint = get_endpoint(config)
+    not is_nil(endpoint) and endpoint != ""
   end
+
+  @impl true
+  def available? do
+    available?(%{})
+  end
+
+  @impl true
+  def unavailable_reason(_config), do: "endpoint is required"
 
   @impl true
   def validate_config(config) do

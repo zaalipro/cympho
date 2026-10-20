@@ -126,6 +126,142 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
     )
   end
 
+  test "the codex preset runs JSON mode and returns Codex's final message and usage" do
+    with_fake_command(
+      "codex",
+      """
+      case " $* " in
+        *" --json "*) ;;
+        *) echo 'Finished without JSON.'; exit 0 ;;
+      esac
+      echo 'Reading prompt from stdin...' >&2
+      printf '%s\\n' '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"All done."}}'
+      printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":100,"output_tokens":7}}'
+      """,
+      fn ->
+        # A hire persisted before the preset gained --json still runs in JSON mode.
+        config =
+          "process-codex"
+          |> Cympho.RuntimeProfiles.config()
+          |> Map.update!("args", &List.delete(&1, "--json"))
+
+        session_id = ProcessAdapter.run(@issue, "agent-1", self(), config: config)
+
+        assert_receive {:turn_completed, ^session_id, result}, 6_000
+        assert result["result"] == "All done."
+
+        assert result["usage"] == %{
+                 "input_tokens" => 120,
+                 "cached_input_tokens" => 100,
+                 "output_tokens" => 7
+               }
+      end
+    )
+  end
+
+  test "a codex preset run that prints no JSONL event says how to fix the command" do
+    config = Cympho.RuntimeProfiles.config("process-codex")
+
+    # Plain text, nothing at all, and whitespace only.
+    for script <- ["echo 'Finished without JSON.'", "true", "printf '  \\n \\n'"] do
+      with_fake_command("codex", script, fn ->
+        session_id = ProcessAdapter.run(@issue, "agent-1", self(), config: config)
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:parse_error,
+                         "codex exec --json produced no JSONL events; " <>
+                           "use codex-cli 0.44.0+ and make wrappers forward --json"}},
+                       6_000
+      end)
+    end
+  end
+
+  @codex_usage_events """
+  printf '%s\\n' '{"type":"turn.started"}'
+  printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":100,"output_tokens":7}}'
+  """
+  @codex_usage %{"input_tokens" => 120, "cached_input_tokens" => 100, "output_tokens" => 7}
+
+  test "codex preset failures still report the usage Codex already reported" do
+    config = Cympho.RuntimeProfiles.config("process-codex")
+
+    # A non-zero exit, and a turn with usage but no final agent message.
+    for {script, expected} <- [
+          {@codex_usage_events <> "exit 3", :exit_code},
+          {@codex_usage_events, :parse_error}
+        ] do
+      with_fake_command("codex", script, fn ->
+        session_id = ProcessAdapter.run(@issue, "agent-1", self(), config: config)
+
+        assert_receive {:turn_ended_with_error, ^session_id, reason, %{"usage" => @codex_usage}},
+                       6_000
+
+        assert elem(reason, 0) == expected
+      end)
+    end
+  end
+
+  test "a codex preset output-limit failure keeps usage completed by the chunk that crossed the limit" do
+    started = ~s({"type":"turn.started"})
+
+    completed =
+      ~s({"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":100,"output_tokens":7}})
+
+    # The relay passes limit + 1 bytes, so the usage event's closing brace is
+    # the byte past the limit: only the over-limit chunk completes the event.
+    limit = byte_size(started) + 1 + byte_size(completed) - 1
+
+    with_fake_command("codex", "printf '%s\\n' '#{started}' '#{completed}' 'more output'", fn ->
+      config = Cympho.RuntimeProfiles.config("process-codex")
+
+      session_id =
+        ProcessAdapter.run(@issue, "agent-1", self(), config: config, max_output_bytes: limit)
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:output_limit_exceeded, ^limit, _tail}, %{"usage" => @codex_usage}},
+                     6_000
+    end)
+  end
+
+  test "cancelling a codex preset run reports the usage Codex already reported" do
+    started = ~s({"type":"turn.started"})
+
+    completed =
+      ~s({"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":100,"output_tokens":7}})
+
+    # Each event line plus its newline.
+    fixture_bytes = byte_size(started) + byte_size(completed) + 2
+
+    # Progress reports are throttled by default; unthrottled, every report
+    # carries the bytes received so far.
+    original = Application.get_env(:cympho, :adapter_progress_interval_ms)
+    Application.put_env(:cympho, :adapter_progress_interval_ms, 0)
+
+    on_exit(fn ->
+      if original,
+        do: Application.put_env(:cympho, :adapter_progress_interval_ms, original),
+        else: Application.delete_env(:cympho, :adapter_progress_interval_ms)
+    end)
+
+    # The fake command's PATH holds only itself, so name sleep absolutely.
+    sleep = System.find_executable("sleep") || "/bin/sleep"
+    script = "printf '%s\\n' '#{started}' '#{completed}'\nexec #{sleep} 30"
+
+    with_fake_command("codex", script, fn ->
+      config = Cympho.RuntimeProfiles.config("process-codex")
+      session_id = ProcessAdapter.run(@issue, "agent-1", self(), config: config)
+
+      # Once the reported bytes cover the fixture, the adapter holds the
+      # usage event, so the cancel cannot race the pipe.
+      await_reported_bytes(session_id, fixture_bytes)
+      assert :ok = Cympho.AdapterSessions.cancel(session_id, :usage_test)
+
+      assert_receive {:turn_ended_with_error, ^session_id, {:cancelled, :usage_test},
+                      %{"usage" => @codex_usage}},
+                     6_000
+    end)
+  end
+
   test "preserves UTF-8 process output for multilingual delivery text" do
     expected =
       <<0xE7, 0x8A, 0xB6, 0xE6, 0x80, 0x81, 0xE6, 0x9B, 0xB4, 0xE6, 0x96, 0xB0, 0x20, 0xF0, 0x9F,
@@ -205,6 +341,75 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
 
         assert snippet =~ "429"
         refute_receive {:turn_completed, ^session_id, _result}, 100
+      end
+    )
+  end
+
+  test "redacts a run secret that spans the provider failure snippet cut" do
+    secret = "plain-deploy-sentinel-" <> String.duplicate("Q", 20)
+    output = "rate limit exceeded " <> String.duplicate("x", 470) <> " " <> secret <> " done"
+
+    with_fake_command("fake-boundary-agent", "printf '%s' '#{output}'\nexit 0", fn ->
+      session_id =
+        ProcessAdapter.run(@issue, "agent-1", self(),
+          config: %{"command" => "fake-boundary-agent", "timeout" => 5_000},
+          runtime_context: secret_context(%{"DEPLOY_VALUE" => secret})
+        )
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:provider_failure, :rate_limited, snippet}},
+                     6_000
+
+      refute snippet =~ "plain-dep"
+      assert snippet =~ "[REDACTE"
+    end)
+  end
+
+  test "an output limit tail does not start partway through a secret" do
+    secret = "plain-deploy-sentinel-" <> String.duplicate("Q", 178)
+    line = String.duplicate("x", 700) <> secret
+
+    with_fake_command(
+      "fake-capped-agent",
+      "printf '%s\\n' '#{line}'\nwhile :; do printf 'yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\\n'; done",
+      fn ->
+        session_id =
+          ProcessAdapter.run(@issue, "agent-1", self(),
+            config: %{"command" => "fake-capped-agent", "timeout" => 5_000},
+            max_output_bytes: 9_000
+          )
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:output_limit_exceeded, 9_000, tail}},
+                       6_000
+
+        refute tail =~ "QQQQ"
+        assert String.starts_with?(tail, "yyy")
+      end
+    )
+  end
+
+  test "an output limit tail does not end partway through a secret" do
+    secret = "plain-deploy-sentinel-" <> String.duplicate("Q", 60)
+    line = String.duplicate("x", 970) <> secret
+
+    # 11 + 970 bytes leave room for only part of the secret before the
+    # relay's limit + 1 cut at byte 1_001.
+    with_fake_command(
+      "fake-end-capped-agent",
+      "printf 'first line\\n%s\\n' '#{line}'\nsleep 5",
+      fn ->
+        session_id =
+          ProcessAdapter.run(@issue, "agent-1", self(),
+            config: %{"command" => "fake-end-capped-agent", "timeout" => 5_000},
+            max_output_bytes: 1_000
+          )
+
+        assert_receive {:turn_ended_with_error, ^session_id,
+                        {:output_limit_exceeded, 1_000, tail}},
+                       6_000
+
+        assert tail == "first line\n"
       end
     )
   end
@@ -306,6 +511,39 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
       refute result.output =~ "from-parent"
       assert result.output == "|#{@issue.id}"
     after
+      if original do
+        System.put_env("CYMPHO_PARENT_ENV_TEST", original)
+      else
+        System.delete_env("CYMPHO_PARENT_ENV_TEST")
+      end
+    end
+  end
+
+  test "health check does not inherit the parent environment" do
+    env_path =
+      Path.join(
+        System.tmp_dir!(),
+        "cympho-process-health-env-#{System.unique_integer([:positive])}"
+      )
+
+    original = System.get_env("CYMPHO_PARENT_ENV_TEST")
+    System.put_env("CYMPHO_PARENT_ENV_TEST", "from-parent")
+
+    try do
+      assert %{status: :healthy} =
+               ProcessAdapter.health_check(%{
+                 "command" => "/bin/sh",
+                 "args" => [
+                   "-c",
+                   "printf '%s|%s' \"$CYMPHO_PARENT_ENV_TEST\" \"${PATH:+path}\" > #{env_path}"
+                 ],
+                 "cwd" => System.tmp_dir!()
+               })
+
+      assert File.read!(env_path) == "|path"
+    after
+      File.rm(env_path)
+
       if original do
         System.put_env("CYMPHO_PARENT_ENV_TEST", original)
       else
@@ -517,6 +755,18 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
     )
   end
 
+  defp secret_context(env) do
+    %Cympho.RuntimeContext{
+      issue_id: @issue.id,
+      agent_id: "agent-1",
+      adapter: :process,
+      adapter_config: %{},
+      cwd: System.tmp_dir!(),
+      env: env,
+      secret_keys: Map.keys(env)
+    }
+  end
+
   defp with_fake_command(command, script, fun) do
     dir =
       Path.join(System.tmp_dir!(), "cympho-process-test-#{System.unique_integer([:positive])}")
@@ -532,6 +782,11 @@ defmodule Cympho.Adapters.ProcessAdapterTest do
     after
       File.rm_rf!(dir)
     end
+  end
+
+  defp await_reported_bytes(session_id, bytes) do
+    assert_receive {:turn_progress, ^session_id, %{bytes: reported}}, 6_000
+    if reported < bytes, do: await_reported_bytes(session_id, bytes)
   end
 
   defp with_path(path, fun) do

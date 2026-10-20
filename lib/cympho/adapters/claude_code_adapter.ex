@@ -99,6 +99,10 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
   @impl true
   def type, do: :claude_code
 
+  # The CLI's JSON envelope carries `total_cost_usd`.
+  @impl true
+  def usage_reporting(_config), do: :cost
+
   @impl true
   def available?(config) do
     api_key = get_api_key(config)
@@ -112,6 +116,11 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
   @impl true
   def available? do
     available?(%{})
+  end
+
+  @impl true
+  def unavailable_reason(_config) do
+    "api_key is required unless a Claude-compatible wrapper command is configured and installed"
   end
 
   @impl true

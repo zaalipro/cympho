@@ -3,6 +3,8 @@ defmodule Cympho.Agrenting.Client do
   Thin HTTP client for the Agrenting marketplace API.
   """
 
+  alias Cympho.Secrets.Redaction
+
   @default_base_url "https://www.agrenting.com"
   @default_timeout 30_000
   @default_max_response_bytes 4 * 1024 * 1024
@@ -61,7 +63,7 @@ defmodule Cympho.Agrenting.Client do
 
         {:ok, %Finch.Response{status: status, body: response_body}} ->
           with {:ok, response_body} <- ensure_response_size(response_body, max_response_bytes) do
-            {:error, {:http_error, status, error_message(response_body)}}
+            {:error, {:http_error, status, error_message(response_body, config)}}
           end
 
         {:error, %Finch.Error{} = error} ->
@@ -71,7 +73,7 @@ defmodule Cympho.Agrenting.Client do
           {:error, error}
 
         {:error, reason} ->
-          {:error, {:request_error, reason}}
+          {:error, {:request_error, Redaction.redact_term(reason, sent_credentials(config))}}
       end
     end
   end
@@ -139,13 +141,29 @@ defmodule Cympho.Agrenting.Client do
     end
   end
 
-  defp error_message(body) when is_binary(body) do
+  defp error_message(body, config) when is_binary(body) do
     case Jason.decode(body) do
-      {:ok, %{"errors" => [%{"message" => message} | _]}} -> message
-      {:ok, %{"error" => %{"message" => message}}} -> message
-      {:ok, decoded} -> inspect(decoded)
-      {:error, _} -> String.slice(body, 0, 500)
+      {:ok, %{"errors" => [%{"message" => message} | _]}} ->
+        Redaction.redact_term(message, sent_credentials(config))
+
+      {:ok, %{"error" => %{"message" => message}}} ->
+        Redaction.redact_term(message, sent_credentials(config))
+
+      {:ok, decoded} ->
+        inspect(Redaction.redact_term(decoded, sent_credentials(config)))
+
+      {:error, _} ->
+        String.slice(Redaction.redact_term(body, sent_credentials(config)), 0, 500)
     end
+  end
+
+  # Credentials this client sends, so an echoed copy is redacted before the
+  # body is cut (or inspect/1 truncates a long string) and could leave a
+  # fragment behind.
+  defp sent_credentials(config) do
+    ["api_key", "repo_access_token"]
+    |> Enum.map(&config_value(config, &1))
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
   end
 
   defp compact_query(params) do
@@ -210,6 +228,8 @@ defmodule Cympho.Agrenting.Client do
 
       case Finch.stream_while(req, Cympho.Finch, init, fun, timeout_options(config, timeout)) do
         {:error, reason, _acc} = result ->
+          # A Mint/Finch exception can carry the sent Authorization header.
+          reason = Redaction.redact_term(reason, sent_credentials(config))
           send(parent, {:agrenting_mcp_stream_error, ref, reason})
           result
 
@@ -304,7 +324,7 @@ defmodule Cympho.Agrenting.Client do
           :ok
 
         {:ok, %Finch.Response{status: status, body: response_body}} ->
-          {:error, {:mcp_http_error, status, error_message(response_body)}}
+          {:error, {:mcp_http_error, status, error_message(response_body, config)}}
 
         {:error, %Finch.Error{} = error} ->
           {:error, {:finch_error, Exception.message(error)}}
@@ -313,7 +333,7 @@ defmodule Cympho.Agrenting.Client do
           {:error, error}
 
         {:error, reason} ->
-          {:error, {:request_error, reason}}
+          {:error, {:request_error, Redaction.redact_term(reason, sent_credentials(config))}}
       end
     end
   end

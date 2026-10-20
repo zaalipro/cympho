@@ -89,10 +89,17 @@ defmodule Cympho.AgentActions do
 
   @doc """
   Executes validated actions for an issue and agent.
+
+  Options:
+    * `:acting_run_id` - the heartbeat run whose turn emitted the actions. A
+      batch that closes the issue leaves that run for its orchestrator to
+      finalize with the turn's usage instead of cancelling it.
   """
-  @spec execute(Issue.t(), Agent.t() | binary(), [action()]) ::
+  @spec execute(Issue.t(), Agent.t() | binary(), [action()], keyword()) ::
           {:ok, %{issue: Issue.t(), results: [map()]}} | {:error, term()}
-  def execute(%Issue{} = issue, %Agent{} = agent, actions) when is_list(actions) do
+  def execute(issue, agent, actions, opts \\ [])
+
+  def execute(%Issue{} = issue, %Agent{} = agent, actions, opts) when is_list(actions) do
     actions = prepare_paired_comment_actions(actions)
 
     cond do
@@ -108,7 +115,7 @@ defmodule Cympho.AgentActions do
       true ->
         with :ok <- Validation.ensure_no_contradictory_success(actions),
              :ok <- Validation.ensure_work_mode_actions(issue, actions) do
-          do_execute(issue, agent, actions)
+          do_execute(issue, agent, actions, opts)
         else
           {:error, reason} ->
             maybe_emit_rejection_comment(issue, reason)
@@ -117,13 +124,13 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  def execute(%Issue{} = issue, agent_id, actions) when is_binary(agent_id) do
+  def execute(%Issue{} = issue, agent_id, actions, opts) when is_binary(agent_id) do
     with {:ok, agent} <- Agents.get_agent(agent_id) do
-      execute(issue, agent, actions)
+      execute(issue, agent, actions, opts)
     end
   end
 
-  def execute(_issue, _agent, _actions), do: {:error, :invalid_execution_context}
+  def execute(_issue, _agent, _actions, _opts), do: {:error, :invalid_execution_context}
 
   @doc """
   True when the failure is an action-contract mistake the agent can fix on the
@@ -198,7 +205,7 @@ defmodule Cympho.AgentActions do
 
   defp maybe_mark_paired_submit_review(action, _comment_body), do: action
 
-  defp do_execute(%Issue{} = issue, %Agent{} = agent, actions) do
+  defp do_execute(%Issue{} = issue, %Agent{} = agent, actions, opts) do
     # Terminal run callbacks are deliberately deferred while this batch owns
     # the outer transaction.  A later action may roll the batch back, so
     # irreversible checkout/provider/usage/audit/broadcast effects must not
@@ -208,6 +215,14 @@ defmodule Cympho.AgentActions do
     nested_defer? = previous_defer_marker == true
     _ = Cympho.HeartbeatEngine.clear_deferred_terminal_effects()
     Process.put(:cympho_agent_actions_defer_terminal_effects, true)
+    # Terminal issue cleanup runs deep inside the batch, so the acting run is
+    # scoped to it the same way as the defer marker.
+    previous_acting_run_id = Process.get(:cympho_agent_actions_acting_run_id, :absent)
+
+    case Keyword.get(opts, :acting_run_id) do
+      nil -> :ok
+      run_id -> Process.put(:cympho_agent_actions_acting_run_id, run_id)
+    end
 
     try do
       result =
@@ -321,8 +336,15 @@ defmodule Cympho.AgentActions do
         {:error, {:action_crashed, Exception.message(exception)}}
     after
       restore_terminal_effect_marker(previous_defer_marker)
+      restore_acting_run_marker(previous_acting_run_id)
     end
   end
+
+  defp restore_acting_run_marker(:absent),
+    do: Process.delete(:cympho_agent_actions_acting_run_id)
+
+  defp restore_acting_run_marker(run_id),
+    do: Process.put(:cympho_agent_actions_acting_run_id, run_id)
 
   defp restore_terminal_effect_marker(:absent),
     do: Process.delete(:cympho_agent_actions_defer_terminal_effects)

@@ -48,6 +48,9 @@ defmodule CymphoWeb.Plugs.AgentAuth do
       |> assign(:run_id, run.id)
       |> assign(:auth_method, :jwt)
     else
+      {:error, :agent_company_required} ->
+        forbidden(conn, "Agent is not assigned to a company")
+
       _ ->
         unauthorized(conn, "Invalid or expired JWT token")
     end
@@ -70,6 +73,9 @@ defmodule CymphoWeb.Plugs.AgentAuth do
       |> assign(:auth_method, :api_key)
       |> assign(:api_key_id, agent_api_key.id)
     else
+      {:error, :agent_company_required} ->
+        forbidden(conn, "Agent is not assigned to a company")
+
       _ ->
         unauthorized(conn, "Invalid API key")
     end
@@ -80,6 +86,13 @@ defmodule CymphoWeb.Plugs.AgentAuth do
       from(ak in Cympho.Agents.AgentApiKey, where: ak.id == ^api_key.id),
       set: [last_used_at: DateTime.utc_now()]
     )
+  end
+
+  defp forbidden(conn, message) do
+    conn
+    |> put_status(:forbidden)
+    |> Phoenix.Controller.json(%{errors: [%{detail: message}]})
+    |> halt()
   end
 
   defp unauthorized(conn, message) do

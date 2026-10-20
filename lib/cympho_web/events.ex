@@ -77,7 +77,13 @@ defmodule CymphoWeb.Events do
   Broadcast a run status change to WebSocket clients.
   """
   def broadcast_run_status(%Run{id: _run_id, issue_id: issue_id} = run, event_type) do
-    case Repo.one(from i in Issue, where: i.id == ^issue_id, select: i.company_id) do
+    # Issue deletion nilifies the run FK; the run still carries its company.
+    company_id =
+      if is_binary(issue_id),
+        do: Repo.one(from i in Issue, where: i.id == ^issue_id, select: i.company_id),
+        else: run.company_id
+
+    case company_id do
       company_id when is_binary(company_id) and company_id != "" ->
         topic = "company:#{company_id}:runs"
         payload = build_run_payload(run, event_type, company_id)

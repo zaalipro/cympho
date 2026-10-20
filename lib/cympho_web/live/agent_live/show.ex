@@ -11,9 +11,11 @@ defmodule CymphoWeb.AgentLive.Show do
   alias Cympho.AgentInstructionStudio
   alias Cympho.AgentInstructionTuner
   alias Cympho.AgentHeartbeat
+  alias Cympho.Finances.Pricing
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
   alias Cympho.RuntimeCapacity
+  alias Cympho.RuntimePreflight
   alias Cympho.RuntimeProfiles
   alias Cympho.Secrets
   alias Cympho.Skills
@@ -92,6 +94,7 @@ defmodule CymphoWeb.AgentLive.Show do
       selected_adapter_from_params(agent_params, socket.assigns.agent, selected_profile_id)
 
     runtime = runtime_form_from_params(agent_params, socket.assigns.agent, selected_profile_id)
+    billing = billing_params(agent_params, runtime.model)
 
     full_params =
       agent_params
@@ -102,7 +105,13 @@ defmodule CymphoWeb.AgentLive.Show do
       )
       |> Map.put(
         "runtime_config",
-        build_runtime_config(socket.assigns.agent, env_rows, selected_profile_id)
+        build_runtime_config(
+          socket.assigns.agent,
+          env_rows,
+          selected_profile_id,
+          billing,
+          runtime.model
+        )
       )
       |> Map.put("permissions", permissions)
 
@@ -119,6 +128,7 @@ defmodule CymphoWeb.AgentLive.Show do
      |> assign(:selected_adapter, selected_adapter)
      |> assign_runtime_profile(selected_profile_id)
      |> assign_runtime_form(runtime)
+     |> assign(:billing, billing_form(socket.assigns.agent, runtime.model, billing))
      |> assign(:adapter_health_check_result, nil)
      |> assign(:instruction_patch_feedback, nil)
      |> assign(:form, to_form(changeset))}
@@ -134,6 +144,7 @@ defmodule CymphoWeb.AgentLive.Show do
       selected_adapter_from_params(agent_params, socket.assigns.agent, selected_profile_id)
 
     runtime = runtime_form_from_params(agent_params, socket.assigns.agent, selected_profile_id)
+    billing = billing_params(agent_params, runtime.model)
 
     full_params =
       agent_params
@@ -144,11 +155,23 @@ defmodule CymphoWeb.AgentLive.Show do
       )
       |> Map.put(
         "runtime_config",
-        build_runtime_config(socket.assigns.agent, env_rows, selected_profile_id)
+        build_runtime_config(
+          socket.assigns.agent,
+          env_rows,
+          selected_profile_id,
+          billing,
+          runtime.model
+        )
       )
       |> Map.put("permissions", permissions)
 
-    case Agents.update_agent(socket.assigns.agent, normalize_agent_params(full_params)) do
+    save_result =
+      case billing_error(billing) do
+        nil -> Agents.update_agent(socket.assigns.agent, normalize_agent_params(full_params))
+        message -> {:error, {:billing, message}}
+      end
+
+    case save_result do
       {:ok, agent} ->
         case Agents.update_agent_permissions(agent, permissions) do
           {:ok, agent} ->
@@ -175,6 +198,12 @@ defmodule CymphoWeb.AgentLive.Show do
            "Change requires board approval. Request submitted (##{String.slice(approval_id, 0, 8)})."
          )}
 
+      {:error, {:billing, message}} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, message)
+         |> assign(:billing, billing_form(socket.assigns.agent, runtime.model, billing))}
+
       {:error, changeset} ->
         {:noreply,
          socket
@@ -185,6 +214,7 @@ defmodule CymphoWeb.AgentLive.Show do
          |> assign(:selected_adapter, selected_adapter)
          |> assign_runtime_profile(selected_profile_id)
          |> assign_runtime_form(runtime)
+         |> assign(:billing, billing_form(socket.assigns.agent, runtime.model, billing))
          |> assign(:adapter_health_check_result, nil)
          |> assign(:instruction_patch_feedback, nil)
          |> assign(:form, to_form(Map.put(changeset, :action, :update)))}
@@ -364,6 +394,7 @@ defmodule CymphoWeb.AgentLive.Show do
      |> assign_runtime_profile(profile_id)
      |> assign_env_rows_for_profile(profile_id)
      |> assign_runtime_form(runtime)
+     |> refresh_billing(runtime.model)
      |> assign(:adapter_health_check_result, nil)}
   end
 
@@ -399,6 +430,7 @@ defmodule CymphoWeb.AgentLive.Show do
          |> assign_runtime_profile(profile_id)
          |> assign_env_rows_for_profile(profile_id)
          |> assign_runtime_form(runtime)
+         |> refresh_billing(runtime.model)
          |> assign(:adapter_health_check_result, nil)
          |> assign(:form, to_form(changeset))}
     end
@@ -677,6 +709,8 @@ defmodule CymphoWeb.AgentLive.Show do
     |> assign(:selected_adapter, selected_adapter_from_agent(agent))
     |> assign_runtime_profile(selected_profile_id)
     |> assign_runtime_form(runtime_form_from_agent(agent))
+    |> assign(:billing, billing_form(agent, runtime_form_from_agent(agent).model, %{}))
+    |> assign(:spending_limit_items, RuntimePreflight.spending_limit_items(agent))
     |> assign(:adapter_health_check_result, nil)
     |> assign(:instruction_patch_feedback, nil)
     |> assign(:config_revisions, config_revisions)
@@ -758,7 +792,9 @@ defmodule CymphoWeb.AgentLive.Show do
       "openclaw_endpoint",
       "openclaw_runtime",
       "openclaw_harness_id",
-      "runtime_profile_id"
+      "runtime_profile_id",
+      "billing_mode",
+      "pricing"
     ])
     |> normalize_parent_id()
   end
@@ -925,7 +961,13 @@ defmodule CymphoWeb.AgentLive.Show do
     end
   end
 
-  defp build_runtime_config(%Agent{runtime_config: existing}, rows, profile_id) do
+  defp build_runtime_config(
+         %Agent{runtime_config: existing} = agent,
+         rows,
+         profile_id,
+         billing,
+         model
+       ) do
     profile_runtime_config = RuntimeProfiles.runtime_config(profile_id)
     profile_env = Map.get(profile_runtime_config, "env", %{})
 
@@ -942,7 +984,126 @@ defmodule CymphoWeb.AgentLive.Show do
     |> Map.merge(profile_runtime_config)
     |> Map.put("env", Map.merge(profile_env, env))
     |> Map.put("profile_id", RuntimeProfiles.normalize_id(profile_id))
+    |> put_billing_mode(agent, billing["billing_mode"])
+    |> put_model_pricing(model, billing["pricing"])
   end
+
+  # ── Billing fieldset ──
+  # Billing lives in runtime_config, which saves keep (config is rebuilt from
+  # the runtime profile). Rates are USD per million tokens for one model.
+
+  @rate_keys ~w(input_usd_per_mtok output_usd_per_mtok cached_input_usd_per_mtok)
+
+  # Rates count only for the model they were entered against, so a model or
+  # profile change in the same edit cannot carry them to another model.
+  defp billing_params(params, model) do
+    pricing =
+      case params["pricing"] do
+        %{"model" => ^model} = rates when is_binary(model) and model != "" ->
+          Map.new(@rate_keys, &{&1, rates |> Map.get(&1, "") |> to_string() |> String.trim()})
+
+        _ ->
+          nil
+      end
+
+    %{"billing_mode" => params["billing_mode"], "pricing" => pricing}
+  end
+
+  defp billing_error(%{"pricing" => %{} = rates}) do
+    entered = Enum.reject(rates, fn {_key, value} -> value == "" end)
+
+    cond do
+      entered == [] ->
+        nil
+
+      not Enum.all?(entered, fn {_key, value} -> Pricing.valid_rate?(value) end) ->
+        "Billing rates must be zero or positive USD amounts per million tokens."
+
+      rates["input_usd_per_mtok"] == "" or rates["output_usd_per_mtok"] == "" ->
+        "Billing needs both an input and an output rate."
+
+      true ->
+        nil
+    end
+  end
+
+  defp billing_error(_billing), do: nil
+
+  defp billing_form(%Agent{config: config, runtime_config: runtime_config}, model, billing) do
+    effective = Map.merge(config || %{}, runtime_config || %{})
+    rates = model_pricing((runtime_config || %{})["pricing"], model)
+
+    %{
+      "billing_mode" =>
+        billing["billing_mode"] ||
+          if(effective["billing_mode"] == "flat_rate", do: "flat_rate", else: "metered"),
+      # The form submits the rates with this model, so they cannot be saved
+      # under another one.
+      "model" => model,
+      "pricing" =>
+        billing["pricing"] || Map.new(@rate_keys, &{&1, to_string(Map.get(rates, &1) || "")})
+    }
+  end
+
+  # A profile or preset change can switch the model: then show the agent's
+  # rates for the new model, keeping the selected billing mode.
+  defp refresh_billing(socket, model) do
+    billing = socket.assigns.billing
+
+    billing =
+      if billing["model"] == model, do: billing, else: Map.take(billing, ["billing_mode"])
+
+    assign(socket, :billing, billing_form(socket.assigns.agent, model, billing))
+  end
+
+  # Written only when it changes the outcome, so saving an untouched agent
+  # changes nothing; "metered" overrides a flat_rate kept in config.
+  defp put_billing_mode(runtime_config, _agent, "flat_rate"),
+    do: Map.put(runtime_config, "billing_mode", "flat_rate")
+
+  defp put_billing_mode(runtime_config, %Agent{} = agent, "metered") do
+    if Map.merge(agent.config || %{}, agent.runtime_config || %{})["billing_mode"] == "flat_rate",
+      do: Map.put(runtime_config, "billing_mode", "metered"),
+      else: runtime_config
+  end
+
+  defp put_billing_mode(runtime_config, _agent, _mode), do: runtime_config
+
+  # All rates blank clears the agent's own rates for the model.
+  defp put_model_pricing(runtime_config, model, %{} = rates) do
+    rates = rates |> Enum.reject(fn {_key, value} -> value == "" end) |> Map.new()
+    pricing = model_pricing_map(runtime_config["pricing"])
+
+    pricing =
+      if rates == %{}, do: Map.delete(pricing, model), else: Map.put(pricing, model, rates)
+
+    if pricing == %{},
+      do: Map.delete(runtime_config, "pricing"),
+      else: Map.put(runtime_config, "pricing", pricing)
+  end
+
+  defp put_model_pricing(runtime_config, _model, _rates), do: runtime_config
+
+  defp model_pricing(pricing, model) do
+    case model_pricing_map(pricing)[model] do
+      %{} = rates -> rates
+      _ -> %{}
+    end
+  end
+
+  defp model_pricing_map(%{} = pricing), do: pricing
+  defp model_pricing_map(_pricing), do: %{}
+
+  def billing_rate_fields do
+    [
+      {"input_usd_per_mtok", "Input"},
+      {"output_usd_per_mtok", "Output"},
+      {"cached_input_usd_per_mtok", "Cached input"}
+    ]
+  end
+
+  def billing_rate_placeholder(%Agent{config: config}, model, key),
+    do: (config || %{})["pricing"] |> model_pricing(model) |> Map.get(key) |> to_string()
 
   defp env_map_from_rows(rows) do
     rows
@@ -960,12 +1121,23 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   defp adapter_config_base(%Agent{config: existing}, profile_id) do
+    existing = existing || %{}
+
     if RuntimeProfiles.custom?(profile_id) do
-      existing || %{}
+      existing
     else
-      RuntimeProfiles.config(profile_id)
+      # Billing set outside the form survives the profile rebuild. Rates merge
+      # per model, so the profile's own rates are kept beside the agent's.
+      profile = RuntimeProfiles.config(profile_id)
+      base = Map.merge(profile, Map.take(existing, ["billing_mode"]))
+      pricing = Map.merge(map_or_empty(profile["pricing"]), map_or_empty(existing["pricing"]))
+
+      if pricing == %{}, do: base, else: Map.put(base, "pricing", pricing)
     end
   end
+
+  defp map_or_empty(value) when is_map(value), do: value
+  defp map_or_empty(_value), do: %{}
 
   defp do_build_adapter_config(config, "codex", runtime) do
     config
@@ -1864,6 +2036,14 @@ defmodule CymphoWeb.AgentLive.Show do
             path: "/agents/#{agent.id}?tab=configuration#agent-runtime-profile"
           }
 
+        readiness.status == :spending_limit ->
+          %{
+            tone: :attention,
+            label: "Set billing",
+            detail: readiness.summary,
+            path: "/agents/#{agent.id}?tab=configuration#agent-billing"
+          }
+
         studio.status in [:attention, :weak] or studio.score < 70 ->
           %{
             tone: :attention,
@@ -2111,9 +2291,14 @@ defmodule CymphoWeb.AgentLive.Show do
     adapter = normalize_adapter(adapter)
     autonomy_enabled? = Cympho.Orchestrator.Dispatcher.enabled?()
 
+    # Spending limit items come from the saved agent (assign_agent/2), the
+    # runtime the dispatch gate checks.
+    spending_items = runtime.spending_limit_items
+
     items =
       [selected_adapter_item(adapter)] ++
         readiness_items(adapter, runtime) ++
+        spending_items ++
         [execution_mode_item(autonomy_enabled?)]
 
     blocked_count = Enum.count(items, &(&1.status == :blocked))
@@ -2121,7 +2306,9 @@ defmodule CymphoWeb.AgentLive.Show do
 
     status =
       cond do
-        blocked_count > 0 -> :command_not_found
+        # Besides spending limits, only a missing command blocks.
+        blocked_count > length(spending_items) -> :command_not_found
+        spending_items != [] -> :spending_limit
         attention_count > 0 -> :missing_config
         not autonomy_enabled? -> :review_mode
         true -> :ready
@@ -2138,6 +2325,7 @@ defmodule CymphoWeb.AgentLive.Show do
   defp readiness_label(:ready, _count), do: "Ready"
   defp readiness_label(:review_mode, _count), do: "Review mode only"
   defp readiness_label(:command_not_found, _count), do: "Command not found"
+  defp readiness_label(:spending_limit, _count), do: "Spending limit"
   defp readiness_label(:missing_config, 1), do: "Missing config"
   defp readiness_label(:missing_config, count), do: "#{count} config checks"
   defp readiness_label(_status, _count), do: "Needs attention"
@@ -2152,6 +2340,10 @@ defmodule CymphoWeb.AgentLive.Show do
 
   defp adapter_readiness_summary(adapter, :command_not_found, _count) do
     "#{adapter_label_human(adapter)} points at a command that isn't installed on this machine."
+  end
+
+  defp adapter_readiness_summary(adapter, :spending_limit, _count) do
+    "A spending limit stops #{adapter_label_human(adapter)} until its billing is set."
   end
 
   defp adapter_readiness_summary(adapter, _status, count) do
@@ -2473,7 +2665,10 @@ defmodule CymphoWeb.AgentLive.Show do
     command = shell_quote(command)
     script = "source \"$HOME/.cld\" 2>/dev/null || true; command -v #{command} >/dev/null 2>&1"
 
-    case System.cmd("bash", ["-lc", script], stderr_to_stdout: true) do
+    case System.cmd("bash", ["-lc", script],
+           stderr_to_stdout: true,
+           env: Cympho.Adapters.ProcessAdapter.health_check_env()
+         ) do
       {_, 0} -> true
       _ -> false
     end
@@ -2507,6 +2702,8 @@ defmodule CymphoWeb.AgentLive.Show do
   defp readiness_badge_class(:command_not_found) do
     "rounded-full border border-brand/25 bg-brand/10 px-2.5 py-1 text-xs font-510 text-brand"
   end
+
+  defp readiness_badge_class(:spending_limit), do: readiness_badge_class(:command_not_found)
 
   defp readiness_dot_class(:ok), do: "h-2 w-2 rounded-full bg-emerald-400"
   defp readiness_dot_class(:info), do: "h-2 w-2 rounded-full bg-sky-400"

@@ -2,6 +2,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
   use ExUnit.Case, async: false
 
   import Mock
+  import Cympho.WaitHelpers
 
   alias Cympho.Adapters.OpenAIChatAdapter
 
@@ -93,6 +94,22 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
 
       assert result["cost_usd"] == "0.0125"
       refute Map.has_key?(result["usage"], "api_key")
+    end
+
+    test "keeps the cached prompt-token category the provider reports" do
+      body =
+        Jason.encode!(%{
+          "choices" => [%{"message" => %{"content" => "Done"}}],
+          "usage" => %{
+            "prompt_tokens" => 2_006,
+            "completion_tokens" => 300,
+            "prompt_tokens_details" => %{"cached_tokens" => 1_920}
+          }
+        })
+
+      assert {:ok, %{"usage" => usage}} = OpenAIChatAdapter.parse_chat_response(body)
+      assert usage["input_tokens"] == 2_006
+      assert usage["cached_input_tokens"] == 1_920
     end
 
     test "rejects responses without text content" do
@@ -386,6 +403,40 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
       end
     end
 
+    test "a response without usable text still reports the usage it billed" do
+      body =
+        Jason.encode!(%{
+          "choices" => [%{"message" => %{"content" => nil}}],
+          "usage" => %{"prompt_tokens" => 900, "completion_tokens" => 40}
+        })
+
+      with_mock Finch, [:passthrough],
+        build: fn _, _, _, _ -> :request end,
+        stream_while: fn :request, Cympho.Finch, initial, reducer, _options ->
+          {:cont, acc} = reducer.({:status, 200}, initial)
+          {:cont, acc} = reducer.({:data, body}, acc)
+          {:ok, acc}
+        end do
+        session_id =
+          OpenAIChatAdapter.run(
+            %{id: "issue-no-output", title: "No output", description: "usage"},
+            "agent-1",
+            self(),
+            config: %{
+              "endpoint" => "https://example.com/v1",
+              "api_key" => "test-key",
+              "timeout" => 10
+            }
+          )
+
+        assert_receive {:turn_ended_with_error, ^session_id, :no_output, %{"usage" => usage}},
+                       1_000
+
+        assert usage["input_tokens"] == 900
+        assert usage["output_tokens"] == 40
+      end
+    end
+
     test "uses an evidence-oriented default system prompt" do
       test_pid = self()
 
@@ -499,6 +550,55 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
       end
     end
 
+    test "redacts run secrets and credentials before cutting a provider error message" do
+      secret = "plain-deploy-sentinel-" <> String.duplicate("Q", 20)
+      padding = String.duplicate("x", 990)
+
+      context = %Cympho.RuntimeContext{
+        issue_id: "issue-1",
+        agent_id: "agent-1",
+        adapter: :openai_chat,
+        adapter_config: %{},
+        cwd: System.tmp_dir!(),
+        env: %{"DEPLOY_VALUE" => secret},
+        secret_keys: ["DEPLOY_VALUE"]
+      }
+
+      # Each value starts 991 bytes in, so the 1_000-byte cut splits it.
+      for value <- [secret, "sk-cred" <> String.duplicate("C", 30)] do
+        body = Jason.encode!(%{"error" => %{"message" => "#{padding} #{value} rejected"}})
+
+        with_mock Finch,
+          build: fn _, _, _, _ -> :request end,
+          stream_while: fn :request, Cympho.Finch, init, fun, _options ->
+            {:cont, acc} = fun.({:status, 401}, init)
+            {:cont, acc} = fun.({:data, body}, acc)
+            {:ok, acc}
+          end do
+          session_id =
+            OpenAIChatAdapter.run(
+              %{id: "issue-1", title: "Test issue", description: "Test description"},
+              "agent-1",
+              self(),
+              config: %{
+                "endpoint" => "https://cli.llmotions.com/v1",
+                "api_key" => "test-key",
+                "model" => "gpt-5.6-terra",
+                "timeout" => 10
+              },
+              runtime_context: context
+            )
+
+          assert_receive {:turn_ended_with_error, ^session_id, {:http_error, 401, message}},
+                         1_000
+
+          assert message =~ "[REDACTE"
+          refute message =~ "plain-dep"
+          refute message =~ "sk-cred"
+        end
+      end
+    end
+
     test "cancels an in-flight provider request through adapter sessions" do
       test_pid = self()
 
@@ -535,6 +635,74 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
 
         refute Process.alive?(request_pid)
         refute_receive {:turn_completed, ^session_id, _result}, 100
+      end
+    end
+
+    test "a response that completed before the cancel was handled still reports its usage" do
+      test_pid = self()
+
+      body =
+        Jason.encode!(%{
+          "choices" => [%{"message" => %{"content" => "Done."}}],
+          "usage" => %{"prompt_tokens" => 900, "completion_tokens" => 40},
+          "cost_usd" => "0.05"
+        })
+
+      with_mock Finch,
+        build: fn _, _, _, _ -> :request end,
+        stream_while: fn :request, Cympho.Finch, init, fun, _options ->
+          send(test_pid, {:provider_request_started, self()})
+
+          # Queue the cancel on the worker ahead of this billed response.
+          receive do
+            {:cancel_first, worker, session_id} ->
+              send(worker, {:cancel_session, session_id, :operator_stop})
+          end
+
+          {:cont, acc} = fun.({:status, 200}, init)
+          {:cont, acc} = fun.({:data, body}, acc)
+          {:ok, acc}
+        end do
+        session_id =
+          OpenAIChatAdapter.run(
+            %{id: "issue-1", title: "Test issue", description: "Test description"},
+            "agent-1",
+            self(),
+            config: %{
+              "endpoint" => "https://dashscope.example.com/compatible-mode/v1",
+              "api_key" => "test-key",
+              "model" => "qwen3.7-plus",
+              "timeout" => 30_000
+            }
+          )
+
+        assert_receive {:provider_request_started, request_pid}, 1_000
+        assert {:ok, worker} = Cympho.AdapterSessions.owner(session_id)
+
+        # Hold the worker until the cancel and the billed response are both
+        # queued, so it cannot handle the cancel before the response arrives.
+        true = :erlang.suspend_process(worker)
+        send(request_pid, {:cancel_first, worker, session_id})
+
+        wait_until(fn ->
+          {:messages, queued} = Process.info(worker, :messages)
+          assert Enum.any?(queued, &match?({:cancel_session, ^session_id, _reason}, &1))
+
+          assert Enum.any?(
+                   queued,
+                   &match?({Cympho.AdapterSessions, :cancellable_result, _pid, _result}, &1)
+                 )
+        end)
+
+        true = :erlang.resume_process(worker)
+
+        assert_receive {:turn_ended_with_error, ^session_id, {:cancelled, :operator_stop},
+                        %{"usage" => usage, "cost_usd" => "0.05"} = billed},
+                       1_000
+
+        assert usage["input_tokens"] == 900
+        refute Map.has_key?(billed, "content")
+        refute_received {:turn_completed, ^session_id, _result}
       end
     end
 

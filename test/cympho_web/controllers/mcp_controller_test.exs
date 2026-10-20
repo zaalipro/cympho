@@ -39,6 +39,27 @@ defmodule CymphoWeb.McpControllerTest do
     assert "create_issue_comment" in tool_names
   end
 
+  test "rejects an API-key agent with no company instead of listing every tenant", %{
+    conn: conn,
+    company: company,
+    agent: agent
+  } do
+    {:ok, _issue} =
+      Issues.create_issue(%{
+        company_id: company.id,
+        title: "Tenant data that must not leak",
+        skip_auto_assign: true
+      })
+
+    {:ok, _orphan} = agent |> Ecto.Changeset.change(company_id: nil) |> Cympho.Repo.update()
+
+    list = post(conn, "/api/mcp/call", %{"tool" => "list_issues", "args" => %{}})
+    assert json_response(list, 403)
+    refute list.resp_body =~ "Tenant data that must not leak"
+
+    assert conn |> get("/api/mcp/tools") |> json_response(403)
+  end
+
   test "returns issue comments through MCP call", %{conn: conn, company: company} do
     {:ok, issue} =
       Issues.create_issue(%{

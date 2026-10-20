@@ -123,6 +123,10 @@ defmodule Cympho.Adapters.MockAdapter do
   @impl true
   def type, do: :mock
 
+  # Scripted results carry whatever usage and cost the test supplies.
+  @impl true
+  def usage_reporting(_config), do: :cost
+
   @impl true
   def validate_config(_config), do: :ok
 

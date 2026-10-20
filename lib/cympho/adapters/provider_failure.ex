@@ -7,6 +7,8 @@ defmodule Cympho.Adapters.ProviderFailure do
   are explicitly error-shaped.
   """
 
+  alias Cympho.Secrets.Redaction
+
   @type category :: :rate_limited | :quota_exceeded | :provider_unavailable
   @type reason ::
           {:provider_failure, category(), String.t()}
@@ -81,37 +83,40 @@ defmodule Cympho.Adapters.ProviderFailure do
 
   @doc """
   Returns `:ok` when output looks usable, or a provider failure reason.
+
+  `secrets` are the run's known secret values. They are redacted from the
+  snippet before it is cut, so a secret spanning the cut is not half kept.
   """
-  @spec detect(term()) :: :ok | {:error, reason()}
-  def detect(output)
+  @spec detect(term(), [String.t()]) :: :ok | {:error, reason()}
+  def detect(output, secrets \\ [])
 
-  def detect(output) when is_binary(output), do: detect_text(output)
+  def detect(output, secrets) when is_binary(output), do: detect_text(output, secrets)
 
-  def detect(%{} = output) do
+  def detect(%{} = output, secrets) do
     text = flatten_text(output)
 
     if error_shaped?(output) do
-      detect_text(text)
+      detect_text(text, secrets)
     else
-      detect_runtime_blocked_text(text)
+      detect_runtime_blocked_text(text, secrets)
     end
   end
 
-  def detect(_output), do: :ok
+  def detect(_output, _secrets), do: :ok
 
-  defp detect_runtime_blocked_text(text) do
+  defp detect_runtime_blocked_text(text, secrets) do
     clean = text |> to_string() |> String.trim()
     lower = String.downcase(clean)
 
     if contains_any?(lower, @runtime_blocked_primary) and
          contains_any?(lower, @runtime_blocked_context) do
-      {:error, {:runtime_failure, :permission_blocked, snippet(clean)}}
+      {:error, {:runtime_failure, :permission_blocked, snippet(clean, secrets)}}
     else
       :ok
     end
   end
 
-  defp detect_text(text) do
+  defp detect_text(text, secrets) do
     clean =
       text
       |> to_string()
@@ -119,27 +124,27 @@ defmodule Cympho.Adapters.ProviderFailure do
       |> String.trim()
 
     lower = String.downcase(clean)
-    runtime_blocked = detect_runtime_blocked_text(clean)
+    runtime_blocked = detect_runtime_blocked_text(clean, secrets)
 
     cond do
       contains_any?(lower, @quota_needles) ->
-        {:error, {:provider_failure, :quota_exceeded, snippet(clean)}}
+        {:error, {:provider_failure, :quota_exceeded, snippet(clean, secrets)}}
 
       contains_any?(lower, @rate_limit_needles) ->
-        {:error, {:provider_failure, :rate_limited, snippet(clean)}}
+        {:error, {:provider_failure, :rate_limited, snippet(clean, secrets)}}
 
       contains_any?(lower, @provider_unavailable_needles) ->
-        {:error, {:provider_failure, :provider_unavailable, snippet(clean)}}
+        {:error, {:provider_failure, :provider_unavailable, snippet(clean, secrets)}}
 
       match?({:error, _reason}, runtime_blocked) ->
         runtime_blocked
 
       Regex.match?(~r/(^|\D)429(\D|$)/, lower) and String.contains?(lower, "openai") ->
-        {:error, {:provider_failure, :rate_limited, snippet(clean)}}
+        {:error, {:provider_failure, :rate_limited, snippet(clean, secrets)}}
 
       Regex.match?(~r/(^|\D)(500|502|503|504|529)(\D|$)/, lower) and
           contains_any?(lower, ["openai", "anthropic", "provider", "upstream"]) ->
-        {:error, {:provider_failure, :provider_unavailable, snippet(clean)}}
+        {:error, {:provider_failure, :provider_unavailable, snippet(clean, secrets)}}
 
       true ->
         :ok
@@ -190,8 +195,9 @@ defmodule Cympho.Adapters.ProviderFailure do
 
   defp contains_any?(text, needles), do: Enum.any?(needles, &String.contains?(text, &1))
 
-  defp snippet(text) do
+  defp snippet(text, secrets) do
     text
+    |> Redaction.redact_term(secrets)
     |> String.replace(~r/\s+/, " ")
     |> String.slice(0, 500)
   end

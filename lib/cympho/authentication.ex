@@ -227,6 +227,11 @@ defmodule Cympho.Authentication do
 
   def authenticate_agent_api_key(_plain_text_key), do: {:error, :invalid_api_key}
 
+  # An agent without a company has no tenant scope; company-filtered queries
+  # treat a nil company as "no filter", so such an identity must never authenticate.
+  defp validate_agent_credential_state(%Agent{company_id: nil}),
+    do: {:error, :agent_company_required}
+
   defp validate_agent_credential_state(%Agent{status: status} = agent) do
     if status in @blocked_agent_statuses or
          agent.governance_status in @blocked_governance_statuses do

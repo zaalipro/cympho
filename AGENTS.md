@@ -98,7 +98,7 @@ After boot, `Cympho.Adapters.Registry.register_builtin/0` and `Cympho.RoutineTri
 1. **Issues** (`Cympho.Issues`) — managed via `Issues.StateMachine`. Issues carry `lock_version` for optimistic concurrency.
 2. **Agents** (`Cympho.Agents`) — AI agent entities with roles, adapter types, API keys.
 3. **Orchestrator** (`Cympho.Orchestrator`) — GenServer registered by `issue_id`; manages agent sessions, creates comments, transitions issue state, publishes PubSub events.
-4. **Agent Adapters** (`Cympho.AgentAdapters`) — behaviour-based backends: `claude_code`, `codex`, `cursor`, `http`, `openclaw`, `process`. `Cympho.Adapters.Registry` resolves with fallback; `HealthChecker` tracks availability.
+4. **Agent Adapters** (`Cympho.AgentAdapters`) — behaviour-based backends: `claude_code`, `codex`, `cursor`, `http`, `openclaw`, `process`. `Cympho.Adapters.Registry` fails closed: an agent's selected adapter is final, and if it is unavailable or invalid the run is refused with that reason, never swapped for another adapter. Only an explicit runtime-profile fallback chain switches runtime, and only on provider-limit or transient provider errors. `HealthChecker` tracks availability.
 5. **Heartbeat Engine** (`Cympho.HeartbeatEngine`) — wakeup queue, watchdog, budget checks, secret injection, run tracking.
 6. **Agent Runner** (`Cympho.AgentRunner`) — executes agent tasks (mock available for tests).
 

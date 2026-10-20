@@ -10,6 +10,7 @@ defmodule Cympho.Finances do
   alias Cympho.Finances.BudgetIncident
   alias Cympho.Finances.FinanceEvent
   alias Cympho.Finances.Biller
+  alias Cympho.Finances.Pricing
   alias Cympho.Finances.WorkProduct
   alias Cympho.HeartbeatEngine
   alias Cympho.HeartbeatEngine.Run
@@ -60,7 +61,8 @@ defmodule Cympho.Finances do
 
   defp do_record_token_usage(attrs) do
     Multi.new()
-    |> Multi.insert(:token_usage, TokenUsage.changeset(%TokenUsage{}, attrs))
+    |> Multi.run(:attrs, fn _repo, _changes -> {:ok, canonical_run_usage(attrs)} end)
+    |> Multi.insert(:token_usage, &TokenUsage.changeset(%TokenUsage{}, &1.attrs))
     |> Multi.insert(:finance_event, fn %{token_usage: tu} ->
       FinanceEvent.changeset(%FinanceEvent{}, %{
         company_id: tu.company_id,
@@ -76,20 +78,12 @@ defmodule Cympho.Finances do
     |> Repo.transaction()
     |> case do
       {:ok, result} ->
-        enforce_hard_stops(result.budget_evaluation.blocked_policies)
-
-        if result.budget_evaluation.blocked_policies == [] do
-          {:ok, result.token_usage}
-        else
-          # The provider spend already happened. Keep the usage, finance
-          # event, and incident committed, then reject future work.
-          {:error, :budget_blocked}
-        end
+        finish_usage_record(result)
 
       {:error, :token_usage, %Ecto.Changeset{} = changeset, changes} ->
         case existing_heartbeat_run_usage(attrs, changeset) do
           %TokenUsage{} = token_usage ->
-            {:ok, token_usage}
+            settle_heartbeat_run_usage(token_usage, attrs)
 
           nil ->
             {:error, :token_usage, changeset, changes}
@@ -99,6 +93,126 @@ defmodule Cympho.Finances do
         {:error, failed_operation, failed_value, changes}
     end
   end
+
+  defp finish_usage_record(%{token_usage: token_usage, budget_evaluation: evaluation}) do
+    enforce_hard_stops(evaluation.blocked_policies)
+
+    if evaluation.blocked_policies == [] do
+      {:ok, token_usage}
+    else
+      # The provider spend already happened. Keep the usage, finance
+      # event, and incident committed, then reject future work.
+      {:error, :budget_blocked}
+    end
+  end
+
+  # A run's first ledger row takes the run's committed totals under the run
+  # row lock its usage writes hold, so a delayed write cannot insert (and
+  # evaluate budgets against) totals a later correction already replaced. As
+  # in settlement, a cost matching the run's 6-place column keeps its precision.
+  defp canonical_run_usage(%{heartbeat_run_id: run_id} = attrs) when is_binary(run_id) do
+    case Run |> where([r], r.id == ^run_id) |> lock("FOR UPDATE") |> Repo.one() do
+      %Run{} = run ->
+        run_cost = run.cost_usd || Decimal.new("0")
+
+        cost =
+          case attrs[:cost_usd] do
+            %Decimal{} = cost -> if Decimal.eq?(Decimal.round(cost, 6), run_cost), do: cost
+            _cost -> nil
+          end
+
+        attrs
+        |> Map.delete(:total_tokens)
+        |> Map.merge(%{
+          input_tokens: run.input_tokens || 0,
+          output_tokens: run.output_tokens || 0,
+          cost_usd: cost || run_cost,
+          metadata:
+            Map.merge(
+              attrs[:metadata] || %{},
+              Map.take(run.run_metadata || %{}, ["accounting", "pricing"])
+            )
+        })
+
+      nil ->
+        attrs
+    end
+  end
+
+  defp canonical_run_usage(attrs), do: attrs
+
+  # A run's usage can be settled again after its ledger row exists (late,
+  # corrected or reconciled reports). The row mirrors the run, so it is moved
+  # to the run's current totals under the run and row locks, taken in the
+  # run-then-ledger order of a first write: a run usage write cannot commit
+  # between this read and the budget evaluation, whichever settlement commits
+  # last reads the newest run, and a repeated settlement is a no-op.
+  # The run's cost column keeps 6 places, so a cost that matches it there is
+  # unchanged. A cost change commits with its finance event and budget
+  # evaluation: an adjustment when it rises, a credit when it falls.
+  defp settle_heartbeat_run_usage(%TokenUsage{id: id, heartbeat_run_id: run_id}, attrs) do
+    Repo.transaction(fn ->
+      run = Run |> where([r], r.id == ^run_id) |> lock("FOR UPDATE") |> Repo.one!()
+      current = TokenUsage |> where([t], t.id == ^id) |> lock("FOR UPDATE") |> Repo.one!()
+      run_cost = run.cost_usd || Decimal.new("0")
+
+      cost =
+        if Decimal.eq?(Decimal.round(current.cost_usd, 6), run_cost),
+          do: current.cost_usd,
+          else: run_cost
+
+      delta = Decimal.sub(cost, current.cost_usd)
+
+      settled = %{
+        input_tokens: max(current.input_tokens, run.input_tokens || 0),
+        output_tokens: max(current.output_tokens, run.output_tokens || 0),
+        cost_usd: cost
+      }
+
+      if settled.input_tokens == current.input_tokens and
+           settled.output_tokens == current.output_tokens and Decimal.eq?(delta, 0) do
+        %{token_usage: current, budget_evaluation: %{blocked_policies: []}}
+      else
+        metadata =
+          (current.metadata || %{})
+          |> Map.merge(attrs[:metadata] || %{})
+          |> Map.merge(Map.take(run.run_metadata || %{}, ["accounting", "pricing"]))
+
+        token_usage =
+          current
+          |> TokenUsage.changeset(Map.put(settled, :metadata, metadata))
+          |> Repo.update()
+          |> unwrap_or_rollback()
+
+        if Decimal.eq?(delta, 0) do
+          %{token_usage: token_usage, budget_evaluation: %{blocked_policies: []}}
+        else
+          %FinanceEvent{}
+          |> FinanceEvent.changeset(%{
+            company_id: token_usage.company_id,
+            token_usage_id: token_usage.id,
+            event_type: if(Decimal.positive?(delta), do: "adjustment", else: "credit"),
+            amount_usd: Decimal.abs(delta),
+            description: "Token usage settlement: #{token_usage.provider}/#{token_usage.model}"
+          })
+          |> Repo.insert()
+          |> unwrap_or_rollback()
+
+          %{
+            token_usage: token_usage,
+            budget_evaluation: token_usage |> check_budget_thresholds() |> unwrap_or_rollback()
+          }
+        end
+      end
+    end)
+    |> case do
+      {:ok, result} -> finish_usage_record(result)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp unwrap_or_rollback({:ok, value}), do: value
+  defp unwrap_or_rollback({:error, reason}), do: Repo.rollback(reason)
 
   def aggregate_usage(company_id, opts \\ []) do
     period = Keyword.get(opts, :period, "monthly")
@@ -154,6 +268,109 @@ defmodule Cympho.Finances do
           }}}
     end
   end
+
+  @doc """
+  Returns the run's pricing snapshot for the resolved `adapter_config`, the
+  same snapshot its usage is later settled against.
+
+  Refuses a runtime whose spend cannot be priced while an enforced USD hard
+  stop applies to the run, so the stop cannot be bypassed by a runtime that
+  records no cost. Flat-rate agents, cost-reporting runtimes, and token
+  runtimes with pricing for the resolved model pass.
+
+  Options:
+    * `:fallback?` - the run is on a fallback runtime profile, not the
+      agent's own: the agent's flat_rate does not cover it.
+    * `:fallback_pricing` - the fallback profile's own pricing, used for
+      models the agent's pricing does not list.
+  """
+  @spec check_runtime_priceable(map(), map(), module(), map(), keyword()) ::
+          {:ok, map() | nil} | {:error, {:budget_unpriceable_runtime, map()}}
+  def check_runtime_priceable(issue, agent, adapter, adapter_config, opts \\ []) do
+    company_id = Map.get(issue, :company_id) || Map.get(agent, :company_id)
+    adapter_key = Cympho.Adapters.ModelCompatibility.adapter_key(adapter)
+
+    policy =
+      company_id
+      |> active_budget_policies()
+      |> Enum.find(fn policy ->
+        policy.action_on_exceed == "block" and policy_applies_to_runtime?(policy, issue, agent)
+      end)
+
+    config = Map.get(agent, :config) || %{}
+    runtime_config = Map.get(agent, :runtime_config) || %{}
+
+    agent_config =
+      config
+      |> Map.merge(runtime_config)
+      # Per model: the agent's own rates override the profile's for the same
+      # model and leave the profile's rates for other models in place.
+      |> Map.put("pricing", merge_pricing(config["pricing"], runtime_config["pricing"]))
+      |> fallback_pricing_config(opts)
+
+    pricing =
+      Pricing.snapshot(
+        agent_config,
+        adapter_config["provider"] || adapter_key,
+        adapter_config["model"]
+      )
+
+    if is_nil(policy) or Pricing.priceable?(adapter, adapter_config, pricing) do
+      {:ok, pricing}
+    else
+      {:error,
+       {:budget_unpriceable_runtime,
+        %{
+          policy_id: policy.id,
+          scope: policy.scope,
+          scope_id: policy.scope_id,
+          period: policy.period,
+          budget_limit_usd:
+            policy.budget_limit_usd |> Decimal.normalize() |> Decimal.to_string(:normal),
+          adapter: adapter_key,
+          model: adapter_config["model"],
+          reporting: Pricing.usage_reporting(adapter, adapter_config)
+        }}}
+    end
+  end
+
+  @doc """
+  The owner-facing reason and remedy for a `:budget_unpriceable_runtime`
+  refusal, shared by the orchestrator comment and the readiness check.
+  """
+  @spec unpriceable_runtime_message(map()) :: String.t()
+  def unpriceable_runtime_message(info) do
+    "budget policy #{info.policy_id} enforces a #{info.scope} hard stop of " <>
+      "#{info.budget_limit_usd} USD (#{info.period}), but the #{info.adapter} runtime" <>
+      "#{if info.model, do: " (model #{info.model})"} does not report a USD cost. " <>
+      unpriceable_runtime_remedy(info)
+  end
+
+  defp unpriceable_runtime_remedy(%{reporting: :tokens, model: model})
+       when is_binary(model) and model != "",
+       do: "Add pricing for #{model} on the agent's Configuration tab."
+
+  defp unpriceable_runtime_remedy(%{reporting: :tokens}),
+    do: "Set an explicit model, then add pricing for it."
+
+  defp unpriceable_runtime_remedy(_info),
+    do:
+      "This runtime reports no usage; mark the agent flat-rate or switch to a runtime that " <>
+        "reports cost or tokens."
+
+  defp fallback_pricing_config(config, opts) do
+    if Keyword.get(opts, :fallback?, false) do
+      pricing = merge_pricing(opts[:fallback_pricing], config["pricing"])
+      config |> Map.delete("billing_mode") |> Map.put("pricing", pricing)
+    else
+      config
+    end
+  end
+
+  defp merge_pricing(base, overrides), do: Map.merge(map_or_empty(base), map_or_empty(overrides))
+
+  defp map_or_empty(%{} = map), do: map
+  defp map_or_empty(_value), do: %{}
 
   # Budget Policies
 
@@ -716,8 +933,9 @@ defmodule Cympho.Finances do
     issue_id = Map.get(attrs, :issue_id) || Map.get(attrs, "issue_id")
     project_id = Map.get(attrs, :project_id) || Map.get(attrs, "project_id")
     goal_id = Map.get(attrs, :goal_id) || Map.get(attrs, "goal_id")
+    issue = if is_binary(run.issue_id), do: Repo.get(Issue, run.issue_id)
 
-    case Repo.get(Issue, run.issue_id) do
+    case issue do
       %Issue{} = issue ->
         expected_company_id = issue.company_id || run.company_id
 

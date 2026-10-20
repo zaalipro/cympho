@@ -96,6 +96,133 @@ defmodule Cympho.Adapters.CodexAdapterTest do
     )
   end
 
+  test "failed turns still report the usage Codex already reported" do
+    events = """
+    printf '%s\\n' '{"type":"turn.started"}'
+    printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":100,"output_tokens":7}}'
+    """
+
+    usage = %{"input_tokens" => 120, "cached_input_tokens" => 100, "output_tokens" => 7}
+
+    # A non-zero exit, and a turn with usage but no final agent message.
+    for script <- [events <> "exit 7", events] do
+      with_fake_codex(script, fn ->
+        session_id =
+          CodexAdapter.run(@issue, "agent-1", self(),
+            config: %{"timeout" => 5_000},
+            cwd: System.tmp_dir!()
+          )
+
+        assert_receive {:turn_ended_with_error, ^session_id, reason, %{"usage" => ^usage}}, 6_000
+        assert match?({:parse_error, _}, reason) or reason =~ "Codex exited with status 7"
+      end)
+    end
+  end
+
+  test "an output-limit failure keeps usage completed by the chunk that crossed the limit" do
+    started = ~s({"type":"turn.started"})
+
+    completed =
+      ~s({"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":100,"output_tokens":7}})
+
+    # The relay passes limit + 1 bytes, so the usage event's closing brace is
+    # the byte past the limit: only the over-limit chunk completes the event.
+    limit = byte_size(started) + 1 + byte_size(completed) - 1
+
+    with_fake_codex("printf '%s\\n' '#{started}' '#{completed}' 'more output'", fn ->
+      session_id =
+        CodexAdapter.run(@issue, "agent-1", self(),
+          config: %{"timeout" => 5_000, "max_output_bytes" => limit},
+          cwd: System.tmp_dir!()
+        )
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:output_limit_exceeded, ^limit, _tail},
+                      %{
+                        "usage" => %{
+                          "input_tokens" => 120,
+                          "cached_input_tokens" => 100,
+                          "output_tokens" => 7
+                        }
+                      }},
+                     6_000
+    end)
+  end
+
+  test "redacts a run secret holding a quote or backslash from Codex's JSON error" do
+    secret = ~s(pa"ss\\word-sentinel-0123)
+    event = Jason.encode!(%{"type" => "error", "message" => "rate limit exceeded for #{secret}"})
+
+    context = %RuntimeContext{
+      issue_id: @issue.id,
+      agent_id: "agent-1",
+      adapter: :codex,
+      adapter_config: %{},
+      cwd: System.tmp_dir!(),
+      env: %{"DEPLOY_VALUE" => secret},
+      secret_keys: ["DEPLOY_VALUE"]
+    }
+
+    with_fake_codex("printf '%s\\n' '#{event}'", fn ->
+      session_id =
+        CodexAdapter.run(@issue, "agent-1", self(),
+          config: %{"timeout" => 5_000},
+          cwd: System.tmp_dir!(),
+          runtime_context: context
+        )
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:provider_failure, :rate_limited, snippet}},
+                     6_000
+
+      assert snippet =~ "rate limit exceeded for [REDACTED]"
+      refute snippet =~ "word-sentinel"
+    end)
+  end
+
+  test "a cancel queued ahead of Codex's buffered output still reports its usage" do
+    gate = Path.join(System.tmp_dir!(), "cympho-codex-gate-#{System.unique_integer([:positive])}")
+    sleep = System.find_executable("sleep") || "/bin/sleep"
+    on_exit(fn -> File.rm(gate) end)
+
+    script = """
+    while [ ! -e #{gate} ]; do #{sleep} 0.01; done
+    printf '%s\\n' '{"type":"turn.started"}'
+    printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":100,"output_tokens":7}}'
+    exec #{sleep} 30
+    """
+
+    with_fake_codex(script, fn ->
+      session_id =
+        CodexAdapter.run(@issue, "agent-1", self(),
+          config: %{"timeout" => 30_000},
+          cwd: System.tmp_dir!()
+        )
+
+      assert_receive {:session_started, ^session_id}, 5_000
+      assert {:ok, worker} = Cympho.AdapterSessions.owner(session_id)
+
+      # Hold the worker so the cancel is queued ahead of the usage event.
+      true = :erlang.suspend_process(worker)
+      assert :ok = Cympho.AdapterSessions.cancel(session_id, :operator_stop)
+      File.touch!(gate)
+
+      assert eventually(
+               fn ->
+                 {:messages, messages} = Process.info(worker, :messages)
+                 port_output(messages) =~ ~s("output_tokens":7}})
+               end,
+               400
+             )
+
+      true = :erlang.resume_process(worker)
+
+      assert_receive {:turn_ended_with_error, ^session_id, {:cancelled, :operator_stop},
+                      %{"usage" => %{"input_tokens" => 120, "output_tokens" => 7}}},
+                     10_000
+    end)
+  end
+
   test "reports malformed JSON output" do
     with_fake_codex("echo not-json", fn ->
       session_id =
@@ -776,6 +903,10 @@ defmodule Cympho.Adapters.CodexAdapterTest do
       attempts <= 1 -> false
       true -> Process.sleep(25) && eventually(fun, attempts - 1)
     end
+  end
+
+  defp port_output(messages) do
+    for {port, {:data, data}} when is_port(port) <- messages, into: "", do: data
   end
 
   test "prompt_runtime_context/1 projects sandbox workspace before prompt construction" do

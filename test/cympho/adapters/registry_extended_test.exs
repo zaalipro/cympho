@@ -99,18 +99,28 @@ defmodule Cympho.Adapters.RegistryExtendedTest do
     end
 
     test "resolves agent without config key using empty config" do
-      assert {:error, :no_adapter} = Registry.resolve_agent(%{adapter: :process})
+      assert {:error, {:config_invalid, [{:process, "command is required"}]}} =
+               Registry.resolve_agent(%{adapter: :process})
     end
 
-    test "walks fallback chain when primary is unavailable" do
+    test "fails closed instead of walking the fallback chain when primary is unavailable" do
       original = Application.get_env(:cympho, :claude_code_command)
       Application.put_env(:cympho, :claude_code_command, "echo")
 
       try do
-        # :codex is unavailable without an API key, so resolution should walk
-        # to the configured Claude-compatible wrapper fallback.
-        {:ok, module, _config} = Registry.resolve_agent(%{adapter: :codex, config: %{}})
-        assert module == Cympho.Adapters.ClaudeCodeAdapter
+        # :process is registered but its command is not installed. A configured
+        # Claude-compatible wrapper is available, but running the agent there
+        # would use the wrong config, credentials and sandbox, so it must not
+        # be picked.
+        assert Cympho.Adapters.ClaudeCodeAdapter.available?(%{})
+
+        assert {:error, {:no_adapter_available, [{:process, reason}]}} =
+                 Registry.resolve_agent(%{
+                   adapter: :process,
+                   config: %{"command" => "cympho-test-no-such-command"}
+                 })
+
+        assert reason =~ "cympho-test-no-such-command"
       after
         if original do
           Application.put_env(:cympho, :claude_code_command, original)
@@ -123,7 +133,8 @@ defmodule Cympho.Adapters.RegistryExtendedTest do
     test "returns error for unregistered adapter type" do
       result = Registry.resolve_agent(%{adapter: :nonexistent, config: %{}})
       # Falls back to default, which may or may not be available
-      assert match?({:ok, _, _}, result) or match?({:error, :no_adapter}, result)
+      assert match?({:ok, _, _}, result) or
+               match?({:error, {:no_adapter_available, [{:claude_code, _reason}]}}, result)
     end
   end
 

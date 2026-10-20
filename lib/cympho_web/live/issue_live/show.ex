@@ -7,6 +7,7 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.Comments
   alias Cympho.DeliveryBriefReadiness
   alias Cympho.Documents
+  alias Cympho.Finances
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
   alias Cympho.Issues.AutoAssignment
@@ -16,6 +17,7 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.IssueThreadInteractions
   alias Cympho.Orchestrator
   alias Cympho.ReviewNudges
+  alias Cympho.Runtime
   alias Cympho.ToolCallTraces
   alias Cympho.WorkProducts
   alias CymphoWeb.IssueLive.Show.RunProgress
@@ -289,10 +291,12 @@ defmodule CymphoWeb.IssueLive.Show do
 
   @impl true
   def handle_event("add_comment", %{"comment" => comment_params}, socket) do
+    # Authorship and the target issue are server-derived; the client only
+    # supplies the body.
     comment_params =
-      socket
-      |> default_comment_params()
-      |> Map.merge(comment_params)
+      comment_params
+      |> Map.take(["body"])
+      |> Map.merge(default_comment_params(socket))
       |> Map.put("issue_id", socket.assigns.issue.id)
 
     case Comments.create_comment(comment_params) do
@@ -861,6 +865,7 @@ defmodule CymphoWeb.IssueLive.Show do
 
     if socket.assigns.orchestrator_enabled? do
       with {:ok, agent} <- get_scoped_agent(socket, agent_id),
+           :ok <- Runtime.pricing_refusal(issue, agent),
            {:ok, checked_out} <- Issues.checkout_issue(issue, agent_id),
            {:ok, _pid} <- Orchestrator.start_and_run(checked_out, agent_id),
            {:ok, _updated_agent} <- Agents.update_agent(agent, %{status: :running}) do
@@ -871,6 +876,9 @@ defmodule CymphoWeb.IssueLive.Show do
          |> assign(:show_agent_panel, false)
          |> assign(:agents, list_idle_agents(socket))}
       else
+        {:error, {:budget_unpriceable_runtime, info}} ->
+          {:noreply, put_flash(socket, :error, Finances.unpriceable_runtime_message(info))}
+
         {:error, reason} ->
           {:noreply, put_flash(socket, :error, "Failed to spawn agent: #{inspect(reason)}")}
       end

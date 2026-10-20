@@ -21,6 +21,7 @@ defmodule Cympho.RuntimeContext do
     :execution_workspace,
     :cwd,
     env: %{},
+    secret_keys: [],
     skills: [],
     budget: %{},
     metadata: %{}

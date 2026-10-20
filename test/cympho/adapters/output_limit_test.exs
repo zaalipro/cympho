@@ -141,6 +141,23 @@ defmodule Cympho.Adapters.OutputLimitTest do
     refute File.exists?(marker), "the producer started without a safe output relay"
   end
 
+  test "a cut tail drops its partial first line so a split secret is not kept" do
+    acc =
+      String.duplicate("x", 100) <>
+        "plain-deploy-sentinel\n" <> String.duplicate("y", 8_180) <> "\n"
+
+    tail = OutputLimit.tail(acc, "end\n")
+
+    refute tail =~ "ntinel"
+    assert String.starts_with?(tail, "yyy")
+    assert String.ends_with?(tail, "\nend\n")
+  end
+
+  test "a capped tail drops the unfinished last line the relay cut" do
+    assert OutputLimit.tail("short\n", "key plain-deploy-sen") == "short\n"
+    assert OutputLimit.tail("", "no newline at all") == ""
+  end
+
   test "direct adapters inherit a smaller compile-time AgentRunner ceiling" do
     elixir = System.find_executable("elixir")
 

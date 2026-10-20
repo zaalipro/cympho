@@ -114,6 +114,46 @@ defmodule CymphoWeb.SkillLiveTest do
       assert skill.manifest["capabilities"] == ["repo_audit", "evidence_summary"]
       assert {:ok, %Manifest{}} = Manifest.validate(skill.manifest)
     end
+
+    test "ignores a client-supplied company_id and saves into the current company", %{
+      conn: conn,
+      current_company: company
+    } do
+      other_company = create_company("forged-create")
+      identifier = "forged-create-#{System.unique_integer([:positive])}"
+      {:ok, view, _html} = live(conn, "/skills/new")
+
+      render_hook(view, "save", %{
+        "skill" => %{
+          "name" => "Forged Create",
+          "identifier" => identifier,
+          "company_id" => other_company.id
+        }
+      })
+
+      assert {:ok, skill} = Skills.get_skill_by_identifier(identifier, company.id)
+      assert skill.company_id == company.id
+      assert {:error, :not_found} = Skills.get_skill_by_identifier(identifier, other_company.id)
+    end
+
+    test "rejects a project from another company", %{conn: conn, current_company: company} do
+      other_company = create_company("foreign-project")
+      {:ok, foreign_project} = create_project(other_company, "Foreign Project")
+      identifier = "foreign-project-#{System.unique_integer([:positive])}"
+      {:ok, view, _html} = live(conn, "/skills/new")
+
+      render_hook(view, "save", %{
+        "skill" => %{
+          "name" => "Foreign Project Skill",
+          "identifier" => identifier,
+          "project_id" => foreign_project.id
+        }
+      })
+
+      flash = :sys.get_state(view.pid).socket.assigns.flash
+      assert Phoenix.Flash.get(flash, :error) == "Choose a project from this company."
+      assert {:error, :not_found} = Skills.get_skill_by_identifier(identifier, company.id)
+    end
   end
 
   describe "SkillLive.Edit" do
@@ -168,6 +208,39 @@ defmodule CymphoWeb.SkillLiveTest do
       assert updated.manifest["entrypoint"] == "Cympho.Skills.EditedSkill"
       assert updated.manifest["capabilities"] == ["new_capability", "review_packet"]
       assert {:ok, %Manifest{}} = Manifest.validate(updated.manifest)
+    end
+
+    test "cannot move a skill into another company via a forged company_id", %{
+      conn: conn,
+      current_company: company
+    } do
+      other_company = create_company("forged-edit")
+
+      {:ok, skill} =
+        Skills.create_skill(%{
+          identifier: "forged-edit-#{System.unique_integer([:positive])}",
+          name: "Forged Edit",
+          version: "1.0.0",
+          author: "Cympho",
+          manifest: valid_manifest("Forged Edit", []),
+          enabled: true,
+          company_id: company.id
+        })
+
+      {:ok, view, _html} = live(conn, "/skills/#{skill.id}/edit")
+
+      render_hook(view, "save", %{
+        "skill" => %{
+          "name" => "Moved Skill",
+          "identifier" => skill.identifier,
+          "company_id" => other_company.id
+        }
+      })
+
+      assert {:ok, updated} = Skills.get_company_skill(company.id, skill.id)
+      assert updated.name == "Moved Skill"
+      assert updated.company_id == company.id
+      assert {:error, :not_found} = Skills.get_company_skill(other_company.id, skill.id)
     end
   end
 

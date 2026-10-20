@@ -95,6 +95,9 @@ defmodule Cympho.Adapters.CodexAdapter do
           {:ok, output} ->
             send(recipient_pid, {:turn_completed, session_id, output})
 
+          {:error, reason, raw} ->
+            send(recipient_pid, turn_error(session_id, reason, raw))
+
           {:error, reason} ->
             send(recipient_pid, {:turn_ended_with_error, session_id, reason})
         end
@@ -218,15 +221,21 @@ defmodule Cympho.Adapters.CodexAdapter do
             fn port ->
               send(recipient_pid, {:session_started, session_id})
 
+              # Error outcomes keep the buffered output: it may hold the
+              # usage Codex reported before the turn failed.
               case collect_output(port, "", timeout, session_id, recipient_pid, limit) do
                 {:ok, raw} ->
-                  case ProviderFailure.detect(raw) do
-                    :ok -> parse_codex_output(raw)
-                    {:error, _} = err -> err
+                  secrets = Cympho.Secrets.Redaction.runtime_secrets(opts[:runtime_context])
+
+                  with :ok <- ProviderFailure.detect(raw, secrets),
+                       {:ok, _result} = ok <- parse_codex_output(raw) do
+                    ok
+                  else
+                    {:error, reason} -> {:error, reason, raw}
                   end
 
-                {:error, _} = err ->
-                  err
+                error ->
+                  error
               end
             end
           )
@@ -315,7 +324,9 @@ defmodule Cympho.Adapters.CodexAdapter do
     receive do
       {^port, {:data, data}} when byte_size(acc) + byte_size(data) > limit ->
         close_port(port)
-        {:error, {:output_limit_exceeded, limit, OutputLimit.tail(acc, data)}}
+        # The relay stops at limit + 1 bytes, so acc <> data stays bounded; this
+        # chunk may complete the usage event.
+        {:error, {:output_limit_exceeded, limit, OutputLimit.tail(acc, data)}, acc <> data}
 
       {^port, {:data, data}} ->
         collect_output(
@@ -334,12 +345,12 @@ defmodule Cympho.Adapters.CodexAdapter do
         {:ok, acc}
 
       {^port, {:exit_status, code}} ->
-        {:error, "Codex exited with status #{code}: #{acc}"}
+        {:error, "Codex exited with status #{code}: #{acc}", acc}
 
       {:cancel_session, ^session_id, reason} ->
-        result = {:error, {:cancelled, reason}}
         close_port(port)
-        result
+        # Output delivered before the cancel was handled may hold usage.
+        {:error, {:cancelled, reason}, acc <> drain_port_data(port)}
 
       {:DOWN, _ref, :process, ^recipient_pid, _reason} ->
         # Owner orchestrator died without cancelling us. See Cympho.AgentRunner.
@@ -355,11 +366,11 @@ defmodule Cympho.Adapters.CodexAdapter do
 
           :max_run ->
             close_port(port)
-            {:error, :max_run_timeout}
+            {:error, :max_run_timeout, acc}
 
           :stall ->
             close_port(port)
-            {:error, :timeout}
+            {:error, :timeout, acc}
         end
     end
   end
@@ -390,7 +401,8 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
-  defp parse_codex_output(raw) do
+  @doc false
+  def parse_codex_output(raw) do
     raw = String.trim(raw)
 
     if raw == "" do
@@ -400,15 +412,30 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
+  @doc false
+  # Shared with the process adapter. Once the port is closed nothing more
+  # arrives, so this collects the output it had already delivered.
+  def drain_port_data(port, acc \\ "") do
+    receive do
+      {^port, {:data, data}} -> drain_port_data(port, acc <> data)
+    after
+      0 -> acc
+    end
+  end
+
+  @doc false
+  # Shared with the process adapter's codex preset. Codex reports usage only
+  # on `turn.completed`, so a failed turn carries it whenever that event was
+  # buffered, with or without a usable final message.
+  def turn_error(session_id, reason, raw) do
+    case raw |> String.split("\n") |> decode_events() |> final_usage() do
+      nil -> {:turn_ended_with_error, session_id, reason}
+      usage -> {:turn_ended_with_error, session_id, reason, %{"usage" => usage}}
+    end
+  end
+
   defp parse_codex_lines(lines, raw) do
-    parsed =
-      lines
-      |> Enum.map(&Jason.decode/1)
-      |> Enum.filter(fn
-        {:ok, _} -> true
-        _ -> false
-      end)
-      |> Enum.map(fn {:ok, m} -> m end)
+    parsed = decode_events(lines)
 
     case final_agent_message(parsed) do
       {:ok, text} ->
@@ -428,6 +455,16 @@ defmodule Cympho.Adapters.CodexAdapter do
       :error ->
         {:error, {:parse_error, raw}}
     end
+  end
+
+  defp decode_events(lines) do
+    lines
+    |> Enum.map(&Jason.decode/1)
+    |> Enum.filter(fn
+      {:ok, _} -> true
+      _ -> false
+    end)
+    |> Enum.map(fn {:ok, m} -> m end)
   end
 
   defp final_agent_message(events) do
@@ -1130,17 +1167,30 @@ defmodule Cympho.Adapters.CodexAdapter do
   def type, do: :codex
 
   @impl true
-  def available?(config) do
-    api_key = get_api_key(config)
-    has_key = not is_nil(api_key) and api_key != ""
-    has_binary = not is_nil(System.find_executable("codex"))
-    has_sandbox = not is_nil(bwrap_binary())
-    has_key and has_binary and has_sandbox
-  end
+  def usage_reporting(_config), do: :tokens
+
+  @impl true
+  def available?(config), do: missing_prerequisites(config) == []
 
   @impl true
   def available? do
     available?(%{})
+  end
+
+  @impl true
+  def unavailable_reason(config), do: config |> missing_prerequisites() |> Enum.join("; ")
+
+  defp missing_prerequisites(config) do
+    api_key = get_api_key(config)
+
+    [
+      {is_nil(api_key) or api_key == "", "api_key is required"},
+      {is_nil(System.find_executable("codex")), "codex binary not found in PATH"},
+      {is_nil(bwrap_binary()),
+       "bubblewrap binary not found; Codex runs require OS-level containment"}
+    ]
+    |> Enum.filter(fn {missing?, _message} -> missing? end)
+    |> Enum.map(fn {_missing?, message} -> message end)
   end
 
   @impl true

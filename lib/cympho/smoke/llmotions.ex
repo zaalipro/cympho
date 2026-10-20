@@ -22,6 +22,7 @@ defmodule Cympho.Smoke.LLMotions do
   }
 
   alias Cympho.Agents.Agent
+  alias Cympho.Finances.Pricing
   alias Cympho.Issues.Issue
 
   @endpoint "https://cli.llmotions.com/v1"
@@ -38,8 +39,11 @@ defmodule Cympho.Smoke.LLMotions do
           cancel_seed_issues?: boolean(),
           focus?: boolean(),
           create_workspace?: boolean(),
-          repo_cwd: String.t() | nil
+          repo_cwd: String.t() | nil,
+          billing: :flat_rate | map()
         ]
+
+  @rate_keys ~w(input_usd_per_mtok output_usd_per_mtok cached_input_usd_per_mtok)
 
   @spec setup(setup_opts()) :: {:ok, map()} | {:error, term()}
   def setup(opts \\ []) do
@@ -48,7 +52,8 @@ defmodule Cympho.Smoke.LLMotions do
     issue_prefix = Keyword.get(opts, :issue_prefix, "LMS")
     api_key = normalize_blank(Keyword.get(opts, :api_key))
 
-    with {:ok, bootstrap} <-
+    with {:ok, billing} <- billing_runtime_config(Keyword.get(opts, :billing), model),
+         {:ok, bootstrap} <-
            Companies.create_autonomous_company(%{
              name: company_name,
              goal_title: "Build Team Pulse launch tracker",
@@ -58,7 +63,7 @@ defmodule Cympho.Smoke.LLMotions do
              adapter: :openai_chat
            }),
          {:ok, project_workspace} <- maybe_create_project_workspace(bootstrap, opts),
-         {:ok, configured_agents} <- configure_agents(bootstrap, model),
+         {:ok, configured_agents} <- configure_agents(bootstrap, model, billing),
          {:ok, secret_status} <- maybe_store_secret(bootstrap.company.id, api_key, opts),
          :ok <- maybe_cancel_seed_issues(bootstrap.seed_issues, opts),
          {:ok, issue} <- create_team_pulse_issue(bootstrap, configured_agents.ceo),
@@ -169,23 +174,45 @@ defmodule Cympho.Smoke.LLMotions do
     end
   end
 
-  defp configure_agents(%{company: company, project: project, agents: agents}, model) do
+  # Billing is an explicit choice: create_autonomous_company always inserts a
+  # company-scope USD block policy, and the repo documents neither LLMotions
+  # per-token prices nor a subscription. Rates are USD per million tokens.
+  defp billing_runtime_config(nil, _model), do: {:error, :llmotions_billing_required}
+  defp billing_runtime_config(:flat_rate, _model), do: {:ok, %{"billing_mode" => "flat_rate"}}
+
+  defp billing_runtime_config(%{} = rates, model) do
+    rates =
+      rates
+      |> Map.new(fn {key, value} -> {to_string(key), value} end)
+      |> Map.take(@rate_keys)
+
+    if Pricing.valid_rate?(rates["input_usd_per_mtok"]) and
+         Pricing.valid_rate?(rates["output_usd_per_mtok"]) and
+         Enum.all?(rates, fn {_key, value} -> Pricing.valid_rate?(value) end),
+       do: {:ok, %{"pricing" => %{model => rates}}},
+       else: {:error, {:invalid_llmotions_billing, rates}}
+  end
+
+  defp billing_runtime_config(billing, _model),
+    do: {:error, {:invalid_llmotions_billing, billing}}
+
+  defp configure_agents(%{company: company, project: project, agents: agents}, model, billing) do
     ceo = find_agent!(agents, :ceo)
     cto = find_agent!(agents, :cto)
     engineer = find_agent!(agents, :engineer)
 
-    with {:ok, ceo} <- configure_llmotions_agent(ceo, model, ceo_instructions()),
-         {:ok, cto} <- configure_llmotions_agent(cto, model, cto_instructions()),
+    with {:ok, ceo} <- configure_llmotions_agent(ceo, model, ceo_instructions(), billing),
+         {:ok, cto} <- configure_llmotions_agent(cto, model, cto_instructions(), billing),
          {:ok, engineer} <-
-           configure_repo_agent(engineer, "Repo-capable Codex Engineer", model),
-         {:ok, qa} <- ensure_qa_agent(company.id, project.id, cto.id, model) do
+           configure_repo_agent(engineer, "Repo-capable Codex Engineer", model, billing),
+         {:ok, qa} <- ensure_qa_agent(company.id, project.id, cto.id, model, billing) do
       {:ok, %{ceo: ceo, cto: cto, engineer: engineer, qa: qa}}
     end
   rescue
     error -> {:error, error}
   end
 
-  defp configure_llmotions_agent(%Agent{} = agent, model, extra_instructions) do
+  defp configure_llmotions_agent(%Agent{} = agent, model, extra_instructions, billing) do
     Agents.update_agent(agent, %{
       adapter: :openai_chat,
       config: %{
@@ -194,19 +221,23 @@ defmodule Cympho.Smoke.LLMotions do
         "temperature" => 0.2,
         "timeout_sec" => 120
       },
-      runtime_config: %{
-        "profile_id" => profile_id_for_model(model),
-        "env" => %{
-          "LLMOTIONS_BASE_URL" => @endpoint,
-          "LLMOTIONS_MODEL" => model
-        }
-      },
+      runtime_config:
+        Map.merge(
+          %{
+            "profile_id" => profile_id_for_model(model),
+            "env" => %{
+              "LLMOTIONS_BASE_URL" => @endpoint,
+              "LLMOTIONS_MODEL" => model
+            }
+          },
+          billing
+        ),
       max_concurrent_jobs: 1,
       instructions: append_instructions(agent.instructions, extra_instructions)
     })
   end
 
-  defp configure_repo_agent(%Agent{} = agent, name, model) do
+  defp configure_repo_agent(%Agent{} = agent, name, model, billing) do
     Agents.update_agent(agent, %{
       name: name,
       adapter: :codex,
@@ -216,20 +247,24 @@ defmodule Cympho.Smoke.LLMotions do
         "repo_capable" => true,
         "timeout_sec" => 1_200
       },
-      runtime_config: %{
-        "profile_id" => RuntimeProfiles.custom_id(),
-        "repo_capable" => true,
-        "env" => %{"OPENAI_BASE_URL" => @endpoint}
-      },
+      runtime_config:
+        Map.merge(
+          %{
+            "profile_id" => RuntimeProfiles.custom_id(),
+            "repo_capable" => true,
+            "env" => %{"OPENAI_BASE_URL" => @endpoint}
+          },
+          billing
+        ),
       max_concurrent_jobs: 1,
       instructions: append_instructions(agent.instructions, repo_instructions())
     })
   end
 
-  defp ensure_qa_agent(company_id, project_id, cto_id, model) do
+  defp ensure_qa_agent(company_id, project_id, cto_id, model, billing) do
     case Agents.list_agents_by_role(:qa_engineer, company_id) do
       [qa | _] ->
-        configure_repo_agent(qa, qa.name || "QA Codex Engineer", model)
+        configure_repo_agent(qa, qa.name || "QA Codex Engineer", model, billing)
 
       [] ->
         Agents.create_agent(%{
@@ -247,11 +282,15 @@ defmodule Cympho.Smoke.LLMotions do
             "repo_capable" => true,
             "timeout_sec" => 1_200
           },
-          runtime_config: %{
-            "profile_id" => RuntimeProfiles.custom_id(),
-            "repo_capable" => true,
-            "env" => %{"OPENAI_BASE_URL" => @endpoint}
-          },
+          runtime_config:
+            Map.merge(
+              %{
+                "profile_id" => RuntimeProfiles.custom_id(),
+                "repo_capable" => true,
+                "env" => %{"OPENAI_BASE_URL" => @endpoint}
+              },
+              billing
+            ),
           max_concurrent_jobs: 1,
           instructions: repo_instructions()
         })

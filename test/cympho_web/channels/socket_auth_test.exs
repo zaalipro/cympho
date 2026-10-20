@@ -86,6 +86,13 @@ defmodule CymphoWeb.SocketAuthTest do
       end)
     end
 
+    test "rejects an agent that has no company" do
+      %{agent: agent, company: company, run: run} = socket_principal()
+      {:ok, _orphan} = agent |> Ecto.Changeset.change(company_id: nil) |> Repo.update()
+
+      assert {:error, :unauthorized} == connect_token(token_for(agent.id, run.id, company.id))
+    end
+
     test "rejects an invalid JWT token" do
       assert {:error, :unauthorized} ==
                Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => "garbage"},

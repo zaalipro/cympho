@@ -65,6 +65,7 @@ defmodule Cympho.Orchestrator do
 
   alias Cympho.Adapters.Adapter
   alias Cympho.RuntimeAdmission
+  alias Cympho.Secrets.Redaction
 
   alias Cympho.Issues.Issue
 
@@ -300,6 +301,13 @@ defmodule Cympho.Orchestrator do
     {:noreply, session}
   end
 
+  def handle_info(
+        {:turn_ended_with_error, msg_session_id, reason, _usage},
+        %__MODULE__{session_id: current} = session
+      )
+      when not is_nil(current) and msg_session_id != current,
+      do: handle_info({:turn_ended_with_error, msg_session_id, reason}, session)
+
   @impl true
   def handle_info({:session_started, session_id}, %__MODULE__{session_id: current} = session)
       when not is_nil(current) and session_id != current do
@@ -362,7 +370,7 @@ defmodule Cympho.Orchestrator do
 
     create_agent_comment(issue, agent_id, body)
 
-    action_result = handle_agent_actions(issue, agent_id, body)
+    action_result = handle_agent_actions(issue, agent_id, body, session.run_id)
 
     finalize_engine_run_for_action_result(
       %{session | tool_traces: updated_tool_traces},
@@ -402,7 +410,11 @@ defmodule Cympho.Orchestrator do
         error: Exception.message(exception)
       )
 
-      fail_engine_run(session, {:turn_processing_crashed, Exception.message(exception)})
+      fail_engine_run(
+        session,
+        {:turn_processing_crashed, Exception.message(exception)},
+        safe_run_attrs(result)
+      )
 
       message =
         "Cympho crashed while processing the agent's response (#{Exception.message(exception)})."
@@ -423,19 +435,30 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def handle_info({:turn_ended_with_error, _session_id, reason}, %__MODULE__{} = session) do
+  def handle_info({:turn_ended_with_error, session_id, reason}, %__MODULE__{} = session),
+    do: handle_info({:turn_ended_with_error, session_id, reason, nil}, session)
+
+  # Adapters attach the usage a failed turn still billed as a fourth element.
+  def handle_info({:turn_ended_with_error, _session_id, reason, usage}, %__MODULE__{} = session) do
+    # Adapter failure reasons can carry raw CLI output or provider error
+    # bodies. Strip this run's secrets before the reason is logged, persisted
+    # on the run or traces, or put in a comment.
+    reason = Redaction.redact_term(reason, Redaction.runtime_secrets(session.runtime_context))
     session = release_after_adapter_exit(session)
     issue = session.issue
     agent_id = session.agent_id
 
-    Logger.warning(
-      "[Orchestrator] Session ended with error for issue #{issue.id}, agent #{agent_id}: #{inspect(reason)}"
+    Logger.warning("[Orchestrator] Session ended with error",
+      issue_id: issue.id,
+      agent_id: agent_id,
+      company_id: issue.company_id,
+      reason: inspect(reason)
     )
 
     # Mark pending tool traces as errored/timed out
     mark_pending_traces_as_errored(session.tool_traces, reason)
 
-    fail_engine_run(session, reason)
+    fail_engine_run(session, reason, if(is_map(usage), do: extract_run_attrs(usage), else: %{}))
 
     if session.runtime_admission_token do
       # A terminal adapter message may arrive before its worker finishes
@@ -815,6 +838,7 @@ defmodule Cympho.Orchestrator do
 
     if cleanup_result == :ok do
       finalize_active_run_on_shutdown(session, reason)
+      settle_cancelled_turn_usage(session)
     end
 
     if cleanup_result == :ok do
@@ -830,6 +854,27 @@ defmodule Cympho.Orchestrator do
 
     :ok
   end
+
+  # A stopped adapter's terminal message lands here during cleanup: an error
+  # carrying the usage its turn had already billed, or a turn that completed
+  # as it was stopped. Settle that usage onto the now-terminal run; the
+  # stopped turn's actions are not run.
+  defp settle_cancelled_turn_usage(%__MODULE__{session_id: session_id, run_id: run_id})
+       when not is_nil(session_id) and is_binary(run_id) do
+    usage =
+      receive do
+        {:turn_ended_with_error, ^session_id, _reason, usage} when is_map(usage) -> usage
+        {:turn_completed, ^session_id, result} when is_map(result) -> result
+      after
+        0 -> nil
+      end
+
+    with %{} <- usage, {:ok, run} <- HeartbeatEngine.get_run(run_id) do
+      HeartbeatEngine.record_late_usage(run, extract_run_attrs(usage))
+    end
+  end
+
+  defp settle_cancelled_turn_usage(_session), do: :ok
 
   defp cleanup_adapter_session(nil, _reason), do: :ok
 
@@ -981,6 +1026,21 @@ defmodule Cympho.Orchestrator do
   defp runtime_identity_metadata(adapter, _config),
     do: %{"runtime" => %{"provider" => adapter_name(adapter)}}
 
+  # Preflight priced the run against its resolved adapter config (env,
+  # overrides and profile applied). Record that identity and snapshot on the
+  # run so settlement uses exactly what admission checked.
+  defp resolved_runtime_metadata(module, config, %Cympho.RuntimeContext{metadata: metadata})
+       when is_map(config) do
+    identity = runtime_identity_metadata(Adapters.ModelCompatibility.adapter_key(module), config)
+
+    case metadata["pricing"] do
+      nil -> identity
+      pricing -> Map.put(identity, "pricing", pricing)
+    end
+  end
+
+  defp resolved_runtime_metadata(_module, _config, _runtime_context), do: %{}
+
   defp config_value(config, "provider"),
     do: Map.get(config, "provider") || Map.get(config, :provider)
 
@@ -1121,7 +1181,7 @@ defmodule Cympho.Orchestrator do
   end
 
   defp start_admitted_runtime_session(session, module, config, runtime_context) do
-    case start_engine_run(session) do
+    case start_engine_run(session, resolved_runtime_metadata(module, config, runtime_context)) do
       :ok ->
         wake_context = runtime_wake_context(session)
         prompt_context = project_prompt_runtime_context(module, runtime_context)
@@ -1657,7 +1717,8 @@ defmodule Cympho.Orchestrator do
 
   defp handle_preflight_or_resolution_error(session, error)
        when error in [:unknown_adapter, :no_adapter_available] or
-              (is_tuple(error) and tuple_size(error) > 0 and elem(error, 0) == :config_invalid) do
+              (is_tuple(error) and tuple_size(error) > 0 and
+                 elem(error, 0) in [:config_invalid, :no_adapter_available]) do
     handle_resolution_error(session, error)
   end
 
@@ -1730,6 +1791,9 @@ defmodule Cympho.Orchestrator do
 
   defp retryable_preflight_error?(:company_paused), do: true
   defp retryable_preflight_error?({:agent_unavailable, _status}), do: true
+  # The refusal is a property of the runtime and its policy, not of this
+  # issue: keep the issue queued until the owner fixes billing.
+  defp retryable_preflight_error?({:budget_unpriceable_runtime, _info}), do: true
   defp retryable_preflight_error?(_reason), do: false
 
   defp format_preflight_error({:agent_unavailable, status}),
@@ -1738,6 +1802,9 @@ defmodule Cympho.Orchestrator do
   defp format_preflight_error({:budget_blocked, info}),
     do:
       "budget policy #{info.policy_id} is exhausted for #{info.scope} scope in the #{info.period} period"
+
+  defp format_preflight_error({:budget_unpriceable_runtime, info}),
+    do: Cympho.Finances.unpriceable_runtime_message(info)
 
   defp format_preflight_error({:workspace_unavailable, cwd}),
     do: "workspace cwd is unavailable: #{cwd}"
@@ -1890,10 +1957,11 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp start_engine_run(%__MODULE__{run_id: nil}), do: :ok
+  defp start_engine_run(%__MODULE__{run_id: nil}, _resolved_metadata), do: :ok
 
-  defp start_engine_run(%__MODULE__{run_id: run_id}) do
-    with {:ok, run} <- HeartbeatEngine.get_run(run_id) do
+  defp start_engine_run(%__MODULE__{run_id: run_id}, resolved_metadata) do
+    with {:ok, run} <- HeartbeatEngine.get_run(run_id),
+         :ok <- record_resolved_runtime(run, resolved_metadata) do
       case HeartbeatEngine.start_run(run) do
         :ok ->
           :ok
@@ -1928,6 +1996,29 @@ defmodule Cympho.Orchestrator do
     e ->
       Logger.warning("[Orchestrator] Failed to start engine run: #{inspect(e)}")
       {:error, {:run_start_crashed, Exception.message(e)}}
+  end
+
+  defp record_resolved_runtime(_run, metadata) when map_size(metadata) == 0, do: :ok
+
+  # A run must not bill before its price snapshot is on its row; the resolved
+  # identity alone is provenance, so failing to record it does not stop a run.
+  defp record_resolved_runtime(run, metadata) do
+    case HeartbeatEngine.merge_run_metadata(run.id, metadata) do
+      {:ok, _run} ->
+        :ok
+
+      {:error, reason} when is_map_key(metadata, "pricing") ->
+        {:error, {:run_pricing_unrecorded, reason}}
+
+      {:error, reason} ->
+        Logger.warning("[Orchestrator] could not record the resolved runtime on the run",
+          component: "orchestrator",
+          run_id: run.id,
+          error: inspect(reason)
+        )
+
+        :ok
+    end
   end
 
   defp cancel_pending_engine_run(%__MODULE__{run_id: nil} = session) do
@@ -1984,7 +2075,12 @@ defmodule Cympho.Orchestrator do
     try do
       {:ok, run} = HeartbeatEngine.get_run(run_id)
       attrs = extract_run_attrs(result)
-      HeartbeatEngine.complete_run(run, attrs)
+
+      case HeartbeatEngine.complete_run(run, attrs) do
+        # Cancelled or failed by an owner/watchdog before the turn reported.
+        {:error, {:invalid_status, _status}} -> HeartbeatEngine.record_late_usage(run, attrs)
+        other -> other
+      end
     rescue
       e ->
         Logger.warning("[Orchestrator] Failed to complete engine run: #{inspect(e)}")
@@ -1998,7 +2094,14 @@ defmodule Cympho.Orchestrator do
   defp fail_engine_run(%__MODULE__{run_id: run_id}, reason, usage_attrs) do
     try do
       {:ok, run} = HeartbeatEngine.get_run(run_id)
-      HeartbeatEngine.fail_run(run, reason, usage_attrs)
+
+      case HeartbeatEngine.fail_run(run, reason, usage_attrs) do
+        {:error, {:invalid_status, _status}} ->
+          HeartbeatEngine.record_late_usage(run, usage_attrs)
+
+        other ->
+          other
+      end
     rescue
       e ->
         Logger.warning("[Orchestrator] Failed to fail engine run: #{inspect(e)}")
@@ -2059,22 +2162,43 @@ defmodule Cympho.Orchestrator do
           end
       end
 
+    # Cache reads are priced apart from fresh input; they are already counted
+    # in input_tokens (Codex and OpenAI report them as a subset of input).
+    cached_input_tokens =
+      case sum_fields(usage, ~w(cached_input_tokens cache_read_input_tokens)) do
+        0 -> sum_over(model_usage, ~w(cacheReadInputTokens))
+        n -> n
+      end
+
     envelope_cost =
       parse_cost(result["total_cost_usd"] || result["cost_usd"] || usage["cost_usd"])
 
+    model_costs = model_usage |> Enum.map(&parse_cost(&1["costUSD"])) |> Enum.reject(&is_nil/1)
+
+    # nil means no cost was reported, which is not the same as a reported zero.
     cost =
-      if Decimal.eq?(envelope_cost, 0) do
-        Enum.reduce(model_usage, Decimal.new("0"), fn mu, acc ->
-          Decimal.add(acc, parse_cost(mu["costUSD"]))
-        end)
+      if (is_nil(envelope_cost) or Decimal.eq?(envelope_cost, 0)) and model_costs != [] do
+        Enum.reduce(model_costs, Decimal.new("0"), &Decimal.add/2)
       else
         envelope_cost
       end
 
-    %{input_tokens: input_tokens, output_tokens: output_tokens, cost_usd: cost}
+    %{
+      input_tokens: input_tokens,
+      output_tokens: output_tokens,
+      cached_input_tokens: cached_input_tokens,
+      cost_usd: cost
+    }
   end
 
-  defp extract_run_attrs(_), do: %{input_tokens: 0, output_tokens: 0, cost_usd: Decimal.new("0")}
+  defp extract_run_attrs(_), do: %{input_tokens: 0, output_tokens: 0, cost_usd: nil}
+
+  # Used on the crash path, where a malformed result must not raise again.
+  defp safe_run_attrs(result) do
+    extract_run_attrs(result)
+  rescue
+    _ -> %{}
+  end
 
   defp sum_fields(map, fields) do
     Enum.reduce(fields, 0, fn field, acc ->
@@ -2089,7 +2213,7 @@ defmodule Cympho.Orchestrator do
     Enum.reduce(maps, 0, fn map, acc -> acc + sum_fields(map, fields) end)
   end
 
-  defp parse_cost(nil), do: Decimal.new("0")
+  defp parse_cost(nil), do: nil
   defp parse_cost(val) when is_binary(val), do: Decimal.new(val)
   defp parse_cost(val) when is_float(val), do: Decimal.from_float(val)
   defp parse_cost(val), do: Decimal.new("#{val}")
@@ -2164,10 +2288,10 @@ defmodule Cympho.Orchestrator do
 
   defp extract_result_content(_), do: "No content returned"
 
-  defp handle_agent_actions(issue, agent_id, body) do
+  defp handle_agent_actions(issue, agent_id, body, run_id) do
     case AgentActions.parse(body) do
       {:ok, actions} ->
-        handle_parsed_agent_actions(issue, agent_id, body, actions)
+        handle_parsed_agent_actions(issue, agent_id, body, actions, run_id)
 
       {:error, reason} ->
         # Parse/shape mistakes are retriable: leave a system note, keep
@@ -2182,8 +2306,8 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp handle_parsed_agent_actions(issue, agent_id, body, actions) do
-    case AgentActions.execute(issue, agent_id, actions) do
+  defp handle_parsed_agent_actions(issue, agent_id, body, actions, run_id) do
+    case AgentActions.execute(issue, agent_id, actions, acting_run_id: run_id) do
       {:ok, result} ->
         maybe_create_completion_handoff_comment(issue, agent_id, body, actions, result)
 
@@ -2582,7 +2706,7 @@ defmodule Cympho.Orchestrator do
     error_body = Error.comment(reason, adapter: session_adapter_name(session))
 
     circuit_breaker =
-      if reason == :no_adapter_available do
+      if reason == :no_adapter_available or match?({:no_adapter_available, _}, reason) do
         record_adapter_failure(agent_id)
       else
         :not_applicable

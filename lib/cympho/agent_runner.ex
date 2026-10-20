@@ -10,6 +10,8 @@ defmodule Cympho.AgentRunner do
     - `{:turn_completed, session_id, result}` — when a turn completes with parsed result
     - `{:tool_call_detected, session_id, tool_call}` — when a tool_use block is detected
     - `{:turn_ended_with_error, session_id, reason}` — when an error occurs
+    - `{:turn_ended_with_error, session_id, reason, result}` — when an error
+      occurs after a billed result (usage, total_cost_usd) was already decoded
   """
 
   @stall_timeout Application.compile_env(:cympho, :agent_runner_stall_timeout, 300_000)
@@ -342,7 +344,8 @@ defmodule Cympho.AgentRunner do
             recipient_pid,
             stall_timeout,
             max_run_ms,
-            max_output_bytes
+            max_output_bytes,
+            Cympho.Secrets.Redaction.runtime_secrets(opts[:runtime_context])
           )
 
         {:error, :runtime_admission_start_failed} ->
@@ -362,7 +365,8 @@ defmodule Cympho.AgentRunner do
          recipient_pid,
          stall_timeout,
          max_run_ms,
-         max_output_bytes
+         max_output_bytes,
+         secrets
        ) do
     send(recipient_pid, {:session_started, session_id})
 
@@ -384,7 +388,8 @@ defmodule Cympho.AgentRunner do
           last_report_at: nil,
           result: nil,
           buffer: "",
-          diagnostic_tail: ""
+          diagnostic_tail: "",
+          secrets: secrets
         })
       after
         # A terminal adapter message must never race the local OS child. On
@@ -403,9 +408,16 @@ defmodule Cympho.AgentRunner do
     receive do
       {^port, {:data, output}}
       when state.bytes + byte_size(output) > state.max_output_bytes ->
-        diagnostic_tail = append_diagnostic_tail(state.diagnostic_tail, output)
+        # diagnostic_tail holds the last 8 KiB, so this is the same tail the
+        # other adapters report, cut to whole lines.
+        diagnostic_tail = Cympho.Adapters.OutputLimit.tail(state.diagnostic_tail, output)
 
-        {:error, {:output_limit_exceeded, state.max_output_bytes, diagnostic_tail}}
+        # The crossing chunk can complete the billed result; it is decoded for
+        # its usage only, so the run still fails and no actions run.
+        billed_error(
+          {:output_limit_exceeded, state.max_output_bytes, diagnostic_tail},
+          state.result || decoded_result(state.buffer <> output, state.secrets)
+        )
 
       {^port, {:data, output}} ->
         buffer = state.buffer <> output
@@ -421,7 +433,7 @@ defmodule Cympho.AgentRunner do
           }
           |> maybe_report_progress(session_id, recipient_pid)
 
-        case {state.result, parse_json_output(buffer)} do
+        case {state.result, parse_json_output(buffer, state.secrets)} do
           {result, _parsed} when not is_nil(result) ->
             loop(port, session_id, recipient_pid, stall_timeout, max_run_ms, %{
               state
@@ -429,7 +441,7 @@ defmodule Cympho.AgentRunner do
             })
 
           {nil, {:ok, result}} ->
-            case Cympho.Adapters.ProviderFailure.detect(result) do
+            case Cympho.Adapters.ProviderFailure.detect(result, state.secrets) do
               :ok ->
                 # Extract and send tool calls if present
                 extract_and_send_tool_calls(result, session_id, recipient_pid)
@@ -441,7 +453,7 @@ defmodule Cympho.AgentRunner do
                 })
 
               {:error, reason} ->
-                {:error, reason}
+                billed_error(reason, result)
             end
 
           {nil, :continue} ->
@@ -465,26 +477,24 @@ defmodule Cympho.AgentRunner do
             {:error, reason}
         end
 
-      {^port, {:exit_status, 0}} ->
-        # A clean exit that never produced a parseable turn is still a
-        # failed run — the orchestrator would otherwise wait on a
-        # turn_completed that never comes.
-        cond do
-          not is_nil(state.result) ->
-            {:ok, state.result}
-
-          String.trim(state.buffer) != "" ->
-            {:error, {:parse_error, state.buffer}}
-
-          true ->
-            {:error, :no_output}
+      {^port, {:exit_status, code}} when is_nil(state.result) ->
+        # A line held back while the CLI was still writing it is complete
+        # now, so it gets the checks it would have had mid-run. A clean exit
+        # that never produced a parseable turn is still a failed run — the
+        # orchestrator would otherwise wait on a turn_completed that never
+        # comes.
+        case parse_json_output(state.buffer, state.secrets, true) do
+          {:error, reason} -> {:error, reason}
+          :incomplete when code == 0 -> {:error, {:parse_error, state.buffer}}
+          _no_text when code == 0 -> {:error, :no_output}
+          _no_text -> {:error, {:exit_code, code}}
         end
 
-      {^port, {:exit_status, code}} ->
-        if is_nil(state.result), do: {:error, {:exit_code, code}}, else: {:ok, state.result}
+      {^port, {:exit_status, _code}} ->
+        {:ok, state.result}
 
       {:cancel_session, ^session_id, reason} ->
-        {:error, {:cancelled, reason}}
+        billed_error({:cancelled, reason}, state.result || queued_result(port, state))
 
       {:DOWN, _ref, :process, ^recipient_pid, _reason} ->
         # The orchestrator died without stopping us. There is nobody left to
@@ -497,10 +507,10 @@ defmodule Cympho.AgentRunner do
 
         cond do
           now - state.started_at >= max_run_ms ->
-            {:error, :max_run_timeout}
+            billed_error(:max_run_timeout, state.result)
 
           now - state.last_output_time >= stall_timeout ->
-            {:error, :stall_timeout}
+            billed_error(:stall_timeout, state.result)
 
           true ->
             # Clock resolution edge: re-enter and recompute remaining wait.
@@ -517,7 +527,36 @@ defmodule Cympho.AgentRunner do
     send(recipient_pid, {:turn_ended_with_error, session_id, reason})
   end
 
+  defp send_terminal_outcome(recipient_pid, session_id, {:error, reason, billed}) do
+    send(recipient_pid, {:turn_ended_with_error, session_id, reason, billed})
+  end
+
   defp send_terminal_outcome(_recipient_pid, _session_id, :owner_down), do: :ok
+
+  # Claude's result carries the turn's usage and total_cost_usd, error results
+  # included. A turn that fails after its result decoded was still billed, so
+  # the result rides along on the error for the run's accounting.
+  defp billed_error(reason, %{} = result)
+       when is_map_key(result, "usage") or is_map_key(result, "total_cost_usd"),
+       do: {:error, reason, result}
+
+  defp billed_error(reason, _result), do: {:error, reason}
+
+  # Output delivered before a cancel was handled can hold the billed result.
+  # The CLI is stopped first, so nothing more arrives; the result is only
+  # decoded for its usage, never acted on.
+  defp queued_result(port, state) do
+    close_port(port)
+    output = state.buffer <> Cympho.Adapters.CodexAdapter.drain_port_data(port)
+    decoded_result(output, state.secrets)
+  end
+
+  defp decoded_result(output, secrets) do
+    case parse_json_output(output, secrets, true) do
+      {:ok, result} -> result
+      _other -> nil
+    end
+  end
 
   defp append_diagnostic_tail(_tail, output) when byte_size(output) >= @diagnostic_tail_bytes do
     output
@@ -622,20 +661,36 @@ defmodule Cympho.AgentRunner do
     min(remaining_max, remaining_stall)
   end
 
-  defp parse_json_output(output) do
+  defp parse_json_output(output, secrets, exited? \\ false) do
     trimmed = String.trim(output)
+    # While the CLI runs, the last line can stop partway through a secret the
+    # next chunk completes. Text is held back until its line ends (or the CLI
+    # exits) so an early error never reports a fragment redaction cannot match.
+    line_done? = exited? or String.ends_with?(output, "\n")
 
     cond do
-      trimmed == "" or String.starts_with?(trimmed, "Thinking") ->
+      trimmed == "" ->
         :continue
+
+      # A Thinking line is held until it ends, like any other line, so a
+      # secret split across writes is never cut; what follows it is parsed.
+      String.starts_with?(trimmed, "Thinking") ->
+        case String.split(String.trim_leading(output), "\n", parts: 2) do
+          [_thinking, rest] -> parse_json_output(rest, secrets, exited?)
+          [_unfinished] when exited? -> :continue
+          [_unfinished] -> :incomplete
+        end
 
       true ->
         case Jason.decode(trimmed) do
           {:ok, result} ->
             {:ok, result}
 
+          {:error, _} when not line_done? ->
+            :incomplete
+
           {:error, _} ->
-            case Cympho.Adapters.ProviderFailure.detect(trimmed) do
+            case Cympho.Adapters.ProviderFailure.detect(trimmed, secrets) do
               # Provider failure text takes priority — surface it as-is.
               {:error, reason} ->
                 {:error, reason}

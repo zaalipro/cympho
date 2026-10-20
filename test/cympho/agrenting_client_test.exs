@@ -85,6 +85,108 @@ defmodule Cympho.Agrenting.ClientTest do
     end
   end
 
+  test "redacts the API key before cutting a non-JSON error body" do
+    api_key = "agrenting-sentinel-key-" <> String.duplicate("K", 20)
+    body = String.duplicate("x", 490) <> " " <> api_key <> " rejected"
+
+    stream = fn _request, _name, initial, callback, _opts ->
+      {:cont, acc} = callback.({:status, 401}, initial)
+      {:cont, acc} = callback.({:data, body}, acc)
+      {:ok, acc}
+    end
+
+    with_mocks [{Finch, [:passthrough], [stream_while: stream]}] do
+      assert {:error, {:http_error, 401, message}} =
+               Client.request(%{"api_key" => api_key}, :get, "/api/v1/agents")
+
+      refute message =~ "agrent"
+      assert message =~ "[REDACTE"
+    end
+  end
+
+  test "redacts the API key before inspect/1 truncates a JSON error body" do
+    api_key = "agrenting-sentinel-key-" <> String.duplicate("K", 20)
+    # inspect/1 keeps 4_096 bytes of a string, which ends inside the key.
+    body = Jason.encode!(%{"detail" => String.duplicate("x", 4_060) <> " " <> api_key})
+
+    stream = fn _request, _name, initial, callback, _opts ->
+      {:cont, acc} = callback.({:status, 401}, initial)
+      {:cont, acc} = callback.({:data, body}, acc)
+      {:ok, acc}
+    end
+
+    with_mocks [{Finch, [:passthrough], [stream_while: stream]}] do
+      assert {:error, {:http_error, 401, message}} =
+               Client.request(%{"api_key" => api_key}, :get, "/api/v1/agents")
+
+      refute message =~ "agrenting-sen"
+      assert message =~ "[REDACTED]"
+    end
+  end
+
+  test "redacts the API key from a JSON error body's keys" do
+    api_key = "agrenting-sentinel-key-0123"
+    body = Jason.encode!(%{api_key => "unknown key"})
+
+    stream = fn _request, _name, initial, callback, _opts ->
+      {:cont, acc} = callback.({:status, 401}, initial)
+      {:cont, acc} = callback.({:data, body}, acc)
+      {:ok, acc}
+    end
+
+    with_mocks [{Finch, [:passthrough], [stream_while: stream]}] do
+      assert {:error, {:http_error, 401, message}} =
+               Client.request(%{"api_key" => api_key}, :get, "/api/v1/agents")
+
+      assert message =~ ~s("[REDACTED]" => "unknown key")
+      refute message =~ "agrenting-sentinel"
+    end
+  end
+
+  test "redacts the API key from both recognised JSON error message shapes" do
+    api_key = "agrenting-sentinel-key-0123"
+
+    for body <- [
+          Jason.encode!(%{"errors" => [%{"message" => "invalid key #{api_key}"}]}),
+          Jason.encode!(%{"error" => %{"message" => "invalid key #{api_key}"}})
+        ] do
+      stream = fn _request, _name, initial, callback, _opts ->
+        {:cont, acc} = callback.({:status, 401}, initial)
+        {:cont, acc} = callback.({:data, body}, acc)
+        {:ok, acc}
+      end
+
+      with_mocks [{Finch, [:passthrough], [stream_while: stream]}] do
+        assert {:error, {:http_error, 401, "invalid key [REDACTED]"}} =
+                 Client.list_agents(%{"api_key" => api_key})
+      end
+    end
+  end
+
+  test "redacts the API key from an MCP stream transport error" do
+    api_key = "agrenting-sentinel-key-0123"
+
+    stream = fn request, _name, initial, callback, _opts ->
+      case {request.method, request.path} do
+        {"GET", "/api/v1/hirings/hiring-1"} ->
+          {:cont, acc} = callback.({:status, 404}, initial)
+          {:ok, acc}
+
+        {"GET", "/mcp/hirer/sse"} ->
+          reason = {:invalid_header_value, "authorization", "Bearer #{api_key}"}
+          {:error, %Mint.HTTPError{module: Mint.HTTP1, reason: reason}, initial}
+      end
+    end
+
+    with_mocks [{Finch, [:passthrough], [stream_while: stream]}] do
+      assert {:error, reason} =
+               Client.get_hiring(%{"api_key" => api_key, "timeout" => 100}, "hiring-1")
+
+      assert %Mint.HTTPError{} = reason
+      refute inspect(reason) =~ api_key
+    end
+  end
+
   test "caps oversized error responses before formatting the HTTP error" do
     stream = fn _request, _name, initial, callback, _opts ->
       {:cont, acc} = callback.({:status, 500}, initial)

@@ -15,7 +15,9 @@ defmodule Cympho.RuntimePreflight do
   alias Cympho.Companies
   alias Cympho.Companies.Company
   alias Cympho.DeliveryBriefReadiness
+  alias Cympho.Finances
   alias Cympho.Issues.Issue
+  alias Cympho.Runtime
   alias Cympho.Secrets
   alias Cympho.Workspaces
   alias Cympho.Workspaces.ProjectWorkspace
@@ -32,6 +34,8 @@ defmodule Cympho.RuntimePreflight do
     * `:autonomy_enabled?` - overrides dispatcher mode for tests/UI previews.
     * `:secret_count` - count of scoped secrets available for display.
     * `:secret_keys` - scoped secret keys that can supply credentials.
+    * `:issue` - the issue being checked, so the spending limit check also
+      covers project, goal and issue budget policies.
   """
   @spec for_agent(map(), keyword()) :: map()
   def for_agent(agent, opts \\ []) when is_map(agent) do
@@ -62,6 +66,7 @@ defmodule Cympho.RuntimePreflight do
       [selected_adapter_item(adapter)] ++
         readiness_items(adapter, runtime) ++
         model_compatibility_items(adapter, runtime) ++
+        spending_limit_items(agent, Keyword.get(opts, :issue)) ++
         [execution_mode_item(autonomy_enabled?)]
 
     status = status_for_items(items, autonomy_enabled?)
@@ -107,6 +112,7 @@ defmodule Cympho.RuntimePreflight do
         agent_opts =
           opts
           |> Keyword.put_new(:return_to, issue_return_to(issue))
+          |> Keyword.put(:issue, issue)
           |> put_secret_count(agent)
 
         preflight =
@@ -653,6 +659,37 @@ defmodule Cympho.RuntimePreflight do
     ]
   end
 
+  @doc """
+  The blocked "Spending limit" item when the dispatch gate
+  (`Runtime.dispatchable?/3`) refuses the agent's saved runtime because its
+  spend cannot be priced under an enforced USD hard stop, else `[]`.
+
+  Without an issue it covers company and agent policies; with one it adds
+  project, goal and issue policies.
+  """
+  @spec spending_limit_items(map(), Issue.t() | nil) :: [map()]
+  def spending_limit_items(agent, issue \\ nil)
+
+  def spending_limit_items(%Agent{} = agent, issue) do
+    scope = issue || %{company_id: agent.company_id}
+
+    with {:ok, adapter, adapter_config} <-
+           Runtime.resolve_adapter_config(agent, validate_config?: false),
+         {:error, {:budget_unpriceable_runtime, info}} <-
+           Finances.check_runtime_priceable(scope, agent, adapter, adapter_config) do
+      [
+        item(:blocked, "Spending limit", Finances.unpriceable_runtime_message(info),
+          target_path: agent_config_path(%{agent: agent}, "agent-billing"),
+          target_label: "Set billing"
+        )
+      ]
+    else
+      _ -> []
+    end
+  end
+
+  def spending_limit_items(_agent, _issue), do: []
+
   defp model_compatibility_items(adapter, runtime) do
     config = %{
       "model" => runtime.model,
@@ -821,7 +858,10 @@ defmodule Cympho.RuntimePreflight do
 
     task =
       Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
-        System.cmd("bash", ["-lc", script], stderr_to_stdout: true)
+        System.cmd("bash", ["-lc", script],
+          stderr_to_stdout: true,
+          env: Cympho.Adapters.ProcessAdapter.health_check_env()
+        )
       end)
 
     case Task.yield(task, @shell_probe_timeout_ms) || Task.shutdown(task, :brutal_kill) do

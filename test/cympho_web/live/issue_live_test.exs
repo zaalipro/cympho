@@ -3696,6 +3696,30 @@ defmodule CymphoWeb.IssueLiveTest do
       assert comment.body =~ "[owner_update]"
     end
 
+    test "comment form ignores client-supplied author fields", %{issue: issue} do
+      {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
+      current_user_id = :sys.get_state(view.pid).socket.assigns.current_user.id
+
+      {:ok, agent} =
+        create_agent(%{name: "Forged Author", role: :engineer, status: :idle})
+
+      forged_authors = [
+        %{"author_type" => "agent", "author_id" => agent.id},
+        %{"author_type" => "system", "author_id" => "00000000-0000-0000-0000-000000000000"}
+      ]
+
+      for forged <- forged_authors do
+        render_hook(view, "add_comment", %{
+          "comment" => Map.put(forged, "body", "Forged authorship #{forged["author_type"]}")
+        })
+      end
+
+      comments = Comments.list_comments(issue.id)
+      assert length(comments) == 2
+      assert Enum.all?(comments, &(&1.author_type == "user"))
+      assert Enum.all?(comments, &(&1.author_id == current_user_id))
+    end
+
     @tag membership_role: "admin"
     test "issue runtime can be paused and resumed from the issue page", %{issue: issue} do
       {:ok, issue} = Issues.update_issue(issue, %{status: :todo})

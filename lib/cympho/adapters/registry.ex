@@ -195,29 +195,85 @@ defmodule Cympho.Adapters.Registry do
   @doc """
   Resolves an agent to its adapter module and config.
 
-  Walks the fallback chain starting from the agent's adapter type.
-  Returns `{:ok, module, config}` when an available adapter is found,
-  or `{:error, :no_adapter}` otherwise.
+  Walks the fallback chain starting from the agent's adapter type, skipping
+  types that are not registered. The first registered adapter is final: if it
+  is invalid or unavailable, resolution fails instead of falling back to the
+  default adapter, which would run the agent with the wrong config,
+  credentials, provider and sandboxing.
+
+  Returns `{:ok, module, config}` when that adapter is valid and available, or
+    - `{:error, {:config_invalid, [{type, reason}]}}` — its config failed validation
+    - `{:error, {:no_adapter_available, [{type, reason}]}}` — it is registered
+      but a prerequisite is missing (CLI, credentials, sandbox, endpoint)
+    - `{:error, :no_adapter}` — no adapter in the chain is registered
+
+  Options:
+    * `:validate_config?` - run the adapter's `validate_config/1`. Defaults to
+      `true`; diagnostics such as health checks pass `false` so the adapter's own
+      `health_check/1` can report a nuanced status. Availability is always
+      enforced.
   """
-  @spec resolve_agent(map()) :: {:ok, module(), map()} | {:error, :no_adapter}
-  def resolve_agent(%{adapter: adapter_type, config: config}) do
+  @spec resolve_agent(map(), keyword()) ::
+          {:ok, module(), map()}
+          | {:error, :no_adapter}
+          | {:error, {:no_adapter_available, [{atom(), String.t()}]}}
+          | {:error, {:config_invalid, [{atom(), String.t()}]}}
+  def resolve_agent(agent, opts \\ [])
+
+  def resolve_agent(%{adapter: adapter_type, config: config}, opts) do
     primary = adapter_type || default_adapter()
-    chain = fallback_chain(primary)
 
-    Enum.find_value(chain, {:error, :no_adapter}, fn type ->
-      case lookup(type) do
-        {:ok, module} ->
-          available = module_available?(module, config)
-          if available, do: {:ok, module, config}, else: nil
-
-        :error ->
-          nil
-      end
-    end)
+    resolve_chain(fallback_chain(primary), config, Keyword.get(opts, :validate_config?, true))
   end
 
-  def resolve_agent(%{adapter: adapter_type}) do
-    resolve_agent(%{adapter: adapter_type, config: %{}})
+  def resolve_agent(%{adapter: adapter_type}, opts) do
+    resolve_agent(%{adapter: adapter_type, config: %{}}, opts)
+  end
+
+  defp resolve_chain([], _config, _validate?), do: {:error, :no_adapter}
+
+  defp resolve_chain([type | rest], config, validate?) do
+    case lookup(type) do
+      {:ok, module} -> check_selected(type, module, config, validate?)
+      :error -> resolve_chain(rest, config, validate?)
+    end
+  end
+
+  @doc false
+  # Shared with `Cympho.Adapters.resolve/1`: the adapter an agent selected is
+  # final, so it is either usable as-is or fails with its own reason.
+  @spec check_selected(adapter_key(), adapter_module(), map(), boolean()) ::
+          {:ok, adapter_module(), map()} | {:error, term()}
+  def check_selected(type, module, config, validate?) do
+    with :ok <- validate_selected(type, module, config, validate?),
+         :ok <- ensure_available(type, module, config) do
+      {:ok, module, config}
+    end
+  end
+
+  defp validate_selected(_type, _module, _config, false), do: :ok
+
+  defp validate_selected(type, module, config, true) do
+    case module.validate_config(config) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:config_invalid, [{type, reason}]}}
+    end
+  end
+
+  defp ensure_available(type, module, config) do
+    if module_available?(module, config) do
+      :ok
+    else
+      {:error, {:no_adapter_available, [{type, unavailable_reason(module, config)}]}}
+    end
+  end
+
+  defp unavailable_reason(module, config) do
+    if function_exported?(module, :unavailable_reason, 1) do
+      module.unavailable_reason(config)
+    else
+      "#{module.name()} is not available in this environment"
+    end
   end
 
   defp module_available?(module, config) do

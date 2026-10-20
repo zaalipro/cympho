@@ -39,7 +39,9 @@ defmodule Mix.Tasks.CymphoLlmotionsSmokeTest do
           "--api-key",
           "task-secret-value",
           "--model",
-          "gemini-3.5-flash"
+          "gemini-3.5-flash",
+          "--billing",
+          "0.10,0.40"
         ])
       end)
 

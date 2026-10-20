@@ -125,6 +125,10 @@ defmodule Cympho.Adapters.Adapter do
     - `{:turn_completed, session_id, result}`
     - `{:turn_ended_with_error, session_id, reason}`
 
+  A turn that failed after the provider billed it may instead send
+  `{:turn_ended_with_error, session_id, reason, usage}`, where `usage` has the
+  same shape as a completed result's usage fields, so the spend is recorded.
+
   A local-process adapter must not send either terminal message until its owned
   Port and every process target captured by cleanup have exited. Runtime
   admission keeps the slot bound to the live registered adapter worker through
@@ -171,6 +175,13 @@ defmodule Cympho.Adapters.Adapter do
   @callback available?(config :: map()) :: boolean()
 
   @doc """
+  Says which prerequisite is missing when `available?/1` is false, so that
+  resolution can fail with an actionable message instead of a bare "unavailable".
+  Optional: resolution falls back to a generic message.
+  """
+  @callback unavailable_reason(config :: map()) :: String.t()
+
+  @doc """
   Returns the adapter type atom (e.g. `:claude_code`, `:codex`).
   """
   @callback type() :: atom()
@@ -183,5 +194,17 @@ defmodule Cympho.Adapters.Adapter do
   """
   @callback validate_config(config :: map()) :: :ok | {:error, String.t()}
 
-  @optional_callbacks [available?: 1, execution_class: 0]
+  @doc """
+  Declares what a turn reports for accounting: `:cost` (a USD cost), `:tokens`
+  (token counts only) or `:none`. Under an enforced USD hard stop, runtimes
+  whose cost cannot be priced are refused at preflight. Defaults to `:none`.
+  """
+  @callback usage_reporting(config :: map()) :: :cost | :tokens | :none
+
+  @optional_callbacks [
+    available?: 1,
+    unavailable_reason: 1,
+    execution_class: 0,
+    usage_reporting: 1
+  ]
 end

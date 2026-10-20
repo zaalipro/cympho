@@ -7,7 +7,7 @@ defmodule Mix.Tasks.Cympho.LlmotionsSmoke do
 
   ## Usage
 
-      LLMOTIONS_API_KEY=... mix cympho.llmotions_smoke --yes
+      LLMOTIONS_API_KEY=... mix cympho.llmotions_smoke --billing flat_rate --yes
 
   ## Options
 
@@ -25,6 +25,9 @@ defmodule Mix.Tasks.Cympho.LlmotionsSmoke do
     * `--keep-seed-issues` - Leave blueprint seed issues active instead of
       cancelling them for a focused smoke run
     * `--no-focus` - Do not pin the generated issue for focused dispatch
+    * `--billing` - Required. `flat_rate` for subscription billing, or
+      `INPUT,OUTPUT[,CACHED_INPUT]` USD per million tokens for the model. The
+      smoke company runs under a USD hard stop, which refuses unpriced runs.
     * `--yes` - Skip confirmation
   """
 
@@ -43,6 +46,7 @@ defmodule Mix.Tasks.Cympho.LlmotionsSmoke do
     no_secret: :boolean,
     keep_seed_issues: :boolean,
     no_focus: :boolean,
+    billing: :string,
     yes: :boolean
   ]
 
@@ -102,7 +106,8 @@ defmodule Mix.Tasks.Cympho.LlmotionsSmoke do
       create_workspace?: opts[:no_workspace] != true,
       repo_cwd: opts[:repo_cwd] || File.cwd!(),
       cancel_seed_issues?: opts[:keep_seed_issues] != true,
-      focus?: opts[:no_focus] != true
+      focus?: opts[:no_focus] != true,
+      billing: parse_billing(opts[:billing])
     ]
 
     case LLMotions.setup(setup_opts) do
@@ -113,6 +118,16 @@ defmodule Mix.Tasks.Cympho.LlmotionsSmoke do
         Mix.shell().error("LLMotions smoke setup failed: #{inspect(reason)}")
         Mix.raise("LLMotions smoke setup failed")
     end
+  end
+
+  defp parse_billing(nil), do: nil
+  defp parse_billing("flat_rate"), do: :flat_rate
+
+  defp parse_billing(value) do
+    rates = value |> String.split(",") |> Enum.map(&String.trim/1)
+    keys = ~w(input_usd_per_mtok output_usd_per_mtok cached_input_usd_per_mtok)
+
+    if length(rates) in [2, 3], do: keys |> Enum.zip(rates) |> Map.new(), else: value
   end
 
   defp present?(value) when is_binary(value), do: String.trim(value) != ""

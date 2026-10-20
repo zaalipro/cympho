@@ -171,7 +171,8 @@ defmodule Cympho.Adapters.RuntimeOptions do
         "workspace-write",
         "--skip-git-repo-check",
         "--color",
-        "never"
+        "never",
+        "--json"
       ],
       "provider" => "openai",
       "model_arg_template" => ["--model", "{{model}}"],

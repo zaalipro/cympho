@@ -76,6 +76,85 @@ defmodule Cympho.SkillsTest do
     end
   end
 
+  describe "skill ownership" do
+    setup %{company: company} do
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Skills Owner Other Co",
+          slug: "skills-owner-other-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, skill} =
+        Skills.create_skill(%{
+          identifier: "owned-skill-#{System.unique_integer([:positive])}",
+          name: "Owned Skill",
+          manifest: %{"name" => "Owned Skill"},
+          company_id: company.id
+        })
+
+      %{other_company: other_company, skill: skill}
+    end
+
+    test "update_skill/2 never changes company_id", %{
+      company: company,
+      other_company: other_company,
+      skill: skill
+    } do
+      assert {:ok, updated} =
+               Skills.update_skill(skill, %{name: "Renamed", company_id: other_company.id})
+
+      assert updated.name == "Renamed"
+      assert updated.company_id == company.id
+      assert Repo.get!(Skills.Skill, skill.id).company_id == company.id
+    end
+
+    test "create_skill/1 rejects a project from another company", %{
+      company: company,
+      other_company: other_company
+    } do
+      {:ok, foreign_project} =
+        Cympho.Projects.create_project(%{
+          name: "Foreign",
+          prefix: "FOREIGNS",
+          company_id: other_company.id
+        })
+
+      assert {:error, changeset} =
+               Skills.create_skill(%{
+                 identifier: "cross-project-#{System.unique_integer([:positive])}",
+                 name: "Cross Project",
+                 manifest: %{"name" => "Cross Project"},
+                 company_id: company.id,
+                 project_id: foreign_project.id
+               })
+
+      assert %{project_id: ["must belong to the same company"]} = errors_on(changeset)
+    end
+
+    test "update_skill/2 rejects moving a skill to a project from another company", %{
+      other_company: other_company,
+      skill: skill
+    } do
+      {:ok, foreign_project} =
+        Cympho.Projects.create_project(%{
+          name: "Foreign Update",
+          prefix: "FOREIGNU",
+          company_id: other_company.id
+        })
+
+      assert {:error, changeset} = Skills.update_skill(skill, %{project_id: foreign_project.id})
+      assert %{project_id: ["must belong to the same company"]} = errors_on(changeset)
+    end
+
+    test "accepts a project from the skill's own company", %{company: company, skill: skill} do
+      {:ok, project} =
+        Cympho.Projects.create_project(%{name: "Own", prefix: "OWNPROJ", company_id: company.id})
+
+      assert {:ok, updated} = Skills.update_skill(skill, %{project_id: project.id})
+      assert updated.project_id == project.id
+    end
+  end
+
   describe "list_plugins/1" do
     test "returns plugins scoped to the given company", %{company: company} do
       {:ok, other_company} =

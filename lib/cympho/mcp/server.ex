@@ -210,6 +210,12 @@ defmodule Cympho.Mcp.Server do
     ]
   end
 
+  # No company means no tenant scope: company-filtered queries treat a nil
+  # company as "no filter", so refuse before any tool can read across tenants.
+  def call_tool(_name, _args, %Agent{company_id: nil}) do
+    %{error: "Agent is not assigned to a company"}
+  end
+
   def call_tool(name, args, %Agent{} = agent) do
     result = do_call(name, args || %{}, agent)
     _ = record_trace(name, args, agent, result)

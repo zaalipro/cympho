@@ -40,6 +40,13 @@ defmodule Cympho.OrchestratorAdapterLifecycleTest do
         engineer_count: 1
       })
 
+    # These synthetic runtimes bill nothing; mark the agent flat-rate so the
+    # onboarding USD hard stop admits runtimes that report no cost.
+    {:ok, agent} =
+      Cympho.Agents.update_agent(agent, %{
+        config: Map.put(agent.config || %{}, "billing_mode", "flat_rate")
+      })
+
     MockAdapter.clear()
     on_exit(fn -> MockAdapter.clear() end)
 
@@ -441,6 +448,166 @@ defmodule Cympho.OrchestratorAdapterLifecycleTest do
       assert run.status == "failed"
     end
 
+    test "a capped run logs and stores no fragment of a secret the output relay cut",
+         %{company: company, agent: agent, issue: issue} do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-managed-cut-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+      script_path = Path.join(tmp_dir, "cut_agent.sh")
+      on_exit(fn -> File.rm_rf(tmp_dir) end)
+      secret = "plain-deploy-sentinel-" <> String.duplicate("Q", 60)
+
+      {:ok, _secret} =
+        Cympho.Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "DEPLOY_VALUE",
+          value: secret
+        })
+
+      # 11 + 970 bytes leave room for only part of the secret before the
+      # relay's limit + 1 cut at byte 1_001, so redaction cannot match it.
+      File.write!(script_path, """
+      #!/bin/sh
+      printf 'first line\\n%s\\n' '#{String.duplicate("x", 970)}#{secret}'
+      sleep 5
+      """)
+
+      File.chmod!(script_path, 0o755)
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {:ok, checked_out} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: agent.id,
+          checked_out_at: now,
+          started_at: now
+        })
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          {:ok, orch_pid} =
+            Orchestrator.start_and_run(checked_out, agent.id,
+              adapter: :process,
+              adapter_config: %{
+                "command" => script_path,
+                "prompt_stdin" => false,
+                "cwd" => tmp_dir,
+                "max_output_bytes" => 1_000
+              }
+            )
+
+          orch_ref = Process.monitor(orch_pid)
+          assert_receive {:DOWN, ^orch_ref, :process, ^orch_pid, _reason}, 10_000
+        end)
+
+      assert [run | _] = HeartbeatEngine.list_runs_for_issue(issue.id)
+      assert run.status == "failed"
+      stored = "#{run.log_excerpt} #{inspect(run.run_metadata)}"
+      assert stored =~ "first line"
+      assert log =~ "first line"
+
+      for text <- [stored, log | Enum.map(Comments.list_comments(issue.id), & &1.body)] do
+        refute text =~ "plain-deploy-sen"
+      end
+    end
+
+    test "a capped run logs and stores no short line of a multi-line secret",
+         %{company: company, agent: agent, issue: issue} do
+      tmp_dir = managed_tmp_dir("short-line")
+      script_path = Path.join(tmp_dir, "cut_agent.sh")
+      secret = "QzX7\nlong-sentinel-value-" <> String.duplicate("Q", 2_000)
+      put_company_secret(company, "DEPLOY_VALUE", secret)
+
+      # The cap cuts the secret's second line, so the whole-line tail keeps
+      # only its short first line.
+      File.write!(script_path, """
+      #!/bin/sh
+      printf 'first line\\n%s\\n' '#{secret}'
+      sleep 5
+      """)
+
+      File.chmod!(script_path, 0o755)
+
+      {log, stored, comments} =
+        run_managed_failure(agent, issue, :process, %{
+          "command" => script_path,
+          "prompt_stdin" => false,
+          "cwd" => tmp_dir,
+          "max_output_bytes" => 1_000
+        })
+
+      assert stored =~ "first line"
+      assert log =~ "first line"
+
+      for text <- [stored, log | comments] do
+        refute text =~ "QzX7"
+        refute text =~ "long-sentinel"
+      end
+    end
+
+    test "a Claude secret split after an unfinished Thinking line is never logged or stored",
+         %{company: company, agent: agent, issue: issue} do
+      tmp_dir = managed_tmp_dir("thinking")
+      script_path = Path.join(tmp_dir, "claude")
+      put_company_secret(company, "DEPLOY_VALUE", "plain-chunk-sentinel-value-0123")
+
+      # The gate holds the rest back until the Thinking line's first write has
+      # been reported as its own chunk, ending partway through the secret.
+      gate = Path.join(tmp_dir, "go")
+      :ok = Orchestrator.subscribe(issue.id)
+
+      File.write!(script_path, """
+      #!/bin/sh
+      cat > /dev/null
+      printf '%s' 'Thinking about plain-chunk-'
+      while [ ! -e '#{gate}' ]; do sleep 0.01; done
+      printf '%s\\n' 'sentinel-value-0123 done'
+      exit 0
+      """)
+
+      File.chmod!(script_path, 0o755)
+
+      {log, stored, comments} =
+        run_managed_failure(
+          agent,
+          issue,
+          :claude_code,
+          %{"command" => script_path},
+          fn ->
+            assert_receive {:run_progress, _progress}, 5_000
+            File.touch!(gate)
+          end
+        )
+
+      for text <- [stored, log | comments] do
+        refute text =~ "sentinel-value"
+      end
+    end
+
+    test "a Cursor failure logs and stores no JSON-escaped secret",
+         %{company: company, agent: agent, issue: issue} do
+      tmp_dir = managed_tmp_dir("cursor-escaped")
+      agent_path = Path.join(tmp_dir, "agent")
+      error_path = Path.join(tmp_dir, "error.json")
+      secret = ~s(pa"ss\\word-sentinel-0123)
+      put_company_secret(company, "DEPLOY_VALUE", secret)
+      error = %{"type" => "error", "message" => "rate limit exceeded for key #{secret}"}
+      File.write!(error_path, Jason.encode!(error) <> "\n")
+      File.write!(agent_path, "#!/bin/sh\ncat '#{error_path}'\n")
+      File.chmod!(agent_path, 0o755)
+
+      {log, stored, comments} =
+        run_managed_failure(agent, issue, :cursor, %{"command" => agent_path, "timeout" => 5_000})
+
+      assert log =~ "rate limit exceeded for key [REDACTED]"
+
+      for text <- [stored, log | comments] do
+        refute text =~ "word-sentinel"
+      end
+    end
+
     test "existing adapter interfaces, wall-clock/stall/output controls, and runtime configuration remain compatible" do
       adapters = [
         ClaudeCodeAdapter,
@@ -475,6 +642,60 @@ defmodule Cympho.OrchestratorAdapterLifecycleTest do
       assert Cympho.Adapters.RuntimeTimeout.resolve(%{"timeout" => 12_000}, default_ms: 300_000) ==
                12_000
     end
+  end
+
+  defp managed_tmp_dir(label) do
+    tmp_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "cympho-managed-#{label}-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(tmp_dir)
+    on_exit(fn -> File.rm_rf(tmp_dir) end)
+    tmp_dir
+  end
+
+  defp put_company_secret(company, key, value) do
+    {:ok, _secret} =
+      Cympho.Secrets.create_secret(%{
+        company_id: company.id,
+        scope: "company",
+        key: key,
+        value: value
+      })
+  end
+
+  # Runs the checked-out issue on `adapter` until its orchestrator stops, and
+  # returns the captured log, every run's stored diagnostics and the comments.
+  defp run_managed_failure(agent, issue, adapter, adapter_config, while_running \\ fn -> :ok end) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {:ok, checked_out} =
+      Issues.update_issue(issue, %{
+        status: :in_progress,
+        assignee_id: agent.id,
+        checked_out_at: now,
+        started_at: now
+      })
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        {:ok, orch_pid} =
+          Orchestrator.start_and_run(checked_out, agent.id,
+            adapter: adapter,
+            adapter_config: adapter_config
+          )
+
+        orch_ref = Process.monitor(orch_pid)
+        while_running.()
+        assert_receive {:DOWN, ^orch_ref, :process, ^orch_pid, _reason}, 15_000
+      end)
+
+    assert [_ | _] = runs = HeartbeatEngine.list_runs_for_issue(issue.id)
+    assert Enum.all?(runs, &(&1.status == "failed"))
+    stored = Enum.map_join(runs, " ", &"#{&1.log_excerpt} #{inspect(&1.run_metadata)}")
+    {log, stored, Enum.map(Comments.list_comments(issue.id), & &1.body)}
   end
 
   defp os_process_alive?(pid) when is_binary(pid) do
