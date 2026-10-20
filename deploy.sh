@@ -1388,7 +1388,8 @@ fi
 if [ "\$current_enabled_state" = enabled ] && [ "\$main_enabled_state" != enabled ] && _sudo test -f "\$main_live"; then
   _sudo systemctl disable ${SERVICE_NAME} >/dev/null
 fi
-if [ -n "\$deploy_release" ] &&
+# deploy_release is only defined by the current-link CAS runner (recovery).
+if [ -n "\${deploy_release:-}" ] &&
    [ "\$main_enabled_state" = not-found ] && _sudo test -f "\$main_live"; then
   _sudo systemctl stop ${SERVICE_NAME}
 fi
