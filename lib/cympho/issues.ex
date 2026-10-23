@@ -92,6 +92,15 @@ defmodule Cympho.Issues do
 
   def human_action_count(_company_id, _user_id), do: 0
 
+  @doc "Lists the company's issues finished (`:done`) at or after `since`, newest first."
+  def list_completed_since(company_id, %DateTime{} = since) when is_binary(company_id) do
+    Issue
+    |> where([i], i.company_id == ^company_id and i.status == :done)
+    |> where([i], i.completed_at >= ^since)
+    |> order_by([i], desc: i.completed_at, desc: i.id)
+    |> Repo.all()
+  end
+
   # Issues waiting on a human: assigned to this user directly, or blocked —
   # blocked work always needs an owner decision (the dashboard says exactly
   # that), so it must show up in the inbox action queue too.
@@ -681,11 +690,22 @@ defmodule Cympho.Issues do
   # Requiring "no run ever" (rather than "no recent run") keeps rework out of
   # this bucket: an issue bounced back to :todo by request_changes already has
   # run history and belongs to the review nudges, not to stall patrol.
+  # An issue waiting on an open blocker cannot be checked out yet
+  # (:blocked_by_active_issues), so it is waiting, not stranded.
   defp todo_dynamic(cutoff) do
     dynamic(
       [i],
       i.status == :todo and i.updated_at < ^cutoff and
-        not exists(from r in Run, where: r.issue_id == parent_as(:issue).id)
+        not exists(from r in Run, where: r.issue_id == parent_as(:issue).id) and
+        not exists(
+          from bb in "issue_blockers",
+            join: blocker in Issue,
+            on: blocker.id == type(bb.blocking_issue_id, Ecto.UUID),
+            where:
+              bb.blocked_issue_id == type(parent_as(:issue).id, Ecto.UUID) and
+                blocker.status not in ^@terminal_issue_statuses,
+            select: 1
+        )
     )
   end
 

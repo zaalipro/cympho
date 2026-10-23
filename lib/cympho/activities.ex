@@ -33,6 +33,19 @@ defmodule Cympho.Activities do
 
   def latest_agent_failure_reason(_), do: nil
 
+  @doc """
+  Returns the agent an issue was taken from when its agent was paused
+  (the latest `rehomed_on_pause` activity), or nil.
+  """
+  def previous_assignee_id(issue_id) when is_binary(issue_id) do
+    Activity
+    |> where([a], a.issue_id == ^issue_id and a.action == "rehomed_on_pause")
+    |> order_by([a], desc: a.inserted_at, desc: a.id)
+    |> limit(1)
+    |> select([a], fragment("?->>'previous_assignee_id'", a.metadata))
+    |> Repo.one()
+  end
+
   def list_activities(issue_id, opts \\ []) do
     limit = Keyword.get(opts, :limit, @default_list_limit)
 

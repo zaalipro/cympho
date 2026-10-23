@@ -1358,6 +1358,7 @@ defmodule Cympho.Agents do
           {:agent_paused, updated}
         )
 
+        Cympho.OwnerAttention.notify_changed(updated.company_id)
         {:ok, updated}
 
       error ->
@@ -1394,6 +1395,7 @@ defmodule Cympho.Agents do
           {:agent_updated, updated}
         )
 
+        Cympho.OwnerAttention.notify_changed(updated.company_id)
         {:ok, updated}
 
       error ->

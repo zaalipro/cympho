@@ -367,6 +367,40 @@ defmodule Cympho.CtoOrchestrationTest do
       refute Enum.any?(Issues.list_stuck_issues(company.id), &(&1.id == fresh.id))
     end
 
+    # Checkout refuses an issue with an open blocker (:blocked_by_active_issues),
+    # so a :todo waiting on one is not stranded; the blocker carries its own stall.
+    test "a :todo issue waiting on an open blocker is not stuck", %{
+      company: company,
+      engineer: engineer
+    } do
+      blocker =
+        create_issue!(%{
+          title: "Ship the API first",
+          description: @delivery_brief,
+          status: :todo,
+          company_id: company.id
+        })
+
+      waiting =
+        create_issue!(%{
+          title: "Demo after the API",
+          description: @delivery_brief,
+          status: :todo,
+          company_id: company.id,
+          assignee_id: engineer.id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, _} = Issues.add_blocker(waiting, blocker)
+      blocker = Repo.update!(Ecto.Changeset.change(blocker, status: :in_review))
+      waiting = backdate!(Repo.get!(Issue, waiting.id), 300)
+
+      refute Enum.any?(Issues.list_stuck_issues(company.id), &(&1.id == waiting.id))
+
+      Repo.update!(Ecto.Changeset.change(blocker, status: :done))
+      assert Enum.any?(Issues.list_stuck_issues(company.id), &(&1.id == waiting.id))
+    end
+
     test "a stalled fan-out escalates to the CTO that parked it, not the CEO", %{
       company: company,
       ceo: ceo,
