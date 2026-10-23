@@ -484,6 +484,12 @@ const GOTO_KEYS = {
 
 const ADVANCED_ONLY_GOTO_KEYS = new Set(['g']);
 
+// The page's one primary sits on the Next step's resolution card (S2); act only when there is exactly one.
+function nextStepPrimary() {
+  const primaries = document.querySelectorAll('#main-content .next .ink .pw:not([disabled])');
+  return primaries.length === 1 ? primaries[0] : null;
+}
+
 let gotoBuffer = '';
 let gotoTimer = null;
 
@@ -529,6 +535,15 @@ function handleKeydown(e) {
     if (window.openCompanySwitcher) {
       window.openCompanySwitcher();
     }
+    return;
+  }
+
+  // Cmd/Ctrl+Enter presses the Next step's one primary (the ⌘↵ hint on its
+  // resolution card), also from the answer field inside that card.
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !e.shiftKey && !e.altKey &&
+      !target.closest?.('#quick-create-modal, #command-palette') && nextStepPrimary()) {
+    e.preventDefault();
+    nextStepPrimary()?.click();
     return;
   }
 

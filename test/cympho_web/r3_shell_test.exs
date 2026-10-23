@@ -326,6 +326,32 @@ defmodule CymphoWeb.R3ShellTest do
     end
   end
 
+  describe "client shell behaviour (app.js)" do
+    setup do
+      %{js: File.read!(Path.join(File.cwd!(), "assets/js/app.js"))}
+    end
+
+    test "Cmd/Ctrl+Enter presses the Next step's one primary, also from its answer field", %{
+      js: js
+    } do
+      assert js =~ "function nextStepPrimary()"
+      assert js =~ ~s|document.querySelectorAll('#main-content .next .ink .pw:not([disabled])')|
+
+      {shortcut, _} = :binary.match(js, "nextStepPrimary()?.click()")
+      {input_guard, _} = :binary.match(js, "if (isInput) return;")
+      assert shortcut < input_guard
+    end
+
+    test "the rail team list stores the owner's choice and starts closed on short screens", %{
+      js: js
+    } do
+      assert js =~ "const TEAM_LIST_KEY = 'cympho.nav.team'"
+      assert js =~ "this.setOpen(window.innerHeight >= 800)"
+      assert js =~ "if (window.location.pathname === '/agents') return this.setOpen(false)"
+      assert js =~ "this.js().setAttribute(this.button, 'aria-expanded'"
+    end
+  end
+
   describe "pages without the shell" do
     test "onboarding renders no rail and no top bar" do
       unique = System.unique_integer([:positive])

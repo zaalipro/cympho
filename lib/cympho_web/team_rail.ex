@@ -13,17 +13,23 @@ defmodule CymphoWeb.TeamRail do
   @doc """
   One row per active agent of the company, ordered: stopped or paused agents
   first, then agents with items for you, then the rest, each alphabetical.
+
+  `detail: true` adds what a Working agent is doing (one run lookup per
+  Working agent); the rail does not show it, Home's phone team block does.
   """
-  def rows(company_id, user) when is_binary(company_id) do
+  def rows(company_id, user, opts \\ [])
+
+  def rows(company_id, user, opts) when is_binary(company_id) do
     counts = for_you_counts(company_id, user)
+    detail? = Keyword.get(opts, :detail, false)
 
     company_id
     |> Agents.list_for_sidebar()
-    |> Enum.map(&row(&1, Map.get(counts, &1.id, 0)))
+    |> Enum.map(&row(&1, Map.get(counts, &1.id, 0), detail?))
     |> Enum.sort_by(&{rank(&1), String.downcase(&1.name)})
   end
 
-  def rows(_company_id, _user), do: []
+  def rows(_company_id, _user, _opts), do: []
 
   @doc """
   "N for you" per agent id.
@@ -64,7 +70,7 @@ defmodule CymphoWeb.TeamRail do
 
   def spend(_company_id), do: nil
 
-  defp row(agent, for_you) do
+  defp row(agent, for_you, detail?) do
     {kind, word} = status(agent.status)
 
     %{
@@ -75,7 +81,7 @@ defmodule CymphoWeb.TeamRail do
       word: word,
       for_you: for_you,
       pin: kind == :stopped,
-      detail: if(kind == :working, do: working_detail(agent.id))
+      detail: if(detail? and kind == :working, do: working_detail(agent.id))
     }
   end
 
