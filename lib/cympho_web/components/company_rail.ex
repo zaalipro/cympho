@@ -137,6 +137,10 @@ defmodule CymphoWeb.Components.CompanyRail do
   defp company_name(nil), do: "Cympho"
   defp company_name(%{name: name}), do: name
 
+  # The brand tile reads the company's task prefix ("NW"), else its initials.
+  defp company_initials(%{issue_prefix: prefix}) when is_binary(prefix) and prefix != "",
+    do: prefix |> String.slice(0, 3) |> String.upcase()
+
   defp company_initials(%{name: name}) when is_binary(name) do
     name
     |> String.split(~r/\s+/, trim: true)

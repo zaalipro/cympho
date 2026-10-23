@@ -527,6 +527,7 @@ defmodule CymphoWeb.UserAuth do
     %{
       id: company.id,
       name: company.name,
+      issue_prefix: company.issue_prefix,
       logo_url: company.logo_url,
       status: company.status,
       paused_at: company.paused_at,
