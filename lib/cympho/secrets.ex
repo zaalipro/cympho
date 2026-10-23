@@ -335,6 +335,27 @@ defmodule Cympho.Secrets do
   defp get_company_id_from_config(%{"company_id" => id}), do: id
   defp get_company_id_from_config(_), do: nil
 
+  @doc """
+  The key names an agent's runs receive (`list_secrets_for_agent/1`'s scopes:
+  the company's and instance keys plus the agent's own), sorted. Names only:
+  no value is read or decrypted.
+  """
+  def key_names_for_agent(%{id: agent_id, company_id: company_id})
+      when is_binary(agent_id) and is_binary(company_id) do
+    Secret
+    |> where([s], s.is_active == true and s.company_id == ^company_id)
+    |> where(
+      [s],
+      s.scope in ["company", "instance"] or (s.scope == "agent" and s.scope_id == ^agent_id)
+    )
+    |> select([s], s.key)
+    |> distinct(true)
+    |> order_by([s], asc: s.key)
+    |> Repo.all()
+  end
+
+  def key_names_for_agent(_agent), do: []
+
   defp maybe_filter(query, _field, nil), do: query
 
   defp maybe_filter(query, field, value), do: where(query, [s], field(s, ^field) == ^value)
