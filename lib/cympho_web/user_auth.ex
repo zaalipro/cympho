@@ -106,6 +106,24 @@ defmodule CymphoWeb.UserAuth do
     {:cont, socket}
   end
 
+  # The root layout's live team list (CymphoWeb.TeamRailLive): only who is signed
+  # in and which of their companies they are looking at. It runs on its own (it is
+  # not mounted at the router), so it loads no sidebar data and attaches no hooks.
+  def on_mount(:team_rail, _params, session, socket) do
+    socket = assign_current_user(socket, session)
+
+    socket =
+      if socket.assigns.current_user do
+        socket
+        |> assign_user_companies()
+        |> assign_current_company(session)
+      else
+        assign(socket, :current_company, nil)
+      end
+
+    {:cont, socket}
+  end
+
   # Blocks company-less users from the app proper; they are funneled into
   # /onboarding (its live_session mounts only :default) until they own a
   # company membership. Prevents orphan rows like projects with NULL company.

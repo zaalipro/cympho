@@ -190,6 +190,51 @@ defmodule CymphoWeb.R3ShellTest do
     end
   end
 
+  describe "the live team list in the rail" do
+    test "renders inside the rail on router LiveViews, and the page still connects" do
+      conn = authenticated_conn(%{role: "owner", is_board_member: true})
+
+      {:ok, _agent} =
+        Cympho.Agents.create_agent(%{
+          name: "Rail Mate",
+          role: :engineer,
+          status: :paused,
+          company_id: current_company().id
+        })
+
+      for path <- ["/", "/issues", "/settings/profile", "/budgets"] do
+        html = conn |> get(path) |> html_response(200)
+        doc = Floki.parse_document!(html)
+
+        assert [team] = Floki.find(doc, "aside.rail .team-live section.team"), "on #{path}"
+        assert Floki.text(team) =~ "Rail Mate"
+        assert [_] = Floki.find(doc, "[data-phx-main]")
+      end
+
+      assert {:ok, _view, html} = live(conn, "/issues")
+      assert html =~ "Rail Mate"
+    end
+
+    test "is left out without a company" do
+      unique = System.unique_integer([:positive])
+
+      {:ok, user} =
+        Cympho.Users.create_user(%{
+          email: "solo-#{unique}@example.com",
+          name: "Solo #{unique}",
+          password: "password1234"
+        })
+
+      conn =
+        Phoenix.ConnTest.build_conn()
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session(:user_id, user.id)
+
+      html = conn |> get("/docs") |> html_response(200)
+      assert Floki.find(Floki.parse_document!(html), ".team-live") == []
+    end
+  end
+
   describe "the company switch" do
     defp power_line(html) do
       html

@@ -90,6 +90,13 @@
           company_count={length(assigns[:user_companies] || [])}
           inbox_count={assigns[:nav_inbox_count] || 0}
         />
+        {if shell_company && assigns[:current_user],
+          do:
+            live_render(CymphoWeb.TeamRailLive.layout_conn(@conn), CymphoWeb.TeamRailLive,
+              id: "team-rail",
+              session: %{},
+              container: {:div, class: "team-live"}
+            )}
         <.user_menu user={assigns[:current_user]} />
       </aside>
       <main id="main-content" class="col mobile-shell-content">

@@ -935,6 +935,55 @@ const Combobox = {
   }
 };
 
+// The rail's live team list (CymphoWeb.TeamRailLive). The header button opens
+// and closes the roster (rows that need the owner stay, r3.css); the owner's
+// choice is stored. FF5: below 800 px of viewport height the list starts closed
+// unless the owner opened it. On Team (/agents) the page is the roster, so the
+// rail draws the list closed there without storing it. Attributes go through
+// this.js() so LiveView patches keep them.
+const TEAM_LIST_KEY = 'cympho.nav.team';
+
+const TeamRailToggle = {
+  mounted() {
+    this.button = this.el.querySelector('.team-h');
+    if (!this.button) return;
+
+    this.onClick = () => {
+      const open = this.button.getAttribute('aria-expanded') !== 'true';
+      this.setOpen(open);
+      try {
+        localStorage.setItem(TEAM_LIST_KEY, open ? 'open' : 'closed');
+      } catch (_e) {
+        /* storage disabled — the choice holds for this page load */
+      }
+    };
+
+    this.onNavigate = () => this.applyDefault();
+    this.button.addEventListener('click', this.onClick);
+    window.addEventListener('phx:page-loading-stop', this.onNavigate);
+    this.applyDefault();
+  },
+  destroyed() {
+    window.removeEventListener('phx:page-loading-stop', this.onNavigate);
+  },
+  stored() {
+    try {
+      return localStorage.getItem(TEAM_LIST_KEY);
+    } catch (_e) {
+      return null;
+    }
+  },
+  applyDefault() {
+    if (window.location.pathname === '/agents') return this.setOpen(false);
+    const stored = this.stored();
+    if (stored === 'open' || stored === 'closed') return this.setOpen(stored === 'open');
+    this.setOpen(window.innerHeight >= 800);
+  },
+  setOpen(open) {
+    this.js().setAttribute(this.button, 'aria-expanded', open ? 'true' : 'false');
+  }
+};
+
 // Color swatch picker — clicking a preset fills the hex input + preview.
 // Typing in the hex input live-updates the preview and the active swatch.
 const ColorSwatchPicker = {
@@ -2395,6 +2444,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     Toast,
     OrgChartExport,
     Combobox,
+    TeamRailToggle,
     ColorSwatchPicker,
     AdapterConfigFields,
     DatePicker,
