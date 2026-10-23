@@ -543,6 +543,11 @@
 .cy-r3 .ot-s .g{width:12px;height:12px}
 .cy-r3 .opt-in:disabled+.opt .ot-n,.cy-r3 .opt-in:disabled+.opt .ot-s{color:var(--inv-ink-2)}
 
+/* ---------- the Cmd+Enter hint (ground-r1 D7) ----------
+   The mockups hide it at 1180 px and below. Between 1181 and about 1290 px it still pushed the
+   primary onto a row of its own and stretched the problem card beside it; hide it there too */
+@media (max-width:1300px){.cy-r3 .ink-f .kh{display:none}}
+
 /* ---------- 1024 layout ---------- */
 @media (max-width:1180px){
   .cy-r3 .shell{grid-template-columns:216px minmax(0,1fr)}
@@ -554,7 +559,6 @@
   .cy-r3 .split>.aside{grid-column:1;grid-row:auto;position:static}
   .cy-r3 .split>.aside.task-aside{display:none}
   .cy-r3 .det-m{display:block}
-  .cy-r3 .ink-f .kh{display:none}
   .cy-r3 .run{grid-template-columns:22px minmax(0,1fr) 140px 108px}
   .cy-r3 .axis-row{grid-template-columns:22px minmax(0,1fr) 140px 108px}
 }
