@@ -88,8 +88,10 @@ defmodule CymphoWeb.TeamRailLiveTest do
   } do
     {:ok, _view, html} = live_isolated(conn, TeamRailLive, session: session(conn, company.id))
 
+    # r3: Mira was paused with nobody recorded as the pauser, so the merged
+    # backend lists her as her own "Resume Mira" item (B2) beside her approval.
     assert rows(html) == [
-             %{name: "Mira", word: "Paused", chip: "1 for you", pin: true},
+             %{name: "Mira", word: "Paused", chip: "2 for you", pin: true},
              %{name: "Priya", word: "Idle", chip: "1 for you", pin: false},
              %{name: "Ravi", word: "Idle", chip: "2 for you", pin: false},
              %{name: "Theo", word: "Working", chip: "1 for you", pin: false},

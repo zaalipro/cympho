@@ -15,6 +15,8 @@ defmodule CymphoWeb.TeamRailLive do
   alias CymphoWeb.Events
   alias CymphoWeb.TeamRail
 
+  import CymphoWeb.Format, only: [money: 1, window: 1]
+
   on_mount {CymphoWeb.UserAuth, :team_rail}
 
   @refresh_ms 300
@@ -95,7 +97,7 @@ defmodule CymphoWeb.TeamRailLive do
       <.link class="see-all" navigate={~p"/agents"}>See all</.link>
     </section>
     <.link :if={@spend} class="spend" navigate={~p"/costs"}>
-      <span class="spend-e">Spending<span aria-hidden="true"> · </span>30 days</span>
+      <span class="spend-e">Spending<span aria-hidden="true"> · </span>{window(@spend.days)}</span>
       <span class="spend-v">
         <b class={@spend.paused? && "st"}>{money(@spend.spent)}</b> of {money(@spend.limit)}
       </span>
@@ -111,14 +113,5 @@ defmodule CymphoWeb.TeamRailLive do
       </span>
     </.link>
     """
-  end
-
-  # "$246", "$246.40"
-  defp money(%Decimal{} = amount) do
-    rounded = Decimal.round(amount, 2)
-
-    if Decimal.equal?(rounded, Decimal.round(rounded, 0)),
-      do: "$#{rounded |> Decimal.round(0) |> Decimal.to_string(:normal)}",
-      else: "$#{Decimal.to_string(rounded, :normal)}"
   end
 end

@@ -32,18 +32,36 @@ defmodule CymphoWeb.TeamRail do
   def rows(_company_id, _user, _opts), do: []
 
   @doc """
-  "N for you" per agent id.
-
-  Seam for the Home step (A3): once the backend slice lands, this body becomes
-  `OwnerAttention.counts(company_id, user).by_agent`, which also credits a
-  review to the task's assignee. Until then it groups the Needs-you items by
-  the agent that raised them.
+  "N for you" per agent id, from the same unlimited membership as the Inbox
+  badge (`OwnerAttention.counts/2`): a review counts for the task's assignee.
+  The chips add up to the badge whenever every item has an agent (a budget
+  incident or a task waiting on a person has none).
   """
   def for_you_counts(company_id, user) do
-    company_id
-    |> OwnerAttention.list_items(user, limit: 500)
-    |> Enum.frequencies_by(& &1.agent_id)
-    |> Map.delete(nil)
+    OwnerAttention.counts(company_id, user).by_agent
+  end
+
+  @doc """
+  Spend against the company's limit over the limit's own window
+  (`Costs.spend_period/1`, 30 days for a monthly limit): the one read behind
+  the rail's spending slot and Home's limit line, so the two never disagree.
+  `limit`, `percent` and `used_percent` are nil when no comparable limit is set.
+  """
+  def spending(company_id) when is_binary(company_id) do
+    days = Costs.spend_period(company_id).days
+    posture = Costs.spend_posture(company_id, Costs.summary(company_id, days).total_cost)
+    limit = posture.budget_limit
+
+    %{
+      spent: posture.budget_spend,
+      limit: limit,
+      days: days,
+      percent: limit && percent(posture.budget_spend, limit),
+      used_percent: posture.budget_used_percent,
+      warn_percent:
+        posture.budget_warning_threshold_pct |> Decimal.round(0) |> Decimal.to_integer(),
+      status: posture.budget_status
+    }
   end
 
   @doc """
@@ -51,17 +69,9 @@ defmodule CymphoWeb.TeamRail do
   (80% of the limit by default) or once the limit is reached; nil otherwise.
   """
   def spend(company_id) when is_binary(company_id) do
-    spent = Costs.summary(company_id, 30).total_cost
-
-    case Costs.spend_posture(company_id, spent) do
-      %{budget_status: status, budget_limit: %Decimal{} = limit} = posture
-      when status in [:watch, :over_budget] ->
-        %{
-          paused?: status == :over_budget,
-          spent: posture.budget_spend,
-          limit: limit,
-          percent: percent(posture.budget_spend, limit)
-        }
+    case spending(company_id) do
+      %{status: status, limit: %Decimal{}} = spending when status in [:watch, :over_budget] ->
+        Map.put(spending, :paused?, status == :over_budget)
 
       _ ->
         nil
