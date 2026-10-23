@@ -61,7 +61,8 @@ defmodule CymphoWeb.Live.CompanyRBAC do
   @write_events ~w(
     accept_owner_verification add_comment add_env apply_instruction_patch apply_prompt_plan
     apply_recommended_instruction_patches apply_runtime_preset approve approve_approval
-    approve_review approve_spec assign_issue attach_work_product cast_vote clear_github_pr_number
+    approve_review approve_spec assign_and_retry assign_issue attach_work_product cast_vote
+    change_limit choose_alerts clear_github_pr_number
     clear_recent_searches clear_stale_comment_wakes config_save create_ceo_flow_smoke_issue
     create_improvement create_label create_launch_item create_mcp_key create_schedule_trigger
     create_workspace delete_budget deny deny_approval dismiss dismiss_budget_incident

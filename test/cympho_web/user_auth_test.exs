@@ -271,13 +271,10 @@ defmodule CymphoWeb.UserAuthTest do
       assert live_assigns(view).nav_approval_count == 2
       assert live_assigns(view).nav_inbox_count == 2
       assert live_assigns(view).inbox_badge_count == 2
-      assert html =~ ~s(href="/approvals?status=pending")
-      assert html =~ ~s(data-testid="nav-badge-approvals")
-      assert html =~ ~r/<span[^>]*data-testid="nav-badge-approvals"[^>]*>\s*2\s*<\/span>/s
+      # r3: one badge (N6). Pending approvals reach the owner through the Inbox
+      # count; the Advanced Approvals badge and the separate phone badge are gone.
+      refute html =~ ~s(data-testid="nav-badge-approvals")
       assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*2\s*<\/span>/s
-
-      assert html =~
-               ~r/<span[^>]*data-testid="mobile-nav-badge-inbox"[^>]*>\s*2\s*<\/span>/s
     end
 
     test "resolving an approval refreshes both Inbox badges", %{
@@ -344,10 +341,8 @@ defmodule CymphoWeb.UserAuthTest do
 
       assert live_assigns(view).nav_inbox_count == 1
       assert live_assigns(view).inbox_badge_count == 1
+      # r3: the phone tab bar is the same Main nav, so one Inbox count node serves both.
       assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*1\s*<\/span>/s
-
-      assert html =~
-               ~r/<span[^>]*data-testid="mobile-nav-badge-inbox"[^>]*>\s*1\s*<\/span>/s
     end
 
     test "Inbox badge does not double-count an unread blocked issue", %{

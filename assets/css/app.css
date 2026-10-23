@@ -31,15 +31,10 @@
    ============================================ */
 
 :root {
-  /* Desktop sidebar width — driven live by the resize/collapse controller in
-     root.html.heex (persisted to localStorage). The layout reads it via
-     w-[var(--sidebar-w)] / ml-[var(--sidebar-w)] / left-[var(--sidebar-w)]. */
-  --sidebar-w: 16rem;
-
-  /* Mobile shell geometry — keep board height / sticky CTAs / scroll padding
-     in lockstep with root.html.heex (pt-16 top bar, #mobile-nav h-14). */
-  --mobile-header-height: 4rem; /* pt-16 */
-  --mobile-nav-height: 3.5rem; /* h-14 inside #mobile-nav */
+  /* Phone shell geometry (r3.css phone block, max-width 640px) — keep board
+     height / sticky CTAs / scroll padding in lockstep with the r3 shell. */
+  --mobile-header-height: 60px; /* .topbar */
+  --mobile-nav-height: 66px; /* floating .dest tab bar: 48 + 2 x 5 padding + 8 offset */
   --mobile-nav-offset: calc(
     var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px)
   );
@@ -332,7 +327,7 @@
   bottom: var(--mobile-nav-offset);
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 641px) {
   .mobile-shell-content {
     padding-bottom: 0;
     scroll-padding-bottom: 0;
@@ -408,37 +403,6 @@
   border-radius: 0 0 4px 4px;
   outline: none;
   box-shadow: 0 4px 12px rgb(var(--shadow-rgb) / calc(0.3 * var(--shadow-strength)));
-}
-
-/* Active navigation highlight */
-.nav-item {
-  position: relative;
-}
-
-.nav-item[data-active="true"] {
-  color: var(--color-text-primary);
-  background: var(--color-surface-hover);
-}
-
-.nav-item[data-active="true"]::before {
-  content: "";
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  width: 2px;
-  height: 16px;
-  border-radius: 9999px;
-  background: var(--color-brand);
-  transform: translateY(-50%);
-}
-
-.nav-item[data-active="true"] svg {
-  color: var(--color-brand);
-}
-
-/* Active mobile bottom nav */
-.mobile-nav-item[data-active="true"] {
-  color: var(--color-brand);
 }
 
 /* Simple / Advanced product mode. Mode and row density are independent:
@@ -1263,79 +1227,6 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   animation: page-enter 600ms var(--ease-out-expo) both;
 }
 
-/* ── Resizable / collapsible desktop sidebar ──────────────────────────────
-   Width comes from --sidebar-w; the aside and main margin read it.
-   Collapsing sets the var to 0 and slides the rail off-canvas,
-   revealing the floating expand button. Transitions are suppressed mid-drag
-   (data-sidebar-dragging) so the handle tracks the pointer 1:1. */
-@media (min-width: 1024px) {
-  #sidebar,
-  #main-content {
-    transition-property: width, margin-left;
-    transition-duration: 200ms;
-    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
-  }
-
-  html[data-sidebar-dragging="true"] #sidebar,
-  html[data-sidebar-dragging="true"] #main-content {
-    transition: none !important;
-  }
-
-  html[data-sidebar-collapsed="true"] {
-    --sidebar-w: 0px;
-  }
-
-  html[data-sidebar-collapsed="true"] #sidebar {
-    transform: translateX(-100%);
-  }
-
-  /* Drag handle sits on the rail's right edge. */
-  #sidebar-resize-handle {
-    position: absolute;
-    top: 0;
-    right: -3px;
-    width: 6px;
-    height: 100%;
-    cursor: col-resize;
-    z-index: 60;
-    touch-action: none;
-  }
-
-  #sidebar-resize-handle::after {
-    content: "";
-    position: absolute;
-    inset: 0 2px;
-    border-radius: 9999px;
-    background: transparent;
-    transition: background 150ms ease;
-  }
-
-  #sidebar-resize-handle:hover::after,
-  html[data-sidebar-dragging="true"] #sidebar-resize-handle::after {
-    background: var(--color-primary);
-  }
-
-  html[data-sidebar-collapsed="true"] #sidebar-resize-handle {
-    display: none;
-  }
-
-  /* Floating button to reopen a collapsed sidebar. */
-  #sidebar-expand-btn {
-    display: none;
-  }
-
-  html[data-sidebar-collapsed="true"] #sidebar-expand-btn {
-    display: inline-flex;
-  }
-}
-
-/* The expand button is desktop-only; the mobile drawer has its own button. */
-@media (max-width: 1023px) {
-  #sidebar-expand-btn {
-    display: none !important;
-  }
-}
-
 /* Staggered list entrance — apply `stagger-children` to a list container;
    the first 12 children cascade in. Cheap: transform + opacity only. */
 @keyframes stagger-in {
@@ -1364,23 +1255,6 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
 .stagger-children > *:nth-child(11) { animation-delay: 400ms; }
 .stagger-children > *:nth-child(12) { animation-delay: 440ms; }
 
-/* Ambient canvas glow — a fixed radial terracotta wash anchored top-center
-   so the dark canvas has a light source. Fixed + pointer-events-none, so
-   zero scroll repaints. Sits under content (z-0 wrapper needed). */
-.cympho-ambient::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(
-      900px 480px at 50% -120px,
-      rgb(var(--color-primary-rgb) / 0.07),
-      transparent 70%
-    );
-}
-
 /* Shimmer skeleton — replaces flat pulse placeholders. */
 @keyframes shimmer {
   from { background-position: 200% 0; }
@@ -1395,19 +1269,6 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   );
   background-size: 200% 100%;
   animation: shimmer 1.6s var(--ease-out-expo) infinite;
-}
-
-/* Nav rail rows — icon nudges right on hover; spring, not snap. */
-.nav-item {
-  transition:
-    background-color 160ms ease-out,
-    color 160ms ease-out;
-}
-.nav-item > span:first-child {
-  transition: transform 300ms var(--ease-spring);
-}
-.nav-item:hover > span:first-child {
-  transform: translateX(2px);
 }
 
 /* Progress bars fill with a spring instead of jumping. */
@@ -1463,8 +1324,7 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   }
   .card-lift:hover,
   .ui-simple-card:hover,
-  .cta-glow:hover,
-  .nav-item:hover > span:first-child {
+  .cta-glow:hover {
     transform: none !important;
   }
 }

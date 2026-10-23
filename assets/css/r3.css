@@ -103,8 +103,8 @@
 .cy-r3 .kids{display:flex;flex-direction:column;gap:1px;margin:4px 0 8px 19px;padding-left:10px;border-left:1px solid var(--spine)}
 .cy-r3 .kids a{display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:9px;font-size:13px;color:var(--ink-2);transition:background .18s var(--ease),color .18s var(--ease)}
 .cy-r3 .kids a:hover{color:var(--ink);background:var(--page-hover)}
-.cy-r3 .kids a.cur{color:var(--ink);font-weight:500}
-.cy-r3 .kids a.cur::before{content:"";width:4px;height:4px;border-radius:50%;background:var(--ink);margin-left:-2px}
+.cy-r3 .kids a[aria-current]{color:var(--ink);font-weight:500}
+.cy-r3 .kids a[aria-current]::before{content:"";width:4px;height:4px;border-radius:50%;background:var(--ink);margin-left:-2px}
 
 .cy-r3 .team{position:relative;background:var(--card);border:1px solid var(--lift-line);border-radius:16px;padding:5px;box-shadow:var(--sh-tile)}
 .cy-r3 .team>.team-h{display:flex;align-items:center;gap:6px;width:100%;height:32px;padding:0 8px;border-radius:10px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
@@ -131,6 +131,24 @@
 .cy-r3 .av{width:28px;height:28px;flex:none;border-radius:50%;background:var(--lift);box-shadow:inset 0 0 0 1px var(--av-line);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--ink)}
 
 .cy-r3 .topbar{display:none}
+
+/* ---------- the shell inside the app (root layout) ----------
+   The root layout is not re-rendered on live navigation, so every destination's pages are rendered and only
+   the current destination's are shown (the mockups render them for the current one only) */
+.cy-r3 .dest li>.kids{display:none}
+@media (min-width:641px){.cy-r3 .dest li>.d[aria-current]+.kids{display:flex}}
+/* pages without the shell (Onboarding) */
+.cy-r3 .shell[data-shell="bare"]{grid-template-columns:minmax(0,1fr)}
+.cy-r3 .acct-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the power dot follows the company state */
+.cy-r3 .pw-dot[data-power="paused"]{background:var(--waiting)}
+.cy-r3 .pw-dot[data-power="low"]{background:var(--idle)}
+/* switch menu: the server line, the runtime POST forms, and the account row's Simple/Advanced segment */
+.cy-r3 .menu .menu-note{padding:8px 10px 6px;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .menu-runtime,.cy-r3 .menu-runtime form{display:flex;flex-direction:column}
+.cy-r3 .menu .menu-mode{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;margin:2px 0;padding:3px;border-radius:12px;background:var(--tray)}
+.cy-r3 .menu .menu-mode button{align-items:center;justify-content:center;min-height:32px;padding:6px 8px;border:1px solid transparent;color:var(--ink-nav)}
+.cy-r3 .menu .menu-mode button[data-active="true"]{background:var(--lift);border-color:var(--lift-line);box-shadow:var(--sh-raise);color:var(--ink-hi)}
 
 /* ---------- column, frame, tray ---------- */
 .cy-r3 .col{min-width:0;display:flex;flex-direction:column;padding:12px 12px 0 2px;overflow-x:hidden;overflow-y:auto;scroll-padding-top:76px}

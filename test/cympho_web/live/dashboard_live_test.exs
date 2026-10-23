@@ -243,15 +243,13 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       document = Floki.parse_document!(html)
 
-      assert length(Floki.find(document, "[data-ui-mode-toggle]")) == 1
-      assert Floki.find(document, "[data-mobile-ui-mode-toggle]") != []
+      # r3: the one Simple/Advanced control is the account row's segment (n2);
+      # the old phone header toggle went with the phone header (D10).
+      assert Floki.find(document, "[data-ui-mode-toggle]") == []
       assert Floki.find(document, "[data-sidebar-ui-mode-switch]") != []
       assert length(Floki.find(document, "[data-ui-mode-option]")) == 2
       assert Floki.text(Floki.find(document, "[data-sidebar-ui-mode-switch]")) =~ "Simple"
       assert Floki.text(Floki.find(document, "[data-sidebar-ui-mode-switch]")) =~ "Advanced"
-
-      assert Floki.text(Floki.find(document, "[data-ui-mode-label]")) =~
-               "Switch to Advanced view"
 
       assert html =~ ~s(aria-describedby="interface-mode-help")
       assert html =~ "Simple shows guided essentials"
@@ -259,7 +257,7 @@ defmodule CymphoWeb.DashboardLiveTest do
       [mode_status] = Floki.find(document, "[data-ui-mode-status]")
       assert Floki.attribute(mode_status, "aria-live") == ["polite"]
       assert Floki.attribute(mode_status, "aria-atomic") == ["true"]
-      assert Floki.find(document, "#sidebar #interface-mode-help") == []
+      assert Floki.find(document, "aside.rail #interface-mode-help") == []
       assert Floki.find(document, "header [data-ui-mode-status]") == []
     end
 
@@ -310,17 +308,20 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ ~s(data-testid="runtime-controls")
       assert has_element?(view, "summary[aria-label='Company controls']")
       assert html =~ ~s(data-testid="runtime-status-trigger")
-      assert html =~ ~s(title="Runtime: Review mode")
+      # r3: the power line shows the company state; that agents are off on this
+      # server is the first line of the company switch's menu (D1).
+      assert html =~ ~s(title="Runtime: Full power")
+      assert html =~ "Agents are switched off on this server"
       assert html =~ "Pause"
       assert html =~ "Stop"
       assert html =~ ~s(action="/runtime-control/pause")
       assert html =~ ~s(action="/runtime-control/stop")
       assert html =~ ~s(data-runtime-menu-close)
       refute html =~ ~s(data-testid="desktop-runtime-topbar")
-      assert html =~ ~s(id="sidebar")
-      assert html =~ ~s(data-mobile-drawer)
-      assert html =~ ~s(aria-controls="sidebar")
-      assert html =~ ~s(aria-expanded="false")
+      # r3: the n2 rail and phone top bar replace the drawer sidebar (D10).
+      assert html =~ ~s(aria-label="Company and navigation")
+      assert html =~ ~s(aria-label="Company and quick actions")
+      refute html =~ ~s(id="sidebar")
     end
 
     test "members and viewers cannot see or forge dashboard company controls" do
@@ -363,7 +364,9 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ ~s(title="Runtime: Review mode · paused")
+      # r3: company state in the power line, the server fact in the menu (D1).
+      assert html =~ ~s(title="Runtime: Paused")
+      assert html =~ "Agents are switched off on this server"
       assert html =~ "Resume"
       assert html =~ ~s(action="/runtime-control/resume")
       refute html =~ ~s(action="/runtime-control/pause")
@@ -375,7 +378,9 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ ~s(title="Runtime: Review mode · low power")
+      # r3: company state in the power line, the server fact in the menu (D1).
+      assert html =~ ~s(title="Runtime: Low power")
+      assert html =~ "Agents are switched off on this server"
       assert html =~ "Full power"
       assert html =~ ~s(action="/runtime-control/resume")
       refute html =~ ~s(action="/runtime-control/low-power")

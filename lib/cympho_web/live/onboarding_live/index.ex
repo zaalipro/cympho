@@ -52,6 +52,8 @@ defmodule CymphoWeb.OnboardingLive.Index do
     socket =
       socket
       |> assign(:page_title, "Get Started")
+      # Onboarding draws its own bar and step list, so the root layout renders no rail or top bar.
+      |> assign(:shell, :bare)
       |> assign(:steps, @steps)
       |> assign(:blueprints, blueprints)
       |> assign(:blueprint_query, "")

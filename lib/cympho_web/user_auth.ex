@@ -164,6 +164,34 @@ defmodule CymphoWeb.UserAuth do
 
   def safe_return_path(_path), do: nil
 
+  # Origins a deep page may offer "Back to …" for (N5), with their glossary names.
+  @from_labels %{
+    "/" => "Home",
+    "/inbox" => "Inbox",
+    "/issues" => "Tasks",
+    "/kanban" => "Board",
+    "/my-issues" => "Mine",
+    "/agents" => "Team",
+    "/costs" => "Spending",
+    "/activity" => "Activity",
+    "/approvals" => "Approval history",
+    "/search" => "Search"
+  }
+
+  @doc """
+  Validates a `?from=` origin for a deep page's "Back to …" link. Returns
+  `{path, label}` for an allow-listed page (its query string dropped), else nil.
+  """
+  def safe_from(from) do
+    with path when is_binary(path) <- safe_return_path(from),
+         path = path |> String.split("?", parts: 2) |> hd(),
+         label when is_binary(label) <- Map.get(@from_labels, path) do
+      {path, label}
+    else
+      _ -> nil
+    end
+  end
+
   defp redirect_to_login(conn) do
     return_to = current_path(conn)
 

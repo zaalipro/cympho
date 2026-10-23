@@ -1,487 +1,229 @@
 defmodule CymphoWeb.Components.NavRail do
   @moduledoc """
-  The Cympho sidebar.
+  The n2 Main navigation: six destinations in one order (N1), each with its
+  pages (N2), the Inbox count (N6) and the orange current dot. The same
+  `<nav aria-label="Main">` is the phone tab bar (r3.css phone block).
 
-  Sections:
-    1. Primary action  — New issue
-    2. Owner navigation — Home, Tasks, Inbox, Projects, Team, Settings
-    3. Advanced work    — Reviews, Operations, Goals, Routines
-    4. PROJECTS         — recent project rows, advanced only
-    5. AGENTS           — recent agent rows, visible in both modes
-
-    Settings (gear) pins to the top group. The "More" overflow (Org /
-    Costs / Activity / Workspaces / Plugins / Skills / Tool
-    traces) lives in the user menu at the bottom of the sidebar — see
-    `UserMenu`.
+  The root layout is not re-rendered on live navigation, so every
+  destination's pages are always rendered and CSS shows them only under the
+  current one; `highlightActiveNav()` in app.js re-marks the current
+  destination from the same table, rendered into `data-nav-*` attributes.
   """
   use Phoenix.Component
 
-  use Phoenix.VerifiedRoutes,
-    endpoint: CymphoWeb.Endpoint,
-    router: CymphoWeb.Router
+  import CymphoWeb.Components.R3, only: [r3_icon: 1]
 
-  @projects_visible 3
-  @agents_visible 5
+  # Each destination: its link, the paths that make it current (`matches`,
+  # prefix match), the root pages where it is aria-current="page" rather than
+  # "true" (`roots`, exact; a trailing /* matches the whole subtree), and its
+  # pages. Advanced pages carry ui-advanced-only.
+  @destinations [
+    %{
+      key: "home",
+      to: "/",
+      label: "Home",
+      icon: "i-home",
+      matches: ~w(/ /dashboard /activity /overview),
+      roots: ~w(/ /dashboard),
+      kids: [{"/activity", "Activity", :simple}, {"/overview", "Compare companies", :multi}]
+    },
+    %{
+      key: "inbox",
+      to: "/inbox",
+      label: "Inbox",
+      icon: "i-inbox",
+      matches: ~w(/inbox /approvals /board-approvals /reviews),
+      roots: ~w(/inbox),
+      kids: [
+        {"/inbox", "Needs you", :simple},
+        {"/approvals", "Approval history", :simple},
+        {"/reviews", "Reviews", :advanced}
+      ]
+    },
+    %{
+      key: "tasks",
+      to: "/issues",
+      label: "Tasks",
+      icon: "i-tasks",
+      matches:
+        ~w(/issues /kanban /my-issues /projects /goals /routines /launch-items /workspaces /workspace),
+      roots: ~w(/issues /kanban),
+      kids: [
+        {"/issues", "All tasks", :simple},
+        {"/projects", "Projects", :simple},
+        {"/goals", "Goals", :simple},
+        {"/routines", "Repeating tasks", :simple},
+        {"/launch-items", "Launch checklist", :simple},
+        {"/workspaces", "Work files", :advanced}
+      ]
+    },
+    %{
+      key: "team",
+      to: "/agents",
+      label: "Team",
+      icon: "i-team",
+      matches: ~w(/agents /org-chart /skills /operations /tool-call-traces),
+      roots: ~w(/agents),
+      kids: [
+        {"/agents", "People", :simple},
+        {"/org-chart", "Org chart", :simple},
+        {"/skills", "Skills", :advanced},
+        {"/operations", "Health", :advanced},
+        {"/tool-call-traces", "Step log", :advanced}
+      ]
+    },
+    %{
+      key: "spending",
+      to: "/costs",
+      label: "Spending",
+      icon: "i-spend",
+      matches: ~w(/costs /budgets),
+      roots: ~w(/costs),
+      kids: [{"/budgets", "Spending limit", :simple}]
+    },
+    %{
+      key: "settings",
+      to: "/settings",
+      label: "Settings",
+      icon: "i-settings",
+      matches: ~w(/settings /labels /companies /plugins),
+      roots: ~w(/settings /settings/*),
+      kids: []
+    }
+  ]
+
+  @doc "The destination table (single source for the server render and app.js)."
+  def destinations, do: @destinations
+
+  @doc """
+  The current destination for a path: `{key, "page" | "true"}`, or nil when the
+  path belongs to no destination (Search, Docs).
+  """
+  def current(path) when is_binary(path) do
+    Enum.find_value(@destinations, fn dest ->
+      if Enum.any?(dest.matches, &prefix_match?(path, &1)) do
+        {dest.key, if(Enum.any?(dest.roots, &root_match?(path, &1)), do: "page", else: "true")}
+      end
+    end)
+  end
+
+  def current(_path), do: nil
 
   attr :current_path, :string, required: true
-  attr :projects, :list, default: []
-  attr :agents, :list, default: []
   attr :inbox_count, :integer, default: 0
-  attr :approval_count, :integer, default: 0
-  attr :current_company, :any, default: nil
   attr :company_count, :integer, default: 0
-  attr :runtime_controls_allowed, :boolean, default: false
   attr :rest, :global
 
   def nav_rail(assigns) do
+    current = current(assigns.current_path)
+
+    destinations =
+      Enum.map(@destinations, fn dest ->
+        state =
+          case current do
+            {key, state} when key == dest.key -> state
+            _ -> nil
+          end
+
+        kids =
+          Enum.reject(dest.kids, fn {_, _, kind} ->
+            kind == :multi and assigns.company_count < 2
+          end)
+
+        %{dest | kids: kids} |> Map.put(:state, state)
+      end)
+
+    count = assigns.inbox_count |> max(0) |> min(99)
+
     assigns =
       assigns
-      |> assign(:projects_visible, @projects_visible)
-      |> assign(:agents_visible, @agents_visible)
-      |> assign(:visible_projects, Enum.take(assigns.projects, @projects_visible))
-      |> assign(:visible_agents, Enum.take(assigns.agents, @agents_visible))
+      |> assign(:destinations, destinations)
+      |> assign(:count, count)
 
     ~H"""
-    <nav class="flex-1 overflow-y-auto py-2.5 px-2 space-y-0.5" data-ui-complex-page {@rest}>
-      <.primary_action />
-
-      <div class="h-1.5"></div>
-
-      <.nav_link
-        to={~p"/dashboard"}
-        label="Home"
-        icon="hero-squares-2x2-mini"
-        current_path={@current_path}
-      />
-      <.nav_link
-        :if={@company_count > 1}
-        to={~p"/overview"}
-        label="Company overview"
-        icon="hero-building-office-2-mini"
-        current_path={@current_path}
-      />
-      <.nav_link
-        to={~p"/issues"}
-        matches={[~p"/kanban"]}
-        label="Tasks"
-        icon="hero-clipboard-document-list-mini"
-        current_path={@current_path}
-      />
-      <.nav_link
-        to={~p"/inbox"}
-        label="Inbox"
-        icon="hero-inbox-mini"
-        current_path={@current_path}
-        badge={@inbox_count}
-      />
-      <.nav_link
-        to={~p"/projects"}
-        label="Projects"
-        icon="hero-folder-mini"
-        current_path={@current_path}
-      />
-      <.nav_link
-        to={~p"/agents"}
-        label="Team"
-        icon="hero-users-mini"
-        current_path={@current_path}
-      />
-      <.nav_link
-        to={~p"/settings/profile"}
-        match="/settings"
-        label="Settings"
-        icon="hero-cog-6-tooth-mini"
-        current_path={@current_path}
-      />
-      <.nav_link
-        to={~p"/docs"}
-        match="/docs"
-        label="Documentation"
-        icon="hero-book-open-mini"
-        current_path={@current_path}
-      />
-
-      <.section_header label="Advanced" advanced_only />
-      <.nav_link
-        to={~p"/approvals?status=pending"}
-        match="/approvals"
-        label="Approvals"
-        icon="hero-shield-check-mini"
-        current_path={@current_path}
-        badge={@approval_count}
-        advanced_only
-      />
-      <.nav_link
-        to={~p"/reviews"}
-        label="Reviews"
-        icon="hero-check-badge-mini"
-        current_path={@current_path}
-        advanced_only
-      />
-      <.nav_link
-        to={~p"/operations"}
-        label="Operations"
-        icon="hero-command-line-mini"
-        current_path={@current_path}
-        advanced_only
-      />
-      <.nav_link
-        to={~p"/launch-items"}
-        label="Launch Tracker"
-        icon="hero-sparkles-mini"
-        current_path={@current_path}
-        advanced_only
-      />
-      <.nav_link
-        to={~p"/goals"}
-        label="Goals"
-        icon="hero-flag-mini"
-        current_path={@current_path}
-        advanced_only
-      />
-      <.nav_link
-        to={~p"/routines"}
-        label="Routines"
-        icon="hero-arrow-path-rounded-square-mini"
-        current_path={@current_path}
-        advanced_only
-      />
-
-      <.nav_section
-        key="projects"
-        label="Projects"
-        action_to={~p"/projects/new"}
-        action_label="New project"
-        advanced_only
-      >
-        <.project_row
-          :for={project <- @visible_projects}
-          project={project}
-          current_path={@current_path}
-        />
-        <.view_all
-          :if={length(@projects) > @projects_visible}
-          to={~p"/projects"}
-          label="All projects"
-          count={length(@projects)}
-        />
-      </.nav_section>
-
-      <.nav_section
-        key="agents"
-        label="Agents"
-        action_to={~p"/agents/new"}
-        action_label="New agent"
-      >
-        <.agent_row
-          :for={agent <- @visible_agents}
-          agent={agent}
-          current_path={@current_path}
-        />
-        <.view_all
-          :if={length(@agents) > @agents_visible}
-          to={~p"/agents"}
-          label="All agents"
-          count={length(@agents)}
-        />
-      </.nav_section>
-
-      <div class="h-3"></div>
+    <nav class="dest" aria-label="Main" data-ui-complex-page {@rest}>
+      <ul>
+        <li :for={dest <- @destinations} class={dest.key == "settings" && "li-settings"}>
+          <.dest_link dest={dest} count={@count} />
+          <ul :if={dest.kids != []} class="kids">
+            <li :for={{href, label, kind} <- dest.kids} class={kind != :simple && "ui-advanced-only"}>
+              <.link navigate={href} aria-current={@current_path == href && "page"}>{label}</.link>
+            </li>
+          </ul>
+        </li>
+      </ul>
     </nav>
     """
   end
 
-  ## ── Sections ───────────────────────────────────────────────────
-
-  defp primary_action(assigns) do
-    ~H"""
-    <button
-      type="button"
-      data-quick-create-trigger
-      class={[
-        "btn-press w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl shadow-card",
-        "text-[13px] font-510 text-text-primary",
-        "bg-brand/15 hover:bg-brand/25 border border-brand/30 hover:border-brand/50",
-        "hover:shadow-[0_0_20px_rgba(217,119,87,0.25)]",
-        "transition-[box-shadow,background-color,border-color] duration-300",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-      ]}
-    >
-      <span class="hero-pencil-square-mini w-4 h-4 text-brand"></span>
-      <span class="flex-1 text-left">New issue</span>
-      <kbd class="kbd">C</kbd>
-    </button>
-    """
-  end
-
-  attr :label, :string, required: true
-  attr :action_to, :string, default: nil
-  attr :action_label, :string, default: nil
-  attr :advanced_only, :boolean, default: false
-
-  defp section_header(assigns) do
-    ~H"""
-    <div class={[
-      "flex items-center justify-between px-3 pt-3 pb-1",
-      @advanced_only && "ui-advanced-only"
-    ]}>
-      <span class="text-[11px] font-510 tracking-[0.06em] text-text-quaternary">
-        {@label}
-      </span>
-      <.link
-        :if={@action_to}
-        navigate={@action_to}
-        aria-label={@action_label}
-        title={@action_label}
-        class="p-1 -mr-1 rounded text-text-quaternary hover:text-text-primary hover:bg-surface-hover transition-colors"
-      >
-        <span class="hero-plus-mini w-3.5 h-3.5"></span>
-      </.link>
-    </div>
-    """
-  end
-
-  ## ── Collapsible section (Projects / Agents) ────────────────────
-
-  attr :key, :string, required: true
-  attr :label, :string, required: true
-  attr :action_to, :string, default: nil
-  attr :action_label, :string, default: nil
-  attr :advanced_only, :boolean, default: false
-  slot :inner_block, required: true
-
-  defp nav_section(assigns) do
-    ~H"""
-    <div data-nav-section={@key} class={["pt-3", @advanced_only && "ui-advanced-only"]}>
-      <div class="flex items-center justify-between px-3 pb-1">
-        <button
-          type="button"
-          data-nav-toggle={@key}
-          aria-expanded="true"
-          class="group flex items-center gap-1 -ml-0.5 rounded text-[11px] font-510 tracking-[0.06em] text-text-quaternary hover:text-text-secondary transition-colors"
-        >
-          <span
-            data-nav-chevron
-            class="hero-chevron-down-mini w-3 h-3 shrink-0 transition-transform duration-150"
-          >
-          </span>
-          <span>{@label}</span>
-        </button>
-        <.link
-          :if={@action_to}
-          navigate={@action_to}
-          aria-label={@action_label}
-          title={@action_label}
-          class="p-1 -mr-1 rounded text-text-quaternary hover:text-text-primary hover:bg-surface-hover transition-colors"
-        >
-          <span class="hero-plus-mini w-3.5 h-3.5"></span>
-        </.link>
-      </div>
-      <div data-nav-body class="space-y-0.5">
-        {render_slot(@inner_block)}
-      </div>
-    </div>
-    """
-  end
-
-  attr :to, :string, required: true
-  attr :label, :string, required: true
+  attr :dest, :map, required: true
   attr :count, :integer, required: true
 
-  defp view_all(assigns) do
+  # Settings is a plain link: /settings is the controller redirect that picks
+  # the Settings landing page in one place.
+  defp dest_link(%{dest: %{key: "settings"}} = assigns) do
     ~H"""
-    <.link
-      navigate={@to}
-      class="flex items-center gap-2 px-3 py-1.5 text-[12px] text-text-quaternary transition-colors hover:text-text-secondary"
+    <a
+      class="d"
+      href={@dest.to}
+      aria-current={@dest.state}
+      data-nav-matches={Enum.join(@dest.matches, ",")}
+      data-nav-roots={Enum.join(@dest.roots, ",")}
     >
-      <span class="hero-arrow-right-mini h-3.5 w-3.5"></span>
-      <span class="flex-1">{@label}</span>
-      <span class="tabular-nums">{@count}</span>
-    </.link>
-    """
-  end
-
-  ## ── Top-level link ─────────────────────────────────────────────
-
-  attr :to, :string, required: true
-  attr :label, :string, required: true
-  attr :icon, :string, required: true
-  attr :current_path, :string, required: true
-  # nil = no live badge chrome; integer (incl. 0) = always-present node for JS live updates.
-  attr :badge, :integer, default: nil
-  # Optional path used for the active-highlight test instead of `to`, so a link
-  # can navigate to one route (e.g. /settings/profile) yet stay highlighted
-  # across a whole section (e.g. any /settings/*).
-  attr :match, :string, default: nil
-  # Extra route roots represented by this item (for example Tasks owns both
-  # the list and board routes).
-  attr :matches, :list, default: []
-  # Hidden while the UI is in simple mode.
-  attr :advanced_only, :boolean, default: false
-
-  defp nav_link(assigns) do
-    paths = [assigns.match || assigns.to | assigns.matches]
-    active? = Enum.any?(paths, &active?(&1, assigns.current_path))
-    badge_key = badge_key(assigns.label)
-    badge_count = assigns.badge || 0
-
-    assigns =
-      assigns
-      |> assign(:active?, active?)
-      |> assign(:badge_key, badge_key)
-      |> assign(:badge_count, badge_count)
-      |> assign(:badge_visible?, is_integer(assigns.badge) and badge_count > 0)
-
-    ~H"""
-    <.link
-      navigate={@to}
-      class={[
-        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
-        "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
-        @advanced_only && "ui-advanced-only"
-      ]}
-      data-nav-path={@to}
-      data-nav-matches={Enum.join(@matches, ",")}
-      data-active={if @active?, do: "true", else: "false"}
-      aria-current={if @active?, do: "page", else: nil}
-    >
-      <span class={[@icon, "w-4 h-4 shrink-0"]}></span>
-      <span class="flex-1 truncate">{@label}</span>
-      <span
-        :if={is_integer(@badge)}
-        class={[
-          "inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-brand text-on-primary text-[10px] font-590",
-          not @badge_visible? && "hidden"
-        ]}
-        data-nav-badge={@badge_key}
-        data-count={@badge_count}
-        data-testid={if(@badge_visible?, do: "nav-badge-#{@badge_key}")}
-        aria-hidden={if(@badge_visible?, do: "false", else: "true")}
-      >
-        {if @badge_visible?, do: @badge_count, else: ""}
-      </span>
-    </.link>
-    """
-  end
-
-  defp badge_key(label) do
-    label
-    |> to_string()
-    |> String.downcase()
-    |> String.replace(~r/[^a-z0-9]+/, "-")
-    |> String.trim("-")
-  end
-
-  ## ── Project row ────────────────────────────────────────────────
-
-  attr :project, :map, required: true
-  attr :current_path, :string, required: true
-
-  defp project_row(assigns) do
-    href = ~p"/projects/#{assigns.project.id}"
-    assigns = assign(assigns, :href, href)
-    assigns = assign(assigns, :active?, active?(href, assigns.current_path))
-
-    ~H"""
-    <.link
-      navigate={@href}
-      class={[
-        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors",
-        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-      ]}
-      data-nav-path={@href}
-      data-active={if @active?, do: "true", else: "false"}
-      aria-current={if @active?, do: "page", else: nil}
-    >
-      <span
-        class="h-2.5 w-2.5 rounded-full shrink-0 border border-white/10"
-        style={"background-color: #{@project.color || "#6b7280"}"}
+      <.r3_icon name={@dest.icon} class="ico" /><span class="lbl">{@dest.label}</span><span
+        class="sel"
         aria-hidden="true"
-      >
-      </span>
-      <span class="flex-1 truncate">{@project.name}</span>
-      <span
-        :if={(@project[:open_count] || 0) > 0}
-        class="text-[11px] text-text-quaternary tabular-nums"
-      >
-        {@project.open_count}
-      </span>
-    </.link>
+      ></span>
+    </a>
     """
   end
 
-  ## ── Agent row ──────────────────────────────────────────────────
-
-  attr :agent, :map, required: true
-  attr :current_path, :string, required: true
-
-  defp agent_row(assigns) do
-    href = ~p"/agents/#{assigns.agent.id}"
-    assigns = assign(assigns, :href, href)
-    assigns = assign(assigns, :active?, active?(href, assigns.current_path))
-
+  defp dest_link(assigns) do
     ~H"""
     <.link
-      navigate={@href}
-      class={[
-        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors",
-        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-      ]}
-      data-nav-path={@href}
-      data-active={if @active?, do: "true", else: "false"}
-      aria-current={if @active?, do: "page", else: nil}
+      class="d"
+      navigate={@dest.to}
+      aria-current={@dest.state}
+      data-nav-matches={Enum.join(@dest.matches, ",")}
+      data-nav-roots={Enum.join(@dest.roots, ",")}
     >
-      <span class={[role_icon(@agent.role), "w-4 h-4 shrink-0", role_icon_color(@agent.role)]}></span>
-      <span class="flex-1 truncate">{@agent.name}</span>
-      <span
-        class="h-1.5 w-1.5 rounded-full shrink-0"
-        title={status_label(@agent.status)}
-        style={"background-color: #{status_color(@agent.status)}"}
-      >
-      </span>
+      <.r3_icon name={@dest.icon} class="ico" /><span class="lbl">{@dest.label}</span>
+      <.inbox_count
+        :if={@dest.key == "inbox"}
+        count={@count}
+      /><span class="sel" aria-hidden="true"></span>
     </.link>
     """
   end
 
-  ## ── Helpers ────────────────────────────────────────────────────
+  attr :count, :integer, required: true
 
-  defp active?("/", current_path), do: current_path == "/"
+  # The one badge (N6). The node is always present so the `nav_badges` push
+  # can update it; at zero it is hidden. The number carries the test id.
+  defp inbox_count(assigns) do
+    ~H"""
+    <span
+      class={["count", @count == 0 && "hidden"]}
+      data-nav-badge="inbox"
+      data-count={@count}
+      aria-hidden={if(@count > 0, do: "false", else: "true")}
+    >
+      <span data-badge-num data-testid={@count > 0 && "nav-badge-inbox"}>
+        {if @count > 0, do: @count}
+      </span>
+      <span class="sr"> need you</span>
+    </span>
+    """
+  end
 
-  defp active?(path, current_path),
-    do: current_path == path or String.starts_with?(current_path || "", path <> "/")
+  defp prefix_match?(path, "/"), do: path == "/"
 
-  defp role_icon(:ceo), do: "hero-sparkles-mini"
-  defp role_icon(:cto), do: "hero-cpu-chip-mini"
-  defp role_icon(:engineer), do: "hero-wrench-screwdriver-mini"
-  defp role_icon(:product_manager), do: "hero-clipboard-document-check-mini"
-  defp role_icon(:designer), do: "hero-paint-brush-mini"
-  defp role_icon(_), do: "hero-user-mini"
+  defp prefix_match?(path, pattern),
+    do: path == pattern or String.starts_with?(path, pattern <> "/")
 
-  defp role_icon_color(:ceo), do: "text-brand"
-  defp role_icon_color(:cto), do: "text-sky-300"
-  defp role_icon_color(:engineer), do: "text-emerald-300"
-  defp role_icon_color(:product_manager), do: "text-amber-300"
-  defp role_icon_color(:designer), do: "text-fuchsia-300"
-  defp role_icon_color(_), do: "text-text-quaternary"
-
-  defp status_color(:running), do: "#5db872"
-  defp status_color(:active), do: "#5db872"
-  defp status_color(:sleeping), do: "#e8a55a"
-  defp status_color(:paused), do: "#e8a55a"
-  defp status_color(:pending_approval), do: "#9A7CA8"
-  defp status_color(:error), do: "#D97757"
-  defp status_color(:offline), do: "#423F3B"
-  defp status_color(:terminated), do: "#423F3B"
-  defp status_color(_), do: "#6b7280"
-
-  defp status_label(:running), do: "Running"
-  defp status_label(:active), do: "Active"
-  defp status_label(:sleeping), do: "Sleeping"
-  defp status_label(:paused), do: "Paused"
-  defp status_label(:pending_approval), do: "Pending approval"
-  defp status_label(:error), do: "Error"
-  defp status_label(:offline), do: "Offline"
-  defp status_label(:idle), do: "Idle"
-  defp status_label(:terminated), do: "Terminated"
-  defp status_label(other), do: to_string(other)
+  defp root_match?(path, pattern) do
+    if String.ends_with?(pattern, "/*"),
+      do: String.starts_with?(path, String.trim_trailing(pattern, "*")),
+      else: path == pattern
+  end
 end
