@@ -1,92 +1,69 @@
 <.settings_layout active={:appearance}>
   <.header title="Appearance">
-    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Pick a theme. It applies instantly and is saved to your account, so it follows you across devices.
-    </p>
-    <p class="ui-simple-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Pick a theme. It applies straight away.
+    <p class="mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      Choose how Cympho looks on this account. System follows this device.
     </p>
   </.header>
 
-  <section :for={{group, themes} <- @grouped} class="mb-10">
-    <h2 class="mb-3 font-serif text-[15px] font-510 italic tracking-[0.01em] text-brand/90">
-      {group}
-    </h2>
-    <div class="stagger-children grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <button
-        :for={theme <- themes}
-        type="button"
-        phx-click="set_theme"
-        phx-value-theme={theme.id}
-        aria-pressed={theme.id == @current_theme}
+  <form phx-change="set_theme" class="mb-10" aria-label="Mode">
+    <fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <legend class="sr-only">Mode</legend>
+      <label
+        :for={theme <- @themes}
+        for={"theme-#{theme.id}"}
         class={[
-          "group card-lift relative rounded-2xl border p-3 text-left transition-all focus:outline-none focus-ring",
+          "flex cursor-pointer items-start gap-3 rounded-2xl border bg-surface-1 p-4 transition-colors",
           if(theme.id == @current_theme,
-            do: "border-brand ring-2 ring-brand/40 shadow-card",
-            else: "border-hairline hover:border-hairline-strong hover:shadow-card"
+            do: "border-brand ring-2 ring-brand/40",
+            else: "border-hairline hover:border-hairline-strong"
           )
         ]}
       >
-        <div
-          :if={theme.id == @current_theme}
-          class="badge-pop absolute right-4 top-4 z-[1] flex h-7 w-7 items-center justify-center rounded-full bg-brand text-on-primary shadow-card"
-        >
-          <.icon name="hero-check" class="h-4 w-4" />
-        </div>
-        <div
-          class={[
-            "aspect-[16/10] w-full overflow-hidden rounded-xl border border-black/10",
-            theme.id == @current_theme || "opacity-90 transition-opacity group-hover:opacity-100"
-          ]}
-          style={"background-color: #{theme.swatch.bg};"}
-        >
-          <div class="flex h-full w-full flex-col gap-2 p-3">
-            <div class="flex items-center gap-1.5">
-              <span
-                class="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={"background-color: #{theme.swatch.accent};"}
-              >
-              </span>
-              <span
-                class="h-1.5 w-16 rounded-full"
-                style={"background-color: #{theme.swatch.ink}; opacity:.85;"}
-              >
-              </span>
-            </div>
-            <div
-              class="h-9 w-full rounded-lg"
-              style={"background-color: #{theme.swatch.surface};"}
-            >
-            </div>
-            <div class="mt-auto flex items-center gap-2">
-              <span
-                class="inline-block h-6 w-16 rounded-md"
-                style={"background-color: #{theme.swatch.accent};"}
-              >
-              </span>
-              <span
-                class="h-1.5 w-12 rounded-full"
-                style={"background-color: #{theme.swatch.ink}; opacity:.5;"}
-              >
-              </span>
-            </div>
-          </div>
-        </div>
+        <input
+          type="radio"
+          id={"theme-#{theme.id}"}
+          name="theme"
+          value={theme.id}
+          checked={theme.id == @current_theme}
+          class="mt-0.5 h-4 w-4 accent-[var(--accent)]"
+        />
+        <span class="min-w-0">
+          <span class="block text-sm font-510 text-text-primary">{theme.name}</span>
+          <span class="block text-caption text-text-tertiary">{theme.blurb}</span>
+        </span>
+      </label>
+    </fieldset>
+  </form>
 
-        <div class="mt-3 flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-590 text-text-primary">{theme.name}</span>
-              <span
-                :if={theme.id == @current_theme}
-                class="rounded-full bg-brand/15 px-2 py-0.5 text-[10px] font-590 text-brand"
-              >
-                Active
-              </span>
-            </div>
-            <p class="truncate text-caption text-text-tertiary">{theme.blurb}</p>
-          </div>
-        </div>
+  <section aria-labelledby="appearance-ui-mode">
+    <h2 id="appearance-ui-mode" class="mb-2 text-sm font-510 text-text-primary">View</h2>
+    <div
+      data-ui-mode-switch
+      data-appearance-ui-mode
+      role="group"
+      aria-label="Interface mode"
+      aria-describedby="interface-mode-help"
+      class="inline-grid grid-cols-2 gap-1 rounded-full border border-hairline bg-surface-3 p-1"
+    >
+      <button
+        type="button"
+        data-ui-mode-option="simple"
+        data-active="true"
+        aria-pressed="true"
+        aria-controls="main-content"
+        class="ui-mode-option h-9 rounded-full px-4 text-[13px] font-510"
+      >
+        Simple
+      </button>
+      <button
+        type="button"
+        data-ui-mode-option="advanced"
+        data-active="false"
+        aria-pressed="false"
+        aria-controls="main-content"
+        class="ui-mode-option h-9 rounded-full px-4 text-[13px] font-510"
+      >
+        Advanced
       </button>
     </div>
   </section>

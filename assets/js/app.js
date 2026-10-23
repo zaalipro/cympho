@@ -1243,14 +1243,14 @@ window.addEventListener('phx:issue:replace_url', (e) => {
   window.history.replaceState(window.history.state, '', cleanUrl);
 });
 
-// Theme switch — the Appearance picker / user menu push `set-theme` after
-// persisting the choice to the DB. Flip <html data-theme> live (no reload) and
-// mirror it into the `theme` cookie so the next full load server-renders it
+// Mode switch — the Appearance picker pushes `set-theme` after persisting the
+// mode (light | dark | system) to the DB. Flip <html data-mode> live (no reload)
+// and mirror it into the `theme` cookie so the next full load server-renders it
 // (the FetchTheme plug reads this cookie), keeping first paint flash-free.
 window.addEventListener('phx:set-theme', (e) => {
   const theme = e.detail?.theme;
   if (!theme) return;
-  document.documentElement.setAttribute('data-theme', theme);
+  document.documentElement.setAttribute('data-mode', theme);
   document.cookie = `theme=${theme}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
 });
 
