@@ -80,6 +80,7 @@ defmodule CymphoWeb do
       import CymphoWeb.Components.CompanySwitcherStatic
       import CymphoWeb.Components.IssueDigest
       import CymphoWeb.Components.NavRail
+      import CymphoWeb.Components.R3
       import CymphoWeb.Components.UserMenu
       import CymphoWeb.Components.SettingsLayout
       import CymphoWeb.Gettext

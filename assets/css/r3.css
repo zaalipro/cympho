@@ -175,8 +175,8 @@
 .cy-r3 .now{align-self:flex-start;display:inline-flex;align-items:center;gap:12px;padding:5px 20px 5px 5px;border-radius:var(--r-pill);background:var(--band);border:1px solid var(--band-line)}
 .cy-r3 .now-t{display:flex;flex-direction:column;font-size:14px;line-height:19px;color:var(--ink)}
 .cy-r3 .now-t small{font-size:12px;line-height:16px;color:var(--ink-2)}
-.cy-r3 .dots{position:relative;width:42px;height:42px;flex:none;border-radius:50%;background-color:var(--dots-bg);box-shadow:inset 0 0 0 1px var(--tile-line);background-image:radial-gradient(circle,var(--waiting) 1px,transparent 1.4px);background-size:6px 6px;background-position:center;overflow:hidden}
-.cy-r3 .dots::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,var(--waiting) 2.2px,transparent 2.6px);background-size:6px 6px;background-position:center;-webkit-mask-image:radial-gradient(circle at 50% 50%,var(--mask) 0,var(--mask) 30%,transparent 64%);mask-image:radial-gradient(circle at 50% 50%,var(--mask) 0,var(--mask) 30%,transparent 64%)}
+.cy-r3 .dots{position:relative;width:42px;height:42px;flex:none;border-radius:50%;background-color:var(--dots-bg);box-shadow:inset 0 0 0 1px var(--tile-line);background-image:radial-gradient(circle,var(--dot) 1px,transparent 1.4px);background-size:6px 6px;background-position:center;overflow:hidden}
+.cy-r3 .dots::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,var(--dot) 2.2px,transparent 2.6px);background-size:6px 6px;background-position:center;-webkit-mask-image:radial-gradient(circle at 50% 50%,var(--mask) 0,var(--mask) 30%,transparent 64%);mask-image:radial-gradient(circle at 50% 50%,var(--mask) 0,var(--mask) 30%,transparent 64%)}
 
 /* ---------- next step: problem card + resolution card (134). Light: paper + ink. Dark: ink + paper ---------- */
 .cy-r3 .next{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1fr);gap:14px}
@@ -499,6 +499,22 @@
 .cy-r3 .spend-go{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:500;color:var(--ink)}
 .cy-r3 .spend:hover .spend-go{text-decoration:underline;text-underline-offset:3px}
 
+/* ---------- states the shared components draw (CymphoWeb.Components.R3) beyond the mockups' frames ---------- */
+/* now capsule: one dot field per state; Working breathes, the others stay still */
+.cy-r3 .now{--dot:var(--waiting)}
+.cy-r3 .now.working{--dot:var(--working)}
+.cy-r3 .now.idle{--dot:var(--idle)}
+.cy-r3 .now.working .dots::after{animation:cy-r3-field 2.4s var(--ease) infinite}
+@keyframes cy-r3-field{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.8);opacity:.65}}
+/* run bars: finished runs are a quiet solid bar with an ink-2 word */
+.cy-r3 .rb-bar.solid{background:var(--ink-2)}
+.cy-r3 .rb-v.ok{color:var(--ink-2)}
+/* two-line answer options (an assignee and their role/status) */
+.cy-r3 .ot-n{display:block;font-weight:500;color:var(--inv-ink-hi)}
+.cy-r3 .ot-s{display:flex;flex-wrap:wrap;align-items:center;gap:0 6px;font-size:12px;line-height:16px;color:var(--inv-ink-2)}
+.cy-r3 .ot-s .g{width:12px;height:12px}
+.cy-r3 .opt-in:disabled+.opt .ot-n,.cy-r3 .opt-in:disabled+.opt .ot-s{color:var(--inv-ink-2)}
+
 /* ---------- 1024 layout ---------- */
 @media (max-width:1180px){
   .cy-r3 .shell{grid-template-columns:216px minmax(0,1fr)}
@@ -648,7 +664,7 @@
 }
 
 @media (prefers-reduced-motion:reduce){
-  .cy-r3 .spin{animation:none}
+  .cy-r3 .spin,.cy-r3 .now.working .dots::after{animation:none}
   .cy-r3 .d,.cy-r3 .pw,.cy-r3 .pw .nub,.cy-r3 .pl,.cy-r3 .btn-new,.cy-r3 .lnk .ico,.cy-r3 .row,.cy-r3 .opt,.cy-r3 .skip,.cy-r3 .howto>summary.pw .nub,.cy-r3 .spend{transition:none}
 }
 
