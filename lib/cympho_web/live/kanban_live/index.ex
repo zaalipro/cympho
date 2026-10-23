@@ -9,8 +9,11 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Projects
   alias Cympho.RuntimePreflight
+  alias CymphoWeb.IssueLive.Tasks
 
   @status_columns [:backlog, :todo, :in_progress, :in_review, :blocked, :done, :cancelled]
+  # Later and Cancelled start as collapsed column pills (build-spec §5, state a).
+  @collapsed_by_default [:backlog, :cancelled]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -50,12 +53,11 @@ defmodule CymphoWeb.KanbanLive.Index do
           else: []
         )
       )
-      |> assign(:collapsed_columns, MapSet.new())
+      |> assign(:collapsed_columns, MapSet.new(@collapsed_by_default))
       |> assign(:swimlane_mode, false)
       |> assign(:digest_density, "compact")
-      |> assign(:filter_assignee_id, nil)
-      |> assign(:filter_priority, nil)
-      |> assign(:filter_search, "")
+      |> assign(:view_params, %{})
+      |> assign(:task_ctx, Tasks.context(nil, nil, []))
       |> assign(:editing_card_id, nil)
       |> assign(:card_action_open, nil)
       |> assign(:blocked_transition, nil)
@@ -129,7 +131,8 @@ defmodule CymphoWeb.KanbanLive.Index do
       |> assign(:selected_project_id, project_id)
       |> assign(:selected_project, selected_project)
       |> assign(:digest_density, digest_density)
-      |> assign(:page_title, "Board")
+      |> assign(:view_params, Map.new(Tasks.filter_params(params)))
+      |> assign(:page_title, "Tasks")
       |> then(fn socket ->
         if socket.assigns[:loaded_project_id] == project_id and
              Map.has_key?(socket.assigns, :loaded_project_id) do
@@ -278,6 +281,9 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   def handle_info(%Phoenix.Socket.Broadcast{event: "run_status", payload: payload}, socket) do
+    # A run starting or ending changes a card's chip ("Theo reviewing").
+    socket = assign_task_ctx(socket)
+
     socket =
       case payload do
         %{status: "completed", agent_id: aid, issue_id: iid} ->
@@ -380,60 +386,35 @@ defmodule CymphoWeb.KanbanLive.Index do
     {:noreply, update(socket, :swimlane_mode, fn mode -> not mode end)}
   end
 
-  def handle_event("filter_project", %{"project_id" => project_id}, socket) do
-    if project_id == "" do
-      {:noreply, push_patch(socket, to: kanban_url(nil, socket.assigns.digest_density))}
-    else
-      {:noreply, push_patch(socket, to: kanban_url(project_id, socket.assigns.digest_density))}
-    end
-  end
+  def handle_event("filter_project", %{"project_id" => project_id}, socket),
+    do: patch_filters(socket, %{"project_id" => project_id})
 
-  def handle_event("combobox_project", %{"selected" => nil}, socket) do
-    {:noreply, push_patch(socket, to: kanban_url(nil, socket.assigns.digest_density))}
-  end
+  def handle_event("combobox_project", %{"selected" => project_id}, socket),
+    do: patch_filters(socket, %{"project_id" => project_id})
 
-  def handle_event("combobox_project", %{"selected" => project_id}, socket)
-      when is_binary(project_id) do
-    {:noreply, push_patch(socket, to: kanban_url(project_id, socket.assigns.digest_density))}
-  end
+  def handle_event("filter_assignee", %{"assignee_id" => assignee_id}, socket),
+    do: patch_filters(socket, %{"assignee_id" => assignee_id})
 
-  def handle_event("filter_assignee", %{"assignee_id" => assignee_id}, socket) do
-    {:noreply,
-     assign(socket, :filter_assignee_id, if(assignee_id == "", do: nil, else: assignee_id))}
-  end
+  def handle_event("combobox_assignee", %{"selected" => assignee_id}, socket),
+    do: patch_filters(socket, %{"assignee_id" => assignee_id})
 
-  def handle_event("combobox_assignee", %{"selected" => selected}, socket) do
-    {:noreply, assign(socket, :filter_assignee_id, selected)}
-  end
+  def handle_event("filter_priority", %{"priority" => priority}, socket),
+    do: patch_filters(socket, %{"priority" => priority})
 
-  def handle_event("filter_priority", %{"priority" => priority}, socket) do
-    {:noreply,
-     assign(
-       socket,
-       :filter_priority,
-       if(priority == "", do: nil, else: String.to_existing_atom(priority))
-     )}
-  end
+  def handle_event("combobox_priority", %{"selected" => priority}, socket),
+    do: patch_filters(socket, %{"priority" => priority})
 
-  def handle_event("combobox_priority", %{"selected" => nil}, socket) do
-    {:noreply, assign(socket, :filter_priority, nil)}
-  end
+  def handle_event("filter_search", %{"query" => query}, socket),
+    do: patch_filters(socket, %{"search" => query})
 
-  def handle_event("combobox_priority", %{"selected" => priority}, socket)
-      when is_binary(priority) do
-    {:noreply, assign(socket, :filter_priority, String.to_existing_atom(priority))}
-  end
-
-  def handle_event("filter_search", %{"query" => query}, socket) do
-    {:noreply, assign(socket, :filter_search, query)}
-  end
+  def handle_event("search", %{"search" => search}, socket),
+    do: patch_filters(socket, %{"search" => search})
 
   def handle_event("clear_filters", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:filter_assignee_id, nil)
-     |> assign(:filter_priority, nil)
-     |> assign(:filter_search, "")}
+    cleared =
+      Map.new(Tasks.filter_params(socket.assigns.view_params), fn {key, _} -> {key, nil} end)
+
+    patch_filters(socket, Map.put(cleared, "project_id", nil))
   end
 
   def handle_event("cancel_comment", _params, socket) do
@@ -668,15 +649,19 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   def valid_next_statuses(_status), do: []
 
-  def status_label(:backlog), do: "Backlog"
-  def status_label(:todo), do: "To Do"
-  def status_label(:in_progress), do: "In Progress"
-  def status_label(:in_review), do: "In Review"
+  # The owner's words for task states (v2 spec §1.4 glossary).
+  def status_label(:backlog), do: "Later"
+  def status_label(:todo), do: "To do"
+  def status_label(:in_progress), do: "Working"
+  def status_label(:in_review), do: "In review"
   def status_label(:done), do: "Done"
   def status_label(:blocked), do: "Blocked"
   def status_label(:cancelled), do: "Cancelled"
 
-  def status_columns, do: @status_columns
+  @doc "The columns drawn: the five open ones, plus Later and Cancelled once expanded."
+  def board_columns(collapsed) do
+    Enum.reject(@status_columns, &MapSet.member?(collapsed, &1))
+  end
 
   defp launch_readiness_by_issue(issues, socket) when is_list(issues) and is_map(socket) do
     launch_readiness_by_issue(issues, socket.assigns[:runtime_enabled?] || false)
@@ -787,16 +772,23 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   def shared_board_digest(_issues, _issue_digests), do: nil
 
-  def kanban_url(project_id, density) do
-    query =
-      %{
-        project_id: project_id,
-        density: if(density == "detailed", do: density)
-      }
-      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
-      |> Enum.into(%{})
+  @doc "This board with the shared filters, the project and the density, after `overrides`."
+  def board_url(assigns, overrides) do
+    params =
+      assigns.view_params
+      |> Map.put("project_id", assigns.selected_project_id)
+      |> Map.put("density", if(assigns.digest_density == "detailed", do: "detailed"))
+      |> Map.merge(overrides)
 
-    ~p"/kanban?#{query}"
+    query =
+      Tasks.filter_params(params) ++
+        Enum.reject([{"density", params["density"]}], &(elem(&1, 1) in [nil, "", "compact"]))
+
+    if query == [], do: ~p"/kanban", else: "/kanban?" <> URI.encode_query(query)
+  end
+
+  defp patch_filters(socket, overrides) do
+    {:noreply, push_patch(socket, to: board_url(socket.assigns, overrides))}
   end
 
   defp normalize_digest_density("compact"), do: "compact"
@@ -823,61 +815,10 @@ defmodule CymphoWeb.KanbanLive.Index do
     |> Enum.sort_by(fn {name, _} -> name end)
   end
 
+  @doc "How many filters are set (the toolbar's Filter chip)."
   def active_filter_count(assigns) do
-    count = 0
-    count = if assigns[:filter_assignee_id], do: count + 1, else: count
-    count = if assigns[:filter_priority], do: count + 1, else: count
-
-    count =
-      if assigns[:filter_search] != "" and assigns[:filter_search] != nil,
-        do: count + 1,
-        else: count
-
-    count
-  end
-
-  def apply_filters(issues, %{assignee_id: assignee_id, priority: priority, search: search}) do
-    issues
-    |> filter_by_assignee(assignee_id)
-    |> filter_by_priority(priority)
-    |> filter_by_search(search)
-  end
-
-  defp filter_by_assignee(issues, nil), do: issues
-  defp filter_by_assignee(issues, ""), do: issues
-
-  defp filter_by_assignee(issues, assignee_id) do
-    Enum.filter(issues, fn issue -> issue.assignee && issue.assignee.id == assignee_id end)
-  end
-
-  defp filter_by_priority(issues, nil), do: issues
-  defp filter_by_priority(issues, ""), do: issues
-
-  defp filter_by_priority(issues, priority) do
-    priority_atom = if is_binary(priority), do: String.to_existing_atom(priority), else: priority
-    Enum.filter(issues, fn issue -> issue.priority == priority_atom end)
-  end
-
-  defp filter_by_search(issues, ""), do: issues
-  defp filter_by_search(issues, nil), do: issues
-
-  defp filter_by_search(issues, search) do
-    lower_search = String.downcase(search)
-
-    Enum.filter(issues, fn issue ->
-      haystack =
-        [
-          issue.title,
-          issue.identifier,
-          issue.assignee && issue.assignee.name,
-          to_string(issue.priority)
-        ]
-        |> Enum.reject(&is_nil/1)
-        |> Enum.join(" ")
-        |> String.downcase()
-
-      String.contains?(haystack, lower_search)
-    end)
+    filters = Map.put(assigns.view_params, "project_id", assigns.selected_project_id)
+    length(Tasks.filter_params(filters))
   end
 
   def backlog_issues(issues), do: issues_for_status(issues, :backlog)
@@ -909,6 +850,20 @@ defmodule CymphoWeb.KanbanLive.Index do
     |> assign(:agent_heartbeat_states, Map.merge(states, load_heartbeat_states(new_agent_issues)))
     |> assign(:pending_wakes, load_pending_wakes(issues))
     |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))
+    |> assign_task_ctx()
+  end
+
+  # Who acts next on each card (owner items, live runs, "was Mira").
+  defp assign_task_ctx(socket) do
+    assign(
+      socket,
+      :task_ctx,
+      Tasks.context(
+        current_company_id(socket),
+        socket.assigns[:current_user],
+        socket.assigns.issues
+      )
+    )
   end
 
   defp build_issue_digests(issues) do

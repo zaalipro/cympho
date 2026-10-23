@@ -114,7 +114,8 @@ defmodule CymphoWeb.IssueLiveTest do
     test "renders all issues", %{issue: issue} do
       {:ok, _view, html} = live(conn(), "/issues?density=detailed")
 
-      assert html =~ "All Issues"
+      # r3: the page is "Tasks" (glossary: an issue is a task; plan P5).
+      assert html =~ ~s(<h1 class="h1">Tasks</h1>)
       assert html =~ issue.title
     end
 

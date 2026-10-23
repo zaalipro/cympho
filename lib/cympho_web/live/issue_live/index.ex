@@ -5,17 +5,33 @@ defmodule CymphoWeb.IssueLive.Index do
 
   alias Cympho.Issues
   alias Cympho.Agents
+  alias Cympho.Agents.Agent
   alias Cympho.Projects
   alias Cympho.Labels
   alias Cympho.IssueReadStates
+  alias Cympho.OwnerAttention
   alias Cympho.RuntimePreflight
   alias CymphoWeb.Events
+  alias CymphoWeb.IssueLive.Tasks
+  alias CymphoWeb.NextStep
+  alias CymphoWeb.TeamRail
+
+  @agent_events [
+    :agent_created,
+    :agent_updated,
+    :agent_deleted,
+    :agent_paused,
+    :agent_resumed,
+    :agent_terminated
+  ]
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) && socket.assigns[:current_company] do
       Issues.subscribe(socket.assigns.current_company.id)
       Events.subscribe_to_runs(socket.assigns.current_company.id)
+      # Assign and retry lists the team, so a pause or resume redraws it.
+      Agents.subscribe(socket.assigns.current_company.id)
     end
 
     if socket.assigns[:current_user] do
@@ -24,7 +40,7 @@ defmodule CymphoWeb.IssueLive.Index do
 
     socket =
       socket
-      |> assign(:page_title, "All Issues")
+      |> assign(:page_title, "Tasks")
       |> assign(:agents, list_agents(socket))
       |> assign(:projects, list_projects(socket))
       |> assign(:labels, list_labels(socket))
@@ -69,6 +85,7 @@ defmodule CymphoWeb.IssueLive.Index do
       |> assign(:digest_density, normalize_digest_density(params["density"]))
       |> assign(:issue_triage_counts, issue_triage_counts(socket))
       |> assign(:unread_issues, unread_issues)
+      |> assign_tasks()
 
     {:noreply, socket}
   end
@@ -108,9 +125,47 @@ defmodule CymphoWeb.IssueLive.Index do
     end
   end
 
+  def handle_info({event, _agent}, socket) when event in @agent_events,
+    do: {:noreply, assign_tasks(socket)}
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
+  def handle_event("assign_and_retry", %{"issue_id" => issue_id} = params, socket) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         agent_id when agent_id not in [nil, ""] <- params["agent_id"],
+         {:ok, issue} <- Issues.get_company_issue(company_id, issue_id),
+         {:ok, agent} <- Agents.get_company_agent(company_id, agent_id),
+         true <- issue.status == :blocked and Tasks.can_retry?(agent, issue),
+         {:ok, issue} <-
+           Issues.update_issue(issue, %{
+             assignee_id: agent.id,
+             status: :todo,
+             actor_type: "user",
+             actor_id: socket.assigns[:current_user] && socket.assigns.current_user.id
+           }),
+         {:ok, issue} <-
+           Issues.prioritize_for_dispatch(issue, actor: socket.assigns[:current_user]) do
+      if socket.assigns.orchestrator_enabled?, do: Cympho.Orchestrator.Dispatcher.poll_now()
+
+      {:noreply,
+       socket
+       |> reload()
+       |> push_event("toast", %{
+         message: "#{issue.identifier || "The task"} goes to #{agent.name}.",
+         type: "success"
+       })}
+    else
+      agent_id when agent_id in [nil, ""] ->
+        {:noreply,
+         push_event(socket, "toast", %{message: "Choose who retries it.", type: "error"})}
+
+      _ ->
+        {:noreply,
+         push_event(socket, "toast", %{message: "Could not assign that task.", type: "error"})}
+    end
+  end
+
   def handle_event("delete_issue", %{"id" => id}, socket) do
     case get_issue(socket, id) do
       {:ok, issue} ->
@@ -210,6 +265,239 @@ defmodule CymphoWeb.IssueLive.Index do
     |> assign(:total_pages, paginated.total_pages)
     |> assign(:issue_triage_counts, issue_triage_counts(socket))
     |> assign(:unread_issues, unread_issues)
+    |> assign_tasks()
+  end
+
+  # The r3 Tasks list (plan P5): every task in one group, in the owner's order,
+  # with the first decision opened as the Next step (S3). The filters are the
+  # same params the Advanced table reads, so List and Board carry them across.
+  defp assign_tasks(socket) do
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+    user = socket.assigns[:current_user]
+    filters = filter_values(socket.assigns)
+    issues = if company_id, do: Issues.list_issues(%{company_id: company_id}), else: []
+    ctx = Tasks.context(company_id, user, issues)
+    stopped? = Enum.any?(ctx.items, &(OwnerAttention.owner_kind(&1) == :stopped))
+    groups = issues |> Tasks.filter(filters) |> Tasks.groups(ctx)
+    open = if stopped?, do: nil, else: Tasks.open_decision(groups, ctx)
+    open_issue = open && elem(open, 1)
+
+    assign(socket,
+      view_params: filters,
+      task_groups: Enum.map(groups, &group_view(&1, open_issue, ctx)),
+      open_decision: open_view(open, ctx),
+      tasks_stopped?: stopped?,
+      owner_items?: ctx.items != [],
+      agent_names: Map.new(ctx.agents, fn {id, agent} -> {id, agent.name} end),
+      spending: if(stopped?, do: TeamRail.spending(company_id))
+    )
+  end
+
+  defp filter_values(assigns) do
+    %{
+      "status" => assigns.current_status,
+      "priority" => assigns.current_priority,
+      "search" => assigns.current_search,
+      "assignee_id" => assigns.current_assignee_id,
+      "project_id" => assigns.current_project_id,
+      "label_id" => assigns.current_label_id,
+      "triage" => assigns.current_triage
+    }
+  end
+
+  @group_glyphs %{
+    blocked: :stopped,
+    waiting: :waiting,
+    working: :working,
+    todo: :idle,
+    done: :done,
+    cancelled: :idle,
+    later: :idle
+  }
+
+  defp group_view(group, open_issue, ctx) do
+    %{
+      key: group.key,
+      label: group.label,
+      count: length(group.issues),
+      closed?: group.key in [:done, :cancelled, :later],
+      open?: open_issue != nil and Enum.any?(group.issues, &(&1.id == open_issue.id)),
+      rows:
+        for issue <- group.issues, open_issue == nil or issue.id != open_issue.id do
+          %{
+            issue: issue,
+            glyph: Map.fetch!(@group_glyphs, group.key),
+            phrase: Tasks.phrase(issue, group.key, ctx),
+            verb: Tasks.verb(issue, group.key, ctx),
+            href: "/issues/#{issue.id}?from=/issues"
+          }
+        end
+    }
+  end
+
+  defp open_view(nil, _ctx), do: nil
+  defp open_view({:item, issue, item}, _ctx), do: %{kind: :item, issue: issue, item: item}
+
+  defp open_view({:retry, issue}, ctx) do
+    item = ctx.by_issue[issue.id]
+    runs = if match?(%{kind: :agent_paused}, item), do: item.runs, else: []
+    candidates = Tasks.retry_candidates(issue, ctx)
+    role = Cympho.Orchestrator.Dispatcher.Router.infer_role(issue)
+
+    preselected =
+      Enum.find(candidates, &(&1.available? and &1.rank == 0 and &1.agent.role == role)) ||
+        Enum.find(candidates, & &1.available?)
+
+    holder = issue.assignee_id && ctx.agents[issue.assignee_id]
+    last_run = List.last(runs)
+
+    %{
+      kind: :retry,
+      issue: issue,
+      runs: runs,
+      runs_label: holder_runs_label(runs, item, issue),
+      failed:
+        runs != [] && "#{length(runs)} #{if length(runs) == 1, do: "run", else: "runs"} failed;",
+      rest: retry_object(holder, ctx.was[issue.id]),
+      since:
+        Tasks.stamp(
+          (last_run && (last_run.completed_at || last_run.started_at)) || issue.updated_at,
+          ctx.now
+        ),
+      options:
+        Enum.map(candidates, fn candidate ->
+          %{
+            value: candidate.agent.id,
+            label: candidate.agent.name,
+            sub: candidate_sub(candidate),
+            disabled: not candidate.available?
+          }
+        end),
+      checked: preselected && preselected.agent.id
+    }
+  end
+
+  defp holder_runs_label(runs, %{agent: %{name: name}}, issue) when runs != [],
+    do: "#{name}'s last #{length(runs)} runs on #{issue.identifier}, in minutes"
+
+  defp holder_runs_label(_runs, _item, _issue), do: nil
+
+  defp retry_object(nil, nil), do: "nobody is assigned now."
+  defp retry_object(nil, was), do: "nobody is assigned now (was #{was})."
+  defp retry_object(holder, _was), do: "#{holder.name} is paused."
+
+  defp candidate_sub(candidate) do
+    assigns = %{
+      role: Agent.role_label(candidate.agent.role),
+      kind: candidate.kind,
+      word: candidate.word,
+      busy?: candidate.available? and candidate.kind == :working
+    }
+
+    ~H"""
+    {@role}<span aria-hidden="true"> · </span><.status_glyph kind={@kind} />{@word}<span
+      :if={@busy?}
+      class="ot-q"
+    ><span aria-hidden="true"> · </span>starts when free</span>
+    """
+  end
+
+  attr :open, :map, required: true
+
+  # Tasks' own Next step (build-spec §5): the blocked task, its failed runs, and
+  # who retries it, chosen on the resolution card.
+  defp retry_pair(assigns) do
+    ~H"""
+    <.next_step>
+      <:problem>
+        <.problem_card title={"Decide who retries #{@open.issue.identifier}"}>
+          <:eyebrow>
+            Next step<span aria-hidden="true"> · </span>Blocked<span :if={@open.since}><span aria-hidden="true"> · </span>since <span class="mono">{@open.since}</span></span>
+          </:eyebrow>
+          <p class="obj"><b :if={@open.failed}>{@open.failed}</b> {@open.rest}</p>
+          <.run_bars :if={@open.runs != []} runs={@open.runs} label={@open.runs_label} />
+          <div class="objt task-tile">
+            <span class="kt p"><.r3_icon name="i-stop" /></span>
+            <div class="objt-m">
+              <.link class="objt-t" navigate={"/issues/#{@open.issue.id}?from=/issues"}>
+                <span class="mono">{@open.issue.identifier}</span> {@open.issue.title}
+              </.link>
+              <span class="objt-s"><Tasks.priority priority={@open.issue.priority} /></span>
+            </div>
+            <span class="go" aria-hidden="true">
+              Open<.r3_icon name="i-arrow-right" class="ico s14" />
+            </span>
+          </div>
+        </.problem_card>
+      </:problem>
+      <:resolution>
+        <.ink_card form={"Assign #{@open.issue.identifier} and retry"} phx-submit="assign_and_retry">
+          <input type="hidden" name="issue_id" value={@open.issue.id} />
+          <.option_rows
+            :if={@open.options != []}
+            name="agent_id"
+            legend="Who should retry it?"
+            items={@open.options}
+            checked={@open.checked}
+            own={false}
+          />
+          <.ink_note :if={@open.options != []}>
+            After you assign: {@open.issue.identifier} goes to the agent you choose and moves to To do; it starts when they're free.
+          </.ink_note>
+          <.ink_note :if={@open.options == []}>
+            No agent can take {@open.issue.identifier} now. Hire one with its role, then assign it.
+          </.ink_note>
+          <.ink_foot verb="assign">
+            <:primary>
+              <.primary_pill :if={@open.options != []} type="submit">Assign and retry</.primary_pill>
+              <.primary_pill :if={@open.options == []} navigate="/agents/new">Hire</.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </.ink_card>
+      </:resolution>
+    </.next_step>
+    """
+  end
+
+  attr :row, :map, required: true
+
+  # A closed task row (141 title-first, 049): glyph · ID · title over its state
+  # phrase · High · and a verb only where the owner acts.
+  defp task_row(assigns) do
+    ~H"""
+    <li class="row tr">
+      <span class="tg"><.status_glyph kind={@row.glyph} /></span>
+      <span class="tid mono" id={"tl-#{@row.issue.id}i"}>{@row.issue.identifier}</span>
+      <span class="row-main">
+        <span :if={@row.verb} class="rt" id={"tl-#{@row.issue.id}"}>{@row.issue.title}</span>
+        <.link :if={!@row.verb} class="rt2" navigate={@row.href}>
+          <s :if={@row.issue.status == :cancelled}>{@row.issue.title}</s><span :if={
+            @row.issue.status != :cancelled
+          }>{@row.issue.title}</span>
+        </.link>
+        <span class="rm" id={"tl-#{@row.issue.id}m"}>
+          <%= for {part, n} <- Enum.with_index(@row.phrase) do %>
+            <span :if={n > 0} aria-hidden="true"> · </span>
+            <%= case part do %>
+              <% {:mono, text} -> %>
+                <span class="mono">{text}</span>
+              <% text -> %>
+                {text}
+            <% end %>
+          <% end %>
+        </span>
+      </span>
+      <Tasks.priority priority={@row.issue.priority} />
+      <.link
+        :if={@row.verb}
+        class="pl go"
+        navigate={@row.href}
+        aria-describedby={"tl-#{@row.issue.id}i tl-#{@row.issue.id} tl-#{@row.issue.id}m"}
+      >
+        {@row.verb}
+      </.link>
+    </li>
+    """
   end
 
   defp build_url(socket, overrides), do: issue_index_url(socket.assigns, overrides)
@@ -400,12 +688,6 @@ defmodule CymphoWeb.IssueLive.Index do
     else
       "text-text-primary"
     end
-  end
-
-  defp triage_lane_label(key) do
-    Enum.find_value(triage_lanes(%{}), "Lane", fn lane ->
-      if lane.key == key, do: lane.label
-    end)
   end
 
   defp attention_queue(issues) do
@@ -657,64 +939,20 @@ defmodule CymphoWeb.IssueLive.Index do
       assigns.current_triage != ""
   end
 
-  # One chip per active filter: {label, clear_event, clear_value_key}.
-  defp active_filter_chips(assigns) do
-    [
-      chip(assigns.current_triage != "", "Lane: #{triage_lane_label(assigns.current_triage)}",
-        event: "filter_triage",
-        key: "triage"
-      ),
-      chip(assigns.current_search != "", ~s(Search: "#{assigns.current_search}"),
-        event: "search",
-        key: "search"
-      ),
-      chip(
-        assigns.current_status != "",
-        "Status: #{status_label(safe_existing_atom(assigns.current_status))}",
-        event: "filter_status",
-        key: "status"
-      ),
-      chip(
-        assigns.current_priority != "",
-        "Priority: #{String.capitalize(assigns.current_priority)}",
-        event: "filter_priority",
-        key: "priority"
-      ),
-      chip(
-        assigns.current_assignee_id != "",
-        "Assignee: #{name_for(assigns.agents, assigns.current_assignee_id)}",
-        event: "filter_assignee",
-        key: "assignee_id"
-      ),
-      chip(
-        assigns.current_project_id != "",
-        "Project: #{name_for(assigns.projects, assigns.current_project_id)}",
-        event: "filter_project",
-        key: "project_id"
-      ),
-      chip(
-        assigns.current_label_id != "",
-        "Label: #{name_for(assigns.labels, assigns.current_label_id)}",
-        event: "filter_label",
-        key: "label_id"
-      )
-    ]
-    |> Enum.reject(&is_nil/1)
-  end
-
-  defp chip(false, _label, _opts), do: nil
-
-  defp chip(true, label, opts),
-    do: %{label: label, event: opts[:event], key: opts[:key]}
-
-  defp safe_existing_atom(value) do
-    String.to_existing_atom(value)
-  rescue
-    ArgumentError -> value
-  end
-
-  defp name_for(items, id) do
-    Enum.find_value(items, "Selected", fn item -> if item.id == id, do: item.name end)
+  # How many filters are set (the toolbar's Filter chip).
+  defp filter_count(assigns) do
+    Enum.count(
+      [
+        assigns.current_status,
+        assigns.current_priority,
+        assigns.current_search,
+        assigns.current_assignee_id,
+        assigns.current_project_id,
+        assigns.current_label_id,
+        assigns.current_triage
+      ],
+      &(&1 != "")
+    )
   end
 
   defp pluralize(1, word), do: word

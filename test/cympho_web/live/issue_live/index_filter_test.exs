@@ -63,7 +63,8 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
     test "renders search input", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/issues")
 
-      assert html =~ "Search issues..."
+      # r3: the toolbar's search finds a task by ID or title (build-spec §5).
+      assert html =~ "Find a task by ID or title"
       assert html =~ ~s(phx-submit="search")
     end
 

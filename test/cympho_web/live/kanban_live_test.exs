@@ -43,18 +43,45 @@ defmodule CymphoWeb.KanbanLiveTest do
 
   describe "Kanban rendering" do
     test "renders all status columns" do
-      {:ok, _view, html} = live(conn(), "/kanban?density=detailed")
-      assert html =~ "Backlog"
-      assert html =~ "To Do"
-      assert html =~ "In Progress"
-      assert html =~ "In Review"
-      assert html =~ "Done"
-      assert html =~ "Blocked"
+      {:ok, _view, html} = live_board("/kanban?density=detailed")
+      # r3: the owner's words (glossary); Later is open, Cancelled is its pill.
+      headings =
+        html |> Floki.parse_document!() |> Floki.find(".bcol h2.gh") |> Enum.map(&Floki.text/1)
+
+      assert Enum.map(
+               headings,
+               &(&1 |> String.split() |> Enum.reject(fn w -> w =~ ~r/^\d/ end) |> Enum.join(" "))
+             ) ==
+               ["Later", "To do", "Working", "In review", "Blocked", "Done"]
+
       assert html =~ "Cancelled"
     end
 
+    test "Later and Cancelled start as collapsed pills that open a column" do
+      {:ok, view, html} = live(conn(), "/kanban")
+      doc = Floki.parse_document!(html)
+
+      pills =
+        doc
+        |> Floki.find("button.colp")
+        |> Enum.map(&(&1 |> Floki.text() |> String.split() |> Enum.join(" ")))
+
+      assert pills == ["Later 1", "Cancelled 0"]
+
+      assert Floki.attribute(Floki.find(doc, "button.colp"), "aria-expanded") == [
+               "false",
+               "false"
+             ]
+
+      refute html =~ ~s(data-kanban-column="backlog")
+
+      html = view |> element("button.colp", "Later") |> render_click()
+      assert html =~ ~s(data-kanban-column="backlog")
+      assert html =~ "Backlog Issue"
+    end
+
     test "renders issues" do
-      {:ok, _view, html} = live(conn(), "/kanban?density=detailed")
+      {:ok, _view, html} = live_board("/kanban?density=detailed")
       assert html =~ "Backlog Issue"
       assert html =~ "Todo Issue"
       assert html =~ "Compact"
@@ -65,54 +92,30 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "groups board header controls in one aligned toolbar" do
-      {:ok, _view, html} = live(conn(), "/kanban?density=detailed")
+      {:ok, _view, html} = live_board("/kanban?density=detailed")
+      doc = Floki.parse_document!(html)
 
-      toolbar =
-        html
-        |> Floki.parse_document!()
-        |> Floki.find("[data-testid='kanban-header-actions']")
+      # r3: the header carries List | Board; the toolbar finds and filters
+      # tasks; re-cutting the board (swimlanes, density) is Advanced. New task
+      # is the shell's (rail and phone top bar).
+      assert [_] = Floki.find(doc, "header.ctx [data-testid='task-view-switch']")
+      [toolbar] = Floki.find(doc, ".tbar")
+      assert Floki.find(toolbar, "input[name='search']") != []
+      assert Floki.text(Floki.find(toolbar, "summary.chip")) =~ "Filter"
+      assert Floki.find(toolbar, "#kanban-filter-project") != []
+      assert Floki.find(toolbar, "a.chip.mine[href='/my-issues']") != []
 
-      toolbar_text = Floki.text(toolbar)
-      view_controls = Floki.find(toolbar, "[data-testid='kanban-view-controls']")
-      task_view_switch = Floki.find(toolbar, "[data-testid='task-view-switch']")
+      [view_controls] = Floki.find(doc, "[data-testid='kanban-view-controls']")
+      assert Floki.attribute([view_controls], "class") |> hd() =~ "ui-advanced-only"
       view_controls_text = Floki.text(view_controls)
-      toolbar_class = toolbar |> Floki.attribute("class") |> List.first()
-      view_controls_class = view_controls |> Floki.attribute("class") |> List.first()
-
-      new_issue_class =
-        toolbar
-        |> Floki.find("a[href='/issues/new']")
-        |> Floki.attribute("class")
-        |> List.first()
-
-      assert toolbar != []
-      assert view_controls != []
-      assert task_view_switch != []
-      assert toolbar_class =~ "grid-cols-2"
-      assert toolbar_class =~ "sm:flex"
-      assert view_controls_class =~ "order-2"
-      assert view_controls_class =~ "sm:flex"
-      assert toolbar_text =~ "List"
-      assert toolbar_text =~ "Board"
-      assert toolbar_text =~ "Project:"
-      assert toolbar_text =~ "Swimlanes"
-      assert toolbar_text =~ "Compact"
-      assert toolbar_text =~ "Detailed"
-      assert toolbar_text =~ "New Issue"
-      refute view_controls_text =~ "List"
-      assert view_controls_text =~ "Project:"
       assert view_controls_text =~ "Swimlanes"
       assert view_controls_text =~ "Compact"
       assert view_controls_text =~ "Detailed"
-      refute view_controls_text =~ "New Issue"
-      assert Floki.find(toolbar, "a[href='/issues/new']") != []
-      assert new_issue_class =~ "order-1"
-      assert new_issue_class =~ "w-full"
-      assert new_issue_class =~ "sm:w-auto"
+      refute view_controls_text =~ "List"
     end
 
     test "renders the accessible task view switch with board selected" do
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       document = Floki.parse_document!(html)
       [switch] = Floki.find(document, "[data-testid='task-view-switch']")
       [list_link] = Floki.find(switch, "a[href='/issues']")
@@ -147,7 +150,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           assigned_role: "ceo"
         })
 
-      {:ok, _view, html} = live(conn(), "/kanban?density=detailed")
+      {:ok, _view, html} = live_board("/kanban?density=detailed")
 
       assert html =~ "Assigned launch card"
       assert html =~ "Launch needed"
@@ -180,7 +183,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           assigned_role: "engineer"
         })
 
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
 
       assert html =~ "Board implementation launch chip"
       assert html =~ ~s(href="/issues/#{issue.id}#issue-agent-panel")
@@ -247,25 +250,26 @@ defmodule CymphoWeb.KanbanLiveTest do
           project_id: project.id
         })
 
-      {:ok, _view, html} = live(conn(), "/kanban?project_id=#{project.id}")
+      {:ok, _view, html} = live_board("/kanban?project_id=#{project.id}")
 
       assert html =~ "Board health"
       assert html =~ "1 blocked"
       assert html =~ "1 review"
       refute html =~ "Board command"
       refute html =~ "Focus queue"
+      # r3: cards open the task with ?from=/kanban (its Back link returns here).
       assert html =~ "Board blocked release"
-      assert html =~ ~s(href="/issues/#{blocked.id}")
+      assert html =~ ~s(href="/issues/#{blocked.id}?from=/kanban")
       assert html =~ "Board CEO launch"
-      assert html =~ ~s(href="/issues/#{ceo_launch.id}")
+      assert html =~ ~s(href="/issues/#{ceo_launch.id}?from=/kanban")
       assert html =~ "Board review approval"
-      assert html =~ ~s(href="/issues/#{review.id}")
+      assert html =~ ~s(href="/issues/#{review.id}?from=/kanban")
       assert html =~ ~s(aria-label="Move issue")
       assert html =~ "hero-ellipsis-horizontal-mini"
     end
 
     test "supports compact digest density" do
-      {:ok, _view, html} = live(conn(), "/kanban?density=compact")
+      {:ok, _view, html} = live_board("/kanban?density=compact")
 
       assert html =~ "Backlog Issue"
       assert html =~ "Not started"
@@ -291,7 +295,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           goal_id: mission.id
         })
 
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
 
       assert html =~ "Aligned board card"
       assert html =~ "Mission: Board mission context"
@@ -299,7 +303,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "renders drag-and-drop attributes" do
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       assert html =~ "data-kanban-column"
       assert html =~ "data-issue-id"
     end
@@ -308,7 +312,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       issue_backlog: high_issue,
       issue_todo: medium_issue
     } do
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       doc = Floki.parse_document!(html)
 
       # Elevated priority renders as a mini icon with a tooltip, not a word chip.
@@ -339,7 +343,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           assignee_id: agent.id
         })
 
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
 
       card =
         html
@@ -359,7 +363,7 @@ defmodule CymphoWeb.KanbanLiveTest do
 
   describe "Transitions" do
     test "valid transition succeeds", %{issue_backlog: issue} do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       view
       |> element("#kanban-board")
@@ -369,7 +373,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "invalid transition shows error", %{issue_todo: issue} do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       # todo -> done is not a valid transition
       view
@@ -406,7 +410,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           priority: :low
         })
 
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       doc = Floki.parse_document!(html)
 
       in_progress_card =
@@ -435,8 +439,9 @@ defmodule CymphoWeb.KanbanLiveTest do
         |> Enum.map(&Floki.text/1)
         |> Enum.join(" ")
 
-      assert menu_text =~ "To Do"
-      assert menu_text =~ "Backlog"
+      # r3: the status menu speaks the owner's words (To do, Later).
+      assert menu_text =~ "To do"
+      assert menu_text =~ "Later"
 
       done_card =
         doc
@@ -484,7 +489,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert checked_out.status == :in_progress
       assert checked_out.checkout_run_id == run.id
 
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       view
       |> element("#kanban-board")
@@ -505,7 +510,7 @@ defmodule CymphoWeb.KanbanLiveTest do
         create_issue(%{title: "Blocked", description: "blocked", status: :in_review})
 
       Issues.add_blocker(blocked, blocking)
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       view
       |> element("#kanban-board")
@@ -543,7 +548,7 @@ defmodule CymphoWeb.KanbanLiveTest do
 
       assert {:ok, _} = Issues.add_blocker(dependent, blocker)
 
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       view
       |> element("#kanban-board")
@@ -606,7 +611,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       # so seed a completed runtime evidence path is heavier; use transition_issue
       # for the terminal step while the board is mounted to still exercise wakes
       # + LiveView pending_wakes_changed.
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
       assert {:ok, _} = Issues.transition_issue(Issues.get_issue!(blocker.id), :done)
 
       html = render(view)
@@ -629,7 +634,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     test "todo review gate blocker points to runtime launch before evidence actions", %{
       issue_todo: issue
     } do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       view
       |> element("#kanban-board")
@@ -659,7 +664,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           priority: :medium
         })
 
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       view
       |> element("#kanban-board")
@@ -724,7 +729,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           description: "Non-code closure evidence."
         })
 
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       view
       |> element("#kanban-board")
@@ -749,7 +754,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           priority: :medium
         })
 
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       view
       |> element("#kanban-board")
@@ -765,7 +770,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "shake event on invalid transition", %{issue_todo: issue} do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       # todo -> done is not a valid transition
       result =
@@ -777,14 +782,14 @@ defmodule CymphoWeb.KanbanLiveTest do
 
   describe "Swimlanes" do
     test "toggle swimlane mode", %{issue_backlog: issue} do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
       view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
       assert render(view) =~ issue.title
     end
 
     test "shows Unassigned group" do
       create_issue(%{title: "Unassigned", description: "none", status: :todo})
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
       view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
       assert render(view) =~ "Unassigned"
     end
@@ -817,7 +822,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           assignee_id: agent.id
         })
 
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
       view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
       html = render(view)
       doc = Floki.parse_document!(html)
@@ -866,7 +871,7 @@ defmodule CymphoWeb.KanbanLiveTest do
 
   describe "Collapsible columns" do
     test "collapse and expand", %{issue_backlog: issue} do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
       assert render(view) =~ issue.title
       view |> element("#kanban-board") |> render_hook("toggle_column", %{"status" => "backlog"})
       refute render(view) =~ ~s(data-kanban-column="backlog")
@@ -877,35 +882,42 @@ defmodule CymphoWeb.KanbanLiveTest do
 
   describe "Responsive layout" do
     test "renders kanban board container" do
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       assert html =~ "kanban-board"
     end
   end
 
   describe "Empty column states" do
     test "shows contextual empty state message for empty columns" do
-      {:ok, _view, html} = live(conn(), "/kanban")
-      assert html =~ "Nothing in flight"
+      {:ok, view, html} = live_board("/kanban")
+      # r3: Working says "Nothing running" (build-spec §5, state a).
+      assert html =~ "Nothing running"
       assert html =~ "Nothing to review"
       assert html =~ "No completed work yet"
       assert html =~ "No blockers"
+
+      html =
+        view
+        |> element("#kanban-board")
+        |> render_hook("toggle_column", %{"status" => "cancelled"})
+
       assert html =~ "No cancelled work"
     end
 
     test "empty backlog column shows no unplanned work message", %{issue_backlog: issue} do
       :ok = Issues.delete_issue(issue)
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       assert html =~ "No unplanned work"
     end
 
     test "empty todo column shows nothing queued message", %{issue_todo: issue} do
       :ok = Issues.delete_issue(issue)
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       assert html =~ "Nothing queued up"
     end
 
     test "empty columns avoid repeated drop instructions" do
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       refute html =~ "Drag a card here"
     end
   end
@@ -915,7 +927,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       issue_todo: issue
     } do
       {:ok, user} = Cympho.Users.get_user(Plug.Conn.get_session(conn(), :user_id))
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       render_submit(view, "submit_comment", %{
         "issue-id" => issue.id,
@@ -942,7 +954,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           status: :todo
         })
 
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       html =
         render_submit(view, "submit_comment", %{
@@ -957,13 +969,13 @@ defmodule CymphoWeb.KanbanLiveTest do
 
   describe "Card animations" do
     test "renders card animation styles" do
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       assert html =~ "kanban-card-enter"
       assert html =~ "card-enter"
     end
 
     test "renders skeleton animation styles" do
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       assert html =~ "kanban-skeleton"
       assert html =~ "skeleton-pulse"
     end
@@ -997,7 +1009,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       on_exit(fn -> AgentHeartbeat.stop_for_agent(agent.id) end)
       assert :ok = AgentHeartbeat.set_working(agent.id, issue.id)
 
-      {:ok, view, initial_html} = live(conn(), "/kanban?project_id=#{project.id}")
+      {:ok, view, initial_html} = live_board("/kanban?project_id=#{project.id}")
       refute initial_html =~ "Moving running card"
 
       moved = issue |> Ecto.Changeset.change(project_id: project.id) |> Repo.update!()
@@ -1036,7 +1048,7 @@ defmodule CymphoWeb.KanbanLiveTest do
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
 
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live_board("/kanban")
       assert html =~ "Backlog Issue"
       assert html =~ "Todo Issue"
 
@@ -1048,7 +1060,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       do:
         assert(
           (fn ->
-             {:ok, _v, h} = live(conn(), "/kanban")
+             {:ok, _v, h} = live_board("/kanban")
              h
            end).() =~ "All projects"
         )
@@ -1063,7 +1075,7 @@ defmodule CymphoWeb.KanbanLiveTest do
         project_id: other.id
       })
 
-      {:ok, _view, html} = live(conn(), "/kanban?project_id=#{project.id}")
+      {:ok, _view, html} = live_board("/kanban?project_id=#{project.id}")
       assert html =~ "Backlog Issue"
       refute html =~ "Other Issue"
     end
@@ -1074,7 +1086,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       issue_todo: todo
     } do
       {:ok, other} = create_project(%{name: "Tuple Project", prefix: "TU"})
-      {:ok, view, _html} = live(conn(), "/kanban?project_id=#{project.id}")
+      {:ok, view, _html} = live_board("/kanban?project_id=#{project.id}")
 
       send(view.pid, {:issue_updated, %{backlog | project_id: other.id}})
       html = render(view)
@@ -1096,7 +1108,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "endpoint-only issue event reloads changed card data", %{issue_backlog: issue} do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       issue
       |> Ecto.Changeset.change(title: "Endpoint-only title")
@@ -1114,7 +1126,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     test "endpoint issue event without a payload still refreshes the board", %{
       issue_backlog: issue
     } do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       issue
       |> Ecto.Changeset.change(title: "Payload-free title")
@@ -1132,7 +1144,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     test "independent same-field Endpoint update after tuple-only update is not discarded", %{
       issue_backlog: issue
     } do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
 
       tuple_issue = issue |> Ecto.Changeset.change(title: "Tuple-only title") |> Repo.update!()
       send(view.pid, {:issue_updated, tuple_issue})
@@ -1165,7 +1177,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       issue_backlog: issue
     } do
       {:ok, other} = create_project(%{name: "Endpoint project", prefix: "EP"})
-      {:ok, view, html} = live(conn(), "/kanban?project_id=#{project.id}")
+      {:ok, view, html} = live_board("/kanban?project_id=#{project.id}")
       assert html =~ "Backlog Issue"
 
       moved_out = issue |> Ecto.Changeset.change(project_id: other.id) |> Repo.update!()
@@ -1190,7 +1202,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "endpoint-only update removes a deleted card", %{issue_backlog: issue} do
-      {:ok, view, html} = live(conn(), "/kanban")
+      {:ok, view, html} = live_board("/kanban")
       assert html =~ "Backlog Issue"
       Repo.delete!(issue)
 
@@ -1225,7 +1237,7 @@ defmodule CymphoWeb.KanbanLiveTest do
         })
 
       assert {:ok, _} = Issues.update_issue(issue, %{assignee_id: first.id})
-      {:ok, view, html} = live(conn(), "/kanban")
+      {:ok, view, html} = live_board("/kanban")
       assert html =~ "First board owner"
 
       loaded_issue =
@@ -1251,7 +1263,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       current_company: company,
       issue_backlog: issue
     } do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
       handler_id = "kanban-event-query-#{System.unique_integer([:positive])}"
       company_id = Ecto.UUID.dump!(company.id)
       test_pid = self()
@@ -1281,7 +1293,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     test "a paired Endpoint event does not rebuild unchanged card digests", %{
       issue_backlog: issue
     } do
-      {:ok, view, _html} = live(conn(), "/kanban")
+      {:ok, view, _html} = live_board("/kanban")
       updated = issue |> Ecto.Changeset.change(title: "Tuple result") |> Repo.update!()
       send(view.pid, {:issue_updated, updated})
       assert render(view) =~ "Tuple result"
@@ -1305,7 +1317,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "non-issue render reuses card and shared-banner digests" do
-      {:ok, view, _html} = live(conn(), "/kanban?density=detailed")
+      {:ok, view, _html} = live_board("/kanban?density=detailed")
       :erlang.trace_pattern({Cympho.IssueDigest, :build, 5}, true, [:local])
       :erlang.trace(view.pid, true, [:call])
 
@@ -1319,6 +1331,18 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ "Todo Issue"
       assert drain_digest_calls(0) == 0
     end
+  end
+
+  # r3: Later (backlog) and Cancelled start as collapsed column pills
+  # (build-spec §5, state a). Most tests look at the backlog fixture, so they
+  # open Later first, as the owner does with one click on its pill.
+  defp live_board(path) do
+    {:ok, view, _html} = live(conn(), path)
+
+    html =
+      view |> element("#kanban-board") |> render_hook("toggle_column", %{"status" => "backlog"})
+
+    {:ok, view, html}
   end
 
   defp drain_board_issue_queries(queries) do

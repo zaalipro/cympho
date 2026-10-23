@@ -70,12 +70,14 @@ defmodule CymphoWeb.SimpleModeCopyTest do
 
       {:ok, _view, html} = live(conn, "/kanban")
 
-      # Both clusters must carry the gate class; without it simple mode shows
-      # the full re-slicing toolbar again.
-      assert html =~ "ui-advanced-only cympho-panel"
-      assert html =~ ~r/data-testid="kanban-view-controls"[^>]*ui-advanced-only/s
-      # Primary CTA and empty-board path stay reachable in simple mode.
-      assert html =~ "New Issue"
+      # r3: Simple keeps one toolbar (find, Filter, Mine) shared with the List;
+      # re-cutting the board (swimlanes, density) stays gated to Advanced.
+      doc = Floki.parse_document!(html)
+      assert [_] = Floki.find(doc, ".tbar")
+      [controls] = Floki.find(doc, "[data-testid='kanban-view-controls']")
+      assert Floki.attribute([controls], "class") |> hd() =~ "ui-advanced-only"
+      assert Floki.text(controls) =~ "Swimlanes"
+      # r3: New task is the shell's (rail, phone top bar); the empty board offers it too.
       assert html =~ ~s(href="/issues/new")
     end
 
@@ -85,8 +87,9 @@ defmodule CymphoWeb.SimpleModeCopyTest do
       {:ok, _view, html} = live(conn, "/kanban")
 
       # Fresh company has no issues: simple must not dead-end on a blank board.
-      assert html =~ "No issues yet."
-      assert html =~ "Create your first issue"
+      # r3: glossary words (task), and New task opens the quick-create sheet.
+      assert html =~ "No tasks yet."
+      assert html =~ "New task"
       assert html =~ ~s(href="/issues/new")
     end
 

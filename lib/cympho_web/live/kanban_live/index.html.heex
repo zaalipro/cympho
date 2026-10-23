@@ -29,258 +29,179 @@
   }
 </style>
 
-<div
+<.page_frame
+  page="board"
+  title="Tasks"
   id="kanban-board"
+  phx-hook="KanbanSortable"
   data-ui-complex-page
   data-density={@digest_density}
-  class="ember-aurora mobile-board-height flex flex-col overflow-hidden bg-canvas p-4 sm:p-5 lg:p-6"
-  phx-hook="KanbanSortable"
 >
-  <div class="relative z-[1] flex min-h-0 flex-1 flex-col">
-    <header class="mb-5 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-      <div class="min-w-0">
-        <h1 class="ember-ink flex items-center gap-2 font-serif text-[clamp(24px,3vw,32px)] font-510 leading-[1.1] tracking-[-0.02em]">
-          <span class="min-w-0 truncate">{@page_title}</span>
-        </h1>
-      </div>
+  <:header_end>
+    <.task_view_switch current="board" params={Tasks.filter_params(@view_params)} />
+  </:header_end>
 
-      <div
-        data-testid="kanban-header-actions"
-        class="grid w-full min-w-0 max-w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-start xl:justify-end"
-      >
-        <.task_view_switch current="board" class="order-1 sm:order-none" />
+  <% computed = Tasks.filter(@issues, @view_params) %>
 
-        <%!-- Simple mode keeps task view choice and "New Issue": swimlane/density
-             toggles and the project picker are advanced ways of re-cutting the board. --%>
-        <div
-          data-testid="kanban-view-controls"
-          class="ui-advanced-only order-2 col-span-2 grid min-w-0 grid-cols-2 gap-2 sm:order-none sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-start xl:justify-end"
-        >
-          <.combobox
-            id="kanban-filter-project"
-            class="col-span-2 min-w-0 max-w-full shrink-0 sm:min-w-[220px] sm:max-w-[280px]"
-            trigger_class="!h-10 !w-full !justify-between !rounded-lg !px-3 !text-sm sm:!w-auto"
-            label="Project"
-            placeholder="All projects"
-            options={Enum.map(@projects, &%{id: to_string(&1.id), label: &1.name})}
-            selected={@selected_project_id}
-            on_change="combobox_project"
-          />
-
-          <button
-            type="button"
-            phx-click="toggle_swimlanes"
-            title={if @swimlane_mode, do: "Flat view", else: "Swimlanes"}
-            class={"inline-flex h-10 min-w-0 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm font-510 transition-colors sm:shrink-0 " <> if(@swimlane_mode, do: "bg-accent/20 border-accent/30 text-accent", else: "bg-panel border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover")}
-          >
-            <span class={[
-              "h-4 w-4",
-              if(@swimlane_mode, do: "hero-bars-3-mini", else: "hero-bars-4-mini")
-            ]}>
-            </span>
-            <span class="sr-only">{if @swimlane_mode, do: "Flat View", else: "Swimlanes"}</span>
-          </button>
-
-          <.density_switch
-            density={@digest_density}
-            compact_patch={kanban_url(@selected_project_id, "compact")}
-            detailed_patch={kanban_url(@selected_project_id, "detailed")}
-          />
-        </div>
-
-        <.app_link
-          navigate={~p"/issues/new"}
-          class="order-1 col-span-2 inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 cta-glow rounded-button bg-brand px-3 text-sm font-590 text-on-primary transition-colors hover:bg-accent-hover sm:order-none sm:w-auto"
-        >
-          <span class="hero-plus-mini h-4 w-4"></span> New Issue
-        </.app_link>
-      </div>
-    </header>
-
-    <div
-      :if={!@runtime_enabled?}
-      class="ui-advanced-only mb-3 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-sm text-sky-200"
-    >
-      Review mode is active. You can reorganize work here without starting agent runs.
-    </div>
-    <div
-      :if={!@runtime_enabled?}
-      class="ui-simple-only mb-3 inline-flex items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-sm font-590 text-sky-100"
-    >
-      <span class="hero-eye-mini h-4 w-4 text-white"></span> Review mode
-    </div>
-
-    <div
-      :if={@flash["error"]}
-      class="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
-    >
-      {@flash["error"]}
-    </div>
-
-    <div
-      :if={@flash["info"]}
-      class="mt-3 rounded-lg border border-brand/30 bg-brand/10 px-3 py-2 text-sm text-brand"
-    >
-      {@flash["info"]}
-    </div>
-
-    <div
-      :if={@blocked_transition}
-      id="kanban-transition-blocker"
-      class="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-50"
-    >
-      <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="rounded-md border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[11px] font-590 uppercase tracking-wider text-amber-200">
-              Move blocked
-            </span>
-            <span class="font-mono text-xs text-amber-200/80">
-              {@blocked_transition.issue_identifier}
-            </span>
-            <span class="text-xs text-amber-200/70">
-              {status_label(@blocked_transition.from_status)} to {status_label(
-                @blocked_transition.to_status
-              )}
-            </span>
-          </div>
-
-          <h2 class="mt-2 text-base font-590 leading-6 text-text-primary">
-            {@blocked_transition.issue_title}
-          </h2>
-          <p class="mt-1 max-w-3xl text-sm leading-5 text-amber-100/80">
-            {@blocked_transition.message}
-          </p>
-        </div>
-
-        <button
-          type="button"
-          phx-click="dismiss_transition_blocker"
-          class="self-start rounded-md border border-amber-500/30 px-2 py-1 text-xs font-510 text-amber-100/80 transition-colors hover:bg-amber-500/15 hover:text-amber-50"
-        >
-          Dismiss
-        </button>
-      </div>
-
-      <div class="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-        <div
-          :for={blocker <- @blocked_transition.blockers}
-          class="rounded-md border border-amber-500/20 bg-canvas/40 p-2"
-        >
-          <div class="text-xs font-590 text-amber-100">{blocker.label}</div>
-          <p class="mt-1 text-xs leading-5 text-text-tertiary">{blocker.prompt}</p>
-        </div>
-      </div>
-
-      <div class="mt-3 flex flex-wrap items-center gap-2">
-        <.app_link
-          :for={action <- @blocked_transition.actions}
-          navigate={action.path}
-          class="rounded-md border border-amber-500/30 bg-panel px-2.5 py-1.5 text-xs font-510 text-amber-100 transition-colors hover:bg-amber-500/15 hover:text-amber-50"
-        >
-          {action.label}
-        </.app_link>
-      </div>
-    </div>
-
-    <%!-- Filter bar --%>
-    <div class="ui-advanced-only cympho-panel mb-4 flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
+  <Tasks.toolbar
+    search={@view_params["search"] || ""}
+    active={active_filter_count(assigns)}
+    mine_href={~p"/my-issues"}
+  >
+    <:filters>
       <.combobox
         id="kanban-filter-assignee"
-        label="Assignee"
-        placeholder="Any assignee"
+        label="Person"
+        placeholder="Anyone"
         options={Enum.map(@agents, &%{id: &1.id, label: &1.name})}
-        selected={@filter_assignee_id}
+        selected={@view_params["assignee_id"]}
         on_change="combobox_assignee"
       />
-
+      <.combobox
+        id="kanban-filter-project"
+        label="Project"
+        placeholder="All projects"
+        options={Enum.map(@projects, &%{id: to_string(&1.id), label: &1.name})}
+        selected={@selected_project_id}
+        on_change="combobox_project"
+      />
       <.combobox
         id="kanban-filter-priority"
         label="Priority"
         placeholder="Any priority"
         searchable?={false}
-        options={[
-          %{id: "critical", label: "Critical", color: "bg-brand"},
-          %{id: "high", label: "High", color: "bg-amber-400"},
-          %{id: "medium", label: "Medium", color: "bg-amber-500"},
-          %{id: "low", label: "Low", color: "bg-ink-tertiary"}
-        ]}
-        selected={@filter_priority && to_string(@filter_priority)}
+        options={
+          Enum.map(
+            Cympho.Issues.Issue.priority_options(),
+            &%{id: to_string(&1), label: String.capitalize(to_string(&1))}
+          )
+        }
+        selected={@view_params["priority"]}
         on_change="combobox_priority"
       />
+      <button
+        :if={active_filter_count(assigns) > 0}
+        type="button"
+        class="pl"
+        phx-click="clear_filters"
+      >
+        Clear all
+      </button>
+    </:filters>
+    <span class="sf-sp"></span>
+    <button
+      :for={status <- [:backlog, :cancelled]}
+      type="button"
+      class="colp"
+      phx-click="toggle_column"
+      phx-value-status={status}
+      aria-expanded={to_string(!MapSet.member?(@collapsed_columns, status))}
+    >
+      {status_label(status)}
+      <span class="mono">{length(issues_for_status(computed, status))}</span>
+    </button>
+  </Tasks.toolbar>
 
-      <form phx-change="filter_search" class="flex-1 w-full sm:min-w-[160px] sm:max-w-xs">
-        <div class="relative">
-          <svg
-            class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-quaternary pointer-events-none"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            />
-          </svg>
-          <input
-            type="text"
-            name="query"
-            value={@filter_search}
-            placeholder="Search title, assignee, priority..."
-            class="cympho-field h-10 w-full pl-9 pr-8 text-sm placeholder:text-text-quaternary"
-          />
-          <%= if @filter_search != "" do %>
-            <button
-              type="button"
-              phx-click="clear_filters"
-              class="absolute right-2 top-1/2 -translate-y-1/2 text-text-quaternary hover:text-text-secondary p-1"
-              aria-label="Clear filters"
-              title="Clear filters"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          <% end %>
-        </div>
-      </form>
+  <p :if={@flash["error"]} role="alert" class="bflash st">{@flash["error"]}</p>
+  <p :if={@flash["info"]} role="status" class="bflash">{@flash["info"]}</p>
 
-      <%= if active_filter_count(assigns) > 0 do %>
-        <button
-          type="button"
-          phx-click="clear_filters"
-          class="h-10 rounded-lg border border-border bg-panel px-3 text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors flex-shrink-0 w-full sm:w-auto"
-        >
-          Clear filters
-          <span class="ml-1.5 bg-accent/20 text-accent px-1.5 rounded-full">
-            {active_filter_count(assigns)}
+  <div
+    :if={@blocked_transition}
+    id="kanban-transition-blocker"
+    class="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-50"
+  >
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="rounded-md border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[11px] font-590 uppercase tracking-wider text-amber-200">
+            Move blocked
           </span>
-        </button>
-      <% end %>
+          <span class="font-mono text-xs text-amber-200/80">
+            {@blocked_transition.issue_identifier}
+          </span>
+          <span class="text-xs text-amber-200/70">
+            {status_label(@blocked_transition.from_status)} to {status_label(
+              @blocked_transition.to_status
+            )}
+          </span>
+        </div>
+
+        <h2 class="mt-2 text-base font-590 leading-6 text-text-primary">
+          {@blocked_transition.issue_title}
+        </h2>
+        <p class="mt-1 max-w-3xl text-sm leading-5 text-amber-100/80">
+          {@blocked_transition.message}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        phx-click="dismiss_transition_blocker"
+        class="self-start rounded-md border border-amber-500/30 px-2 py-1 text-xs font-510 text-amber-100/80 transition-colors hover:bg-amber-500/15 hover:text-amber-50"
+      >
+        Dismiss
+      </button>
     </div>
 
-    <% computed =
-      apply_filters(@issues, %{
-        assignee_id: @filter_assignee_id,
-        priority: @filter_priority,
-        search: @filter_search
-      }) %>
+    <div class="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+      <div
+        :for={blocker <- @blocked_transition.blockers}
+        class="rounded-md border border-amber-500/20 bg-canvas/40 p-2"
+      >
+        <div class="text-xs font-590 text-amber-100">{blocker.label}</div>
+        <p class="mt-1 text-xs leading-5 text-text-tertiary">{blocker.prompt}</p>
+      </div>
+    </div>
+
+    <div class="mt-3 flex flex-wrap items-center gap-2">
+      <.app_link
+        :for={action <- @blocked_transition.actions}
+        navigate={action.path}
+        class="rounded-md border border-amber-500/30 bg-panel px-2.5 py-1.5 text-xs font-510 text-amber-100 transition-colors hover:bg-amber-500/15 hover:text-amber-50"
+      >
+        {action.label}
+      </.app_link>
+    </div>
+  </div>
+
+  <%!-- Advanced: re-cutting the board (swimlanes, density) and its health. --%>
+  <div class="ui-advanced-only" data-testid="kanban-view-controls">
+    <div class="mb-3 flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        phx-click="toggle_swimlanes"
+        title={if @swimlane_mode, do: "Flat view", else: "Swimlanes"}
+        class={"inline-flex h-10 min-w-0 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm font-510 transition-colors sm:shrink-0 " <> if(@swimlane_mode, do: "bg-accent/20 border-accent/30 text-accent", else: "bg-panel border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover")}
+      >
+        <span class={[
+          "h-4 w-4",
+          if(@swimlane_mode, do: "hero-bars-3-mini", else: "hero-bars-4-mini")
+        ]}>
+        </span>
+        <span class="sr-only">{if @swimlane_mode, do: "Flat View", else: "Swimlanes"}</span>
+      </button>
+
+      <.density_switch
+        density={@digest_density}
+        compact_patch={board_url(assigns, %{"density" => "compact"})}
+        detailed_patch={board_url(assigns, %{"density" => "detailed"})}
+      />
+    </div>
+
+    <div
+      :if={!@runtime_enabled?}
+      class="mb-3 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-sm text-sky-200"
+    >
+      Review mode is active. You can reorganize work here without starting agent runs.
+    </div>
+
     <% flow_metrics = board_flow_metrics(computed) %>
     <% attention_metrics =
       Enum.filter(flow_metrics, &(&1.label in ["Blocked", "Review"] and &1.count > 0)) %>
-    <% shared_digest = shared_board_digest(computed, @issue_digests) %>
-
     <section
       :if={attention_metrics != []}
       id="kanban-flow-health"
-      class="ember-glass ui-advanced-only mb-3 flex flex-wrap items-center gap-3 px-3 py-2"
+      class="ember-glass mb-3 flex flex-wrap items-center gap-3 px-3 py-2"
     >
       <span class="hero-exclamation-triangle-mini h-4 w-4 text-amber-300"></span>
       <span class="text-xs font-590 text-text-secondary">Board health</span>
@@ -291,203 +212,101 @@
         {metric.count} {String.downcase(metric.label)}
       </span>
     </section>
-
-    <%!-- Every card on the board is in the same state, so the pill and headline
-         are stated once here instead of once per card. Mirrors the per-card
-         digest's visibility so simple mode never gains a line it wasn't shown. --%>
-    <section
-      :if={shared_digest}
-      id="kanban-shared-digest"
-      class={[
-        "ember-glass mb-3 flex flex-wrap items-center gap-2 px-3 py-2",
-        @digest_density == "compact" && "ui-advanced-only"
-      ]}
-    >
-      <span class="rounded-full border border-border bg-panel px-2 py-0.5 text-[11px] font-510 text-text-secondary">
-        {shared_digest.label}
-      </span>
-      <span class="text-xs text-text-tertiary">
-        All {shared_digest.count} cards: {shared_digest.headline}
-      </span>
-    </section>
-
-    <%= if Enum.empty?(@issues) do %>
-      <div class="flex flex-col items-center justify-center py-20 text-center">
-        <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
-          <svg
-            class="w-6 h-6 text-text-tertiary"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-            />
-          </svg>
-        </div>
-        <p class="text-sm text-text-tertiary mb-4">No issues yet.</p>
-        <.app_link
-          navigate={~p"/issues/new"}
-          class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
-        >
-          Create your first issue
-        </.app_link>
-      </div>
-    <% else %>
-      <%= if Enum.empty?(computed) do %>
-        <div class="flex-1 flex items-center justify-center">
-          <div class="text-center">
-            <svg
-              class="w-8 h-8 mx-auto mb-3 text-text-quaternary"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
-            <p class="text-sm text-text-quaternary">No issues match the current filters.</p>
-            <button
-              type="button"
-              phx-click="clear_filters"
-              class="mt-2 text-xs text-accent hover:text-accent-hover font-510"
-            >
-              Clear filters
-            </button>
-          </div>
-        </div>
-      <% else %>
-        <div class="flex-1 overflow-y-auto rounded-2xl border border-hairline bg-panel/30 p-2 lg:overflow-x-auto lg:overflow-y-hidden">
-          <div class="stagger-children flex flex-col gap-2 pb-2 lg:h-full lg:min-w-max lg:flex-row">
-            <%= for status <- status_columns() do %>
-              <% issues = issues_for_status(computed, status) %>
-              <% limit = wip_limit(@selected_project, status) %>
-              <% count = length(issues) %>
-              <% exceeded = wip_exceeded?(limit, count) %>
-              <% collapsed = MapSet.member?(@collapsed_columns, status) %>
-
-              <%= if collapsed do %>
-                <%!-- Collapsed column - only visible on desktop --%>
-                <div
-                  class="hidden h-full w-12 cursor-pointer flex-col items-center rounded-lg border border-border bg-panel pt-4 transition-colors hover:bg-subtle lg:flex"
-                  phx-click="toggle_column"
-                  phx-value-status={status}
-                >
-                  <span
-                    class="text-[10px] font-510 text-text-secondary"
-                    style="writing-mode: vertical-rl; transform: rotate(180deg);"
-                  >
-                    {status_label(status)}
-                  </span>
-                  <span class="text-xs text-text-quaternary mt-2">{count}</span>
-                </div>
-              <% else %>
-                <div class={"flex min-h-[160px] w-full flex-col rounded-2xl border bg-surface-1 lg:h-full lg:w-[260px] xl:w-[276px] " <> if(exceeded, do: "border-brand/50", else: "border-hairline")}>
-                  <div class={"sticky top-0 z-10 flex items-center justify-between rounded-t-2xl border-b border-l-2 border-hairline bg-surface-1 px-3 py-2.5 " <> column_accent_class(status) <> " " <> column_wash_class(status)}>
-                    <div class="flex items-center gap-2">
-                      <button
-                        type="button"
-                        phx-click="toggle_column"
-                        phx-value-status={status}
-                        class="hidden lg:block text-text-quaternary hover:text-text-secondary transition-colors"
-                        aria-label="Collapse column"
-                        title="Collapse column"
-                      >
-                        <svg
-                          class="w-3.5 h-3.5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M15 19l-7-7 7-7"
-                          />
-                        </svg>
-                      </button>
-                      <span class={"h-1.5 w-1.5 shrink-0 rounded-full " <> column_dot_class(status)}>
-                      </span>
-                      <h2 class="text-sm font-510 text-text-primary">{status_label(status)}</h2>
-                    </div>
-                    <span
-                      class={"font-serif text-sm px-2 py-0.5 rounded-full font-590 " <> column_count_class(status, count, exceeded)}
-                      title={
-                        cond do
-                          exceeded -> "Over the WIP limit of #{limit}"
-                          limit -> "WIP limit #{limit}"
-                          true -> nil
-                        end
-                      }
-                    >
-                      {count}{if limit, do: "/#{limit}", else: ""}
-                    </span>
-                  </div>
-                  <div
-                    class="kanban-column-cards flex-1 space-y-2 overflow-y-auto p-2"
-                    data-kanban-column={status}
-                  >
-                    <%= if @swimlane_mode do %>
-                      <%= for {assignee_name, group_issues} <- assignee_groups(issues) do %>
-                        <div class="mb-3">
-                          <div class="text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2 px-1">
-                            {assignee_name}
-                          </div>
-                          <%= for issue <- group_issues do %>
-                            <.issue_card
-                              issue={issue}
-                              digest={Map.fetch!(@issue_digests, issue.id)}
-                              status={status}
-                              digest_density={@digest_density}
-                              agent_heartbeat_states={@agent_heartbeat_states}
-                              pending_wake={Map.get(@pending_wakes, issue.id)}
-                              launch_readiness={Map.get(@launch_readiness_by_issue, issue.id)}
-                              digest_cause_hoisted={shared_digest != nil}
-                              show_assignee={false}
-                            />
-                          <% end %>
-                        </div>
-                      <% end %>
-                      <%= if Enum.empty?(issues) do %>
-                        <div class="text-center py-8">
-                          <p class="text-xs text-text-quaternary">No issues</p>
-                        </div>
-                      <% end %>
-                    <% else %>
-                      <%= if Enum.empty?(issues) do %>
-                        <.empty_column_state status={status} />
-                      <% end %>
-                      <%= for issue <- issues do %>
-                        <.issue_card
-                          issue={issue}
-                          digest={Map.fetch!(@issue_digests, issue.id)}
-                          status={status}
-                          digest_density={@digest_density}
-                          agent_heartbeat_states={@agent_heartbeat_states}
-                          pending_wake={Map.get(@pending_wakes, issue.id)}
-                          launch_readiness={Map.get(@launch_readiness_by_issue, issue.id)}
-                          digest_cause_hoisted={shared_digest != nil}
-                        />
-                      <% end %>
-                    <% end %>
-                  </div>
-                </div>
-              <% end %>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-    <% end %>
   </div>
-</div>
+
+  <% shared_digest = shared_board_digest(computed, @issue_digests) %>
+  <%!-- Every card on the board is in the same state, so the pill and headline
+       are stated once here instead of once per card (Advanced detail). --%>
+  <section
+    :if={shared_digest}
+    id="kanban-shared-digest"
+    class="ember-glass ui-advanced-only mb-3 flex flex-wrap items-center gap-2 px-3 py-2"
+  >
+    <span class="rounded-full border border-border bg-panel px-2 py-0.5 text-[11px] font-510 text-text-secondary">
+      {shared_digest.label}
+    </span>
+    <span class="text-xs text-text-tertiary">
+      All {shared_digest.count} cards: {shared_digest.headline}
+    </span>
+  </section>
+
+  <%= cond do %>
+    <% Enum.empty?(@issues) -> %>
+      <section class="card" aria-label="No tasks yet">
+        <.quiet_empty title="No tasks yet.">
+          Add one and Cympho gives it to an agent with the right role.
+          <:action>
+            <.text_link href="/issues/new" data-quick-create-trigger>New task</.text_link>
+          </:action>
+        </.quiet_empty>
+      </section>
+    <% Enum.empty?(computed) -> %>
+      <section class="card" aria-label="No matching tasks">
+        <.quiet_empty title="No tasks match these filters.">
+          <:action>
+            <button type="button" class="lnk" phx-click="clear_filters">Clear filters</button>
+          </:action>
+        </.quiet_empty>
+      </section>
+    <% true -> %>
+      <div class="bcols">
+        <section
+          :for={status <- board_columns(@collapsed_columns)}
+          class="bcol"
+          aria-labelledby={"bd-#{status}"}
+        >
+          <% issues = computed |> issues_for_status(status) |> Tasks.board_order(@task_ctx) %>
+          <% limit = wip_limit(@selected_project, status) %>
+          <h2 class="gh" id={"bd-#{status}"}>
+            {status_label(status)}
+            <span
+              class="mono"
+              title={
+                cond do
+                  wip_exceeded?(limit, length(issues)) -> "Over the WIP limit of #{limit}"
+                  limit -> "WIP limit #{limit}"
+                  true -> nil
+                end
+              }
+            >
+              {length(issues)}{if limit, do: "/#{limit}", else: ""}
+            </span>
+          </h2>
+          <ul class="bcs" data-kanban-column={status}>
+            <li :if={issues == []} class="bempty">{empty_column_message(status)}</li>
+            <%= if @swimlane_mode do %>
+              <%= for {assignee_name, group_issues} <- assignee_groups(issues) do %>
+                <li class="lane-h">{assignee_name}</li>
+                <.board_card
+                  :for={issue <- group_issues}
+                  issue={issue}
+                  ctx={@task_ctx}
+                  digest={Map.fetch!(@issue_digests, issue.id)}
+                  digest_density={@digest_density}
+                  agent_heartbeat_states={@agent_heartbeat_states}
+                  pending_wake={Map.get(@pending_wakes, issue.id)}
+                  launch_readiness={Map.get(@launch_readiness_by_issue, issue.id)}
+                  digest_cause_hoisted={shared_digest != nil}
+                />
+              <% end %>
+            <% else %>
+              <.board_card
+                :for={issue <- issues}
+                issue={issue}
+                ctx={@task_ctx}
+                digest={Map.fetch!(@issue_digests, issue.id)}
+                digest_density={@digest_density}
+                agent_heartbeat_states={@agent_heartbeat_states}
+                pending_wake={Map.get(@pending_wakes, issue.id)}
+                launch_readiness={Map.get(@launch_readiness_by_issue, issue.id)}
+                digest_cause_hoisted={shared_digest != nil}
+              />
+            <% end %>
+          </ul>
+        </section>
+      </div>
+  <% end %>
+</.page_frame>
 
 <%!-- Comment modal --%>
 <%= if match?({:add_comment, _}, @editing_card_id) do %>

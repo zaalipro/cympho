@@ -58,7 +58,8 @@ defmodule CymphoWeb.MobileShellTest do
     board = File.read!(@kanban_board)
     css = File.read!(@app_css)
 
-    assert board =~ "mobile-board-height"
+    # r3: the board scrolls with the page column (no fixed board height); it
+    # must still never use 100vh or h-screen.
     refute board =~ "100vh"
     refute board =~ "h-screen"
 
