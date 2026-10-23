@@ -130,6 +130,24 @@ defmodule Cympho.Costs do
     |> preload_issues()
   end
 
+  @doc "Total spend on one issue over its whole life, from the company's own rows."
+  def issue_total(company_id, issue_id) when is_binary(company_id) and is_binary(issue_id) do
+    token_usage_query(company_id)
+    |> where([tu], tu.issue_id == ^issue_id)
+    |> Repo.aggregate(:sum, :cost_usd)
+    |> decimal_or_zero()
+  end
+
+  @doc "Spend in the last `days` that is not tied to any issue."
+  def unattributed_total(company_id, days \\ 30) when is_binary(company_id) do
+    since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
+
+    token_usage_query(company_id)
+    |> where([tu], tu.inserted_at >= ^since and is_nil(tu.issue_id))
+    |> Repo.aggregate(:sum, :cost_usd)
+    |> decimal_or_zero()
+  end
+
   def by_model(company_id, days \\ 30) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
