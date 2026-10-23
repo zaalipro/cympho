@@ -517,6 +517,14 @@
 .cy-r3 .spend-go{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:500;color:var(--ink)}
 .cy-r3 .spend:hover .spend-go{text-decoration:underline;text-underline-offset:3px}
 
+/* ---------- legacy pages in the r3 frame (CymphoWeb.Components.page/1 and top-level .ember-aurora roots) ---------- */
+.cy-r3 .lframe{background:var(--frame);border-radius:var(--r-frame);box-shadow:var(--sh-frame);padding:14px 24px 24px}
+.cy-r3 [data-phx-main]>.ember-aurora{background:var(--frame);border-radius:var(--r-frame);box-shadow:var(--sh-frame)}
+@media (max-width:640px){
+  .cy-r3 .lframe{border-radius:24px;padding:10px 12px 16px}
+  .cy-r3 [data-phx-main]>.ember-aurora{border-radius:24px}
+}
+
 /* ---------- states the shared components draw (CymphoWeb.Components.R3) beyond the mockups' frames ---------- */
 /* now capsule: one dot field per state; Working breathes, the others stay still */
 .cy-r3 .now{--dot:var(--waiting)}

@@ -10,9 +10,10 @@ defmodule CymphoWeb.Components do
   attr :rest, :global
   slot :inner_block, required: true
 
+  # A legacy page in the r3 frame: the paper bezel on the page background.
   def page(assigns) do
     ~H"""
-    <div class={["min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8", @class]} {@rest}>
+    <div class={["lframe", @class]} {@rest}>
       <div class={["mx-auto w-full", page_size(@size)]}>
         {render_slot(@inner_block)}
       </div>
@@ -31,7 +32,7 @@ defmodule CymphoWeb.Components do
     ~H"""
     <header class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between" {@rest}>
       <div class="min-w-0">
-        <h1 :if={@title} class="flex items-center gap-2 text-headline text-text-primary">
+        <h1 :if={@title} class="h1 flex items-center gap-2">
           <.spark :if={@spark} class="h-[0.85em] w-[0.85em] text-brand" />
           <span class="min-w-0 truncate">{@title}</span>
         </h1>
