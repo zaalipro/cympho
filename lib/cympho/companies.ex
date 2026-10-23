@@ -2027,6 +2027,7 @@ defmodule Cympho.Companies do
 
     owner_user_id = attrs[:owner_user_id] || attrs["owner_user_id"]
     engineer_names = normalize_engineer_names(attrs[:engineer_names] || attrs["engineer_names"])
+    leader_names = attrs[:leader_names] || attrs["leader_names"]
 
     agent_runtime =
       normalize_agent_runtime(attrs[:agent_runtime] || attrs["agent_runtime"], adapter)
@@ -2127,7 +2128,7 @@ defmodule Cympho.Companies do
         create_template_agent!(%{
           company_id: company.id,
           project_id: project.id,
-          name: "CEO",
+          name: leader_name(leader_names, "ceo", "CEO"),
           title: "Chief Executive Officer",
           role: :ceo,
           adapter: ceo_adapter,
@@ -2152,7 +2153,7 @@ defmodule Cympho.Companies do
           project_id: project.id,
           parent_id: ceo.id,
           created_by_agent_id: ceo.id,
-          name: "CTO",
+          name: leader_name(leader_names, "cto", "CTO"),
           title: "Chief Technology Officer",
           role: :cto,
           adapter: cto_adapter,
@@ -2202,7 +2203,7 @@ defmodule Cympho.Companies do
           project_id: project.id,
           parent_id: ceo.id,
           created_by_agent_id: ceo.id,
-          name: "Product Lead",
+          name: leader_name(leader_names, "product_manager", "Product Lead"),
           title: "Product Lead",
           role: :product_manager,
           adapter: adapter,
@@ -2223,7 +2224,7 @@ defmodule Cympho.Companies do
           project_id: project.id,
           parent_id: ceo.id,
           created_by_agent_id: ceo.id,
-          name: "Design Lead",
+          name: leader_name(leader_names, "designer", "Design Lead"),
           title: "Design Lead",
           role: :designer,
           adapter: adapter,
@@ -2574,9 +2575,19 @@ defmodule Cympho.Companies do
     end
   end
 
+  # Onboarding's suggested (and editable) leader names; blank or missing keeps
+  # the role name, as for engineers.
+  defp leader_name(%{} = names, role, default) do
+    trim_or_nil(names[role]) || default
+  end
+
+  defp leader_name(_names, _role, default), do: default
+
   # Builds the extra runtime_config merged into every launched agent.
   # command -> top-level "command" (read by adapters via the orchestrator's
-  # config merge); model -> "env"."ANTHROPIC_MODEL" (injected by profile_env).
+  # config merge); model -> "env"."ANTHROPIC_MODEL" (injected by profile_env);
+  # pricing -> "pricing", the per-model rates a token-reporting runtime (Codex)
+  # needs under the spending limit (same shape as the agent Setup form).
   defp normalize_agent_runtime(%{} = runtime, adapter) do
     command = trim_or_nil(runtime["command"] || runtime[:command])
     model = trim_or_nil(runtime["model"] || runtime[:model])
@@ -2584,6 +2595,7 @@ defmodule Cympho.Companies do
     %{}
     |> then(fn config -> if command, do: Map.put(config, "command", command), else: config end)
     |> put_runtime_model(model, adapter)
+    |> put_runtime_pricing(runtime["pricing"] || runtime[:pricing])
   end
 
   defp normalize_agent_runtime(_, _adapter), do: %{}
@@ -2597,6 +2609,28 @@ defmodule Cympho.Companies do
   end
 
   defp put_runtime_model(config, model, _adapter), do: Map.put(config, "model", model)
+
+  # Only complete, valid rates are written: a half-priced model would still be
+  # refused by the hard stop, so it is left for the agent Setup form instead.
+  defp put_runtime_pricing(config, %{} = pricing) do
+    rates =
+      for {model, %{} = rates} <- pricing,
+          model = trim_or_nil(model),
+          model != nil,
+          input = rates["input_usd_per_mtok"],
+          output = rates["output_usd_per_mtok"],
+          Finances.Pricing.valid_rate?(input) and Finances.Pricing.valid_rate?(output),
+          into: %{} do
+        {model,
+         %{"input_usd_per_mtok" => rate_text(input), "output_usd_per_mtok" => rate_text(output)}}
+      end
+
+    if rates == %{}, do: config, else: Map.put(config, "pricing", rates)
+  end
+
+  defp put_runtime_pricing(config, _pricing), do: config
+
+  defp rate_text(rate), do: rate |> to_string() |> String.trim()
 
   # Per-role runtime overrides from onboarding: each role (ceo/cto/engineer)
   # may pick its own adapter + model + command; blank fields fall back to the
@@ -2618,7 +2652,8 @@ defmodule Cympho.Companies do
                 config
             end
 
-          {role, {adapter, config}}
+          # The shared rates are keyed by model, so they are kept on every role.
+          {role, {adapter, Map.merge(Map.take(default_runtime, ["pricing"]), config)}}
 
         _ ->
           {role, {default_adapter, default_runtime}}

@@ -193,6 +193,123 @@ defmodule Cympho.CompaniesOnboardingTest do
     end
   end
 
+  describe "create_autonomous_company/1 leader names (B8)" do
+    test "names the four leaders and keeps their titles" do
+      {:ok, %{agents: agents}} =
+        Companies.create_autonomous_company(%{
+          name: "Leader Names Co",
+          engineer_count: 1,
+          leader_names: %{
+            "ceo" => " Ada ",
+            "cto" => "Theo",
+            "product_manager" => "Priya",
+            "designer" => "Jun"
+          }
+        })
+
+      by_role = Map.new(agents, &{&1.role, &1})
+
+      assert {by_role[:ceo].name, by_role[:ceo].title} == {"Ada", "Chief Executive Officer"}
+      assert {by_role[:cto].name, by_role[:cto].title} == {"Theo", "Chief Technology Officer"}
+
+      assert {by_role[:product_manager].name, by_role[:product_manager].title} ==
+               {"Priya", "Product Lead"}
+
+      assert {by_role[:designer].name, by_role[:designer].title} == {"Jun", "Design Lead"}
+      assert by_role[:engineer].name == "Engineer 1"
+    end
+
+    test "blank or missing leader names fall back to the role names" do
+      {:ok, %{agents: agents}} =
+        Companies.create_autonomous_company(%{
+          name: "Blank Leaders Co",
+          engineer_count: 0,
+          leader_names: %{"ceo" => "  ", "cto" => nil}
+        })
+
+      names = agents |> Map.new(&{&1.role, &1.name})
+
+      assert names[:ceo] == "CEO"
+      assert names[:cto] == "CTO"
+      assert names[:product_manager] == "Product Lead"
+      assert names[:designer] == "Design Lead"
+    end
+  end
+
+  describe "create_autonomous_company/1 Codex prices (B10)" do
+    @codex_pricing %{
+      "gpt-5.4-mini" => %{"input_usd_per_mtok" => "0.75", "output_usd_per_mtok" => "4.50"}
+    }
+
+    test "the rates land on every agent and make a Codex agent priceable under the hard stop" do
+      {:ok, %{agents: agents, seed_issues: [issue | _]}} =
+        Companies.create_autonomous_company(%{
+          name: "Codex Priced Co",
+          engineer_count: 2,
+          adapter: "codex",
+          agent_runtime: %{"model" => "gpt-5.4-mini", "pricing" => @codex_pricing}
+        })
+
+      assert length(agents) == 6
+
+      for agent <- agents do
+        assert agent.adapter == :codex
+        assert agent.runtime_config["model"] == "gpt-5.4-mini"
+        assert agent.runtime_config["pricing"] == @codex_pricing
+      end
+
+      engineer = Enum.find(agents, &(&1.role == :engineer))
+
+      assert {:ok, %{"basis" => "agent_pricing", "output_usd_per_mtok" => "4.50"}} =
+               Finances.check_runtime_priceable(
+                 issue,
+                 engineer,
+                 Cympho.Adapters.CodexAdapter,
+                 %{"model" => "gpt-5.4-mini"}
+               )
+    end
+
+    test "per-role overrides keep the shared rates" do
+      {:ok, %{agents: agents}} =
+        Companies.create_autonomous_company(%{
+          name: "Codex Roles Co",
+          engineer_count: 1,
+          adapter: "codex",
+          agent_runtime: %{"model" => "gpt-5.4-mini", "pricing" => @codex_pricing},
+          role_runtimes: %{"cto" => %{"adapter" => "codex", "model" => "gpt-5.4-mini"}}
+        })
+
+      cto = Enum.find(agents, &(&1.role == :cto))
+      assert cto.runtime_config["pricing"] == @codex_pricing
+    end
+
+    test "incomplete or invalid rates are not written, so the agent stays unpriceable" do
+      {:ok, %{agents: agents, seed_issues: [issue | _]}} =
+        Companies.create_autonomous_company(%{
+          name: "Codex Unpriced Co",
+          engineer_count: 1,
+          adapter: "codex",
+          agent_runtime: %{
+            "model" => "gpt-5.4-mini",
+            "pricing" => %{
+              "gpt-5.4-mini" => %{"input_usd_per_mtok" => "0.75", "output_usd_per_mtok" => ""},
+              "other" => %{"input_usd_per_mtok" => "-1", "output_usd_per_mtok" => "2"}
+            }
+          }
+        })
+
+      for agent <- agents, do: refute(Map.has_key?(agent.runtime_config, "pricing"))
+
+      assert {:error, {:budget_unpriceable_runtime, _}} =
+               Finances.check_runtime_priceable(
+                 issue,
+                 hd(agents),
+                 Cympho.Adapters.CodexAdapter,
+                 %{"model" => "gpt-5.4-mini"}
+               )
+    end
+  end
+
   describe "create_autonomous_company/1 budget hard-stop ownership" do
     test "onboarding policy has no budget_id and survives UI company budget create/delete" do
       assert {:ok, result} =

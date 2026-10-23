@@ -1,472 +1,553 @@
-<div
-  class="min-h-screen flex items-start justify-center overflow-y-auto px-4 py-8"
-  data-ui-complex-page
->
-  <div class="ember-aurora relative w-full max-w-4xl">
-    <div class="relative z-[1]">
-      <!-- Progress dots -->
-      <div
-        :if={@onboarding_path == :start}
-        class="flex items-center justify-center gap-2 mb-8"
-      >
-        <%= for {step, idx} <- Enum.with_index(@steps) do %>
-          <div class={
-          "h-2 rounded-full transition-all duration-300 " <>
-          cond do
-            idx < @current_step -> "w-6 bg-brand/55"
-            idx == @current_step -> "w-2 bg-brand shadow-[0_0_12px_2px_rgb(var(--color-primary-rgb)/0.6)]"
-            true -> "w-2 bg-white/10"
-          end
-        }>
+<% blueprint = selected_blueprint(@blueprints, @company_form)
+crew = crew(blueprint, @company_form)
+start? = @onboarding_path == :start
+step = Enum.at(@steps, @current_step)
+short_name = blueprint_short_name(blueprint.name)
+adapter = sanitize_adapter(@company_form["adapter"])
+prefix = @company_form["issue_prefix"]
+
+heading =
+  cond do
+    start? -> step.title
+    @onboarding_path == :improve and @bootstrap_result -> "Improvement ready"
+    @onboarding_path == :improve -> "Improve #{@current_company.name}"
+    true -> "Get started"
+  end %>
+<%!-- Onboarding draws its own chrome (the root layout's shell is bare): the setup bar,
+     the step list, then one Next step pair per step (build-spec §9). --%>
+<div class="ob" data-page="onboarding" data-ui-complex-page>
+  <div class="ob-bar">
+    <span class="ob-brand"><span class="tile-co" aria-hidden="true">Cy</span>Cympho</span>
+    <span :if={start?} class="ob-step">
+      <span class="ob-sep" aria-hidden="true">/</span><span>Step {@current_step + 1} of {length(@steps)}</span>
+    </span>
+    <span class="ob-sp"></span>
+    <a class="ob-help" href="/docs"><.r3_icon name="i-question" />Help</a>
+    <details class="ob-acct">
+      <summary>
+        <span class="av" aria-hidden="true">{user_initials(@current_user)}</span>
+        <span class="sr">{@current_user.name || @current_user.email}, account</span>
+      </summary>
+      <div class="menu">
+        <a href="/docs">Help</a>
+        <.link href={~p"/logout"} method="delete">Sign out</.link>
+      </div>
+    </details>
+  </div>
+
+  <div class="frame">
+    <header :if={start?} class="ctx ob-h">
+      <nav class="so" aria-label="Setup steps">
+        <p class="so-m">
+          Step {@current_step + 1} of {length(@steps)}<span aria-hidden="true"> · </span>{step.label}
+        </p>
+        <ol>
+          <li
+            :for={{s, index} <- Enum.with_index(@steps)}
+            class={
+              case step_state(index, @current_step) do
+                :done -> "dn"
+                :current -> "cu"
+                :todo -> nil
+              end
+            }
+          >
+            <%= case step_state(index, @current_step) do %>
+              <% :done -> %>
+                <button
+                  :if={is_nil(@bootstrap_result)}
+                  type="button"
+                  phx-click="go_to_step"
+                  phx-value-step={index}
+                >
+                  <.status_glyph kind={:done} big /><span class="sl">{s.label}</span><span class="sr">, done</span>
+                </button>
+                <span :if={@bootstrap_result}>
+                  <.status_glyph kind={:done} big /><span class="sl">{s.label}</span><span class="sr">, done</span>
+                </span>
+              <% :current -> %>
+                <span aria-current="step">
+                  <span class="sn mono">{index + 1}</span><span class="sl">{s.label}</span>
+                </span>
+              <% :todo -> %>
+                <span>
+                  <span class="sn mono">{index + 1}</span><span class="sl">{s.label}</span>
+                </span>
+            <% end %>
+          </li>
+        </ol>
+      </nav>
+    </header>
+
+    <div class="head">
+      <h1 class="h1 big">{heading}</h1>
+    </div>
+
+    <div class="tray">
+      <%!-- Start or improve: only for owners who already have a company. --%>
+      <section :if={is_nil(@onboarding_path)} class="next" aria-labelledby="ob-t">
+        <article class="paper">
+          <p class="eyebrow">Guided setup</p>
+          <h2 class="nt" id="ob-t">What would you like to do?</h2>
+          <.ob_error :if={@step_error} message={@step_error} />
+          <p class="obj">
+            Start another company, or turn one improvement for {@current_company.name} into ready work.
+          </p>
+          <div class="ob-choices">
+            <button
+              type="button"
+              class="opt"
+              phx-click="select_onboarding_path"
+              phx-value-path="start"
+            >
+              <span class="on" aria-hidden="true">1</span><span class="ot2">Start a company<small>Choose a template, name the team and launch its first tasks.</small></span>
+            </button>
+            <button
+              type="button"
+              class="opt"
+              phx-click="select_onboarding_path"
+              phx-value-path="improve"
+            >
+              <span class="on" aria-hidden="true">2</span><span class="ot2">Improve this company<small>Add one goal and its first task to {@current_company.name}; no new company is created.</small></span>
+            </button>
           </div>
-        <% end %>
-      </div>
-      
-<!-- Step content -->
-      <div :if={@onboarding_path == :start} class="text-center mb-8">
-        <%!-- Eyebrows are hidden in simple mode because they usually restate the
-             heading in operator jargon. This one is the only thing that says how
-             far through the wizard you are, so it opts back in. --%>
-        <span class="ember-eyebrow ui-simple-keep">
-          Step {@current_step + 1} of {length(@steps)}
-        </span>
-        <h1 class="ember-ink mt-4 mb-2 font-serif text-[clamp(28px,4vw,40px)] font-510 leading-[1.1] tracking-[-0.02em]">
-          {@steps |> Enum.at(@current_step) |> Map.get(:title)}
-        </h1>
-        <p class="ui-advanced-only text-sm text-text-secondary">
-          {@steps |> Enum.at(@current_step) |> Map.get(:description)}
-        </p>
-        <p class="ui-simple-only text-sm text-text-secondary">
-          {@steps |> Enum.at(@current_step) |> step_simple_description()}
-        </p>
-      </div>
+          <div class="pf">
+            <button type="button" class="ul" phx-click="skip">Skip setup</button>
+          </div>
+        </article>
+      </section>
 
-      <div
-        :if={@step_error}
-        class="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2.5 text-sm text-red-300"
-      >
-        {@step_error}
-      </div>
-
-      <div :if={is_nil(@onboarding_path)} class="ember-glass mb-6 p-6">
-        <div class="mx-auto max-w-2xl text-center">
-          <span class="ember-eyebrow">Guided setup</span>
-          <h1 class="ember-ink mt-4 font-serif text-[clamp(28px,4vw,40px)] font-510 leading-[1.1] tracking-[-0.02em]">
-            What would you like to do?
-          </h1>
-          <p class="mt-2 text-sm text-text-secondary">
-            Start another autonomous company, or turn an improvement for {@current_company.name} into ready-to-run work.
-          </p>
-        </div>
-
-        <div class="mt-6 grid gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            phx-click="select_onboarding_path"
-            phx-value-path="start"
-            class="rounded-xl border border-border bg-surface p-5 text-left transition-colors hover:border-brand/50 hover:bg-brand/10"
-          >
-            <span class="hero-building-office-2-mini h-5 w-5 text-brand"></span>
-            <span class="mt-3 block text-base font-590 text-text-primary">Start a company</span>
-            <span class="mt-1 block text-sm leading-6 text-text-tertiary">
-              Choose a blueprint, create a team, and launch starter work.
-            </span>
-          </button>
-          <button
-            type="button"
-            phx-click="select_onboarding_path"
-            phx-value-path="improve"
-            class="rounded-xl border border-border bg-surface p-5 text-left transition-colors hover:border-brand/50 hover:bg-brand/10"
-          >
-            <span class="hero-arrow-trending-up-mini h-5 w-5 text-brand"></span>
-            <span class="mt-3 block text-base font-590 text-text-primary">
-              Improve this company
-            </span>
-            <span class="mt-1 block text-sm leading-6 text-text-tertiary">
-              Add one focused goal and issue to {@current_company.name}; no new company is created.
-            </span>
-          </button>
-        </div>
-
-        <button
-          type="button"
-          phx-click="skip"
-          class="mx-auto mt-5 block min-h-[44px] px-3 py-2 text-sm text-text-quaternary transition-colors hover:text-text-secondary"
-        >
-          Skip setup
-        </button>
-      </div>
-
-      <div
+      <%!-- Improve: one goal and one CEO task in the current company. --%>
+      <section
         :if={@onboarding_path == :improve and is_nil(@bootstrap_result)}
-        class="ember-glass mb-6 p-6"
+        class="next"
+        aria-labelledby="ob-t"
       >
-        <div class="mx-auto max-w-2xl">
-          <span class="ember-eyebrow">Improve {@current_company.name}</span>
-          <h1 class="ember-ink mt-4 font-serif text-[clamp(28px,4vw,38px)] font-510 leading-[1.1] tracking-[-0.02em]">
-            Turn one outcome into ready work
-          </h1>
-          <p class="mt-2 text-sm leading-6 text-text-secondary">
-            Cympho will create a company goal and one CEO-ready issue in your current company. No new company is created.
+        <article class="paper">
+          <p class="eyebrow">Improvement</p>
+          <h2 class="nt" id="ob-t">Turn one outcome into ready work</h2>
+          <.ob_error :if={@step_error} message={@step_error} />
+          <p class="obj">
+            Cympho adds a goal and one task for the CEO to {@current_company.name}. No new company is created.
           </p>
-
-          <form id="improve-company-form" phx-change="update_company_form" class="mt-6 space-y-4">
-            <div>
-              <label class="mb-1.5 block text-xs font-510 text-text-tertiary">
-                What should improve?
-              </label>
-              <input
-                name="company[goal_title]"
-                value={@company_form["goal_title"]}
-                maxlength="255"
-                placeholder="Improve activation for new customers"
-                class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
-              />
-            </div>
-            <div>
-              <label class="mb-1.5 block text-xs font-510 text-text-tertiary">
-                Helpful context <span class="text-text-quaternary">(optional)</span>
-              </label>
+          <form id="improve-company-form" phx-change="update_company_form" class="flds">
+            <.ob_field
+              id="ob-improve-goal"
+              class="full"
+              label="What should improve?"
+              name="company[goal_title]"
+              value={@company_form["goal_title"]}
+              maxlength="255"
+              placeholder="Improve activation for new customers"
+            />
+            <div class="fld full">
+              <label for="ob-improve-details">Helpful context (optional)</label>
               <textarea
+                id="ob-improve-details"
                 name="company[improvement_details]"
-                rows="5"
+                rows="4"
                 maxlength="2000"
-                placeholder="Describe the customer problem, desired outcome, and evidence to review. Never paste credentials or secrets."
-                class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
+                aria-describedby="ob-improve-help"
               >{@company_form["improvement_details"]}</textarea>
+              <p class="help" id="ob-improve-help">
+                The customer problem, the outcome you want and how to check it. Never paste credentials or secrets.
+              </p>
             </div>
           </form>
+        </article>
+        <article class="ink" aria-labelledby="ob-i">
+          <h3 class="ink-h" id="ob-i">After you create it</h3>
+          <.consequences rows={[
+            {:done, "A goal and its first task are added to #{@current_company.name}."},
+            {:idle, "The CEO turns it into scoped work."}
+          ]} />
+          <.ink_foot verb="create">
+            <:secondary>
+              <.ghost_pill phx-click="change_onboarding_path">Back to choices</.ghost_pill>
+            </:secondary>
+            <:primary>
+              <.primary_pill phx-click="create_improvement" phx-disable-with="Creating…">
+                Create improvement
+              </.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </article>
+      </section>
 
-          <div class="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <button
-              type="button"
-              phx-click="change_onboarding_path"
-              class="min-h-[44px] px-3 py-2 text-sm text-text-tertiary hover:text-text-secondary"
-            >
-              Back to choices
-            </button>
-            <button
-              type="button"
-              phx-click="create_improvement"
-              phx-disable-with="Creating..."
-              class="cta-glow min-h-[44px] rounded-button bg-brand px-5 py-2.5 text-sm font-510 text-on-primary transition-colors hover:bg-accent-hover"
-            >
-              Create improvement
-            </button>
-          </div>
-        </div>
-      </div>
-      
-<!-- Blueprint step -->
-      <div :if={@onboarding_path == :start and @current_step == 0} class="ember-glass p-6 mb-6">
-        <form id="blueprint-search-form" phx-change="filter_blueprints" class="mb-3">
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div class="min-w-0 flex-1">
-              <label class="block text-xs font-510 text-text-tertiary mb-1.5">
-                Search blueprints
-              </label>
-              <input
-                type="search"
-                name="blueprint_query"
-                value={@blueprint_query}
-                placeholder="Security, content, sales, training..."
-                class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
-              />
-            </div>
-            <p class="shrink-0 text-xs text-text-quaternary">
-              {length(@filtered_blueprints)} of {length(@blueprints)}
-            </p>
-          </div>
-        </form>
+      <section
+        :if={@onboarding_path == :improve and @bootstrap_result}
+        class="next"
+        aria-labelledby="ob-t"
+      >
+        <article class="paper">
+          <p class="eyebrow">Ready</p>
+          <h2 class="nt" id="ob-t">{@bootstrap_result.goal.title}</h2>
+          <p class="obj">
+            The goal and its first task were added to {@bootstrap_result.company.name}. No new company was created.
+          </p>
+          <.kv_list>
+            <:item term="Goal">{@bootstrap_result.goal.title}</:item>
+            <:item term="First task">
+              <span class="mono">{@bootstrap_result.issue.identifier || "Task"}</span>
+              · {@bootstrap_result.issue.title}
+            </:item>
+          </.kv_list>
+        </article>
+        <article class="ink" aria-labelledby="ob-i">
+          <h3 class="ink-h" id="ob-i">Next</h3>
+          <.consequences rows={[{:idle, "The CEO plans it on its task."}]} />
+          <.ink_foot verb="open it">
+            <:primary>
+              <.primary_pill navigate={~p"/issues/#{@bootstrap_result.issue.id}"}>
+                Open improvement
+              </.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </article>
+      </section>
 
-        <% shared_seeds = shared_seed_issue_count(@filtered_blueprints) %>
-        <form id="blueprint-form" phx-change="update_company_form">
-          <%!-- Every blueprint seeds the same number of starter issues, so the
-               per-card count printed one identical number 17 times. Say it once
-               here; the cards keep it if the catalog ever varies. --%>
-          <div class="mb-2 flex items-center justify-between gap-3">
-            <label class="block text-xs font-510 text-text-tertiary">Company blueprint</label>
-            <span class="text-[11px] text-text-quaternary">
-              {if shared_seeds,
-                do: "Creates agents and #{shared_seeds} first issues",
-                else: "Creates agents and first issues"}
-            </span>
-          </div>
-          <div class="grid min-w-0 grid-cols-1 max-h-[42vh] gap-2 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            <label
-              :for={blueprint <- @filtered_blueprints}
-              class={[
-                "onboarding-blueprint-card group flex min-h-[118px] w-full min-w-0 max-w-full cursor-pointer flex-col justify-between rounded-lg border bg-surface px-3 py-3 text-left transition",
-                if(@company_form["blueprint"] == blueprint.key,
-                  do: "border-brand/60 bg-brand/10",
-                  else: "border-border hover:border-border-hover hover:bg-surface-hover"
-                )
-              ]}
-            >
-              <input
-                type="radio"
-                name="company[blueprint]"
-                value={blueprint.key}
-                checked={@company_form["blueprint"] == blueprint.key}
-                class="onboarding-blueprint-input sr-only"
-              />
-              <%!-- All 17 names end in "company", in a grid already labelled
-                   "Company blueprint". Full name stays as the tooltip. --%>
-              <span
-                class="min-w-0 break-words text-sm font-590 leading-5 text-text-primary"
-                title={blueprint.name}
-              >
-                {blueprint_short_name(blueprint.name)}
-              </span>
-              <span
-                class="mt-1 block w-full min-w-0 truncate text-[11px] leading-4 text-text-tertiary"
-                title={blueprint.role_summary}
-              >
-                {blueprint.role_summary}
-              </span>
-              <span class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-510 text-text-quaternary">
-                <span
-                  class="inline-flex items-center gap-1"
-                  title={"#{blueprint.default_agent_count} agents"}
-                >
-                  <span class="hero-user-group-mini h-3.5 w-3.5"></span>
-                  {blueprint.default_agent_count}
-                </span>
-                <span
-                  :if={is_nil(shared_seeds)}
-                  class="inline-flex items-center gap-1"
-                  title={"#{blueprint.seed_issue_count} starter issues"}
-                >
-                  <span class="hero-clipboard-document-list-mini h-3.5 w-3.5"></span>
-                  {blueprint.seed_issue_count}
-                </span>
-              </span>
-            </label>
-          </div>
-          <div
-            :if={Enum.empty?(@filtered_blueprints)}
-            class="rounded-lg border border-border bg-surface px-3 py-6 text-center text-sm text-text-tertiary"
+      <%!-- Step 1 · Template --%>
+      <section :if={start? and @current_step == 0} class="next" aria-labelledby="ob-t">
+        <% shown =
+          visible_templates(@filtered_blueprints, @company_form, @all_templates, @blueprint_query) %>
+        <article class="paper">
+          <p class="eyebrow">Template</p>
+          <h2 class="nt" id="ob-t">Choose a company template</h2>
+          <.ob_error :if={@step_error} message={@step_error} />
+          <form
+            id="blueprint-search-form"
+            phx-change="filter_blueprints"
+            phx-submit="filter_blueprints"
           >
-            No matching blueprints.
+            <.search_capsule
+              label="Search templates"
+              placeholder="Search templates"
+              name="blueprint_query"
+              value={@blueprint_query}
+            />
+          </form>
+          <form id="blueprint-form" phx-change="update_company_form">
+            <fieldset class="opts">
+              <legend class="sr">Company template</legend>
+              <div class="tpl">
+                <.paper_opt
+                  :for={{bp, n} <- Enum.with_index(shown, 1)}
+                  id={"ob-tpl-#{bp.key}"}
+                  n={n}
+                  name="company[blueprint]"
+                  value={bp.key}
+                  checked={@company_form["blueprint"] == bp.key}
+                >
+                  {blueprint_short_name(bp.name)}<span class="mono">{bp.default_agent_count} agents</span>
+                  <:line>{bp.role_summary}</:line>
+                </.paper_opt>
+              </div>
+            </fieldset>
+          </form>
+          <p :if={shown == []} class="obj">No template matches that search.</p>
+          <div class="pf">
+            <span>{length(shown)} of {length(@blueprints)} templates</span>
+            <button
+              :if={length(shown) < length(@filtered_blueprints)}
+              type="button"
+              class="ul"
+              phx-click="show_all_templates"
+            >
+              Show all {length(@blueprints)}
+            </button>
           </div>
-        </form>
-      </div>
-      
-<!-- Company step -->
-      <div :if={@onboarding_path == :start and @current_step == 1} class="ember-glass p-6 mb-6">
-        <form id="company-step-form" phx-change="update_company_form" class="space-y-4">
-          <div>
-            <label class="block text-xs font-510 text-text-tertiary mb-1.5">Company name</label>
-            <input
+        </article>
+        <article class="ink" aria-labelledby="ob-i">
+          <h3 class="ink-h" id="ob-i">{short_name}</h3>
+          <.crew_tiles people={crew_roles(blueprint, @company_form)} />
+          <p class="ink-note">Creates {blueprint.seed_issue_count} first tasks.</p>
+          <.ink_note>Next you name it and set a spending limit.</.ink_note>
+          <.ink_foot verb="continue">
+            <:primary>
+              <.primary_pill phx-click="next_step">Continue</.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </article>
+      </section>
+
+      <%!-- Step 2 · Company --%>
+      <form
+        :if={start? and @current_step == 1}
+        id="company-step-form"
+        class="next"
+        phx-change="update_company_form"
+        phx-submit="next_step"
+        aria-labelledby="ob-t"
+      >
+        <article class="paper">
+          <p class="eyebrow">Company</p>
+          <h2 class="nt" id="ob-t">Name your company</h2>
+          <.ob_error :if={@step_error && is_nil(@error_field)} message={@step_error} />
+          <div class="flds">
+            <.ob_field
+              id="ob-name"
+              class="full"
+              label="Company name"
               name="company[name]"
               value={@company_form["name"]}
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
+              error={@error_field == :name && @step_error}
             />
-          </div>
-          <div>
-            <label class="block text-xs font-510 text-text-tertiary mb-1.5">Company goal</label>
-            <textarea
+            <.ob_field
+              id="ob-goal"
+              class="full"
+              label="First goal"
               name="company[goal_title]"
-              rows="3"
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
-            >{@company_form["goal_title"]}</textarea>
-          </div>
-          <div>
-            <label class="block text-xs font-510 text-text-tertiary mb-1.5">Project name</label>
-            <input
+              value={@company_form["goal_title"]}
+              error={@error_field == :goal_title && @step_error}
+              maxlength="255"
+            />
+            <div class="fld">
+              <label for="ob-limit">Spending limit per 30 days</label>
+              <span class="inp">
+                <span aria-hidden="true">$</span>
+                <input
+                  id="ob-limit"
+                  name="company[budget_monthly_usd]"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  value={@company_form["budget_monthly_usd"]}
+                  aria-invalid={@error_field == :budget_monthly_usd && "true"}
+                  aria-describedby={
+                    if @error_field == :budget_monthly_usd,
+                      do: "ob-limit-h ob-limit-e",
+                      else: "ob-limit-h"
+                  }
+                />
+              </span>
+              <p :if={@error_field == :budget_monthly_usd} class="err" id="ob-limit-e">
+                <.r3_icon name="i-alert" />{@step_error}
+              </p>
+            </div>
+            <p class="help full" id="ob-limit-h">
+              Agents stop when the last 30 days of spend reaches this.
+            </p>
+            <%!-- Project and task-ID prefix follow the company name (Advanced); a field
+                 that blocks the step comes back into view so Simple never dead-ends. --%>
+            <.ob_field
+              id="ob-project"
+              class={["full", @error_field != :project_name && "ui-advanced-only"]}
+              label="First project"
               name="company[project_name]"
               value={@company_form["project_name"]}
+              error={@error_field == :project_name && @step_error}
               maxlength="255"
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
             />
-            <p class="mt-1 text-xs text-text-quaternary">
-              The first project your agents work in — you can rename it later in project settings.
-            </p>
-          </div>
-          <div class="max-w-[200px]">
-            <label
-              for="company-budget-monthly-usd"
-              class="block text-xs font-510 text-text-tertiary mb-1.5"
-            >
-              Monthly budget (USD)
-            </label>
-            <input
-              id="company-budget-monthly-usd"
-              type="number"
-              min="1"
-              step="1"
-              name="company[budget_monthly_usd]"
-              value={@company_form["budget_monthly_usd"]}
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-            />
-            <p class="mt-1 text-xs text-text-quaternary">
-              Agents stop when this monthly spend limit is reached. Required for launch.
-            </p>
-          </div>
-          <%!-- Normally advanced-only, but the company step refuses to advance on
-               an invalid prefix — so when that is what is blocking, the field
-               has to be reachable in simple mode too or the step dead-ends. --%>
-          <div
-            id="onboarding-issue-prefix"
-            class={[
-              "max-w-[200px]",
-              !prefix_error?(@step_error) && "ui-advanced-only"
-            ]}
-          >
-            <label class="block text-xs font-510 text-text-tertiary mb-1.5">Issue prefix</label>
-            <input
+            <.ob_field
+              id="onboarding-issue-prefix"
+              class={@error_field != :issue_prefix && "ui-advanced-only"}
+              label="Task ID prefix"
               name="company[issue_prefix]"
               value={@company_form["issue_prefix"]}
+              error={@error_field == :issue_prefix && @step_error}
               maxlength="7"
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
             />
           </div>
-        </form>
-      </div>
-      
-<!-- Team step -->
-      <div :if={@onboarding_path == :start and @current_step == 2} class="ember-glass p-6 mb-6">
-        <div class="mb-5 grid gap-2 sm:grid-cols-2">
-          <div class="rounded-lg border border-brand/40 bg-brand/10 px-4 py-3">
-            <p class="text-sm font-590 text-text-primary">CEO</p>
-            <p class="mt-0.5 text-xs text-text-tertiary">
-              Owns the goal, sets direction, and hands work to the team.
-            </p>
-          </div>
-          <div class="rounded-lg border border-brand/40 bg-brand/10 px-4 py-3">
-            <p class="text-sm font-590 text-text-primary">CTO</p>
-            <p class="mt-0.5 text-xs text-text-tertiary">
-              Turns the plan into concrete work and reviews what's done.
-            </p>
-          </div>
-        </div>
-        <%!-- The summary starts "CEO, CTO, …", which is the two cards directly
-             above it read out a second time. --%>
-        <p class="mb-4 text-xs text-text-quaternary">
-          Also on the team: {other_roles_summary(selected_blueprint(@blueprints, @company_form))}
-        </p>
+        </article>
+        <article class="ink" aria-labelledby="ob-i">
+          <h3 class="ink-h" id="ob-i">{short_name}</h3>
+          <.crew_tiles people={crew_roles(blueprint, @company_form)} />
+          <.ink_note>Next you choose the team and how it runs.</.ink_note>
+          <.ink_foot verb="continue">
+            <:secondary>
+              <.ghost_pill phx-click="prev_step">Back</.ghost_pill>
+            </:secondary>
+            <:primary>
+              <.primary_pill phx-click="next_step">Continue</.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </article>
+      </form>
 
-        <form id="team-step-form" phx-change="update_company_form" class="space-y-4">
-          <div class="max-w-[200px]">
-            <label
-              for="company-engineer-count"
-              class="block text-xs font-510 text-text-tertiary mb-1.5"
-            >
-              Engineers
-            </label>
-            <input
-              id="company-engineer-count"
-              type="number"
-              min="0"
-              max="8"
-              name="company[engineer_count]"
-              value={@company_form["engineer_count"]}
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-            />
-          </div>
-          <div :if={engineer_count(@company_form) > 0} class="grid gap-2 sm:grid-cols-2">
-            <div :for={index <- 1..engineer_count(@company_form)}>
-              <label
-                for={"company-engineer-name-#{index}"}
-                class="block text-xs font-510 text-text-tertiary mb-1.5"
-              >
-                Engineer {index} name
-              </label>
-              <input
+      <%!-- Step 3 · Team & AI: the choices, the provider's readiness and the crew, one form. --%>
+      <form
+        :if={start? and @current_step == 2}
+        id="team-step-form"
+        class="next"
+        phx-change="update_company_form"
+        phx-submit="next_step"
+        aria-labelledby="ob-t"
+      >
+        <% ready = ready?(@company_form)
+        rd = readiness_view(@company_form, @checking)
+        price_error = price_error(@company_form)
+
+        show_price_error =
+          price_error &&
+            (@error_field == :price or
+               Enum.any?(["price_input", "price_output"], &present(@company_form[&1]))) %>
+        <article class="paper">
+          <p class="eyebrow">Team</p>
+          <h2 class="nt" id="ob-t">{length(crew)} agents to start</h2>
+          <.ob_error :if={@step_error && @error_field != :price} message={@step_error} />
+          <p class="obj">
+            The {short_name} template gives {@company_form["name"]} this team. Names are suggestions; you can rename anyone later.
+          </p>
+          <div class="ob-sec">
+            <ul class="lead">
+              <li :for={person <- Enum.filter(crew, &(&1.key in ["ceo", "cto"]))}>
+                <span class="tile-ag" aria-hidden="true">{initials(person.name)}</span><span class="who2">{person.name}<small>{person.role}</small></span>
+              </li>
+            </ul>
+            <p :if={also_on_team(crew) != ""} class="also">
+              Also on the team: {also_on_team(crew)}.
+            </p>
+            <details class="ob-ren">
+              <summary>Rename the leaders</summary>
+              <div class="flds">
+                <.ob_field
+                  :for={
+                    {key, label} <- [
+                      {"ceo", "CEO"},
+                      {"cto", "CTO"},
+                      {"product_manager", "Product Manager"},
+                      {"designer", "Designer"}
+                    ]
+                  }
+                  id={"ob-lead-#{key}"}
+                  label={"#{label} name"}
+                  name={"company[leader_names][#{key}]"}
+                  value={get_in(@company_form, ["leader_names", key])}
+                  placeholder={leader_name(%{}, key)}
+                  maxlength="120"
+                />
+              </div>
+            </details>
+            <div :if={engineer_count(@company_form) > 0} class="flds">
+              <.ob_field
+                :for={index <- 1..engineer_count(@company_form)}
                 id={"company-engineer-name-#{index}"}
+                label={"Engineer #{index} name"}
                 name="company[engineer_names][]"
                 value={engineer_name_value(@company_form, index)}
-                class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                maxlength="120"
+              />
+            </div>
+            <div class="fld ui-advanced-only ob-count">
+              <label for="company-engineer-count">Engineers</label>
+              <input
+                id="company-engineer-count"
+                type="number"
+                min="0"
+                max="8"
+                name="company[engineer_count]"
+                value={@company_form["engineer_count"]}
               />
             </div>
           </div>
-
-          <fieldset class="rounded-lg border border-border p-4">
-            <legend class="px-1 text-xs font-510 text-text-tertiary">AI provider</legend>
-            <div class="space-y-3">
-              <div class="max-w-sm">
-                <select
-                  name="company[adapter]"
-                  aria-label="Provider"
-                  class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-                >
-                  {Phoenix.HTML.Form.options_for_select(
-                    adapter_options(),
-                    @company_form["adapter"]
-                  )}
-                </select>
-              </div>
-              <div
-                data-testid="onboarding-ai-advanced-fields"
-                class="ui-advanced-only grid gap-3 sm:grid-cols-2"
-              >
-                <div>
-                  <label class="block text-xs font-510 text-text-tertiary mb-1.5">Model</label>
-                  <input
-                    name="company[runtime_model]"
-                    value={@company_form["runtime_model"]}
-                    placeholder={model_placeholder(@company_form["adapter"])}
-                    list={"model-suggestions-#{@company_form["adapter"]}"}
-                    class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label class="block text-xs font-510 text-text-tertiary mb-1.5">
-                    Command <span class="text-text-quaternary">(optional)</span>
-                  </label>
-                  <input
-                    name="company[runtime_command]"
-                    value={@company_form["runtime_command"]}
-                    placeholder={command_placeholder(@company_form["adapter"])}
-                    class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-            <p class="ui-advanced-only mt-2 text-[11px] leading-4 text-text-quaternary">
-              Used by every agent. Leave blank to use the defaults.
+          <div class="ruler" aria-hidden="true"></div>
+          <fieldset class="opts">
+            <legend>AI provider</legend>
+            <p class="help">
+              Every agent runs on this to start. You can change it per agent later.
             </p>
-            <%!-- Simple mode hides the model and command inputs, so this is the
-                 only thing explaining a choice a first-time user has no basis
-                 for. Say what to pick on and what happens if the key is missing. --%>
-            <p class="ui-simple-only mt-2 text-[11px] leading-4 text-text-quaternary">
-              Used by every agent. Pick the one you have an account with — Cympho asks for its key after launch.
-            </p>
-
-            <button
-              type="button"
-              phx-click="toggle_role_overrides"
-              class="ui-advanced-only mt-3 inline-flex items-center gap-1.5 text-xs font-510 text-brand hover:text-accent-hover"
+            <.paper_opt
+              id="ob-prov-1"
+              n={1}
+              name="company[adapter]"
+              value="claude_code"
+              checked={adapter == "claude_code"}
             >
-              <span class={[
-                "hero-chevron-down-mini h-3.5 w-3.5 transition-transform",
-                @company_form["role_overrides"] && "rotate-180"
-              ]}>
+              Claude Code<:line>Reports its own cost</:line>
+            </.paper_opt>
+            <.paper_opt
+              id="ob-prov-2"
+              n={2}
+              name="company[adapter]"
+              value="codex"
+              checked={adapter == "codex"}
+            >
+              Codex (OpenAI)<:line>Reports tokens; you enter its prices</:line>
+            </.paper_opt>
+          </fieldset>
+          <div :if={adapter == "codex"} class="flds">
+            <.ob_field
+              id="ob-codex-model"
+              class="full"
+              input_class="mono"
+              label="Model"
+              name="company[runtime_model]"
+              value={@company_form["runtime_model"]}
+              placeholder={Cympho.Adapters.CodexAdapter.default_model()}
+              list="model-suggestions-codex"
+            />
+            <div
+              :for={{key, label} <- [{"price_input", "Input"}, {"price_output", "Output"}]}
+              class="fld"
+            >
+              <label for={"ob-#{key}"}>{label}, per 1M tokens</label>
+              <span class="inp">
+                <span aria-hidden="true">$</span>
+                <input
+                  id={"ob-#{key}"}
+                  name={"company[#{key}]"}
+                  type="text"
+                  inputmode="decimal"
+                  autocomplete="off"
+                  value={@company_form[key]}
+                  aria-invalid={show_price_error && is_nil(present(@company_form[key])) && "true"}
+                  aria-describedby={show_price_error && "ob-price-e"}
+                />
               </span>
+            </div>
+            <p :if={show_price_error} class="err full" id="ob-price-e">
+              <.r3_icon name="i-alert" />{price_error}
+            </p>
+            <p class="help full">These prices are saved on all {length(crew)} agents.</p>
+          </div>
+          <section class="rd" aria-labelledby="ob-rd">
+            <h3 class="rd-h" id="ob-rd">{rd.heading}</h3>
+            <ul>
+              <li :for={row <- rd.rows} class={row.kind == :stopped && "bad"}>
+                <.status_glyph kind={row.kind} big /><b>{row.label}</b><span>{row.text}</span>
+              </li>
+            </ul>
+            <div :if={rd.action} class="rd-a">
+              <.pill phx-click="check_readiness" disabled={@checking}>{rd.action}</.pill>
+              <a :if={rd.fix?} class="ul" href="/docs/ai-agents/cli-harnesses">How to fix this</a>
+            </div>
+          </section>
+          <div data-testid="onboarding-ai-advanced-fields" class="ui-advanced-only flds">
+            <.ob_field
+              :if={adapter != "codex"}
+              id="ob-model"
+              label="Model"
+              name="company[runtime_model]"
+              value={@company_form["runtime_model"]}
+              placeholder={model_placeholder(adapter)}
+              list={"model-suggestions-#{adapter}"}
+            />
+            <.ob_field
+              id="ob-command"
+              label="Command (optional)"
+              name="company[runtime_command]"
+              value={@company_form["runtime_command"]}
+              placeholder={command_placeholder(adapter)}
+            />
+            <p class="help full">Used by every agent. Leave blank to use the defaults.</p>
+          </div>
+          <div class="ui-advanced-only ob-roles">
+            <button type="button" class="ul" phx-click="toggle_role_overrides">
               {if @company_form["role_overrides"],
                 do: "Use the same AI for everyone",
                 else: "Choose a different AI per role"}
             </button>
-
-            <div
-              :if={@company_form["role_overrides"]}
-              class="ui-advanced-only mt-3 space-y-2"
-            >
+            <div :if={@company_form["role_overrides"]} class="ob-role-list">
               <div
                 :for={
-                  {role, label} <- [
-                    {"ceo", "CEO"},
-                    {"cto", "CTO"},
-                    {"engineer", "Engineers"}
-                  ]
+                  {role, label} <- [{"ceo", "CEO"}, {"cto", "CTO"}, {"engineer", "Engineers"}]
                 }
-                class="grid gap-2 rounded-lg border border-border bg-surface/50 p-3 sm:grid-cols-[80px_1fr_1fr_1fr] sm:items-center"
+                class="ob-role"
               >
-                <p class="text-sm font-590 text-text-primary">{label}</p>
+                <span class="ob-role-n">{label}</span>
                 <select
                   name={"company[role_runtimes][#{role}][adapter]"}
                   aria-label={"#{label} provider"}
-                  class="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none"
                 >
                   {Phoenix.HTML.Form.options_for_select(
                     [{"Same as above", ""} | adapter_options()],
@@ -479,302 +560,193 @@
                   placeholder={model_placeholder(role_runtime_adapter(@company_form, role))}
                   list={"model-suggestions-#{role_runtime_adapter(@company_form, role)}"}
                   aria-label={"#{label} model"}
-                  class="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
                 />
                 <input
                   name={"company[role_runtimes][#{role}][command]"}
                   value={role_runtime_value(@company_form, role, "command")}
                   placeholder="command (optional)"
                   aria-label={"#{label} command"}
-                  class="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-quaternary focus:border-accent focus:outline-none"
                 />
               </div>
-              <p class="text-[11px] leading-4 text-text-quaternary">
-                Blank fields fall back to the shared choice above.
-              </p>
+              <p class="help">Blank fields fall back to the shared choice above.</p>
             </div>
-
-            <datalist
-              :for={{value, models} <- model_suggestion_lists()}
-              id={"model-suggestions-#{value}"}
-            >
-              <option :for={model <- models} value={model}></option>
-            </datalist>
-          </fieldset>
-        </form>
-      </div>
-      
-<!-- Launch step -->
-      <div
-        :if={@onboarding_path == :start and @current_step == 3}
-        class="ember-glass card-lift p-6 mb-6"
-      >
-        <div class="stagger-children space-y-2 text-sm">
-          <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-            <span class="text-text-secondary">Company</span>
-            <span class="text-text-primary font-590">{@company_form["name"]}</span>
           </div>
-          <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-            <span class="text-text-secondary">Blueprint</span>
-            <span class="text-text-primary font-590">
-              {selected_blueprint(@blueprints, @company_form).name}
-            </span>
-          </div>
-          <div class="flex items-center justify-between gap-3 py-1.5 px-3 rounded-lg bg-surface">
-            <span class="text-text-secondary">Goal</span>
-            <span
-              class="max-w-[280px] truncate text-text-primary"
-              title={@company_form["goal_title"]}
-            >
-              {@company_form["goal_title"]}
-            </span>
-          </div>
-          <div class="ui-advanced-only flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-            <span class="text-text-secondary">Issue prefix</span>
-            <span class="text-text-primary font-mono font-590">
-              {@company_form["issue_prefix"]}
-            </span>
-          </div>
-          <div class="flex items-center justify-between gap-3 py-1.5 px-3 rounded-lg bg-surface">
-            <span class="text-text-secondary">Engineers</span>
-            <span class="max-w-[280px] truncate text-text-primary font-590">
-              {engineer_count(@company_form)}<span :if={engineer_count(@company_form) > 0}>
-                · {Enum.map_join(
-                  1..engineer_count(@company_form),
-                  ", ",
-                  &engineer_name_value(@company_form, &1)
-                )}</span>
-            </span>
-          </div>
-          <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-            <span class="text-text-secondary">AI</span>
-            <span class="text-text-primary font-590">
-              {runtime_summary(@company_form["adapter"], @company_form["runtime_model"])}
-            </span>
-          </div>
-          <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-            <span class="text-text-secondary">Monthly budget</span>
-            <span class="text-text-primary font-590">
-              <span class="ui-advanced-only">
-                ${@company_form["budget_monthly_usd"]}/mo · hard stop
-              </span>
-              <span class="ui-simple-only">
-                ${@company_form["budget_monthly_usd"]}/mo · agents stop at the limit
-              </span>
-            </span>
-          </div>
-          <div
-            :for={{role, label} <- [{"ceo", "CEO"}, {"cto", "CTO"}, {"engineer", "Engineers"}]}
-            :if={
-              @company_form["role_overrides"] and role_runtime_customized?(@company_form, role)
-            }
-            class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface"
+          <datalist
+            :for={{value, models} <- model_suggestion_lists()}
+            id={"model-suggestions-#{value}"}
           >
-            <span class="text-text-secondary">{label} AI</span>
-            <span class="text-text-primary font-590">
+            <option :for={model <- models} value={model}></option>
+          </datalist>
+        </article>
+        <article class="ink" aria-labelledby="ob-i">
+          <h3 class="ink-h" id="ob-i">Your crew</h3>
+          <.crew_tiles people={crew} />
+          <dl class="ikv">
+            <dt>Runs on</dt>
+            <dd>
+              <%= if adapter == "codex" do %>
+                Codex <span class="mono">{agent_runtime(@company_form)["model"]}</span>, all {length(
+                  crew
+                )}
+              <% else %>
+                Claude Code, all {length(crew)}
+              <% end %>
+            </dd>
+            <dt>Limit</dt>
+            <dd><span class="mono">${@company_form["budget_monthly_usd"]}</span> per 30 days</dd>
+            <dt>Task IDs</dt>
+            <dd><span class="mono">{prefix}-1, {prefix}-2</span> …</dd>
+          </dl>
+          <.ink_note>
+            {if ready,
+              do: "Next you check everything before launch.",
+              else: "Continue unlocks when every check passes."}
+          </.ink_note>
+          <.ink_foot verb="continue">
+            <:secondary>
+              <.ghost_pill phx-click="prev_step">Back</.ghost_pill>
+            </:secondary>
+            <:primary>
+              <.primary_pill phx-click="next_step" disabled={not ready}>
+                Continue to review
+              </.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </article>
+      </form>
+
+      <%!-- Step 4 · Review & launch --%>
+      <section :if={start? and @current_step == 3} class="next" aria-labelledby="ob-t">
+        <% owner = first_task_owner(blueprint, crew) %>
+        <article class="paper">
+          <p class="eyebrow">Review</p>
+          <h2 class="nt" id="ob-t">{@company_form["name"]} is ready to launch</h2>
+          <.ob_error :if={@step_error} message={@step_error} />
+          <.kv_list class="wide">
+            <:item term="Template">{short_name}</:item>
+            <:item term="Team">{team_line(crew)}</:item>
+            <:item term="Goal">{@company_form["goal_title"]}</:item>
+            <:item term="Project">
+              {@company_form["project_name"]} · task IDs <span class="mono">{prefix}-1</span> …
+            </:item>
+            <:item term="AI">
+              {if adapter == "codex",
+                do: "Codex #{agent_runtime(@company_form)["model"]}",
+                else: "Claude Code"} · {if ready?(@company_form),
+                do: "installed, signed in, priced",
+                else: "checks needed on the Team & AI step"}
+            </:item>
+            <:item term="Spending limit">
+              <span class="mono">${@company_form["budget_monthly_usd"]}</span>
+              per 30 days. Agents stop at the limit.
+            </:item>
+            <:item
+              :for={{role, label} <- [{"ceo", "CEO"}, {"cto", "CTO"}, {"engineer", "Engineers"}]}
+              :if={
+                @company_form["role_overrides"] and role_runtime_customized?(@company_form, role)
+              }
+              term={"#{label} AI"}
+            >
               {runtime_summary(
                 role_runtime_adapter(@company_form, role),
                 role_runtime_value(@company_form, role, "model")
               )}
-            </span>
-          </div>
-        </div>
-        <button
-          type="button"
-          phx-click="start_autonomous_company"
-          phx-disable-with="Launching..."
-          class="mt-5 w-full cta-glow rounded-button bg-brand px-4 py-2.5 text-sm font-510 text-on-primary hover:bg-accent-hover transition-colors"
-        >
-          Launch autonomous company
-        </button>
-      </div>
-      
-<!-- Ready step -->
-      <div
-        :if={@onboarding_path == :start and @current_step == 4}
-        class="ember-glass card-lift p-6 mb-6"
+            </:item>
+          </.kv_list>
+        </article>
+        <article class="ink" aria-labelledby="ob-i">
+          <h3 class="ink-h" id="ob-i">After you launch</h3>
+          <.consequences rows={[
+            {:done,
+             "Cympho creates #{length(crew)} agents and #{blueprint.seed_issue_count} first tasks."},
+            {:idle, "#{prefix}-1 starts with #{owner.name} (#{owner.role})."}
+          ]} />
+          <.ink_foot verb="launch">
+            <:secondary>
+              <.ghost_pill phx-click="prev_step">Back</.ghost_pill>
+            </:secondary>
+            <:primary>
+              <.primary_pill phx-click="start_autonomous_company" phx-disable-with="Launching…">
+                Launch {@company_form["name"]}
+              </.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </article>
+      </section>
+
+      <%!-- Step 5 · Ready: what was created, and the way into Home. --%>
+      <section
+        :if={start? and @current_step == 4 and @bootstrap_result}
+        class="next"
+        aria-labelledby="ob-t"
       >
-        <div class="flex flex-col gap-4">
-          <div class="flex flex-col items-center gap-3 text-center">
-            <div class="w-14 h-14 rounded-full bg-emerald/10 ring-1 ring-emerald/40 shadow-[0_0_30px_rgb(var(--color-success-rgb)/0.5)] flex items-center justify-center">
-              <svg
-                class="w-7 h-7 text-emerald"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </div>
-            <p class="text-sm text-text-secondary">
-              Your company, team, project, and starter issues were created. Cympho will show any provider setup still needed before agents run.
-            </p>
-          </div>
+        <% result = @bootstrap_result
+        first = List.first(result.seed_issues)
+        last = List.last(result.seed_issues)
+        lead = first && Enum.find(result.agents, &(&1.id == first.assignee_id)) %>
+        <article class="paper">
+          <p class="eyebrow">Ready</p>
+          <h2 class="nt" id="ob-t">{result.company.name} is set up</h2>
+          <ul class="launch">
+            <li>
+              <.status_glyph kind={:done} big color={false} />Company, goal and project created
+            </li>
+            <li>
+              <.status_glyph kind={:done} big color={false} />{length(result.agents)} agents hired
+            </li>
+            <li :if={first}>
+              <.status_glyph kind={:done} big color={false} />
+              <span>
+                {length(result.seed_issues)} first tasks,
+                <span class="mono">{first.identifier}</span>
+                to <span class="mono">{last.identifier}</span>
+              </span>
+            </li>
+          </ul>
+        </article>
+        <article class="ink" aria-labelledby="ob-i">
+          <h3 class="ink-h" id="ob-i">First result</h3>
+          <.consequences
+            :if={first && lead}
+            rows={[
+              if(@dispatcher_on,
+                do:
+                  {:working,
+                   "#{lead.name} (#{role_label(lead.role)}) is starting #{first.identifier}: #{first.title}."},
+                else:
+                  {:idle,
+                   "#{first.identifier} waits for #{lead.name} (#{role_label(lead.role)}): #{first.title}."}
+              )
+            ]}
+          />
+          <.ink_note :if={not @dispatcher_on}>
+            Agents are switched off on this server. You can still plan and answer.
+          </.ink_note>
+          <.ink_foot verb="open Home">
+            <:primary>
+              <.primary_pill href={"/switch-company/#{result.company.id}?return_to=/"}>
+                Open Home
+              </.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </article>
+      </section>
 
-          <%= if @bootstrap_result do %>
-            <div class="stagger-children space-y-2 text-sm">
-              <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-                <span class="text-text-secondary">Company</span>
-                <span class="text-text-primary font-590">{@bootstrap_result.company.name}</span>
-              </div>
-              <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-                <span class="text-text-secondary">Goal</span>
-                <span
-                  class="text-text-primary truncate max-w-[280px]"
-                  title={@bootstrap_result.goal.title}
-                >
-                  {@bootstrap_result.goal.title}
-                </span>
-              </div>
-              <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
-                <span class="text-text-secondary">Your team</span>
-                <span class="text-text-primary font-590">
-                  {length(@bootstrap_result.agents)} ({Enum.map_join(
-                    @bootstrap_result.agents,
-                    ", ",
-                    &role_label(&1.role)
-                  )})
-                </span>
-              </div>
-              <div class="py-1.5 px-3">
-                <span class="text-text-secondary text-xs">First issues</span>
-                <div class="mt-1.5 space-y-1">
-                  <%= for issue <- @bootstrap_result.seed_issues do %>
-                    <div class="flex items-center gap-2">
-                      <span class="text-xs text-accent font-mono">{issue.identifier}</span>
-                      <span class="text-xs text-text-tertiary truncate">{issue.title}</span>
-                    </div>
-                  <% end %>
-                </div>
-              </div>
-            </div>
-          <% else %>
-            <p class="text-sm text-text-tertiary text-center">
-              You're ready to start using Cympho. Create your first project or jump straight to the issue board.
-            </p>
-          <% end %>
-
-          <%!-- Five keyboard shortcuts for an app the reader has not opened yet.
-               They belong to someone who already knows their way around. --%>
-          <div class="ui-advanced-only border-t border-border pt-4">
-            <p class="mb-3 text-xs text-text-quaternary">
-              A few keys that make Cympho faster to move around:
-            </p>
-            <div class="stagger-children space-y-3">
-              <div class="flex items-center justify-between text-sm">
-                <span class="text-text-secondary">Command palette</span>
-                <div class="flex gap-1"><kbd class="kbd">Cmd</kbd><kbd class="kbd">K</kbd></div>
-              </div>
-              <div class="flex items-center justify-between text-sm">
-                <span class="text-text-secondary">New issue</span>
-                <kbd class="kbd">C</kbd>
-              </div>
-              <div class="flex items-center justify-between text-sm">
-                <span class="text-text-secondary">Go to Issues</span>
-                <div class="flex gap-1"><kbd class="kbd">G</kbd><kbd class="kbd">I</kbd></div>
-              </div>
-              <div class="flex items-center justify-between text-sm">
-                <span class="text-text-secondary">Go to Board</span>
-                <div class="flex gap-1"><kbd class="kbd">G</kbd><kbd class="kbd">K</kbd></div>
-              </div>
-              <div class="flex items-center justify-between text-sm">
-                <span class="text-text-secondary">Show shortcuts</span>
-                <kbd class="kbd">?</kbd>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex gap-3 w-full pt-2">
-            <.link
-              :if={@bootstrap_result}
-              href={"/switch-company/#{@bootstrap_result.company.id}?return_to=/issues"}
-              class="flex-1 text-center cta-glow bg-brand hover:bg-accent text-on-primary font-590 text-sm px-4 py-2.5 rounded-button transition-colors"
-            >
-              Enter Cympho
-            </.link>
-          </div>
-        </div>
-      </div>
-
-      <div
-        :if={@onboarding_path == :improve and @bootstrap_result}
-        class="ember-glass card-lift mb-6 p-6"
+      <%!-- Five keys for an app the reader has not opened yet: Advanced only. --%>
+      <.band_card
+        :if={start? and @current_step == 4 and @bootstrap_result}
+        id="ob-keys"
+        title="Keys that make Cympho faster"
+        class="ui-advanced-only"
       >
-        <div class="mx-auto max-w-2xl text-center">
-          <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald/10 ring-1 ring-emerald/40">
-            <span class="hero-check-mini h-7 w-7 text-emerald"></span>
-          </div>
-          <h1 class="ember-ink mt-4 font-serif text-3xl font-510">Improvement ready</h1>
-          <p class="mt-2 text-sm leading-6 text-text-secondary">
-            The goal and its first issue were added to {@bootstrap_result.company.name}. No new company was created.
-          </p>
-        </div>
-
-        <div class="mt-6 space-y-2 text-sm">
-          <div class="flex items-center justify-between gap-3 rounded-lg bg-surface px-3 py-2">
-            <span class="text-text-secondary">Goal</span>
-            <span class="truncate font-590 text-text-primary">
-              {@bootstrap_result.goal.title}
-            </span>
-          </div>
-          <div class="flex items-center justify-between gap-3 rounded-lg bg-surface px-3 py-2">
-            <span class="text-text-secondary">First issue</span>
-            <span class="truncate font-590 text-text-primary">
-              {@bootstrap_result.issue.identifier || "Issue"} · {@bootstrap_result.issue.title}
-            </span>
-          </div>
-        </div>
-
-        <.link
-          navigate={~p"/issues/#{@bootstrap_result.issue.id}"}
-          class="cta-glow mt-5 block w-full rounded-button bg-brand px-4 py-2.5 text-center text-sm font-590 text-on-primary transition-colors hover:bg-accent"
-        >
-          Open improvement
-        </.link>
-      </div>
-      
-<!-- Navigation buttons -->
-      <div :if={@onboarding_path == :start} class="flex items-center justify-between">
-        <button
-          :if={@current_step > 0 && @current_step < 4}
-          type="button"
-          phx-click="prev_step"
-          class="text-sm text-text-tertiary hover:text-text-secondary transition-colors px-3 py-2 min-h-[44px]"
-        >
-          Back
-        </button>
-        <button
-          :if={@current_step == 0 && @current_company}
-          type="button"
-          phx-click="change_onboarding_path"
-          class="min-h-[44px] px-3 py-2 text-sm text-text-tertiary transition-colors hover:text-text-secondary"
-        >
-          Back to choices
-        </button>
-        <button
-          :if={@current_step == 0 && @current_company}
-          type="button"
-          phx-click="skip"
-          class="text-sm text-text-quaternary hover:text-text-tertiary transition-colors px-3 py-2 min-h-[44px]"
-        >
-          Skip setup
-        </button>
-        <div class="flex items-center gap-3 ml-auto">
-          <button
-            :if={@current_step < 3}
-            type="button"
-            phx-click="next_step"
-            class="cta-glow bg-brand hover:bg-accent text-on-primary font-510 text-sm px-5 py-2.5 rounded-button transition-colors min-h-[44px]"
-          >
-            Continue
-          </button>
-        </div>
-      </div>
+        <.kv_list class="ob-keys">
+          <:item term="Command palette"><kbd>⌘</kbd> <kbd>K</kbd></:item>
+          <:item term="New task"><kbd>C</kbd></:item>
+          <:item term="Go to Tasks"><kbd>G</kbd> <kbd>I</kbd></:item>
+          <:item term="Go to Board"><kbd>G</kbd> <kbd>K</kbd></:item>
+          <:item term="All shortcuts"><kbd>?</kbd></:item>
+        </.kv_list>
+      </.band_card>
     </div>
   </div>
 </div>

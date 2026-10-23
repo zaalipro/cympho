@@ -1,43 +1,40 @@
 defmodule CymphoWeb.OnboardingLive.Index do
   use CymphoWeb, :live_view
 
+  alias Cympho.Adapters.CodexAdapter
   alias Cympho.Agents.Agent
   alias Cympho.Companies
   alias Cympho.Onboarding
+  alias Cympho.Onboarding.Readiness
 
+  # `label` names the step in the step list, `title` is the step's H1.
   @steps [
-    %{
-      id: :blueprint,
-      title: "Choose a blueprint",
-      description: "Pick the kind of company your agents will run"
-    },
-    %{
-      id: :company,
-      title: "Name the company",
-      description: "Set the company name, goal, and issue prefix",
-      simple_description: "Set the company name, its first goal, and its first project"
-    },
-    %{
-      id: :team,
-      title: "Build the team",
-      description: "Pick your engineers and which AI each role uses",
-      simple_description: "Pick your engineers and the AI they all run on"
-    },
-    %{
-      id: :launch,
-      title: "Review and launch",
-      description: "Confirm the plan, then launch"
-    },
-    %{
-      id: :ready,
-      title: "You're all set",
-      description: "Your company structure and starting work are ready"
-    }
+    %{id: :blueprint, label: "Template", title: "Start from a company template"},
+    %{id: :company, label: "Company", title: "Name it and set a spending limit"},
+    %{id: :team, label: "Team & AI", title: "Your team, and the AI it runs on"},
+    %{id: :launch, label: "Review & launch", title: "Check everything before launch"},
+    %{id: :ready, label: "Ready", title: "You're all set"}
   ]
 
-  # Simple mode hides the issue prefix and the per-role model fields, so the step
-  # subtitle must not promise controls the reader cannot see.
-  defp step_simple_description(step), do: Map.get(step, :simple_description, step.description)
+  # Suggested leader names (B8): editable on the team step, blank keeps the role name.
+  @leader_suggestions %{
+    "ceo" => "Ada",
+    "cto" => "Theo",
+    "product_manager" => "Priya",
+    "designer" => "Jun"
+  }
+  @leader_defaults %{
+    "ceo" => "CEO",
+    "cto" => "CTO",
+    "product_manager" => "Product Lead",
+    "designer" => "Design Lead"
+  }
+
+  # The template list shows this many until the owner searches or asks for all.
+  @templates_shown 4
+
+  @budget_message "Enter a spending limit above $0."
+  @price_reason "Without it the spending limit can't stop Codex."
 
   @impl true
   def mount(_params, _session, socket) do
@@ -61,6 +58,10 @@ defmodule CymphoWeb.OnboardingLive.Index do
       |> assign(:onboarding_path, onboarding_path)
       |> assign(:current_step, current_step)
       |> assign(:step_error, nil)
+      |> assign(:error_field, nil)
+      |> assign(:all_templates, false)
+      |> assign(:checking, false)
+      |> assign(:dispatcher_on, Cympho.Orchestrator.Dispatcher.enabled?())
       |> assign(:bootstrap_result, nil)
       |> assign(:improvement_submission_id, improvement_submission_id)
       |> assign(:company_form, company_form)
@@ -72,19 +73,21 @@ defmodule CymphoWeb.OnboardingLive.Index do
   def handle_event("next_step", _params, socket) do
     step = Enum.at(socket.assigns.steps, socket.assigns.current_step)
 
+    # The launch step's own button launches; Continue never moves past it.
+    launch_step = length(socket.assigns.steps) - 2
+
     case validate_step(step.id, socket.assigns.company_form) do
       :ok ->
-        max = length(socket.assigns.steps) - 1
-        next = min(socket.assigns.current_step + 1, max)
+        next = min(socket.assigns.current_step + 1, launch_step)
 
         {:noreply,
          socket
-         |> assign(:current_step, next)
-         |> assign(:step_error, nil)
+         |> assign(:current_step, max(next, socket.assigns.current_step))
+         |> clear_error()
          |> persist_draft()}
 
-      {:error, message} ->
-        {:noreply, socket |> assign(:step_error, message) |> persist_draft()}
+      {:error, field, message} ->
+        {:noreply, socket |> put_error(field, message) |> persist_draft()}
     end
   end
 
@@ -92,8 +95,42 @@ defmodule CymphoWeb.OnboardingLive.Index do
     {:noreply,
      socket
      |> assign(:current_step, max(socket.assigns.current_step - 1, 0))
-     |> assign(:step_error, nil)
+     |> clear_error()
      |> persist_draft()}
+  end
+
+  # Finished steps in the step list go back; nothing jumps forward past a check.
+  def handle_event("go_to_step", %{"step" => step}, socket) do
+    case Integer.parse(to_string(step)) do
+      {index, ""}
+      when index >= 0 and index < socket.assigns.current_step and
+             is_nil(socket.assigns.bootstrap_result) ->
+        {:noreply, socket |> assign(:current_step, index) |> clear_error() |> persist_draft()}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("show_all_templates", _params, socket) do
+    {:noreply, assign(socket, :all_templates, true)}
+  end
+
+  # B9: the server checks run only when the owner asks, in the background so
+  # the page stays live while the test prompt is answered.
+  def handle_event("check_readiness", _params, %{assigns: %{checking: true}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("check_readiness", _params, socket) do
+    form = socket.assigns.company_form
+    adapter = sanitize_adapter(form["adapter"])
+    runtime = agent_runtime(form)
+
+    {:noreply,
+     socket
+     |> assign(:checking, true)
+     |> clear_error()
+     |> start_async(:readiness, fn -> Readiness.check(adapter, runtime) end)}
   end
 
   def handle_event("skip", _params, socket) do
@@ -104,12 +141,17 @@ defmodule CymphoWeb.OnboardingLive.Index do
     end
   end
 
+  # A readiness result only comes from the server's own check (B9), never from the form.
   def handle_event("update_company_form", %{"company" => params}, socket) do
-    params = maybe_apply_blueprint_defaults(params, socket.assigns.company_form)
+    params =
+      params
+      |> Map.delete("readiness")
+      |> maybe_apply_blueprint_defaults(socket.assigns.company_form)
+      |> follow_company_name(socket.assigns.company_form)
+
     form = deep_merge_form(socket.assigns.company_form, params)
 
-    {:noreply,
-     socket |> assign(:company_form, form) |> assign(:step_error, nil) |> persist_draft()}
+    {:noreply, socket |> assign(:company_form, form) |> clear_error() |> persist_draft()}
   end
 
   def handle_event("toggle_role_overrides", _params, socket) do
@@ -201,6 +243,21 @@ defmodule CymphoWeb.OnboardingLive.Index do
     end
   end
 
+  @impl true
+  def handle_async(:readiness, {:ok, result}, socket) do
+    form = Map.put(socket.assigns.company_form, "readiness", result)
+
+    {:noreply,
+     socket |> assign(:checking, false) |> assign(:company_form, form) |> persist_draft()}
+  end
+
+  def handle_async(:readiness, {:exit, _reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:checking, false)
+     |> put_error(nil, "The checks could not run. Try again.")}
+  end
+
   @allowed_adapters ~w(claude_code codex cursor http)
 
   defp launch_company(socket) do
@@ -216,17 +273,19 @@ defmodule CymphoWeb.OnboardingLive.Index do
         "issue_prefix" => form["issue_prefix"],
         "engineer_count" => engineer_count(form),
         "engineer_names" => form["engineer_names"] || [],
+        "leader_names" => form["leader_names"] || %{},
         "adapter" => sanitize_adapter(form["adapter"]),
-        "agent_runtime" => %{
-          "command" => form["runtime_command"],
-          "model" => form["runtime_model"]
-        },
+        "agent_runtime" => agent_runtime(form),
         "role_runtimes" => role_runtimes_attrs(form),
         "owner_user_id" => socket.assigns.current_user.id,
         "budget_monthly_cents" => budget_monthly_cents
       }
 
-      with :ok <- validate_runtime_compat(attrs) do
+      # A model/runtime mismatch, missing Codex prices or a failed check sends
+      # the owner back to the team step (where the AI is picked) instead of
+      # launching a company whose agents could never run.
+      with :ok <- validate_runtime_compat(attrs),
+           :ok <- validate_step(:team, form) do
         case create_company_safely(attrs) do
           {:ok, result} ->
             _ = Onboarding.clear_draft(socket.assigns.current_user.id)
@@ -235,48 +294,90 @@ defmodule CymphoWeb.OnboardingLive.Index do
              socket
              |> assign(:bootstrap_result, result)
              |> assign(:company_form, default_company_form())
-             |> assign(:step_error, nil)
+             |> clear_error()
              |> assign(:current_step, 4)}
 
           {:error, :budget_required} ->
             {:noreply,
              socket
              |> assign(:current_step, 1)
-             |> assign(
-               :step_error,
-               "A positive monthly budget is required before autonomous agents can run."
-             )
+             |> put_error(:budget_monthly_usd, @budget_message)
              |> persist_draft()}
 
           {:error, _reason} ->
             {:noreply,
              socket
-             |> assign(
-               :step_error,
+             |> put_error(
+               nil,
                "We couldn't launch the company. Review the company and AI settings, then try again."
              )
              |> persist_draft()}
         end
       else
-        # Send the owner back to the team step (where AI runtimes are picked) so
-        # they can fix a model/runtime mismatch instead of launching into a
-        # company whose agents can never dispatch.
         {:error, :runtime_incompatible, message} ->
           {:noreply,
-           socket
-           |> assign(:current_step, 2)
-           |> assign(:step_error, message)
-           |> persist_draft()}
+           socket |> assign(:current_step, 2) |> put_error(nil, message) |> persist_draft()}
+
+        {:error, field, message} ->
+          {:noreply,
+           socket |> assign(:current_step, 2) |> put_error(field, message) |> persist_draft()}
       end
     else
-      {:error, message} ->
+      {:error, field, message} ->
         {:noreply,
-         socket
-         |> assign(:current_step, 1)
-         |> assign(:step_error, message)
-         |> persist_draft()}
+         socket |> assign(:current_step, 1) |> put_error(field, message) |> persist_draft()}
     end
   end
+
+  defp put_error(socket, field, message) do
+    socket |> assign(:step_error, message) |> assign(:error_field, field)
+  end
+
+  defp clear_error(socket), do: put_error(socket, nil, nil)
+
+  @doc """
+  The runtime every agent starts on (`agent_runtime` at launch, and what the
+  readiness checks probe). Codex always names its model, so its prices (B10)
+  are keyed by the model its runs report.
+  """
+  def agent_runtime(form) do
+    adapter = sanitize_adapter(form["adapter"])
+    model = present(form["runtime_model"])
+
+    runtime = %{"command" => present(form["runtime_command"]) || "", "model" => model || ""}
+
+    if adapter == "codex" do
+      model = model || CodexAdapter.default_model()
+
+      runtime
+      |> Map.put("model", model)
+      |> Map.put("pricing", %{
+        model => %{
+          "input_usd_per_mtok" => present(form["price_input"]) || "",
+          "output_usd_per_mtok" => present(form["price_output"]) || ""
+        }
+      })
+    else
+      runtime
+    end
+  end
+
+  @doc "True when every readiness check passes for the form's current runtime."
+  def ready?(form) do
+    Readiness.ready?(form["readiness"], sanitize_adapter(form["adapter"]), agent_runtime(form))
+  end
+
+  @doc "The Codex price error, or nil (B10): without both rates the limit can't stop Codex."
+  def price_error(form) do
+    cond do
+      sanitize_adapter(form["adapter"]) != "codex" -> nil
+      not valid_price?(form["price_input"]) -> "Enter the input price. #{@price_reason}"
+      not valid_price?(form["price_output"]) -> "Enter the output price. #{@price_reason}"
+      true -> nil
+    end
+  end
+
+  defp valid_price?(value), do: Cympho.Finances.Pricing.valid_rate?(present(value) || "")
 
   defp create_improvement(socket) do
     company = socket.assigns.current_company
@@ -440,37 +541,41 @@ defmodule CymphoWeb.OnboardingLive.Index do
     |> Enum.join(", ")
   end
 
-  # The issue prefix input is advanced-only. When the company step refuses to
-  # advance because of it, the field has to come back into view or a simple-mode
-  # user is stuck on an error they cannot act on.
-  def prefix_error?(nil), do: false
-  def prefix_error?(message), do: String.contains?(message, "Issue prefix")
-
   # The prefix cap is 7 (not the schema's 10) because the launch engine
   # truncates prefixes to 7 characters; the name minimum is 3 because the
   # company slug derived from it must satisfy validate_length(:slug, min: 3).
+  # Each error names the field it belongs to, so the form can point at it.
   defp validate_step(:company, form) do
     cond do
       String.trim(form["name"] || "") == "" ->
-        {:error, "Company name is required."}
+        {:error, :name, "Enter a company name."}
 
       String.length(String.trim(form["name"])) < 3 ->
-        {:error, "Company name must be at least 3 characters."}
+        {:error, :name, "Use at least 3 characters for the company name."}
 
       String.trim(form["goal_title"] || "") == "" ->
-        {:error, "Company goal is required."}
+        {:error, :goal_title, "Enter a first goal."}
 
       String.trim(form["project_name"] || "") == "" ->
-        {:error, "Project name is required."}
+        {:error, :project_name, "Enter a project name."}
 
       not Regex.match?(~r/^[A-Z]{2,7}$/, form["issue_prefix"] || "") ->
-        {:error, "Issue prefix must be 2-7 uppercase letters."}
+        {:error, :issue_prefix, "Use 2 to 7 capital letters for task IDs, like NW."}
 
       match?({:error, _}, parse_budget_monthly_cents(form)) ->
-        {:error, "Monthly budget must be a positive dollar amount."}
+        {:error, :budget_monthly_usd, @budget_message}
 
       true ->
         :ok
+    end
+  end
+
+  # B9/B10: Continue (and launch) need Codex prices and every readiness check.
+  defp validate_step(:team, form) do
+    cond do
+      message = price_error(form) -> {:error, :price, message}
+      not ready?(form) -> {:error, nil, "Every check must pass before you continue."}
+      true -> :ok
     end
   end
 
@@ -485,7 +590,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
         {:ok, usd * 100}
 
       _ ->
-        {:error, "Monthly budget must be a positive dollar amount."}
+        {:error, @budget_message}
     end
   end
 
@@ -541,6 +646,12 @@ defmodule CymphoWeb.OnboardingLive.Index do
       [count] -> count
       _ -> nil
     end
+  end
+
+  defp role_label(role) when is_binary(role) do
+    role |> String.to_existing_atom() |> Agent.role_label()
+  rescue
+    ArgumentError -> Agent.role_label(role)
   end
 
   defp role_label(role), do: Agent.role_label(role)
@@ -603,6 +714,345 @@ defmodule CymphoWeb.OnboardingLive.Index do
     if model in [nil, ""], do: "#{label} · default model", else: "#{label} · #{model}"
   end
 
+  # ── r3 page-local components (build-spec §2.6: page-only helpers) ────
+
+  attr :id, :string, required: true
+  attr :n, :integer, required: true
+  attr :name, :string, required: true
+  attr :value, :string, required: true
+  attr :checked, :boolean, default: false
+  slot :inner_block, required: true
+  slot :line
+
+  # An option row on paper (151): the radio sits right before its label.
+  defp paper_opt(assigns) do
+    ~H"""
+    <div class="opt-w">
+      <input
+        class="opt-in"
+        type="radio"
+        id={@id}
+        name={@name}
+        value={@value}
+        checked={@checked}
+      />
+      <label class="opt" for={@id}>
+        <span class="on" aria-hidden="true">{@n}</span><span class="ot2">{render_slot(@inner_block)}<small :if={
+          @line != []
+        }>{render_slot(@line)}</small></span><span
+          class="radio"
+          aria-hidden="true"
+        ></span>
+      </label>
+    </div>
+    """
+  end
+
+  attr :people, :list, required: true
+
+  # The crew card's tiles (001, 125); a role-only tile has no second line.
+  defp crew_tiles(assigns) do
+    ~H"""
+    <ul class="crew">
+      <li :for={person <- @people}>
+        <span class="ct" aria-hidden="true">{initials(person.name)}</span><span class="cn">{person.name}<small :if={
+          person.role
+        }>{person.role}</small></span>
+      </li>
+    </ul>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :label, :string, required: true
+  attr :name, :string, required: true
+  attr :value, :any, default: nil
+  attr :error, :any, default: nil, doc: "the field's error message, tied by aria-describedby"
+  attr :class, :any, default: nil
+  attr :input_class, :string, default: nil
+  attr :rest, :global, include: ~w(maxlength placeholder list inputmode)
+
+  # A labelled capsule field (045, 024) with its own validation line.
+  defp ob_field(assigns) do
+    ~H"""
+    <div class={["fld", @class]}>
+      <label for={@id}>{@label}</label>
+      <input
+        id={@id}
+        name={@name}
+        type="text"
+        value={@value}
+        class={@input_class}
+        autocomplete="off"
+        aria-invalid={@error && "true"}
+        aria-describedby={@error && @id <> "-e"}
+        {@rest}
+      />
+      <p :if={@error} class="err" id={@id <> "-e"}><.r3_icon name="i-alert" />{@error}</p>
+    </div>
+    """
+  end
+
+  attr :message, :string, required: true
+
+  defp ob_error(assigns) do
+    ~H"""
+    <p class="err" role="alert"><.r3_icon name="i-alert" />{@message}</p>
+    """
+  end
+
+  # ── r3 view helpers ─────────────────────────────────────────────────
+
+  defp present(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp present(_value), do: nil
+
+  # The task-ID prefix ("NW") and the project ("{Company} app") follow the
+  # company name until the owner sets them (spec P9 [LV]).
+  defp follow_company_name(%{"name" => name} = params, form) when is_binary(name) do
+    old = String.trim(form["name"] || "")
+    new = String.trim(name)
+
+    if new == "" or new == old do
+      params
+    else
+      {prefix, project} =
+        case Companies.autonomous_company_blueprint(form["blueprint"] || "software") do
+          {:ok, blueprint} -> {blueprint.default_prefix, blueprint.project_name}
+          {:error, :not_found} -> {nil, nil}
+        end
+
+      params
+      |> follow(form, "issue_prefix", [prefix, name_prefix(old)], name_prefix(new))
+      |> follow(form, "project_name", [project, "#{old} app"], "#{new} app")
+    end
+  end
+
+  defp follow_company_name(params, _form), do: params
+
+  defp follow(params, form, key, auto_values, value) do
+    current = form[key]
+    typed? = Map.has_key?(params, key) and params[key] != current
+
+    if value != nil and not typed? and current in auto_values,
+      do: Map.put(params, key, value),
+      else: params
+  end
+
+  # Initials of up to three words ("Northwind Software" -> "NS"), or the first
+  # two letters of a one-word name ("Acme" -> "AC").
+  defp name_prefix(name) do
+    prefix =
+      case Regex.scan(~r/[A-Za-z]+/, name || "") |> List.flatten() do
+        [word] -> String.slice(word, 0, 2)
+        words -> words |> Enum.take(3) |> Enum.map_join(&String.first/1)
+      end
+
+    prefix = String.upcase(prefix)
+    if Regex.match?(~r/^[A-Z]{2,7}$/, prefix), do: prefix
+  end
+
+  def leader_name(form, role) do
+    present(get_in(form, ["leader_names", role])) || @leader_defaults[role]
+  end
+
+  @base_refs ~w(ceo cto product_lead design_lead)
+
+  # Everyone the template hires, in the order the crew card lists them.
+  defp crew(blueprint, form) do
+    leaders =
+      for {key, role} <- [
+            ceo: :ceo,
+            cto: :cto,
+            product_manager: :product_manager,
+            designer: :designer
+          ] do
+        key = Atom.to_string(key)
+        %{key: key, name: leader_name(form, key), role: role_label(role)}
+      end
+
+    engineers =
+      for index <- 1..engineer_count(form)//1 do
+        %{key: "engineer", name: engineer_name_value(form, index), role: "Engineer"}
+      end
+
+    extras =
+      for agent <- blueprint.launch_manifest["agent_roster"],
+          agent["ref"] not in @base_refs and not String.starts_with?(agent["ref"], "engineer_") do
+        %{key: agent["ref"], name: agent["name"], role: role_label(agent["role"])}
+      end
+
+    leaders ++ engineers ++ extras
+  end
+
+  # Before the team is named, the crew card shows the roles.
+  defp crew_roles(blueprint, form) do
+    Enum.map(crew(blueprint, form), &%{&1 | name: &1.role, role: nil})
+  end
+
+  defp initials(text) do
+    case String.split(text) do
+      [first, second | _] -> String.first(first) <> String.first(second)
+      [word] -> String.slice(word, 0, 2)
+      [] -> "?"
+    end
+    |> String.upcase()
+  end
+
+  defp also_on_team(crew) do
+    crew
+    |> Enum.reject(&(&1.key in ["ceo", "cto", "engineer"]))
+    |> Enum.map(&"#{&1.name} (#{&1.role})")
+    |> join_and()
+  end
+
+  defp team_line(crew) do
+    {engineers, others} = Enum.split_with(crew, &(&1.key == "engineer"))
+
+    engineer_part =
+      case engineers do
+        [] -> []
+        [one] -> ["#{one.name} (Engineer)"]
+        many -> ["#{many |> Enum.map(& &1.name) |> join_and()} (Engineers)"]
+      end
+
+    {leaders, extras} = Enum.split_with(others, &(&1.key in Map.keys(@leader_defaults)))
+
+    (Enum.map(leaders, &"#{&1.name} (#{&1.role})") ++
+       engineer_part ++ Enum.map(extras, &"#{&1.name} (#{&1.role})"))
+    |> Enum.join(", ")
+  end
+
+  defp join_and([]), do: ""
+  defp join_and([one]), do: one
+
+  defp join_and(items) do
+    {init, [last]} = Enum.split(items, -1)
+    Enum.join(init, ", ") <> " and " <> last
+  end
+
+  # Who picks up task 1: the first seed task's assignee in the template.
+  defp first_task_owner(blueprint, crew) do
+    ref =
+      case blueprint.launch_manifest["seed_work"] do
+        [first | _] -> first["assignee_ref"]
+        _ -> "ceo"
+      end
+
+    key =
+      case ref do
+        "product_lead" -> "product_manager"
+        "design_lead" -> "designer"
+        "first_engineer" -> "engineer"
+        other -> other
+      end
+
+    Enum.find(crew, &(&1.key == key)) || Enum.find(crew, &(&1.key == "cto")) ||
+      List.first(crew)
+  end
+
+  defp visible_templates(filtered, form, all?, query) do
+    if all? or query != "" do
+      filtered
+    else
+      shown = Enum.take(filtered, @templates_shown)
+      selected = Enum.find(filtered, &(&1.key == form["blueprint"]))
+
+      if selected && selected not in shown, do: shown ++ [selected], else: shown
+    end
+  end
+
+  defp provider_name("codex"), do: "Codex"
+  defp provider_name(_adapter), do: "Claude Code"
+
+  # The three readiness lines for the form's runtime (build-spec §9).
+  defp readiness_view(form, checking?) do
+    adapter = sanitize_adapter(form["adapter"])
+    runtime = agent_runtime(form)
+    result = form["readiness"]
+    current? = not checking? and Readiness.current?(result, adapter, runtime)
+    installed = current? and result["installed"] == true
+    signed_in = current? and result["signed_in"] == true
+    priceable = Readiness.priceable?(adapter, runtime)
+    program = Readiness.program(adapter, runtime) || adapter
+
+    rows = [
+      {"Installed", current? && installed,
+       cond do
+         installed -> "found the #{program} program on this server"
+         current? -> "the #{program} program was not found on this server"
+         true -> "looks for the #{program} program on this server"
+       end},
+      {"Signed in", current? && signed_in,
+       cond do
+         signed_in ->
+           "a one-line test prompt was answered"
+
+         current? and installed ->
+           "The test prompt was refused. Sign in to #{provider_name(adapter)} on the server, then check again."
+
+         current? ->
+           "needs the program first"
+
+         true ->
+           "sends a one-line test prompt"
+       end},
+      {"Can be priced", priceable,
+       cond do
+         priceable and adapter == "codex" -> "you entered its prices"
+         priceable -> "it reports the cost of every run"
+         adapter == "codex" -> "enter its input and output prices above"
+         true -> "it reports no usage, so the spending limit can't stop it"
+       end}
+    ]
+
+    %{
+      current?: current?,
+      rows:
+        Enum.map(rows, fn {label, state, text} ->
+          kind =
+            cond do
+              state == true -> :done
+              label == "Can be priced" or current? -> :stopped
+              true -> :idle
+            end
+
+          %{label: label, kind: kind, text: text}
+        end),
+      heading:
+        cond do
+          checking? -> "Checking this server…"
+          current? and installed and signed_in and priceable -> "Ready on this server"
+          current? -> "Not ready on this server"
+          true -> "Not checked yet"
+        end,
+      action:
+        cond do
+          checking? -> "Checking…"
+          not current? -> "Check"
+          not (installed and signed_in) -> "Check again"
+          true -> nil
+        end,
+      fix?: current? and not (installed and signed_in)
+    }
+  end
+
+  defp user_initials(%{name: name}) when is_binary(name) and name != "", do: initials(name)
+  defp user_initials(_user), do: "Me"
+
+  defp step_state(index, current) do
+    cond do
+      index < current -> :done
+      index == current -> :current
+      true -> :todo
+    end
+  end
+
   defp default_company_form do
     %{
       "blueprint" => "software",
@@ -615,6 +1065,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
       "budget_monthly_usd" => "100",
       "engineer_count" => "2",
       "engineer_names" => [],
+      "leader_names" => @leader_suggestions,
       "adapter" => "claude_code",
       "runtime_command" => "",
       "runtime_model" => "",
