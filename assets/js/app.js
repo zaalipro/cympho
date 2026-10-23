@@ -2,9 +2,9 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 
-// Cympho ships dark-only per DESIGN.md. Theme toggle was removed; this
-// noop preserves the global symbol so any stale inline handlers still in
-// the wild don't throw before they're cleaned up.
+// Paper & Ink: light/dark/system; tokens in app.css/themes.css, the mode is
+// <html data-mode> (see the phx:set-theme listener). This noop preserves the
+// old global symbol so any stale inline handlers don't throw.
 window.toggleTheme = function() {};
 
 const UI_MODE_KEY = "cympho-ui-mode";

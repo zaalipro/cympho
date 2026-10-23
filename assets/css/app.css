@@ -4,24 +4,33 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500;700&family=Saira+Condensed:wght@300;400;600;700&display=swap');
 
-/* Per-theme [data-theme] token overrides (uses :root[data-theme] specificity). */
+/* Paper & Ink tokens. :root below is the light mode; themes.css holds the dark
+   block twice (System follows the device unless data-mode="light"; data-mode="dark"
+   forces it), kept identical by test/cympho_web/r3_css_contract_test.exs. */
 @import "themes.css";
 
-/* ============================================
-   Cympho Design Tokens — sourced from DESIGN.md (warm editorial spec)
+/* r3 shell and shared components (every selector under .cy-r3), then one file
+   per page track. */
+@import "r3.css";
+@import "r3-pages/home.css";
+@import "r3-pages/task.css";
+@import "r3-pages/agents.css";
+@import "r3-pages/work.css";
+@import "r3-pages/money.css";
+@import "r3-pages/onboarding.css";
 
-   These :root values are the default "Ember" theme (warm dark). Per-theme
-   overrides live in themes.css under [data-theme="…"]; flipping that attr
-   on <html> recolors the whole app.
-   Both spec-named tokens (surface-1, ink, hairline, primary…) and the
-   legacy names (panel, surface, text-primary, border, brand…) resolve
-   to the same values so old templates keep working while new code uses
-   the spec names.
+/* ============================================
+   Cympho Design Tokens — Paper & Ink (r3)
+
+   :root holds the light mode: the r3 token set (copied verbatim from the
+   approved mockups' r3.css) followed by the legacy names the existing
+   templates and Tailwind config use. A legacy name that equals one r3 token
+   is written as var(<token>) so it follows Light/Dark with no dark line;
+   only the legacy names with their own value are literals here and in each
+   dark copy in themes.css.
    ============================================ */
 
 :root {
-  color-scheme: dark;
-
   /* Desktop sidebar width — driven live by the resize/collapse controller in
      root.html.heex (persisted to localStorage). The layout reads it via
      w-[var(--sidebar-w)] / ml-[var(--sidebar-w)] / left-[var(--sidebar-w)]. */
@@ -37,27 +46,88 @@
   /* Content pad under the fixed nav (nav + small cushion + safe-area). */
   --mobile-shell-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
 
-  /* Canvas + surface ladder — warm "Claude" charcoal: canvas lifted to a
-     paper-like warm tone; ladder steps up in warm lightness so elevation
-     reads on the lighter canvas. (Legacy aliases below are var() refs and
-     follow these.) */
-  --color-canvas:        #20201E;
-  --color-surface-1:     #262624;
-  --color-surface-2:     #2D2C2A;
-  --color-surface-3:     #353330;
-  --color-surface-4:     #423F3B;
+  /* ---------- r3: theme-independent tokens + light theme ---------- */
+  --r-frame:28px;--r-tray:20px;--r-card:16px;--r-row:12px;--r-field:8px;--r-pill:9999px;
+  --sans:Inter,"Inter Variable",-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --ease:cubic-bezier(0.32,0.72,0,1);
+  --press:cubic-bezier(0.34,-0.56,0.64,1);
+  --mask:#000;
+
+  color-scheme:light;--inv-scheme:dark;
+  /* surfaces: page < tray < frame = card (134) */
+  --page:#eaeaea;--frame:#ffffff;--tray:#f1f1f1;--card:#ffffff;--band:#f4f4f4;--hover:#f6f6f6;
+  --lift:#ffffff;--well:#fafafa;--quiet:#f4f4f4;--pop:#ffffff;--field-bg:#ffffff;--dots-bg:#ffffff;
+  --page-hover:rgba(255,255,255,.62);--ib-hover:rgba(0,0,0,.05);--tray-hover:#e7e7e7;
+  /* lines */
+  --line:#dfdfdf;--edge:#e3e3e3;--hair:#ececec;--tick:#d2d2d2;--spine:#d0d0d0;--band-line:#e6e6e6;
+  --tile-line:#e2e2e2;--lift-line:#e0e0e0;--ag-line:#dcdcdc;--av-line:#cfcfcf;--dots-line:#bdbdbd;
+  --underline:#9a9a9a;--field:#7a7a7a;
+  /* secondary pill */
+  --btn-bg:#ffffff;--btn-line:#d6d6d6;--btn-hover:#fafafa;--btn-line-hover:#bdbdbd;
+  /* ink */
+  --ink-hi:#000000;--ink:#212121;--ink-nav:#3d3d3d;--ink-2:#606060;
+  /* selection accent and status: each value passes on every light surface, page included */
+  --accent:#e8501a;--accent-text:#b93e0b;
+  --working:#2a7366;--waiting:#805e0e;--stopped:#b23a3a;--done:#2a743e;--idle:#6b6660;
+  --waiting-bg:#faf2de;--waiting-line:#efdcae;--stopped-bg:#fdeeee;--stopped-line:#f0cfcf;
+  /* ink objects on paper: they turn to paper objects in dark */
+  --count-bg:#212121;--count-ink:#ffffff;--brand-bg:#161616;--brand-ink:#ffffff;
+  --step-bg:#5f5f5f;--step-ink:#ffffff;
+  --kbd-bg:#f1f1f1;--kbd-line:#e0e0e0;--kbd-ink:#3d3d3d;
+  --file-bg:#efefef;--file-fold:#e2e2e2;--file-edge:#c4c4c4;--file-mark:#919191;
+  /* phone chrome */
+  --topbar-bg:rgba(234,234,234,.94);--dock-bg:rgba(255,255,255,.95);--dock-line:#dcdcdc;
+  /* focus: 2px ring outside a 2px gap */
+  --focus-ring:#101012;--focus-gap:#ffffff;
+  /* shadows */
+  --sh-tile:0 1px 2px rgba(0,0,0,.05),0 3px 8px -4px rgba(0,0,0,.10);
+  --sh-raise:0 1px 2px rgba(0,0,0,.05),0 6px 14px -8px rgba(0,0,0,.18);
+  --sh-chip:0 1px 2px rgba(0,0,0,.05);
+  --sh-card:0 0 0 0 transparent;
+  --sh-frame:0 1px 1px rgba(0,0,0,.03),0 28px 56px -40px rgba(0,0,0,.30);
+  --sh-pop:0 16px 40px -12px rgba(0,0,0,.25);
+  --sh-dock:0 16px 36px -14px rgba(0,0,0,.32);
+  --sh-brand:inset 0 1px 0 rgba(255,255,255,.18),0 1px 2px rgba(0,0,0,.25);
+
+  /* constant swatches for Settings › Appearance previews: the SAME value in every block, because each depicts a theme */
+  --sw-l-page:#eaeaea;--sw-l-card:#ffffff;--sw-l-ink:#161616;--sw-l-line:#dfdfdf;--sw-d-page:#0d0c0b;--sw-d-card:#201f1d;--sw-d-paper:#e6e3dd;--sw-d-line:#302e2b;
+  /* labelled categories (Spending › By runtime, Advanced) and the numeral on a chosen tile filled with --accent */
+  --cat-1:#2563c9;--cat-2:#6d4fd8;--cat-3:#6b6b6b;--on-accent:#101012;
+  /* inverse surface = the resolution card: ink in light (134) */
+  --inv-top:#2b2b2b;--inv-mid:#161616;--inv-bot:#0e0e0e;
+  --inv-sh:0 30px 60px -22px rgba(0,0,0,.48),0 12px 24px -12px rgba(0,0,0,.30),inset 0 1px 0 rgba(255,255,255,.08);
+  --inv-ink-hi:#ffffff;--inv-ink:#ededed;--inv-ink-2:#b9b9b9;--inv-line:rgba(255,255,255,.09);
+  --inv-row:rgba(255,255,255,.06);--inv-row-line:rgba(255,255,255,.09);--inv-row-hover:rgba(255,255,255,.10);
+  --inv-num-bg:rgba(255,255,255,.08);--inv-num-ink:#d6d6d6;--inv-radio:#a8a8a8;--inv-dash:rgba(255,255,255,.30);
+  --inv-accent:#f35c23;--inv-on-accent:#101012;--inv-accent-tint:rgba(243,92,35,.10);
+  --inv-pill-bg:#f5f5f5;--inv-pill-hover:#ffffff;--inv-pill-ink:#292929;--inv-nub-bg:#1c1c1c;--inv-nub-ink:#ffffff;
+  --inv-sh-pill:inset 0 -1px 0 rgba(0,0,0,.14),0 8px 18px -8px rgba(0,0,0,.6);
+  --inv-ghost-bg:rgba(255,255,255,.07);--inv-ghost-hover:rgba(255,255,255,.13);--inv-ghost-line:rgba(255,255,255,.14);--inv-ghost-ink:#ffffff;
+  --inv-kbd-bg:#2f2f2f;--inv-kbd-line:#444444;--inv-kbd-ink:#dcdcdc;
+  --inv-field-bg:rgba(255,255,255,.05);--inv-field:#8a8a8a;
+  --inv-focus-ring:#f5f5f5;--inv-focus-gap:#0e0e0e;
+  --inv-working:#6cc4b2;--inv-waiting:#e0b23a;--inv-stopped:#f29a91;--inv-done:#6cc480;--inv-idle:#b3ada3;
+
+  /* ---------- legacy names, mapped onto r3 tokens ---------- */
+  /* Canvas + surface ladder */
+  --color-canvas:        var(--page);
+  --color-surface-1:     var(--frame);
+  --color-surface-2:     var(--card);
+  --color-surface-3:     var(--band);
+  --color-surface-4:     #e7e7e7;
 
   /* Legacy aliases */
   --color-panel:         var(--color-surface-1);
   --color-surface:       var(--color-surface-2);
   --color-surface-hover: var(--color-surface-3);
-  --color-subtle:        rgba(255, 250, 245, 0.05);
+  --color-subtle:        rgba(0, 0, 0, 0.045);
 
-  /* Ink — warm off-white down to warm taupe */
-  --color-ink:           #FAF9F5;
-  --color-ink-muted:     #E5E1D8;
-  --color-ink-subtle:    #B0A99C;
-  --color-ink-tertiary:  #8C857A;
+  /* Ink (subtle and tertiary both read --ink-2: legibility over a fourth grey) */
+  --color-ink:           var(--ink);
+  --color-ink-muted:     var(--ink-nav);
+  --color-ink-subtle:    var(--ink-2);
+  --color-ink-tertiary:  var(--ink-2);
 
   /* Legacy aliases */
   --color-text-primary:    var(--color-ink);
@@ -65,61 +135,56 @@
   --color-text-tertiary:   var(--color-ink-subtle);
   --color-text-quaternary: var(--color-ink-tertiary);
 
-  /* Brand — terracotta */
-  --color-primary:       #D97757;
-  --color-primary-hover: #E08A6B;
-  --color-primary-focus: #D97757;
-  --color-primary-rgb:   217 119 87;   /* channels so Tailwind can apply alpha (bg-brand/10 …) */
+  /* Brand — the text- and fill-safe accent; hover keeps the same value */
+  --color-primary:       var(--accent-text);
+  --color-primary-hover: var(--accent-text);
+  --color-primary-focus: var(--focus-ring);
+  --color-primary-rgb:   185 62 11;   /* channels so Tailwind can apply alpha (bg-brand/10 …) */
 
   /* Legacy aliases */
   --color-brand:        var(--color-primary);
   --color-accent:       var(--color-primary);
   --color-accent-hover: var(--color-primary-hover);
 
-  /* Hairlines — warm, low-contrast on the lifted canvas */
-  --color-hairline:           #3A3733;
-  --color-hairline-strong:    #4A453F;
-  --color-hairline-tertiary:  #5A544C;
+  /* Hairlines */
+  --color-hairline:           var(--line);
+  --color-hairline-strong:    var(--tick);
+  --color-hairline-tertiary:  var(--btn-line-hover);
 
   /* Legacy aliases */
   --color-border:        var(--color-hairline);
   --color-border-subtle: var(--color-surface-3);
   --color-border-hover:  var(--color-hairline-strong);
 
-  /* Semantic — Anthropic's official Claude tokens (DESIGN.md):
-     success #5db872 · warning #d4a017 · error #c64545. */
-  --color-success:      #5db872;
-  --color-success-rgb:  93 184 114;
-  --color-warning:      #d4a017;
-  --color-warning-rgb:  212 160 23;
-  --color-error:        #c64545;
-  --color-error-rgb:    198 69 69;
-  --color-info:         #5db8a6;   /* warm teal — info/active status (DESIGN.md) */
-  --color-info-rgb:     93 184 166;
-  --color-overlay:      rgba(20, 20, 18, 0.6);
+  /* Semantic — the r3 status hues (each passes on every surface) */
+  --color-success:      var(--done);
+  --color-success-rgb:  42 116 62;
+  --color-warning:      var(--waiting);
+  --color-warning-rgb:  128 94 14;
+  --color-error:        var(--stopped);
+  --color-error-rgb:    178 58 58;
+  --color-info:         var(--working);
+  --color-info-rgb:     42 115 102;
+  --color-overlay:      rgba(20, 20, 20, 0.4);
 
   /* Buttons */
   --color-button-bg:    var(--color-surface-2);
   --color-button-hover: var(--color-surface-3);
 
-  /* Selection + scrollbars (terracotta-tied) */
-  --color-selection:        rgba(217, 119, 87, 0.30);
-  --color-scrollbar:        rgba(255, 250, 245, 0.12);
-  --color-scrollbar-hover:  rgba(255, 250, 245, 0.18);
+  /* Selection + scrollbars */
+  --color-selection:        rgba(232, 80, 26, 0.16);
+  --color-scrollbar:        rgba(0, 0, 0, 0.2);
+  --color-scrollbar-hover:  rgba(0, 0, 0, 0.3);
 
-  /* ── Multi-theme contract — overridden per [data-theme] in themes.css.
-     Defaults below are the Ember (warm-dark) theme, so no attr == today. ── */
+  /* Text/icon color on a primary-filled button */
+  --color-on-primary: #ffffff;
 
-  /* Text/icon color on a primary-filled button (Ember: dark on terracotta) */
-  --color-on-primary: #20201E;
+  /* Typography families — Inter and JetBrains Mono; the serif display face is retired */
+  --font-display: var(--sans);
+  --font-body:    var(--sans);
+  --font-mono:    var(--mono);
 
-  /* Typography families — display vs body vs mono. Fraunces gives the
-     display voice its molten, characterful curves (optical sizing on). */
-  --font-display: "Fraunces", "Source Serif 4", ui-serif, "Iowan Old Style", Georgia, Cambria, "Times New Roman", serif;
-  --font-body:    "Inter", "Inter Variable", "SF Pro Display", -apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-mono:    "Berkeley Mono", ui-monospace, "SF Mono", Menlo, monospace;
-
-  /* Radius scale + semantic radii (themes shift these: Blocks→pill, Circuit→0) */
+  /* Radius scale + semantic radii */
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -135,14 +200,14 @@
   --radius-input: 8px;
   --radius-field: 8px;
 
-  /* Elevation — ambient shadow color, per-theme strength, inset top highlight */
+  /* Elevation — ambient shadow color, per-mode strength, inset top highlight */
   --shadow-rgb: 0 0 0;
-  --shadow-strength: 1;
-  --shadow-inset-highlight: rgba(255, 250, 245, 0.05);
+  --shadow-strength: 0.4;
+  --shadow-inset-highlight: transparent;
 
-  /* Decorative effects — softened/disabled on light themes */
-  --vignette-color: rgba(0, 0, 0, 0.35);
-  --noise-opacity: 0.035;
+  /* Decorative effects — off in both modes */
+  --vignette-color: transparent;
+  --noise-opacity: 0;
   --theme-hero-bg: transparent;
 
   /* Motion — spring-weighted curves; never linear/ease-in-out on
@@ -582,13 +647,18 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
   }
 }
 
-/* Touch-friendly tap targets */
-button, a, select, input[type="submit"] {
+/* Touch-friendly tap targets for legacy markup. r3 regions (the rail, the phone
+   top bar and every r3 page frame, [data-page]) size their own targets, so they
+   are scoped out; Advanced blocks inside r3 pages keep the floor. Specificity
+   stays 0 so every Tailwind utility still wins. */
+:where(button, a, select, input[type="submit"]):not(:where(.rail *, .topbar *, [data-page] *)),
+:where([data-page] .ui-advanced-only) :where(button, a, select, input[type="submit"]) {
   min-height: 28px;
 }
 
 @media (max-width: 1023px) {
-  button, a, select, input[type="submit"] {
+  :where(button, a, select, input[type="submit"]):not(:where(.rail *, .topbar *, [data-page] *)),
+  :where([data-page] .ui-advanced-only) :where(button, a, select, input[type="submit"]) {
     min-height: 44px;
   }
 

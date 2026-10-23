@@ -12,8 +12,8 @@ const semantic = (token) =>
     STATUS_SHADES.map((shade) => [shade, `rgb(var(--color-${token}-rgb) / <alpha-value>)`])
   )
 
-// Cympho is dark-only per DESIGN.md. Tokens map to CSS variables defined in
-// app.css. Spec names (surface-1, ink, hairline, primary…) are the
+// Paper & Ink: light/dark/system; tokens in app.css/themes.css. Tokens map to
+// CSS variables defined there. Spec names (surface-1, ink, hairline, primary…) are the
 // canonical utilities; legacy names (panel, surface, text-primary, border,
 // brand…) are kept as aliases pointing to the same vars so the existing
 // templates compile without a sweeping rewrite.
