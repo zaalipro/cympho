@@ -354,6 +354,10 @@ defmodule CymphoWeb.IssueLive.R3TaskTest do
       html = render_submit(view, "assign_and_retry", %{"agent_id" => other.agents["Ravi"].id})
       assert html =~ "Agent not found"
 
+      html = render_submit(view, "assign_and_retry", %{})
+      assert html =~ "Choose who should retry it."
+      render_change(view, "pick_retry_agent", %{"_target" => ["agent_id"]})
+
       issue = Issues.get_issue!(nw.issues["NW-10"].id)
       assert is_nil(issue.assignee_id)
       assert issue.status == :blocked

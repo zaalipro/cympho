@@ -1068,6 +1068,8 @@ defmodule CymphoWeb.IssueLive.Show do
     {:noreply, assign(socket, :retry_choice, agent_id)}
   end
 
+  def handle_event("pick_retry_agent", _params, socket), do: {:noreply, socket}
+
   def handle_event("assign_and_retry", %{"agent_id" => agent_id}, socket) do
     issue = socket.assigns.issue
 
@@ -1096,6 +1098,10 @@ defmodule CymphoWeb.IssueLive.Show do
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Failed to assign and retry")}
     end
+  end
+
+  def handle_event("assign_and_retry", _params, socket) do
+    {:noreply, put_flash(socket, :error, "Choose who should retry it.")}
   end
 
   @impl true
