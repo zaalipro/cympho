@@ -1029,6 +1029,76 @@ defmodule Cympho.OwnerAttentionTest do
     end
   end
 
+  describe "recent_decisions" do
+    setup do
+      %{nw: Cympho.R3Fixtures.northwind!()}
+    end
+
+    test "lists what the user decided in the last 7 days, newest first", %{nw: nw} do
+      decisions = OwnerAttention.recent_decisions(nw.company.id, nw.user, days: 7)
+
+      assert Enum.map(decisions, &{&1.action, &1.issue.identifier}) == [
+               {:cancelled, "NW-11"},
+               {:accepted, "NW-2"},
+               {:accepted, "NW-1"}
+             ]
+
+      assert Enum.map(decisions, & &1.at) ==
+               Enum.map([2720, 3775, 4950], &Cympho.R3Fixtures.at(nw.anchor, &1))
+    end
+
+    test "an answered question is a decision", %{nw: nw} do
+      {:ok, _} =
+        IssueThreadInteractions.resolve_interaction(nw.questions["Q1"], %{
+          "status" => :responded,
+          "resolved_by_user_id" => nw.user.id,
+          "response" => "Email the customer first"
+        })
+
+      assert [%{action: :answered, issue: %{identifier: "NW-6"}} | _] =
+               OwnerAttention.recent_decisions(nw.company.id, nw.user)
+    end
+
+    test "leaves out older decisions, other people's and other companies'", %{nw: nw} do
+      other = Cympho.R3Fixtures.northwind!()
+      old = DateTime.add(nw.anchor, -8 * 86_400, :second)
+
+      insert_activity!(nw.issues["NW-3"], "user", nw.user.id, "approval_approved", old)
+      insert_activity!(nw.issues["NW-8"], "user", other.user.id, "approval_approved", nw.anchor)
+
+      insert_activity!(
+        nw.issues["NW-9"],
+        "agent",
+        nw.agents["Theo"].id,
+        "approval_approved",
+        nw.anchor
+      )
+
+      # The same person deciding in another company stays in that company.
+      insert_activity!(other.issues["NW-3"], "user", nw.user.id, "approval_approved", nw.anchor)
+
+      assert nw.company.id
+             |> OwnerAttention.recent_decisions(nw.user)
+             |> Enum.map(& &1.issue.id) ==
+               Enum.map(~w(NW-11 NW-2 NW-1), &nw.issues[&1].id)
+
+      assert OwnerAttention.recent_decisions(nw.company.id, nil) == []
+      assert OwnerAttention.recent_decisions(nil, nw.user) == []
+    end
+
+    defp insert_activity!(issue, actor_type, actor_id, action, at) do
+      Repo.insert!(%Cympho.Activities.Activity{
+        company_id: issue.company_id,
+        issue_id: issue.id,
+        actor_type: actor_type,
+        actor_id: actor_id,
+        action: action,
+        metadata: %{},
+        inserted_at: at
+      })
+    end
+  end
+
   defp issue!(company_id, title, opts \\ []) do
     attrs = %{
       title: title,
