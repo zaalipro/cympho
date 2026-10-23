@@ -275,7 +275,7 @@ defmodule CymphoWeb.IssueLive.Index do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
     user = socket.assigns[:current_user]
     filters = filter_values(socket.assigns)
-    issues = if company_id, do: Issues.list_issues(%{company_id: company_id}), else: []
+    issues = if company_id, do: Tasks.list(company_id), else: []
     ctx = Tasks.context(company_id, user, issues)
     stopped? = Enum.any?(ctx.items, &(OwnerAttention.owner_kind(&1) == :stopped))
     groups = issues |> Tasks.filter(filters) |> Tasks.groups(ctx)

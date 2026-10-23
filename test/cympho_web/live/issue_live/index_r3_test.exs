@@ -2,13 +2,16 @@ defmodule CymphoWeb.IssueLive.IndexR3Test do
   @moduledoc "The r3 Tasks list (plan P5): groups in the owner's order and Assign and retry."
   use CymphoWeb.LiveCase, async: true
 
+  import Ecto.Query, only: [from: 2]
   import Phoenix.LiveViewTest
 
   alias Cympho.Agents.Agent
   alias Cympho.Companies
   alias Cympho.Issues
+  alias Cympho.Issues.Issue
   alias Cympho.R3Fixtures
   alias Cympho.Repo
+  alias CymphoWeb.IssueLive.Tasks
 
   setup do
     nw = R3Fixtures.northwind!()
@@ -110,6 +113,27 @@ defmodule CymphoWeb.IssueLive.IndexR3Test do
 
       assert text(main, ".next .paper .nt") == "Answer Priya's question"
       assert main |> Floki.find(".tid") |> Enum.map(&squish(Floki.text(&1))) == ["NW-8"]
+    end
+
+    test "reads only the tasks a group can list: done ones from the last 7 days, any cancelled",
+         %{nw: nw} do
+      _other = R3Fixtures.northwind!()
+      long_ago = DateTime.utc_now() |> DateTime.add(-10, :day) |> DateTime.truncate(:second)
+      set_time(nw.issues["NW-1"], completed_at: long_ago)
+      set_time(nw.issues["NW-11"], cancelled_at: long_ago)
+
+      every = Issues.list_issues(%{company_id: nw.company.id})
+      assert nw.issues["NW-1"].id in Enum.map(every, & &1.id)
+
+      listed = Tasks.list(nw.company.id)
+
+      assert MapSet.new(listed, & &1.id) ==
+               MapSet.new(every, & &1.id) |> MapSet.delete(nw.issues["NW-1"].id)
+
+      assert Enum.all?(
+               listed,
+               &(Ecto.assoc_loaded?(&1.blocked_by) and Ecto.assoc_loaded?(&1.labels))
+             )
     end
   end
 
@@ -224,6 +248,10 @@ defmodule CymphoWeb.IssueLive.IndexR3Test do
                ~w(NW-4 NW-6 NW-7 NW-10)
 
       assert text(card.("NW-10"), ".bchip") == "Unassigned · was Mira"
+      # A narrow column wraps the chip only after the separator, never inside "was Mira".
+      assert card.("NW-10") |> Floki.find(".bchip") |> Floki.text() =~
+               "Unassigned\u00A0· was\u00A0Mira"
+
       assert text(card.("NW-6"), ".bchip") == "Waiting on you"
       assert text(card.("NW-4"), ".bchip") == "Your review"
       assert text(card.("NW-9"), ".bchip") == "Theo reviewing"
@@ -265,6 +293,10 @@ defmodule CymphoWeb.IssueLive.IndexR3Test do
       assert nw.issues["NW-6"].id in cards
       refute nw.issues["NW-7"].id in cards
     end
+  end
+
+  defp set_time(issue, fields) do
+    {1, _} = Repo.update_all(from(i in Issue, where: i.id == ^issue.id), set: fields)
   end
 
   defp assert_unchanged(nw) do

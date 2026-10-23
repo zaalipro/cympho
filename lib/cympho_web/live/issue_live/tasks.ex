@@ -89,6 +89,23 @@ defmodule CymphoWeb.IssueLive.Tasks do
   end
 
   @doc """
+  The company's tasks the list can group: every task but those done before the
+  last #{@recent_days} days, which no group shows; with what the rows read. Capped
+  like `Issues.list_issues/1`.
+  """
+  def list(company_id) when is_binary(company_id) do
+    since = DateTime.add(DateTime.utc_now(), -@recent_days, :day)
+
+    from(i in Issue,
+      where: i.company_id == ^company_id,
+      where: i.status != :done or i.completed_at >= ^since,
+      limit: 5_000,
+      preload: [:blocked_by, :labels]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   What the views need besides the tasks: the owner's open items by task, the
   company's agents, live runs by task, and who a task was taken from when its
   agent was paused.
@@ -493,10 +510,11 @@ defmodule CymphoWeb.IssueLive.Tasks do
     end
   end
 
+  # No-break spaces: a narrow Board column wraps the chip after the "·" only.
   defp unassigned(issue, ctx) do
     case ctx.was[issue.id] do
       nil -> "Unassigned"
-      name -> "Unassigned · was #{name}"
+      name -> "Unassigned\u00A0· was\u00A0#{name}"
     end
   end
 

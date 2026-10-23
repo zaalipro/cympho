@@ -99,7 +99,8 @@
 .cy-r3 .bc-t:focus-visible::after{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
 .cy-r3 .bc-f{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 8px;font-size:12px;line-height:16px;color:var(--ink-2)}
 .cy-r3 .bc-who{display:inline-flex;align-items:center;gap:6px;color:var(--ink)}
-.cy-r3 .bchip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:var(--r-pill);background:var(--band);border:1px solid var(--band-line);font-size:12px;line-height:16px;font-weight:500;color:var(--ink-nav)}
+/* a 12 px radius is the pill on one line and a rounded box when a narrow column wraps the chip */
+.cy-r3 .bchip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:12px;background:var(--band);border:1px solid var(--band-line);font-size:12px;line-height:16px;font-weight:500;color:var(--ink-nav)}
 .cy-r3 .bchip.w{background:var(--waiting-bg);border-color:var(--waiting-line);color:var(--waiting)}
 .cy-r3 .bchip.s{background:var(--stopped-bg);border-color:var(--stopped-line);color:var(--stopped)}
 .cy-r3 .bchip.k{color:var(--working)}
