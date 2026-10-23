@@ -491,6 +491,13 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
     0 1px 2px rgb(var(--shadow-rgb) / calc(0.18 * var(--shadow-strength)));
 }
 
+/* Text on a primary fill reads the fill's own ink. Legacy links pass it next to
+   app_link/1's default text colours, which come later in the utilities and
+   would otherwise win (and turn to ink on hover). */
+.text-on-primary {
+  color: var(--color-on-primary) !important;
+}
+
 .cympho-field {
   background: var(--color-panel);
   border: 1px solid var(--color-border);

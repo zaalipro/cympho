@@ -30,7 +30,7 @@ defmodule CymphoWeb.Format do
   def role_avatar_class(:cto), do: "bg-sky-500/15 text-sky-300"
   def role_avatar_class(:engineer), do: "bg-emerald-500/15 text-emerald-300"
   def role_avatar_class(:product_manager), do: "bg-amber-500/15 text-amber-300"
-  def role_avatar_class(:designer), do: "bg-fuchsia-500/15 text-fuchsia-300"
+  def role_avatar_class(:designer), do: "bg-subtle text-text-secondary"
   def role_avatar_class(_), do: "bg-subtle text-text-secondary"
 
   @doc """

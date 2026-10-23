@@ -229,7 +229,7 @@ defmodule CymphoWeb.OrgChartLive do
               <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
                 {recommendation.label}
               </p>
-              <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
+              <p class="mt-1 text-xs leading-5">{recommendation.detail}</p>
             </div>
           </div>
 
@@ -623,7 +623,7 @@ defmodule CymphoWeb.OrgChartLive do
 
   def org_health_metric(assigns) do
     ~H"""
-    <div class="bg-surface/70 px-3 py-2 text-center">
+    <div class="bg-surface px-3 py-2 text-center">
       <p class={"font-mono text-[18px] font-590 leading-none #{org_metric_text(@tone)}"}>
         {@value}
       </p>
