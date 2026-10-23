@@ -1,169 +1,142 @@
-<.page size="wide" data-ui-complex-page class="ember-aurora">
-  <div class="relative z-10">
-    <%!-- ============================================================
-         Hero — molten editorial greeting. Aurora field drifts behind;
-         the status line rides in an ember eyebrow chip.
-         ============================================================ --%>
-    <div class="mb-5 px-1 pt-2">
-      <.header>
-        <div class="min-w-0">
-          <div class="ui-advanced-only flex flex-wrap items-center gap-2">
-            <span class="ember-eyebrow">
-              {status_label(@autonomy_status)} · {status_label(@operating_mode)}
-            </span>
-            <span
-              class={[
-                "cympho-pulse-dot hidden h-2 w-2 rounded-full",
-                autonomy_dot_color(@autonomy_status)
-              ]}
-              style={"--cympho-pulse-color: #{autonomy_pulse_color(@autonomy_status)};"}
-            >
-            </span>
-          </div>
-          <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-            Today
-          </h1>
-        </div>
-        <:actions>
-          <.overflow_menu
-            :if={@runtime_controls_allowed}
-            label="Company controls"
-            class={
-              if @autonomy_status == :paused or @operating_mode == :review,
-                do: nil,
-                else: "ui-advanced-only"
-            }
-          >
-            <.menu_item
-              :if={@company && @autonomy_status == :active && @operating_mode != :low_power}
-              phx-click="low_power_company"
-              data-confirm="Switch to low power? Only high and critical queued work will auto-dispatch."
-            >
-              Low power
-            </.menu_item>
-            <.menu_item
-              :if={@company && @autonomy_status == :active && @operating_mode == :low_power}
-              phx-click="resume_company"
-            >
-              Resume full power
-            </.menu_item>
-            <.menu_item
-              :if={@company && @autonomy_status == :active}
-              phx-click="pause_company"
-              data-confirm="Pause autonomous execution for this company?"
-            >
-              Pause autonomy
-            </.menu_item>
-            <.menu_item :if={@company && @autonomy_status == :paused} phx-click="resume_company">
-              Resume autonomy
-            </.menu_item>
-            <.menu_item navigate={~p"/onboarding"}>Start company setup</.menu_item>
-          </.overflow_menu>
-        </:actions>
-      </.header>
+<.page_frame page="home" title="Home" data-ui-complex-page>
+  <:aside>
+    {Calendar.strftime(@now, "%A %-d %b")},
+    <span class="num">{Calendar.strftime(@now, "%H:%M")}</span>
+  </:aside>
+  <:header_end :if={@runtime_controls_allowed}>
+    <%!-- Advanced only: the company switch in the rail holds these for Simple. --%>
+    <div class="ui-advanced-only">
+      <.overflow_menu label="Company controls">
+        <.menu_item
+          :if={@company && @autonomy_status == :active && @operating_mode != :low_power}
+          phx-click="low_power_company"
+          data-confirm="Switch to low power? Only high and critical queued work will auto-dispatch."
+        >
+          Low power
+        </.menu_item>
+        <.menu_item
+          :if={@company && @autonomy_status == :active && @operating_mode == :low_power}
+          phx-click="resume_company"
+        >
+          Resume full power
+        </.menu_item>
+        <.menu_item
+          :if={@company && @autonomy_status == :active}
+          phx-click="pause_company"
+          data-confirm="Pause autonomous execution for this company?"
+        >
+          Pause autonomy
+        </.menu_item>
+        <.menu_item :if={@company && @autonomy_status == :paused} phx-click="resume_company">
+          Resume autonomy
+        </.menu_item>
+        <.menu_item navigate={~p"/onboarding"}>Start company setup</.menu_item>
+      </.overflow_menu>
     </div>
+  </:header_end>
 
-    <%!-- Simple-mode home: a calm glance — work in flight, what needs you,
-         and the team — with one clear next action. The dense ops panels
-         below are advanced-mode only. --%>
-    <section aria-label="Home" class="ui-simple-only mb-6">
-      <button
-        type="button"
-        data-quick-create-trigger
-        class="mb-4 flex w-full items-center gap-3 rounded-2xl border border-brand/25 bg-brand/[0.07] px-4 py-3.5 text-left shadow-card transition-colors hover:border-brand/45 hover:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-      >
-        <.spark class="h-5 w-5 shrink-0 text-brand" />
-        <span class="min-w-0 flex-1 truncate text-[15px] text-text-secondary">
-          What should the team do?
-        </span>
-        <span class="hero-arrow-right-mini h-4 w-4 shrink-0 text-brand"></span>
-      </button>
+  <%!-- The Next step: the first owner decision (stopped, problems, questions,
+       reviews, approvals); with none, agents-off or all clear (plan §11 D1). --%>
+  <NextStep.pair :if={@next_item} item={@next_item} agents={@agent_names} spending={@spending} />
+  <NextStep.server_off_step :if={!@next_item and !@runtime_enabled?} />
+  <NextStep.all_clear :if={!@next_item and @runtime_enabled?} />
 
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <.app_link
-          navigate={~p"/kanban"}
-          class="group flex items-center gap-3 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card transition hover:border-brand/40 hover:bg-surface/60"
-        >
-          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10">
-            <span class="hero-view-columns-mini h-5 w-5 text-brand"></span>
-          </span>
-          <span class="min-w-0">
-            <span class="ui-advanced-only block text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Active
-            </span>
-            <span class="block text-lg font-590 text-text-primary">
-              <span class="tabular-nums">{@running_work + @queued_work}</span>
-              <span class="text-sm font-510 text-text-tertiary">active</span>
-            </span>
-          </span>
-        </.app_link>
+  <div class="lower">
+    <.band_card :if={@needs != []} id="ny-t" title="Needs you">
+      <:header_end><.text_link navigate={~p"/inbox"}>Open Inbox</.text_link></:header_end>
+      <ul class="rows">
+        <NextStep.row
+          :for={{item, n} <- Enum.with_index(@needs, 1)}
+          item={item}
+          n={n}
+          agents={@agent_names}
+        />
+      </ul>
+      <p :if={@needs_more > 0} class="more">
+        <.text_link navigate={~p"/inbox"}>{@needs_more} more in Inbox</.text_link>
+      </p>
+    </.band_card>
 
-        <.app_link
-          navigate={~p"/inbox"}
-          class="group flex items-center gap-3 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card transition hover:border-brand/40 hover:bg-surface/60"
-        >
-          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10">
-            <span class="hero-inbox-mini h-5 w-5 text-brand"></span>
-          </span>
-          <span class="min-w-0">
-            <span class="ui-advanced-only block text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Waiting
-            </span>
-            <span class="block text-lg font-590 text-text-primary">
-              <span class="tabular-nums">{@needs_you_count}</span>
-              <span class="text-sm font-510 text-text-tertiary">
-                {if @needs_you_count == 1, do: "item", else: "items"}
-              </span>
-            </span>
-          </span>
-        </.app_link>
-
-        <.app_link
-          navigate={~p"/agents"}
-          class="group flex items-center gap-3 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card transition hover:border-brand/40 hover:bg-surface/60"
-        >
-          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10">
-            <span class="hero-users-mini h-5 w-5 text-brand"></span>
-          </span>
-          <span class="min-w-0">
-            <span class="ui-advanced-only block text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Agents
-            </span>
-            <span class="block text-lg font-590 text-text-primary">
-              <span class="tabular-nums">{@total_agents}</span>
-              <span class="text-sm font-510 text-text-tertiary">
-                {if @total_agents == 1, do: "agent", else: "agents"}
-              </span>
-            </span>
-          </span>
-        </.app_link>
+    <section class="card" aria-labelledby="day-t">
+      <div class="card-h">
+        <h2 class="h2" id="day-t">Last 24 hours</h2>
+        <span class="meta mono">{clock_day(@day_start)} → {clock_day(@now)}</span>
+      </div>
+      <div class="strip">
+        <div class="cell">
+          <p class="v">{@finished_count}</p>
+          <p class="l">{if @finished_count == 1, do: "task finished", else: "tasks finished"}</p>
+        </div>
+        <div class="cell">
+          <p class="v mono">{money(@spent_today)}</p>
+          <p class="l">spent</p>
+        </div>
+      </div>
+      <ul :if={@finished != []} class="fin">
+        <li :for={issue <- @finished}>
+          <.status_glyph kind={:done} color={false} /><span class="mono">{issue.identifier}</span><span>{issue.title}</span>
+        </li>
+      </ul>
+      <div class="ruler" aria-hidden="true"></div>
+      <div :if={@spending} class="lim">
+        <p :if={@spending.limit} class="lim-line">
+          <b class="mono">{money(@spending.spent)}</b>
+          of <span class="mono">{money(@spending.limit)}</span>
+          in the last {window(@spending.days)} ({@spending.used_percent}%)
+        </p>
+        <.tick_meter
+          :if={@spending.limit}
+          percent={@spending.percent}
+          warn_percent={@spending.warn_percent}
+        />
+        <p :if={!@spending.limit} class="lim-line">
+          <b class="mono">{money(@spending.spent)}</b>
+          in the last {window(@spending.days)}. No spending limit is set.
+        </p>
+      </div>
+      <div class="cf">
+        <.text_link navigate={~p"/activity"}>See all activity</.text_link>
+        <.text_link navigate={~p"/costs"}>Open Spending</.text_link>
       </div>
     </section>
+  </div>
 
+  <%!-- Phones only (r3.css): the rail is a tab bar there, so Home carries the team. --%>
+  <section class="card team-m" aria-labelledby="tm-t">
+    <div class="card-h">
+      <h2 class="h2" id="tm-t">Your team</h2>
+      <.link class="lnk" navigate={~p"/agents"}>See all</.link>
+    </div>
+    <ul class="roster">
+      <.team_row
+        :for={row <- @team}
+        name={row.name}
+        href={row.href}
+        kind={row.kind}
+        word={row.word}
+        for_you={row.for_you}
+        detail={row.detail}
+        pin={row.pin}
+      />
+    </ul>
+  </section>
+
+  <%!-- Advanced: the operator panels, unchanged below the r3 blocks (plan §0.2). --%>
+  <div class="ui-advanced-only">
     <%!-- ============================================================
-         Needs you — the one row that answers "does anything need ME
-         right now?". Each card is one decision with one CTA. When
-         nothing needs the owner, a single calm all-clear card.
-         Lower-priority items collapse behind a "Later" disclosure.
-         ============================================================ --%>
-    <section aria-label="Needs you" class="mb-5">
+           Setup and health — the operator queue (readiness, budgets, goal
+           links, CEO flow, nudges). The owner's decisions are the Next step
+           and Needs you above.
+           ============================================================ --%>
+    <section aria-label="Setup and health" class="mb-5">
       <div class="mb-3 px-1">
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Needs you
+        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand">
+          Setup and health
         </p>
       </div>
 
       <div class="stagger-children grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <.signoff_card
-          :if={@owner_signoff_decision}
-          decision={@owner_signoff_decision}
-          action={@owner_signoff_action}
-        />
-        <%= if @all_clear? do %>
-          <.all_clear_card />
-        <% else %>
-          <.needs_you_card :for={action <- @needs_you_actions} action={action} />
-        <% end %>
+        <.needs_you_card :for={action <- @needs_you_actions} action={action} />
       </div>
 
       <details :if={@later_actions != []} class="group mt-3 px-1">
@@ -194,37 +167,16 @@
                 </span>
               </span>
             </a>
-            <a
-              href={simple_action_path(action)}
-              class="ui-simple-only flex items-start gap-3 rounded-md border-l-2 border-transparent py-1 pl-3 pr-2 transition hover:border-brand hover:bg-surface/40"
-              title={simple_field(action, :detail, Map.get(action, :detail))}
-            >
-              <span class="mt-0.5 w-5 shrink-0 font-mono text-[11px] tabular-nums text-text-quaternary">
-                {String.pad_leading(Integer.to_string(idx), 2, "0")}
-              </span>
-              <span class="min-w-0 flex-1">
-                <span class="block truncate text-sm font-510 text-text-primary">
-                  {simple_field(action, :label, action.label)}
-                </span>
-                <span class="block truncate text-[11px] text-text-quaternary">
-                  {simple_field(action, :action, Map.get(action, :action))} · {simple_field(
-                    action,
-                    :detail,
-                    Map.get(action, :detail)
-                  )}
-                </span>
-              </span>
-            </a>
           </li>
         </ul>
       </details>
     </section>
 
     <%!-- ============================================================
-         Company health — one glanceable card: operating mode, agent
-         roll-up with a pulse dot, the four numbers that change
-         decisions, and the runtime capacity gauge.
-         ============================================================ --%>
+           Company health — one glanceable card: operating mode, agent
+           roll-up with a pulse dot, the four numbers that change
+           decisions, and the runtime capacity gauge.
+           ============================================================ --%>
     <section aria-label="Company health" class="ui-advanced-only ember-glass mb-5 p-5">
       <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(220px,0.95fr)_minmax(0,1.35fr)_minmax(250px,0.95fr)] lg:items-center">
         <div class="min-w-0">
@@ -535,7 +487,7 @@
         class="mt-4 flex flex-col gap-3 rounded-lg border border-border bg-canvas/55 p-3 lg:flex-row lg:items-start lg:justify-between"
       >
         <%!-- The ready / review / setup counters beside this label restate the
-             paperclip summary, so the sentence lives on the box's title. --%>
+               paperclip summary, so the sentence lives on the box's title. --%>
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
             <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
@@ -576,9 +528,9 @@
       </div>
 
       <%!-- One card per readiness concern. The operating primitives for org,
-           runtime, and agent guides restated their signal card's summary
-           verbatim, so readiness_cards/1 keeps only the primitives that add
-           a concern the signals do not already cover. --%>
+             runtime, and agent guides restated their signal card's summary
+             verbatim, so readiness_cards/1 keeps only the primitives that add
+             a concern the signals do not already cover. --%>
       <div class="stagger-children mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <a
           :for={signal <- readiness_cards(@autonomy_readiness)}
@@ -614,10 +566,10 @@
     </section>
 
     <%!-- ============================================================
-         Execution Health — tone-keyed tiles with gradient atmosphere.
-         Advanced mode only; simple mode gets the same truths through
-         the "Needs you" row.
-         ============================================================ --%>
+           Execution Health — tone-keyed tiles with gradient atmosphere.
+           Advanced mode only; simple mode gets the same truths through
+           the "Needs you" row.
+           ============================================================ --%>
     <div class="ui-advanced-only mb-5 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card">
       <div class="mb-1 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -664,9 +616,9 @@
     </div>
 
     <%!-- ============================================================
-         Work Metrics — single instrument band, advanced mode only.
-         The decision-driving numbers already live in Company health.
-         ============================================================ --%>
+           Work Metrics — single instrument band, advanced mode only.
+           The decision-driving numbers already live in Company health.
+           ============================================================ --%>
     <div class="ui-advanced-only stagger-children mb-5 grid grid-cols-2 divide-y divide-border overflow-hidden rounded-2xl border border-hairline bg-surface-1 sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-6">
       <%!-- Queued --%>
       <div class="ember-stat px-4 py-3.5 sm:border-r sm:border-border">
@@ -799,12 +751,12 @@
     </div>
 
     <%!-- ============================================================
-         While you were away — the catch-up row. Activity ticker and
-         inbox side by side; deeper telemetry stays in advanced mode.
-         ============================================================ --%>
+           While you were away — the catch-up row. Activity ticker and
+           inbox side by side; deeper telemetry stays in advanced mode.
+           ============================================================ --%>
     <section aria-label="While you were away" class="ui-advanced-only mt-5">
       <div class="mb-3 px-1">
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand">
           While you were away
         </p>
         <p class="mt-0.5 text-xs text-text-quaternary">
@@ -915,9 +867,9 @@
     </section>
 
     <%!-- ============================================================
-         Deep dive — roster, status donuts, patrol, throughput,
-         routine health. Advanced mode only.
-         ============================================================ --%>
+           Deep dive — roster, status donuts, patrol, throughput,
+           routine health. Advanced mode only.
+           ============================================================ --%>
     <div class="ui-advanced-only stagger-children mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-stretch">
       <.panel class="flex flex-col overflow-hidden">
         <div class="flex items-center justify-between border-b border-border px-4 py-3">
@@ -979,9 +931,9 @@
       <.panel class="flex flex-col p-4">
         <div class="grid grid-cols-2 gap-4">
           <%= for {title, counts, color_fun, total} <- [
-            {"Issues by Status", @issue_status_counts, &status_stroke/1, total_issues(@issue_status_counts)},
-            {"Agents by Status", @agent_status_counts, &agent_stroke/1, @total_agents}
-          ] do %>
+              {"Issues by Status", @issue_status_counts, &status_stroke/1, total_issues(@issue_status_counts)},
+              {"Agents by Status", @agent_status_counts, &agent_stroke/1, @total_agents}
+            ] do %>
             <div class="min-w-0">
               <h2 class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                 {title}
@@ -1185,11 +1137,11 @@
     </div>
 
     <%!-- ============================================================
-         Prompt bar — Claude-style task entry. Reuses the quick-create
-         modal (click / Enter → new issue) and the command palette
-         (inner search button, a sibling so the two delegated
-         data-* handlers never collide). No new backend.
-         ============================================================ --%>
+           Prompt bar — Claude-style task entry. Reuses the quick-create
+           modal (click / Enter → new issue) and the command palette
+           (inner search button, a sibling so the two delegated
+           data-* handlers never collide). No new backend.
+           ============================================================ --%>
     <div class="ui-advanced-only mt-8">
       <div class="flex items-center gap-2 rounded-2xl border border-hairline bg-surface-1 px-4 py-3 shadow-card transition-colors focus-within:border-hairline-strong hover:border-hairline-strong">
         <div
@@ -1217,4 +1169,4 @@
       </div>
     </div>
   </div>
-</.page>
+</.page_frame>

@@ -252,6 +252,8 @@
 .cy-r3 .opt-in:focus-visible+.opt{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
 .cy-r3 .own-box{display:none}
 .cy-r3 .opt-in:checked~.own-box{display:block}
+/* a question without options: the answer box is the whole form (CymphoWeb.NextStep) */
+.cy-r3 .own-box.open{display:block}
 .cy-r3 .own-box textarea{width:100%;min-height:72px;padding:10px 12px;border-radius:var(--r-row);background:var(--inv-field-bg);border:1px solid var(--inv-field);color:var(--inv-ink-hi);resize:vertical}
 
 /* ---------- cards ---------- */

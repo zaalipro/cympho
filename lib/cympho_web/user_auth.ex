@@ -319,7 +319,8 @@ defmodule CymphoWeb.UserAuth do
             count = owner_inbox_badge_count(company_id, socket.assigns[:current_user])
             socket = put_inbox_badge_counts(socket, count)
 
-            if socket.view == CymphoWeb.InboxLive.Index,
+            # Inbox and Home redraw their decisions from the same change.
+            if socket.view in [CymphoWeb.InboxLive.Index, CymphoWeb.DashboardLive.Index],
               do: {:cont, socket},
               else: {:halt, socket}
 

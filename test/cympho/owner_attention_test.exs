@@ -905,9 +905,89 @@ defmodule Cympho.OwnerAttentionTest do
     end
   end
 
+  describe "question answer options" do
+    test "a question keeps 2 to 4 short options; anything else keeps the question only",
+         context do
+      long = String.duplicate("a", 121)
+
+      payloads = [
+        {"Two options", ["Retry", "Email"]},
+        {"One option", ["Retry"]},
+        {"Five options", ["1", "2", "3", "4", "5"]},
+        {"A non-string option", ["Retry", 3]},
+        {"An over-long option", ["Retry", long]},
+        {"A blank option", ["Retry", " "]}
+      ]
+
+      for {title, options} <- payloads do
+        issue = issue!(context.company.id, title)
+
+        {:ok, _} =
+          IssueThreadInteractions.create_interaction(%{
+            issue_id: issue.id,
+            kind: :ask_user_questions,
+            payload: %{
+              "questions" => [
+                %{"question" => title, "options" => options},
+                %{"label" => "Never render provider-secret-value"}
+              ]
+            },
+            created_by_agent_id: context.agent.id
+          })
+      end
+
+      questions =
+        context.company.id
+        |> OwnerAttention.list_items(context.user)
+        |> Map.new(&{&1.issue.title, &1.questions})
+
+      assert questions["Two options"] == [%{question: "Two options", options: ["Retry", "Email"]}]
+
+      for title <- [
+            "One option",
+            "Five options",
+            "A non-string option",
+            "An over-long option",
+            "A blank option"
+          ] do
+        assert questions[title] == [%{question: title, options: []}]
+      end
+    end
+
+    test "items other than questions carry no questions", context do
+      {:ok, _} =
+        Issues.create_issue(%{
+          title: "Blocked task",
+          status: :blocked,
+          company_id: context.company.id
+        })
+
+      assert [%{kind: :human_action, questions: []}] =
+               OwnerAttention.list_items(context.company.id, context.user)
+    end
+  end
+
   describe "the r3 dataset" do
     setup do
       %{nw: Cympho.R3Fixtures.northwind!()}
+    end
+
+    test "a question item carries its question and its answer options", %{nw: nw} do
+      item =
+        nw.company.id
+        |> OwnerAttention.list_items(nw.user)
+        |> Enum.find(&(&1.source_id == nw.questions["Q1"].id))
+
+      assert item.questions == [
+               %{
+                 question: "When a customer's card payment fails, what should happen first?",
+                 options: [
+                   "Retry automatically after 3 days",
+                   "Email the customer first",
+                   "Both: email now, retry in 3 days"
+                 ]
+               }
+             ]
     end
 
     test "Needs you is one row per task, in the owner's order", %{nw: nw} do

@@ -251,35 +251,23 @@ defmodule CymphoWeb.SimpleModeCopyTest do
 
       # Review mode card also appears when dispatcher is off in test env —
       # advanced keeps ops anchors; simple must not.
-      {:ok, _view, html} = live(conn, "/dashboard")
+      {:ok, view, html} = live(conn, "/dashboard")
 
       assert html =~ "Something went wrong" or html =~ "Nothing is running" or
                html =~ "Some runs failed" or html =~ "Review mode is on"
 
-      # Dual-render: advanced may keep /operations#*; simple anchors never do.
-      simple_hrefs =
-        html
-        |> Floki.parse_document!()
-        |> Floki.find("section[aria-label='Needs you'] a.ui-simple-only")
-        |> Enum.map(fn {_tag, attrs, _} ->
-          attrs |> Map.new() |> Map.get("href")
-        end)
-        |> Enum.reject(&is_nil/1)
-
-      # Also check Later list simple rows if any.
-      later_hrefs =
-        html
-        |> Floki.parse_document!()
-        |> Floki.find("section[aria-label='Needs you'] details a.ui-simple-only")
-        |> Enum.map(fn {_tag, attrs, _} ->
-          attrs |> Map.new() |> Map.get("href")
-        end)
-        |> Enum.reject(&is_nil/1)
-
-      all_simple = simple_hrefs ++ later_hrefs
+      # r3: the Simple view is the r3 Home (plan §0.2); the dual Simple anchors
+      # went with the old cards. Every link outside the Advanced panels counts.
+      all_simple =
+        view
+        |> render()
+        |> Floki.parse_fragment!()
+        |> Floki.filter_out(".ui-advanced-only")
+        |> Floki.find("a[href]")
+        |> Enum.flat_map(&Floki.attribute(&1, "href"))
 
       assert all_simple != [],
-             "expected dual simple anchors for Needs-you CTAs so simple mode can navigate"
+             "expected the Simple Home to link its decisions so simple mode can navigate"
 
       for href <- all_simple do
         refute String.contains?(href, "#"),
@@ -301,8 +289,11 @@ defmodule CymphoWeb.SimpleModeCopyTest do
                  "/agents/new",
                  "/approvals",
                  "/approvals?status=pending",
-                 "/costs"
+                 "/costs",
+                 # r3: Home's own links (Last 24 hours, the hire vote).
+                 "/activity"
                ] or
+                 String.starts_with?(href, "/board-approvals/") or
                  String.starts_with?(href, "/inbox") or
                  String.starts_with?(href, "/issues/") or
                  String.starts_with?(href, "/approvals") or

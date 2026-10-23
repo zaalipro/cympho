@@ -21,7 +21,8 @@ defmodule CymphoWeb.OverviewIssueIsolationTest do
     {c_issue, _} = running_issue(c, "C_ISSUE", user_id)
 
     {:ok, home, html} = live(conn, "/")
-    assert html =~ "What should the team do?"
+    # r3: Home is the r3 page (the Simple prompt bar is gone).
+    assert html =~ ~s(data-page="home")
     assert html =~ ~s(href="/overview")
     # Sidebar navigation belongs to the static layout, outside LiveViewTest's DOM.
     GenServer.stop(home.pid)

@@ -347,6 +347,7 @@ defmodule Cympho.OwnerAttention do
         agent: interaction.created_by_agent,
         agent_id: interaction.created_by_agent_id,
         interaction_kind: interaction.kind,
+        questions: interaction_questions(interaction),
         title: interaction_title(interaction),
         summary: interaction_summary(interaction),
         card_body: card_body,
@@ -530,6 +531,7 @@ defmodule Cympho.OwnerAttention do
         interaction_kind: nil,
         issue: nil,
         issue_id: nil,
+        questions: [],
         raise_limit_path: nil,
         resume_path: nil,
         review_nudge: nil,
@@ -769,6 +771,35 @@ defmodule Cympho.OwnerAttention do
   end
 
   defp interaction_payload_lines(_kind, _payload), do: []
+
+  # The questions of an ask, each with its numbered answer options: only the
+  # canonical "question" key and 2–4 non-blank options of at most 120
+  # characters (owner decision); any other option shape keeps the question only.
+  defp interaction_questions(%IssueThreadInteraction{kind: :ask_user_questions, payload: payload}) do
+    (payload || %{})
+    |> Map.get("questions", [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{"question" => text} = question when is_binary(text) and text != "" ->
+        [%{question: truncate_card_text(text), options: answer_options(question["options"])}]
+
+      _ ->
+        []
+    end)
+  end
+
+  defp interaction_questions(_interaction), do: []
+
+  defp answer_options(options) when is_list(options) and length(options) in 2..4 do
+    if Enum.all?(
+         options,
+         &(is_binary(&1) and String.trim(&1) != "" and String.length(&1) <= 120)
+       ),
+       do: Enum.map(options, &String.trim/1),
+       else: []
+  end
+
+  defp answer_options(_options), do: []
 
   defp payload_message(payload) when is_map(payload) do
     case Map.get(payload, "message") do

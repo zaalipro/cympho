@@ -22,7 +22,8 @@ defmodule CymphoWeb.MultiCompanyOverviewLiveTest do
   test "visible optional link leaves landing unchanged and renders read-only authorized summaries",
        %{conn: conn, b: b, c: c} do
     {:ok, _home, html} = live(conn, "/")
-    assert html =~ "What should the team do?"
+    # r3: Home is the r3 page (the Simple prompt bar is gone).
+    assert html =~ ~s(data-page="home")
     assert html =~ ~s(href="/overview")
     {:ok, view, html} = live(conn, "/overview")
     assert html =~ "Company overview"
@@ -74,7 +75,8 @@ defmodule CymphoWeb.MultiCompanyOverviewLiveTest do
     assert {:error, {:redirect, %{to: "/login?return_to=%2Foverview"}}} = live(guest, "/overview")
     Repo.delete!(membership)
     {:ok, _home, html} = live(conn, "/")
-    assert html =~ "What should the team do?"
+    # r3: Home is the r3 page (the Simple prompt bar is gone).
+    assert html =~ ~s(data-page="home")
     refute html =~ ~s(href="/overview")
     {:ok, _issues, _} = live(conn, "/issues")
     {:ok, _projects, _} = live(conn, "/projects")
