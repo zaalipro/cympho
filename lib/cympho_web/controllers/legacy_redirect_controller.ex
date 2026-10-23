@@ -6,7 +6,8 @@ defmodule CymphoWeb.LegacyRedirectController do
   """
   use CymphoWeb, :controller
 
-  def settings(conn, _params), do: redirect(conn, to: ~p"/settings/profile")
+  # Every Settings entry point links /settings; Settings opens on Company › Details (r3 P8).
+  def settings(conn, _params), do: redirect(conn, to: ~p"/settings/company")
   def adapters(conn, _params), do: redirect(conn, to: ~p"/settings/adapters")
   def adapter(conn, %{"key" => key}), do: redirect(conn, to: ~p"/settings/adapters/#{key}")
   # Old links carried the company in the path; switch to it (membership-checked

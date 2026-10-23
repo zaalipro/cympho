@@ -1,28 +1,141 @@
-<div class="p-6 lg:p-8 max-w-7xl mx-auto ember-aurora" data-ui-complex-page>
-  <div class="relative z-[1]">
-    <.header>
-      <span class="ember-eyebrow">Spend intelligence</span>
-      <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-        {@page_title}
-      </h1>
-      <:actions>
-        <.form
-          for={%{}}
-          as={:days}
-          phx-change="change_days"
-          phx-submit="change_days"
-          class="inline-flex"
-        >
-          <.input
-            type="select"
-            name="days"
-            options={[{"7 days", "7"}, {"30 days", "30"}, {"90 days", "90"}]}
-            value={to_string(@days)}
-            class="text-sm"
-          />
-        </.form>
-      </:actions>
-    </.header>
+<.page_frame page="spending" title="Spending" data-ui-complex-page>
+  <:aside :if={@spending}>since {day(@since)}</:aside>
+
+  <.limit_step
+    :if={@spending}
+    spending={@spending}
+    policy={@limit_policy}
+    can_change={@can_change_limit}
+    paused={@company_paused?}
+    runtime_controls={@runtime_controls_allowed}
+    input={@limit_input}
+  />
+
+  <div :if={@spending && @agent_rows != []} class="money-g">
+    <section class="card" aria-labelledby="ba-t">
+      <div class="card-h">
+        <h2 class="h2" id="ba-t">By agent</h2>
+        <span class="meta">Last 24 hours <span class="mono">{money(@day_total)}</span></span>
+      </div>
+      <table class="money">
+        <thead>
+          <tr>
+            <th scope="col">Agent</th>
+            <th scope="col">{window(@spending.days)}</th>
+            <th scope="col">24 hours</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr :for={row <- @agent_rows}>
+            <th scope="row">
+              <.link :if={row.agent} class="nm" navigate={"/agents/#{row.agent.id}?from=/costs"}>
+                <span class="tile-ag sm" aria-hidden="true">{initials(row.agent.name)}</span>{row.agent.name}
+              </.link>
+              <span :if={!row.agent} class="nm">A removed agent</span>
+            </th>
+            <td><.amount value={row.total_cost} total={@window_total} /></td>
+            <td class="mono">{money(Map.get(@day_by_agent, row.agent_id, Decimal.new(0)))}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" aria-labelledby="bt-t">
+      <div class="card-h">
+        <h2 class="h2" id="bt-t">By task</h2>
+        <span class="meta">Last {window(@spending.days)}</span>
+      </div>
+      <.task_table :if={@top_tasks != []} rows={@top_tasks} total={@window_total} />
+      <details :if={@more_tasks != []} class="earlier more">
+        <summary>
+          <span>
+            <span class="mono">{length(@more_tasks)}</span> more<span aria-hidden="true"> ·</span>
+            <span class="mono">{" " <> money(sum(@more_tasks))}</span>
+          </span>
+          <.r3_icon name="i-chev-down" />
+        </summary>
+        <.task_table rows={@more_tasks} total={@window_total} />
+      </details>
+      <div :if={Decimal.gt?(@untied_total, 0)} class="untied">
+        <p>
+          <span class="ut-t">Not tied to a task</span>
+          <span class="ut-s">Runs that were not about one task</span>
+        </p>
+        <.amount value={@untied_total} total={@window_total} />
+      </div>
+    </section>
+  </div>
+
+  <.band_card
+    :if={@spending && @agent_rows == []}
+    id="ns-empty"
+    title="Where it went"
+    band={false}
+  >
+    <.quiet_empty title={"No spend in the last #{window(@spending.days)}"}>
+      Costs appear here once agents start running.
+    </.quiet_empty>
+  </.band_card>
+
+  <section
+    :if={Map.get(@summary, :has_unpriced_usage?)}
+    id="unpriced-usage-warning"
+    data-testid="unpriced-usage-warning"
+    class="card"
+    aria-labelledby="up-t"
+  >
+    <div class="card-h">
+      <h2 class="h2" id="up-t">Usage we couldn't price</h2>
+    </div>
+    <p class="note-l">
+      {format_tokens(@summary.unpriced_tokens)} tokens across {pluralize(
+        @summary.unpriced_request_count,
+        "request"
+      )} reported no price, so they are not in the totals above.
+    </p>
+    <.text_link navigate="/settings/company?section=billing">Add prices in Billing</.text_link>
+  </section>
+
+  <%!-- Advanced: by runtime, then the analytics, unchanged below the r3 blocks (plan §0.2). --%>
+  <div class="ui-advanced-only">
+    <section :if={@by_provider != []} class="card" aria-labelledby="rt-t">
+      <div class="card-h">
+        <h2 class="h2" id="rt-t">By runtime <span class="adv">Adv</span></h2>
+        <span class="meta">Last {window(@days)}</span>
+      </div>
+      <div class="rtb" style={runtime_columns(@by_provider)} aria-hidden="true">
+        <i :for={{row, n} <- Enum.with_index(@by_provider)} class={category(n)}></i>
+      </div>
+      <ul class="rtl">
+        <li :for={{row, n} <- Enum.with_index(@by_provider)}>
+          <span class={["key", category(n)]} aria-hidden="true"></span>
+          <span>
+            {runtime_label(row.provider)}
+            <small :if={@runtime_agents[row.provider]}>{@runtime_agents[row.provider]}</small>
+          </span>
+          <span class="mono">{money(row.total_cost || Decimal.new(0))}</span>
+        </li>
+      </ul>
+    </section>
+
+    <div class="mb-6 mt-6 flex flex-wrap items-center justify-between gap-3">
+      <h2 class="h2">Details</h2>
+      <.form
+        for={%{}}
+        as={:days}
+        phx-change="change_days"
+        phx-submit="change_days"
+        class="inline-flex"
+      >
+        <.input
+          type="select"
+          name="days"
+          options={[{"7 days", "7"}, {"30 days", "30"}, {"90 days", "90"}]}
+          value={to_string(@days)}
+          class="text-sm"
+        />
+      </.form>
+    </div>
     
 <!-- Budget Alerts -->
     <div
@@ -76,56 +189,9 @@
     </div>
 
     <section
-      id="cost-command"
-      data-testid="cost-command"
-      class="ember-glass mb-6 overflow-hidden"
-    >
-      <div class="border-b border-border bg-gradient-to-b from-surface-2/50 to-transparent px-5 py-4">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <p class="ui-advanced-only text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                Cost Analytics
-              </p>
-              <span class={[
-                "rounded-full border px-2 py-0.5 text-[11px] font-510",
-                cost_command_badge_class(@cost_command.tone)
-              ]}>
-                {@cost_command.badge}
-              </span>
-            </div>
-            <h2 class="mt-2 text-lg font-590 tracking-tight text-text-primary">
-              {@cost_command.title}
-            </h2>
-            <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
-              <span class="ui-advanced-only">{@cost_command.summary}</span>
-              <span class="ui-simple-only">{@cost_command.simple_summary}</span>
-            </p>
-            <p :if={@cost_command.driver} class="mt-2 text-xs font-510 text-text-secondary">
-              {@cost_command.driver}
-            </p>
-          </div>
-          <a
-            href={@cost_command.action_path}
-            class={[
-              "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
-              cost_command_action_class(@cost_command.tone)
-            ]}
-          >
-            <span class="hero-arrow-right-mini h-4 w-4"></span>
-            {@cost_command.action_label}
-          </a>
-        </div>
-      </div>
-
-      <%!-- No metric strip here: spend, limit and used are the summary cards
-           below, and printing them twice let the two disagree. --%>
-    </section>
-
-    <section
       id="spend-runway"
       data-testid="spend-runway"
-      class="ui-advanced-only mb-6 overflow-hidden rounded-lg border border-border bg-panel"
+      class="mb-6 overflow-hidden rounded-lg border border-border bg-panel"
     >
       <div class="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div class="min-w-0">
@@ -171,137 +237,6 @@
       </div>
     </section>
     
-<!-- Summary Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      <div class="ember-stat bg-surface border border-border rounded-xl p-5">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-text-secondary text-xs uppercase tracking-wider">Total Cost</span>
-          <svg
-            class="w-5 h-5 text-text-quaternary"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-        </div>
-        <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-          {format_cost(@summary.total_cost)}
-        </div>
-        <div class="text-xs text-text-quaternary mt-1">
-          <%= if Map.get(@summary, :has_unpriced_usage?) do %>
-            plus unpriced usage
-          <% else %>
-            Last {@days} days
-          <% end %>
-        </div>
-      </div>
-
-      <div class="ember-stat bg-surface border border-border rounded-xl p-5">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-text-secondary text-xs uppercase tracking-wider">Total Tokens</span>
-          <svg
-            class="w-5 h-5 text-text-quaternary"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-            />
-          </svg>
-        </div>
-        <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-          {format_tokens(@summary.total_tokens)}
-        </div>
-      </div>
-
-      <div class="ember-stat bg-surface border border-border rounded-xl p-5">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-text-secondary text-xs uppercase tracking-wider">Budget Limit</span>
-          <svg
-            class="w-5 h-5 text-text-quaternary"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-            />
-          </svg>
-        </div>
-        <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-          {posture_limit(@spend_posture)}
-        </div>
-        <div class="text-xs text-text-quaternary mt-1">Active budgets</div>
-      </div>
-
-      <div class="ember-stat bg-surface border border-border rounded-xl p-5">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-text-secondary text-xs uppercase tracking-wider">Budget Spent</span>
-          <svg
-            class="w-5 h-5 text-text-quaternary"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-            />
-          </svg>
-        </div>
-        <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-          {format_cost(@spend_posture.budget_spend)}
-        </div>
-        <% pace = spend_pace(@spend_posture) %>
-        <div class={["text-xs mt-1 leading-5", spend_pace_text_class(pace.tone)]}>
-          {pace.text}
-        </div>
-      </div>
-    </div>
-
-    <section
-      :if={Map.get(@summary, :has_unpriced_usage?)}
-      id="unpriced-usage-warning"
-      data-testid="unpriced-usage-warning"
-      class="mb-6 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4"
-    >
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="min-w-0">
-          <p class="flex items-center gap-2 text-sm font-590 text-amber-100">
-            <span class="hero-exclamation-triangle-mini h-4 w-4 text-white"></span>
-            Pricing is missing for token usage
-          </p>
-          <p class="mt-1 text-xs leading-5 text-amber-100/80">
-            {format_tokens(@summary.unpriced_tokens)} tokens across {@summary.unpriced_request_count} {pluralize(
-              @summary.unpriced_request_count,
-              "request"
-            )} reported zero cost. Treat the dollar total as incomplete until model pricing or provider-reported cost is configured.
-          </p>
-        </div>
-        <a
-          href="#top-cost-drivers"
-          class="ui-advanced-only inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-amber-500/30 bg-black/15 px-3 py-2 text-xs font-590 text-amber-50 transition hover:bg-amber-500/15"
-        >
-          <span class="hero-chart-bar-mini h-4 w-4"></span> Inspect drivers
-        </a>
-      </div>
-    </section>
-    
 <!-- One empty panel instead of nine cards each saying "no X yet" -->
     <div :if={@spend_breakdowns_empty?} class="mb-6">
       <.cost_empty_state
@@ -309,7 +244,6 @@
         icon="hero-chart-bar-square-mini"
         title="No spend recorded in this window"
         detail="Breakdowns by agent, issue, model and provider appear once agent runs report token usage. Set a spending limit before launching more runtime."
-        simple_detail="Costs appear here once agents start running."
         primary_label="Create budget"
         primary_path={~p"/budgets/new"}
         secondary_label="Open Operations"
@@ -746,11 +680,10 @@
           icon="hero-shield-check-mini"
           title="No active budgets"
           detail="Create a company budget so runtime launches have a clear spend envelope."
-          simple_detail="Set a limit so spending can't run away."
           primary_label="Create budget"
           primary_path={~p"/budgets/new"}
         />
       </div>
     </div>
   </div>
-</div>
+</.page_frame>

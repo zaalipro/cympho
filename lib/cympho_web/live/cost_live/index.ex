@@ -1,8 +1,18 @@
 defmodule CymphoWeb.CostLive.Index do
   use CymphoWeb, :live_view
 
+  import CymphoWeb.Format, only: [money: 1, window: 1]
+
+  alias Cympho.Agents
+  alias Cympho.Companies
   alias Cympho.Costs
+  alias Cympho.Finances
   alias Cympho.Budgets.Budget
+  alias CymphoWeb.TeamRail
+
+  # Spending (r3 P7): the limit block is the Next step, then where the money
+  # went by agent and by task over the limit's own window. The Advanced
+  # analytics below keep their own window (`change_days`).
 
   @impl true
   def mount(_params, _session, socket) do
@@ -10,9 +20,11 @@ defmodule CymphoWeb.CostLive.Index do
 
     {:ok,
      socket
-     |> assign(:page_title, "Cost Monitoring")
+     |> assign(:page_title, "Spending")
      |> assign(:company_id, company_id)
      |> assign(:days, 30)
+     |> assign(:limit_input, nil)
+     |> assign_spending(company_id)
      |> assign_cost_data(company_id, 30)}
   end
 
@@ -38,6 +50,37 @@ defmodule CymphoWeb.CostLive.Index do
      |> assign_cost_data(company_id, days)}
   end
 
+  # B5: the board member's own change; Finances re-checks the board seat.
+  def handle_event("change_limit", %{"limit" => limit}, socket) do
+    company_id = socket.assigns.company_id
+
+    case Finances.update_company_limit(company_id, limit, socket.assigns.current_user.id) do
+      {:ok, policy} ->
+        {:noreply,
+         socket
+         |> assign(:limit_input, nil)
+         |> assign_spending(company_id)
+         |> push_event("toast", %{
+           message: "Limit changed to #{money(policy.budget_limit_usd)}.",
+           type: "success"
+         })}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:limit_input, limit)
+         |> push_event("toast", %{message: limit_error(reason), type: "error"})}
+    end
+  end
+
+  defp limit_error(:invalid_limit), do: "Enter an amount above $0."
+  defp limit_error(:not_board_member), do: "Only board members can change the limit."
+
+  defp limit_error(:approval_required),
+    do: "Raising the limit needs a board vote in this company."
+
+  defp limit_error(_reason), do: "Change this limit on the Spending limit page."
+
   defp get_current_company_id(socket) do
     case socket.assigns do
       %{current_company: %{id: id}} -> id
@@ -46,12 +89,49 @@ defmodule CymphoWeb.CostLive.Index do
     end
   end
 
+  defp assign_spending(socket, nil), do: assign(socket, :spending, nil)
+
+  defp assign_spending(socket, company_id) do
+    spending = TeamRail.spending(company_id)
+    days = spending.days
+    total = Costs.summary(company_id, days).total_cost
+    day_by_agent = Map.new(Costs.by_agent(company_id, 1, 1_000), &{&1.agent_id, &1.total_cost})
+    {top_tasks, more_tasks} = company_id |> Costs.by_issue(days, 1_000) |> Enum.split(6)
+    user = socket.assigns[:current_user]
+    company = Companies.get_company!(company_id)
+
+    socket
+    |> assign(:spending, spending)
+    |> assign(:company_paused?, company.status == "paused")
+    |> assign(:since, since(company_id, company))
+    |> assign(:limit_policy, Finances.company_limit(company_id))
+    |> assign(:can_change_limit, user && Companies.is_board_member?(user.id, company_id))
+    |> assign(:window_total, total)
+    |> assign(:day_total, Costs.summary(company_id, 1).total_cost)
+    |> assign(:agent_rows, Costs.by_agent(company_id, days, 1_000))
+    |> assign(:day_by_agent, day_by_agent)
+    |> assign(:top_tasks, top_tasks)
+    |> assign(:more_tasks, more_tasks)
+    |> assign(:untied_total, Costs.unattributed_total(company_id, days))
+  end
+
+  # The window is rolling, so a young company's "30 days" holds everything since
+  # it was created; the aside says which (build-spec §7).
+  defp since(company_id, company) do
+    started = Costs.spend_period(company_id).started_at
+
+    if DateTime.compare(company.inserted_at, started) == :gt,
+      do: company.inserted_at,
+      else: started
+  end
+
   defp assign_cost_data(socket, company_id, days) do
     summary = Costs.summary(company_id, days)
     by_agent = Costs.by_agent(company_id, days)
     by_issue = Costs.by_issue(company_id, days)
     by_model = Costs.by_model(company_id, days)
     by_provider = Costs.by_provider(company_id, days)
+    runtime_agents = runtime_agents(company_id)
     daily_costs = Costs.daily_costs(company_id, days)
     by_goal = Costs.by_goal(company_id, days)
     by_mission = Costs.by_mission(company_id, days)
@@ -68,6 +148,7 @@ defmodule CymphoWeb.CostLive.Index do
     |> assign(:by_issue, by_issue)
     |> assign(:by_model, by_model)
     |> assign(:by_provider, by_provider)
+    |> assign(:runtime_agents, runtime_agents)
     |> assign(:daily_costs, daily_costs)
     |> assign(:by_goal, by_goal)
     |> assign(:by_mission, by_mission)
@@ -93,22 +174,7 @@ defmodule CymphoWeb.CostLive.Index do
     |> assign(:active_budgets, active_budgets)
     |> assign(:approaching_budgets, approaching_budgets)
     |> assign(:exceeded_budgets, exceeded_budgets)
-    |> assign(:spend_posture, spend_posture)
     |> assign(:spend_runway, build_spend_runway(summary, spend_posture, days))
-    |> assign(
-      :cost_command,
-      build_cost_command(%{
-        days: days,
-        summary: summary,
-        spend_posture: spend_posture,
-        by_agent: by_agent,
-        by_issue: by_issue,
-        by_provider: by_provider,
-        active_budgets: active_budgets,
-        approaching_budgets: approaching_budgets,
-        exceeded_budgets: exceeded_budgets
-      })
-    )
   end
 
   defp parse_days(days) when is_binary(days) do
@@ -150,39 +216,6 @@ defmodule CymphoWeb.CostLive.Index do
   end
 
   def format_tokens(_), do: "0"
-
-  @doc """
-  Humane, plain-language read on where spend sits inside the active budget
-  envelope so a large-but-safe number stays calm instead of alarming.
-  """
-  def spend_pace(posture) do
-    limit = decimal_or_zero(posture.budget_limit)
-    spent = decimal_or_zero(posture.budget_spend)
-
-    if Decimal.gt?(limit, Decimal.new("0")) do
-      pct = Decimal.to_float(Decimal.mult(Decimal.div(spent, limit), 100))
-      pct_label = format_percentage(Decimal.mult(Decimal.div(spent, limit), 100))
-      envelope = format_cost(limit)
-
-      cond do
-        pct >= 100 ->
-          %{tone: :over, text: "Over the #{envelope} envelope — agents pause"}
-
-        pct >= 80 ->
-          %{tone: :watch, text: "Watch — #{pct_label} of the #{envelope} envelope"}
-
-        true ->
-          %{tone: :calm, text: "Calm — #{pct_label} of the #{envelope} envelope"}
-      end
-    else
-      %{tone: :none, text: "No company budget set yet"}
-    end
-  end
-
-  def spend_pace_text_class(:over), do: "text-brand"
-  def spend_pace_text_class(:watch), do: "text-amber-400"
-  def spend_pace_text_class(:calm), do: "text-text-tertiary"
-  def spend_pace_text_class(_tone), do: "text-text-quaternary"
 
   def budget_utilization_pct(budget) do
     pct = Budget.utilization_percentage(budget)
@@ -286,216 +319,6 @@ defmodule CymphoWeb.CostLive.Index do
   def goal_type_label(:initiative), do: "Initiative"
   def goal_type_label(:milestone), do: "Milestone"
   def goal_type_label(_), do: "Goal"
-
-  defp build_cost_command(%{
-         spend_posture: %{budget_status: :over_budget} = posture,
-         exceeded_budgets: exceeded_budgets
-       }) do
-    count = max(length(exceeded_budgets), posture.budget_incident_count)
-
-    %{
-      tone: :critical,
-      badge: "Hard stop risk",
-      title: "Freeze spend until budget is resolved",
-      summary:
-        "#{pluralize(count, "budget control")} need attention before more autonomous runtime is launched.",
-      simple_summary: "Spending has hit its limit.",
-      action_label: "Review budgets",
-      action_path: "/budgets",
-      driver: budget_driver(exceeded_budgets, posture)
-    }
-  end
-
-  defp build_cost_command(%{
-         summary: %{has_unpriced_usage?: true} = summary
-       }) do
-    %{
-      tone: :warning,
-      badge: "Unpriced usage",
-      title: "Price missing before the next run",
-      summary:
-        "Token usage exists with zero recorded cost. Treat this as unknown spend until pricing or provider reporting is configured.",
-      simple_summary: "Some runs reported no price, so this total is incomplete.",
-      action_label: "Inspect drivers",
-      action_path: "#top-cost-drivers",
-      driver:
-        "#{format_tokens(summary.unpriced_tokens)} unpriced tokens across #{pluralize(summary.unpriced_request_count, "request")}."
-    }
-  end
-
-  defp build_cost_command(%{
-         spend_posture: %{budget_status: :watch} = posture,
-         by_agent: by_agent,
-         by_issue: by_issue,
-         by_provider: by_provider,
-         approaching_budgets: approaching_budgets
-       }) do
-    %{
-      tone: :warning,
-      badge: "Spend watch",
-      title: "Triage spend before the next run",
-      summary: watch_summary(posture),
-      simple_summary: simple_watch_summary(posture),
-      action_label: "Inspect drivers",
-      action_path: "#top-cost-drivers",
-      driver: top_cost_driver(by_agent, by_issue, by_provider, approaching_budgets)
-    }
-  end
-
-  defp build_cost_command(%{
-         spend_posture: %{budget_status: :unbudgeted},
-         summary: summary
-       }) do
-    has_spend? = Decimal.gt?(decimal_or_zero(summary.total_cost), Decimal.new("0"))
-
-    %{
-      tone: :attention,
-      badge: "Unbudgeted spend",
-      title:
-        if(has_spend?,
-          do: "Add a company budget before scaling agents",
-          else: "Set the first spending limit"
-        ),
-      summary:
-        if(has_spend?,
-          do:
-            "Agent spend exists without a company budget envelope. Add a cap before expanding autonomous runs.",
-          else:
-            "No spend has landed yet, but a budget cap makes launch decisions safer once agents start running."
-        ),
-      simple_summary: "No spending limit is set yet.",
-      action_label: "Create budget",
-      action_path: "/budgets/new",
-      driver:
-        if(has_spend?, do: "Current period spend: #{format_cost(summary.total_cost)}", else: nil)
-    }
-  end
-
-  defp build_cost_command(%{spend_posture: %{budget_status: :scoped_controls} = posture}) do
-    %{
-      tone: :attention,
-      badge: "Scoped controls",
-      title: "Add a company budget envelope",
-      summary:
-        "#{pluralize(posture.budget_control_count, "scoped control")} exist, but there is no comparable company-wide spend limit.",
-      simple_summary: "There is no company-wide spending limit yet.",
-      action_label: "Create company budget",
-      action_path: "/budgets/new",
-      driver: nil
-    }
-  end
-
-  defp build_cost_command(%{
-         by_agent: by_agent,
-         by_issue: by_issue,
-         by_provider: by_provider
-       }) do
-    %{
-      tone: :ready,
-      badge: "Spend under control",
-      title: "Cost status is clear for the next run",
-      summary: "Spend is inside the active budget envelope for this period.",
-      simple_summary: "Spending is inside the limit.",
-      action_label: "Review budgets",
-      action_path: "#active-budgets",
-      driver: top_cost_driver(by_agent, by_issue, by_provider, [])
-    }
-  end
-
-  # `Costs.spend_posture/2` also returns `:watch` when an unresolved budget
-  # incident from an earlier period is still open, so the threshold sentence is
-  # a false alarm whenever this window's usage is below the warning line.
-  # The remediation the old second sentence spelled out is what the card's
-  # "Inspect drivers" action and the Budgets link already do, so the sentence
-  # stops at the diagnosis.
-  defp watch_summary(%{budget_used_percent: used, budget_warning_threshold_pct: threshold})
-       when is_integer(used) do
-    if used >= Decimal.to_integer(Decimal.round(threshold, 0)) do
-      "Spend is near the configured warning threshold."
-    else
-      "This window's spend is inside the limit, but an earlier budget alert is still open."
-    end
-  end
-
-  defp watch_summary(_posture) do
-    "An open budget alert is unresolved."
-  end
-
-  defp simple_watch_summary(%{budget_used_percent: used, budget_warning_threshold_pct: threshold})
-       when is_integer(used) do
-    if used >= Decimal.to_integer(Decimal.round(threshold, 0)) do
-      "Spending is close to the limit."
-    else
-      "An older spending alert is still open."
-    end
-  end
-
-  defp simple_watch_summary(_posture), do: "An older spending alert is still open."
-
-  defp budget_driver([budget | _], _posture),
-    do: "#{budget.name}: #{budget_utilization_pct(budget)} used"
-
-  defp budget_driver([], %{budget_incident_count: count}) when count > 0,
-    do: "#{pluralize(count, "unresolved budget incident")}"
-
-  defp budget_driver([], _posture), do: nil
-
-  defp top_cost_driver(
-         [%{agent: %{name: name}, total_cost: cost} | _],
-         _issues,
-         _providers,
-         _budgets
-       ) do
-    "Top agent: #{name} · #{format_cost(cost)}"
-  end
-
-  defp top_cost_driver(
-         _agents,
-         [%{issue: %{title: title}, total_cost: cost} | _],
-         _providers,
-         _budgets
-       ) do
-    "Top issue: #{title} · #{format_cost(cost)}"
-  end
-
-  defp top_cost_driver(_agents, _issues, [%{provider: provider, total_cost: cost} | _], _budgets) do
-    "Top provider: #{provider} · #{format_cost(cost)}"
-  end
-
-  defp top_cost_driver(_agents, _issues, _providers, [budget | _]) do
-    "Closest budget: #{budget.name} · #{budget_utilization_pct(budget)} used"
-  end
-
-  defp top_cost_driver(_agents, _issues, _providers, _budgets), do: nil
-
-  # The summary card reads the same posture the command strip does, so the page
-  # cannot show a $100 limit above a $0 limit.
-  defp posture_limit(%{budget_limit: nil}), do: "Not set"
-  defp posture_limit(%{budget_limit: limit}), do: format_cost(limit)
-
-  defp cost_command_badge_class(:critical),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  defp cost_command_badge_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-
-  defp cost_command_badge_class(:attention),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp cost_command_badge_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp cost_command_action_class(:critical),
-    do: "border-red-500/25 bg-red-500/10 text-red-200 hover:bg-red-500/15"
-
-  defp cost_command_action_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15"
-
-  defp cost_command_action_class(:attention),
-    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
-
-  defp cost_command_action_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
 
   defp build_spend_runway(summary, %{budget_status: :over_budget} = posture, days) do
     %{
@@ -654,6 +477,307 @@ defmodule CymphoWeb.CostLive.Index do
 
   defp spend_runway_action_class(:ready),
     do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
+
+  ## ── r3 Spending ────────────────────────────────────────────────
+
+  attr :spending, :map, required: true, doc: "CymphoWeb.TeamRail.spending/1"
+  attr :policy, :any, required: true, doc: "Finances.company_limit/1"
+  attr :can_change, :boolean, required: true
+  attr :paused, :boolean, required: true
+  attr :runtime_controls, :boolean, required: true
+  attr :input, :string, default: nil
+
+  # The Next step (build-spec §7): all clear below the warning line, decide at
+  # 80%, raise at the limit; the resolution card holds the change form (B5).
+  defp limit_step(assigns) do
+    s = assigns.spending
+
+    assigns =
+      assign(assigns,
+        kind: limit_kind(s),
+        limit: s.limit && money(s.limit),
+        window: window(s.days),
+        resume?: s.status == :over_budget and assigns.paused and assigns.runtime_controls,
+        value: assigns.input || (s.limit && amount_text(s.limit)),
+        effect:
+          s.limit &&
+            "After you change it: agents stop at the new amount instead of #{money(s.limit)}."
+      )
+
+    ~H"""
+    <.next_step>
+      <:problem>
+        <.problem_card title={limit_title(@kind)}>
+          <:eyebrow>{limit_eyebrow(@kind)}</:eyebrow>
+          <%= case @kind do %>
+            <% :clear -> %>
+              <p class="hero">
+                <span class="mono">{money(@spending.spent)}</span><span class="u">of {@limit} · last {@window}</span>
+              </p>
+              <p class="sr">
+                Warns at {@spending.warn_percent}%, which is {money(warn_amount(@spending))}. Agents stop at the limit.
+              </p>
+              <.limit_ruler spending={@spending} />
+              <div class={["strip", match?({:ok, _}, @policy) && "s3"]}>
+                <div class="cell">
+                  <p class="v">{@spending.used_percent}%</p>
+                  <p class="l">of the limit</p>
+                </div>
+                <div class="cell">
+                  <p class="v mono">{money(remaining(@spending))}</p>
+                  <p class="l">left before agents stop</p>
+                </div>
+                <div :if={match?({:ok, _}, @policy)} class="cell">
+                  <p class="v">{day(set_at(@policy))}</p>
+                  <p class="l">{set_label(@policy)}</p>
+                </div>
+              </div>
+            <% :watch -> %>
+              <p class="obj">
+                <b class="mono">{money(@spending.spent)}</b>
+                of <span class="mono">{@limit}</span>
+                in the last {@window}. Agents stop at {@limit}.
+              </p>
+              <.limit_ruler spending={@spending} />
+            <% :stopped -> %>
+              <p class="obj">
+                <b>Agents stopped:</b> the {@limit} limit for the last {@window} was reached.
+              </p>
+              <.limit_ruler spending={@spending} />
+            <% :none -> %>
+              <p class="obj">
+                <b class="mono">{money(@spending.spent)}</b>
+                in the last {@window}. Nothing stops agents from spending more.
+              </p>
+          <% end %>
+        </.problem_card>
+      </:problem>
+      <:resolution>
+        <%= cond do %>
+          <% @kind == :none -> %>
+            <.ink_card heading="After you set it">
+              <.ink_note>
+                On the Spending limit page you choose the amount and what happens when spending reaches it.
+              </.ink_note>
+              <.ink_foot verb="set">
+                <:primary>
+                  <.primary_pill navigate="/budgets/new">Set a limit</.primary_pill>
+                </:primary>
+              </.ink_foot>
+            </.ink_card>
+          <% not match?({:ok, _}, @policy) -> %>
+            <.ink_card heading="Change it on Spending limit">
+              <.ink_note>{managed_note(@policy)}</.ink_note>
+              <.ink_foot verb="open">
+                <:primary>
+                  <.primary_pill navigate="/budgets">Open Spending limit</.primary_pill>
+                </:primary>
+              </.ink_foot>
+            </.ink_card>
+          <% true -> %>
+            <.ink_card form="Change the spending limit" id="limit-form" phx-submit="change_limit">
+              <div class="lim-f">
+                <label class="lim-l" for="lim">New limit per {@window}</label>
+                <div class="cap">
+                  <span class="cur" aria-hidden="true">$</span>
+                  <input
+                    id="lim"
+                    name="limit"
+                    type="text"
+                    inputmode="decimal"
+                    value={@value}
+                    autocomplete="off"
+                    aria-describedby="lim-h"
+                    disabled={!@can_change}
+                  />
+                </div>
+                <p class="ink-help" id="lim-h">
+                  <%= if @can_change do %>
+                    Warns at {@spending.warn_percent}% of it.
+                  <% else %>
+                    Only board members can change the limit.
+                  <% end %>
+                </p>
+              </div>
+              <.consequences
+                :if={@resume?}
+                rows={[
+                  {:done, @effect},
+                  {:idle, "After you resume: agents start picking up work again."}
+                ]}
+              />
+              <.ink_note :if={!@resume?}>{@effect}</.ink_note>
+              <.ink_foot verb="change">
+                <:secondary :if={@resume?}>
+                  <.ghost_pill type="submit" form="limit-resume">Resume agents</.ghost_pill>
+                </:secondary>
+                <:primary>
+                  <.primary_pill type="submit" disabled={!@can_change}>Change limit</.primary_pill>
+                </:primary>
+              </.ink_foot>
+            </.ink_card>
+        <% end %>
+      </:resolution>
+    </.next_step>
+    <%!-- The existing runtime control (CSRF, role check, audit): "Resume agents" submits it. --%>
+    <form :if={@resume?} id="limit-resume" method="post" action="/runtime-control/resume" hidden>
+      <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+      <input type="hidden" name="return_to" value="/costs" />
+    </form>
+    """
+  end
+
+  defp limit_kind(%{limit: nil}), do: :none
+  defp limit_kind(%{status: :over_budget}), do: :stopped
+  defp limit_kind(%{status: :watch}), do: :watch
+  defp limit_kind(_spending), do: :clear
+
+  defp limit_title(:clear), do: "Spending is within your limit"
+  defp limit_title(:watch), do: "Decide on the spending limit"
+  defp limit_title(:stopped), do: "Raise the limit to restart agents"
+  defp limit_title(:none), do: "Set a spending limit"
+
+  defp limit_eyebrow(:clear), do: "All clear · Limit"
+  defp limit_eyebrow(:watch), do: "Next step · Limit warning"
+  defp limit_eyebrow(:stopped), do: "Next step · Limit reached"
+  defp limit_eyebrow(:none), do: "Next step · Limit"
+
+  defp managed_note({:error, :ambiguous}),
+    do:
+      "This company has more than one spending limit, so they are changed on the Spending limit page."
+
+  defp managed_note(_policy), do: "This limit is managed on the Spending limit page."
+
+  attr :spending, :map, required: true
+
+  # The 60-tick ruler (1 tick = a sixtieth of the limit, a major tick every tenth):
+  # the shared tick_meter/1 sizes one tick layer, the ruler has two.
+  defp limit_ruler(assigns) do
+    fill = min(assigns.spending.percent || 0, 100)
+
+    assigns =
+      assign(assigns,
+        fill: fill,
+        style:
+          if(fill > 0,
+            do:
+              "width:#{pct(fill)}%;background-size:calc(100% / #{pct(6 * fill / 100)}) 100%," <>
+                "calc(100% / #{pct(60 * fill / 100)}) 58%",
+            else: "width:0%"
+          )
+      )
+
+    ~H"""
+    <div class={["tk lr", @fill >= 100 && "full"]} aria-hidden="true">
+      <span class="tk-fill" style={@style}></span><span
+        class="tk-warn"
+        style={"left:#{@spending.warn_percent}%"}
+      ></span>
+    </div>
+    <div class="tk-legend mono" aria-hidden="true">
+      <span class="a">$0</span><span class="w" style={"left:#{@spending.warn_percent}%"}>warns {money(warn_amount(@spending))}</span><span class="z">agents stop</span>
+    </div>
+    """
+  end
+
+  attr :value, :any, required: true
+  attr :total, :any, required: true
+
+  # Amount with its 3 px share of the window's total (115).
+  defp amount(assigns) do
+    ~H"""
+    <span class="amt">
+      <span class="sh" aria-hidden="true"><i style={"width:#{share(@value, @total)}%"}></i></span>
+      <span>{money(@value || Decimal.new(0))}</span>
+    </span>
+    """
+  end
+
+  attr :rows, :list, required: true
+  attr :total, :any, required: true
+
+  defp task_table(assigns) do
+    ~H"""
+    <table class="money">
+      <thead>
+        <tr>
+          <th scope="col">Task</th>
+          <th scope="col">Spent</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr :for={row <- @rows}>
+          <th scope="row">
+            <.link :if={row.issue} class="nm tn" navigate={"/issues/#{row.issue.id}?from=/costs"}>
+              <span class="mono id">{row.issue.identifier}</span><span>{row.issue.title}</span>
+            </.link>
+            <span :if={!row.issue} class="nm tn">A removed task</span>
+          </th>
+          <td><.amount value={row.total_cost} total={@total} /></td>
+        </tr>
+      </tbody>
+    </table>
+    """
+  end
+
+  defp warn_amount(%{limit: limit, warn_percent: warn}),
+    do: limit |> Decimal.mult(warn) |> Decimal.div(100)
+
+  defp remaining(%{limit: limit, spent: spent}), do: Decimal.max(Decimal.sub(limit, spent), 0)
+
+  defp set_at({:ok, policy}), do: policy.updated_at
+
+  defp set_label({:ok, %{inserted_at: same, updated_at: same}}), do: "set at setup"
+  defp set_label(_policy), do: "last changed"
+
+  # "300" for the field, "300.5" stays "300.50".
+  defp amount_text(%Decimal{} = limit), do: limit |> money() |> String.trim_leading("$")
+
+  defp day(%DateTime{} = at), do: Calendar.strftime(at, "%a %-d %b")
+
+  defp initials(name), do: name |> String.slice(0, 2) |> String.upcase()
+
+  defp sum(rows), do: Enum.reduce(rows, Decimal.new(0), &Decimal.add(&2, &1.total_cost || 0))
+
+  defp share(value, total) do
+    total = decimal_or_zero(total)
+
+    if Decimal.gt?(total, 0),
+      do:
+        value |> decimal_or_zero() |> Decimal.div(total) |> Decimal.mult(100) |> Decimal.round(0),
+      else: 0
+  end
+
+  defp pct(n),
+    do: n |> Kernel.*(1.0) |> Float.round(2) |> :erlang.float_to_binary([:compact, decimals: 2])
+
+  defp runtime_columns(rows) do
+    "grid-template-columns:" <>
+      Enum.map_join(
+        rows,
+        " ",
+        &"#{decimal_or_zero(&1.total_cost) |> Decimal.max(Decimal.new("0.01"))}fr"
+      )
+  end
+
+  defp category(n), do: "c#{min(n + 1, 3)}"
+
+  # Agents per runtime (a usage row's provider is its agent's adapter), for By runtime.
+  defp runtime_agents(nil), do: %{}
+
+  defp runtime_agents(company_id) do
+    company_id
+    |> Agents.list_agents_by_company()
+    |> Enum.reject(&(&1.governance_status == "terminated"))
+    |> Enum.group_by(&to_string(&1.adapter), & &1.name)
+    |> Map.new(fn {provider, names} -> {provider, names |> Enum.sort() |> Enum.join(", ")} end)
+  end
+
+  defp runtime_label("claude_code"), do: "Claude Code"
+  defp runtime_label("codex"), do: "Codex"
+  defp runtime_label("openai_chat"), do: "OpenAI-compatible chat"
+  defp runtime_label(nil), do: "Unknown runtime"
+  defp runtime_label(provider), do: provider |> String.replace("_", " ") |> String.capitalize()
 
   defp cost_empty_state(assigns) do
     assigns =

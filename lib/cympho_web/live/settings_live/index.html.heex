@@ -1,252 +1,159 @@
 <.settings_layout active={:notifications}>
-  <.header title={@page_title} />
+  <.header title="Alerts" subtitle="What Cympho tells you about, and where." />
 
-  <div :if={@user != nil} class="space-y-6">
-    <section class="ember-glass p-5">
-      <div class="mb-4">
-        <h2 class="text-sm font-590 text-text-primary">Channels</h2>
-        <hr class="ember-rule mt-4" />
-      </div>
+  <div :if={@user != nil} class="flex flex-col gap-4">
+    <.band_card id="ev-t" title="Events">
+      <table class="mx">
+        <thead>
+          <tr>
+            <th scope="col">Tell me when…</th>
+            <th :for={pref <- ordered_prefs(@prefs)} scope="col">
+              {String.capitalize(pref.channel_type)}<small>{if pref.enabled, do: "on", else: "off"}</small>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr :for={{event, label} <- alert_events()}>
+            <th scope="row">{label}</th>
+            <td :for={pref <- ordered_prefs(@prefs)}>
+              <label class="tg">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={event_enabled?(pref, event)}
+                  phx-click="toggle_event"
+                  phx-value-pref_id={pref.id}
+                  phx-value-event={event}
+                />
+                <span class="tg-t" aria-hidden="true"></span>
+                <span class="sr">{String.capitalize(pref.channel_type)}: {label}</span>
+              </label>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p :if={Enum.empty?(@prefs)} class="cfoot">
+        <span>No notification preferences are configured.</span>
+      </p>
+    </.band_card>
 
-      <div class="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <div id="channel-email" class="rounded-xl border border-border bg-panel p-4">
-          <div class="flex items-start justify-between gap-3">
-            <div class="flex min-w-0 gap-3">
-              <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-tertiary">
-                <.icon name="hero-envelope" class="h-4 w-4" />
-              </div>
-              <div class="min-w-0">
-                <h3 class="text-sm font-590 text-text-primary">Email</h3>
-                <p class="mt-0.5 truncate text-xs text-text-tertiary">{@user.email}</p>
-              </div>
-            </div>
-            <div class="flex shrink-0 items-center gap-2.5">
-              <span class="sr-only">
-                {if channel_enabled?(@prefs, "email"), do: "On", else: "Off"}
+    <.band_card id="ch-t" title="Channels">
+      <ul class="srows">
+        <li id="channel-email" class="srow">
+          <span class="kt"><.icon name="hero-envelope" class="h-4 w-4" /></span>
+          <span class="row-main">
+            <span class="rt">Email</span>
+            <span class="rm">{@user.email}</span>
+          </span>
+          <span class="end">
+            <.channel_switch prefs={@prefs} channel="email" />
+          </span>
+        </li>
+        <li id="channel-telegram" class="srow">
+          <span class="kt"><.icon name="hero-paper-airplane" class="h-4 w-4" /></span>
+          <div class="row-main">
+            <span class="rt">Telegram</span>
+            <span class="rm">
+              {if telegram_chat_id(@prefs, @user) == "",
+                do: "Not linked",
+                else: telegram_chat_id(@prefs, @user)}
+            </span>
+            <div
+              :if={telegram_chat_id(@prefs, @user) != ""}
+              class="mt-3 flex flex-wrap items-center gap-2"
+            >
+              <span
+                :if={@telegram_verify_status in [:verified, :linked]}
+                class="rounded-md border border-success/20 bg-success/10 px-2 py-0.5 text-xs font-510 text-success"
+              >
+                {if @telegram_verify_status == :verified, do: "Verified", else: "Linked"}
               </span>
               <button
                 type="button"
-                aria-label="Toggle email notifications"
-                aria-pressed={to_string(channel_enabled?(@prefs, "email"))}
-                class={switch_track_class(channel_enabled?(@prefs, "email"))}
-                phx-click="toggle_channel"
-                phx-value-channel="email"
+                class="pl"
+                phx-click="verify_telegram"
               >
-                <span class={switch_knob_class(channel_enabled?(@prefs, "email"))}></span>
+                Verify
               </button>
             </div>
-          </div>
-          <p class="ui-advanced-only mt-3 border-t border-border pt-3 text-xs leading-5 text-text-tertiary">
-            Account updates and issues assigned to you arrive in your inbox.
-          </p>
-        </div>
-
-        <div id="channel-telegram" class="rounded-xl border border-border bg-panel p-4">
-          <div class="flex items-start justify-between gap-3">
-            <div class="flex min-w-0 gap-3">
-              <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-tertiary">
-                <.icon name="hero-paper-airplane" class="h-4 w-4" />
-              </div>
-              <div class="min-w-0">
-                <h3 class="text-sm font-590 text-text-primary">Telegram</h3>
-                <p class="mt-0.5 truncate text-xs text-text-tertiary">
-                  {if telegram_chat_id(@prefs, @user) == "",
-                    do: "Not linked",
-                    else: telegram_chat_id(@prefs, @user)}
-                </p>
-              </div>
-            </div>
-            <div class="flex shrink-0 items-center gap-2.5">
-              <span class="sr-only">
-                {if channel_enabled?(@prefs, "telegram"), do: "On", else: "Off"}
-              </span>
+            <form
+              :if={telegram_chat_id(@prefs, @user) == ""}
+              phx-submit="link_telegram"
+              class="mt-3 flex gap-2"
+            >
+              <input
+                type="text"
+                name="telegram_chat_id"
+                placeholder="Telegram chat ID"
+                value={@telegram_chat_id_input}
+                required
+                class="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+              />
               <button
-                type="button"
-                aria-label="Toggle telegram notifications"
-                aria-pressed={to_string(channel_enabled?(@prefs, "telegram"))}
-                class={switch_track_class(channel_enabled?(@prefs, "telegram"))}
-                phx-click="toggle_channel"
-                phx-value-channel="telegram"
+                type="submit"
+                class="pl"
               >
-                <span class={switch_knob_class(channel_enabled?(@prefs, "telegram"))}></span>
+                Link
               </button>
-            </div>
+            </form>
           </div>
-          <p class="ui-advanced-only mt-3 border-t border-border pt-3 text-xs leading-5 text-text-tertiary">
-            Instant chat pings for approvals and mentions.
-          </p>
-          <div
-            :if={telegram_chat_id(@prefs, @user) != ""}
-            class="mt-3 flex flex-wrap items-center gap-2"
-          >
-            <span
-              :if={@telegram_verify_status in [:verified, :linked]}
-              class="rounded-md border border-success/20 bg-success/10 px-2 py-0.5 text-xs font-510 text-success"
-            >
-              {if @telegram_verify_status == :verified, do: "Verified", else: "Linked"}
+          <span class="end">
+            <.channel_switch prefs={@prefs} channel="telegram" />
+          </span>
+        </li>
+        <li id="channel-webhook" class="srow ui-advanced-only">
+          <span class="kt"><.icon name="hero-bolt" class="h-4 w-4" /></span>
+          <div class="row-main">
+            <span class="rt">Webhook</span>
+            <span class="rm">
+              {if webhook_url(@prefs, @user) == "",
+                do: "No endpoint",
+                else: webhook_url(@prefs, @user)}
             </span>
-            <button
-              type="button"
-              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-              phx-click="verify_telegram"
-            >
-              Verify
-            </button>
-          </div>
-          <form
-            :if={telegram_chat_id(@prefs, @user) == ""}
-            phx-submit="link_telegram"
-            class="mt-3 flex gap-2"
-          >
-            <input
-              type="text"
-              name="telegram_chat_id"
-              placeholder="Telegram chat ID"
-              value={@telegram_chat_id_input}
-              required
-              class="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-            />
-            <button
-              type="submit"
-              class="cta-glow rounded-button bg-brand px-3 py-2 text-xs font-510 text-on-primary transition-colors hover:bg-accent"
-            >
-              Link
-            </button>
-          </form>
-        </div>
-
-        <div
-          id="channel-webhook"
-          class="ui-advanced-only rounded-xl border border-border bg-panel p-4"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="flex min-w-0 gap-3">
-              <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-tertiary">
-                <.icon name="hero-bolt" class="h-4 w-4" />
-              </div>
-              <div class="min-w-0">
-                <h3 class="text-sm font-590 text-text-primary">Webhook</h3>
-                <p class="mt-0.5 truncate text-xs text-text-tertiary">
-                  {if webhook_url(@prefs, @user) == "",
-                    do: "No endpoint",
-                    else: webhook_url(@prefs, @user)}
-                </p>
-              </div>
-            </div>
-            <div class="flex shrink-0 items-center gap-2.5">
-              <span class="sr-only">
-                {if channel_enabled?(@prefs, "webhook"), do: "On", else: "Off"}
-              </span>
+            <span class="rm">Cympho POSTs a JSON event to your endpoint for each alert.</span>
+            <form phx-submit="update_webhook_url" class="mt-3 flex gap-2">
+              <input
+                type="url"
+                name="webhook_url"
+                placeholder="https://example.com/webhook"
+                value={webhook_url(@prefs, @user)}
+                class="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+              />
               <button
-                type="button"
-                aria-label="Toggle webhook notifications"
-                aria-pressed={to_string(channel_enabled?(@prefs, "webhook"))}
-                class={switch_track_class(channel_enabled?(@prefs, "webhook"))}
-                phx-click="toggle_channel"
-                phx-value-channel="webhook"
+                type="submit"
+                class="pl"
               >
-                <span class={switch_knob_class(channel_enabled?(@prefs, "webhook"))}></span>
+                Save
               </button>
+            </form>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                :if={webhook_url(@prefs, @user) != ""}
+                type="button"
+                class="pl"
+                phx-click="test_webhook"
+              >
+                Test Ping
+              </button>
+              <span
+                :if={match?({:ok, _}, @webhook_test_result)}
+                class="rounded-md border border-success/20 bg-success/10 px-2 py-0.5 text-xs font-510 text-success"
+              >
+                Test passed
+              </span>
+              <span
+                :if={match?({:error, _}, @webhook_test_result)}
+                class="rounded-md border border-brand/20 bg-brand/10 px-2 py-0.5 text-xs font-510 text-brand"
+              >
+                Test failed
+              </span>
             </div>
           </div>
-          <p class="mt-3 border-t border-border pt-3 text-xs leading-5 text-text-tertiary">
-            Cympho POSTs a JSON event to your endpoint for each notification.
-          </p>
-          <form phx-submit="update_webhook_url" class="mt-3 flex gap-2">
-            <input
-              type="url"
-              name="webhook_url"
-              placeholder="https://example.com/webhook"
-              value={webhook_url(@prefs, @user)}
-              class="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-            />
-            <button
-              type="submit"
-              class="cta-glow rounded-button bg-brand px-3 py-2 text-xs font-510 text-on-primary transition-colors hover:bg-accent"
-            >
-              Save
-            </button>
-          </form>
-          <div class="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              :if={webhook_url(@prefs, @user) != ""}
-              type="button"
-              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-              phx-click="test_webhook"
-            >
-              Test Ping
-            </button>
-            <span
-              :if={match?({:ok, _}, @webhook_test_result)}
-              class="rounded-md border border-success/20 bg-success/10 px-2 py-0.5 text-xs font-510 text-success"
-            >
-              Test passed
-            </span>
-            <span
-              :if={match?({:error, _}, @webhook_test_result)}
-              class="rounded-md border border-brand/20 bg-brand/10 px-2 py-0.5 text-xs font-510 text-brand"
-            >
-              Test failed
-            </span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="ui-advanced-only rounded-xl border border-border bg-surface p-5">
-      <div class="mb-4">
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Fine-tuning
-        </p>
-        <h2 class="mt-1 text-sm font-590 text-text-primary">Event Notifications</h2>
-        <p class="mt-1 text-sm text-text-tertiary">
-          Only high-signal events are delivered. Choose which reach each channel.
-        </p>
-        <hr class="ember-rule mt-4" />
-      </div>
-
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <div
-          :for={pref <- @prefs}
-          id={"events-#{pref.channel_type}"}
-          class="rounded-xl border border-border bg-panel p-4"
-        >
-          <%!-- Each channel had two on/off switches — one here and one in
-               Channels above — with no way to tell which one won. Channels owns
-               turning a channel on; this card only picks the events it carries. --%>
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <h3 class="text-sm font-590 text-text-primary">
-              {String.capitalize(pref.channel_type)}
-            </h3>
-            <span
-              :if={not pref.enabled}
-              class="rounded-md border border-border bg-surface px-2 py-0.5 text-xs font-510 text-text-quaternary"
-            >
-              Channel off
-            </span>
-          </div>
-          <div class="space-y-2">
-            <button
-              :for={event <- ~w(human_approval_required)}
-              type="button"
-              class={event_toggle_class(event_enabled?(pref, event))}
-              phx-click="toggle_event"
-              phx-value-pref_id={pref.id}
-              phx-value-event={event}
-            >
-              <span>{format_event(event)}</span>
-              <span>{if event_enabled?(pref, event), do: "On", else: "Off"}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div
-        :if={Enum.empty?(@prefs)}
-        class="rounded-lg border border-dashed border-border p-8 text-center"
-      >
-        <p class="text-sm text-text-tertiary">No notification preferences are configured.</p>
-      </div>
-    </section>
+          <span class="end">
+            <.channel_switch prefs={@prefs} channel="webhook" />
+          </span>
+        </li>
+      </ul>
+    </.band_card>
   </div>
 </.settings_layout>
