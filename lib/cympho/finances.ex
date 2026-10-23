@@ -404,6 +404,132 @@ defmodule Cympho.Finances do
     |> Repo.update()
   end
 
+  @doc """
+  The company's spending limit the owner can change from Spending: its one
+  active company-wide policy, when no UI `Budget` owns it (the setup-time
+  limit, `budget_id` nil). `{:error, :ambiguous}` when several company-wide
+  policies are active (the lowest one stops agents, so changing one would not
+  say where they stop), `{:error, :budget_owned}` when the Budgets UI owns it,
+  `{:error, :none}` when there is none.
+  """
+  def company_limit(company_id) when is_binary(company_id) do
+    company_id |> active_company_policies_query() |> Repo.all() |> one_company_limit()
+  end
+
+  def company_limit(_company_id), do: {:error, :none}
+
+  @doc """
+  B5: a board member changes the company's spending limit (`company_limit/1`)
+  to `new_limit_usd`, a positive amount. A raise that the company's governance
+  sends to a board vote (`budget_increase`, as `Budgets.update_budget/4`) is
+  refused with `:approval_required`. Limit incidents the new amount clears are
+  resolved; the company is not resumed (the owner presses Resume agents).
+  """
+  def update_company_limit(company_id, new_limit_usd, user_id)
+      when is_binary(company_id) and is_binary(user_id) do
+    with {:ok, limit} <- parse_limit(new_limit_usd),
+         :ok <- board_member(user_id, company_id),
+         {:ok, {old, updated}} <- change_company_limit(company_id, limit) do
+      Logger.info("company spend limit changed",
+        company_id: company_id,
+        component: "finances",
+        user_id: user_id
+      )
+
+      _ =
+        Cympho.GovernanceAuditLogs.log_action(
+          "spending_limit_changed",
+          {"user", user_id},
+          "Spending limit changed from $#{old} to $#{updated.budget_limit_usd}",
+          resource: updated,
+          company_id: company_id
+        )
+
+      resolve_cleared_limit_incidents(updated)
+      _ = OwnerAttention.notify_changed(company_id)
+      {:ok, updated}
+    end
+  end
+
+  def update_company_limit(_company_id, _new_limit_usd, _user_id), do: {:error, :not_board_member}
+
+  defp board_member(user_id, company_id) do
+    if Companies.is_board_member?(user_id, company_id), do: :ok, else: {:error, :not_board_member}
+  end
+
+  defp change_company_limit(company_id, limit) do
+    Repo.transaction(fn ->
+      with {:ok, policy} <-
+             company_id
+             |> active_company_policies_query()
+             |> lock("FOR UPDATE")
+             |> Repo.all()
+             |> one_company_limit(),
+           :ok <- limit_raise_allowed(company_id, policy.budget_limit_usd, limit),
+           {:ok, updated} <- update_budget_policy(policy, %{budget_limit_usd: limit}) do
+        {policy.budget_limit_usd, updated}
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp active_company_policies_query(company_id) do
+    from(p in BudgetPolicy,
+      where: p.company_id == ^company_id and p.scope == "company" and p.is_active == true
+    )
+  end
+
+  defp one_company_limit([%BudgetPolicy{budget_id: nil} = policy]), do: {:ok, policy}
+  defp one_company_limit([%BudgetPolicy{}]), do: {:error, :budget_owned}
+  defp one_company_limit([]), do: {:error, :none}
+  defp one_company_limit(_policies), do: {:error, :ambiguous}
+
+  defp limit_raise_allowed(company_id, old, new) do
+    company = Repo.get!(Company, company_id)
+    threshold = (company.governance_config || %{})["budget_limit_threshold"] || 0
+
+    if Decimal.gt?(new, old) and Decimal.gt?(new, Decimal.new("#{threshold}")) and
+         Cympho.BoardApprovals.governance_required?(company, "budget_increase") do
+      {:error, :approval_required}
+    else
+      :ok
+    end
+  end
+
+  defp parse_limit(value) when is_binary(value) do
+    case Decimal.parse(String.trim(value)) do
+      {limit, ""} -> parse_limit(limit)
+      _ -> {:error, :invalid_limit}
+    end
+  end
+
+  defp parse_limit(%Decimal{} = limit) do
+    if Decimal.gt?(limit, 0) and Decimal.lt?(limit, 1_000_000_000),
+      do: {:ok, Decimal.round(limit, 2)},
+      else: {:error, :invalid_limit}
+  end
+
+  defp parse_limit(_value), do: {:error, :invalid_limit}
+
+  # The new limit clears an open incident only when this window's spend is
+  # under it (a warning: under its warning line). resolve_budget_incident/1
+  # keeps refusing incidents whose hard stop never finished.
+  defp resolve_cleared_limit_incidents(%BudgetPolicy{} = policy) do
+    spend = spend_for_scope(policy.company_id, "company", nil, policy.period)
+
+    warn_at =
+      Decimal.mult(policy.budget_limit_usd, Decimal.div(policy.warning_threshold_pct, 100))
+
+    policy.company_id
+    |> list_budget_incidents(budget_policy_id: policy.id)
+    |> Enum.filter(fn
+      %{event_type: "budget_exceeded"} -> Decimal.lt?(spend, policy.budget_limit_usd)
+      _warning -> Decimal.lt?(spend, warn_at)
+    end)
+    |> Enum.each(&resolve_budget_incident/1)
+  end
+
   def delete_budget_policy(%BudgetPolicy{} = policy) do
     Repo.delete(policy)
   end
@@ -878,6 +1004,7 @@ defmodule Cympho.Finances do
           # OwnerAttention badges/lists source unresolved budget incidents; notify
           # so Simple Needs-you / nav badges refresh without a full reload.
           _ = OwnerAttention.notify_changed(incident.company_id)
+          notify_spend_threshold(policy, incident)
           ok
 
         error ->
@@ -885,6 +1012,27 @@ defmodule Cympho.Finances do
       end
     end
   end
+
+  # B6 "Spending reaches 80% or 100% of the limit": the company-wide limit only.
+  defp notify_spend_threshold(%BudgetPolicy{scope: "company"}, %BudgetIncident{} = incident)
+       when incident.event_type in ["warning", "budget_exceeded"] do
+    Cympho.Notifications.Dispatcher.notify_company_opt_in(
+      incident.company_id,
+      "spend_threshold",
+      fn ->
+        subject =
+          if incident.event_type == "budget_exceeded",
+            do: "Spending reached the limit",
+            else: "Spending reached #{Decimal.round(incident.threshold_pct, 0)}% of the limit"
+
+        {subject,
+         "$#{Decimal.round(incident.spend_usd, 2)} of the $#{Decimal.round(incident.budget_limit_usd, 2)} limit.",
+         %{budget_incident_id: incident.id}}
+      end
+    )
+  end
+
+  defp notify_spend_threshold(_policy, _incident), do: :ok
 
   defp enforcement_status_for("budget_exceeded", %BudgetPolicy{action_on_exceed: "block"}),
     do: @incomplete_enforcement

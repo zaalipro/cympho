@@ -134,18 +134,57 @@ defmodule Cympho.Notifications.Dispatcher do
   end
 
   # Per-event channel preferences live in pref.config["events"]; gate delivery on
-  # the message's event (event_type, else metadata :type). Unknown/absent ⇒ deliver.
+  # the message's event (event_type, else metadata :type).
   defp resolve_event(%Message{event_type: type}) when is_binary(type) and type != "", do: type
   defp resolve_event(%Message{metadata: %{type: type}}) when is_binary(type), do: type
   defp resolve_event(%Message{metadata: %{"type" => type}}) when is_binary(type), do: type
   defp resolve_event(_message), do: nil
 
-  defp event_allowed?(_pref, nil), do: true
+  @doc """
+  Whether a channel preference carries `event`: the saved choice in
+  `config["events"]`, else the event's default (`Users.default_event_config/0`:
+  the opt-in alert events are off), else on. A message without an event is
+  always delivered.
+  """
+  def event_allowed?(_pref, nil), do: true
 
-  defp event_allowed?(pref, event) do
+  def event_allowed?(pref, event) do
     (pref.config || %{})
     |> Map.get("events", %{})
-    |> Map.get(event, true)
+    |> Map.get(event, Map.get(Users.default_event_config(), event, true))
+  end
+
+  @doc """
+  Sends an opt-in alert `event` to the members of `company_id` who chose it on
+  an enabled channel. `build` returns `{subject, body, metadata}`; it runs only
+  when someone chose the event, so hot paths pay one query otherwise.
+  """
+  def notify_company_opt_in(company_id, event, build)
+      when is_binary(company_id) and is_binary(event) and is_function(build, 0) do
+    case opted_in_user_ids(company_id, event) do
+      [] ->
+        :ok
+
+      user_ids ->
+        {subject, body, metadata} = build.()
+        metadata = Map.put(metadata, :type, event)
+        Enum.each(user_ids, &dispatch_async(Message.new(subject, body, &1, metadata)))
+    end
+  end
+
+  def notify_company_opt_in(_company_id, _event, _build), do: :ok
+
+  defp opted_in_user_ids(company_id, event) do
+    Cympho.Repo.all(
+      from p in NotificationPreference,
+        join: m in Cympho.Companies.CompanyMembership,
+        on: m.user_id == p.user_id,
+        where:
+          m.company_id == ^company_id and p.enabled == true and
+            fragment("(?->'events'->>?) = 'true'", p.config, ^event),
+        distinct: true,
+        select: p.user_id
+    )
   end
 
   defp channel_for(channel_type) when is_binary(channel_type) do

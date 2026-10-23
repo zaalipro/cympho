@@ -126,10 +126,25 @@ defmodule Cympho.HeartbeatEngine do
       log_audit(updated, "run_failed")
       record_usage_event(updated)
       CymphoWeb.Events.broadcast_run_status(updated, :run_failed)
+      notify_run_failed(updated)
     end)
   end
 
   def fail_run(%Run{status: status}, _, _), do: {:error, {:invalid_status, status}}
+
+  # B6 "Work stopped: a run failed". The email names the task, never the raw error.
+  defp notify_run_failed(%Run{} = run) do
+    Cympho.Notifications.Dispatcher.notify_company_opt_in(run.company_id, "work_stopped", fn ->
+      task =
+        case run.issue_id && Repo.get(Issue, run.issue_id) do
+          %Issue{identifier: id} when is_binary(id) -> id
+          _ -> "a task"
+        end
+
+      {"A run on #{task} failed", "Open #{task} in Cympho to see why it stopped.",
+       %{issue_id: run.issue_id, run_id: run.id}}
+    end)
+  end
 
   @doc """
   Settles usage reported after a run already reached a terminal state.

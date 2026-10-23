@@ -54,6 +54,7 @@ defmodule Cympho.IssueThreadInteractions do
     case result do
       {:ok, interaction} ->
         broadcast_interaction({:interaction_created, interaction}, interaction.issue_id)
+        notify_agent_question(interaction)
 
         {:ok, interaction}
 
@@ -61,6 +62,35 @@ defmodule Cympho.IssueThreadInteractions do
         {:error, changeset}
     end
   end
+
+  # B6 "An agent asks me something": questions and confirmations, not task suggestions.
+  defp notify_agent_question(%IssueThreadInteraction{kind: kind} = interaction)
+       when kind in [:ask_user_questions, :request_confirmation] do
+    case Repo.get(Issue, interaction.issue_id) do
+      %Issue{company_id: company_id} = issue when is_binary(company_id) ->
+        Cympho.Notifications.Dispatcher.notify_company_opt_in(company_id, "agent_question", fn ->
+          name = agent_name(interaction.created_by_agent_id)
+
+          {"#{name} asked you something",
+           "#{name} is waiting for your answer on #{issue.identifier}: #{issue.title}.",
+           %{issue_id: issue.id}}
+        end)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp notify_agent_question(_interaction), do: :ok
+
+  defp agent_name(agent_id) when is_binary(agent_id) do
+    case Repo.get(Agent, agent_id) do
+      %Agent{name: name} when is_binary(name) -> name
+      _ -> "An agent"
+    end
+  end
+
+  defp agent_name(_agent_id), do: "An agent"
 
   def resolve_interaction(%IssueThreadInteraction{} = interaction, attrs) do
     new_status = Map.get(attrs, :status) || Map.get(attrs, "status")
