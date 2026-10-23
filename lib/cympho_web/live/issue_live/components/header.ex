@@ -1,15 +1,17 @@
 defmodule CymphoWeb.IssueLive.Show.Header do
   @moduledoc """
-  Stateless function component for the issue show page header — the
-  breadcrumb / identifier strip and the title-hero block (title, status
-  badge, priority badge, pending-wake badge, assignee display, project link).
+  The r3 Task page's header block (`header/1`, mockup `v5/pages/task.html`):
+  the H1, the chips (status in the owner's words, person, "High" only when it
+  applies, an issue-level pause) that open the existing comboboxes, the brief,
+  the Now capsule, inline title/description editing and the page's flash.
+  The breadcrumb and Back live in the page frame (`page_frame/1`).
 
-  Also renders `status_digest/1`, the answer-first strip under the title:
-  one sentence for "do I need to act?", the last timeline event, and at
-  most one primary action pulled from the review-gate resolution.
+  Also renders `status_digest/1` for Advanced: one sentence for "do I need to
+  act?", the last timeline event, and at most one primary action pulled from
+  the review-gate resolution.
 
-  All events (`start_editing`, `save_title`, `cancel_editing`,
-  `resolve_review_gate`, and gate live-events) bubble to the parent
+  All events (`start_editing`, `save_title`, `cancel_editing`, the combobox
+  events, `resolve_review_gate`, and gate live-events) bubble to the parent
   LiveView since the parent owns the `editing` assign and the issue
   mutation flow.
   """
@@ -19,84 +21,107 @@ defmodule CymphoWeb.IssueLive.Show.Header do
     only: [format_timeline_timestamp: 1, run_status_label: 1, count_suffix: 1]
 
   attr :issue, :map, required: true
+  attr :v, :map, required: true
   attr :editing, :any, default: nil
-  attr :pending_wake, :map, default: nil
+  attr :all_agents, :list, default: []
+  attr :description_draft, :string, default: nil
+  attr :delivery_brief_readiness, :map, default: nil
+  attr :flash, :map, default: %{}
 
   def header(assigns) do
     ~H"""
-    <div class="flex items-center gap-3 px-4 lg:px-6 py-3 border-b border-hairline">
-      <.app_link
-        navigate={~p"/issues"}
-        class="group inline-flex items-center gap-1.5 text-caption text-ink-tertiary hover:text-ink-muted transition-colors"
-      >
-        <.icon
-          name="hero-arrow-left-mini"
-          class="w-3.5 h-3.5 transition-transform duration-200 group-hover:-translate-x-0.5"
-        /> Issues
-      </.app_link>
-      <span aria-hidden="true" class="h-3.5 w-px bg-hairline-strong"></span>
-      <span
-        :if={@issue.identifier}
-        class="rounded-md border border-hairline bg-surface-1/70 px-2 py-0.5 font-mono text-[11px] tracking-[0.05em] text-ink-muted"
-      >
-        {@issue.identifier}
-      </span>
-      <span
-        :if={!@issue.identifier}
-        class="rounded-md border border-hairline bg-surface-1/70 px-2 py-0.5 font-mono text-[11px] tracking-[0.05em] text-ink-muted"
-      >
-        #{@issue.issue_number}
-      </span>
-    </div>
-    <div class="group px-4 lg:px-6 pt-5 pb-4">
-      <div :if={@editing != "title"} class="flex items-start gap-3">
-        <h1 class={title_class(@issue)}>
-          {@issue.title}
-        </h1>
+    <section class="head" aria-labelledby="t-h">
+      <h1 class="h1 big" id="t-h">{@issue.title}</h1>
+      <form :if={@editing == "title"} phx-submit="save_title" class="t-edit">
+        <label class="sr" for="t-edit-title">Title</label>
+        <input id="t-edit-title" type="text" name="title" value={@issue.title} autofocus />
+        <.pill type="submit">Save</.pill>
+        <.pill phx-click="cancel_editing">Cancel</.pill>
+      </form>
+      <div class="chips">
+        <.combobox
+          id="issue-status-chip"
+          label={"Status: " <> @v.status.word}
+          options={@v.status_options}
+          selected={to_string(@issue.status)}
+          on_change="combobox_status"
+          searchable?={false}
+          clearable?={false}
+          trigger_class={["chip", @v.status.kind == :waiting && "st-wait"]}
+        >
+          <:trigger><.status_glyph kind={@v.status.kind} />{@v.status.word}</:trigger>
+        </.combobox>
+        <.combobox
+          id="issue-assignee-chip"
+          label={"Assignee: " <> @v.person.word}
+          options={Enum.map(@all_agents, &%{id: &1.id, label: &1.name})}
+          selected={@issue.assignee_id}
+          on_change="combobox_assignee"
+          placeholder="Unassigned"
+          align="right"
+          trigger_class="chip"
+        >
+          <:trigger>
+            <span :if={@v.person.initials} class="tile-ag sm" aria-hidden="true">
+              {@v.person.initials}
+            </span>{@v.person.word}
+          </:trigger>
+        </.combobox>
+        <.combobox
+          :if={@v.priority}
+          id="issue-priority-chip"
+          label={"Priority: " <> @v.priority.word}
+          options={@v.priority_options}
+          selected={to_string(@issue.priority)}
+          on_change="combobox_priority"
+          searchable?={false}
+          clearable?={false}
+          align="right"
+          trigger_class="chip"
+        >
+          <:trigger>
+            <span class="pri" aria-hidden="true"><i
+                :for={on <- @v.priority.bars}
+                class={on && "on"}
+              ></i></span>{@v.priority.word}
+          </:trigger>
+        </.combobox>
+        <span :if={Cympho.Issues.issue_runtime_paused?(@issue)} class="chip">
+          <.status_glyph kind={:stopped} />Paused
+        </span>
+        <details :if={@v.brief} class="brief">
+          <summary class="chip ghost">
+            {@v.brief.by}<span aria-hidden="true"> · </span>{@v.brief.day}
+            <span class="mono">{@v.brief.time}</span>
+            <.r3_icon name="i-chev-down" class="ico s14" />
+          </summary>
+          <blockquote>{@issue.description}</blockquote>
+        </details>
         <button
           type="button"
+          class="chip ghost ui-advanced-only"
           phx-click="start_editing"
           phx-value-field="title"
-          class="shrink-0 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 text-ink-tertiary hover:text-ink-muted transition-all"
           aria-label="Edit title"
-          title="Edit title"
         >
-          <.icon name="hero-pencil-mini" class="w-4 h-4" />
+          <.r3_icon name="i-pencil" class="ico s14" />Edit title
         </button>
       </div>
-      <form
-        :if={@editing == "title"}
-        phx-submit="save_title"
-        class="flex items-center gap-2"
-      >
-        <input
-          type="text"
-          name="title"
-          value={@issue.title}
-          class="flex-1 bg-surface-1 border border-hairline rounded-md px-3 h-10 font-serif text-lg text-ink transition-shadow focus:outline-none focus:border-brand/60 focus:shadow-[0_0_0_3px_rgb(217_119_87_/_0.15)]"
-          autofocus
-        />
-        <.button type="submit" size="sm">Save</.button>
-        <.button type="button" variant="ghost" size="sm" phx-click="cancel_editing">
-          Cancel
-        </.button>
-      </form>
-      <div
-        :if={
-          Cympho.Issues.issue_runtime_paused?(@issue) ||
-            (@pending_wake && !terminal_issue?(@issue))
-        }
-        class="mt-3 flex flex-wrap items-center gap-2"
-      >
-        <span
-          :if={Cympho.Issues.issue_runtime_paused?(@issue)}
-          class="inline-flex items-center gap-1.5 rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[11px] font-590 uppercase tracking-[0.06em] text-amber-100"
-        >
-          <.icon name="hero-pause-mini" class="h-3.5 w-3.5 text-white" /> Paused
-        </span>
-        <.pending_wake_badge :if={@pending_wake && !terminal_issue?(@issue)} wake={@pending_wake} />
-      </div>
-    </div>
+      <.now_capsule :if={@v.now} state={@v.now.state}>
+        <.link class="ul" navigate={"/agents/#{@v.now.agent.id}"}>{@v.now.agent.name}</.link>
+        {@v.now.text}
+        <:sub>{@v.now.sub}</:sub>
+      </.now_capsule>
+      <CymphoWeb.IssueLive.Show.Description.description
+        :if={@editing == "description"}
+        issue={@issue}
+        editing={@editing}
+        description_draft={@description_draft}
+        delivery_brief_readiness={@delivery_brief_readiness}
+      />
+      <p :if={@flash["info"]} class="flash-msg" role="status">{@flash["info"]}</p>
+      <p :if={@flash["error"]} class="flash-msg err" role="alert">{@flash["error"]}</p>
+    </section>
     """
   end
 
@@ -121,14 +146,8 @@ defmodule CymphoWeb.IssueLive.Show.Header do
         <div class="flex min-w-0 items-center gap-2.5">
           <span class={digest_dot_class(@digest.tone)} aria-hidden="true"></span>
           <div class="min-w-0">
-            <p class="text-sm font-510 leading-5 text-ink">
-              <span class="ui-advanced-only">{@digest.headline}</span>
-              <span class="ui-simple-only">{simple_headline(@digest)}</span>
-            </p>
-            <p
-              :if={@last_event}
-              class="ui-advanced-only mt-0.5 truncate text-caption text-ink-tertiary"
-            >
+            <p class="text-sm font-510 leading-5 text-ink">{@digest.headline}</p>
+            <p :if={@last_event} class="mt-0.5 truncate text-caption text-ink-tertiary">
               Last: {@last_event}
             </p>
           </div>
@@ -139,8 +158,7 @@ defmodule CymphoWeb.IssueLive.Show.Header do
             href={@primary_action.href}
             class={digest_action_class(@digest.tone)}
           >
-            <span class="ui-advanced-only">{@primary_action.label}</span>
-            <span class="ui-simple-only">{simple_action_label(@primary_action.label)}</span>
+            {@primary_action.label}
           </a>
           <button
             :if={@primary_action.type == :event}
@@ -149,8 +167,7 @@ defmodule CymphoWeb.IssueLive.Show.Header do
             phx-value-action={@primary_action.action}
             class={digest_action_class(@digest.tone)}
           >
-            <span class="ui-advanced-only">{@primary_action.label}</span>
-            <span class="ui-simple-only">{simple_action_label(@primary_action.label)}</span>
+            {@primary_action.label}
           </button>
           <button
             :if={@primary_action.type == :live_event}
@@ -159,8 +176,7 @@ defmodule CymphoWeb.IssueLive.Show.Header do
             data-confirm={Map.get(@primary_action, :confirm)}
             class={digest_action_class(@digest.tone)}
           >
-            <span class="ui-advanced-only">{@primary_action.label}</span>
-            <span class="ui-simple-only">{simple_action_label(@primary_action.label)}</span>
+            {@primary_action.label}
           </button>
         </div>
       </div>
@@ -196,29 +212,6 @@ defmodule CymphoWeb.IssueLive.Show.Header do
         %{tone: :quiet, headline: "No action needed."}
     end
   end
-
-  # Simple mode drops the trailing period and the runtime vocabulary: the
-  # headline is read as a state label, not a sentence.
-  defp simple_headline(%{headline: "Ready to run."}), do: "Ready"
-  defp simple_headline(%{headline: "Review needed."}), do: "Needs your review"
-  defp simple_headline(%{headline: "No action needed."}), do: "Nothing to do"
-  defp simple_headline(%{headline: "Closed."}), do: "Done"
-
-  defp simple_headline(%{headline: "Blocked by " <> rest}) do
-    "Stuck on " <> String.trim_trailing(rest, ".")
-  end
-
-  defp simple_headline(%{headline: headline}), do: headline
-
-  # Gate actions are named for the runtime ("queue focused dispatch"). Simple
-  # mode names the outcome instead ("start now"). Unmapped labels pass through.
-  defp simple_action_label("Queue focused dispatch"), do: "Start now"
-  defp simple_action_label("Focus queued"), do: "Starting next"
-  defp simple_action_label("Review evidence"), do: "See the work"
-  defp simple_action_label("Accept owner verification"), do: "Looks good"
-  defp simple_action_label("Attach work product"), do: "Attach proof"
-  defp simple_action_label("Set PR link"), do: "Set PR"
-  defp simple_action_label(label), do: label
 
   defp last_event_line([]), do: nil
 
@@ -260,31 +253,6 @@ defmodule CymphoWeb.IssueLive.Show.Header do
   defp digest_action_class(_tone),
     do:
       "inline-flex items-center justify-center rounded-md border border-border bg-panel px-3 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
-
-  defp title_class(issue) do
-    if swarm_issue?(issue) do
-      "flex-1 font-serif text-[clamp(24px,3.2vw,34px)] font-510 leading-[1.12] tracking-[-0.018em] text-ink"
-    else
-      "flex-1 font-serif text-[clamp(20px,2.6vw,28px)] font-510 leading-[1.15] tracking-[-0.015em] text-ink"
-    end
-  end
-
-  defp swarm_issue?(%{origin_type: origin}) when origin in ["swarm_worker", "swarm_cto_review"],
-    do: true
-
-  defp swarm_issue?(%{monitor_state: monitor_state}) when is_map(monitor_state) do
-    monitor_state
-    |> Map.get("swarm", Map.get(monitor_state, :swarm))
-    |> swarm_state?()
-  end
-
-  defp swarm_issue?(_issue), do: false
-
-  defp swarm_state?(%{"enabled" => enabled}) when enabled in [true, "true"], do: true
-  defp swarm_state?(%{enabled: enabled}) when enabled in [true, "true"], do: true
-  defp swarm_state?(%{"role" => role}) when role in ["worker", "cto_synthesis"], do: true
-  defp swarm_state?(%{role: role}) when role in ["worker", "cto_synthesis"], do: true
-  defp swarm_state?(_), do: false
 
   defp terminal_issue?(%{status: status}) when status in [:done, :cancelled, "done", "cancelled"],
     do: true

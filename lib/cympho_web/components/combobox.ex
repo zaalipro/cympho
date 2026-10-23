@@ -39,6 +39,9 @@ defmodule CymphoWeb.Components.Combobox do
   attr :trigger_class, :any, default: nil
   attr :rest, :global
 
+  slot :trigger,
+    doc: "replaces the trigger's label and chevron; only `trigger_class` styles it then"
+
   def combobox(assigns) do
     selected_ids = normalize_selected(assigns.selected)
     selected_options = Enum.filter(assigns.options, &(&1.id in selected_ids))
@@ -61,27 +64,35 @@ defmodule CymphoWeb.Components.Combobox do
       <button
         type="button"
         data-combobox-trigger
-        class={[
-          "inline-flex items-center gap-1.5 px-2.5 h-7 rounded-md max-w-full",
-          "text-caption text-ink whitespace-nowrap",
-          "bg-surface-1 hover:bg-surface-2 border border-hairline hover:border-hairline-strong",
-          "transition-colors duration-150",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
-          length(@selected_ids) > 0 && "border-brand/30 bg-brand/[0.06]",
-          @trigger_class
-        ]}
+        class={
+          if @trigger != [],
+            do: @trigger_class,
+            else: [
+              "inline-flex items-center gap-1.5 px-2.5 h-7 rounded-md max-w-full",
+              "text-caption text-ink whitespace-nowrap",
+              "bg-surface-1 hover:bg-surface-2 border border-hairline hover:border-hairline-strong",
+              "transition-colors duration-150",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
+              length(@selected_ids) > 0 && "border-brand/30 bg-brand/[0.06]",
+              @trigger_class
+            ]
+        }
         aria-haspopup="listbox"
         aria-expanded="false"
         title={@label}
         aria-label={@label}
       >
-        <%!-- "Status: Any status", "Priority: Any priority" — the placeholder
-             already names the dimension, so the prefix said it twice on every
-             filter. The word moves to the trigger's title/aria-label, which
-             also gives these controls an accessible name they lacked. --%>
-        <span :if={@label} class="ui-advanced-only text-ink-muted shrink-0">{@label}:</span>
-        <span class="font-510 truncate">{@trigger_label}</span>
-        <.chevron />
+        <%= if @trigger != [] do %>
+          {render_slot(@trigger)}
+        <% else %>
+          <%!-- "Status: Any status", "Priority: Any priority" — the placeholder
+               already names the dimension, so the prefix said it twice on every
+               filter. The word moves to the trigger's title/aria-label, which
+               also gives these controls an accessible name they lacked. --%>
+          <span :if={@label} class="ui-advanced-only text-ink-muted shrink-0">{@label}:</span>
+          <span class="font-510 truncate">{@trigger_label}</span>
+          <.chevron />
+        <% end %>
       </button>
 
       <div
