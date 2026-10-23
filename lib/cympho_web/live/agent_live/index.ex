@@ -3,14 +3,37 @@ defmodule CymphoWeb.AgentLive.Index do
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Agents.RuntimeEnv
+  alias Cympho.BoardApprovals
+  alias Cympho.Costs
+  alias Cympho.HeartbeatEngine
+  alias Cympho.Orchestrator.Dispatcher
   alias Cympho.OrgHealth
+  alias Cympho.OwnerAttention
+  alias CymphoWeb.AgentLive.Parts
+  alias CymphoWeb.Events
+  alias CymphoWeb.NextStep
+  alias CymphoWeb.TeamRail
 
   import CymphoWeb.Format, only: [status_pill_class: 1, role_avatar_class: 1]
+
+  # The Team board (plan P6): columns in the owner's words, Idle capped.
+  @columns [
+    {:stopped, "Stopped", "tb-st"},
+    {:waiting, "Waiting on you", "tb-wy"},
+    {:working, "Working", "tb-wk"},
+    {:idle, "Idle", "tb-id"}
+  ]
+  @idle_cap 6
+  @day_runs 20
+  @board_refresh_ms 300
+  @agent_events [:agent_paused, :agent_resumed, :agent_terminated]
 
   @impl true
   def mount(_params, session, socket) do
     if connected?(socket) && socket.assigns[:current_company] do
       Agents.subscribe(socket.assigns.current_company.id)
+      # Run starts and ends move agents between Working and Idle.
+      Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
 
     company_id = current_company_id(socket)
@@ -29,6 +52,10 @@ defmodule CymphoWeb.AgentLive.Index do
       |> assign(:org_health, org_health_snapshot(company_id))
       |> assign(:workload, workload_counts(company_id))
       |> assign(:session_progress, progress)
+      |> assign(:runtime_enabled?, Dispatcher.enabled?())
+      |> assign(:show_all_idle, false)
+      |> assign(:board_refresh, nil)
+      |> assign_board()
 
     if connected?(socket) do
       schedule_progress_update()
@@ -46,10 +73,11 @@ defmodule CymphoWeb.AgentLive.Index do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
-  defp apply_action(socket, :index, _params) do
+  defp apply_action(socket, :index, params) do
     socket
-    |> assign(:page_title, "Agents")
+    |> assign(:page_title, "Team")
     |> assign(:agent, nil)
+    |> assign(:show_all_idle, params["state"] == "idle")
   end
 
   defp apply_action(socket, nil, params) do
@@ -62,10 +90,13 @@ defmodule CymphoWeb.AgentLive.Index do
      socket
      |> update(:agents, fn agents -> [agent | agents] end)
      |> refresh_roster_status_counts()
-     |> refresh_org_health()}
+     |> refresh_org_health()
+     |> schedule_board()}
   end
 
-  def handle_info({:agent_updated, updated_agent}, socket) do
+  # A pause, resume or termination carries the updated agent, like an update.
+  def handle_info({event, %Agent{} = updated_agent}, socket)
+      when event == :agent_updated or event in @agent_events do
     {:noreply,
      socket
      |> update(:agents, fn agents ->
@@ -74,7 +105,8 @@ defmodule CymphoWeb.AgentLive.Index do
        end)
      end)
      |> refresh_roster_status_counts()
-     |> refresh_org_health()}
+     |> refresh_org_health()
+     |> schedule_board()}
   end
 
   def handle_info({:agent_deleted, deleted_id}, socket) do
@@ -84,8 +116,18 @@ defmodule CymphoWeb.AgentLive.Index do
        Enum.filter(agents, fn agent -> agent.id != deleted_id end)
      end)
      |> refresh_roster_status_counts()
-     |> refresh_org_health()}
+     |> refresh_org_health()
+     |> schedule_board()}
   end
+
+  def handle_info(%Phoenix.Socket.Broadcast{event: "run_status"}, socket),
+    do: {:noreply, schedule_board(socket)}
+
+  def handle_info({:owner_attention_changed, _company_id}, socket),
+    do: {:noreply, schedule_board(socket)}
+
+  def handle_info(:refresh_board, socket),
+    do: {:noreply, socket |> assign(:board_refresh, nil) |> assign_board()}
 
   def handle_info(:update_progress, socket) do
     company_id = current_company_id(socket)
@@ -114,6 +156,9 @@ defmodule CymphoWeb.AgentLive.Index do
      |> refresh_roster_status_counts()
      |> assign(:workload, workload_counts(current_company_id(socket)))}
   end
+
+  # Anything else on the subscribed topics must never crash the page.
+  def handle_info(_message, socket), do: {:noreply, socket}
 
   @impl true
   def handle_event("delete_agent", %{"id" => id}, socket) do
@@ -440,6 +485,199 @@ defmodule CymphoWeb.AgentLive.Index do
     assign(socket, :org_health, org_health_snapshot(current_company_id(socket)))
   end
 
+  ## ── The r3 Team page (plan P6) ────────────────────────────────
+
+  def board_columns, do: @columns
+  def idle_cap, do: @idle_cap
+
+  def ac_word_class(:stopped), do: "c-stop"
+  def ac_word_class(:working), do: "c-work"
+  def ac_word_class(_kind), do: nil
+
+  # The proposed agent's name (the agent_hire executor's attrs), else the vote's title.
+  def hire_name(%{proposal_data: %{"attrs" => %{"name" => name}}}) when is_binary(name), do: name
+  def hire_name(%{title: title}), do: title
+
+  # Bursts of agent and run messages redraw the board once.
+  defp schedule_board(%{assigns: %{board_refresh: nil}} = socket) do
+    assign(socket, :board_refresh, Process.send_after(self(), :refresh_board, @board_refresh_ms))
+  end
+
+  defp schedule_board(socket), do: socket
+
+  defp reload_board(socket) do
+    socket
+    |> assign(:agents, list_agents(current_company_id(socket)))
+    |> refresh_roster_status_counts()
+    |> assign_board()
+  end
+
+  # The Next step (a company stopped at its limit, else a stopped agent), the
+  # board, the proposed hires and the last day's runs. Company-scoped reads.
+  defp assign_board(socket) do
+    case current_company_id(socket) do
+      nil ->
+        assign(socket,
+          next_item: nil,
+          board: Map.new(@columns, fn {col, _label, _id} -> {col, []} end),
+          team_size: 0,
+          hires: [],
+          runs_24h: 0,
+          day_runs: [],
+          agent_names: %{},
+          spending: nil
+        )
+
+      company_id ->
+        user = socket.assigns[:current_user]
+        agents = socket.assigns.agents
+        items = company_id |> OwnerAttention.list_items(user) |> OwnerAttention.owner_order()
+        since = DateTime.add(DateTime.utc_now(), -86_400, :second)
+        names = Map.new(agents, &{&1.id, &1.name})
+
+        assign(socket,
+          next_item:
+            Enum.find(items, &(OwnerAttention.owner_kind(&1) == :stopped)) ||
+              Enum.find(items, &(&1.kind == :agent_paused)),
+          board: board(company_id, user, agents, items),
+          team_size: Enum.count(agents, &(not terminated?(&1))),
+          hires:
+            BoardApprovals.list_board_approvals(%{
+              company_id: company_id,
+              status: "pending",
+              category: "agent_hire"
+            }),
+          runs_24h: HeartbeatEngine.count_runs_since(company_id, since),
+          day_runs:
+            company_id
+            |> HeartbeatEngine.list_runs_since(since, limit: @day_runs)
+            |> Enum.map(&day_run_row(&1, names)),
+          agent_names: names,
+          spending: TeamRail.spending(company_id)
+        )
+    end
+  end
+
+  defp board(company_id, user, agents, items) do
+    for_you = TeamRail.for_you_counts(company_id, user)
+    runs = HeartbeatEngine.latest_runs_by_agent(company_id)
+
+    costs =
+      company_id
+      |> Costs.by_agent(30, max(length(agents), 1))
+      |> Map.new(&{&1.agent_id, &1.total_cost})
+
+    # The first owner item per agent, in the owner's order, names what it waits on.
+    first_items =
+      items
+      |> Enum.reverse()
+      |> Map.new(&{Parts.for_you_agent_id(&1), &1})
+
+    agents
+    |> Enum.reject(&terminated?/1)
+    |> Enum.map(
+      &card(&1, runs[&1.id], Map.get(for_you, &1.id, 0), first_items[&1.id], costs[&1.id])
+    )
+    |> Enum.group_by(& &1.col)
+    |> then(fn groups ->
+      Map.new(@columns, fn {col, _label, _id} ->
+        {col, groups |> Map.get(col, []) |> Enum.sort_by(&card_rank/1)}
+      end)
+    end)
+  end
+
+  defp card(agent, run, for_you, item, cost) do
+    running? = match?(%{status: "running"}, run)
+    {kind, word} = Parts.status(agent, running?)
+
+    col =
+      cond do
+        kind == :stopped -> :stopped
+        kind == :working -> :working
+        kind == :waiting or for_you > 0 -> :waiting
+        true -> :idle
+      end
+
+    %{
+      id: agent.id,
+      name: agent.name,
+      initials: Parts.initials(agent.name),
+      role: role_label(agent.role),
+      kind: kind,
+      word: word,
+      line: line_parts(now_or_last(kind, run, item)),
+      cost: Parts.usd(cost),
+      for_you: for_you,
+      col: col
+    }
+  end
+
+  defp line_parts({_text, _minutes} = line), do: line
+  defp line_parts(text), do: {text, nil}
+
+  # Waiting on you: most for-you items first; every column then by name.
+  defp card_rank(%{col: :waiting} = card), do: {-card.for_you, String.downcase(card.name)}
+  defp card_rank(card), do: {0, String.downcase(card.name)}
+
+  defp terminated?(agent),
+    do: agent.status == :terminated or agent.governance_status == "terminated"
+
+  # What the agent is doing now (with its minutes, drawn mono), else what it is
+  # waiting on you for, else what it did last; at most six words (build-spec §6).
+  defp now_or_last(:working, %{status: "running"} = run, _item) do
+    minutes = if run.started_at, do: DateTime.diff(DateTime.utc_now(), run.started_at, :minute)
+    {run_subject(run.issue), minutes && "#{minutes} min"}
+  end
+
+  defp now_or_last(_kind, _run, %{kind: :interaction, issue: %{identifier: id}}),
+    do: "asked you on #{id}"
+
+  defp now_or_last(_kind, _run, %{kind: :review_queue, issue: %{identifier: id}}),
+    do: "#{id} ready for your review"
+
+  defp now_or_last(_kind, _run, %{kind: kind}) when kind in [:approval, :board_approval],
+    do: "asked for your approval"
+
+  defp now_or_last(_kind, nil, _item), do: "no runs yet"
+  defp now_or_last(_kind, %{issue: nil} = run, _item), do: "last run at #{run_clock(run)}"
+
+  defp now_or_last(_kind, %{issue: %{status: :done} = issue} = run, _item) do
+    if finished_by?(issue, run),
+      do: "finished #{issue.identifier} at #{run_clock(run)}",
+      else: "last on #{issue.identifier}"
+  end
+
+  defp now_or_last(_kind, %{issue: %{status: :in_review, identifier: id}}, _item),
+    do: "#{id} in team review"
+
+  defp now_or_last(_kind, %{issue: %{identifier: id}}, _item), do: "last on #{id}"
+
+  defp run_subject(%{status: :in_review, identifier: id}) when is_binary(id),
+    do: "reviewing #{id}"
+
+  defp run_subject(%{identifier: id}) when is_binary(id), do: "on #{id}"
+  defp run_subject(_issue), do: "working"
+
+  # The task was completed during or after this run, not before it.
+  defp finished_by?(%{completed_at: %DateTime{} = done}, %{started_at: %DateTime{} = started}),
+    do: DateTime.compare(done, started) != :lt
+
+  defp finished_by?(_issue, _run), do: false
+
+  defp run_clock(run) do
+    case run.completed_at || run.started_at || run.inserted_at do
+      %DateTime{} = at -> Calendar.strftime(at, "%H:%M")
+      _ -> "?"
+    end
+  end
+
+  defp day_run_row(run, names) do
+    name = Map.get(names, run.agent_id) || (run.agent && run.agent.name) || "An agent"
+    subject = if run.issue, do: " on #{run.issue.identifier}", else: ""
+
+    Parts.run_row(run, name <> subject, "/agents/#{run.agent_id}?tab=runs&run_id=#{run.id}")
+  end
+
   defp get_scoped_agent(socket, id) do
     case current_company_id(socket) do
       nil -> {:error, :not_found}
@@ -450,7 +688,7 @@ defmodule CymphoWeb.AgentLive.Index do
   defp scoped_agent_action(socket, id, action, success_message, error_message) do
     with {:ok, agent} <- get_scoped_agent(socket, id),
          {:ok, _agent} <- action.(agent) do
-      {:noreply, put_flash(socket, :info, success_message)}
+      {:noreply, socket |> put_flash(:info, success_message) |> reload_board()}
     else
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Agent not found")}
@@ -526,10 +764,6 @@ defmodule CymphoWeb.AgentLive.Index do
   defp status_rank(:pending_approval), do: 4
   defp status_rank(status) when status in [:sleeping, :paused], do: 5
   defp status_rank(_), do: 6
-
-  def agents_needing_attention(agents) do
-    agents |> Enum.filter(&(&1.status == :error)) |> Enum.sort_by(&(&1.name || ""))
-  end
 
   def session_progress_note(progress, agent_id) do
     case Map.get(progress || %{}, agent_id) do

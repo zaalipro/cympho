@@ -11,22 +11,34 @@ defmodule CymphoWeb.AgentLive.Show do
   alias Cympho.AgentInstructionStudio
   alias Cympho.AgentInstructionTuner
   alias Cympho.AgentHeartbeat
+  alias Cympho.Costs
   alias Cympho.Finances.Pricing
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
+  alias Cympho.IssueThreadInteractions
+  alias Cympho.Orchestrator.Dispatcher
+  alias Cympho.OwnerAttention
   alias Cympho.RuntimeCapacity
   alias Cympho.RuntimePreflight
   alias Cympho.RuntimeProfiles
   alias Cympho.Secrets
   alias Cympho.Skills
   alias Cympho.Wakes
+  alias CymphoWeb.AgentLive.Parts
+  alias CymphoWeb.Events
   alias CymphoWeb.Markdown
+  alias CymphoWeb.NextStep
+  alias CymphoWeb.TeamRail
+  alias CymphoWeb.UserAuth
 
-  import CymphoWeb.Format,
-    only: [format_datetime: 1, role_avatar_class: 1, status_pill_class: 1]
+  import CymphoWeb.Format, only: [format_datetime: 1]
 
   @valid_tabs ~w(dashboard instructions skills configuration runs)
   @entry_file "AGENTS.md"
+  # Overview (plan P3): recent runs shown, and the debounce for live redraws.
+  @overview_runs 5
+  @overview_refresh_ms 300
+  @agent_events [:agent_paused, :agent_resumed, :agent_terminated]
 
   @impl true
   def mount(%{"id" => "new"}, _session, socket) do
@@ -36,7 +48,16 @@ defmodule CymphoWeb.AgentLive.Show do
   def mount(%{"id" => id}, _session, socket) do
     if connected?(socket) && socket.assigns[:current_company] do
       Agents.subscribe(socket.assigns.current_company.id)
+      # Run starts and ends change the Overview's state, runs and spend.
+      Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
+
+    socket =
+      assign(socket,
+        runtime_enabled?: Dispatcher.enabled?(),
+        overview_refresh: nil,
+        from: nil
+      )
 
     case get_scoped_agent(socket, id) do
       {:ok, agent} ->
@@ -59,6 +80,7 @@ defmodule CymphoWeb.AgentLive.Show do
           socket
           |> assign(:page_title, agent.name)
           |> assign(:current_tab, tab)
+          |> assign(:from, UserAuth.safe_from(params["from"]))
           |> assign_agent(agent)
           |> maybe_select_file(file)
           |> maybe_select_run(run_id)
@@ -584,10 +606,42 @@ defmodule CymphoWeb.AgentLive.Show do
         {:noreply,
          socket
          |> put_flash(:info, "Agent resumed.")
-         |> assign_agent(agent)}
+         |> assign_agent(agent)
+         |> push_event("toast", %{message: "#{agent.name} can take new work.", type: "success"})}
 
       _ ->
-        {:noreply, put_flash(socket, :error, "Could not resume agent.")}
+        {:noreply,
+         socket
+         |> put_flash(:error, "Could not resume agent.")
+         |> push_event("toast", %{message: "Could not resume that agent.", type: "error"})}
+    end
+  end
+
+  # The Overview's question (NextStep's answer form), company-scoped like Home's.
+  def handle_event("respond_questions", params, socket) do
+    with {:ok, id, answer} <- NextStep.answer_from_params(params),
+         {:ok, interaction} <- scoped_question(socket, id),
+         {:ok, _resolved} <-
+           IssueThreadInteractions.resolve_interaction(interaction, %{
+             "status" => :responded,
+             "resolved_by_user_id" => current_user_id(socket),
+             "response" => answer
+           }) do
+      {:noreply,
+       socket
+       |> assign_overview()
+       |> push_event("toast", %{message: "Answer sent.", type: "success"})}
+    else
+      {:error, :empty} ->
+        {:noreply,
+         push_event(socket, "toast", %{
+           message: "Choose an answer or write your own.",
+           type: "error"
+         })}
+
+      _ ->
+        {:noreply,
+         push_event(socket, "toast", %{message: "Could not send this answer.", type: "error"})}
     end
   end
 
@@ -638,9 +692,30 @@ defmodule CymphoWeb.AgentLive.Show do
     end
   end
 
+  def handle_info(
+        {event, %Agent{id: id} = updated_agent},
+        %{assigns: %{agent: %{id: id}}} = socket
+      )
+      when event in @agent_events do
+    {:noreply, assign_agent(socket, updated_agent)}
+  end
+
   def handle_info({:agent_deleted, _deleted_id}, socket) do
     {:noreply, push_navigate(socket, to: ~p"/agents")}
   end
+
+  # Runs and owner decisions change the Overview only; the Setup form is left alone.
+  def handle_info(%Phoenix.Socket.Broadcast{event: "run_status"}, socket),
+    do: {:noreply, schedule_overview(socket)}
+
+  def handle_info({:owner_attention_changed, _company_id}, socket),
+    do: {:noreply, schedule_overview(socket)}
+
+  def handle_info(:refresh_overview, socket),
+    do: {:noreply, socket |> assign(:overview_refresh, nil) |> assign_overview()}
+
+  # Other agents' events and anything else on the subscribed topics.
+  def handle_info(_message, socket), do: {:noreply, socket}
 
   # ── Loading helpers ───────────────────────────────────────────────────
 
@@ -722,6 +797,249 @@ defmodule CymphoWeb.AgentLive.Show do
     |> assign(:reports_to_options, reports_to_options(socket.assigns[:current_company], agent.id))
     |> refresh_skills()
     |> maybe_default_tab()
+    |> assign_overview()
+  end
+
+  ## ── The r3 Overview (plan P3) ────────────────────────────────
+
+  defp schedule_overview(%{assigns: %{overview_refresh: nil}} = socket) do
+    assign(
+      socket,
+      :overview_refresh,
+      Process.send_after(self(), :refresh_overview, @overview_refresh_ms)
+    )
+  end
+
+  defp schedule_overview(socket), do: socket
+
+  # The Next step for this agent, its now-and-last task, spend, how it runs and
+  # its recent runs. Company-scoped reads; key names only, never values.
+  defp assign_overview(%{assigns: %{agent: agent}} = socket) do
+    company_id = agent.company_id
+    user = socket.assigns[:current_user]
+    team = Agents.list_agents_by_company(company_id)
+
+    items =
+      company_id
+      |> OwnerAttention.list_items(user)
+      |> OwnerAttention.owner_order()
+      |> Enum.filter(&(Parts.for_you_agent_id(&1) == agent.id))
+
+    runs =
+      agent.id
+      |> HeartbeatEngine.list_runs_for_agent(limit: @overview_runs)
+      |> Cympho.Repo.preload(:issue)
+
+    running? = match?([%{status: "running"} | _], runs)
+    runs_issue = shared_issue(runs)
+    runtime = runtime_form_from_agent(agent)
+
+    assign(socket,
+      next: overview_next(agent, items, socket),
+      # An agent page is not on UserAuth.safe_from/1's list, so links leave without ?from=.
+      step_from: nil,
+      agent_names: Map.new(team, &{&1.id, &1.name}),
+      spending: TeamRail.spending(company_id),
+      pill: overview_pill(agent, running?),
+      runtime_label: adapter_label_human(agent.adapter),
+      overview_model: runtime.model,
+      working_on: working_on(runs, socket.assigns.recent_issues, agent.id, running?),
+      last_task: last_task(runs, socket.assigns.recent_issues),
+      spend_30d: agent_spend(company_id, agent.id, 30, length(team)),
+      spend_1d: agent_spend(company_id, agent.id, 1, length(team)),
+      price: price_line(agent, runtime.model),
+      key_name: key_name(agent, runtime, socket.assigns.env_vars),
+      overview_runs:
+        Enum.map(
+          runs,
+          &Parts.run_row(&1, run_title(&1), "/agents/#{agent.id}?tab=runs&run_id=#{&1.id}")
+        ),
+      runs_issue: runs_issue,
+      earlier_spend: earlier_spend(company_id, agent.id, runs_issue, runs)
+    )
+  end
+
+  defp overview_next(agent, items, socket) do
+    paused = Enum.find(items, &(&1.kind == :agent_paused))
+
+    cond do
+      paused -> {:paused, paused}
+      agent.status == :paused -> {:paused, hand_paused_item(agent)}
+      agent.status == :error -> {:retry, socket.assigns.latest_failure_reason}
+      items != [] -> {:item, hd(items)}
+      not socket.assigns.runtime_enabled? -> :server_off
+      true -> :all_clear
+    end
+  end
+
+  # A person's pause is not an owner item (OwnerAttention leaves it out), but
+  # its fix is still this page's Next step.
+  defp hand_paused_item(agent) do
+    %{
+      kind: :agent_paused,
+      title: "Resume #{agent.name}",
+      agent: agent,
+      issue: nil,
+      runs: [],
+      diagnostic: agent.pause_reason,
+      summary: "Paused by a person: #{agent.name} takes no work until resumed."
+    }
+  end
+
+  defp overview_pill(%Agent{status: :paused} = agent, _running?) do
+    word = if agent.paused_by_user_id, do: "Paused", else: "Paused automatically"
+    %{kind: :stopped, word: word, time: Parts.stamp(agent.paused_at)}
+  end
+
+  defp overview_pill(agent, running?) do
+    {kind, word} = Parts.status(agent, running?)
+    %{kind: kind, word: word, time: nil}
+  end
+
+  @doc false
+  # How it runs: when the runtime cannot run on its own, its one fix in Setup.
+  def readiness_fix(%{status: :spending_limit}, agent),
+    do: %{
+      label: "Set billing in Setup",
+      path: "/agents/#{agent.id}?tab=configuration#agent-billing"
+    }
+
+  def readiness_fix(%{status: status}, agent)
+      when status in [:command_not_found, :missing_config],
+      do: %{
+        label: "Fix in Setup",
+        path: "/agents/#{agent.id}?tab=configuration#agent-runtime-profile"
+      }
+
+  def readiness_fix(_readiness, _agent), do: nil
+
+  def pill_class(:working), do: "k-work"
+  def pill_class(:waiting), do: "k-wait"
+  def pill_class(:idle), do: "k-idle"
+  def pill_class(_stopped), do: nil
+
+  # The task of the running run, else the agent's first open assigned task.
+  defp working_on([%{status: "running", issue: %{} = issue} | _], _recent, _agent_id, true),
+    do: issue
+
+  defp working_on(_runs, recent_issues, agent_id, _running?) do
+    Enum.find(
+      recent_issues || [],
+      &(&1.assignee_id == agent_id and &1.status in [:in_progress, :in_review, :todo, :blocked])
+    )
+  end
+
+  defp last_task([%{issue: %{} = issue} | _], _recent), do: issue
+  defp last_task(_runs, [issue | _]), do: issue
+  defp last_task(_runs, _recent), do: nil
+
+  defp agent_spend(company_id, agent_id, days, team_size) do
+    company_id
+    |> Costs.by_agent(days, max(team_size, 1))
+    |> Enum.find_value(Decimal.new(0), &(&1.agent_id == agent_id && &1.total_cost))
+  end
+
+  # "$0.75 in · $4.50 out per 1M tokens", a flat rate, or a runtime that reports
+  # its own cost; nil when nothing prices it (readiness then says so).
+  defp price_line(agent, model) do
+    config = Map.merge(agent.config || %{}, agent.runtime_config || %{})
+    rates = model_pricing((agent.runtime_config || %{})["pricing"], model)
+
+    cond do
+      config["billing_mode"] == "flat_rate" ->
+        {:text, "Flat rate"}
+
+      rates["input_usd_per_mtok"] && rates["output_usd_per_mtok"] ->
+        {:rates, usd_rate(rates["input_usd_per_mtok"]), usd_rate(rates["output_usd_per_mtok"])}
+
+      reports_cost?(agent.adapter, config) ->
+        {:text, "Reported by #{adapter_label_human(agent.adapter)}"}
+
+      true ->
+        nil
+    end
+  end
+
+  defp usd_rate(value) do
+    case Decimal.cast(value) do
+      {:ok, decimal} -> "$" <> (decimal |> Decimal.round(2) |> Decimal.to_string(:normal))
+      :error -> to_string(value)
+    end
+  end
+
+  defp reports_cost?(adapter, config) when is_atom(adapter) and not is_nil(adapter) do
+    case AdapterRegistry.lookup(adapter) do
+      {:ok, module} -> Pricing.usage_reporting(module, config) == :cost
+      :error -> false
+    end
+  end
+
+  defp reports_cost?(_adapter, _config), do: false
+
+  # The credential the runtime reads, as a name: the first of the adapter's keys
+  # that the agent's secrets or its env provide.
+  defp key_name(agent, runtime, env_vars) do
+    available = Secrets.key_names_for_agent(agent) ++ Map.keys(env_vars || %{})
+
+    agent.adapter
+    |> to_string()
+    |> normalize_adapter()
+    |> credential_keys(runtime)
+    |> Enum.find(&(&1 in available))
+  end
+
+  defp credential_keys("codex", _runtime), do: ["OPENAI_API_KEY", "CODEX_API_KEY"]
+  defp credential_keys("claude_code", _runtime), do: ["ANTHROPIC_API_KEY"]
+  defp credential_keys("openclaw", _runtime), do: ["OPENCLAW_API_KEY"]
+  defp credential_keys("agrenting", _runtime), do: ["AGRENTING_API_KEY"]
+
+  defp credential_keys("openai_chat", runtime),
+    do:
+      openai_chat_credential_keys(%{endpoint: runtime.openai_chat_endpoint, model: runtime.model})
+
+  defp credential_keys(_adapter, _runtime), do: []
+
+  # A failed run is named by its error; any other by its task.
+  defp run_title(%{status: status, error_reason: reason})
+       when status in ~w(failed timed_out) and is_binary(reason) and reason != "" do
+    reason |> String.split("\n", parts: 2) |> hd() |> String.slice(0, 120)
+  end
+
+  defp run_title(%{issue: %{identifier: id, title: title}}), do: "#{id} #{title}"
+  defp run_title(%{status: "running"}), do: "Working"
+  defp run_title(_run), do: "Run without a task"
+
+  defp shared_issue([%{issue: %{id: id} = issue} | rest]) do
+    if Enum.all?(rest, &(&1.issue_id == id)), do: issue
+  end
+
+  defp shared_issue(_runs), do: nil
+
+  # Spend on the shown runs' task before them: "Earlier runs on NW-10 · $15.72".
+  defp earlier_spend(_company_id, _agent_id, nil, _runs), do: nil
+
+  defp earlier_spend(company_id, agent_id, issue, runs) do
+    spend =
+      HeartbeatEngine.issue_spend_for_agent(
+        company_id,
+        agent_id,
+        issue.id,
+        Enum.map(runs, & &1.id)
+      )
+
+    if Decimal.gt?(spend, 0), do: spend
+  end
+
+  defp scoped_question(socket, id) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         {:ok, id} <- Ecto.UUID.cast(id),
+         {:ok, interaction} <- IssueThreadInteractions.get_interaction(id),
+         :ask_user_questions <- interaction.kind,
+         {:ok, _issue} <- Issues.get_company_issue(company_id, interaction.issue_id) do
+      {:ok, interaction}
+    else
+      _ -> {:error, :not_found}
+    end
   end
 
   defp refresh_skills(socket) do
@@ -1995,23 +2313,6 @@ defmodule CymphoWeb.AgentLive.Show do
       n when n <= 4 -> "••••"
       _ -> String.slice(value, 0, 4) <> "••••" <> String.slice(value, -4, 4)
     end
-  end
-
-  def agent_initials(agent) do
-    agent.name
-    |> String.split(~r/\s+/, trim: true)
-    |> Enum.take(2)
-    |> Enum.map(&String.first/1)
-    |> Enum.join()
-    |> String.upcase()
-  end
-
-  @doc """
-  The issue this agent is actively working right now, if any — surfaced
-  next to the identity block so "what is it doing?" needs no digging.
-  """
-  def current_focus_issue(recent_issues) do
-    Enum.find(recent_issues || [], &(&1.status == :in_progress))
   end
 
   def health_pill_class(:healthy), do: "border-success/25 bg-success/10 text-success"
