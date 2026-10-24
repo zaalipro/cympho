@@ -24,15 +24,8 @@ defmodule CymphoWeb.AgentLive.Parts do
   def status(%{status: :terminated}, _), do: {:idle, "Terminated"}
   def status(_agent, _running?), do: {:idle, "Idle"}
 
-  @doc """
-  The agent an owner item counts for, the rule behind the "N for you" chips
-  (`OwnerAttention.counts/2`, private there): a review waits on the work of the
-  task's assignee; every other item on its own agent.
-  """
-  def for_you_agent_id(%{kind: :review_queue, issue: %{assignee_id: id}}) when is_binary(id),
-    do: id
-
-  def for_you_agent_id(item), do: Map.get(item, :agent_id)
+  @doc "The agent an owner item counts for: the rule behind the \"N for you\" chips."
+  defdelegate for_you_agent_id(item), to: Cympho.OwnerAttention
 
   @doc "Dollars and cents, always both: agent and run costs (\"$19.40\", \"$0.00\")."
   def usd(%Decimal{} = amount),

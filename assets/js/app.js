@@ -416,8 +416,11 @@ function highlightActiveNav() {
     }
   });
 
+  // A destination's page: "page" on its own path, "true" on the pages below it.
   document.querySelectorAll('.dest .kids a[href]').forEach((el) => {
-    if (el.getAttribute('href') === path) el.setAttribute('aria-current', 'page');
+    const href = el.getAttribute('href');
+    if (href === path) el.setAttribute('aria-current', 'page');
+    else if (path.startsWith(href + '/')) el.setAttribute('aria-current', 'true');
     else el.removeAttribute('aria-current');
   });
 

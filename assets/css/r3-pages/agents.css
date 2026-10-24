@@ -7,23 +7,18 @@
    - Shared components belong in r3.css, not here. */
 
 /* ================================================================
-   Shared by Team and Agent (ported from v5 g1.css; scoped to these two pages so
-   the work track's copies of the same g1 rules cannot collide)
+   Shared by Team and Agent (ported from v5 g1.css; scoped to these two pages;
+   .tech and the .gh headers are r3.css's)
    ================================================================ */
 .cy-r3 :is([data-page="team"],[data-page="agent"]) .nw{white-space:nowrap}
-.cy-r3 :is([data-page="team"],[data-page="agent"]) .tech>summary .h2 .cx{margin-left:2px}
-.cy-r3 :is([data-page="team"],[data-page="agent"]) .tech>summary .ico{color:var(--ink-2);transition:transform .2s var(--ease)}
-.cy-r3 :is([data-page="team"],[data-page="agent"]) .tech[open]>summary .ico{transform:rotate(180deg)}
 /* run rows: a finished run's word is quiet, a live one is Working (r3.css colours the failed ones) */
 .cy-r3 :is([data-page="team"],[data-page="agent"]) .run-sub .st.ok{color:var(--ink-2)}
 .cy-r3 :is([data-page="team"],[data-page="agent"]) .run-sub .st.wk{color:var(--working)}
 .cy-r3 :is([data-page="team"],[data-page="agent"]) .run>.g{justify-self:center}
 
 /* ================================================================
-   Team (g1.css §2, §5): group headers, the board, agent cards, the proposed hire
+   Team (g1.css §2, §5): the board, agent cards, the proposed hire
    ================================================================ */
-.cy-r3 [data-page="team"] .gh{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 6px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
-.cy-r3 [data-page="team"] .gh .mono{letter-spacing:0;color:var(--ink)}
 .cy-r3 [data-page="team"] .tcols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:start}
 .cy-r3 [data-page="team"] .tcol{display:flex;flex-direction:column;gap:6px;min-width:0}
 .cy-r3 [data-page="team"] .acs{display:flex;flex-direction:column;gap:8px}
@@ -101,5 +96,5 @@
 }
 
 @media (prefers-reduced-motion:reduce){
-  .cy-r3 [data-page="team"] .ac,.cy-r3 :is([data-page="team"],[data-page="agent"]) .tech>summary .ico{transition:none}
+  .cy-r3 [data-page="team"] .ac{transition:none}
 }

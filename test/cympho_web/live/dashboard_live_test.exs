@@ -1278,6 +1278,10 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       assert text(main, ".next .paper .nt") == "Hire a QA engineer"
       assert text(main, ".next .paper .eyebrow") =~ "Approval"
+      # The vote page keeps the reason (work track), so the library sentence holds (ground H7).
+      assert text(main, ".next .ink .ink-note") ==
+               "On the vote page you approve or deny; your reason is saved with your vote."
+
       assert [primary] = Floki.find(main, ".pw")
       assert Floki.text(primary) =~ "Open vote"
       assert hrefs([primary]) == ["/board-approvals/#{nw.hire.id}?from=/"]

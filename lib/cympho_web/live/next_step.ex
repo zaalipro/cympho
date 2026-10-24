@@ -541,7 +541,7 @@ defmodule CymphoWeb.NextStep do
       lead: words(item.summary, 25),
       foot: agent_name(item) && %{left: {:text, "Requested by #{agent_name(item)}"}, right: nil},
       heading: "Cast your vote",
-      note: "On the vote page you approve or deny.",
+      note: "On the vote page you approve or deny; your reason is saved with your vote.",
       primary: {:link, "Open vote", href},
       row_verb: "Open vote",
       row_href: href

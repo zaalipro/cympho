@@ -315,13 +315,6 @@
   scroll-padding-bottom: var(--mobile-shell-bottom);
 }
 
-/* Full-height board: fill viewport minus mobile top bar + shell bottom pad. */
-.mobile-board-height {
-  height: calc(
-    100dvh - var(--mobile-header-height) - var(--mobile-shell-bottom)
-  );
-}
-
 /* Sticky primary actions sit above fixed #mobile-nav + home-indicator. */
 .sticky-above-mobile-nav {
   bottom: var(--mobile-nav-offset);
@@ -331,10 +324,6 @@
   .mobile-shell-content {
     padding-bottom: 0;
     scroll-padding-bottom: 0;
-  }
-
-  .mobile-board-height {
-    height: 100dvh;
   }
 
   .sticky-above-mobile-nav {
@@ -412,11 +401,6 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-single-column
 
 html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
   grid-column: 1 / -1 !important;
-}
-
-.onboarding-blueprint-card:focus-within {
-  border-color: color-mix(in srgb, var(--color-primary) 70%, var(--color-border));
-  box-shadow: 0 0 0 2px rgb(var(--color-primary-rgb) / 0.35);
 }
 
 .ui-mode-toggle[data-mode="advanced"] {

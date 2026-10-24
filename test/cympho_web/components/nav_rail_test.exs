@@ -74,6 +74,21 @@ defmodule CymphoWeb.Components.NavRailTest do
     assert Floki.text(all_tasks) =~ "All tasks"
   end
 
+  test "marks a destination's page: page on its path, true on the pages below it" do
+    marked = fn path ->
+      nav(current_path: path)
+      |> Floki.find(".kids a[aria-current]")
+      |> Enum.map(&{Floki.text(&1), &1 |> Floki.attribute("aria-current") |> hd()})
+    end
+
+    assert marked.("/issues") == [{"All tasks", "page"}]
+    assert marked.("/issues/x") == [{"All tasks", "true"}]
+    assert marked.("/agents/a1") == [{"People", "true"}]
+    assert marked.("/projects/p1") == [{"Projects", "true"}]
+    assert marked.("/kanban") == []
+    assert marked.("/issuesx") == []
+  end
+
   test "Compare companies appears only with more than one company" do
     refute render_rail(company_count: 1) =~ "Compare companies"
     assert render_rail(company_count: 2) =~ "Compare companies"

@@ -7,13 +7,6 @@
    - Shared components belong in r3.css, not here. */
 
 /* ================================================================
-   Group and column headers (Tasks groups, Board columns): caps 12/16 + mono count on the tray (008, 141).
-   g1.css §2; the Team board (agents.css) draws the same headers.
-   ================================================================ */
-.cy-r3 .gh{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 6px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
-.cy-r3 .gh .mono{letter-spacing:0;color:var(--ink)}
-
-/* ================================================================
    Inbox (g1.css §3)
    ================================================================ */
 /* the kind filter: 134's segmented control with 063's quiet counts */
@@ -22,10 +15,7 @@
 /* "Showing the first 200 of N" under the list (B4: no silent truncation) */
 .cy-r3 .b4{padding:6px 12px 6px;font-size:12px;line-height:16px;color:var(--ink-2)}
 
-/* Decided in the last 7 days (closed, like Agent's Technical details) */
-.cy-r3 .tech>summary .h2 .cx{margin-left:2px}
-.cy-r3 .tech>summary .ico{color:var(--ink-2);transition:transform .2s var(--ease)}
-.cy-r3 .tech[open]>summary .ico{transform:rotate(180deg)}
+/* Decided in the last 7 days (closed, like Agent's Technical details; .tech is r3.css's) */
 .cy-r3 .dec-l{display:flex;flex-direction:column;padding:2px 12px 6px}
 .cy-r3 .dec-l li{display:grid;grid-template-columns:14px minmax(0,1fr) auto;align-items:center;gap:12px;min-height:44px;font-size:13px;line-height:18px;color:var(--ink)}
 .cy-r3 .dec-l li+li{border-top:1px solid var(--hair)}
@@ -192,5 +182,5 @@
 }
 
 @media (prefers-reduced-motion:reduce){
-  .cy-r3 .bc,.cy-r3 .colp,.cy-r3 .grp-d>summary,.cy-r3 .grp-d>summary .ico,.cy-r3 .tech>summary .ico{transition:none}
+  .cy-r3 .bc,.cy-r3 .colp,.cy-r3 .grp-d>summary,.cy-r3 .grp-d>summary .ico{transition:none}
 }

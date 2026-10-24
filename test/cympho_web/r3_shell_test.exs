@@ -350,6 +350,15 @@ defmodule CymphoWeb.R3ShellTest do
       assert js =~ "if (window.location.pathname === '/agents') return this.setOpen(false)"
       assert js =~ "this.js().setAttribute(this.button, 'aria-expanded'"
     end
+
+    test "live navigation marks a destination's page below it too, as the server does", %{
+      js: js
+    } do
+      assert js =~ "if (href === path) el.setAttribute('aria-current', 'page');"
+
+      assert js =~
+               "else if (path.startsWith(href + '/')) el.setAttribute('aria-current', 'true');"
+    end
   end
 
   describe "pages without the shell" do

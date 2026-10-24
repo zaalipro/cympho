@@ -11,6 +11,7 @@ defmodule CymphoWeb.AgentLiveTest do
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues
   alias Cympho.Issues.IssueThreadInteraction
+  alias Cympho.IssueThreadInteractions
   alias Cympho.OwnerAttention
   alias Cympho.R3Fixtures
   alias Cympho.Repo
@@ -2940,6 +2941,24 @@ defmodule CymphoWeb.AgentLiveTest do
       assert Process.alive?(view.pid)
     end
 
+    test "the board follows owner-attention changes made elsewhere", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/agents")
+      assert r3_card(r3_doc(view), "Ravi").for_you == "2 for you"
+
+      {:ok, _} =
+        IssueThreadInteractions.resolve_interaction(nw.questions["Q1"], %{
+          "status" => :responded,
+          "resolved_by_user_id" => nw.user.id,
+          "response" => "Email the customer first"
+        })
+
+      wait_until(fn ->
+        ravi = r3_card(r3_doc(view), "Ravi")
+        assert ravi.for_you == "1 for you"
+        refute ravi.line == "asked you on NW-6"
+      end)
+    end
+
     test "Idle shows six cards, then Show all", %{conn: conn, nw: nw} do
       for n <- 1..5 do
         {:ok, _} =
@@ -3200,6 +3219,22 @@ defmodule CymphoWeb.AgentLiveTest do
       assert Repo.get!(IssueThreadInteraction, nw.questions["Q1"].id).status == :responded
       assert Issues.get_issue!(nw.issues["NW-6"].id).status == :todo
       assert r3_text(r3_doc(view), ".next .paper .nt") == "Review Ravi's work"
+    end
+
+    test "the Next step follows a question answered elsewhere", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/agents/#{nw.agents["Ravi"].id}")
+      assert r3_text(r3_doc(view), ".next .paper .nt") == "Answer Ravi's question"
+
+      {:ok, _} =
+        IssueThreadInteractions.resolve_interaction(nw.questions["Q1"], %{
+          "status" => :responded,
+          "resolved_by_user_id" => nw.user.id,
+          "response" => "Email the customer first"
+        })
+
+      wait_until(fn ->
+        assert r3_text(r3_doc(view), ".next .paper .nt") == "Review Ravi's work"
+      end)
     end
 
     test "an answer to another company's question is refused", %{conn: conn, nw: nw} do

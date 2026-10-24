@@ -54,18 +54,14 @@ defmodule CymphoWeb.MobileShellTest do
     refute Enum.any?(CymphoWeb.Components.NavRail.destinations(), &(&1.to == "/kanban"))
   end
 
-  test "board height uses dvh and accounts for mobile header + nav shell bottom" do
+  test "the board never uses a fixed screen height" do
     board = File.read!(@kanban_board)
-    css = File.read!(@app_css)
 
     # r3: the board scrolls with the page column (no fixed board height); it
-    # must still never use 100vh or h-screen.
+    # must still never use 100vh or h-screen. The orphaned .mobile-board-height
+    # rule was removed with its CSS assertions (work track FR3).
     refute board =~ "100vh"
     refute board =~ "h-screen"
-
-    assert css =~ ".mobile-board-height"
-    assert css =~ "100dvh - var(--mobile-header-height) - var(--mobile-shell-bottom)"
-    assert css =~ "height: 100dvh"
   end
 
   test "sticky CTAs clear fixed mobile bottom nav via nav+safe-area offset" do

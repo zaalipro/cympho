@@ -247,12 +247,16 @@ defmodule Cympho.OwnerAttention do
 
   defp empty_kind_counts, do: Map.new(Map.keys(@owner_rank), &{&1, 0})
 
-  # A review waits on the work of the task's assignee; the wake itself belongs
-  # to whoever reviews (the CEO for an unassigned root task).
-  defp for_you_agent_id(%{kind: :review_queue, issue: %{assignee_id: id}}) when is_binary(id),
+  @doc """
+  The agent an owner item counts for, the rule behind the "N for you" chips
+  (`counts/2`'s `by_agent`): a review waits on the work of the task's
+  assignee (the wake itself belongs to whoever reviews, the CEO for an
+  unassigned root task); every other item on its own agent.
+  """
+  def for_you_agent_id(%{kind: :review_queue, issue: %{assignee_id: id}}) when is_binary(id),
     do: id
 
-  defp for_you_agent_id(item), do: Map.get(item, :agent_id)
+  def for_you_agent_id(item), do: Map.get(item, :agent_id)
 
   # One row per task: items sharing a dedup key keep the most specific kind,
   # then the most severe and newest. Survivors keep severity-then-newest order.

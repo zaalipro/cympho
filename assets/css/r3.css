@@ -434,6 +434,12 @@
 .cy-r3 .hero .u{font-size:14px;color:var(--ink-2)}
 .cy-r3 .tech>summary{display:flex;align-items:center;justify-content:space-between;min-height:44px;padding:0 12px;border-radius:10px}
 .cy-r3 .tech>summary:hover{background:var(--hover)}
+.cy-r3 .tech>summary .h2 .cx{margin-left:2px}
+.cy-r3 .tech>summary .ico{color:var(--ink-2);transition:transform .2s var(--ease)}
+.cy-r3 .tech[open]>summary .ico{transform:rotate(180deg)}
+/* group and column headers (Tasks groups, Board columns, Team board): caps 12/16 + mono count (g1.css §2) */
+.cy-r3 .gh{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 6px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 .gh .mono{letter-spacing:0;color:var(--ink)}
 /* the reason row is the problem card's footer: it sits on the resolution card's footer line, as .pf does (argon-final) */
 .cy-r3 .reason{margin-top:auto;border-top:1px solid var(--hair);padding-top:4px}
 .cy-r3 .reason>summary{display:flex;align-items:center;gap:8px;min-height:36px;font-size:13px;color:var(--ink-2)}
@@ -697,6 +703,6 @@
 
 @media (prefers-reduced-motion:reduce){
   .cy-r3 .spin,.cy-r3 .now.working .dots::after{animation:none}
-  .cy-r3 .d,.cy-r3 .pw,.cy-r3 .pw .nub,.cy-r3 .pl,.cy-r3 .btn-new,.cy-r3 .lnk .ico,.cy-r3 .row,.cy-r3 .opt,.cy-r3 .skip,.cy-r3 .howto>summary.pw .nub,.cy-r3 .spend{transition:none}
+  .cy-r3 .d,.cy-r3 .pw,.cy-r3 .pw .nub,.cy-r3 .pl,.cy-r3 .btn-new,.cy-r3 .lnk .ico,.cy-r3 .row,.cy-r3 .opt,.cy-r3 .skip,.cy-r3 .howto>summary.pw .nub,.cy-r3 .spend,.cy-r3 .tech>summary .ico{transition:none}
 }
 

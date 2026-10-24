@@ -147,7 +147,7 @@ defmodule CymphoWeb.Components.NavRail do
           <.dest_link dest={dest} count={@count} />
           <ul :if={dest.kids != []} class="kids">
             <li :for={{href, label, kind} <- dest.kids} class={kind != :simple && "ui-advanced-only"}>
-              <.link navigate={href} aria-current={@current_path == href && "page"}>{label}</.link>
+              <.link navigate={href} aria-current={kid_state(@current_path, href)}>{label}</.link>
             </li>
           </ul>
         </li>
@@ -214,6 +214,15 @@ defmodule CymphoWeb.Components.NavRail do
       <span class="sr"> need you</span>
     </span>
     """
+  end
+
+  # A destination's page: "page" on its own path, "true" on the pages below it.
+  defp kid_state(path, href) do
+    cond do
+      path == href -> "page"
+      prefix_match?(path, href) -> "true"
+      true -> nil
+    end
   end
 
   defp prefix_match?(path, "/"), do: path == "/"
