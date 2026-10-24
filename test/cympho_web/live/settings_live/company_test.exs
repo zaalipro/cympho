@@ -167,7 +167,7 @@ defmodule CymphoWeb.SettingsLive.CompanyTest do
   end
 
   describe "sections" do
-    test "the section nav regroups every settings page", %{conn: conn, nw: nw} do
+    test "the section nav regroups every settings page", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/settings/company")
       [nav] = view |> main_doc() |> Floki.find("nav.snav")
 
