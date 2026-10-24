@@ -179,6 +179,8 @@
   .cy-r3 .bc-mv>summary{width:44px;height:44px}
   .cy-r3 .bc-menu button{min-height:44px}
   .cy-r3 [data-page="mine"] .seg{align-self:stretch}
+  /* four equal shares were narrower than "Created by me", which wrapped (C8): each tab takes its own width */
+  .cy-r3 [data-page="mine"] .seg a{flex:auto}
 }
 
 @media (prefers-reduced-motion:reduce){

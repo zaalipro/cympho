@@ -165,4 +165,10 @@ defmodule CymphoWeb.MobileShellTest do
     [toast] = Regex.run(~r/\n\.toast \{[^}]*\}/, css)
     assert toast =~ "pointer-events: none;"
   end
+
+  # C8: four equal shares of the phone row were narrower than "Created by me".
+  test "Mine's tabs take their own widths on phones" do
+    assert phone_css("assets/css/r3-pages/work.css") =~
+             ~s|.cy-r3 [data-page="mine"] .seg a{flex:auto}|
+  end
 end
