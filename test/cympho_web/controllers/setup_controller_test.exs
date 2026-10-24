@@ -159,4 +159,84 @@ defmodule CymphoWeb.SetupControllerTest do
     assert html_response(conn, 503) =~ "First-run setup is locked"
     assert {:error, :not_found} = Cympho.Users.get_user_by_email("visitor@example.com")
   end
+
+  describe "setup pages in Paper & Ink" do
+    test "the owner form follows the theme cookie and loads only the app tokens" do
+      for {cookie, mode} <- [{"light", "light"}, {"dark", "dark"}, {nil, "system"}] do
+        conn = if cookie, do: put_req_cookie(build_conn(), "theme", cookie), else: build_conn()
+        doc = conn |> get("/setup") |> doc(200)
+
+        assert doc |> Floki.find("html") |> Floki.attribute("data-mode") == [mode]
+        assert doc |> Floki.find("body") |> Floki.attribute("class") == ["cy-r3"]
+        assert [_] = Floki.find(doc, ~s(link[rel="stylesheet"][href^="/assets/app"]))
+        assert Floki.find(doc, "style") == []
+        assert Floki.find(doc, "script") == []
+        assert [_card] = Floki.find(doc, ~s([data-page="auth"] .auth-card))
+        assert Floki.text(Floki.find(doc, "h1")) == "Create your owner account"
+        assert [_] = Floki.find(doc, ~s(form[action="/setup"] input[name="_csrf_token"]))
+      end
+    end
+
+    test "a changeset error sits under its field, the typed values stay", %{conn: conn} do
+      doc =
+        conn
+        |> post("/setup", %{
+          "user" => %{"name" => "Nick", "email" => "nick@example.com", "password" => "short"}
+        })
+        |> doc(200)
+
+      assert invalid_field(doc, "user[password]") == "Password should be at least 8 characters"
+
+      assert doc |> Floki.find(~s(input[name="user[name]"])) |> Floki.attribute("value") == [
+               "Nick"
+             ]
+
+      assert doc |> Floki.find(~s(input[name="user[email]"])) |> Floki.attribute("value") ==
+               ["nick@example.com"]
+
+      assert doc |> Floki.find(~s(input[name="user[password]"])) |> Floki.attribute("value") == []
+
+      assert doc |> Floki.find(~s(input[name="user[email]"])) |> Floki.attribute("aria-invalid") ==
+               []
+    end
+
+    test "a wrong bootstrap secret is flagged on the secret field", %{conn: conn} do
+      Application.put_env(:cympho, :bootstrap_protection,
+        required: true,
+        secret: String.duplicate("bootstrap-secret-", 3)
+      )
+
+      doc =
+        conn
+        |> post("/setup", %{
+          "bootstrap_secret" => "wrong-secret",
+          "user" => %{"name" => "A", "email" => "a@example.com", "password" => "longenough1"}
+        })
+        |> doc(403)
+
+      assert invalid_field(doc, "bootstrap_secret") == "Bootstrap secret is invalid."
+    end
+
+    test "the locked page uses the same tokenised card", %{conn: conn} do
+      Application.put_env(:cympho, :bootstrap_protection, required: true, secret: nil)
+
+      doc = conn |> put_req_cookie("theme", "light") |> get("/setup") |> doc(503)
+
+      assert doc |> Floki.find("html") |> Floki.attribute("data-mode") == ["light"]
+      assert Floki.find(doc, "style") == []
+      assert [_card] = Floki.find(doc, ~s([data-page="auth"] .auth-card))
+      assert Floki.text(Floki.find(doc, "h1")) == "First-run setup is locked"
+      assert [_] = Floki.find(doc, ~s(meta[name="robots"][content="noindex, nofollow"]))
+    end
+  end
+
+  defp doc(conn, status), do: conn |> html_response(status) |> Floki.parse_document!()
+
+  defp invalid_field(doc, name) do
+    [input] = Floki.find(doc, ~s(.fld input[name="#{name}"]))
+    assert Floki.attribute(input, "aria-invalid") == ["true"]
+    [error_id] = Floki.attribute(input, "aria-describedby")
+    [error] = Floki.find(doc, ~s(.fld p.err##{error_id}))
+    Floki.text(error)
+  end
 end

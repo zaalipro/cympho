@@ -1,0 +1,49 @@
+<form class="auth-form" method="post" action={~p"/setup"}>
+  <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+  <div class="auth-head">
+    <h1>Create your owner account</h1>
+    <p>
+      This instance is brand new. Create the owner account, then the setup wizard will launch your first autonomous company.
+    </p>
+  </div>
+  <.auth_field
+    :if={@bootstrap_required}
+    id="setup-secret"
+    label="Bootstrap secret"
+    name="bootstrap_secret"
+    type="password"
+    autocomplete="off"
+    required
+    error={@errors[:bootstrap_secret]}
+  />
+  <.auth_field
+    id="setup-name"
+    label="Name"
+    name="user[name]"
+    value={@name}
+    autocomplete="name"
+    required
+    error={@errors[:name]}
+  />
+  <.auth_field
+    id="setup-email"
+    label="Email"
+    name="user[email]"
+    type="email"
+    value={@email}
+    autocomplete="email"
+    required
+    error={@errors[:email]}
+  />
+  <.auth_field
+    id="setup-password"
+    label="Password"
+    name="user[password]"
+    type="password"
+    autocomplete="new-password"
+    minlength="8"
+    required
+    error={@errors[:password]}
+  />
+  <button type="submit" class="auth-go">Create owner account</button>
+</form>
