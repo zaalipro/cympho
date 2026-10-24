@@ -170,6 +170,44 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
     assert updated.status == "approved"
   end
 
+  # B14: the reason saved with a vote is shown with its voter.
+  test "the Votes list shows each vote's reason with its voter", %{
+    conn: conn,
+    current_company: company
+  } do
+    voter = create_board_user(company, "voter")
+    silent = create_board_user(company, "silent")
+    third = create_board_user(company, "third")
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a QA engineer",
+        description: "Owns the test suite.",
+        category: "agent_hire",
+        company_id: company.id,
+        review_deadline: DateTime.utc_now() |> DateTime.add(2 * 60 * 60, :second)
+      })
+
+    {:ok, with_reason} =
+      BoardApprovals.cast_vote(approval.id, voter.id, "approve", "Release checks keep slipping.")
+
+    {:ok, without_reason} = BoardApprovals.cast_vote(approval.id, silent.id, "abstain")
+    {:ok, _third} = BoardApprovals.cast_vote(approval.id, third.id, "approve")
+
+    {:ok, view, html} = live(conn, "/board-approvals/#{approval.id}")
+    assert html =~ "APPROVED"
+    assert html =~ "Release checks keep slipping."
+
+    row = view |> element("#board-vote-#{with_reason.id}") |> render()
+    assert row =~ voter.name
+    assert row =~ "Release checks keep slipping."
+    assert row =~ "APPROVE"
+
+    # A vote cast without a reason shows its voter and vote, and no empty reason line.
+    assert has_element?(view, "#board-vote-#{without_reason.id}", silent.name)
+    refute has_element?(view, "#board-vote-#{without_reason.id} [data-vote-reason]")
+  end
+
   defp crumb_parent(html) do
     html
     |> Floki.parse_document!()
