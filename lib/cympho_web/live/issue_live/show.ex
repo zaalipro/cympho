@@ -1243,12 +1243,14 @@ defmodule CymphoWeb.IssueLive.Show do
         case get_scoped_issue(socket, updated_issue.id) do
           {:ok, issue} ->
             {runs, run_history} = load_issue_run_history(issue.id)
+            # This page's own writes already show their version; only a newer one is news.
+            news? = issue.lock_version > socket.assigns.issue.lock_version
 
             socket =
               socket
               |> assign(issue: issue, runs: runs, run_history: run_history)
               |> assign_child_rollup(issue.id)
-              |> push_event("toast", %{
+              |> toast_if(news?, %{
                 message: "Issue updated by another user",
                 type: "info",
                 key: "issue_#{issue.id}_updated"
@@ -1277,10 +1279,12 @@ defmodule CymphoWeb.IssueLive.Show do
       socket.assigns.issue.id == updated_issue.id ->
         case get_scoped_issue(socket, updated_issue.id) do
           {:ok, issue} ->
+            news? = others_comment?(socket, updated_issue)
+
             socket =
               socket
               |> assign(:issue, issue)
-              |> push_event("toast", %{
+              |> toast_if(news?, %{
                 message: "New comment added",
                 type: "info",
                 key: "comment_#{issue.id}_created"
@@ -1771,6 +1775,20 @@ defmodule CymphoWeb.IssueLive.Show do
     case socket.assigns[:current_company] do
       %{id: company_id} -> Issues.get_company_issue(company_id, id)
       _ -> {:error, :not_found}
+    end
+  end
+
+  defp toast_if(socket, true, toast), do: push_event(socket, "toast", toast)
+  defp toast_if(socket, false, _toast), do: socket
+
+  # A {:comment_created, issue} broadcast is about the newest comment on its
+  # issue (microsecond timestamps): the signed-in user's own is no news to them.
+  defp others_comment?(socket, %{comments: comments}) do
+    me = socket.assigns[:current_user] && to_string(socket.assigns.current_user.id)
+
+    case Enum.max_by(comments, & &1.inserted_at, DateTime, fn -> nil end) do
+      %{author_type: "user", author_id: ^me} -> false
+      _ -> true
     end
   end
 
