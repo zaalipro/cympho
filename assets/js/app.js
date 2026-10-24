@@ -1244,6 +1244,17 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// The Next step's "Or write your own answer" row reveals its text box with CSS
+// only (.opt-in:checked ~ .own-box). Choosing the row, by mouse or keyboard,
+// also moves the caret there, so what the owner types becomes the answer.
+function focusOwnAnswer(e) {
+  const radio = e.target;
+  if (!radio.classList?.contains('opt-in') || !radio.checked) return;
+  radio.closest('.opt-w')?.querySelector('.own-box textarea')?.focus();
+}
+document.addEventListener('change', focusOwnAnswer);
+document.addEventListener('click', focusOwnAnswer);
+
 // The dashboard prompt bar has a standalone command-palette button outside
 // the user-menu hook, so it needs the same delegated behavior here.
 document.addEventListener('click', (e) => {
