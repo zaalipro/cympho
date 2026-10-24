@@ -208,6 +208,52 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
     refute has_element?(view, "#board-vote-#{without_reason.id} [data-vote-reason]")
   end
 
+  # B14, review r1: on a board of three, one vote leaves the approval pending
+  # (quorum 3). The reason must still show with its voter on the same page.
+  test "a vote that leaves the approval pending shows its voter and reason", %{
+    conn: conn,
+    current_company: company
+  } do
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    membership = Companies.get_membership(user_id, company.id)
+    {:ok, _membership} = Companies.update_board_membership(membership, %{is_board_member: true})
+    _second = create_board_user(company, "second")
+    _third = create_board_user(company, "third")
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a QA engineer",
+        description: "Owns the test suite.",
+        category: "agent_hire",
+        company_id: company.id,
+        review_deadline: DateTime.utc_now() |> DateTime.add(2 * 60 * 60, :second)
+      })
+
+    {:ok, view, _html} = live(conn, "/board-approvals/#{approval.id}?from=/inbox")
+
+    view
+    |> form("#vote", %{"reason" => "Release checks keep slipping."})
+    |> render_submit(%{"vote" => "approve"})
+
+    # render/1 is queued behind the :board_vote_cast broadcast the view sent itself.
+    html = render(view)
+    assert html =~ "PENDING"
+
+    {:ok, updated} = BoardApprovals.get_board_approval(approval.id)
+    assert updated.status == "pending"
+    assert [vote] = updated.votes
+
+    voter = Users.get_user!(user_id)
+    assert has_element?(view, "#board-vote-#{vote.id}", voter.name)
+    assert has_element?(view, "#board-vote-#{vote.id}", "APPROVE")
+
+    assert has_element?(
+             view,
+             "#board-vote-#{vote.id} [data-vote-reason]",
+             "Release checks keep slipping."
+           )
+  end
+
   defp crumb_parent(html) do
     html
     |> Floki.parse_document!()

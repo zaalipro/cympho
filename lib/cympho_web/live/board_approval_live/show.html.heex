@@ -190,7 +190,7 @@
       </form>
     <% end %>
 
-    <%= if @approval.status != "pending" && length(@approval.votes) > 0 do %>
+    <%= if length(@approval.votes) > 0 do %>
       <div class="card-lift rounded-xl border border-border bg-panel p-6 shadow-card">
         <h3 class="mb-4 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
           Votes
