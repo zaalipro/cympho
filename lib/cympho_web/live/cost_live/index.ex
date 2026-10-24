@@ -508,7 +508,9 @@ defmodule CymphoWeb.CostLive.Index do
     <.next_step>
       <:problem>
         <.problem_card title={limit_title(@kind)}>
-          <:eyebrow>{limit_eyebrow(@kind)}</:eyebrow>
+          <:eyebrow>
+            {eyebrow_lead(@kind)}<span aria-hidden="true"> · </span>{limit_topic(@kind)}
+          </:eyebrow>
           <%= case @kind do %>
             <% :clear -> %>
               <p class="hero">
@@ -637,10 +639,13 @@ defmodule CymphoWeb.CostLive.Index do
   defp limit_title(:stopped), do: "Raise the limit to restart agents"
   defp limit_title(:none), do: "Set a spending limit"
 
-  defp limit_eyebrow(:clear), do: "All clear · Limit"
-  defp limit_eyebrow(:watch), do: "Next step · Limit warning"
-  defp limit_eyebrow(:stopped), do: "Next step · Limit reached"
-  defp limit_eyebrow(:none), do: "Next step · Limit"
+  defp eyebrow_lead(:clear), do: "All clear"
+  defp eyebrow_lead(_kind), do: "Next step"
+
+  defp limit_topic(:clear), do: "Limit"
+  defp limit_topic(:watch), do: "Limit warning"
+  defp limit_topic(:stopped), do: "Limit reached"
+  defp limit_topic(:none), do: "Limit"
 
   defp managed_note({:error, :ambiguous}),
     do:

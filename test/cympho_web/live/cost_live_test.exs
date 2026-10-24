@@ -181,6 +181,8 @@ defmodule CymphoWeb.CostLiveTest do
       assert text(main, "h1") == "Spending"
       assert text(main, ".h1-aside") =~ "since "
       assert text(main, ".next .paper .eyebrow") == "All clear · Limit"
+      # The dot is decoration, hidden from screen readers, as in every r3 eyebrow.
+      assert texts(main, ".next .paper .eyebrow > span[aria-hidden=true]") == ["·"]
       assert text(main, ".next .paper .nt") == "Spending is within your limit"
       assert text(main, ".next .hero .mono") == "$186.50"
       assert text(main, ".next .hero .u") == "of $300 · last 30 days"
