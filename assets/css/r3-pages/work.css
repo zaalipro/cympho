@@ -5,3 +5,192 @@
      the light block and both identical dark copies, never here.
    - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
    - Shared components belong in r3.css, not here. */
+
+/* ================================================================
+   Group and column headers (Tasks groups, Board columns): caps 12/16 + mono count on the tray (008, 141).
+   g1.css §2; the Team board (agents.css) draws the same headers.
+   ================================================================ */
+.cy-r3 .gh{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 6px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 .gh .mono{letter-spacing:0;color:var(--ink)}
+
+/* ================================================================
+   Inbox (g1.css §3)
+   ================================================================ */
+/* the kind filter: 134's segmented control with 063's quiet counts */
+.cy-r3 [data-page="inbox"] .seg .ct{font:500 12px/16px var(--mono);color:var(--ink-2)}
+.cy-r3 [data-page="inbox"] .seg a[aria-current] .ct{color:var(--ink)}
+/* "Showing the first 200 of N" under the list (B4: no silent truncation) */
+.cy-r3 .b4{padding:6px 12px 6px;font-size:12px;line-height:16px;color:var(--ink-2)}
+
+/* Decided in the last 7 days (closed, like Agent's Technical details) */
+.cy-r3 .tech>summary .h2 .cx{margin-left:2px}
+.cy-r3 .tech>summary .ico{color:var(--ink-2);transition:transform .2s var(--ease)}
+.cy-r3 .tech[open]>summary .ico{transform:rotate(180deg)}
+.cy-r3 .dec-l{display:flex;flex-direction:column;padding:2px 12px 6px}
+.cy-r3 .dec-l li{display:grid;grid-template-columns:14px minmax(0,1fr) auto;align-items:center;gap:12px;min-height:44px;font-size:13px;line-height:18px;color:var(--ink)}
+.cy-r3 .dec-l li+li{border-top:1px solid var(--hair)}
+.cy-r3 .dec-l .g{color:var(--ink-2)}
+.cy-r3 .dec-l .g.c-done{color:var(--done)}
+.cy-r3 .dec-l .dt{font-size:12px;line-height:16px;color:var(--ink-2)}
+
+/* ================================================================
+   Tasks (g1.css §4): the toolbar, the groups, the rows, the assignee choice
+   ================================================================ */
+.cy-r3 .tbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cy-r3 .tbar-f{display:flex;flex:0 1 380px;min-width:0}
+.cy-r3 .tbar-f .search{flex:1;min-width:0}
+.cy-r3 .tbar .chip{height:38px;padding:0 14px 0 12px}
+.cy-r3 .tbar .chip .mono{font-size:12px;color:var(--ink-2)}
+.cy-r3 a.chip:hover{border-color:var(--btn-line-hover);background:var(--btn-hover)}
+/* Mine on: pressed, like 141's active filter chip */
+.cy-r3 .chip.mine[aria-current],.cy-r3 .chip.mine[aria-current]:hover{background:var(--count-bg);border-color:var(--count-bg);color:var(--count-ink)}
+/* Filter: a disclosure whose panel holds the view's filter controls */
+.cy-r3 .flt-d{position:relative}
+.cy-r3 .flt-d>summary{cursor:pointer}
+.cy-r3 .flt-d[open]>summary{border-color:var(--btn-line-hover)}
+.cy-r3 .flt-p{position:absolute;top:calc(100% + 6px);left:0;z-index:30;display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:260px;padding:12px;border-radius:16px;background:var(--lift);border:1px solid var(--lift-line);box-shadow:var(--sh-raise)}
+
+.cy-r3 .grp{display:flex;flex-direction:column;gap:6px;min-width:0}
+.cy-r3 .grp-shut{display:flex;flex-direction:column;gap:2px;margin-top:2px}
+.cy-r3 .grp-d>summary{display:flex;align-items:center;gap:6px;min-height:36px;padding-right:8px;border-radius:10px;color:var(--ink-2);cursor:pointer;transition:background .18s var(--ease)}
+.cy-r3 .grp-d>summary:hover{background:var(--tray-hover)}
+.cy-r3 .grp-d>summary:hover .gh{color:var(--ink)}
+.cy-r3 .grp-d>summary .ico{transition:transform .2s var(--ease)}
+.cy-r3 .grp-d[open]>summary .ico{transform:rotate(180deg)}
+.cy-r3 .grp-d>.trows{margin-top:6px}
+
+/* closed task rows (141 title-first, 049): glyph · ID · title over its state phrase · High · verb */
+.cy-r3 .trows{padding:4px;background:var(--card);border:1px solid var(--edge);border-radius:var(--r-card);box-shadow:var(--sh-card)}
+.cy-r3 .tr{display:grid;grid-template-columns:14px 46px minmax(0,1fr) auto auto;column-gap:12px;align-items:center}
+.cy-r3 .tr+.tr::before{left:38px}
+.cy-r3 .tr .tg{display:grid;place-items:center;align-self:start;height:20px}
+.cy-r3 .tr .tg .g{width:14px;height:14px}
+.cy-r3 .tr .tid{align-self:start;font-size:12px;line-height:20px;color:var(--ink-2)}
+.cy-r3 .tr .row-main{grid-column:3}
+.cy-r3 .tr .prio{grid-column:4}
+.cy-r3 .tr .go{grid-column:5}
+.cy-r3 .tr s{color:var(--ink-2);text-decoration-thickness:1px}
+.cy-r3 .prio{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;color:var(--ink-2);white-space:nowrap}
+/* the blocked task's own identity, as a 121 file tile at the foot of the problem card */
+.cy-r3 .task-tile{margin-top:auto}
+.cy-r3 .task-tile .kt{width:38px;height:38px}
+.cy-r3 .task-tile .objt-s{display:flex;align-items:center}
+
+/* ================================================================
+   Board (g1.css §4, state a): lifted cards need the owner, quiet ones do not (142)
+   ================================================================ */
+.cy-r3 .tbar .sf-sp{flex:1}
+.cy-r3 .colp{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 13px;border-radius:var(--r-pill);border:1px dashed var(--dots-line);font-size:13px;font-weight:500;color:var(--ink-2);transition:color .18s var(--ease),border-color .18s var(--ease)}
+.cy-r3 .colp:hover{color:var(--ink);border-color:var(--field)}
+.cy-r3 .colp .mono{color:var(--ink)}
+.cy-r3 .colp[aria-expanded="true"]{border-style:solid;border-color:var(--btn-line-hover);background:var(--btn-bg);color:var(--ink)}
+.cy-r3 .bflash{padding:10px 14px;border-radius:12px;background:var(--card);border:1px solid var(--edge);font-size:13px;line-height:18px;color:var(--ink)}
+.cy-r3 .bflash.st{background:var(--stopped-bg);border-color:var(--stopped-line);color:var(--stopped)}
+.cy-r3 .bcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:start}
+.cy-r3 .bcol{display:flex;flex-direction:column;gap:6px;min-width:0}
+.cy-r3 .bcs{display:flex;flex-direction:column;gap:8px;min-height:56px}
+.cy-r3 .bc{position:relative;display:flex;flex-direction:column;gap:8px;padding:12px 12px 10px;border-radius:14px;background:var(--lift);border:1px solid var(--lift-line);box-shadow:var(--sh-raise);transition:border-color .18s var(--ease),background .18s var(--ease)}
+.cy-r3 .bc:hover{border-color:var(--btn-line-hover)}
+.cy-r3 .bc-top{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .bc-top-r{display:inline-flex;align-items:center;gap:6px}
+.cy-r3 .bc-t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 .bc-t::after{content:"";position:absolute;inset:0;border-radius:14px}
+.cy-r3 .bc-t:focus-visible{box-shadow:none}
+.cy-r3 .bc-t:focus-visible::after{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+.cy-r3 .bc-f{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 8px;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .bc-who{display:inline-flex;align-items:center;gap:6px;color:var(--ink)}
+/* a 12 px radius is the pill on one line and a rounded box when a narrow column wraps the chip */
+.cy-r3 .bchip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:12px;background:var(--band);border:1px solid var(--band-line);font-size:12px;line-height:16px;font-weight:500;color:var(--ink-nav)}
+.cy-r3 .bchip.w{background:var(--waiting-bg);border-color:var(--waiting-line);color:var(--waiting)}
+.cy-r3 .bchip.s{background:var(--stopped-bg);border-color:var(--stopped-line);color:var(--stopped)}
+.cy-r3 .bchip.k{color:var(--working)}
+.cy-r3 .bempty{padding:14px 12px;border-radius:14px;border:1px dashed var(--tick);font-size:13px;line-height:18px;color:var(--ink-2)}
+.cy-r3 .lane-h{padding:4px 4px 0;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}
+/* the status menu: how a card moves without dragging (phones, keyboards); it sits above the card's link */
+.cy-r3 .bc-mv{position:relative;z-index:1}
+.cy-r3 .bc-mv[open]{z-index:40}
+.cy-r3 .bc-mv>summary{display:grid;place-items:center;width:24px;height:24px;border-radius:8px;color:var(--ink-2);cursor:pointer}
+.cy-r3 .bc-mv>summary:hover,.cy-r3 .bc-mv[open]>summary{background:var(--hover);color:var(--ink)}
+.cy-r3 .bc-mv>summary:focus-visible{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+.cy-r3 .bc-menu{position:absolute;top:calc(100% + 4px);right:0;z-index:30;display:flex;flex-direction:column;min-width:148px;padding:4px;border-radius:12px;background:var(--lift);border:1px solid var(--lift-line);box-shadow:var(--sh-raise)}
+.cy-r3 .bc-menu button{display:flex;align-items:center;min-height:32px;padding:0 10px;border-radius:8px;font-size:13px;font-weight:500;color:var(--ink);text-align:left}
+.cy-r3 .bc-menu button:hover{background:var(--hover)}
+/* where a pointer can hover, the menu shows on the card's hover or focus, as the mockup draws quiet cards */
+@media (hover:hover) and (min-width:641px){
+  .cy-r3 .bc-mv:not([open])>summary{opacity:0;transition:opacity .15s var(--ease)}
+  .cy-r3 .bc:hover .bc-mv>summary,.cy-r3 .bc:focus-within .bc-mv>summary{opacity:1}
+}
+/* Advanced detail on a card (digest, launch readiness, PR) sits above the card's link too */
+.cy-r3 .bc-x{position:relative;z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.cy-r3 .bc-x:empty{display:none}
+
+/* quiet cards (142's idle cards): --quiet surface, --edge line, no shadow, title in --ink-2 */
+.cy-r3 .bc.quiet{background:var(--quiet);border-color:var(--edge);box-shadow:none}
+.cy-r3 .bc.quiet:hover{background:var(--hover);border-color:var(--tick)}
+.cy-r3 .bc.quiet .bc-t{color:var(--ink-2)}
+
+/* Mine: the four meanings as a segmented row on the tray */
+.cy-r3 [data-page="mine"] .seg{align-self:flex-start}
+
+/* ================================================================
+   1024
+   ================================================================ */
+@media (max-width:1180px){
+  .cy-r3 .tbar-f{flex:1 1 260px}
+  /* a busy assignee's "starts when free" takes its own line rather than wrapping after a trailing dot */
+  .cy-r3 .ot-q{flex-basis:100%}
+  .cy-r3 .ot-q>[aria-hidden]{display:none}
+}
+
+/* ================================================================
+   Phone (390)
+   ================================================================ */
+@media (max-width:640px){
+
+  /* Inbox: the kind filter takes its own row and scrolls sideways, fading at the right edge (028) */
+  .cy-r3 [data-page="inbox"] .ctx{flex-wrap:wrap;row-gap:4px}
+  .cy-r3 [data-page="inbox"] .ctx-end{position:relative;flex-basis:100%;margin-left:0}
+  .cy-r3 [data-page="inbox"] .ctx-end .seg{width:auto;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,var(--mask) calc(100% - 36px),transparent);mask-image:linear-gradient(90deg,var(--mask) calc(100% - 36px),transparent)}
+  .cy-r3 [data-page="inbox"] .ctx-end .seg::-webkit-scrollbar{display:none}
+  .cy-r3 [data-page="inbox"] .seg a{flex:none;padding:0 14px}
+  .cy-r3 .dec-l li{grid-template-columns:14px minmax(0,1fr);row-gap:0;padding:8px 0}
+  .cy-r3 .dec-l .dt{grid-column:2}
+
+  /* Tasks and Board: H1 + List|Board on one row; one toolbar row; Filter becomes a 44px icon button */
+  .cy-r3 :is([data-page="tasks"],[data-page="board"]) .ctx-end .seg{width:auto;flex:none}
+  .cy-r3 :is([data-page="tasks"],[data-page="board"]) .ctx-end .seg a{flex:none;padding:0 16px}
+  .cy-r3 .tbar{gap:6px}
+  .cy-r3 [data-page="tasks"] .tbar{flex-wrap:nowrap}
+  .cy-r3 .tbar-f{flex:1}
+  .cy-r3 .tbar .chip{height:44px}
+  .cy-r3 .tbar .chip.flt{min-width:44px;padding:0 12px;justify-content:center}
+  .cy-r3 .tbar .fl-t{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .cy-r3 .flt-p{min-width:min(300px,calc(100vw - 48px))}
+  .cy-r3 [data-page="tasks"] .paper .task-tile,.cy-r3 [data-page="tasks"] .paper .rb{display:none}
+  .cy-r3 [data-page="tasks"] .opts legend{position:static;width:auto;height:auto;margin:0 0 8px;overflow:visible;clip:auto;white-space:normal;font-size:16px;line-height:22px}
+  .cy-r3 .grp-d>summary{min-height:44px}
+  /* task rows: ID above the title (141), High and the verb at the right */
+  .cy-r3 .tr{grid-template-columns:14px minmax(0,1fr) auto;row-gap:0;column-gap:10px;padding:10px 8px}
+  .cy-r3 .tr+.tr::before{left:32px}
+  .cy-r3 .tr .tg{grid-row:1}
+  .cy-r3 .tr .tid{grid-column:2;grid-row:1;line-height:20px}
+  .cy-r3 .tr .row-main{grid-column:2;grid-row:2}
+  .cy-r3 .tr .prio{grid-column:3;grid-row:1;justify-self:end}
+  .cy-r3 .tr .go{grid-column:3;grid-row:2}
+  .cy-r3 .tr .prio .pt{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  /* Board: the columns stack; the pills and the status menu are 44px targets */
+  .cy-r3 .bcols{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 .colp{height:44px}
+  /* the Board's toolbar: search on its own row, then Filter, Mine and the column pills */
+  .cy-r3 [data-page="board"] .tbar-f{flex:1 1 100%}
+  /* the card's top row carries the 44px status menu; the card's top padding gives way to it */
+  .cy-r3 .bc{padding-top:2px}
+  .cy-r3 .bc-top{min-height:44px}
+  .cy-r3 .bc-mv>summary{width:44px;height:44px}
+  .cy-r3 .bc-menu button{min-height:44px}
+  .cy-r3 [data-page="mine"] .seg{align-self:stretch}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .cy-r3 .bc,.cy-r3 .colp,.cy-r3 .grp-d>summary,.cy-r3 .grp-d>summary .ico,.cy-r3 .tech>summary .ico{transition:none}
+}

@@ -6,7 +6,10 @@ defmodule CymphoWeb.InboxLive.Index do
   alias Cympho.Inbox
   alias Cympho.IssueThreadInteractions
   alias Cympho.OwnerAttention
+  alias Cympho.Orchestrator.Dispatcher
   alias CymphoWeb.Live.ReviewChanges
+  alias CymphoWeb.NextStep
+  alias CymphoWeb.TeamRail
   alias Cympho.Issues.HumanReview
 
   # "all" is the explicit unified feed; missing status defaults to "action"
@@ -14,6 +17,37 @@ defmodule CymphoWeb.InboxLive.Index do
   # paint matches the nav badge and stays decision-first, not noise-first.
   @statuses ~w(action unread read dismissed archived review all)
   @default_status "action"
+
+  # The r3 kind filter (build-spec §4), in the owner's order: param, label,
+  # and the owner kinds it holds (a company stopped at its limit is a problem).
+  @kinds [
+    {"problem", "Problems", [:problem, :stopped]},
+    {"question", "Questions", [:question]},
+    {"review", "Reviews", [:review]},
+    {"approval", "Approvals", [:approval]}
+  ]
+  @row_words %{
+    stopped: "Spending",
+    problem: "Problem",
+    question: "Question",
+    review: "Review",
+    approval: "Approval"
+  }
+  @row_icons %{
+    stopped: "i-stop",
+    problem: "i-stop",
+    question: "i-question",
+    review: "i-doc-check",
+    approval: "i-shield"
+  }
+  @row_tiles %{stopped: "p", problem: "p", question: "q"}
+  @decision_words %{
+    answered: "Answered",
+    accepted: "Accepted",
+    declined: "Declined",
+    sent_back: "Sent back",
+    cancelled: "Cancelled"
+  }
 
   @impl true
   def mount(_params, _session, socket) do
@@ -39,6 +73,18 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:inbox_action_queue, [])
       |> assign(:owner_attention_items, [])
       |> assign(:can_resolve_approvals, can_resolve_approvals?(socket))
+      |> assign(:runtime_enabled?, Dispatcher.enabled?())
+      |> assign(:kind, nil)
+      |> assign(:item_param, nil)
+      |> assign(:decided_open, false)
+      |> assign(:kind_segments, [])
+      |> assign(:next_item, nil)
+      |> assign(:inbox_rows, [])
+      |> assign(:inbox_shown, 0)
+      |> assign(:inbox_total, 0)
+      |> assign(:agent_names, %{})
+      |> assign(:spending, nil)
+      |> assign(:decisions, [])
 
     if connected?(socket) do
       if socket.assigns.selected_agent_id do
@@ -67,6 +113,9 @@ defmodule CymphoWeb.InboxLive.Index do
       socket
       |> assign(:current_status, status)
       |> assign(:digest_density, digest_density)
+      |> assign(:kind, normalize_kind(params["kind"]))
+      |> assign(:item_param, params["item"])
+      |> assign(:decided_open, params["decided"] == "open")
       |> assign(:selected_agent_id, agent_id)
       |> assign(:selected_agent, selected_agent(socket.assigns.agents, agent_id))
       |> maybe_subscribe_to_agent()
@@ -208,8 +257,23 @@ defmodule CymphoWeb.InboxLive.Index do
     resolve_interaction(socket, id, status)
   end
 
-  def handle_event("respond_questions", %{"_id" => id, "response" => response}, socket) do
-    respond_questions(socket, id, response)
+  def handle_event("respond_questions", params, socket) do
+    respond_questions(socket, params)
+  end
+
+  def handle_event("resume_agent", %{"id" => id}, socket) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         {:ok, agent} <- Agents.get_company_agent(company_id, id),
+         {:ok, agent} <- Agents.resume_agent(agent) do
+      {:noreply,
+       socket
+       |> load_inbox()
+       |> push_event("toast", %{message: "#{agent.name} can take new work.", type: "success"})}
+    else
+      _ ->
+        {:noreply,
+         push_event(socket, "toast", %{message: "Could not resume that agent.", type: "error"})}
+    end
   end
 
   def handle_event("dismiss_budget_incident", %{"incident_id" => incident_id}, socket) do
@@ -444,35 +508,33 @@ defmodule CymphoWeb.InboxLive.Index do
     end
   end
 
-  defp respond_questions(socket, id, response) do
-    user_id = current_user_id(socket)
-    response = response |> to_string() |> String.trim()
-
-    with true <- response != "",
+  # Both the Next step (a numbered option or an own answer) and the Advanced
+  # card (a free-text response) post here; NextStep reads either shape.
+  defp respond_questions(socket, params) do
+    with {:ok, id, answer} <- NextStep.answer_from_params(params),
          {:ok, interaction} <- scoped_interaction(socket, id),
-         true <- interaction.kind == :ask_user_questions,
+         :ask_user_questions <- interaction.kind,
          {:ok, _updated} <-
            IssueThreadInteractions.resolve_interaction(interaction, %{
              "status" => :responded,
-             "resolved_by_user_id" => user_id,
-             "response" => response
+             "resolved_by_user_id" => current_user_id(socket),
+             "response" => answer
            }) do
       {:noreply,
        socket
-       |> put_flash(:info, "Response sent.")
-       |> load_inbox()}
+       |> load_inbox()
+       |> push_event("toast", %{message: "Answer sent.", type: "success"})}
     else
-      false ->
-        {:noreply, put_flash(socket, :error, "Add a short response before sending.")}
-
-      {:error, :invalid_transition} ->
-        {:noreply, put_flash(socket, :error, "Could not send this response.")}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Interaction not found.")}
+      {:error, :empty} ->
+        {:noreply,
+         push_event(socket, "toast", %{
+           message: "Choose an answer or write your own.",
+           type: "error"
+         })}
 
       _ ->
-        {:noreply, put_flash(socket, :error, "Could not send this response.")}
+        {:noreply,
+         push_event(socket, "toast", %{message: "Could not send this answer.", type: "error"})}
     end
   end
 
@@ -508,6 +570,7 @@ defmodule CymphoWeb.InboxLive.Index do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
     with true <- is_binary(company_id),
+         {:ok, id} <- Ecto.UUID.cast(id),
          {:ok, interaction} <- IssueThreadInteractions.get_interaction(id),
          {:ok, _issue} <- Cympho.Issues.get_company_issue(company_id, interaction.issue_id) do
       {:ok, interaction}
@@ -552,6 +615,250 @@ defmodule CymphoWeb.InboxLive.Index do
     socket
     |> assign_inbox_counts(length(all_items))
     |> reset_stream(:inbox_items, &fetch_inbox(socket, &1, all_items))
+    |> assign_decisions(attention_items)
+  end
+
+  # The r3 Inbox (plan P4): every owner decision of the company in the owner's
+  # order, filtered by kind; the `item` param (or the first) opens as the Next
+  # step and the rest are closed rows. `item` is looked up in this company's
+  # own list, so an id from anywhere else falls back to the first item.
+  defp assign_decisions(socket, attention_items) do
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+    user = socket.assigns[:current_user]
+
+    items =
+      if socket.assigns[:selected_agent_id] in [nil, "all"],
+        do: attention_items,
+        else: owner_attention_items(socket, nil)
+
+    counts = OwnerAttention.counts(company_id, user)
+    kind = socket.assigns[:kind]
+
+    items =
+      items
+      |> Enum.filter(&(is_nil(kind) or OwnerAttention.owner_kind(&1) in kind_members(kind)))
+      |> OwnerAttention.owner_order()
+
+    open =
+      Enum.find(items, &(&1.id == socket.assigns[:item_param])) || List.first(items)
+
+    names = Map.new(socket.assigns[:agents] || [], &{&1.id, &1.name})
+    total = if kind, do: kind_count(counts, kind), else: counts.total
+
+    assign(socket,
+      kind_segments: kind_segments(socket.assigns, counts),
+      next_item: open,
+      inbox_rows: items |> List.delete(open) |> Enum.map(&row_view(&1, names, socket.assigns)),
+      inbox_shown: length(items),
+      inbox_total: total,
+      agent_names: names,
+      spending:
+        if(open && OwnerAttention.owner_kind(open) == :stopped,
+          do: TeamRail.spending(company_id)
+        ),
+      decisions: decisions(company_id, user)
+    )
+  end
+
+  defp decisions(company_id, user) do
+    company_id
+    |> OwnerAttention.recent_decisions(user, days: 7)
+    |> Enum.map(fn decision ->
+      %{
+        word: Map.fetch!(@decision_words, decision.action),
+        glyph: if(decision.action in [:answered, :accepted], do: :done, else: :idle),
+        id: decision.issue.identifier,
+        title: decision.issue.title,
+        at: Calendar.strftime(decision.at, "%a %-d %b %H:%M")
+      }
+    end)
+  end
+
+  defp kind_members(kind) do
+    Enum.find_value(@kinds, [], fn {param, _label, members} -> if param == kind, do: members end)
+  end
+
+  defp kind_count(counts, kind),
+    do: kind |> kind_members() |> Enum.map(&Map.get(counts.by_kind, &1, 0)) |> Enum.sum()
+
+  # All, then each kind that has an item (or is the current filter).
+  defp kind_segments(assigns, counts) do
+    kinds =
+      @kinds
+      |> Enum.map(fn {param, label, _members} ->
+        %{
+          label: label,
+          count: kind_count(counts, param),
+          path: r3_path(assigns, kind: param),
+          current: assigns[:kind] == param
+        }
+      end)
+      |> Enum.filter(&(&1.count > 0 or &1.current))
+
+    all = %{
+      label: "All",
+      count: counts.total,
+      path: r3_path(assigns, kind: nil),
+      current: is_nil(assigns[:kind])
+    }
+
+    [all | kinds]
+  end
+
+  # One closed Needs-you row: the object in the agent's (or the dataset's)
+  # words, its kind, task, person and time, and one verb. Decisions made on
+  # this page open in place (`item`); votes and approvals open their page (S7).
+  defp row_view(item, names, assigns) do
+    owner = OwnerAttention.owner_kind(item)
+    issue = item.issue
+
+    %{
+      tile: Map.get(@row_tiles, owner),
+      icon: Map.fetch!(@row_icons, owner),
+      word: Map.fetch!(@row_words, owner),
+      title: row_title(item),
+      meta:
+        Enum.reject(
+          [
+            issue && issue.identifier && {:mono, issue.identifier},
+            row_person(item, names),
+            item.inserted_at && {:mono, stamp(item.inserted_at)}
+          ],
+          &(&1 in [nil, false])
+        ),
+      verb: row_verb(item),
+      patch: row_patch(item, assigns),
+      navigate: row_navigate(item)
+    }
+  end
+
+  defp row_title(%{kind: :agent_paused, summary: summary}) when is_binary(summary), do: summary
+
+  defp row_title(%{kind: :interaction, interaction_kind: :ask_user_questions, questions: [q]}),
+    do: q.question
+
+  defp row_title(%{kind: :interaction, summary: summary}) when is_binary(summary), do: summary
+
+  defp row_title(%{kind: :review_queue, issue: issue}),
+    do: "Ready for your review: #{issue.title}"
+
+  defp row_title(%{kind: :human_action, issue: %{title: title}}), do: title
+  defp row_title(item), do: item.title
+
+  defp row_person(%{kind: :review_queue, issue: issue} = item, names),
+    do: Map.get(names, issue.assignee_id) || agent_name(item)
+
+  defp row_person(item, _names), do: agent_name(item)
+
+  defp agent_name(%{agent: %{name: name}}) when is_binary(name), do: name
+  defp agent_name(_item), do: nil
+
+  defp row_verb(%{kind: :agent_paused, title: title}), do: title
+  defp row_verb(%{kind: :interaction, interaction_kind: :ask_user_questions}), do: "Answer"
+  defp row_verb(%{kind: :interaction}), do: "Decide"
+  defp row_verb(%{kind: :review_queue}), do: "Review"
+  defp row_verb(%{kind: :board_approval}), do: "Open vote"
+  defp row_verb(%{kind: :budget_incident}), do: "Open Spending"
+  defp row_verb(_item), do: "Open"
+
+  defp row_navigate(%{kind: kind, target_path: path}) when kind in [:board_approval, :approval],
+    do: path <> "?from=/inbox"
+
+  defp row_navigate(%{kind: :budget_incident}), do: "/costs"
+  defp row_navigate(_item), do: nil
+
+  defp row_patch(%{kind: kind}, _assigns)
+       when kind in [:board_approval, :approval, :budget_incident],
+       do: nil
+
+  defp row_patch(item, assigns), do: r3_path(assigns, item: item.id)
+
+  # The r3 links keep the Advanced view's own params (status, agent, density).
+  defp r3_path(assigns, overrides) do
+    query =
+      [
+        kind: Keyword.get(overrides, :kind, assigns[:kind]),
+        item: Keyword.get(overrides, :item),
+        status: if(assigns[:current_status] != @default_status, do: assigns[:current_status]),
+        agent_id:
+          if(assigns[:selected_agent_id] not in [nil, "all"], do: assigns[:selected_agent_id]),
+        density: if(assigns[:digest_density] == "detailed", do: "detailed")
+      ]
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+
+    if query == [], do: "/inbox", else: "/inbox?" <> URI.encode_query(query)
+  end
+
+  # A clock time within the last day, else the day: "04:12", "Mon 19 Oct".
+  defp stamp(%DateTime{} = at) do
+    if DateTime.diff(DateTime.utc_now(), at, :hour) < 24,
+      do: Calendar.strftime(at, "%H:%M"),
+      else: Calendar.strftime(at, "%a %-d %b")
+  end
+
+  defp stamp(_at), do: nil
+
+  defp normalize_kind(kind) do
+    if Enum.any?(@kinds, fn {param, _label, _members} -> param == kind end), do: kind
+  end
+
+  @doc "Nothing needs the owner: the Inbox all clear opens what they decided recently."
+  def all_clear(assigns) do
+    ~H"""
+    <.next_step>
+      <:problem>
+        <.problem_card title="Nothing needs you">
+          <:eyebrow>All clear</:eyebrow>
+          <p class="obj">Decisions appear here as soon as an agent asks.</p>
+        </.problem_card>
+      </:problem>
+      <:resolution>
+        <.ink_card heading="Recent decisions">
+          <.ink_note>Shows what you answered, accepted and approved in the last 7 days.</.ink_note>
+          <.ink_foot verb="open">
+            <:primary>
+              <.primary_pill patch="/inbox?decided=open">See recent decisions</.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </.ink_card>
+      </:resolution>
+    </.next_step>
+    """
+  end
+
+  attr :row, :map, required: true
+  attr :n, :integer, required: true
+
+  # NextStep's row with the Inbox's own title and a verb that can open in place.
+  defp inbox_row(assigns) do
+    ~H"""
+    <li class="row">
+      <span class={["kt", @row.tile]}><.r3_icon name={@row.icon} /></span>
+      <span class="row-main">
+        <span class="rt" id={"ib#{@n}"}>{@row.title}</span>
+        <span class="rm" id={"ib#{@n}m"}>
+          {@row.word}
+          <%= for part <- @row.meta do %>
+            <span aria-hidden="true"> · </span>
+            <%= case part do %>
+              <% {:mono, text} -> %>
+                <span class="mono">{text}</span>
+              <% text -> %>
+                {text}
+            <% end %>
+          <% end %>
+        </span>
+      </span>
+      <.link
+        class="pl go"
+        patch={@row.patch}
+        navigate={@row.navigate}
+        aria-describedby={"ib#{@n} ib#{@n}m"}
+      >
+        {@row.verb}
+      </.link>
+    </li>
+    """
   end
 
   defp fetch_inbox(socket, cursor), do: fetch_inbox(socket, cursor, nil)
@@ -967,10 +1274,10 @@ defmodule CymphoWeb.InboxLive.Index do
     |> Enum.filter(& &1.review_nudge)
   end
 
-  defp owner_attention_items(socket) do
+  defp owner_attention_items(socket, agent_id \\ :selected) do
     current_user = socket.assigns[:current_user]
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
-    agent_id = socket.assigns[:selected_agent_id]
+    agent_id = if agent_id == :selected, do: socket.assigns[:selected_agent_id], else: agent_id
 
     if is_binary(company_id) and current_user do
       opts =

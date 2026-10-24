@@ -9,6 +9,7 @@ defmodule Cympho.OwnerAttention do
 
   import Ecto.Query, warn: false
 
+  alias Cympho.Activities.Activity
   alias Cympho.Agents.Agent
   alias Cympho.Approvals
   alias Cympho.BoardApprovals
@@ -152,6 +153,72 @@ defmodule Cympho.OwnerAttention do
   end
 
   def counts(_company_id, _user), do: %{total: 0, by_kind: empty_kind_counts(), by_agent: %{}}
+
+  @doc """
+  What `user` decided in the company in the last `:days` (default 7), newest
+  first: questions answered and confirmations accepted or declined
+  (`IssueThreadInteraction.resolved_at`), reviews accepted or sent back
+  (`approval_approved` / `approval_requested_changes` activities), and tasks
+  cancelled (`status_changed` to cancelled). Each row is
+  `%{action: :answered | :accepted | :declined | :sent_back | :cancelled, issue: %Issue{}, at: DateTime}`;
+  company scope comes from the task.
+  """
+  def recent_decisions(company_id, user, opts \\ [])
+
+  def recent_decisions(company_id, user, opts) when is_binary(company_id) do
+    case user_id(user) do
+      nil ->
+        []
+
+      user_id ->
+        since = DateTime.add(DateTime.utc_now(), -Keyword.get(opts, :days, 7) * 86_400, :second)
+
+        (decided_interactions(company_id, user_id, since) ++
+           decided_activities(company_id, user_id, since))
+        |> Enum.sort_by(&timestamp(&1.at), :desc)
+    end
+  end
+
+  def recent_decisions(_company_id, _user, _opts), do: []
+
+  defp decided_interactions(company_id, user_id, since) do
+    from(i in IssueThreadInteraction,
+      join: issue in Issue,
+      on: issue.id == i.issue_id,
+      where:
+        issue.company_id == ^company_id and i.resolved_by_user_id == ^user_id and
+          i.status in [:responded, :accepted, :rejected] and i.resolved_at >= ^since,
+      select: {i.status, i.resolved_at, issue}
+    )
+    |> Repo.all()
+    |> Enum.map(fn {status, at, issue} ->
+      %{action: decision_action(status), issue: issue, at: at}
+    end)
+  end
+
+  defp decided_activities(company_id, user_id, since) do
+    from(a in Activity,
+      join: issue in Issue,
+      on: issue.id == a.issue_id,
+      where:
+        issue.company_id == ^company_id and a.actor_type == "user" and a.actor_id == ^user_id and
+          a.inserted_at >= ^since and
+          (a.action in ["approval_approved", "approval_requested_changes"] or
+             (a.action == "status_changed" and fragment("?->>'to'", a.metadata) == "cancelled")),
+      select: {a.action, a.inserted_at, issue}
+    )
+    |> Repo.all()
+    |> Enum.map(fn {action, at, issue} ->
+      %{action: decision_action(action), issue: issue, at: at}
+    end)
+  end
+
+  defp decision_action(:responded), do: :answered
+  defp decision_action(:accepted), do: :accepted
+  defp decision_action(:rejected), do: :declined
+  defp decision_action("approval_approved"), do: :accepted
+  defp decision_action("approval_requested_changes"), do: :sent_back
+  defp decision_action("status_changed"), do: :cancelled
 
   @doc "The owner's word for an item: `:stopped`, `:problem`, `:question`, `:review` or `:approval`."
   def owner_kind(%{kind: :budget_incident, event_type: "budget_exceeded"}), do: :stopped
