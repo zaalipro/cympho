@@ -3088,6 +3088,26 @@ defmodule CymphoWeb.AgentLiveTest do
       end
     end
 
+    test "Back to Home stays while the tabs change", %{conn: conn, nw: nw} do
+      mira = nw.agents["Mira"]
+      {:ok, view, _html} = live(conn, "/agents/#{mira.id}?from=/")
+
+      view |> element(".agent-h .seg a", "Setup") |> render_click()
+      assert r3_text(r3_doc(view), ".agent-h .seg a[aria-current]") == "Setup"
+      assert r3_text(r3_doc(view), ".ctx .ret") == "Back to Home"
+
+      render_click(view, "set_tab", %{"tab" => "instructions"})
+      assert r3_text(r3_doc(view), ".ctx .ret") == "Back to Home"
+
+      view |> element(".agent-h .seg a", "Overview") |> render_click()
+      assert r3_text(r3_doc(view), ".ctx .ret") == "Back to Home"
+
+      # Opened without one, the tabs add no Back link.
+      {:ok, view, _html} = live(conn, "/agents/#{mira.id}")
+      view |> element(".agent-h .seg a", "Setup") |> render_click()
+      assert Floki.find(r3_doc(view), ".ctx .ret") == []
+    end
+
     test "Pause here is the owner's: it reads Paused and is no Inbox problem", %{
       conn: conn,
       nw: nw

@@ -80,7 +80,8 @@ defmodule CymphoWeb.AgentLive.Show do
           socket
           |> assign(:page_title, agent.name)
           |> assign(:current_tab, tab)
-          |> assign(:from, UserAuth.safe_from(params["from"]))
+          # The page's own patches (tabs, files, runs) leave the origin's Back link standing.
+          |> assign(:from, UserAuth.safe_from(params["from"]) || socket.assigns.from)
           |> assign_agent(agent)
           |> maybe_select_file(file)
           |> maybe_select_run(run_id)
