@@ -224,8 +224,17 @@ defmodule Cympho.Users do
     list_notification_prefs(user_id)
   end
 
+  # The five alert events of Settings' "Tell me when…". Only the approval
+  # event is on by default; the four added with it are opt-in, so existing
+  # users get no surprise email (`Notifications.Dispatcher.event_allowed?/2`).
   def default_event_config do
-    %{"human_approval_required" => true}
+    %{
+      "human_approval_required" => true,
+      "agent_question" => false,
+      "review_ready" => false,
+      "work_stopped" => false,
+      "spend_threshold" => false
+    }
   end
 
   def update_pref_events(pref_id, events) do

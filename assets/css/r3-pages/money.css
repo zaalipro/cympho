@@ -4,4 +4,284 @@
    - No colour literal: use the tokens (app.css :root, themes.css). A new colour token goes into
      the light block and both identical dark copies, never here.
    - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
-   - Shared components belong in r3.css, not here. */
+   - Shared components belong in r3.css, not here.
+   Ported from ui-redesign/v5/notes/r3-src/g2.css (Spending, Settings). Spending rules read
+   [data-page="spending"]; Settings rules read [data-page="settings"] (the Company page) or
+   .set-page (the legacy-framed settings sections, SettingsLayout). */
+
+/* ================================================================
+   1. Spending
+   ================================================================ */
+
+/* the limit ruler (050, 079, 064): 60 ticks, a major tick every tenth of the limit.
+   Spent ticks are ink; the cursor marks the exact amount; amber = warns; coral = agents stop.
+   The fill's two tick layers are sized inline from the spend (CostLive.Index limit_ruler/1). */
+.cy-r3 [data-page="spending"] .tk.lr{height:30px;margin-top:34px;background:
+  linear-gradient(90deg,var(--tick) 0 2px,transparent 2px) 0 0/calc(100% / 6) 100% repeat-x,
+  linear-gradient(90deg,var(--tick) 0 2px,transparent 2px) 0 100%/calc(100% / 60) 58% repeat-x}
+.cy-r3 [data-page="spending"] .tk.lr .tk-fill{background-image:
+  linear-gradient(90deg,var(--ink) 0 2px,transparent 2px),
+  linear-gradient(90deg,var(--ink) 0 2px,transparent 2px);background-position:0 0,0 100%;background-repeat:repeat-x}
+.cy-r3 [data-page="spending"] .tk.lr .tk-fill::after{content:"";position:absolute;right:-1px;top:-6px;bottom:-6px;width:2px;border-radius:1px;background:var(--ink-hi)}
+.cy-r3 [data-page="spending"] .tk.lr.full .tk-fill::after{display:none}
+.cy-r3 [data-page="spending"] .tk.lr .tk-warn{top:-6px;bottom:-6px}
+.cy-r3 [data-page="spending"] .tk.lr::after{content:"";position:absolute;right:0;top:-6px;bottom:-6px;width:2px;border-radius:1px;background:var(--stopped)}
+.cy-r3 [data-page="spending"] .tk.lr+.tk-legend{margin-top:4px}
+.cy-r3 [data-page="spending"] .tk.lr+.tk-legend .z{color:var(--stopped)}
+.cy-r3 [data-page="spending"] .tk.lr+.tk-legend .w{top:-62px}
+.cy-r3 [data-page="spending"] .tk.lr+.tk-legend span{white-space:nowrap}  /* the warn label sits above its mark, so it never meets "agents stop" */
+
+/* hero + 3-cell strip inside the problem card (050, 013) */
+.cy-r3 [data-page="spending"] .paper .hero .mono{font-size:40px;line-height:46px;letter-spacing:-.035em}
+.cy-r3 [data-page="spending"] .paper .strip{margin:4px -8px 0;padding-top:8px;border-top:1px solid var(--hair)}
+.cy-r3 [data-page="spending"] .strip.s3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.cy-r3 [data-page="spending"] .paper .strip .cell{padding:6px 12px 2px}
+.cy-r3 [data-page="spending"] .paper .strip .v{font-size:22px;line-height:28px}
+.cy-r3 [data-page="spending"] .paper .strip .v.mono{font-size:20px}
+
+/* a field on the resolution card (151, 068): the label is the card's heading, the amount is the hero */
+.cy-r3 [data-page="spending"] .lim-f{display:flex;flex-direction:column;gap:10px}
+.cy-r3 [data-page="spending"] .lim-l{font-size:18px;line-height:24px;font-weight:500;color:var(--inv-ink-hi)}
+.cy-r3 [data-page="spending"] .cap{display:flex;align-items:center;gap:6px;height:60px;padding:0 18px;border-radius:var(--r-row);background:var(--inv-field-bg);border:1px solid var(--inv-field);transition:box-shadow .2s var(--ease)}
+.cy-r3 [data-page="spending"] .cap:focus-within{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+.cy-r3 [data-page="spending"] .cap .cur{font:500 22px/1 var(--mono);color:var(--inv-ink-2)}
+.cy-r3 [data-page="spending"] .cap input{flex:1;min-width:0;height:100%;border:0;background:transparent;outline:none;font:500 28px/1 var(--mono);letter-spacing:-.02em;color:var(--inv-ink-hi)}
+.cy-r3 [data-page="spending"] .cap input:disabled{color:var(--inv-ink-2);cursor:not-allowed}
+.cy-r3 [data-page="spending"] .ink-help{font-size:13px;line-height:18px;color:var(--inv-ink-2)}
+.cy-r3 [data-page="spending"] .ink button.pd{cursor:pointer}
+.cy-r3 [data-page="spending"] .ink button.pw:disabled{opacity:.55;cursor:not-allowed}
+
+/* money tables (009 filled column header, 115 share bars, 107) */
+.cy-r3 [data-page="spending"] .money-g{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.28fr);gap:16px;align-items:start}
+.cy-r3 [data-page="spending"] .money{width:100%;border-collapse:separate;border-spacing:0;margin-top:2px;font-size:13px;line-height:18px}
+.cy-r3 [data-page="spending"] .money thead th{height:32px;padding:0 12px;background:var(--band);font-size:12px;line-height:16px;font-weight:500;color:var(--ink-2);text-align:right;white-space:nowrap}
+.cy-r3 [data-page="spending"] .money thead th:first-child{text-align:left;border-radius:10px 0 0 10px}
+.cy-r3 [data-page="spending"] .money thead th:last-child{border-radius:0 10px 10px 0}
+.cy-r3 [data-page="spending"] .money tbody th,.cy-r3 [data-page="spending"] .money td{height:48px;padding:0 12px;border-top:1px solid var(--hair);text-align:right;font-weight:400;color:var(--ink);vertical-align:middle}
+.cy-r3 [data-page="spending"] .money tbody tr:first-child>*{border-top:0}
+.cy-r3 [data-page="spending"] .money tbody th{text-align:left}
+.cy-r3 [data-page="spending"] .money tbody tr:hover>*{background:var(--hover)}
+.cy-r3 [data-page="spending"] .money tbody tr:hover>:first-child{border-radius:var(--r-row) 0 0 var(--r-row)}
+.cy-r3 [data-page="spending"] .money tbody tr:hover>:last-child{border-radius:0 var(--r-row) var(--r-row) 0}
+.cy-r3 [data-page="spending"] .money tbody tr:hover>*,.cy-r3 [data-page="spending"] .money tbody tr:hover+tr>*{border-top-color:transparent}
+.cy-r3 [data-page="spending"] .money td.mono{font:13px/18px var(--mono);color:var(--ink-2)}
+.cy-r3 [data-page="spending"] .nm{display:inline-flex;align-items:center;gap:10px;min-height:32px;padding:0 6px 0 0;border-radius:8px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="spending"] a.nm:hover{text-decoration:underline;text-decoration-color:var(--underline);text-underline-offset:3px}
+.cy-r3 [data-page="spending"] .nm .id{flex:none;min-width:44px;font-size:12px;font-weight:400;color:var(--ink-2)}
+.cy-r3 [data-page="spending"] .nm.tn{align-items:baseline;padding:8px 6px 8px 0;font-weight:400}
+.cy-r3 [data-page="spending"] .amt{display:inline-flex;align-items:center;justify-content:flex-end;gap:12px;font:13px/18px var(--mono);color:var(--ink);white-space:nowrap}
+.cy-r3 [data-page="spending"] .amt>span:last-child{min-width:6ch;text-align:right}
+.cy-r3 [data-page="spending"] .sh{position:relative;width:72px;height:3px;flex:none;border-radius:2px;background:var(--tick);overflow:hidden}  /* a visible track (115, 107), so a small share reads as part of a meter */
+.cy-r3 [data-page="spending"] .sh i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--ink-2)}
+.cy-r3 [data-page="spending"] .more{margin:4px 4px 0}
+.cy-r3 [data-page="spending"] .more>summary .mono{color:var(--ink)}
+.cy-r3 [data-page="spending"] .more .money{margin-bottom:4px}
+.cy-r3 [data-page="spending"] .untied{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 4px;padding:10px 8px 6px;border-top:1px dashed var(--tick)}
+.cy-r3 [data-page="spending"] .untied p{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cy-r3 [data-page="spending"] .ut-t{font-size:13px;line-height:18px;color:var(--ink-2)}
+.cy-r3 [data-page="spending"] .ut-s{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 [data-page="spending"] .untied .amt{color:var(--ink-2)}
+
+/* runtime bar, Advanced (050, 115): labelled categories --cat-1..3; column widths are the amounts */
+.cy-r3 [data-page="spending"] .rtb{display:grid;gap:2px;height:8px;margin:6px 12px 4px}
+.cy-r3 [data-page="spending"] .rtb i{border-radius:2px}
+.cy-r3 [data-page="spending"] .c1{background:var(--cat-1)}
+.cy-r3 [data-page="spending"] .c2{background:var(--cat-2)}
+.cy-r3 [data-page="spending"] .c3{background:var(--cat-3)}
+.cy-r3 [data-page="spending"] .rtl{display:flex;flex-direction:column;padding:6px 12px 6px}
+.cy-r3 [data-page="spending"] .rtl li{display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:32px;font-size:13px;color:var(--ink)}
+.cy-r3 [data-page="spending"] .rtl .key{width:10px;height:10px;border-radius:3px}
+.cy-r3 [data-page="spending"] .rtl .mono{font-size:13px}
+.cy-r3 [data-page="spending"] .rtl small{font-size:12px;color:var(--ink-2)}
+.cy-r3 [data-page="spending"] .note-l{padding:4px 12px 8px;font-size:13px;line-height:19px;color:var(--ink-2)}
+.cy-r3 [data-page="spending"] .card>.lnk{margin:0 8px 6px}
+.cy-r3 [data-page="spending"] .money-g+.card,.cy-r3 [data-page="spending"] .next+.card{margin-top:0}
+
+/* ================================================================
+   2. Settings
+   ================================================================ */
+
+/* "Where alerts go" (011's matrix in miniature): channel · status word · one dot per event 1–5, numbered like the
+   chooser's rows. On = an ink disc (an ink object on paper, a paper object in dark), off = a dots-line ring. */
+.cy-r3 [data-page="settings"] .cov{margin:auto -8px 0;padding:10px 8px 0;border-top:1px solid var(--hair)}
+.cy-r3 [data-page="settings"] .cov-k{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:24px;padding:0 4px}
+.cy-r3 [data-page="settings"] .cov-l{font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 [data-page="settings"] .cov-n,.cy-r3 [data-page="settings"] .cov-d{display:grid;grid-template-columns:repeat(5,28px);justify-items:center}
+.cy-r3 [data-page="settings"] .cov-n{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 [data-page="settings"] .cov li{display:grid;grid-template-columns:minmax(0,1fr) auto 140px;align-items:center;gap:12px;min-height:40px;padding:0 4px;border-top:1px solid var(--hair)}
+.cy-r3 [data-page="settings"] .cov li:first-child{border-top:0}
+.cy-r3 [data-page="settings"] .cov-c{font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="settings"] .cov-s{display:inline-flex;align-items:center;gap:6px;min-width:48px;font-size:13px;line-height:18px;color:var(--ink-2)}
+.cy-r3 [data-page="settings"] .cov-d i{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--dots-line)}
+.cy-r3 [data-page="settings"] .cov-d i.y{background:var(--ink);border-color:var(--ink)}
+.cy-r3 [data-page="settings"] .cov+.pf{margin-top:0;padding-top:2px}
+.cy-r3 [data-page="settings"] .pf-m{display:none}
+.cy-r3 [data-page="settings"] .pf-m+a{margin-left:auto}
+
+/* check rows on the resolution card: the option-row anatomy with a square check (148, 151) */
+.cy-r3 [data-page="settings"] .ck{width:20px;height:20px;flex:none;display:grid;place-items:center;border-radius:6px;border:1.5px solid var(--inv-radio);color:transparent;transition:background .18s var(--ease),border-color .18s var(--ease)}
+.cy-r3 [data-page="settings"] .opt-in:checked+.opt .ck{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.cy-r3 [data-page="settings"] .ck .ico{stroke-width:2.2}
+.cy-r3 [data-page="settings"] .opts.checks{gap:6px}
+.cy-r3 [data-page="settings"] .opts.checks .opt{min-height:44px;padding-top:6px;padding-bottom:6px}  /* 44 px rows: five of them, so the chooser stays close to its problem card */
+
+/* section nav (142 grouped sidebar, 139 raised current tile): on the tray, like the rail on the page */
+.cy-r3 :is([data-page="settings"],.set-page) .set{display:grid;grid-template-columns:232px minmax(0,1fr);gap:16px;align-items:start}
+.cy-r3 :is([data-page="settings"],.set-page) .snav{position:sticky;top:76px;display:flex;flex-direction:column;gap:14px;padding:4px 2px 4px 0}
+.cy-r3 .set-page .snav{top:8px}
+.cy-r3 :is([data-page="settings"],.set-page) .sn-g{padding:0 10px 4px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 :is([data-page="settings"],.set-page) .snav ul{display:flex;flex-direction:column;gap:1px}
+.cy-r3 :is([data-page="settings"],.set-page) .snav a{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-radius:10px;border:1px solid transparent;font-size:13px;color:var(--ink-nav);transition:background .18s var(--ease),color .18s var(--ease)}
+.cy-r3 :is([data-page="settings"],.set-page) .snav a:hover{background:var(--tray-hover);color:var(--ink)}
+.cy-r3 :is([data-page="settings"],.set-page) .snav a[aria-current]{background:var(--lift);border-color:var(--lift-line);box-shadow:var(--sh-raise);color:var(--ink-hi);font-weight:500}
+.cy-r3 :is([data-page="settings"],.set-page) .snav a[aria-current]::after{content:"";width:6px;height:6px;margin-left:auto;border-radius:50%;background:var(--accent)}
+.cy-r3 :is([data-page="settings"],.set-page) .snav .chv{display:none;margin-left:auto;color:var(--ink-2)}
+.cy-r3 :is([data-page="settings"],.set-page) .set-main{display:flex;flex-direction:column;gap:16px;min-width:0}
+.cy-r3 [data-page="settings"] .kv.wide{grid-template-columns:136px minmax(0,1fr);gap:14px 12px;padding:12px 12px 14px;font-size:14px;line-height:20px}
+.cy-r3 [data-page="settings"] .pw-st{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:var(--ink)}
+
+/* power rows (008's danger zone, light); the buttons are the runtime-control POST forms */
+.cy-r3 [data-page="settings"] .dz{display:flex;flex-direction:column;gap:8px;padding:8px 4px 4px}
+.cy-r3 [data-page="settings"] .dz li{display:flex;align-items:center;gap:14px;min-height:64px;padding:10px 12px;border-radius:14px;background:var(--well);border:1px solid var(--band-line)}
+.cy-r3 [data-page="settings"] .dz .kt.p{color:var(--stopped)}
+.cy-r3 [data-page="settings"] .dz form{margin-left:auto;flex:none}
+.cy-r3 [data-page="settings"] .pl.warn{color:var(--stopped)}
+.cy-r3 [data-page="settings"] .pl.stop{background:var(--stopped-bg);border-color:var(--stopped-line);color:var(--stopped)}
+.cy-r3 [data-page="settings"] .pl.stop:hover{border-color:var(--stopped)}
+
+/* settings section frames: runtime rows, billing */
+.cy-r3 :is([data-page="settings"],.set-page) .srows{display:flex;flex-direction:column;padding:4px 0 2px}
+.cy-r3 :is([data-page="settings"],.set-page) .srow{position:relative;display:flex;align-items:center;gap:14px;min-height:60px;padding:10px 12px}
+.cy-r3 :is([data-page="settings"],.set-page) .srow+.srow::before{content:"";position:absolute;left:60px;right:12px;top:0;height:1px;background:var(--hair)}
+.cy-r3 :is([data-page="settings"],.set-page) .srow .row-main{flex:1}
+.cy-r3 :is([data-page="settings"],.set-page) .srow .end{flex:none;display:inline-flex;align-items:center;gap:8px;font-size:12px;line-height:16px;color:var(--ink-2);text-align:right}
+.cy-r3 :is([data-page="settings"],.set-page) .cfoot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 4px 2px;padding:10px 8px 4px;border-top:1px solid var(--hair);font-size:13px;color:var(--ink-2)}
+.cy-r3 [data-page="settings"] .bill{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:8px 12px 10px}
+.cy-r3 [data-page="settings"] .bill-l{font-size:14px;line-height:21px;color:var(--ink)}
+.cy-r3 [data-page="settings"] .bill-l .mono{font-size:13px}
+.cy-r3 [data-page="settings"] .sub-h{padding:10px 12px 2px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 [data-page="settings"] .gl-sec .pl{align-self:flex-start;margin-top:6px}
+
+/* alerts matrix (011): toggles. On: the ink object (count pill) with its knob; off: a field-edged outline */
+.cy-r3 .set-page .mx{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;line-height:18px}
+.cy-r3 .set-page .mx thead th{height:40px;padding:4px 10px;background:var(--band);font-size:12px;line-height:16px;font-weight:500;color:var(--ink-nav);text-align:center;vertical-align:middle}
+.cy-r3 .set-page .mx thead th small{display:block;font-size:12px;font-weight:400;color:var(--ink-2)}
+.cy-r3 .set-page .mx thead th:first-child{text-align:left;border-radius:10px 0 0 10px}
+.cy-r3 .set-page .mx thead th:last-child{border-radius:0 10px 10px 0}
+.cy-r3 .set-page .mx tbody th{padding:6px 10px;text-align:left;font-weight:400;color:var(--ink)}
+.cy-r3 .set-page .mx tbody td{text-align:center}
+.cy-r3 .set-page .mx tbody tr+tr>*{border-top:1px solid var(--hair)}
+.cy-r3 .set-page .tg{position:relative;display:inline-flex;align-items:center;justify-content:center;width:48px;height:40px;cursor:pointer;vertical-align:middle}
+.cy-r3 .set-page .tg input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
+.cy-r3 .set-page .tg-t{position:relative;width:34px;height:20px;border-radius:var(--r-pill);border:1px solid var(--field);background:transparent;transition:background .2s var(--ease),border-color .2s var(--ease)}
+.cy-r3 .set-page .tg-t::after{content:"";position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:50%;background:var(--field);transition:transform .2s var(--ease),background .2s var(--ease)}
+.cy-r3 .set-page .tg:hover .tg-t{border-color:var(--ink-2)}
+.cy-r3 .set-page .tg input:checked+.tg-t,.cy-r3 .set-page .tg[aria-pressed="true"] .tg-t{background:var(--count-bg);border-color:var(--count-bg)}
+.cy-r3 .set-page .tg input:checked+.tg-t::after,.cy-r3 .set-page .tg[aria-pressed="true"] .tg-t::after{transform:translateX(14px);background:var(--count-ink)}
+.cy-r3 .set-page .tg input:focus-visible+.tg-t{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+
+/* theme cards (151's option-card cues, 146's nested wells). The previews depict a theme, so they must not follow it:
+   they read the constant swatch tokens (--sw-l-* and --sw-d-*) directly. */
+.cy-r3 .set-page .ap{display:flex;flex-direction:column;gap:18px;padding:10px 12px 12px}
+.cy-r3 .set-page .ap-l,.cy-r3 .set-page .thm legend{margin-bottom:10px;font-size:13px;line-height:18px;font-weight:500;color:var(--ink)}
+.cy-r3 .set-page .thm-g{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.cy-r3 .set-page .thm-w{position:relative}
+.cy-r3 .set-page .thm-c{display:flex;flex-direction:column;gap:10px;height:100%;padding:8px 8px 12px;border-radius:16px;background:var(--well);border:1px solid var(--edge);cursor:pointer;transition:border-color .18s var(--ease),background .18s var(--ease)}
+.cy-r3 .set-page .thm-c:hover{border-color:var(--btn-line-hover)}
+.cy-r3 .set-page .opt-in:checked+.thm-c{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.cy-r3 .set-page .opt-in:focus-visible+.thm-c{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+.cy-r3 .set-page .thm-row{display:flex;align-items:center;gap:10px;padding:0 4px}
+.cy-r3 .set-page .thm-n{display:flex;flex-direction:column;flex:1;min-width:0;font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 .set-page .thm-n small{font-size:12px;line-height:16px;font-weight:400;color:var(--ink-2)}
+.cy-r3 .set-page .thm-c .radio{border-color:var(--field)}
+.cy-r3 .set-page .opt-in:checked+.thm-c .radio{border-color:var(--accent)}
+.cy-r3 .set-page .opt-in:checked+.thm-c .radio::after{content:"";width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.cy-r3 .set-page .pv{position:relative;display:block;height:96px;border-radius:11px;overflow:hidden;box-shadow:inset 0 0 0 1px var(--line)}
+.cy-r3 .set-page .pv>span{position:absolute;inset:0;display:block}
+.cy-r3 .set-page .pv .pg{background:var(--sw-pg)}
+.cy-r3 .set-page .pv .cd{position:absolute;left:12px;top:14px;width:52%;height:56px;border-radius:8px;background:var(--sw-cd);box-shadow:inset 0 0 0 1px var(--sw-ln)}
+.cy-r3 .set-page .pv .cd::before{content:"";position:absolute;left:10px;top:10px;width:5px;height:5px;border-radius:50%;background:var(--accent)}
+.cy-r3 .set-page .pv .ik{position:absolute;right:12px;top:26px;width:34%;height:52px;border-radius:8px;background:var(--sw-ik);box-shadow:0 8px 14px -8px var(--sw-sh)}
+.cy-r3 .set-page .pv .lt{--sw-pg:var(--sw-l-page);--sw-cd:var(--sw-l-card);--sw-ik:var(--sw-l-ink);--sw-ln:var(--sw-l-line);--sw-sh:var(--sw-l-ink)}
+.cy-r3 .set-page .pv .dk{--sw-pg:var(--sw-d-page);--sw-cd:var(--sw-d-card);--sw-ik:var(--sw-d-paper);--sw-ln:var(--sw-d-line);--sw-sh:var(--sw-d-page)}
+.cy-r3 .set-page .pv .dk.half{clip-path:polygon(100% 0,100% 100%,0 100%)}
+.cy-r3 .set-page .pv .lt:has(+.half){clip-path:polygon(0 0,100% 0,100% 6%,6% 100%,0 100%)}  /* no light fringe under the dark half (v5 round C) */
+.cy-r3 .set-page .ap-d{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.cy-r3 .set-page .ap-d .ap-l{margin:0}
+/* the Detail switch keeps the shell's Simple/Advanced buttons (app.js applyUIMode marks data-active) */
+.cy-r3 .set-page .seg button{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 16px;border-radius:var(--r-pill);border:1px solid transparent;font-size:13px;font-weight:500;color:var(--ink-nav);transition:background .18s var(--ease),color .18s var(--ease)}
+.cy-r3 .set-page .seg button:hover{color:var(--ink);background:var(--page-hover)}
+.cy-r3 .set-page .seg button[data-active="true"]{background:var(--lift);color:var(--ink-hi);border-color:var(--lift-line);box-shadow:var(--sh-raise)}
+.cy-r3 .set-page .seg button[data-active="true"]::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.cy-r3 .set-page .help{font-size:13px;line-height:18px;color:var(--ink-2)}
+
+/* ================================================================
+   3. 1024
+   ================================================================ */
+@media (max-width:1180px){
+  .cy-r3 [data-page="spending"] .money-g{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 [data-page="spending"] .paper .strip .v{font-size:18px;line-height:24px;white-space:nowrap}
+  .cy-r3 [data-page="spending"] .paper .strip .v.mono{font-size:17px}
+  .cy-r3 :is([data-page="settings"],.set-page) .set{grid-template-columns:200px minmax(0,1fr)}
+}
+
+/* ================================================================
+   4. phone (390)
+   ================================================================ */
+@media (max-width:640px){
+  /* spending */
+  .cy-r3 [data-page="spending"] .paper .hero .mono{font-size:32px;line-height:38px}
+  .cy-r3 [data-page="spending"] .hero{flex-wrap:wrap;gap:2px 8px}
+  .cy-r3 [data-page="spending"] .paper .strip{margin:2px -4px 0}
+  .cy-r3 [data-page="spending"] .paper .strip .cell{padding:6px 8px 0}
+  .cy-r3 [data-page="spending"] .paper .strip .v{font-size:18px;line-height:24px}
+  .cy-r3 [data-page="spending"] .paper .strip .v.mono{font-size:17px}
+  .cy-r3 [data-page="spending"] .paper .strip .l{font-size:12px;line-height:16px}
+  .cy-r3 [data-page="spending"] .lim-l{font-size:16px;line-height:22px}
+  .cy-r3 [data-page="spending"] .cap{height:52px;padding:0 14px}
+  .cy-r3 [data-page="spending"] .cap input{font-size:24px}
+  .cy-r3 [data-page="spending"] .ink-help{font-size:12px;line-height:17px}
+  .cy-r3 [data-page="spending"] .money tbody th,.cy-r3 [data-page="spending"] .money td{height:52px;padding:0 6px}
+  .cy-r3 [data-page="spending"] .money thead th{padding:0 6px}
+  .cy-r3 [data-page="spending"] .nm{min-height:44px;gap:8px}
+  .cy-r3 [data-page="spending"] .nm.tn{flex-direction:column;align-items:flex-start;gap:0;padding:6px 0}
+  .cy-r3 [data-page="spending"] .amt{gap:8px}
+  .cy-r3 [data-page="spending"] .sh{width:36px}
+  .cy-r3 [data-page="spending"] .untied{padding:10px 6px 6px}
+
+  /* settings: the next step, then the section list; each section is its own page on phones */
+  .cy-r3 :is([data-page="settings"],.set-page) .set{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 [data-page="settings"] .set:not(.picked) .set-main{display:none}
+  .cy-r3 [data-page="settings"] .set.picked .snav{display:none}
+  .cy-r3 .set-page .snav{display:none}  /* sections are reached from Settings' own list (the top bar's gear) */
+  .cy-r3 [data-page="settings"] .snav{position:static;gap:10px;padding:4px 0 0}
+  .cy-r3 [data-page="settings"] .snav ul{padding:4px;border-radius:var(--r-card);background:var(--card);border:1px solid var(--edge);gap:0}
+  .cy-r3 [data-page="settings"] .snav a{height:52px;padding:0 10px 0 14px;border-radius:12px;font-size:14px;color:var(--ink)}
+  .cy-r3 [data-page="settings"] .snav a:hover{background:var(--hover)}
+  .cy-r3 [data-page="settings"] .snav a[aria-current]{background:transparent;border-color:transparent;box-shadow:none;font-weight:400;color:var(--ink)}
+  .cy-r3 [data-page="settings"] .snav a[aria-current]::after{display:none}
+  .cy-r3 [data-page="settings"] .snav .chv{display:block}
+  .cy-r3 [data-page="settings"] .opts.checks .opt{padding:6px 12px 6px 7px}
+  /* the coverage instrument would push "Choose alerts" under the tab bar; its words stay, as one line beside the link */
+  .cy-r3 [data-page="settings"] .cov{display:none}
+  .cy-r3 [data-page="settings"] .pf-m{display:inline;min-width:0}
+  .cy-r3 [data-page="settings"] .kv.wide{grid-template-columns:minmax(0,1fr);gap:2px 0}
+  .cy-r3 [data-page="settings"] .kv.wide dd{margin-bottom:10px}
+  .cy-r3 [data-page="settings"] .dz li{flex-wrap:wrap}
+  .cy-r3 [data-page="settings"] .dz .row-main{flex:1 1 calc(100% - 62px)}  /* the button wraps under the words */
+  .cy-r3 [data-page="settings"] .dz form{margin-left:48px}
+  .cy-r3 [data-page="settings"] .dz .pl{height:44px}
+  .cy-r3 .set-page .thm-g{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 .set-page .pv{height:80px}
+  .cy-r3 .set-page .mx thead th,.cy-r3 .set-page .mx tbody th{padding:4px 6px}
+  .cy-r3 .set-page .tg{width:44px;height:44px}
+  .cy-r3 :is([data-page="settings"],.set-page) .srow{flex-wrap:wrap;padding:10px 6px}
+  .cy-r3 :is([data-page="settings"],.set-page) .srow .end{width:100%;justify-content:flex-start;padding-left:48px;text-align:left}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .cy-r3 .set-page :is(.tg-t,.tg-t::after,.thm-c),
+  .cy-r3 :is([data-page="settings"],.set-page) .snav a,
+  .cy-r3 [data-page="settings"] .ck,
+  .cy-r3 [data-page="spending"] .cap{transition:none}
+}

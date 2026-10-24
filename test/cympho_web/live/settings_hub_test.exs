@@ -33,9 +33,10 @@ defmodule CymphoWeb.SettingsHubTest do
       assert html =~ "Profile"
       assert html =~ "Save changes"
       # grouped sub-nav from the shell
-      assert html =~ "Account"
-      assert html =~ "Workspace"
-      assert html =~ "Governance"
+      # r3: sections regrouped as Company, Connections, You and Labels (P8).
+      assert html =~ "Company"
+      assert html =~ "Connections"
+      assert html =~ ~s(<p class="sn-g" id="sn-2">You</p>)
     end
 
     test "adapters", %{conn: conn} do
@@ -57,7 +58,8 @@ defmodule CymphoWeb.SettingsHubTest do
     test "proxies", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/proxies")
       assert html =~ "Proxy Profiles"
-      assert html =~ "Proxies"
+      # r3: the nav calls it "Network proxies" (Advanced).
+      assert html =~ "Network proxies"
     end
 
     test "secrets summarizes runtime credential coverage without leaking values", %{
@@ -540,7 +542,8 @@ defmodule CymphoWeb.SettingsHubTest do
 
   describe "legacy URLs redirect into the hub" do
     test "bare /settings", %{conn: conn} do
-      assert redirected_to(get(conn, "/settings")) == "/settings/profile"
+      # r3: Settings opens on Company › Details (P8).
+      assert redirected_to(get(conn, "/settings")) == "/settings/company"
     end
 
     test "/adapters", %{conn: conn} do

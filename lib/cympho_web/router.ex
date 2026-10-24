@@ -153,6 +153,7 @@ defmodule CymphoWeb.Router do
       # session (see CymphoWeb.Components.SettingsLayout). Pre-hub paths
       # (/adapters, /execution-policies, /audit-trail, /companies/:id/secrets,
       # bare /settings) redirect in via LegacyRedirectController below.
+      live "/settings/company", SettingsLive.Company
       live "/settings/profile", SettingsLive.Profile
       live "/settings/notifications", SettingsLive.Index
       live "/settings/appearance", SettingsLive.Appearance

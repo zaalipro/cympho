@@ -3,6 +3,19 @@ defmodule CymphoWeb.SettingsLive.Index do
 
   alias Cympho.Users
   alias Cympho.Notifications
+  alias Cympho.Notifications.Dispatcher
+
+  # The five alert events of "Tell me when…" (B6), numbered 1–5 in this order
+  # wherever they are shown (the Company page's chooser and summary, this matrix).
+  @alert_events [
+    {"agent_question", "An agent asks me something"},
+    {"human_approval_required", "An approval is waiting"},
+    {"review_ready", "Work is ready for my review"},
+    {"work_stopped", "Work stopped: a run failed or an agent was paused"},
+    {"spend_threshold", "Spending reaches 80% or 100% of the limit"}
+  ]
+
+  def alert_events, do: @alert_events
 
   # `current_user` is a narrowed projection (id/name/email/theme/company_id), so
   # the full record has to be reloaded for the channel fields. `?user_id=` is
@@ -16,7 +29,7 @@ defmodule CymphoWeb.SettingsLive.Index do
       {:error, :not_found} ->
         {:ok,
          socket
-         |> assign(:page_title, "Notifications")
+         |> assign(:page_title, "Alerts")
          |> assign(:user, nil)
          |> assign(:prefs, [])
          |> assign(:user_id, nil)
@@ -35,11 +48,11 @@ defmodule CymphoWeb.SettingsLive.Index do
   end
 
   defp apply_action(socket, :index, _params) do
-    assign(socket, :page_title, "Notifications")
+    assign(socket, :page_title, "Alerts")
   end
 
   defp apply_action(socket, nil, _params) do
-    assign(socket, :page_title, "Notifications")
+    assign(socket, :page_title, "Alerts")
   end
 
   @impl true
@@ -66,8 +79,8 @@ defmodule CymphoWeb.SettingsLive.Index do
 
   def handle_event("toggle_event", %{"pref_id" => pref_id, "event" => event}, socket) do
     pref = Enum.find(socket.assigns.prefs, &(&1.id == pref_id))
-    events = Map.get(pref.config, "events", Users.default_event_config())
-    new_events = Map.put(events, event, not Map.get(events, event, true))
+    events = Map.get(pref.config || %{}, "events", Users.default_event_config())
+    new_events = Map.put(events, event, not Dispatcher.event_allowed?(pref, event))
 
     case Users.update_pref_events(pref_id, new_events) do
       {:ok, _} ->
@@ -186,7 +199,7 @@ defmodule CymphoWeb.SettingsLive.Index do
 
   defp mount_for_user(socket, user) do
     socket
-    |> assign(:page_title, "Notifications")
+    |> assign(:page_title, "Alerts")
     |> assign(:user, user)
     |> assign(:prefs, Users.ensure_default_prefs(user.id))
     |> assign(:user_id, user.id)
@@ -231,40 +244,33 @@ defmodule CymphoWeb.SettingsLive.Index do
   defp pref_config(%{config: config}) when is_map(config), do: config
   defp pref_config(_pref), do: %{}
 
-  defp event_enabled?(pref, event) do
-    events = Map.get(pref.config, "events", Users.default_event_config())
-    Map.get(events, event, true)
+  defp event_enabled?(pref, event), do: Dispatcher.event_allowed?(pref, event)
+
+  defp ordered_prefs(prefs) do
+    Enum.sort_by(prefs, fn pref ->
+      Enum.find_index(~w(email telegram webhook), &(&1 == pref.channel_type))
+    end)
   end
 
-  # A real on/off switch: the physical control plus a colored word so the
-  # channel's state is unambiguous at rest (emerald = on, quiet gray = off).
-  defp switch_track_class(true) do
-    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-success/40 bg-success/30 transition-colors"
-  end
+  attr :prefs, :list, required: true
+  attr :channel, :string, required: true
 
-  defp switch_track_class(false) do
-    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border bg-subtle transition-colors hover:bg-button-hover"
-  end
+  # A real on/off switch; the state word is for screen readers, the track shows it.
+  defp channel_switch(assigns) do
+    assigns = assign(assigns, :on?, channel_enabled?(assigns.prefs, assigns.channel))
 
-  defp switch_knob_class(true) do
-    "inline-block h-4 w-4 translate-x-[18px] rounded-full bg-success shadow-sm transition-transform"
+    ~H"""
+    <span class="sr-only">{if @on?, do: "On", else: "Off"}</span>
+    <button
+      type="button"
+      class="tg"
+      aria-label={"Toggle #{@channel} notifications"}
+      aria-pressed={to_string(@on?)}
+      phx-click="toggle_channel"
+      phx-value-channel={@channel}
+    >
+      <span class="tg-t" aria-hidden="true"></span>
+    </button>
+    """
   end
-
-  defp switch_knob_class(false) do
-    "inline-block h-4 w-4 translate-x-0.5 rounded-full bg-text-quaternary shadow-sm transition-transform"
-  end
-
-  defp event_toggle_class(true) do
-    "flex w-full items-center justify-between rounded-lg border border-success/20 bg-success/10 px-3 py-2 text-left text-xs font-510 text-success transition-colors hover:bg-success/15"
-  end
-
-  defp event_toggle_class(false) do
-    "flex w-full items-center justify-between rounded-lg border border-border bg-button px-3 py-2 text-left text-xs font-510 text-text-tertiary transition-colors hover:bg-button-hover hover:text-text-primary"
-  end
-
-  defp format_event("issue_assigned"), do: "Issue Assigned"
-  defp format_event("comment"), do: "Comment"
-  defp format_event("status_change"), do: "Status Change"
-  defp format_event("human_approval_required"), do: "Human Approval Required"
-  defp format_event(other), do: String.capitalize(String.replace(other, "_", " "))
 end

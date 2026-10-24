@@ -1,0 +1,187 @@
+<.page_frame page="settings" title="Settings" data-ui-complex-page>
+  <%!-- The Next step: the company-wide stop first, else the owner's alerts. --%>
+  <%= cond do %>
+    <% @spending.status == :over_budget -> %>
+      <NextStep.paused_step spending={@spending} />
+    <% alerts_chosen?(@prefs) -> %>
+      <.next_step>
+        <:problem>
+          <.problem_card title="Everything is set up">
+            <:eyebrow>All clear</:eyebrow>
+            <.coverage channels={channels(@prefs)} />
+          </.problem_card>
+        </:problem>
+      </.next_step>
+    <% true -> %>
+      <.next_step>
+        <:problem>
+          <.problem_card title="Choose your alerts">
+            <:eyebrow>Next step<span aria-hidden="true"> · </span>Setup</:eyebrow>
+            <p class="obj">{alerts_sentence(@prefs)}</p>
+            <.coverage channels={channels(@prefs)} />
+          </.problem_card>
+        </:problem>
+        <:resolution>
+          <.ink_card :if={@company_writable} form="Choose your alerts" phx-submit="choose_alerts">
+            <fieldset class="opts checks">
+              <legend>Tell me when…</legend>
+              <div
+                :for={{{key, label}, n} <- Enum.with_index(SettingsLive.Index.alert_events(), 1)}
+                class="opt-w"
+              >
+                <input
+                  class="opt-in"
+                  type="checkbox"
+                  id={"al-#{n}"}
+                  name="events[]"
+                  value={key}
+                  checked={Enum.at(channel(@prefs, "email").dots, n - 1)}
+                />
+                <label class="opt" for={"al-#{n}"}>
+                  <span class="on" aria-hidden="true">{n}</span><span class="ot">{label}</span><span
+                    class="ck"
+                    aria-hidden="true"
+                  ><.r3_icon name="i-check" class="ico s14" /></span>
+                </label>
+              </div>
+            </fieldset>
+            <.ink_note>
+              After you choose: Cympho emails {@user.email} once per item you picked.
+            </.ink_note>
+            <.ink_foot verb="choose">
+              <:primary>
+                <.primary_pill type="submit">Choose alerts</.primary_pill>
+              </:primary>
+            </.ink_foot>
+          </.ink_card>
+          <.ink_card :if={!@company_writable} heading="Choose them on Alerts">
+            <.ink_note>Your alerts are yours: you choose them on the Alerts page.</.ink_note>
+            <.ink_foot verb="open">
+              <:primary>
+                <.primary_pill navigate="/settings/notifications">Open Alerts</.primary_pill>
+              </:primary>
+            </.ink_foot>
+          </.ink_card>
+        </:resolution>
+      </.next_step>
+  <% end %>
+
+  <%!-- Phones: the section list, or the section a list row opened (?section=). --%>
+  <div class={["set", @picked? && "picked"]}>
+    <.settings_nav active={@section} />
+    <div class="set-main">
+      <%= case @section do %>
+        <% :details -> %>
+          <.band_card id="cd-t" title="Company details">
+            <:header_end>
+              <.pill :if={@board_member?} href={"/companies/#{@company.id}/edit"}>
+                Edit details
+              </.pill>
+            </:header_end>
+            <.kv_list class="wide">
+              <:item term="Name">{@company.name}</:item>
+              <:item term="Task ID prefix">
+                <span class="mono">{@company.issue_prefix}</span>
+              </:item>
+              <:item term="Goal">{(@goal && @goal.title) || "No goal yet"}</:item>
+              <:item term="Created">
+                {Calendar.strftime(@company.inserted_at, "%a %-d %b")}
+                <span class="mono">{Calendar.strftime(@company.inserted_at, "%H:%M")}</span>
+              </:item>
+            </.kv_list>
+          </.band_card>
+
+          <.band_card id="po-t" title="Power">
+            <:header_end>
+              <span class="pw-st">
+                <span class="pw-dot" data-power={power_key(@company)} aria-hidden="true"></span>{power_word(
+                  @company
+                )}
+              </span>
+            </:header_end>
+            <ul class="dz">
+              <li :for={row <- power_rows(@company)}>
+                <span class={["kt", row.tone == "stop" && "p"]}>
+                  <.r3_icon name={row.icon} />
+                </span>
+                <span class="row-main">
+                  <span class="rt">{row.title}</span><span class="rm">{row.detail}</span>
+                </span>
+                <form :if={@runtime_controls_allowed} method="post" action={row.action}>
+                  <input
+                    type="hidden"
+                    name="_csrf_token"
+                    value={Plug.CSRFProtection.get_csrf_token()}
+                  />
+                  <input type="hidden" name="return_to" value="/settings/company" />
+                  <button type="submit" class={["pl", row.tone]} data-confirm={row.confirm}>
+                    {row.button}
+                  </button>
+                </form>
+              </li>
+            </ul>
+            <p :if={!@runtime_controls_allowed} class="cfoot">
+              <span>Owners, admins and board members change this.</span>
+            </p>
+          </.band_card>
+        <% :members -> %>
+          <.band_card id="me-t" title="Members">
+            <:header_end>
+              <.pill href={"/companies/#{@company.id}"}>Invite someone</.pill>
+            </:header_end>
+            <ul class="srows">
+              <li :for={m <- @members} class="srow">
+                <span class="av" aria-hidden="true">{initials(m.user && m.user.name)}</span>
+                <span class="row-main">
+                  <span class="rt">{(m.user && m.user.name) || "A former member"}</span>
+                  <span class="rm">
+                    {role_word(m.role)}<span :if={m.user}><span aria-hidden="true"> · </span>{m.user.email}</span>
+                  </span>
+                </span>
+                <span :if={m.is_board_member} class="end">
+                  <span class="ui-advanced-only adv">Adv</span>Board member
+                </span>
+              </li>
+            </ul>
+            <p class="cfoot">
+              <span :if={@pending_invites == []}>No pending invites.</span>
+              <span :if={@pending_invites != []}>
+                {length(@pending_invites)} pending {if length(@pending_invites) == 1,
+                  do: "invite",
+                  else: "invites"}
+              </span>
+            </p>
+          </.band_card>
+        <% :billing -> %>
+          <.band_card id="bi-t" title="Billing">
+            <p class="sub-h">Spending limit</p>
+            <div class="bill">
+              <p :if={@spending.limit} class="bill-l">
+                <span class="mono">{money(@spending.limit)}</span>
+                per {window(@spending.days)}<span aria-hidden="true"> · </span>warns at {@spending.warn_percent}%<span aria-hidden="true"> · </span>{if @stops_at_limit?,
+                  do: "agents stop at the limit",
+                  else: "Cympho warns at the limit"}
+              </p>
+              <p :if={!@spending.limit} class="bill-l">No spending limit is set.</p>
+              <.text_link navigate="/costs">Change it on Spending</.text_link>
+            </div>
+            <p class="sub-h">Prices</p>
+            <ul class="srows">
+              <li :for={row <- @price_rows} class="srow">
+                <span class="kt"><.r3_icon name="i-term" /></span>
+                <span class="row-main">
+                  <span class="rt">{row.runtime}</span>
+                  <span class="rm">
+                    {row.price}<span aria-hidden="true"> · </span>{row.names}
+                  </span>
+                </span>
+              </li>
+            </ul>
+            <p :if={@stops_at_limit?} class="cfoot">
+              <span>A runtime without prices can't run while a spending limit is on.</span>
+            </p>
+          </.band_card>
+      <% end %>
+    </div>
+  </div>
+</.page_frame>

@@ -34,7 +34,8 @@ defmodule CymphoWeb.SettingsLiveTest do
 
       {:ok, _view, html} = live(conn, "/settings/notifications?user_id=#{other.id}")
 
-      assert html =~ "Notifications"
+      # r3: "Notifications" is called Alerts (glossary).
+      assert html =~ "Alerts"
       assert html =~ user.email
       refute html =~ other.email
       refute html =~ "Choose a user"
@@ -44,7 +45,8 @@ defmodule CymphoWeb.SettingsLiveTest do
     test "unknown user_id still shows the signed-in user's settings", %{conn: conn, user: user} do
       {:ok, _view, html} = live(conn, "/settings/notifications?user_id=fake-id")
 
-      assert html =~ "Notifications"
+      # r3: "Notifications" is called Alerts (glossary).
+      assert html =~ "Alerts"
       assert html =~ user.email
       refute html =~ "Choose a user"
       refute html =~ "No users found"
@@ -53,7 +55,8 @@ defmodule CymphoWeb.SettingsLiveTest do
     test "without a user_id it shows the signed-in user's own settings", %{conn: conn, user: user} do
       {:ok, _view, html} = live(conn, "/settings/notifications")
 
-      assert html =~ "Notifications"
+      # r3: "Notifications" is called Alerts (glossary).
+      assert html =~ "Alerts"
       assert html =~ "Channels"
       assert html =~ user.email
       refute html =~ "Choose a user"
@@ -65,7 +68,8 @@ defmodule CymphoWeb.SettingsLiveTest do
     test "renders settings page with user", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/notifications")
 
-      assert html =~ "Notifications"
+      # r3: "Notifications" is called Alerts (glossary).
+      assert html =~ "Alerts"
       assert html =~ "Email"
       assert html =~ "Telegram"
       assert html =~ "Webhook"
@@ -85,12 +89,14 @@ defmodule CymphoWeb.SettingsLiveTest do
       assert has_element?(view, "#channel-email span.sr-only", "On")
     end
 
-    test "shows event notification section", %{conn: conn, user: user} do
+    test "shows the five alert events", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
       {:ok, _view, html} = live(conn, "/settings/notifications")
 
-      assert html =~ "Event Notifications"
-      assert html =~ "Human Approval Required"
+      # r3: one events × channels matrix replaces the per-channel event cards (B6: five events).
+      assert html =~ "Tell me when…"
+      assert html =~ "An approval is waiting"
+      assert html =~ "Spending reaches 80% or 100% of the limit"
     end
   end
 
@@ -240,26 +246,41 @@ defmodule CymphoWeb.SettingsLiveTest do
 
   describe "Event type toggles" do
     test "shows event toggles for each channel", %{conn: conn, user: user} do
-      Users.ensure_default_prefs(user.id)
+      prefs = Users.ensure_default_prefs(user.id)
 
-      {:ok, _view, html} = live(conn, "/settings/notifications")
+      {:ok, view, _html} = live(conn, "/settings/notifications")
 
-      assert html =~ "events-email"
-      assert html =~ "events-telegram"
-      assert html =~ "events-webhook"
+      # r3: five events × three channels in one matrix.
+      doc = view |> render() |> Floki.parse_fragment!()
+
+      for pref <- prefs do
+        assert length(
+                 Floki.find(
+                   doc,
+                   "input[phx-click='toggle_event'][phx-value-pref_id='#{pref.id}']"
+                 )
+               ) ==
+                 5
+      end
     end
 
     test "toggle event type for a channel", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)
+      email = Repo.get_by!(NotificationPreference, user_id: user.id, channel_type: "email")
 
       {:ok, view, _html} = live(conn, "/settings/notifications")
 
-      result =
-        view
-        |> element("#events-email button[phx-click='toggle_event']", "Human Approval Required")
-        |> render_click()
+      selector =
+        "input[phx-click='toggle_event'][phx-value-pref_id='#{email.id}'][phx-value-event='human_approval_required']"
 
-      assert result =~ "On" or result =~ "Off" or result =~ "event"
+      assert has_element?(view, selector <> "[checked]")
+      view |> element(selector) |> render_click()
+
+      refute has_element?(view, selector <> "[checked]")
+      email = Repo.get!(NotificationPreference, email.id)
+      assert email.config["events"]["human_approval_required"] == false
+      # an opt-in event keeps its default (off) when another event is toggled
+      assert email.config["events"]["agent_question"] == false
     end
 
     test "a channel has exactly one enable switch", %{conn: conn, user: user} do
@@ -276,7 +297,13 @@ defmodule CymphoWeb.SettingsLiveTest do
       |> element("#channel-email button[phx-click='toggle_channel']")
       |> render_click()
 
-      assert has_element?(view, "#events-email", "Channel off")
+      # r3: the matrix header shows each channel's state.
+      assert view
+             |> render()
+             |> Floki.parse_fragment!()
+             |> Floki.find(".mx thead th small")
+             |> hd()
+             |> Floki.text() == "off"
     end
   end
 

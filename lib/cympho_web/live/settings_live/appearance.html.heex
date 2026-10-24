@@ -1,70 +1,75 @@
 <.settings_layout active={:appearance}>
-  <.header title="Appearance">
-    <p class="mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Choose how Cympho looks on this account. System follows this device.
-    </p>
-  </.header>
+  <.header title="Appearance" />
 
-  <form phx-change="set_theme" class="mb-10" aria-label="Mode">
-    <fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      <legend class="sr-only">Mode</legend>
-      <label
-        :for={theme <- @themes}
-        for={"theme-#{theme.id}"}
-        class={[
-          "flex cursor-pointer items-start gap-3 rounded-2xl border bg-surface-1 p-4 transition-colors",
-          if(theme.id == @current_theme,
-            do: "border-brand ring-2 ring-brand/40",
-            else: "border-hairline hover:border-hairline-strong"
-          )
-        ]}
-      >
-        <input
-          type="radio"
-          id={"theme-#{theme.id}"}
-          name="theme"
-          value={theme.id}
-          checked={theme.id == @current_theme}
-          class="mt-0.5 h-4 w-4 accent-[var(--accent)]"
-        />
-        <span class="min-w-0">
-          <span class="block text-sm font-510 text-text-primary">{theme.name}</span>
-          <span class="block text-caption text-text-tertiary">{theme.blurb}</span>
-        </span>
-      </label>
-    </fieldset>
-  </form>
+  <section class="card" aria-label="Appearance">
+    <div class="ap">
+      <form phx-change="set_theme" aria-label="Colour">
+        <fieldset class="thm">
+          <legend>Colour</legend>
+          <div class="thm-g">
+            <div :for={theme <- @themes} class="thm-w">
+              <input
+                class="opt-in"
+                type="radio"
+                id={"theme-#{theme.id}"}
+                name="theme"
+                value={theme.id}
+                checked={theme.id == @current_theme}
+              />
+              <label class="thm-c" for={"theme-#{theme.id}"}>
+                <span class="pv" aria-hidden="true">
+                  <span :if={theme.id != "dark"} class="lt pg">
+                    <span class="cd"></span><span class="ik"></span>
+                  </span>
+                  <span
+                    :if={theme.id != "light"}
+                    class={["dk pg", theme.id == "system" && "half"]}
+                  >
+                    <span class="cd"></span><span class="ik"></span>
+                  </span>
+                </span>
+                <span class="thm-row">
+                  <span class="thm-n">{theme.name}<small>{theme.blurb}</small></span>
+                  <span class="radio" aria-hidden="true"></span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </fieldset>
+      </form>
 
-  <section aria-labelledby="appearance-ui-mode">
-    <h2 id="appearance-ui-mode" class="mb-2 text-sm font-510 text-text-primary">View</h2>
-    <div
-      data-ui-mode-switch
-      data-appearance-ui-mode
-      role="group"
-      aria-label="Interface mode"
-      aria-describedby="interface-mode-help"
-      class="inline-grid grid-cols-2 gap-1 rounded-full border border-hairline bg-surface-3 p-1"
-    >
-      <button
-        type="button"
-        data-ui-mode-option="simple"
-        data-active="true"
-        aria-pressed="true"
-        aria-controls="main-content"
-        class="ui-mode-option h-9 rounded-full px-4 text-[13px] font-510"
-      >
-        Simple
-      </button>
-      <button
-        type="button"
-        data-ui-mode-option="advanced"
-        data-active="false"
-        aria-pressed="false"
-        aria-controls="main-content"
-        class="ui-mode-option h-9 rounded-full px-4 text-[13px] font-510"
-      >
-        Advanced
-      </button>
+      <div class="ap-d">
+        <p class="ap-l" id="appearance-ui-mode">Detail</p>
+        <%!-- The shell's Simple/Advanced switch (app.js applyUIMode keeps data-active and aria-pressed). --%>
+        <div
+          class="seg"
+          data-ui-mode-switch
+          data-appearance-ui-mode
+          role="group"
+          aria-labelledby="appearance-ui-mode"
+          aria-describedby="appearance-detail-help"
+        >
+          <button
+            type="button"
+            data-ui-mode-option="simple"
+            data-active="true"
+            aria-pressed="true"
+            aria-controls="main-content"
+          >
+            Simple
+          </button>
+          <button
+            type="button"
+            data-ui-mode-option="advanced"
+            data-active="false"
+            aria-pressed="false"
+            aria-controls="main-content"
+          >
+            Advanced
+          </button>
+        </div>
+        <p class="help" id="appearance-detail-help">Advanced adds technical pages and details.</p>
+      </div>
     </div>
   </section>
 </.settings_layout>

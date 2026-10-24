@@ -6,6 +6,8 @@ defmodule CymphoWeb.Components.SettingsLayoutTest do
 
   alias CymphoWeb.Components.SettingsLayout
 
+  # r3 (P8): the section nav is regrouped as Company · Connections · You · Labels;
+  # one nav for both modes, Advanced-only sections carry ui-advanced-only.
   defp render_settings(active) do
     assigns = %{active: active}
 
@@ -16,49 +18,63 @@ defmodule CymphoWeb.Components.SettingsLayoutTest do
     """)
   end
 
-  test "renders the three groups, the content slot, and every tab link" do
+  test "renders the groups, the content slot, and every section link" do
     html = render_settings(:appearance)
+    doc = Floki.parse_fragment!(html)
 
-    for group <- ~w(Account Workspace Governance), do: assert(html =~ group)
-    assert html =~ "Technical settings"
+    assert doc |> Floki.find(".sn-g") |> Enum.map(&Floki.text/1) == [
+             "Company",
+             "Connections",
+             "You"
+           ]
+
     assert html =~ "CONTENT-MARKER"
 
     for {label, path} <- [
+          {"Details", "/settings/company?section=details"},
+          {"Members", "/settings/company?section=members"},
+          {"Billing", "/settings/company?section=billing"},
+          {"Review steps", "/settings/policies"},
+          {"Audit log", "/settings/audit"},
+          {"How agents run", "/settings/adapters"},
+          {"Integrations", "/settings/integrations"},
+          {"Keys and secrets", "/settings/secrets"},
+          {"Network proxies", "/settings/proxies"},
+          {"Plugins", "/plugins"},
           {"Profile", "/settings/profile"},
           {"Appearance", "/settings/appearance"},
-          {"Notifications", "/settings/notifications"},
-          {"Integrations", "/settings/integrations"},
-          {"Adapters", "/settings/adapters"},
-          {"Secrets", "/settings/secrets"},
-          {"Execution policies", "/settings/policies"},
-          {"Audit log", "/settings/audit"}
+          {"Alerts", "/settings/notifications"},
+          {"Labels", "/labels"}
         ] do
       assert html =~ label
       assert html =~ ~s(href="#{path}")
     end
+
+    advanced =
+      doc |> Floki.find("li.ui-advanced-only a") |> Enum.map(&String.trim(Floki.text(&1)))
+
+    assert advanced == ["Network proxies", "Plugins"]
   end
 
-  test "marks the active tab in both mode-specific navigation variants" do
+  test "marks exactly the active section" do
     html = render_settings(:appearance)
 
-    assert length(String.split(html, ~s(aria-current="page"))) - 1 == 2
-
-    # …and it is the Appearance tab (href precedes the rest attrs on the anchor).
+    assert length(String.split(html, ~s(aria-current="page"))) - 1 == 1
     assert html =~ ~r|<a[^>]*href="/settings/appearance"[^>]*aria-current="page"|
   end
 
   test "active follows the passed key" do
     html = render_settings(:audit)
 
-    assert length(String.split(html, ~s(aria-current="page"))) - 1 == 2
+    assert length(String.split(html, ~s(aria-current="page"))) - 1 == 1
     assert html =~ ~r|<a[^>]*href="/settings/audit"[^>]*aria-current="page"|
     refute html =~ ~r|<a[^>]*href="/settings/appearance"[^>]*aria-current="page"|
   end
 
-  test "mode-specific settings navigation keeps a visible keyboard focus state" do
-    html = render_settings(:profile)
+  test "the section nav is labelled and sits in the settings frame" do
+    doc = Floki.parse_fragment!(render_settings(:profile))
 
-    assert html =~ "focus-visible:ring-2"
-    assert html =~ "focus-visible:ring-brand/40"
+    assert doc |> Floki.find("nav.snav") |> Floki.attribute("aria-label") == ["Settings sections"]
+    assert Floki.find(doc, ".lframe.set-page[data-ui-complex-page] .set .set-main") != []
   end
 end

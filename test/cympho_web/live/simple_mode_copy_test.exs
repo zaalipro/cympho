@@ -39,10 +39,10 @@ defmodule CymphoWeb.SimpleModeCopyTest do
 
       {:ok, _view, html} = live(conn, "/costs")
 
-      # Cost command summary.
-      assert html =~ "No spend has landed yet, but a budget cap makes launch decisions safer"
-      assert html =~ "No spending limit is set yet."
-      # Breakdown empty state.
+      # r3: the limit block's Next step replaces the cost command summary.
+      assert html =~ "Set a spending limit"
+      assert html =~ "Nothing stops agents from spending more."
+      # Breakdown empty state: the plain line in Simple, the operator one in Advanced.
       assert html =~ "Set a spending limit before launching more runtime"
       assert html =~ "Costs appear here once agents start running."
     end
