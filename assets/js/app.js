@@ -501,9 +501,9 @@ function handleKeydown(e) {
   const target = e.target;
   const isInput = shortcutTargetIsTextInput(target);
 
-  // Escape always closes modals (and the rail's open menus)
+  // Escape always closes modals (and the open <details> menus)
   if (e.key === 'Escape') {
-    document.querySelectorAll('.rail details[open]').forEach((open) => open.removeAttribute('open'));
+    document.querySelectorAll(DETAILS_MENUS).forEach((open) => open.removeAttribute('open'));
     const palette = document.getElementById('command-palette');
     const shortcuts = document.getElementById('shortcuts-modal');
     const quickCreate = document.getElementById('quick-create-modal');
@@ -1254,6 +1254,13 @@ document.addEventListener('click', (e) => {
   openCommandPalette();
 });
 
+// The <details> menus a LiveView renders ignore `open` on patch, so a live
+// update leaves them open; picking one of their items closes them instead.
+const LIVE_MENUS = 'details.cympho-menu, details.bc-mv, details.ob-acct';
+// With the rail's company switch and account menus (root layout), these close
+// on an outside click and on Escape.
+const DETAILS_MENUS = `.rail details, ${LIVE_MENUS}`;
+
 // Company rail controls. These used inline onclick handlers, which the
 // Content-Security-Policy (script-src with a nonce) now blocks.
 document.addEventListener('click', (e) => {
@@ -1261,12 +1268,11 @@ document.addEventListener('click', (e) => {
     window.openCompanySwitcher();
   }
 
-  const menuClose = e.target.closest('[data-runtime-menu-close]');
+  const menuClose = e.target.closest(`[data-runtime-menu-close], :is(${LIVE_MENUS}) :is(a, button)`);
   const menu = menuClose && menuClose.closest('details');
   if (menu) menu.removeAttribute('open');
 
-  // The rail's company switch and account menus are <details>: an outside click closes them.
-  document.querySelectorAll('.rail details[open]').forEach((open) => {
+  document.querySelectorAll(DETAILS_MENUS).forEach((open) => {
     if (!open.contains(e.target)) open.removeAttribute('open');
   });
 });
