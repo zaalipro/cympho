@@ -588,7 +588,9 @@ defmodule CymphoWeb.AgentLive.Show do
   # ── Top action bar ────────────────────────────────────────────────────
 
   def handle_event("pause_agent", _params, socket) do
-    case Agents.pause_agent(socket.assigns.agent) do
+    case Agents.pause_agent(socket.assigns.agent, "Agent paused",
+           paused_by_user_id: current_user_id(socket)
+         ) do
       {:ok, agent} ->
         {:noreply,
          socket

@@ -2942,6 +2942,22 @@ defmodule CymphoWeb.AgentLiveTest do
       assert Repo.get!(Agent, nw.agents["Mira"].id).status == :paused
     end
 
+    test "a pause made here is the owner's: no Resume problem for them", %{conn: conn, nw: nw} do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents")
+
+      render_click(view, "pause_agent", %{"id" => ada.id})
+
+      paused = Repo.get!(Agent, ada.id)
+      assert paused.status == :paused
+      assert paused.paused_by_user_id == nw.user.id
+
+      refute Enum.any?(
+               OwnerAttention.list_items(nw.company.id, nw.user),
+               &(&1.kind == :agent_paused and &1.agent_id == ada.id)
+             )
+    end
+
     test "the board follows agent events live", %{conn: conn, nw: nw} do
       {:ok, view, _html} = live(conn, "/agents")
 
@@ -3070,6 +3086,26 @@ defmodule CymphoWeb.AgentLiveTest do
         {:ok, view, _html} = live(conn, path <> "?from=" <> URI.encode_www_form(from))
         assert Floki.find(r3_doc(view), ".ctx .ret") == []
       end
+    end
+
+    test "Pause here is the owner's: it reads Paused and is no Inbox problem", %{
+      conn: conn,
+      nw: nw
+    } do
+      ada = nw.agents["Ada"]
+      before = OwnerAttention.counts(nw.company.id, nw.user)
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}")
+
+      render_click(view, "pause_agent", %{})
+
+      paused = Repo.get!(Agent, ada.id)
+      assert paused.status == :paused
+      assert paused.paused_by_user_id == nw.user.id
+      assert r3_text(r3_doc(view), ".agent-h .sp") =~ ~r/^Paused · \d\d:\d\d$/
+
+      after_pause = OwnerAttention.counts(nw.company.id, nw.user)
+      assert after_pause.total == before.total
+      refute Map.has_key?(after_pause.by_agent, ada.id)
     end
 
     test "the Next step resumes Mira, with the reason as Cympho stored it", %{
