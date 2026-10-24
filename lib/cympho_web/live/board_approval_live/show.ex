@@ -98,7 +98,8 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
       approval: approval,
       governance_risk: GovernanceRisk.approval_brief(approval),
       page_title: approval.title,
-      board_member?: board_member?
+      board_member?: board_member?,
+      voted?: is_binary(user_id) and Enum.any?(approval.votes, &(&1.user_id == user_id))
     )
   end
 

@@ -143,7 +143,7 @@
       <% end %>
     </div>
 
-    <%= if @approval.status == "pending" && @board_member? do %>
+    <%= if @approval.status == "pending" && @board_member? && !@voted? do %>
       <form
         id="vote"
         phx-submit="cast_vote"

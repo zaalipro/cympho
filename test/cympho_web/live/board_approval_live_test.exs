@@ -254,6 +254,39 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
            )
   end
 
+  # Review r1 (Argon IMP-1): a member votes once (unique per approval and user),
+  # so after voting on a still-pending approval the form is a dead end.
+  test "a board member who already voted gets no vote form while it is pending", %{
+    conn: conn,
+    current_company: company
+  } do
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    membership = Companies.get_membership(user_id, company.id)
+    {:ok, _membership} = Companies.update_board_membership(membership, %{is_board_member: true})
+    _second = create_board_user(company, "second")
+    _third = create_board_user(company, "third")
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a QA engineer",
+        description: "Owns the test suite.",
+        category: "agent_hire",
+        company_id: company.id
+      })
+
+    {:ok, view, _html} = live(conn, "/board-approvals/#{approval.id}")
+    assert has_element?(view, "form#vote")
+
+    view |> form("#vote") |> render_submit(%{"vote" => "abstain"})
+
+    assert render(view) =~ "PENDING"
+    refute has_element?(view, "form#vote")
+
+    {:ok, _view, html} = live(conn, "/board-approvals/#{approval.id}")
+    assert html =~ "PENDING"
+    refute html =~ ~s(id="vote")
+  end
+
   defp crumb_parent(html) do
     html
     |> Floki.parse_document!()
