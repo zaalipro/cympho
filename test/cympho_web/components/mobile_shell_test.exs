@@ -3,6 +3,7 @@ defmodule CymphoWeb.MobileShellTest do
 
   @root_layout "lib/cympho_web/controllers/layouts/root.html.heex"
   @app_css "assets/css/app.css"
+  @r3_css "assets/css/r3.css"
   @kanban_board "lib/cympho_web/live/kanban_live/index.html.heex"
   @issue_new "lib/cympho_web/live/issue_live/new.html.heex"
   @agent_new "lib/cympho_web/live/agent_live/new.html.heex"
@@ -16,56 +17,66 @@ defmodule CymphoWeb.MobileShellTest do
     refute layout =~ ~s(class="h-screen)
   end
 
+  # r3: one Main nav serves the rail and the phone tab bar (n2), so the safe
+  # area moved from the old #mobile-nav markup into the tab bar's CSS offset.
   test "mobile content, navigation, dialogs, and toasts account for safe areas" do
     layout = File.read!(@root_layout)
     css = File.read!(@app_css)
+    r3 = File.read!(@r3_css)
 
     assert layout =~ "mobile-shell-content"
-    assert layout =~ "safe-area-bottom"
     assert layout =~ "safe-area-dialog"
     assert layout =~ "safe-area-toast"
-    assert layout =~ ~s(id="mobile-nav")
-    assert layout =~ "h-14"
+    refute layout =~ ~s(id="mobile-nav")
+    assert r3 =~ "bottom:calc(8px + env(safe-area-inset-bottom, 0px))"
 
     for inset <- ["top", "right", "bottom", "left"] do
       assert css =~ "safe-area-inset-#{inset}"
     end
 
-    assert css =~ "--mobile-header-height: 4rem"
-    assert css =~ "--mobile-nav-height: 3.5rem"
+    assert css =~ "--mobile-header-height: 60px"
+    # The tab bar's top edge (measured at 390x844: 770 = 844 - 74).
+    assert css =~ "--mobile-nav-height: 74px"
     assert css =~ "--mobile-nav-offset: calc("
     assert css =~ "--mobile-shell-bottom: calc(4rem + env(safe-area-inset-bottom, 0px))"
     assert css =~ "padding-bottom: var(--mobile-shell-bottom)"
     assert css =~ "scroll-padding-bottom: var(--mobile-shell-bottom)"
   end
 
+  # r3: the phone tab bar is the Main nav itself; Tasks owns list and board.
   test "mobile navigation uses one Tasks destination for list and board" do
     layout = File.read!(@root_layout)
 
-    assert layout =~ ~s(href="/issues")
-    assert layout =~ ~s(data-mobile-nav-path="/issues")
-    assert layout =~ ~s(data-nav-matches="/kanban")
-    assert layout =~ ">Tasks</span>"
-    refute layout =~ ~s(data-mobile-nav-path="/kanban")
+    assert length(String.split(layout, "<.nav_rail")) == 2
+
+    [tasks] = Enum.filter(CymphoWeb.Components.NavRail.destinations(), &(&1.label == "Tasks"))
+    assert tasks.to == "/issues"
+    assert "/kanban" in tasks.roots
+    refute Enum.any?(CymphoWeb.Components.NavRail.destinations(), &(&1.to == "/kanban"))
   end
 
-  test "board height uses dvh and accounts for mobile header + nav shell bottom" do
+  test "the board never uses a fixed screen height" do
     board = File.read!(@kanban_board)
-    css = File.read!(@app_css)
 
-    assert board =~ "mobile-board-height"
+    # r3: the board scrolls with the page column (no fixed board height); it
+    # must still never use 100vh or h-screen. The orphaned .mobile-board-height
+    # rule was removed with its CSS assertions (work track FR3).
     refute board =~ "100vh"
     refute board =~ "h-screen"
-
-    assert css =~ ".mobile-board-height"
-    assert css =~ "100dvh - var(--mobile-header-height) - var(--mobile-shell-bottom)"
-    assert css =~ "height: 100dvh"
   end
 
+  # r3: #main-content (.col) pads 104 px at the bottom on phones, and a sticky
+  # inset counts from the scroller's padding edge (measured in Chromium: the
+  # bare offset left the bar 104 px above the tab bar; w3c/csswg-drafts#3352),
+  # so the inset is the tab bar's top edge minus that padding.
   test "sticky CTAs clear fixed mobile bottom nav via nav+safe-area offset" do
     issue_new = File.read!(@issue_new)
     agent_new = File.read!(@agent_new)
     css = File.read!(@app_css)
+    r3 = File.read!(@r3_css)
+
+    assert css =~ "bottom: calc(var(--mobile-nav-offset) - 104px)"
+    assert r3 =~ ".cy-r3 .col{padding:0 6px 104px;"
 
     assert issue_new =~ "sticky-above-mobile-nav"
     assert issue_new =~ "sticky"
@@ -77,6 +88,5 @@ defmodule CymphoWeb.MobileShellTest do
     refute agent_new =~ "sticky bottom-0"
 
     assert css =~ ".sticky-above-mobile-nav"
-    assert css =~ "bottom: var(--mobile-nav-offset)"
   end
 end

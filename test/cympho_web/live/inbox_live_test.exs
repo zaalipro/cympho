@@ -301,8 +301,14 @@ defmodule CymphoWeb.InboxLiveTest do
       |> render_click()
 
       wait_until(fn ->
-        rendered = render(view)
-        refute rendered =~ "Ready to approve and close"
+        # r3: the accepted task is listed under "Decided in the last 7 days";
+        # it leaves every decision surface (Next step, Needs you, the lanes).
+        doc = view |> render() |> Floki.parse_fragment!()
+
+        refute doc |> Floki.filter_out("details.dec") |> Floki.raw_html() =~
+                 "Ready to approve and close"
+
+        assert text(doc, "details.dec") =~ "Accepted"
         assert :sys.get_state(view.pid).socket.assigns.inbox_badge_count == 0
         assert :sys.get_state(view.pid).socket.assigns.nav_inbox_count == 0
       end)
@@ -1335,6 +1341,236 @@ defmodule CymphoWeb.InboxLiveTest do
     end
   end
 
+  describe "r3 Inbox" do
+    setup do
+      nw = Cympho.R3Fixtures.northwind!()
+      %{nw: nw, conn: live_session_conn(Phoenix.ConnTest.build_conn(), nw.user, nw.company)}
+    end
+
+    test "the kind filter adds up to the badge and the problem opens first", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, view, html} = live(conn, "/inbox")
+      main = main_doc(view)
+
+      assert [{"div", _, _}] = Floki.find(main, "div.frame[data-page='inbox']")
+      assert text(main, "h1") == "Inbox"
+
+      assert main
+             |> Floki.find("nav.seg[aria-label='Show'] a")
+             |> Enum.map(&squish(Floki.text(&1))) ==
+               ["All 5", "Problems 1", "Questions 2", "Reviews 1", "Approvals 1"]
+
+      assert main |> Floki.find("nav.seg a[aria-current='page']") |> hrefs() == ["/inbox"]
+      assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*5\s*<\/span>/s
+
+      assert text(main, ".next .paper .nt") == "Resume Mira"
+      assert [primary] = Floki.find(main, ".pw")
+      assert Floki.attribute(primary, "phx-click") == ["resume_agent"]
+      assert Floki.attribute(primary, "phx-value-id") == [nw.agents["Mira"].id]
+
+      rows = Floki.find(main, "section[aria-labelledby='ny-t'] li.row")
+
+      assert Enum.map(rows, &text(&1, ".rt")) == [
+               "When a customer's card payment fails, what should happen first?",
+               "Which pricing should we launch with?",
+               "Ready for your review: Implement the first core feature",
+               "Hire a QA engineer"
+             ]
+
+      assert Enum.map(rows, &text(&1, "a.go")) == ["Answer", "Answer", "Review", "Open vote"]
+
+      assert Enum.flat_map(rows, &hrefs(Floki.find(&1, "a.go"))) == [
+               "/inbox?item=interaction-#{nw.questions["Q1"].id}",
+               "/inbox?item=interaction-#{nw.questions["Q2"].id}",
+               "/inbox?item=#{nw.review_wake.id}",
+               "/board-approvals/#{nw.hire.id}?from=/inbox"
+             ]
+
+      meta = text(hd(rows), ".rm")
+      assert meta =~ "Question"
+      assert meta =~ "NW-6"
+      assert meta =~ "Ravi"
+      assert text(Enum.at(rows, 2), ".rm") =~ "Ravi"
+    end
+
+    test "kind and item open one decision in place", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/inbox?kind=question")
+      main = main_doc(view)
+
+      assert main |> Floki.find("nav.seg a[aria-current='page']") |> hrefs() ==
+               ["/inbox?kind=question"]
+
+      assert text(main, ".next .paper .nt") == "Answer Ravi's question"
+
+      assert Enum.map(Floki.find(main, ".next .ink .opt .ot"), &Floki.text/1) == [
+               "Retry automatically after 3 days",
+               "Email the customer first",
+               "Both: email now, retry in 3 days",
+               "Or write your own answer"
+             ]
+
+      assert main |> Floki.find("section[aria-labelledby='ny-t'] li.row") |> length() == 1
+
+      view
+      |> element("section[aria-labelledby='ny-t'] a.go", "Answer")
+      |> render_click()
+
+      assert_patch(view, "/inbox?kind=question&item=interaction-#{nw.questions["Q2"].id}")
+      assert text(main_doc(view), ".next .paper .nt") == "Answer Priya's question"
+    end
+
+    test "an item id from another company is ignored", %{conn: conn, nw: nw} do
+      other = Cympho.R3Fixtures.northwind!()
+      {:ok, view, _html} = live(conn, "/inbox?item=interaction-#{other.questions["Q1"].id}")
+      html = render(view)
+
+      assert text(main_doc(view), ".next .paper .nt") == "Resume Mira"
+      refute html =~ other.questions["Q1"].id
+      assert html =~ nw.questions["Q1"].id
+    end
+
+    test "an Advanced agent scope leaves the owner's decisions company-wide", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, view, _html} = live(conn, "/inbox?agent_id=#{nw.agents["Priya"].id}")
+      main = main_doc(view)
+
+      assert text(main, ".next .paper .nt") == "Resume Mira"
+      assert main |> Floki.find("section[aria-labelledby='ny-t'] li.row") |> length() == 4
+      assert text(main, "nav.seg[aria-label='Show'] a[aria-current='page']") =~ "All 5"
+    end
+
+    test "answers a question inline with a numbered option", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/inbox?kind=question")
+
+      view
+      |> form("#ns-answer", %{"response" => "Email the customer first"})
+      |> render_submit()
+
+      assert_push_event(view, "toast", %{message: "Answer sent."})
+
+      assert Repo.get!(Cympho.Issues.IssueThreadInteraction, nw.questions["Q1"].id).status ==
+               :responded
+
+      assert Issues.get_issue!(nw.issues["NW-6"].id).status == :todo
+      assert text(main_doc(view), ".next .paper .nt") == "Answer Priya's question"
+    end
+
+    test "an empty answer is refused", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/inbox?kind=question")
+
+      view |> form("#ns-answer", %{"own_response" => "  "}) |> render_submit()
+
+      assert_push_event(view, "toast", %{type: "error"})
+
+      assert Repo.get!(Cympho.Issues.IssueThreadInteraction, nw.questions["Q1"].id).status ==
+               :pending
+    end
+
+    test "resumes Mira from the Inbox, never another company's agent", %{conn: conn, nw: nw} do
+      other = Cympho.R3Fixtures.northwind!()
+      {:ok, view, _html} = live(conn, "/inbox")
+
+      render_click(view, "resume_agent", %{"id" => other.agents["Mira"].id})
+      assert Repo.get!(Cympho.Agents.Agent, other.agents["Mira"].id).status == :paused
+
+      view |> element(".next .pw") |> render_click()
+
+      assert Repo.get!(Cympho.Agents.Agent, nw.agents["Mira"].id).status == :idle
+      assert_push_event(view, "toast", %{message: "Mira can take new work."})
+    end
+
+    test "a member cannot resume an agent", %{nw: nw} do
+      unique = System.unique_integer([:positive])
+
+      {:ok, user} =
+        Cympho.Users.create_user(%{email: "inbox-member-#{unique}@example.com", name: "Member"})
+
+      {:ok, _} =
+        Companies.create_membership(%{
+          user_id: user.id,
+          company_id: nw.company.id,
+          role: "member"
+        })
+
+      {:ok, view, _html} =
+        live(live_session_conn(Phoenix.ConnTest.build_conn(), user, nw.company), "/inbox")
+
+      render_click(view, "resume_agent", %{"id" => nw.agents["Mira"].id})
+
+      assert Repo.get!(Cympho.Agents.Agent, nw.agents["Mira"].id).status == :paused
+    end
+
+    test "Decided in the last 7 days is closed and lists what you decided", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/inbox")
+      [decided] = Floki.find(main_doc(view), "details.dec")
+
+      assert Floki.attribute(decided, "open") == []
+      assert text(decided, "summary") =~ "Decided in the last 7 days 3"
+
+      assert Enum.map(Floki.find(decided, ".dec-l li"), &text(&1, ".dec-t")) == [
+               "Cancelled NW-11 · Native mobile app spike",
+               "Accepted NW-2 · Set up the engineering environment and CI pipeline",
+               "Accepted NW-1 · Create the first autonomous execution plan"
+             ]
+
+      {:ok, view, _html} = live(conn, "/inbox?decided=open")
+      assert [_] = Floki.find(main_doc(view), "details.dec[open]")
+    end
+
+    test "past 200 items the list says how many there are (B4)" do
+      {conn, _user, company} = ConnCase.register_and_log_in_user(Phoenix.ConnTest.build_conn())
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      Repo.insert_all(
+        Cympho.BoardApprovals.BoardApproval,
+        for n <- 1..201 do
+          %{
+            id: Ecto.UUID.generate(),
+            company_id: company.id,
+            title: "Vote #{n}",
+            category: "policy_change",
+            status: "pending",
+            inserted_at: now,
+            updated_at: now
+          }
+        end
+      )
+
+      {:ok, view, _html} = live(conn, "/inbox")
+      main = main_doc(view)
+
+      assert text(main, "nav.seg a[aria-current='page']") == "All 201"
+      assert text(main, ".b4") == "Showing the first 200 of 201."
+    end
+
+    test "with nothing to decide and agents off, the Next step says so", %{conn: conn} do
+      {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
+      {:ok, view, _html} = live(conn, "/inbox")
+      main = main_doc(view)
+
+      assert text(main, ".next .paper .nt") == "Turn agents on"
+      assert Floki.find(main, "nav.seg[aria-label='Show']") == []
+    end
+
+    test "the all-clear pair opens the recent decisions" do
+      html =
+        render_component(&CymphoWeb.InboxLive.Index.all_clear/1, %{})
+        |> Floki.parse_fragment!()
+
+      assert text(html, ".paper .nt") == "Nothing needs you"
+      assert text(html, ".paper .obj") == "Decisions appear here as soon as an agent asks."
+
+      assert text(html, ".ink .ink-note") ==
+               "Shows what you answered, accepted and approved in the last 7 days."
+
+      assert html |> Floki.find(".pw") |> hrefs() == ["/inbox?decided=open"]
+    end
+  end
+
   describe "state normalization" do
     test "normalizes empty agent_id to all", %{conn: conn} do
       {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
@@ -1351,6 +1587,14 @@ defmodule CymphoWeb.InboxLiveTest do
     |> Plug.Conn.put_session("user_id", user.id)
     |> Plug.Conn.put_session("company_id", company.id)
   end
+
+  defp main_doc(view), do: view |> render() |> Floki.parse_fragment!()
+
+  defp text(node, selector), do: node |> Floki.find(selector) |> Floki.text() |> squish()
+
+  defp squish(text), do: text |> String.replace(~r/\s+/u, " ") |> String.trim()
+
+  defp hrefs(nodes), do: Enum.flat_map(nodes, &Floki.attribute(&1, "href"))
 
   defp insert_budget_policy!(company, attrs \\ %{}) do
     %BudgetPolicy{}

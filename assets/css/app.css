@@ -2,62 +2,125 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500;700&family=Saira+Condensed:wght@300;400;600;700&display=swap');
-
-/* Per-theme [data-theme] token overrides (uses :root[data-theme] specificity). */
+/* Paper & Ink tokens. :root below is the light mode; themes.css holds the dark
+   block twice (System follows the device unless data-mode="light"; data-mode="dark"
+   forces it), kept identical by test/cympho_web/r3_css_contract_test.exs. */
 @import "themes.css";
 
-/* ============================================
-   Cympho Design Tokens — sourced from DESIGN.md (warm editorial spec)
+/* r3 shell and shared components (every selector under .cy-r3), then one file
+   per page track. */
+@import "r3.css";
+@import "r3-pages/home.css";
+@import "r3-pages/task.css";
+@import "r3-pages/agents.css";
+@import "r3-pages/work.css";
+@import "r3-pages/money.css";
+@import "r3-pages/onboarding.css";
 
-   These :root values are the default "Ember" theme (warm dark). Per-theme
-   overrides live in themes.css under [data-theme="…"]; flipping that attr
-   on <html> recolors the whole app.
-   Both spec-named tokens (surface-1, ink, hairline, primary…) and the
-   legacy names (panel, surface, text-primary, border, brand…) resolve
-   to the same values so old templates keep working while new code uses
-   the spec names.
+/* ============================================
+   Cympho Design Tokens — Paper & Ink (r3)
+
+   :root holds the light mode: the r3 token set (copied verbatim from the
+   approved mockups' r3.css) followed by the legacy names the existing
+   templates and Tailwind config use. A legacy name that equals one r3 token
+   is written as var(<token>) so it follows Light/Dark with no dark line;
+   only the legacy names with their own value are literals here and in each
+   dark copy in themes.css.
    ============================================ */
 
 :root {
-  color-scheme: dark;
-
-  /* Desktop sidebar width — driven live by the resize/collapse controller in
-     root.html.heex (persisted to localStorage). The layout reads it via
-     w-[var(--sidebar-w)] / ml-[var(--sidebar-w)] / left-[var(--sidebar-w)]. */
-  --sidebar-w: 16rem;
-
-  /* Mobile shell geometry — keep board height / sticky CTAs / scroll padding
-     in lockstep with root.html.heex (pt-16 top bar, #mobile-nav h-14). */
-  --mobile-header-height: 4rem; /* pt-16 */
-  --mobile-nav-height: 3.5rem; /* h-14 inside #mobile-nav */
+  /* Phone shell geometry (r3.css phone block, max-width 640px) — keep board
+     height / sticky CTAs / scroll padding in lockstep with the r3 shell. */
+  --mobile-header-height: 60px; /* .topbar */
+  --mobile-nav-height: 74px; /* floating .dest tab bar's top edge: 48 tab + 2 x 3 track + 2 x 5 padding + 2 x 1 border + 8 offset */
   --mobile-nav-offset: calc(
     var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px)
   );
   /* Content pad under the fixed nav (nav + small cushion + safe-area). */
   --mobile-shell-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
 
-  /* Canvas + surface ladder — warm "Claude" charcoal: canvas lifted to a
-     paper-like warm tone; ladder steps up in warm lightness so elevation
-     reads on the lighter canvas. (Legacy aliases below are var() refs and
-     follow these.) */
-  --color-canvas:        #20201E;
-  --color-surface-1:     #262624;
-  --color-surface-2:     #2D2C2A;
-  --color-surface-3:     #353330;
-  --color-surface-4:     #423F3B;
+  /* ---------- r3: theme-independent tokens + light theme ---------- */
+  --r-frame:28px;--r-tray:20px;--r-card:16px;--r-row:12px;--r-field:8px;--r-pill:9999px;
+  --sans:Inter,"Inter Variable",-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --ease:cubic-bezier(0.32,0.72,0,1);
+  --press:cubic-bezier(0.34,-0.56,0.64,1);
+  --mask:#000;
+
+  color-scheme:light;--inv-scheme:dark;
+  /* surfaces: page < tray < frame = card (134) */
+  --page:#eaeaea;--frame:#ffffff;--tray:#f1f1f1;--card:#ffffff;--band:#f4f4f4;--hover:#f6f6f6;
+  --lift:#ffffff;--well:#fafafa;--quiet:#f4f4f4;--pop:#ffffff;--field-bg:#ffffff;--dots-bg:#ffffff;
+  --page-hover:rgba(255,255,255,.62);--ib-hover:rgba(0,0,0,.05);--tray-hover:#e7e7e7;
+  /* lines */
+  --line:#dfdfdf;--edge:#e3e3e3;--hair:#ececec;--tick:#d2d2d2;--spine:#d0d0d0;--band-line:#e6e6e6;
+  --tile-line:#e2e2e2;--lift-line:#e0e0e0;--ag-line:#dcdcdc;--av-line:#cfcfcf;--dots-line:#bdbdbd;
+  --underline:#9a9a9a;--field:#7a7a7a;
+  /* secondary pill */
+  --btn-bg:#ffffff;--btn-line:#d6d6d6;--btn-hover:#fafafa;--btn-line-hover:#bdbdbd;
+  /* ink */
+  --ink-hi:#000000;--ink:#212121;--ink-nav:#3d3d3d;--ink-2:#606060;
+  /* selection accent and status: each value passes on every light surface, page included */
+  --accent:#e8501a;--accent-text:#b93e0b;
+  --working:#2a7366;--waiting:#805e0e;--stopped:#b23a3a;--done:#2a743e;--idle:#6b6660;
+  --waiting-bg:#faf2de;--waiting-line:#efdcae;--stopped-bg:#fdeeee;--stopped-line:#f0cfcf;
+  /* ink objects on paper: they turn to paper objects in dark */
+  --count-bg:#212121;--count-ink:#ffffff;--brand-bg:#161616;--brand-ink:#ffffff;
+  --step-bg:#5f5f5f;--step-ink:#ffffff;
+  --kbd-bg:#f1f1f1;--kbd-line:#e0e0e0;--kbd-ink:#3d3d3d;
+  --file-bg:#efefef;--file-fold:#e2e2e2;--file-edge:#c4c4c4;--file-mark:#919191;
+  /* phone chrome */
+  --topbar-bg:rgba(234,234,234,.94);--dock-bg:rgba(255,255,255,.95);--dock-line:#dcdcdc;
+  /* focus: 2px ring outside a 2px gap */
+  --focus-ring:#101012;--focus-gap:#ffffff;
+  /* shadows */
+  --sh-tile:0 1px 2px rgba(0,0,0,.05),0 3px 8px -4px rgba(0,0,0,.10);
+  --sh-raise:0 1px 2px rgba(0,0,0,.05),0 6px 14px -8px rgba(0,0,0,.18);
+  --sh-chip:0 1px 2px rgba(0,0,0,.05);
+  --sh-card:0 0 0 0 transparent;
+  --sh-frame:0 1px 1px rgba(0,0,0,.03),0 28px 56px -40px rgba(0,0,0,.30);
+  --sh-pop:0 16px 40px -12px rgba(0,0,0,.25);
+  --sh-dock:0 16px 36px -14px rgba(0,0,0,.32);
+  --sh-brand:inset 0 1px 0 rgba(255,255,255,.18),0 1px 2px rgba(0,0,0,.25);
+
+  /* constant swatches for Settings › Appearance previews: the SAME value in every block, because each depicts a theme */
+  --sw-l-page:#eaeaea;--sw-l-card:#ffffff;--sw-l-ink:#161616;--sw-l-line:#dfdfdf;--sw-d-page:#0d0c0b;--sw-d-card:#201f1d;--sw-d-paper:#e6e3dd;--sw-d-line:#302e2b;
+  /* labelled categories (Spending › By runtime, Advanced) and the numeral on a chosen tile filled with --accent */
+  --cat-1:#2563c9;--cat-2:#6d4fd8;--cat-3:#6b6b6b;--on-accent:#101012;
+  /* inverse surface = the resolution card: ink in light (134) */
+  --inv-top:#2b2b2b;--inv-mid:#161616;--inv-bot:#0e0e0e;
+  --inv-sh:0 30px 60px -22px rgba(0,0,0,.48),0 12px 24px -12px rgba(0,0,0,.30),inset 0 1px 0 rgba(255,255,255,.08);
+  --inv-ink-hi:#ffffff;--inv-ink:#ededed;--inv-ink-2:#b9b9b9;--inv-line:rgba(255,255,255,.09);
+  --inv-row:rgba(255,255,255,.06);--inv-row-line:rgba(255,255,255,.09);--inv-row-hover:rgba(255,255,255,.10);
+  --inv-num-bg:rgba(255,255,255,.08);--inv-num-ink:#d6d6d6;--inv-radio:#a8a8a8;--inv-dash:rgba(255,255,255,.30);
+  --inv-accent:#f35c23;--inv-on-accent:#101012;--inv-accent-tint:rgba(243,92,35,.10);
+  --inv-pill-bg:#f5f5f5;--inv-pill-hover:#ffffff;--inv-pill-ink:#292929;--inv-nub-bg:#1c1c1c;--inv-nub-ink:#ffffff;
+  --inv-sh-pill:inset 0 -1px 0 rgba(0,0,0,.14),0 8px 18px -8px rgba(0,0,0,.6);
+  --inv-ghost-bg:rgba(255,255,255,.07);--inv-ghost-hover:rgba(255,255,255,.13);--inv-ghost-line:rgba(255,255,255,.14);--inv-ghost-ink:#ffffff;
+  --inv-kbd-bg:#2f2f2f;--inv-kbd-line:#444444;--inv-kbd-ink:#dcdcdc;
+  --inv-field-bg:rgba(255,255,255,.05);--inv-field:#8a8a8a;
+  --inv-focus-ring:#f5f5f5;--inv-focus-gap:#0e0e0e;
+  --inv-working:#6cc4b2;--inv-waiting:#e0b23a;--inv-stopped:#f29a91;--inv-done:#6cc480;--inv-idle:#b3ada3;
+
+  /* ---------- legacy names, mapped onto r3 tokens ---------- */
+  /* Canvas + surface ladder */
+  --color-canvas:        var(--page);
+  --color-surface-1:     var(--frame);
+  --color-surface-2:     var(--card);
+  --color-surface-3:     var(--band);
+  --color-surface-4:     #e7e7e7;
 
   /* Legacy aliases */
   --color-panel:         var(--color-surface-1);
   --color-surface:       var(--color-surface-2);
   --color-surface-hover: var(--color-surface-3);
-  --color-subtle:        rgba(255, 250, 245, 0.05);
+  --color-subtle:        rgba(0, 0, 0, 0.045);
 
-  /* Ink — warm off-white down to warm taupe */
-  --color-ink:           #FAF9F5;
-  --color-ink-muted:     #E5E1D8;
-  --color-ink-subtle:    #B0A99C;
-  --color-ink-tertiary:  #8C857A;
+  /* Ink (subtle and tertiary both read --ink-2: legibility over a fourth grey) */
+  --color-ink:           var(--ink);
+  --color-ink-muted:     var(--ink-nav);
+  --color-ink-subtle:    var(--ink-2);
+  --color-ink-tertiary:  var(--ink-2);
 
   /* Legacy aliases */
   --color-text-primary:    var(--color-ink);
@@ -65,61 +128,59 @@
   --color-text-tertiary:   var(--color-ink-subtle);
   --color-text-quaternary: var(--color-ink-tertiary);
 
-  /* Brand — terracotta */
-  --color-primary:       #D97757;
-  --color-primary-hover: #E08A6B;
-  --color-primary-focus: #D97757;
-  --color-primary-rgb:   217 119 87;   /* channels so Tailwind can apply alpha (bg-brand/10 …) */
+  /* Brand — the text- and fill-safe accent; hover keeps the same value */
+  --color-primary:       var(--accent-text);
+  --color-primary-hover: var(--accent-text);
+  --color-primary-focus: var(--focus-ring);
+  --color-primary-rgb:   185 62 11;   /* channels so Tailwind can apply alpha (bg-brand/10 …) */
 
   /* Legacy aliases */
   --color-brand:        var(--color-primary);
   --color-accent:       var(--color-primary);
   --color-accent-hover: var(--color-primary-hover);
 
-  /* Hairlines — warm, low-contrast on the lifted canvas */
-  --color-hairline:           #3A3733;
-  --color-hairline-strong:    #4A453F;
-  --color-hairline-tertiary:  #5A544C;
+  /* Hairlines */
+  --color-hairline:           var(--line);
+  --color-hairline-strong:    var(--tick);
+  --color-hairline-tertiary:  var(--btn-line-hover);
 
   /* Legacy aliases */
   --color-border:        var(--color-hairline);
   --color-border-subtle: var(--color-surface-3);
   --color-border-hover:  var(--color-hairline-strong);
 
-  /* Semantic — Anthropic's official Claude tokens (DESIGN.md):
-     success #5db872 · warning #d4a017 · error #c64545. */
-  --color-success:      #5db872;
-  --color-success-rgb:  93 184 114;
-  --color-warning:      #d4a017;
-  --color-warning-rgb:  212 160 23;
-  --color-error:        #c64545;
-  --color-error-rgb:    198 69 69;
-  --color-info:         #5db8a6;   /* warm teal — info/active status (DESIGN.md) */
-  --color-info-rgb:     93 184 166;
-  --color-overlay:      rgba(20, 20, 18, 0.6);
+  /* Semantic — the r3 status hues (each passes on every surface) */
+  --color-success:      var(--done);
+  --color-success-rgb:  42 116 62;
+  --color-warning:      var(--waiting);
+  --color-warning-rgb:  128 94 14;
+  --color-error:        var(--stopped);
+  --color-error-rgb:    178 58 58;
+  --color-info:         var(--working);
+  --color-info-rgb:     42 115 102;
+  /* Tailwind's violet/purple/fuchsia and slate/gray families (tailwind.config.js) */
+  --color-cat-2-rgb:    109 79 216;   /* --cat-2 */
+  --color-idle-rgb:     107 102 96;   /* --idle */
+  --color-overlay:      rgba(20, 20, 20, 0.4);
 
   /* Buttons */
   --color-button-bg:    var(--color-surface-2);
   --color-button-hover: var(--color-surface-3);
 
-  /* Selection + scrollbars (terracotta-tied) */
-  --color-selection:        rgba(217, 119, 87, 0.30);
-  --color-scrollbar:        rgba(255, 250, 245, 0.12);
-  --color-scrollbar-hover:  rgba(255, 250, 245, 0.18);
+  /* Selection + scrollbars */
+  --color-selection:        rgba(232, 80, 26, 0.16);
+  --color-scrollbar:        rgba(0, 0, 0, 0.2);
+  --color-scrollbar-hover:  rgba(0, 0, 0, 0.3);
 
-  /* ── Multi-theme contract — overridden per [data-theme] in themes.css.
-     Defaults below are the Ember (warm-dark) theme, so no attr == today. ── */
+  /* Text/icon color on a primary-filled button */
+  --color-on-primary: #ffffff;
 
-  /* Text/icon color on a primary-filled button (Ember: dark on terracotta) */
-  --color-on-primary: #20201E;
+  /* Typography families — Inter and JetBrains Mono; the serif display face is retired */
+  --font-display: var(--sans);
+  --font-body:    var(--sans);
+  --font-mono:    var(--mono);
 
-  /* Typography families — display vs body vs mono. Fraunces gives the
-     display voice its molten, characterful curves (optical sizing on). */
-  --font-display: "Fraunces", "Source Serif 4", ui-serif, "Iowan Old Style", Georgia, Cambria, "Times New Roman", serif;
-  --font-body:    "Inter", "Inter Variable", "SF Pro Display", -apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-mono:    "Berkeley Mono", ui-monospace, "SF Mono", Menlo, monospace;
-
-  /* Radius scale + semantic radii (themes shift these: Blocks→pill, Circuit→0) */
+  /* Radius scale + semantic radii */
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -135,14 +196,14 @@
   --radius-input: 8px;
   --radius-field: 8px;
 
-  /* Elevation — ambient shadow color, per-theme strength, inset top highlight */
+  /* Elevation — ambient shadow color, per-mode strength, inset top highlight */
   --shadow-rgb: 0 0 0;
-  --shadow-strength: 1;
-  --shadow-inset-highlight: rgba(255, 250, 245, 0.05);
+  --shadow-strength: 0.4;
+  --shadow-inset-highlight: transparent;
 
-  /* Decorative effects — softened/disabled on light themes */
-  --vignette-color: rgba(0, 0, 0, 0.35);
-  --noise-opacity: 0.035;
+  /* Decorative effects — off in both modes */
+  --vignette-color: transparent;
+  --noise-opacity: 0;
   --theme-hero-bg: transparent;
 
   /* Motion — spring-weighted curves; never linear/ease-in-out on
@@ -255,26 +316,18 @@
   scroll-padding-bottom: var(--mobile-shell-bottom);
 }
 
-/* Full-height board: fill viewport minus mobile top bar + shell bottom pad. */
-.mobile-board-height {
-  height: calc(
-    100dvh - var(--mobile-header-height) - var(--mobile-shell-bottom)
-  );
-}
-
-/* Sticky primary actions sit above fixed #mobile-nav + home-indicator. */
+/* Sticky primary actions sit on the floating tab bar + home-indicator. A sticky
+   inset counts from the scroller's padding edge, and on phones #main-content
+   (.col, r3.css phone block) already pads 104px at the bottom, so the inset is
+   the tab bar's top edge minus that padding (the bare offset left a 104px gap). */
 .sticky-above-mobile-nav {
-  bottom: var(--mobile-nav-offset);
+  bottom: calc(var(--mobile-nav-offset) - 104px);
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 641px) {
   .mobile-shell-content {
     padding-bottom: 0;
     scroll-padding-bottom: 0;
-  }
-
-  .mobile-board-height {
-    height: 100dvh;
   }
 
   .sticky-above-mobile-nav {
@@ -302,78 +355,6 @@
   border: 1px solid var(--color-border);
   border-radius: 4px;
   line-height: 1;
-}
-
-/* Focus ring utility for accessibility */
-.focus-ring:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-brand);
-}
-
-.focus-ring:focus:not(:focus-visible) {
-  box-shadow: none;
-}
-
-.focus-ring:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-brand);
-}
-
-/* Skip to content link for accessibility */
-.skip-to-content {
-  position: absolute;
-  left: -9999px;
-  top: auto;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  z-index: 9999;
-}
-
-.skip-to-content:focus {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: auto;
-  height: auto;
-  padding: 8px 16px;
-  background: var(--color-brand);
-  color: var(--color-on-primary);
-  font-weight: 500;
-  border-radius: 0 0 4px 4px;
-  outline: none;
-  box-shadow: 0 4px 12px rgb(var(--shadow-rgb) / calc(0.3 * var(--shadow-strength)));
-}
-
-/* Active navigation highlight */
-.nav-item {
-  position: relative;
-}
-
-.nav-item[data-active="true"] {
-  color: var(--color-text-primary);
-  background: var(--color-surface-hover);
-}
-
-.nav-item[data-active="true"]::before {
-  content: "";
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  width: 2px;
-  height: 16px;
-  border-radius: 9999px;
-  background: var(--color-brand);
-  transform: translateY(-50%);
-}
-
-.nav-item[data-active="true"] svg {
-  color: var(--color-brand);
-}
-
-/* Active mobile bottom nav */
-.mobile-nav-item[data-active="true"] {
-  color: var(--color-brand);
 }
 
 /* Simple / Advanced product mode. Mode and row density are independent:
@@ -411,16 +392,6 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
   grid-column: 1 / -1 !important;
 }
 
-.onboarding-blueprint-card:focus-within {
-  border-color: color-mix(in srgb, var(--color-primary) 70%, var(--color-border));
-  box-shadow: 0 0 0 2px rgb(var(--color-primary-rgb) / 0.35);
-}
-
-.ui-mode-toggle[data-mode="advanced"] {
-  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
-  background: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface-2));
-  color: var(--color-ink);
-}
 
 .ui-mode-option {
   color: var(--color-text-quaternary);
@@ -449,10 +420,10 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--color-hairline);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--color-surface-3);
+  color: var(--color-ink);
 }
 
 .ui-simple-card {
@@ -488,17 +459,11 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
     0 1px 2px rgb(var(--shadow-rgb) / calc(0.18 * var(--shadow-strength)));
 }
 
-.cympho-field {
-  background: var(--color-panel);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  color: var(--color-text-primary);
-  outline: none;
-}
-
-.cympho-field:focus {
-  border-color: rgb(var(--color-primary-rgb) / 0.75);
-  box-shadow: 0 0 0 2px rgb(var(--color-primary-rgb) / 0.22);
+/* Text on a primary fill reads the fill's own ink. Legacy links pass it next to
+   app_link/1's default text colours, which come later in the utilities and
+   would otherwise win (and turn to ink on hover). */
+.text-on-primary {
+  color: var(--color-on-primary) !important;
 }
 
 #kanban-board[data-drag-unavailable="true"] .kanban-card-actions {
@@ -582,17 +547,22 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
   }
 }
 
-/* Touch-friendly tap targets */
-button, a, select, input[type="submit"] {
+/* Touch-friendly tap targets for legacy markup. r3 regions (the rail, the phone
+   top bar and every r3 page frame, [data-page]) size their own targets, so they
+   are scoped out; Advanced blocks inside r3 pages keep the floor. Specificity
+   stays 0 so every Tailwind utility still wins. */
+:where(button, a, select, input[type="submit"]):not(:where(.rail *, .topbar *, [data-page] *)),
+:where([data-page] .ui-advanced-only) :where(button, a, select, input[type="submit"]) {
   min-height: 28px;
 }
 
 @media (max-width: 1023px) {
-  button, a, select, input[type="submit"] {
+  :where(button, a, select, input[type="submit"]):not(:where(.rail *, .topbar *, [data-page] *)),
+  :where([data-page] .ui-advanced-only) :where(button, a, select, input[type="submit"]) {
     min-height: 44px;
   }
 
-  button, a, nav, .kanban-column-cards {
+  button, a, nav {
     -webkit-user-select: none;
     user-select: none;
   }
@@ -1193,79 +1163,6 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   animation: page-enter 600ms var(--ease-out-expo) both;
 }
 
-/* ── Resizable / collapsible desktop sidebar ──────────────────────────────
-   Width comes from --sidebar-w; the aside and main margin read it.
-   Collapsing sets the var to 0 and slides the rail off-canvas,
-   revealing the floating expand button. Transitions are suppressed mid-drag
-   (data-sidebar-dragging) so the handle tracks the pointer 1:1. */
-@media (min-width: 1024px) {
-  #sidebar,
-  #main-content {
-    transition-property: width, margin-left;
-    transition-duration: 200ms;
-    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
-  }
-
-  html[data-sidebar-dragging="true"] #sidebar,
-  html[data-sidebar-dragging="true"] #main-content {
-    transition: none !important;
-  }
-
-  html[data-sidebar-collapsed="true"] {
-    --sidebar-w: 0px;
-  }
-
-  html[data-sidebar-collapsed="true"] #sidebar {
-    transform: translateX(-100%);
-  }
-
-  /* Drag handle sits on the rail's right edge. */
-  #sidebar-resize-handle {
-    position: absolute;
-    top: 0;
-    right: -3px;
-    width: 6px;
-    height: 100%;
-    cursor: col-resize;
-    z-index: 60;
-    touch-action: none;
-  }
-
-  #sidebar-resize-handle::after {
-    content: "";
-    position: absolute;
-    inset: 0 2px;
-    border-radius: 9999px;
-    background: transparent;
-    transition: background 150ms ease;
-  }
-
-  #sidebar-resize-handle:hover::after,
-  html[data-sidebar-dragging="true"] #sidebar-resize-handle::after {
-    background: var(--color-primary);
-  }
-
-  html[data-sidebar-collapsed="true"] #sidebar-resize-handle {
-    display: none;
-  }
-
-  /* Floating button to reopen a collapsed sidebar. */
-  #sidebar-expand-btn {
-    display: none;
-  }
-
-  html[data-sidebar-collapsed="true"] #sidebar-expand-btn {
-    display: inline-flex;
-  }
-}
-
-/* The expand button is desktop-only; the mobile drawer has its own button. */
-@media (max-width: 1023px) {
-  #sidebar-expand-btn {
-    display: none !important;
-  }
-}
-
 /* Staggered list entrance — apply `stagger-children` to a list container;
    the first 12 children cascade in. Cheap: transform + opacity only. */
 @keyframes stagger-in {
@@ -1294,23 +1191,6 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
 .stagger-children > *:nth-child(11) { animation-delay: 400ms; }
 .stagger-children > *:nth-child(12) { animation-delay: 440ms; }
 
-/* Ambient canvas glow — a fixed radial terracotta wash anchored top-center
-   so the dark canvas has a light source. Fixed + pointer-events-none, so
-   zero scroll repaints. Sits under content (z-0 wrapper needed). */
-.cympho-ambient::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(
-      900px 480px at 50% -120px,
-      rgb(var(--color-primary-rgb) / 0.07),
-      transparent 70%
-    );
-}
-
 /* Shimmer skeleton — replaces flat pulse placeholders. */
 @keyframes shimmer {
   from { background-position: 200% 0; }
@@ -1327,33 +1207,9 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   animation: shimmer 1.6s var(--ease-out-expo) infinite;
 }
 
-/* Nav rail rows — icon nudges right on hover; spring, not snap. */
-.nav-item {
-  transition:
-    background-color 160ms ease-out,
-    color 160ms ease-out;
-}
-.nav-item > span:first-child {
-  transition: transform 300ms var(--ease-spring);
-}
-.nav-item:hover > span:first-child {
-  transform: translateX(2px);
-}
-
 /* Progress bars fill with a spring instead of jumping. */
 .progress-spring {
   transition: width 800ms var(--ease-out-expo);
-}
-
-/* Badge micro-pop when a live badge count changes (retriggered via JS
-   class flip or LiveView re-render remount). */
-@keyframes badge-pop {
-  0% { transform: scale(1); }
-  40% { transform: scale(1.25); }
-  100% { transform: scale(1); }
-}
-.badge-pop {
-  animation: badge-pop 360ms var(--ease-spring);
 }
 
 /* Kanban cards get pickup physics: lifted + slightly rotated while
@@ -1387,172 +1243,54 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   .page-enter,
   .stagger-children > *,
   .dialog-enter,
-  .badge-pop,
   .skeleton-shimmer {
     animation: none !important;
   }
   .card-lift:hover,
   .ui-simple-card:hover,
-  .cta-glow:hover,
-  .nav-item:hover > span:first-child {
+  .cta-glow:hover {
     transform: none !important;
   }
 }
 
-/* Kanban card hover — soft raise + hairline warm-up; grab affordance. */
-.kanban-column-cards [data-issue-id] {
-  transition:
-    transform 320ms var(--ease-spring),
-    box-shadow 320ms var(--ease-spring),
-    border-color 180ms ease-out,
-    background-color 180ms ease-out;
-}
-.kanban-column-cards [data-issue-id]:hover {
-  transform: translateY(-1px);
-  border-color: var(--color-hairline-strong);
-  box-shadow:
-    inset 0 1px 0 0 var(--shadow-inset-highlight),
-    0 3px 10px rgb(var(--shadow-rgb) / calc(0.22 * var(--shadow-strength)));
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .kanban-column-cards [data-issue-id]:hover {
-    transform: none;
-  }
-}
-
 /* ============================================
-   Ember Creative Layer — molten light, editorial drama
+   Ember layer, neutralised for Paper & Ink: the classes stay on legacy
+   templates but draw plain paper surfaces, ink text and hairlines.
    ============================================ */
 
-/* Aurora hero field — two drifting molten orbs + a cool counter-glow.
-   Fixed, pointer-events-none, transform-only animation. */
 .ember-aurora {
   position: relative;
 }
-.ember-aurora::before,
-.ember-aurora::after {
-  content: "";
-  position: absolute;
-  pointer-events: none;
-  border-radius: 50%;
-  filter: blur(80px);
-  z-index: 0;
-}
-.ember-aurora::before {
-  width: 560px;
-  height: 380px;
-  top: -180px;
-  left: -80px;
-  background: radial-gradient(closest-side, rgb(var(--color-primary-rgb) / 0.28), transparent);
-  animation: ember-drift-a 22s ease-in-out infinite alternate;
-}
-.ember-aurora::after {
-  width: 480px;
-  height: 340px;
-  top: -140px;
-  right: -60px;
-  background: radial-gradient(closest-side, rgb(var(--color-info-rgb) / 0.14), transparent);
-  animation: ember-drift-b 26s ease-in-out infinite alternate;
-}
-@keyframes ember-drift-a {
-  from { transform: translate3d(0, 0, 0) scale(1); }
-  to { transform: translate3d(60px, 24px, 0) scale(1.12); }
-}
-@keyframes ember-drift-b {
-  from { transform: translate3d(0, 0, 0) scale(1.08); }
-  to { transform: translate3d(-48px, 18px, 0) scale(0.96); }
-}
 
-/* Molten display ink — terracotta→amber gradient text for hero headlines. */
 .ember-ink {
-  background: linear-gradient(
-    92deg,
-    var(--color-ink) 0%,
-    var(--color-ink) 55%,
-    var(--color-primary) 78%,
-    #e8a55a 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+  color: var(--color-ink);
 }
 
-/* Glass panel — heavier presence than a flat card; for hero-level surfaces. */
 .ember-glass {
-  background:
-    linear-gradient(165deg, rgba(255, 250, 245, 0.055), rgba(255, 250, 245, 0.012) 42%),
-    color-mix(in srgb, var(--color-surface-1) 92%, transparent);
-  border: 1px solid rgba(255, 250, 245, 0.10);
-  border-radius: 20px;
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 250, 245, 0.08),
-    0 1px 2px rgb(var(--shadow-rgb) / 0.30),
-    0 24px 64px rgb(var(--shadow-rgb) / 0.30);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-card);
+  box-shadow: var(--sh-card);
 }
 
-/* Molten hairline — 1px gradient rule used under section headers. */
 .ember-rule {
   height: 1px;
   border: 0;
-  background: linear-gradient(
-    90deg,
-    rgb(var(--color-primary-rgb) / 0.55),
-    rgb(var(--color-primary-rgb) / 0.10) 40%,
-    transparent 85%
-  );
+  background: var(--color-hairline);
 }
 
-/* Eyebrow chip — small-caps label with a live ember dot. */
+/* r3 eyebrow: caps 12/16 in ink-2, no chip, no dot */
 .ember-eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 12px 4px 8px;
-  border-radius: 9999px;
-  border: 1px solid rgb(var(--color-primary-rgb) / 0.28);
-  background: rgb(var(--color-primary-rgb) / 0.08);
-  color: var(--color-ink-muted);
-  font-size: 11px;
-  font-weight: 590;
-  letter-spacing: 0.14em;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-}
-.ember-eyebrow::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  box-shadow: 0 0 12px 2px rgb(var(--color-primary-rgb) / 0.65);
+  color: var(--ink-2);
 }
 
-/* Number tiles with a molten counter glow on hover. */
 .ember-stat {
   position: relative;
-  overflow: hidden;
-}
-.ember-stat::after {
-  content: "";
-  position: absolute;
-  right: -30px;
-  bottom: -30px;
-  width: 110px;
-  height: 110px;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, rgb(var(--color-primary-rgb) / 0.22), transparent);
-  opacity: 0;
-  transition: opacity 600ms var(--ease-out-expo);
-  pointer-events: none;
-}
-.ember-stat:hover::after {
-  opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ember-aurora::before,
-  .ember-aurora::after {
-    animation: none;
-  }
 }

@@ -10,9 +10,10 @@ defmodule CymphoWeb.Components do
   attr :rest, :global
   slot :inner_block, required: true
 
+  # A legacy page in the r3 frame: the paper bezel on the page background.
   def page(assigns) do
     ~H"""
-    <div class={["min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8", @class]} {@rest}>
+    <div class={["lframe", @class]} {@rest}>
       <div class={["mx-auto w-full", page_size(@size)]}>
         {render_slot(@inner_block)}
       </div>
@@ -31,7 +32,7 @@ defmodule CymphoWeb.Components do
     ~H"""
     <header class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between" {@rest}>
       <div class="min-w-0">
-        <h1 :if={@title} class="flex items-center gap-2 text-headline text-text-primary">
+        <h1 :if={@title} class="h1 flex items-center gap-2">
           <.spark :if={@spark} class="h-[0.85em] w-[0.85em] text-brand" />
           <span class="min-w-0 truncate">{@title}</span>
         </h1>
@@ -109,37 +110,25 @@ defmodule CymphoWeb.Components do
   end
 
   attr :current, :string, required: true, values: ~w(list board)
+  attr :params, :any, default: [], doc: "filters both views read, carried across ({key, value})"
   attr :class, :any, default: nil
 
+  # r3: the List | Board switch is the segmented control (134) and keeps the
+  # current filters when it changes view.
   def task_view_switch(assigns) do
+    query = if assigns.params == [], do: "", else: "?" <> URI.encode_query(assigns.params)
+    assigns = assign(assigns, :query, query)
+
     ~H"""
-    <nav
-      class={[
-        "inline-flex shrink-0 overflow-hidden rounded-xl border border-hairline bg-surface p-1",
-        @class
-      ]}
-      data-testid="task-view-switch"
-      aria-label="Task view"
-    >
-      <.task_view_link
-        to="/issues"
-        label="List"
-        icon="hero-queue-list-mini"
-        active={@current == "list"}
-      />
-      <.task_view_link
-        to="/kanban"
-        label="Board"
-        icon="hero-view-columns-mini"
-        active={@current == "board"}
-      />
+    <nav class={["seg", @class]} data-testid="task-view-switch" aria-label="Task view">
+      <.task_view_link to={"/issues" <> @query} label="List" active={@current == "list"} />
+      <.task_view_link to={"/kanban" <> @query} label="Board" active={@current == "board"} />
     </nav>
     """
   end
 
   attr :to, :string, required: true
   attr :label, :string, required: true
-  attr :icon, :string, required: true
   attr :active, :boolean, required: true
 
   defp task_view_link(assigns) do
@@ -150,15 +139,8 @@ defmodule CymphoWeb.Components do
       aria-label={"#{@label} view"}
       aria-current={if @active, do: "page", else: nil}
       aria-pressed={to_string(@active)}
-      title={"#{@label} view"}
-      class={[
-        "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-510 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
-        @active && "bg-surface-2 text-text-primary shadow-card",
-        !@active && "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-      ]}
     >
-      <span class={[@icon, "h-4 w-4"]}></span>
-      <span class="hidden sm:inline">{@label}</span>
+      {@label}
     </.link>
     """
   end

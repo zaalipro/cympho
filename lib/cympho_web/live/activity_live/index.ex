@@ -1,6 +1,8 @@
 defmodule CymphoWeb.ActivityLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Activities
+  alias Cympho.Agents
+  alias Cympho.Companies
 
   @issue_actions ~w(
     created title_changed description_changed priority_changed status_changed
@@ -23,6 +25,7 @@ defmodule CymphoWeb.ActivityLive.Index do
       socket
       |> assign(:page_title, "Activity Feed")
       |> assign(:company_id, company_id)
+      |> assign(:actor_names, actor_names(company_id))
       |> assign(:filter_action, "")
       |> assign(:filter_actor_type, "")
       |> assign(:infinite_scroll, %{})
@@ -79,7 +82,10 @@ defmodule CymphoWeb.ActivityLive.Index do
     filtered? = filters_active?(socket)
 
     socket
-    |> assign(:activity_command, build_activity_command(snapshot, filtered?))
+    |> assign(
+      :activity_command,
+      build_activity_command(snapshot, filtered?, socket.assigns.actor_names)
+    )
     |> assign(:activity_audit_lanes, build_activity_audit_lanes(snapshot, filtered?))
   end
 
@@ -111,7 +117,7 @@ defmodule CymphoWeb.ActivityLive.Index do
     }
   end
 
-  defp build_activity_command(%{total: 0}, true) do
+  defp build_activity_command(%{total: 0}, true, _names) do
     %{
       empty_activity_command()
       | tone: :filtered,
@@ -124,11 +130,11 @@ defmodule CymphoWeb.ActivityLive.Index do
     }
   end
 
-  defp build_activity_command(%{total: 0}, false), do: empty_activity_command()
+  defp build_activity_command(%{total: 0}, false, _names), do: empty_activity_command()
 
-  defp build_activity_command(%{by_action: by_action, latest: latest}, _filtered?) do
+  defp build_activity_command(%{by_action: by_action, latest: latest}, _filtered?, names) do
     counts = command_counts(by_action)
-    focus = activity_focus(latest)
+    focus = activity_focus(latest, names)
 
     command =
       cond do
@@ -297,9 +303,9 @@ defmodule CymphoWeb.ActivityLive.Index do
 
   defp action_count(by_action, action), do: Map.get(by_action, action, 0)
 
-  defp activity_focus(nil), do: %{label: nil, detail: nil}
+  defp activity_focus(nil, _names), do: %{label: nil, detail: nil}
 
-  defp activity_focus(activity) do
+  defp activity_focus(activity, names) do
     label =
       case activity.issue do
         %{identifier: identifier, title: title} when identifier not in [nil, ""] ->
@@ -312,7 +318,10 @@ defmodule CymphoWeb.ActivityLive.Index do
           "Issue removed"
       end
 
-    %{label: label, detail: "#{format_action(activity.action)} · #{actor_name(activity)}"}
+    %{
+      label: label,
+      detail: "#{format_action(activity.action)} · #{actor_name(activity, names)}"
+    }
   end
 
   defp build_url(filter_action, filter_actor_type) do
@@ -390,15 +399,36 @@ defmodule CymphoWeb.ActivityLive.Index do
     end
   end
 
-  defp actor_name(%{actor_type: "system"}), do: "System"
+  defp actor_name(%{actor_type: "system"}, _names), do: "System"
 
-  defp actor_name(%{actor_type: "agent", metadata: metadata, actor_id: id}),
-    do: metadata_value(metadata, "agent_name") || short_identity("Agent", id)
+  defp actor_name(%{actor_type: "agent", metadata: metadata, actor_id: id}, names),
+    do:
+      metadata_value(metadata, "agent_name") || names[{"agent", id}] ||
+        short_identity("Agent", id)
 
-  defp actor_name(%{actor_type: "user", metadata: metadata, actor_id: id}),
-    do: metadata_value(metadata, "user_name") || short_identity("User", id)
+  defp actor_name(%{actor_type: "user", metadata: metadata, actor_id: id}, names),
+    do:
+      metadata_value(metadata, "user_name") || names[{"user", id}] ||
+        short_identity("User", id)
 
-  defp actor_name(%{actor_type: type, actor_id: id}), do: short_identity(type, id)
+  defp actor_name(%{actor_type: type, actor_id: id}, _names), do: short_identity(type, id)
+
+  # Rows store only the actor's id. Names come from the company's own members
+  # and agents, so an id from outside the company keeps its short form.
+  defp actor_names(company_id) when is_binary(company_id) do
+    users =
+      for %{user_id: id, user: %{name: name}} <- Companies.list_memberships(company_id),
+          name not in [nil, ""],
+          do: {{"user", id}, name}
+
+    agents =
+      for agent <- Agents.list_agents_by_company(company_id),
+          do: {{"agent", agent.id}, agent.name}
+
+    Map.new(users ++ agents)
+  end
+
+  defp actor_names(_company_id), do: %{}
 
   defp metadata_value(metadata, key) when is_map(metadata),
     do: Map.get(metadata, key) || Map.get(metadata, String.to_atom(key))

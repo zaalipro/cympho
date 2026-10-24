@@ -181,6 +181,21 @@ defmodule Cympho.UsersTest do
     end
   end
 
+  describe "update_theme/2" do
+    test "new users start on System", %{user: user} do
+      assert user.theme == "system"
+    end
+
+    test "stores a Paper & Ink mode", %{user: user} do
+      assert {:ok, updated} = Users.update_theme(user, "dark")
+      assert updated.theme == "dark"
+    end
+
+    test "refuses legacy palette ids, which are only read-mapped", %{user: user} do
+      assert {:error, %Ecto.Changeset{}} = Users.update_theme(user, "claude")
+    end
+  end
+
   describe "change_user/2" do
     test "returns a changeset for the user" do
       user = %User{email: "test@example.com", name: "Test"}

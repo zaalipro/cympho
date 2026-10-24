@@ -9,6 +9,8 @@ defmodule Cympho.OwnerAttention do
 
   import Ecto.Query, warn: false
 
+  alias Cympho.Activities.Activity
+  alias Cympho.Agents.Agent
   alias Cympho.Approvals
   alias Cympho.BoardApprovals
   alias Cympho.Budgets
@@ -28,6 +30,16 @@ defmodule Cympho.OwnerAttention do
   @pubsub Cympho.PubSub
 
   @severity_rank %{critical: 0, high: 1, medium: 2, low: 3}
+  @owner_rank %{stopped: 0, problem: 1, question: 2, review: 3, approval: 4}
+  @problem_kinds [:agent_paused, :failed_run, :stuck_issue, :budget_incident, :human_action]
+  @kind_precedence %{
+    agent_paused: 0,
+    failed_run: 1,
+    interaction: 2,
+    review_queue: 3,
+    stuck_issue: 4,
+    human_action: 5
+  }
 
   @doc "Subscribes the current process to company-scoped attention changes."
   def subscribe(company_id) when is_binary(company_id) do
@@ -122,17 +134,146 @@ defmodule Cympho.OwnerAttention do
 
   def unresolved_count(_company_id, _user), do: 0
 
-  @doc false
-  def sort_and_deduplicate(items) when is_list(items) do
-    items
-    |> Enum.sort_by(fn item ->
+  @doc """
+  Counts from the same unlimited membership as `unresolved_count/2`: the total,
+  the total per owner kind (`owner_kind/1`) and the "for you" count per agent id.
+  """
+  def counts(company_id, user) when is_binary(company_id) do
+    items = membership_items(company_id, user, nil)
+
+    %{
+      total: length(items),
+      by_kind: Map.merge(empty_kind_counts(), Enum.frequencies_by(items, &owner_kind/1)),
+      by_agent:
+        items
+        |> Enum.map(&for_you_agent_id/1)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.frequencies()
+    }
+  end
+
+  def counts(_company_id, _user), do: %{total: 0, by_kind: empty_kind_counts(), by_agent: %{}}
+
+  @doc """
+  What `user` decided in the company in the last `:days` (default 7), newest
+  first: questions answered and confirmations accepted or declined
+  (`IssueThreadInteraction.resolved_at`), reviews accepted or sent back
+  (`approval_approved` / `approval_requested_changes` activities), and tasks
+  cancelled (`status_changed` to cancelled). Each row is
+  `%{action: :answered | :accepted | :declined | :sent_back | :cancelled, issue: %Issue{}, at: DateTime}`;
+  company scope comes from the task.
+  """
+  def recent_decisions(company_id, user, opts \\ [])
+
+  def recent_decisions(company_id, user, opts) when is_binary(company_id) do
+    case user_id(user) do
+      nil ->
+        []
+
+      user_id ->
+        since = DateTime.add(DateTime.utc_now(), -Keyword.get(opts, :days, 7) * 86_400, :second)
+
+        (decided_interactions(company_id, user_id, since) ++
+           decided_activities(company_id, user_id, since))
+        |> Enum.sort_by(&timestamp(&1.at), :desc)
+    end
+  end
+
+  def recent_decisions(_company_id, _user, _opts), do: []
+
+  defp decided_interactions(company_id, user_id, since) do
+    from(i in IssueThreadInteraction,
+      join: issue in Issue,
+      on: issue.id == i.issue_id,
+      where:
+        issue.company_id == ^company_id and i.resolved_by_user_id == ^user_id and
+          i.status in [:responded, :accepted, :rejected] and i.resolved_at >= ^since,
+      select: {i.status, i.resolved_at, issue}
+    )
+    |> Repo.all()
+    |> Enum.map(fn {status, at, issue} ->
+      %{action: decision_action(status), issue: issue, at: at}
+    end)
+  end
+
+  defp decided_activities(company_id, user_id, since) do
+    from(a in Activity,
+      join: issue in Issue,
+      on: issue.id == a.issue_id,
+      where:
+        issue.company_id == ^company_id and a.actor_type == "user" and a.actor_id == ^user_id and
+          a.inserted_at >= ^since and
+          (a.action in ["approval_approved", "approval_requested_changes"] or
+             (a.action == "status_changed" and fragment("?->>'to'", a.metadata) == "cancelled")),
+      select: {a.action, a.inserted_at, issue}
+    )
+    |> Repo.all()
+    |> Enum.map(fn {action, at, issue} ->
+      %{action: decision_action(action), issue: issue, at: at}
+    end)
+  end
+
+  defp decision_action(:responded), do: :answered
+  defp decision_action(:accepted), do: :accepted
+  defp decision_action(:rejected), do: :declined
+  defp decision_action("approval_approved"), do: :accepted
+  defp decision_action("approval_requested_changes"), do: :sent_back
+  defp decision_action("status_changed"), do: :cancelled
+
+  @doc "The owner's word for an item: `:stopped`, `:problem`, `:question`, `:review` or `:approval`."
+  def owner_kind(%{kind: :budget_incident, event_type: "budget_exceeded"}), do: :stopped
+  def owner_kind(%{kind: kind}) when kind in @problem_kinds, do: :problem
+  def owner_kind(%{kind: :interaction}), do: :question
+  def owner_kind(%{kind: :review_queue}), do: :review
+  def owner_kind(%{kind: kind}) when kind in [:approval, :board_approval], do: :approval
+
+  @doc """
+  Display order for the Next step and Needs you: stopped, problems newest first,
+  then questions, reviews and approvals oldest first. `list_items/3` keeps its
+  severity order; this only reorders what a page shows.
+  """
+  def owner_order(items) when is_list(items) do
+    Enum.sort_by(items, fn item ->
+      owner_kind = owner_kind(item)
+      age = timestamp(Map.get(item, :inserted_at))
+
       {
-        Map.get(@severity_rank, Map.get(item, :severity), 9),
-        -timestamp(Map.get(item, :inserted_at)),
+        Map.fetch!(@owner_rank, owner_kind),
+        if(owner_kind == :problem, do: -age, else: age),
         to_string(Map.get(item, :id, ""))
       }
     end)
+  end
+
+  defp empty_kind_counts, do: Map.new(Map.keys(@owner_rank), &{&1, 0})
+
+  @doc """
+  The agent an owner item counts for, the rule behind the "N for you" chips
+  (`counts/2`'s `by_agent`): a review waits on the work of the task's
+  assignee (the wake itself belongs to whoever reviews, the CEO for an
+  unassigned root task); every other item on its own agent.
+  """
+  def for_you_agent_id(%{kind: :review_queue, issue: %{assignee_id: id}}) when is_binary(id),
+    do: id
+
+  def for_you_agent_id(item), do: Map.get(item, :agent_id)
+
+  # One row per task: items sharing a dedup key keep the most specific kind,
+  # then the most severe and newest. Survivors keep severity-then-newest order.
+  @doc false
+  def sort_and_deduplicate(items) when is_list(items) do
+    items
+    |> Enum.sort_by(&{Map.get(@kind_precedence, Map.get(&1, :kind), 9), severity_order(&1)})
     |> Enum.uniq_by(&Map.get(&1, :dedup_key, Map.get(&1, :id)))
+    |> Enum.sort_by(&severity_order/1)
+  end
+
+  defp severity_order(item) do
+    {
+      Map.get(@severity_rank, Map.get(item, :severity), 9),
+      -timestamp(Map.get(item, :inserted_at)),
+      to_string(Map.get(item, :id, ""))
+    }
   end
 
   # Single membership path for list_items and unresolved_count.
@@ -150,7 +291,8 @@ defmodule Cympho.OwnerAttention do
       interaction_items(company_id, agent_id) ++
       failed_run_items(company_id, agent_id) ++
       stuck_issue_items(company_id) ++
-      budget_incident_items(company_id)
+      budget_incident_items(company_id) ++
+      paused_agent_items(company_id, agent_id)
   end
 
   defp human_action_items(company_id, user) do
@@ -188,7 +330,7 @@ defmodule Cympho.OwnerAttention do
     |> Enum.map(fn %{wake: wake, issue: issue} ->
       attention_item(%{
         id: wake.id,
-        dedup_key: "review:#{issue.id}",
+        dedup_key: "issue:#{issue.id}",
         kind: :review_queue,
         wake: wake,
         wake_id: wake.id,
@@ -276,6 +418,7 @@ defmodule Cympho.OwnerAttention do
         agent: interaction.created_by_agent,
         agent_id: interaction.created_by_agent_id,
         interaction_kind: interaction.kind,
+        questions: interaction_questions(interaction),
         title: interaction_title(interaction),
         summary: interaction_summary(interaction),
         card_body: card_body,
@@ -297,7 +440,7 @@ defmodule Cympho.OwnerAttention do
     |> Enum.map(fn run ->
       attention_item(%{
         id: "failed-run-#{run.id}",
-        dedup_key: "failed-run:#{run.issue_id}",
+        dedup_key: "issue:#{run.issue_id}",
         kind: :failed_run,
         source_id: run.id,
         issue: run.issue,
@@ -329,6 +472,7 @@ defmodule Cympho.OwnerAttention do
         dedup_key: "budget-policy:#{incident.budget_policy_id}",
         kind: :budget_incident,
         source_id: incident.id,
+        event_type: incident.event_type,
         target_label_text: "Company budget",
         title: budget_incident_title(incident),
         summary: budget_incident_summary(incident),
@@ -369,6 +513,84 @@ defmodule Cympho.OwnerAttention do
     end)
   end
 
+  # Agents a breaker or a hard stop paused. A person's own pause is not waiting
+  # on anyone, so agents with `paused_by_user_id` are left out.
+  defp paused_agent_items(company_id, agent_id) do
+    from(a in Agent,
+      where: a.company_id == ^company_id and a.status == :paused and is_nil(a.paused_by_user_id),
+      order_by: [desc: a.paused_at, desc: a.id]
+    )
+    |> maybe_filter_agent(agent_id)
+    |> Repo.all()
+    |> Enum.map(fn agent ->
+      {issue, streak} = failed_streak(agent)
+
+      attention_item(%{
+        id: "agent-paused-#{agent.id}",
+        dedup_key: if(issue, do: "issue:#{issue.id}", else: "agent-paused:#{agent.id}"),
+        kind: :agent_paused,
+        source_id: agent.id,
+        agent: agent,
+        agent_id: agent.id,
+        issue: issue,
+        issue_id: issue && issue.id,
+        runs: streak |> Enum.take(3) |> Enum.reverse(),
+        title: "Resume #{agent.name}",
+        summary: paused_agent_summary(agent, streak),
+        target_path: "/agents/#{agent.id}",
+        target_label: "Open #{agent.name}",
+        diagnostic: agent.pause_reason,
+        severity: :critical,
+        inserted_at: agent.paused_at || agent.updated_at
+      })
+    end)
+  end
+
+  # The task of the agent's latest failed run, and the agent's unbroken run of
+  # failures on it, newest first.
+  defp failed_streak(%Agent{id: agent_id, company_id: company_id}) do
+    latest_failed =
+      Repo.one(
+        from(r in Run,
+          join: issue in assoc(r, :issue),
+          where:
+            r.agent_id == ^agent_id and issue.company_id == ^company_id and
+              r.status in ^@failed_run_statuses,
+          order_by: [desc: fragment("COALESCE(?, ?)", r.completed_at, r.inserted_at), desc: r.id],
+          limit: 1,
+          preload: [issue: issue]
+        )
+      )
+
+    case latest_failed do
+      nil ->
+        {nil, []}
+
+      %Run{issue: issue} ->
+        streak =
+          from(r in Run,
+            where: r.agent_id == ^agent_id and r.issue_id == ^issue.id,
+            order_by: [
+              desc: fragment("COALESCE(?, ?)", r.completed_at, r.inserted_at),
+              desc: r.id
+            ],
+            limit: 20
+          )
+          |> Repo.all()
+          |> Enum.take_while(&(&1.status in @failed_run_statuses))
+
+        {issue, streak}
+    end
+  end
+
+  defp paused_agent_summary(%Agent{name: name}, []), do: "#{name} was paused automatically."
+
+  defp paused_agent_summary(%Agent{name: name}, [latest | _] = streak) do
+    attempts = if length(streak) == 1, do: "attempt", else: "attempts"
+    timed_out = if latest.status == "timed_out", do: " — timed out", else: ""
+    "#{name} stopped after #{length(streak)} failed #{attempts}#{timed_out}."
+  end
+
   defp attention_item(attrs) do
     Map.merge(
       %{
@@ -380,9 +602,11 @@ defmodule Cympho.OwnerAttention do
         interaction_kind: nil,
         issue: nil,
         issue_id: nil,
+        questions: [],
         raise_limit_path: nil,
         resume_path: nil,
         review_nudge: nil,
+        runs: [],
         source_id: nil,
         status: "action",
         summary: nil,
@@ -496,6 +720,11 @@ defmodule Cympho.OwnerAttention do
     do: :critical
 
   defp stuck_issue_severity(_issue), do: :high
+
+  defp maybe_filter_agent(query, agent_id) when is_binary(agent_id),
+    do: where(query, [a], a.id == ^agent_id)
+
+  defp maybe_filter_agent(query, _agent_id), do: query
 
   defp maybe_filter_run_agent(query, agent_id) when is_binary(agent_id),
     do: where(query, [r], r.agent_id == ^agent_id)
@@ -613,6 +842,35 @@ defmodule Cympho.OwnerAttention do
   end
 
   defp interaction_payload_lines(_kind, _payload), do: []
+
+  # The questions of an ask, each with its numbered answer options: only the
+  # canonical "question" key and 2–4 non-blank options of at most 120
+  # characters (owner decision); any other option shape keeps the question only.
+  defp interaction_questions(%IssueThreadInteraction{kind: :ask_user_questions, payload: payload}) do
+    (payload || %{})
+    |> Map.get("questions", [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{"question" => text} = question when is_binary(text) and text != "" ->
+        [%{question: truncate_card_text(text), options: answer_options(question["options"])}]
+
+      _ ->
+        []
+    end)
+  end
+
+  defp interaction_questions(_interaction), do: []
+
+  defp answer_options(options) when is_list(options) and length(options) in 2..4 do
+    if Enum.all?(
+         options,
+         &(is_binary(&1) and String.trim(&1) != "" and String.length(&1) <= 120)
+       ),
+       do: Enum.map(options, &String.trim/1),
+       else: []
+  end
+
+  defp answer_options(_options), do: []
 
   defp payload_message(payload) when is_map(payload) do
     case Map.get(payload, "message") do

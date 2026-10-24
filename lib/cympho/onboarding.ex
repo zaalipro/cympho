@@ -27,6 +27,11 @@ defmodule Cympho.Onboarding do
     issue_prefix
     engineer_count
     engineer_names
+    leader_names
+    budget_monthly_usd
+    price_input
+    price_output
+    readiness
     adapter
     runtime_model
     runtime_command
@@ -34,6 +39,7 @@ defmodule Cympho.Onboarding do
     role_runtimes
   )
   @paths ~w(start improve)
+  @leader_roles ~w(ceo cto product_manager designer)
   @allowed_adapters ~w(claude_code codex cursor http)
   @max_step 3
   @max_text_length 2_000
@@ -280,6 +286,38 @@ defmodule Cympho.Onboarding do
     |> Enum.take(8)
     |> Enum.map(&normalize_text(&1, 120))
     |> Enum.reject(&(&1 == "" or unsafe_text?(&1)))
+  end
+
+  # A blank leader name is kept: it means "use the role name" at launch.
+  defp sanitize_form_value("leader_names", names) when is_map(names) do
+    for role <- @leader_roles,
+        name = normalize_text(field(names, role), 120),
+        Map.has_key?(names, role) and not unsafe_text?(name),
+        into: %{},
+        do: {role, name}
+  end
+
+  defp sanitize_form_value("budget_monthly_usd", value) when is_binary(value) do
+    value = String.trim(value)
+    if Regex.match?(~r/^[1-9][0-9]{0,8}$/, value), do: value
+  end
+
+  defp sanitize_form_value(key, value)
+       when key in ["price_input", "price_output"] and is_binary(value) do
+    value = String.trim(value)
+    if String.length(value) <= 12 and Cympho.Finances.Pricing.valid_rate?(value), do: value
+  end
+
+  # The readiness result only: which runtime it was taken on and two booleans.
+  defp sanitize_form_value("readiness", %{} = result) do
+    checked = normalize_text(field(result, "checked"), 300)
+    installed = field(result, "installed")
+    signed_in = field(result, "signed_in")
+
+    if checked != "" and not unsafe_text?(checked) and is_boolean(installed) and
+         is_boolean(signed_in) do
+      %{"checked" => checked, "installed" => installed, "signed_in" => signed_in}
+    end
   end
 
   defp sanitize_form_value("engineer_count", value) do

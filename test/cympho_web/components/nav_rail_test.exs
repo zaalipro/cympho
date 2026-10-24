@@ -1,132 +1,156 @@
 defmodule CymphoWeb.Components.NavRailTest do
+  # r3: rewritten for the n2 Main navigation (six destinations with their pages,
+  # one Inbox count); the old sidebar sections, agent rows and Approvals badge are gone.
   use ExUnit.Case, async: true
   import Phoenix.LiveViewTest
 
-  defp agent(i), do: %{id: "a#{i}", name: "Engineer #{i}", role: :engineer, status: :idle}
-  defp project(i), do: %{id: "p#{i}", name: "Project #{i}", color: "#fff", open_count: i}
+  alias CymphoWeb.Components.NavRail
 
   defp render_rail(opts) do
-    render_component(
-      &CymphoWeb.Components.NavRail.nav_rail/1,
-      Keyword.merge([current_path: "/dashboard", projects: [], agents: []], opts)
-    )
+    render_component(&NavRail.nav_rail/1, Keyword.merge([current_path: "/"], opts))
   end
 
-  test "Projects/Agents are collapsible sections with a toggle + chevron" do
-    html = render_rail(projects: [project(1)], agents: [agent(1)])
-    assert html =~ ~s(data-nav-section="projects")
-    assert html =~ ~s(data-nav-section="agents")
-    assert html =~ ~s(data-nav-toggle="projects")
-    assert html =~ ~s(data-nav-toggle="agents")
-    assert html =~ "data-nav-chevron"
-    assert html =~ "data-nav-body"
+  defp nav(opts), do: opts |> render_rail() |> Floki.parse_fragment!()
+
+  defp current(doc) do
+    doc
+    |> Floki.find("a.d[aria-current]")
+    |> Enum.map(fn a ->
+      {a |> Floki.find(".lbl") |> Floki.text(), a |> Floki.attribute("aria-current") |> hd()}
+    end)
   end
 
-  test "agent section is capped and links to the complete team" do
-    html = render_rail(agents: Enum.map(1..9, &agent/1))
+  test "renders the six destinations in N1 order as the Main navigation" do
+    doc = nav([])
 
-    assert html =~ "Engineer 5"
-    refute html =~ "Engineer 6"
-    refute html =~ "Engineer 9"
-    assert html =~ "All agents"
-    assert html =~ ~s(href="/agents")
-    assert html =~ ">9<"
+    assert [_] = Floki.find(doc, ~s(nav.dest[aria-label="Main"]))
+    labels = doc |> Floki.find("a.d .lbl") |> Enum.map(&Floki.text/1)
+    assert labels == ~w(Home Inbox Tasks Team Spending Settings)
+
+    hrefs = doc |> Floki.find("a.d") |> Enum.map(&(Floki.attribute(&1, "href") |> hd()))
+    assert hrefs == ~w(/ /inbox /issues /agents /costs /settings)
   end
 
-  test "no overflow omits the all-agents row" do
-    html = render_rail(agents: Enum.map(1..3, &agent/1))
-
-    refute html =~ "All agents"
-  end
-
-  test "agent shortcuts stay visible in simple mode" do
-    html = render_rail(projects: [project(1)], agents: [agent(1)])
-    document = Floki.parse_document!(html)
-
-    [agent_section] = Floki.find(document, "[data-nav-section='agents']")
-    [project_section] = Floki.find(document, "[data-nav-section='projects']")
-
-    refute Floki.attribute(agent_section, "class") |> Enum.join(" ") =~ "ui-advanced-only"
-    assert Floki.attribute(project_section, "class") |> Enum.join(" ") =~ "ui-advanced-only"
-  end
-
-  test "renders a stable inbox badge id when unread count is present" do
-    html = render_rail(inbox_count: 7)
-
-    assert html =~ ~s(data-testid="nav-badge-inbox")
-    assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*7\s*<\/span>/s
-  end
-
-  test "keeps approvals in Advanced mode when decisions are pending" do
-    html = render_rail(approval_count: 3)
-    document = Floki.parse_document!(html)
-    [approval_link] = Floki.find(document, "a[href='/approvals?status=pending']")
-
-    assert html =~ ~s(href="/approvals?status=pending")
-    assert html =~ ~s(data-testid="nav-badge-approvals")
-    assert html =~ ~r/<span[^>]*data-testid="nav-badge-approvals"[^>]*>\s*3\s*<\/span>/s
-    assert Floki.attribute(approval_link, "class") |> Enum.join(" ") =~ "ui-advanced-only"
-  end
-
-  test "keeps an empty approvals shortcut in Advanced mode" do
-    html = render_rail(approval_count: 0)
-    document = Floki.parse_document!(html)
-    [approval_link] = Floki.find(document, "a[href='/approvals?status=pending']")
-
-    assert Floki.attribute(approval_link, "class") |> Enum.join(" ") =~ "ui-advanced-only"
-  end
-
-  test "keeps mode switching out of the navigation rail" do
-    html = render_rail([])
-
-    refute html =~ ~s(data-ui-mode-toggle)
-    assert html =~ "Home"
-    assert html =~ "Tasks"
-    assert html =~ "Team"
-    assert html =~ "ui-advanced-only"
-    assert html =~ "focus-visible:ring-2"
-  end
-
-  test "uses one simple Tasks item for both list and board routes" do
-    for current_path <- ["/issues", "/kanban"] do
-      html = render_rail(current_path: current_path)
-      document = Floki.parse_document!(html)
-      [tasks_link] = Floki.find(document, "a[href='/issues']")
-
-      assert Floki.text(tasks_link) =~ "Tasks"
-      refute Floki.attribute(tasks_link, "class") |> Enum.join(" ") =~ "ui-advanced-only"
-      assert Floki.attribute(tasks_link, "data-nav-matches") == ["/kanban"]
-      assert Floki.attribute(tasks_link, "data-active") == ["true"]
-      assert Floki.attribute(tasks_link, "aria-current") == ["page"]
-      assert Floki.find(document, "a[href='/kanban']") == []
-      refute html =~ ">Issues<"
+  test "marks exactly one destination: page on its root pages, true below them" do
+    for {path, expected} <- [
+          {"/", {"Home", "page"}},
+          {"/dashboard", {"Home", "page"}},
+          {"/issues", {"Tasks", "page"}},
+          {"/kanban", {"Tasks", "page"}},
+          {"/issues/x", {"Tasks", "true"}},
+          {"/projects/p1", {"Tasks", "true"}},
+          {"/board-approvals/b1", {"Inbox", "true"}},
+          {"/budgets", {"Spending", "true"}},
+          {"/settings/appearance", {"Settings", "page"}},
+          {"/companies/c1", {"Settings", "true"}}
+        ] do
+      assert current(nav(current_path: path)) == [expected], "on #{path}"
     end
+
+    assert current(nav(current_path: "/search")) == []
   end
 
-  test "does not duplicate runtime controls in navigation" do
-    html =
-      render_rail(
-        current_company: %{id: "company-1", status: "active"},
-        runtime_controls_allowed: true
-      )
+  test "lists each destination's pages; Advanced pages carry ui-advanced-only" do
+    doc = nav(current_path: "/issues")
 
-    refute html =~ "/runtime-control/"
+    kids = doc |> Floki.find(".kids a") |> Enum.map(&Floki.text/1)
+
+    for label <-
+          ["Activity", "Needs you", "Approval history", "All tasks", "Projects", "Goals"] ++
+            ["Repeating tasks", "Launch checklist", "People", "Org chart", "Spending limit"] do
+      assert label in kids
+    end
+
+    for href <- ~w(/reviews /workspaces /skills /operations /tool-call-traces) do
+      [li] =
+        doc
+        |> Floki.find(".kids li")
+        |> Enum.filter(&(Floki.find(&1, ~s(a[href="#{href}"])) != []))
+
+      assert "ui-advanced-only" in (li |> Floki.attribute("class") |> hd() |> String.split())
+    end
+
+    assert [all_tasks] = Floki.find(doc, ~s(.kids a[aria-current="page"]))
+    assert Floki.text(all_tasks) =~ "All tasks"
   end
 
-  test "keeps a hidden live inbox badge node when the unread count is zero" do
+  test "marks a destination's page: page on its path, true on the pages below it" do
+    marked = fn path ->
+      nav(current_path: path)
+      |> Floki.find(".kids a[aria-current]")
+      |> Enum.map(&{Floki.text(&1), &1 |> Floki.attribute("aria-current") |> hd()})
+    end
+
+    assert marked.("/issues") == [{"All tasks", "page"}]
+    assert marked.("/issues/x") == [{"All tasks", "true"}]
+    assert marked.("/agents/a1") == [{"People", "true"}]
+    assert marked.("/projects/p1") == [{"Projects", "true"}]
+    assert marked.("/issuesx") == []
+  end
+
+  # Board and Mine are views of the one Tasks page (List | Board, the Mine
+  # chip), so All tasks stays the current page under Tasks on both.
+  test "marks All tasks on its Board and Mine views, for the server render and app.js" do
+    marked = fn path ->
+      nav(current_path: path)
+      |> Floki.find(".kids a[aria-current]")
+      |> Enum.map(&{Floki.text(&1), &1 |> Floki.attribute("aria-current") |> hd()})
+    end
+
+    assert marked.("/kanban") == [{"All tasks", "page"}]
+    assert marked.("/my-issues") == [{"All tasks", "page"}]
+    assert marked.("/kanbanx") == []
+
+    [all_tasks] = Floki.find(nav([]), ~s(.kids a[href="/issues"]))
+    assert Floki.attribute(all_tasks, "data-nav-views") == ["/kanban,/my-issues"]
+    assert Floki.find(nav([]), ~s(.kids a[href="/projects"][data-nav-views])) == []
+  end
+
+  test "Compare companies appears only with more than one company" do
+    refute render_rail(company_count: 1) =~ "Compare companies"
+    assert render_rail(company_count: 2) =~ "Compare companies"
+  end
+
+  test "renders the Inbox count as one live node with the number and a spoken suffix" do
+    doc = nav(inbox_count: 7)
+
+    assert [count] = Floki.find(doc, ~s(a.d[href="/inbox"] .count[data-nav-badge="inbox"]))
+    assert Floki.attribute(count, "data-count") == ["7"]
+    assert [num] = Floki.find(count, "[data-badge-num][data-testid='nav-badge-inbox']")
+    assert String.trim(Floki.text(num)) == "7"
+    assert Floki.text(Floki.find(count, ".sr")) == " need you"
+  end
+
+  test "keeps a hidden Inbox count node at zero and shows no other badge" do
     html = render_rail(inbox_count: 0)
 
     refute html =~ ~s(data-testid="nav-badge-inbox")
     assert html =~ ~s(data-nav-badge="inbox")
     assert html =~ ~s(data-count="0")
     assert html =~ "hidden"
+    refute html =~ ~s(data-nav-badge="approvals")
   end
 
-  test "keeps a hidden live approvals badge node when no decisions are pending" do
-    html = render_rail(approval_count: 0)
+  test "renders the destination table for the client-side highlight" do
+    doc = nav([])
 
-    refute html =~ ~s(data-testid="nav-badge-approvals")
-    assert html =~ ~s(data-nav-badge="approvals")
-    assert html =~ ~s(data-count="0")
+    [tasks] = Floki.find(doc, ~s(a.d[href="/issues"]))
+
+    assert Floki.attribute(tasks, "data-nav-matches")
+           |> hd()
+           |> String.split(",")
+           |> Enum.member?("/kanban")
+
+    assert Floki.attribute(tasks, "data-nav-roots") == ["/issues,/kanban"]
+
+    [settings] = Floki.find(doc, ~s(a.d[href="/settings"]))
+    assert Floki.attribute(settings, "data-nav-roots") == ["/settings,/settings/*"]
+  end
+
+  test "keeps runtime controls and mode switching out of the navigation" do
+    html = render_rail([])
+
+    refute html =~ "/runtime-control/"
+    refute html =~ "data-ui-mode-toggle"
   end
 end

@@ -1,8 +1,9 @@
 defmodule CymphoWeb.SettingsLive.Appearance do
   @moduledoc """
-  Theme picker. Persists the choice to the current user (`Cympho.Themes` is the
-  source of truth for valid ids) and pushes `set-theme` so the `phx:set-theme`
-  client listener flips `<html data-theme>` live and mirrors it into the cookie.
+  Mode picker (Light, Dark, System). Persists the choice to the current user
+  (`Cympho.Themes` is the source of truth for valid ids) and pushes `set-theme`
+  so the `phx:set-theme` client listener flips `<html data-mode>` live and
+  mirrors it into the cookie.
   """
   use CymphoWeb, :live_view
 
@@ -14,7 +15,7 @@ defmodule CymphoWeb.SettingsLive.Appearance do
     {:ok,
      socket
      |> assign(:page_title, "Appearance")
-     |> assign(:grouped, Themes.grouped())
+     |> assign(:themes, Themes.all())
      |> assign(:current_theme, current_theme(socket))}
   end
 

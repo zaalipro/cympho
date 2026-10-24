@@ -79,6 +79,61 @@ defmodule Cympho.OnboardingTest do
     refute serialized =~ "never-store-this"
   end
 
+  test "the draft keeps leader names, the spending limit, Codex prices and readiness results",
+       %{user: user} do
+    assert {:ok, _user} =
+             Onboarding.save_draft(user.id, %{
+               "path" => "start",
+               "current_step" => 2,
+               "form" => %{
+                 "leader_names" => %{
+                   "ceo" => " Ada ",
+                   "cto" => "",
+                   "designer" => "token=never-store-this",
+                   "intern" => "Not a leader"
+                 },
+                 "budget_monthly_usd" => "300",
+                 "price_input" => " 0.75 ",
+                 "price_output" => "four",
+                 "readiness" => %{
+                   "checked" => "claude_code||",
+                   "installed" => true,
+                   "signed_in" => true,
+                   "api_key" => "never-store-this"
+                 }
+               }
+             })
+
+    form = Onboarding.get_draft(user.id)["form"]
+
+    assert form["leader_names"] == %{"ceo" => "Ada", "cto" => ""}
+    assert form["budget_monthly_usd"] == "300"
+    assert form["price_input"] == "0.75"
+    refute Map.has_key?(form, "price_output")
+
+    assert form["readiness"] == %{
+             "checked" => "claude_code||",
+             "installed" => true,
+             "signed_in" => true
+           }
+
+    refute inspect(form) =~ "never-store-this"
+
+    {:ok, _user} =
+      Onboarding.save_draft(user.id, %{
+        "path" => "start",
+        "form" => %{
+          "name" => "Kept Co",
+          "budget_monthly_usd" => "-5",
+          "readiness" => %{"checked" => "codex||", "installed" => "yes"}
+        }
+      })
+
+    form = Onboarding.get_draft(user.id)["form"]
+    refute Map.has_key?(form, "budget_monthly_usd")
+    refute Map.has_key?(form, "readiness")
+  end
+
   test "secret-like values in otherwise safe text fields are discarded", %{user: user} do
     assert {:ok, _user} =
              Onboarding.save_draft(user.id, %{

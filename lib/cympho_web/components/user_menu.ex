@@ -1,13 +1,13 @@
 defmodule CymphoWeb.Components.UserMenu do
   @moduledoc """
-  Bottom-of-sidebar user pill that opens a popover menu with the
-  overflow nav (Org / Approvals / Costs / Activity / Workspaces /
-  Plugins / Skills / Tool traces), search, shortcuts, settings.
-
-  Pairs with the `UserMenu` JS hook in app.js for click-outside
-  dismissal and escape handling.
+  The rail's account row (r3 `div.acct`): a closed menu holding only personal
+  items (N2): Profile, Appearance, the Simple/Advanced switch, Help, Keyboard
+  shortcuts and Sign out. Every page lives under its destination in the Main
+  navigation, so there is no "More" block here.
   """
   use Phoenix.Component
+
+  import CymphoWeb.Components.R3, only: [r3_icon: 1]
 
   use Phoenix.VerifiedRoutes,
     endpoint: CymphoWeb.Endpoint,
@@ -16,227 +16,71 @@ defmodule CymphoWeb.Components.UserMenu do
   @dev Mix.env() == :dev
 
   attr :user, :any, default: nil
-  attr :current_path, :string, default: "/"
 
   def user_menu(assigns) do
     assigns = assign(assigns, :initials, initials(assigns.user))
 
     ~H"""
-    <div id="user-menu" phx-hook="UserMenu" class="relative">
-      <button
-        type="button"
-        data-user-menu-trigger
-        aria-haspopup="menu"
-        aria-expanded="false"
-        class={[
-          "w-full flex items-center gap-2.5 px-2 py-2 rounded-lg",
-          "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 transition-colors"
-        ]}
-      >
-        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-brand/25 bg-brand/15 text-[11px] font-590 text-brand shadow-[0_0_12px_-2px_rgb(var(--color-primary-rgb)/0.35)]">
-          {@initials}
-        </span>
-        <span class="flex-1 truncate text-left text-[13px] font-510">
-          {if @user, do: @user.name || @user.email, else: "Guest"}
-        </span>
-        <span class="hero-ellipsis-horizontal-mini w-4 h-4 text-text-quaternary"></span>
-      </button>
-
-      <div
-        data-user-menu-popover
-        data-ui-complex-page
-        role="menu"
-        class={[
-          "hidden absolute bottom-full left-0 right-0 mb-2 z-50 rounded-xl",
-          "cympho-menu-panel bg-surface-2 border border-hairline shadow-dialog overflow-hidden"
-        ]}
-      >
-        <div :if={!@user} class="px-3 py-2.5 border-b border-hairline">
-          <p class="text-sm font-590 text-text-primary truncate">Guest session</p>
-          <p class="text-xs text-text-quaternary truncate">
-            Sign in to load company projects and agents.
-          </p>
+    <div class="acct">
+      <details>
+        <summary>
+          <span class="av" aria-hidden="true">{@initials}</span>
+          <span class="acct-name">{if @user, do: @user.name || @user.email, else: "Guest"}</span>
+          <.r3_icon name="i-chev-updown" />
+        </summary>
+        <div class="menu up">
+          <%= if @user do %>
+            <.link navigate={~p"/settings/profile"} data-runtime-menu-close>Profile</.link>
+            <.link navigate={~p"/settings/appearance"} data-runtime-menu-close>
+              Appearance
+            </.link>
+            <div
+              class="menu-mode"
+              data-ui-mode-switch
+              data-sidebar-ui-mode-switch
+              data-sidebar-ui-mode-toggle
+              role="group"
+              aria-label="Interface mode"
+              aria-describedby="interface-mode-help"
+            >
+              <button
+                type="button"
+                data-ui-mode-option="simple"
+                data-active="true"
+                aria-pressed="true"
+                aria-controls="main-content"
+                title="Simple view — guided essentials"
+                class="ui-mode-option"
+              >
+                Simple
+              </button>
+              <button
+                type="button"
+                data-ui-mode-option="advanced"
+                data-active="false"
+                aria-pressed="false"
+                aria-controls="main-content"
+                title="Advanced view — full controls and diagnostics"
+                class="ui-mode-option"
+              >
+                Advanced
+              </button>
+            </div>
+            <.link navigate={~p"/docs"} data-runtime-menu-close>Help</.link>
+            <button type="button" data-shortcuts-btn data-runtime-menu-close>
+              Keyboard shortcuts
+            </button>
+            <.link href={~p"/logout"} method="delete">Sign out</.link>
+          <% else %>
+            <.link href={~p"/login"}>Sign in</.link>
+            <.link :if={dev?()} href="/dev/login">Dev owner</.link>
+            <.link navigate={~p"/docs"}>Help</.link>
+          <% end %>
         </div>
-        <div :if={@user} class="px-3 py-2.5 border-b border-hairline">
-          <p class="text-sm font-590 text-text-primary truncate">{@user.name || "Account"}</p>
-          <p class="text-xs text-text-quaternary truncate">{@user.email}</p>
-        </div>
-
-        <div :if={!@user} class="py-1">
-          <.menu_link
-            to={~p"/login"}
-            icon="hero-arrow-right-on-rectangle-mini"
-            current={@current_path}
-            label="Sign in"
-          />
-          <.menu_link
-            :if={dev?()}
-            to="/dev/login"
-            icon="hero-bolt-mini"
-            current={@current_path}
-            label="Dev owner"
-          />
-        </div>
-
-        <div class="ui-advanced-only py-1">
-          <p class="px-3 pt-1.5 pb-0.5 font-serif text-[12px] font-510 italic tracking-[0.02em] text-brand/80">
-            More
-          </p>
-          <.menu_link
-            to={~p"/org-chart"}
-            icon="hero-share-mini"
-            current={@current_path}
-            label="Org chart"
-          />
-          <.menu_link
-            to={~p"/approvals"}
-            icon="hero-check-circle-mini"
-            current={@current_path}
-            label="Approvals"
-          />
-          <.menu_link
-            to={~p"/costs"}
-            icon="hero-currency-dollar-mini"
-            current={@current_path}
-            label="Costs"
-          />
-          <.menu_link
-            to={~p"/activity"}
-            icon="hero-bolt-mini"
-            current={@current_path}
-            label="Activity"
-          />
-          <.menu_link
-            to={~p"/operations"}
-            icon="hero-command-line-mini"
-            current={@current_path}
-            label="Operations"
-          />
-          <.menu_link
-            to={~p"/workspaces"}
-            icon="hero-rectangle-stack-mini"
-            current={@current_path}
-            label="Workspaces"
-            advanced_only
-          />
-          <.menu_link
-            to={~p"/plugins"}
-            icon="hero-puzzle-piece-mini"
-            current={@current_path}
-            label="Plugins"
-            advanced_only
-          />
-          <.menu_link
-            to={~p"/skills"}
-            icon="hero-academic-cap-mini"
-            current={@current_path}
-            label="Skills"
-            advanced_only
-          />
-          <.menu_link
-            to={~p"/tool-call-traces"}
-            icon="hero-magnifying-glass-mini"
-            current={@current_path}
-            label="Tool traces"
-            advanced_only
-          />
-        </div>
-
-        <div class="py-1 border-t border-hairline">
-          <button
-            type="button"
-            data-action="open-command-palette"
-            class={menu_row_class(false)}
-            role="menuitem"
-          >
-            <span class="hero-magnifying-glass-mini w-4 h-4 text-text-tertiary group-hover:text-text-primary">
-            </span>
-            <span class="flex-1 text-left">Search</span>
-            <kbd class="kbd">⌘K</kbd>
-          </button>
-          <button
-            type="button"
-            data-action="open-shortcuts"
-            class={[menu_row_class(false), "ui-advanced-only"]}
-            role="menuitem"
-          >
-            <span class="hero-command-line-mini w-4 h-4 text-text-tertiary group-hover:text-text-primary">
-            </span>
-            <span class="flex-1 text-left">Keyboard shortcuts</span>
-            <kbd class="kbd">?</kbd>
-          </button>
-          <.menu_link
-            to={~p"/docs"}
-            icon="hero-book-open-mini"
-            current={@current_path}
-            label="Documentation"
-          />
-          <.menu_link
-            to={~p"/settings/profile"}
-            icon="hero-cog-6-tooth-mini"
-            current={@current_path}
-            label="Settings"
-          />
-          <.menu_logout_link
-            :if={@user}
-            to={~p"/logout"}
-            icon="hero-arrow-left-on-rectangle-mini"
-            label="Sign out"
-          />
-        </div>
-      </div>
+      </details>
     </div>
     """
   end
-
-  attr :to, :string, required: true
-  attr :icon, :string, required: true
-  attr :label, :string, required: true
-  attr :current, :string, required: true
-  # Hidden while the UI is in simple mode.
-  attr :advanced_only, :boolean, default: false
-
-  defp menu_link(assigns) do
-    active? = active?(assigns.to, assigns.current)
-    assigns = assign(assigns, :active?, active?)
-
-    ~H"""
-    <.link
-      navigate={@to}
-      class={[menu_row_class(@active?), @advanced_only && "ui-advanced-only"]}
-      role="menuitem"
-    >
-      <span class={[@icon, "w-4 h-4 text-text-tertiary group-hover:text-text-primary"]}></span>
-      <span class="flex-1 text-left">{@label}</span>
-    </.link>
-    """
-  end
-
-  attr :to, :string, required: true
-  attr :icon, :string, required: true
-  attr :label, :string, required: true
-
-  defp menu_logout_link(assigns) do
-    ~H"""
-    <.link href={@to} method="delete" class={menu_row_class(false)} role="menuitem">
-      <span class={[@icon, "w-4 h-4 text-text-tertiary group-hover:text-text-primary"]}></span>
-      <span class="flex-1 text-left">{@label}</span>
-    </.link>
-    """
-  end
-
-  defp menu_row_class(active?) do
-    [
-      "group flex w-full items-center gap-2.5 px-3 py-1.5 text-[13px] font-510 transition-[background-color,color,box-shadow] duration-150",
-      "text-text-secondary hover:bg-surface-3 hover:text-text-primary",
-      "hover:shadow-[inset_2px_0_0_0_var(--color-primary)]",
-      active? && "bg-surface-3 text-text-primary shadow-[inset_2px_0_0_0_var(--color-primary)]"
-    ]
-  end
-
-  defp active?(path, current),
-    do: current == path or String.starts_with?(current || "", path <> "/")
 
   defp initials(nil), do: "?"
 

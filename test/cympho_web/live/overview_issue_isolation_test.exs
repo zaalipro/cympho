@@ -21,7 +21,8 @@ defmodule CymphoWeb.OverviewIssueIsolationTest do
     {c_issue, _} = running_issue(c, "C_ISSUE", user_id)
 
     {:ok, home, html} = live(conn, "/")
-    assert html =~ "What should the team do?"
+    # r3: Home is the r3 page (the Simple prompt bar is gone).
+    assert html =~ ~s(data-page="home")
     assert html =~ ~s(href="/overview")
     # Sidebar navigation belongs to the static layout, outside LiveViewTest's DOM.
     GenServer.stop(home.pid)
@@ -50,7 +51,8 @@ defmodule CymphoWeb.OverviewIssueIsolationTest do
     refute "company:#{a.id}:runs" in Registry.keys(Cympho.PubSub, b_view.pid)
 
     # Leaving issue Show must remove its company subscriptions, not just hide the panel.
-    {:ok, b_tasks, _} = navigate(b_view, recycle(b_conn), "/issues", "Issues")
+    # r3: the task page's way back is the breadcrumb's "Tasks" (was the "Issues" back link).
+    {:ok, b_tasks, _} = navigate(b_view, recycle(b_conn), "/issues", "Tasks")
     wait_until(fn -> assert Registry.keys(Cympho.PubSub, b_view.pid) == [] end)
     GenServer.stop(b_tasks.pid)
     {:ok, overview, _} = live(recycle(b_conn), "/overview")

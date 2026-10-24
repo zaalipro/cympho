@@ -13,7 +13,7 @@ defmodule CymphoWeb.IssueLive.MyIssues do
 
     {:ok,
      socket
-     |> assign(:page_title, "My Issues")
+     |> assign(:page_title, "Mine")
      |> assign(:agents, [])
      |> assign(:infinite_scroll, %{})
      |> assign(:current_tab, "active")}
@@ -39,11 +39,6 @@ defmodule CymphoWeb.IssueLive.MyIssues do
     socket = assign(socket, :multiple_projects?, multiple_projects?(socket))
 
     {:noreply, init_stream(socket, :issues, &fetch_issues(socket, &1))}
-  end
-
-  @impl true
-  def handle_event("switch_tab", %{"tab" => tab}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/my-issues?tab=#{tab}")}
   end
 
   @impl true
@@ -139,27 +134,22 @@ defmodule CymphoWeb.IssueLive.MyIssues do
     |> where([i], i.status not in [:done, :cancelled])
   end
 
-  def status_label(:in_progress), do: "In progress"
-  def status_label(:in_review), do: "In review"
-  def status_label(status), do: status |> to_string() |> String.capitalize()
+  @tabs [
+    {"active", "Active"},
+    {"created_by_me", "Created by me"},
+    {"watching", "Watching"},
+    {"all", "All"}
+  ]
 
-  def status_color(:backlog), do: "bg-gray-400"
-  def status_color(:todo), do: "bg-blue-400"
-  def status_color(:in_progress), do: "bg-yellow-400"
-  def status_color(:in_review), do: "bg-purple-400"
-  def status_color(:done), do: "bg-green-400"
-  def status_color(:blocked), do: "bg-brand"
-  def status_color(_), do: "bg-gray-400"
+  # Mine keeps its four meanings, one tab each.
+  def tabs, do: @tabs
 
-  def priority_color(:critical), do: "text-brand"
-  def priority_color(:high), do: "text-orange-400"
-  def priority_color(:medium), do: "text-yellow-400"
-  def priority_color(:low), do: "text-gray-400"
-  def priority_color(_), do: "text-gray-400"
-
-  def tab_active?("active", "active"), do: "bg-surface-hover text-text-primary"
-  def tab_active?("created_by_me", "created_by_me"), do: "bg-surface-hover text-text-primary"
-  def tab_active?("watching", "watching"), do: "bg-surface-hover text-text-primary"
-  def tab_active?("all", "all"), do: "bg-surface-hover text-text-primary"
-  def tab_active?(_, _), do: "text-text-secondary hover:text-text-primary"
+  # The owner's words for task states (v2 spec §1.4), with their shape.
+  def status_state(:backlog), do: {:idle, "Later"}
+  def status_state(:todo), do: {:idle, "To do"}
+  def status_state(:in_progress), do: {:working, "Working"}
+  def status_state(:in_review), do: {:waiting, "In review"}
+  def status_state(:blocked), do: {:stopped, "Blocked"}
+  def status_state(:done), do: {:done, "Done"}
+  def status_state(_cancelled), do: {:idle, "Cancelled"}
 end

@@ -1,40 +1,135 @@
-<.page size="wide" data-ui-complex-page data-density={@digest_density} class="ember-aurora">
-  <div class="relative z-[1]">
-    <.header>
-      <div class="min-w-0">
-        <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-          {@page_title}
-        </h1>
-        <p
-          :if={@digest_density == "detailed"}
-          class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary"
-        >
-          Triage, assign, and track autonomous work across the company.
-        </p>
-      </div>
-      <:actions>
-        <.task_view_switch current="list" />
-        <.density_switch
-          density={@digest_density}
-          compact_patch={issue_index_url(assigns, %{"density" => "compact", "page" => "1"})}
-          detailed_patch={issue_index_url(assigns, %{"density" => "detailed", "page" => "1"})}
-        />
-        <.app_link
-          navigate={~p"/issues/new"}
-          class="inline-flex shrink-0 items-center gap-2 cta-glow rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
-        >
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
-          New Issue
-        </.app_link>
-      </:actions>
-    </.header>
+<.page_frame page="tasks" title="Tasks" data-ui-complex-page data-density={@digest_density}>
+  <:header_end>
+    <.task_view_switch current="list" params={Tasks.filter_params(@view_params)} />
+  </:header_end>
+
+  <Tasks.toolbar
+    search={@current_search}
+    active={filter_count(assigns)}
+    mine_href={~p"/my-issues"}
+  >
+    <:filters>
+      <.combobox
+        id="filter-status"
+        label="Status"
+        placeholder="Any status"
+        searchable?={false}
+        options={
+          Enum.map(
+            Cympho.Issues.Issue.status_options(),
+            &%{id: to_string(&1), label: status_label(&1)}
+          )
+        }
+        selected={@current_status}
+        on_change="combobox_status"
+      />
+      <.combobox
+        id="filter-assignee"
+        label="Person"
+        placeholder="Anyone"
+        options={Enum.map(@agents, &%{id: &1.id, label: &1.name})}
+        selected={@current_assignee_id}
+        on_change="combobox_assignee"
+      />
+      <.combobox
+        id="filter-project"
+        label="Project"
+        placeholder="Any project"
+        options={Enum.map(@projects, &%{id: &1.id, label: &1.name})}
+        selected={@current_project_id}
+        on_change="combobox_project"
+      />
+      <.combobox
+        id="filter-priority"
+        label="Priority"
+        placeholder="Any priority"
+        searchable?={false}
+        options={
+          Enum.map(
+            Cympho.Issues.Issue.priority_options(),
+            &%{id: to_string(&1), label: String.capitalize(to_string(&1))}
+          )
+        }
+        selected={@current_priority}
+        on_change="combobox_priority"
+      />
+      <.combobox
+        id="filter-label"
+        label="Label"
+        placeholder="Any label"
+        options={Enum.map(@labels, &%{id: &1.id, label: &1.name})}
+        selected={@current_label_id}
+        on_change="combobox_label"
+      />
+      <button :if={filters_active?(assigns)} type="button" class="pl" phx-click="clear_filters">
+        Clear all
+      </button>
+    </:filters>
+  </Tasks.toolbar>
+
+  <%!-- The Next step (S3): the company stopped at its limit comes first;
+       otherwise the first decision opens inside its own group, and with none,
+       all clear (or agents off when nothing at all waits on the owner, D1). --%>
+  <NextStep.paused_step :if={@tasks_stopped?} spending={@spending} />
+  <NextStep.server_off_step :if={
+    !@tasks_stopped? and !@open_decision and !@owner_items? and !@orchestrator_enabled?
+  } />
+  <NextStep.all_clear
+    :if={!@tasks_stopped? and !@open_decision and (@owner_items? or @orchestrator_enabled?)}
+    title="Nothing is waiting on you"
+  />
+
+  <section
+    :for={group <- Enum.reject(@task_groups, & &1.closed?)}
+    class="grp"
+    aria-labelledby={"tg-#{group.key}"}
+  >
+    <h2 class="gh" id={"tg-#{group.key}"}>
+      {group.label} <span class="mono">{group.count}</span>
+    </h2>
+    <%= if group.open? do %>
+      <.retry_pair :if={@open_decision.kind == :retry} open={@open_decision} />
+      <NextStep.pair
+        :if={@open_decision.kind == :item}
+        item={@open_decision.item}
+        from="/issues"
+        agents={@agent_names}
+      />
+    <% end %>
+    <ul :if={group.rows != []} class="rows trows">
+      <.task_row :for={row <- group.rows} row={row} />
+    </ul>
+  </section>
+
+  <div :if={Enum.any?(@task_groups, & &1.closed?)} class="grp-shut">
+    <details
+      :for={group <- Enum.filter(@task_groups, & &1.closed?)}
+      id={"tg-#{group.key}-d"}
+      class="grp grp-d"
+      phx-mounted={JS.ignore_attributes("open")}
+    >
+      <summary>
+        <h2 class="gh" id={"tg-#{group.key}"}>
+          {group.label} <span class="mono">{group.count}</span>
+        </h2>
+        <.r3_icon name="i-chev-down" />
+      </summary>
+      <ul class="rows trows">
+        <.task_row :for={row <- group.rows} row={row} />
+      </ul>
+    </details>
+  </div>
+
+  <%!-- Advanced: the triage lanes, the attention queue and the paged table,
+       unchanged below the r3 list (plan §0.2); the filters above drive both. --%>
+  <div class="ui-advanced-only">
+    <div class="mb-3 mt-6 flex justify-end">
+      <.density_switch
+        density={@digest_density}
+        compact_patch={issue_index_url(assigns, %{"density" => "compact", "page" => "1"})}
+        detailed_patch={issue_index_url(assigns, %{"density" => "detailed", "page" => "1"})}
+      />
+    </div>
 
     <section class="mb-4">
       <div class="mb-2 flex items-center justify-between px-1">
@@ -183,121 +278,6 @@
         </.app_link>
       </div>
     </section>
-
-    <div class="cympho-panel mb-4 p-3">
-      <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-        <form phx-submit="search" class="min-w-0 flex-1">
-          <div class="relative">
-            <svg
-              class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-quaternary"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
-            <input
-              type="text"
-              name="search"
-              value={@current_search}
-              placeholder="Search issues..."
-              class="cympho-field h-10 w-full pl-9 pr-3 text-sm placeholder:text-text-quaternary"
-            />
-          </div>
-        </form>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <.combobox
-            id="filter-status"
-            label="Status"
-            placeholder="Any status"
-            searchable?={false}
-            options={
-              Enum.map(
-                Cympho.Issues.Issue.status_options(),
-                &%{id: to_string(&1), label: status_label(&1)}
-              )
-            }
-            selected={@current_status}
-            on_change="combobox_status"
-          />
-
-          <.combobox
-            id="filter-priority"
-            label="Priority"
-            placeholder="Any priority"
-            searchable?={false}
-            options={
-              Enum.map(
-                Cympho.Issues.Issue.priority_options(),
-                &%{id: to_string(&1), label: String.capitalize(to_string(&1))}
-              )
-            }
-            selected={@current_priority}
-            on_change="combobox_priority"
-          />
-
-          <.combobox
-            id="filter-assignee"
-            label="Assignee"
-            placeholder="Any assignee"
-            options={Enum.map(@agents, &%{id: &1.id, label: &1.name})}
-            selected={@current_assignee_id}
-            on_change="combobox_assignee"
-          />
-
-          <.combobox
-            id="filter-project"
-            label="Project"
-            placeholder="Any project"
-            options={Enum.map(@projects, &%{id: &1.id, label: &1.name})}
-            selected={@current_project_id}
-            on_change="combobox_project"
-          />
-
-          <.combobox
-            id="filter-label"
-            label="Label"
-            placeholder="Any label"
-            options={Enum.map(@labels, &%{id: &1.id, label: &1.name})}
-            selected={@current_label_id}
-            on_change="combobox_label"
-          />
-        </div>
-      </div>
-
-      <div
-        :if={filters_active?(assigns)}
-        class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-hairline pt-2.5"
-      >
-        <span class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
-          Showing
-        </span>
-        <button
-          :for={chip <- active_filter_chips(assigns)}
-          type="button"
-          title="Remove this filter"
-          {%{"phx-click" => chip.event, "phx-value-#{chip.key}" => ""}}
-          class="group/chip inline-flex max-w-56 items-center gap-1.5 rounded-full border border-brand/25 bg-brand/10 px-2.5 py-1 text-[11px] font-510 text-brand transition-colors hover:border-brand/40 hover:bg-brand/15"
-        >
-          <span class="truncate">{chip.label}</span>
-          <span class="hero-x-mark-mini h-3 w-3 shrink-0 opacity-60 group-hover/chip:opacity-100">
-          </span>
-        </button>
-        <button
-          type="button"
-          phx-click="clear_filters"
-          class="ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-590 text-text-tertiary transition-colors hover:bg-subtle hover:text-text-primary"
-        >
-          Clear all
-        </button>
-      </div>
-    </div>
 
     <div class="mb-2 flex items-center justify-between px-1 text-xs text-text-quaternary">
       <span>{@total} {pluralize(@total, "issue")}</span>
@@ -521,4 +501,4 @@
       </button>
     </div>
   </div>
-</.page>
+</.page_frame>

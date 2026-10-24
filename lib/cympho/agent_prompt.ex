@@ -963,7 +963,7 @@ defmodule Cympho.AgentPrompt do
         ## HIGH PRIORITY WORK MODE — ASK ME FIRST
         This issue is clarification-only until the owner responds. This contract overrides role playbooks, wake guidance, and ordinary completion rules.
 
-        Do not implement, edit files, delegate, create child issues, or take operational side effects. Emit exactly one `ask_user_questions` action with 1–5 specific question objects shaped as `{"question":"..."}`. You may pair it with one concise owner-facing `comment` explaining why the answers matter. The server rejects any incompatible action batch.
+        Do not implement, edit files, delegate, create child issues, or take operational side effects. Emit exactly one `ask_user_questions` action with 1–5 specific question objects shaped as `{"question":"..."}`, each with optionally `options`: 2–4 short answers the owner can pick by number (`{"question":"...","options":["...","..."]}`). You may pair it with one concise owner-facing `comment` explaining why the answers matter. The server rejects any incompatible action batch.
         Stop after asking. The issue resumes in Standard mode and wakes you after the owner responds.
         """
         |> String.trim()
@@ -2454,7 +2454,7 @@ defmodule Cympho.AgentPrompt do
 
     `attach_work_product` has a strict schema: use `title` for the artifact name, optional `description` for artifact contents/summary, optional `kind`, `payload`, `metadata`, and `url`. Valid `kind` values are `code_change`, `document`, `url`, `artifact`, or `other`; for strategy plans/specs, use `document`. If you include `payload`, it must be a JSON object; put long artifact text in `description` or in `payload.text`. Do not use `name` or `content` keys for work products.
 
-    Structured owner interactions are server-rendered and pause the issue. `ask_user_questions` requires `questions` with 1–5 objects shaped as `{"question":"..."}` and accepts an optional `message`. `request_confirmation` requires a concrete `message` and accepts optional `details` and `target_document_id`. In Plan first mode, attach a non-empty document plan in the same or an earlier turn; Cympho auto-targets its revision when `target_document_id` is omitted. Do not imitate these with a prose comment: use the action so the owner can respond and the creating agent can be resumed.
+    Structured owner interactions are server-rendered and pause the issue. `ask_user_questions` requires `questions` with 1–5 objects shaped as `{"question":"..."}`, optionally `options`: 2–4 short answers; it accepts an optional `message`. `request_confirmation` requires a concrete `message` and accepts optional `details` and `target_document_id`. In Plan first mode, attach a non-empty document plan in the same or an earlier turn; Cympho auto-targets its revision when `target_document_id` is omitted. Do not imitate these with a prose comment: use the action so the owner can respond and the creating agent can be resumed.
 
     A run is incomplete if the current issue remains `in_progress` and assigned to you. After delegation or decomposition, also emit a state-changing action such as `handoff`, `block_issue`, `approve_issue`, or `request_changes`. For CEO decomposition where child issues must finish first, use `block_issue` with a clear `[blocked]` comment such as "Waiting for delegated sub-issues."
 

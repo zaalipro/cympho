@@ -3,6 +3,7 @@ defmodule Cympho.OwnerAttentionTest do
 
   import Ecto.Query
 
+  alias Cympho.AgentGovernance
   alias Cympho.Agents
   alias Cympho.Approvals
   alias Cympho.BoardApprovals
@@ -108,13 +109,16 @@ defmodule Cympho.OwnerAttentionTest do
         company_id: other_company.id
       })
 
-    insert_run!(company, agent, company_issue, "failed")
+    # r3: B1 one row per task — each kind on its own task so every kind still shows.
+    failed_issue = issue!(company.id, "Company failure")
+    review_issue = issue!(company.id, "Company review")
+    insert_run!(company, agent, failed_issue, "failed")
     insert_run!(other_company, other_agent, other_issue, "failed")
 
     {:ok, _wake} =
       Wakes.do_wake_agent(
         agent.id,
-        company_issue.id,
+        review_issue.id,
         "final_review_required",
         "system",
         "test",
@@ -207,8 +211,56 @@ defmodule Cympho.OwnerAttentionTest do
 
     items = OwnerAttention.list_items(context.company.id, context.user)
 
-    assert Enum.count(items, &(&1.kind == :review_queue)) == 1
-    assert Enum.map(items, & &1.kind) == [:failed_run, :approval, :review_queue]
+    # r3: B1 one row per task — the failed run outranks the review on that issue.
+    assert Enum.count(items, &(&1.issue_id == issue.id)) == 1
+    assert Enum.map(items, & &1.kind) == [:failed_run, :approval]
+  end
+
+  describe "one row per task (B1)" do
+    test "a blocked task with a failed run is one row: the failed run", context do
+      issue = issue!(context.company.id, "Blocked and failed", priority: :critical)
+      {:ok, issue} = Issues.update_issue(issue, %{status: :blocked})
+      insert_run!(context.company, context.agent, issue, "failed")
+
+      items = OwnerAttention.list_items(context.company.id, context.user)
+
+      assert [%{kind: :failed_run}] = Enum.filter(items, &(&1.issue_id == issue.id))
+      assert OwnerAttention.unresolved_count(context.company.id, context.user) == length(items)
+    end
+
+    test "a blocked task with a pending question is one row: the question", context do
+      issue = issue!(context.company.id, "Blocked on a question", priority: :critical)
+      {:ok, issue} = Issues.update_issue(issue, %{status: :blocked})
+
+      {:ok, _question} =
+        IssueThreadInteractions.create_interaction(%{
+          issue_id: issue.id,
+          kind: :ask_user_questions,
+          payload: %{"questions" => [%{"question" => "Which first?"}]},
+          created_by_agent_id: context.agent.id
+        })
+
+      items = OwnerAttention.list_items(context.company.id, context.user)
+
+      assert [%{kind: :interaction}] = Enum.filter(items, &(&1.issue_id == issue.id))
+    end
+
+    test "an in-review task with a review wake that also stalled is one row: the review",
+         context do
+      issue = issue!(context.company.id, "Review stalled", assignee_id: context.agent.id)
+      {:ok, issue} = Issues.update_issue(issue, %{status: :in_review})
+      stale_at = DateTime.utc_now() |> DateTime.add(-2 * 3600) |> DateTime.truncate(:second)
+
+      Repo.update_all(from(i in Issues.Issue, where: i.id == ^issue.id),
+        set: [updated_at: stale_at]
+      )
+
+      insert_wake!(context.agent, issue, "final_review_required")
+
+      items = OwnerAttention.list_items(context.company.id, context.user)
+
+      assert [%{kind: :review_queue}] = Enum.filter(items, &(&1.issue_id == issue.id))
+    end
   end
 
   test "list_action_items includes reviews so Needs you matches the badge set", context do
@@ -648,7 +700,7 @@ defmodule Cympho.OwnerAttentionTest do
     failed_issue = issue!(context.company.id, "Provider died")
     insert_run!(context.company, context.agent, failed_issue, "failed")
 
-    # human-assigned issue that also failed — two membership keys (issue: + failed-run:)
+    # r3: B1 one row per task — human-assigned issue that also failed shares the issue: key
     human_failed =
       issue!(context.company.id, "Human + failure", assignee_user_id: context.user.id)
 
@@ -710,11 +762,341 @@ defmodule Cympho.OwnerAttentionTest do
     blocked_rows = Enum.filter(items, &(&1.issue_id == blocked.id))
     assert length(blocked_rows) == 1
 
-    # human + failed_run keeps both keys.
-    human_failed_rows = Enum.filter(items, &(&1.issue_id == human_failed.id))
-    assert length(human_failed_rows) == 2
-    assert Enum.any?(human_failed_rows, &(&1.kind == :human_action))
-    assert Enum.any?(human_failed_rows, &(&1.kind == :failed_run))
+    # r3: B1 one row per task — human + failed_run is one row, the failed run.
+    assert [%{kind: :failed_run}] = Enum.filter(items, &(&1.issue_id == human_failed.id))
+  end
+
+  describe "paused agents (B2)" do
+    test "an automatically paused agent is one row with its failed runs, merged with its task",
+         context do
+      issue = issue!(context.company.id, "Totals tests", assignee_id: context.agent.id)
+      {:ok, issue} = Issues.update_issue(issue, %{status: :blocked})
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      insert_run!(context.company, context.agent, issue, "failed", DateTime.add(now, -300))
+      insert_run!(context.company, context.agent, issue, "failed", DateTime.add(now, -200))
+      insert_run!(context.company, context.agent, issue, "timed_out", DateTime.add(now, -100))
+
+      {:ok, _paused} = Agents.pause_agent(context.agent, "3 failed attempts in a row")
+
+      items = OwnerAttention.list_items(context.company.id, context.user)
+
+      assert [item] = Enum.filter(items, &(&1.issue_id == issue.id))
+      assert item.kind == :agent_paused
+      assert item.agent_id == context.agent.id
+      assert item.title == "Resume Attention Agent"
+      assert item.summary == "Attention Agent stopped after 3 failed attempts — timed out."
+      assert item.severity == :critical
+      assert item.target_path == "/agents/#{context.agent.id}"
+      assert Enum.map(item.runs, & &1.status) == ["failed", "failed", "timed_out"]
+      assert OwnerAttention.unresolved_count(context.company.id, context.user) == length(items)
+
+      refute Enum.any?(
+               OwnerAttention.list_items(context.company.id, context.user,
+                 agent_id: context.other_agent.id
+               ),
+               &(&1.kind == :agent_paused)
+             )
+    end
+
+    test "an agent paused by a person is not listed", context do
+      assert {:ok, _paused} =
+               AgentGovernance.pause_agent(
+                 context.agent.id,
+                 [reason: "Owner pause"],
+                 context.user
+               )
+
+      refute Enum.any?(
+               OwnerAttention.list_items(context.company.id, context.user),
+               &(&1.kind == :agent_paused)
+             )
+    end
+
+    test "pausing and resuming notify, and resuming clears the row", context do
+      company_id = context.company.id
+      :ok = OwnerAttention.subscribe(company_id)
+
+      {:ok, paused} = Agents.pause_agent(context.agent, "No-progress circuit breaker")
+      assert_receive {:owner_attention_changed, ^company_id}
+
+      assert [%{kind: :agent_paused, issue_id: nil, runs: []} = item] =
+               OwnerAttention.list_items(company_id, context.user)
+
+      assert item.summary == "Attention Agent was paused automatically."
+
+      {:ok, _resumed} = Agents.resume_agent(paused)
+      assert_receive {:owner_attention_changed, ^company_id}
+      assert OwnerAttention.list_items(company_id, context.user) == []
+    end
+
+    test "another company's paused agent is never listed", context do
+      {:ok, _paused} = Agents.pause_agent(context.other_agent, "Breaker")
+
+      refute Enum.any?(
+               OwnerAttention.list_items(context.company.id, context.user),
+               &(&1.kind == :agent_paused)
+             )
+
+      assert OwnerAttention.counts(context.company.id, context.user).total == 0
+    end
+  end
+
+  describe "owner_kind/1 and owner_order/1" do
+    test "map every item kind to the owner's five kinds" do
+      assert OwnerAttention.owner_kind(%{kind: :budget_incident, event_type: "budget_exceeded"}) ==
+               :stopped
+
+      assert OwnerAttention.owner_kind(%{kind: :budget_incident, event_type: "warning"}) ==
+               :problem
+
+      for kind <- [:agent_paused, :failed_run, :stuck_issue, :human_action] do
+        assert OwnerAttention.owner_kind(%{kind: kind}) == :problem
+      end
+
+      assert OwnerAttention.owner_kind(%{kind: :interaction}) == :question
+      assert OwnerAttention.owner_kind(%{kind: :review_queue}) == :review
+      assert OwnerAttention.owner_kind(%{kind: :approval}) == :approval
+      assert OwnerAttention.owner_kind(%{kind: :board_approval}) == :approval
+    end
+
+    test "order stopped, problems newest first, then questions, reviews, approvals oldest first" do
+      t = fn minutes -> DateTime.add(~U[2026-10-21 07:40:00Z], -minutes * 60) end
+
+      items = [
+        %{id: "hire", kind: :board_approval, inserted_at: t.(102)},
+        %{id: "q2", kind: :interaction, inserted_at: t.(53)},
+        %{id: "older-problem", kind: :failed_run, inserted_at: t.(300)},
+        %{id: "review", kind: :review_queue, inserted_at: t.(129)},
+        %{id: "q1", kind: :interaction, inserted_at: t.(208)},
+        %{id: "newer-problem", kind: :agent_paused, inserted_at: t.(228)},
+        %{id: "older-approval", kind: :approval, inserted_at: t.(400)},
+        %{
+          id: "stopped",
+          kind: :budget_incident,
+          event_type: "budget_exceeded",
+          inserted_at: t.(5)
+        }
+      ]
+
+      assert items |> OwnerAttention.owner_order() |> Enum.map(& &1.id) ==
+               ~w(stopped newer-problem older-problem q1 q2 review older-approval hire)
+    end
+  end
+
+  describe "counts/2" do
+    test "counts a review for the task's assignee, not the reviewer", context do
+      {:ok, reviewer} =
+        Agents.create_agent(%{name: "Reviewer", role: :ceo, company_id: context.company.id})
+
+      issue = issue!(context.company.id, "Review my work", assignee_id: context.agent.id)
+      insert_wake!(reviewer, issue, "final_review_required")
+
+      insert_wake!(
+        context.other_agent,
+        issue!(context.other_company.id, "Foreign"),
+        "final_review_required"
+      )
+
+      assert OwnerAttention.counts(context.company.id, context.user) == %{
+               total: 1,
+               by_kind: %{stopped: 0, problem: 0, question: 0, review: 1, approval: 0},
+               by_agent: %{context.agent.id => 1}
+             }
+    end
+  end
+
+  describe "question answer options" do
+    test "a question keeps 2 to 4 short options; anything else keeps the question only",
+         context do
+      long = String.duplicate("a", 121)
+
+      payloads = [
+        {"Two options", ["Retry", "Email"]},
+        {"One option", ["Retry"]},
+        {"Five options", ["1", "2", "3", "4", "5"]},
+        {"A non-string option", ["Retry", 3]},
+        {"An over-long option", ["Retry", long]},
+        {"A blank option", ["Retry", " "]}
+      ]
+
+      for {title, options} <- payloads do
+        issue = issue!(context.company.id, title)
+
+        {:ok, _} =
+          IssueThreadInteractions.create_interaction(%{
+            issue_id: issue.id,
+            kind: :ask_user_questions,
+            payload: %{
+              "questions" => [
+                %{"question" => title, "options" => options},
+                %{"label" => "Never render provider-secret-value"}
+              ]
+            },
+            created_by_agent_id: context.agent.id
+          })
+      end
+
+      questions =
+        context.company.id
+        |> OwnerAttention.list_items(context.user)
+        |> Map.new(&{&1.issue.title, &1.questions})
+
+      assert questions["Two options"] == [%{question: "Two options", options: ["Retry", "Email"]}]
+
+      for title <- [
+            "One option",
+            "Five options",
+            "A non-string option",
+            "An over-long option",
+            "A blank option"
+          ] do
+        assert questions[title] == [%{question: title, options: []}]
+      end
+    end
+
+    test "items other than questions carry no questions", context do
+      {:ok, _} =
+        Issues.create_issue(%{
+          title: "Blocked task",
+          status: :blocked,
+          company_id: context.company.id
+        })
+
+      assert [%{kind: :human_action, questions: []}] =
+               OwnerAttention.list_items(context.company.id, context.user)
+    end
+  end
+
+  describe "the r3 dataset" do
+    setup do
+      %{nw: Cympho.R3Fixtures.northwind!()}
+    end
+
+    test "a question item carries its question and its answer options", %{nw: nw} do
+      item =
+        nw.company.id
+        |> OwnerAttention.list_items(nw.user)
+        |> Enum.find(&(&1.source_id == nw.questions["Q1"].id))
+
+      assert item.questions == [
+               %{
+                 question: "When a customer's card payment fails, what should happen first?",
+                 options: [
+                   "Retry automatically after 3 days",
+                   "Email the customer first",
+                   "Both: email now, retry in 3 days"
+                 ]
+               }
+             ]
+    end
+
+    test "Needs you is one row per task, in the owner's order", %{nw: nw} do
+      items = nw.company.id |> OwnerAttention.list_items(nw.user) |> OwnerAttention.owner_order()
+
+      assert Enum.map(items, & &1.kind) == [
+               :agent_paused,
+               :interaction,
+               :interaction,
+               :review_queue,
+               :board_approval
+             ]
+
+      assert [paused, q1, q2, review, hire] = items
+      assert paused.agent_id == nw.agents["Mira"].id
+      assert paused.issue_id == nw.issues["NW-10"].id
+      assert paused.title == "Resume Mira"
+      assert length(paused.runs) == 3
+      assert q1.source_id == nw.questions["Q1"].id
+      assert q2.source_id == nw.questions["Q2"].id
+      assert review.issue_id == nw.issues["NW-4"].id
+      assert hire.source_id == nw.hire.id
+    end
+
+    test "counts per kind and per agent", %{nw: nw} do
+      counts = OwnerAttention.counts(nw.company.id, nw.user)
+      names = Map.new(nw.agents, fn {name, agent} -> {agent.id, name} end)
+
+      assert counts.total == 5
+      assert counts.total == OwnerAttention.unresolved_count(nw.company.id, nw.user)
+      assert counts.by_kind == %{stopped: 0, problem: 1, question: 2, review: 1, approval: 1}
+
+      assert Map.new(counts.by_agent, fn {id, n} -> {names[id], n} end) == %{
+               "Mira" => 1,
+               "Priya" => 1,
+               "Ravi" => 2,
+               "Theo" => 1
+             }
+    end
+  end
+
+  describe "recent_decisions" do
+    setup do
+      %{nw: Cympho.R3Fixtures.northwind!()}
+    end
+
+    test "lists what the user decided in the last 7 days, newest first", %{nw: nw} do
+      decisions = OwnerAttention.recent_decisions(nw.company.id, nw.user, days: 7)
+
+      assert Enum.map(decisions, &{&1.action, &1.issue.identifier}) == [
+               {:cancelled, "NW-11"},
+               {:accepted, "NW-2"},
+               {:accepted, "NW-1"}
+             ]
+
+      assert Enum.map(decisions, & &1.at) ==
+               Enum.map([2720, 3775, 4950], &Cympho.R3Fixtures.at(nw.anchor, &1))
+    end
+
+    test "an answered question is a decision", %{nw: nw} do
+      {:ok, _} =
+        IssueThreadInteractions.resolve_interaction(nw.questions["Q1"], %{
+          "status" => :responded,
+          "resolved_by_user_id" => nw.user.id,
+          "response" => "Email the customer first"
+        })
+
+      assert [%{action: :answered, issue: %{identifier: "NW-6"}} | _] =
+               OwnerAttention.recent_decisions(nw.company.id, nw.user)
+    end
+
+    test "leaves out older decisions, other people's and other companies'", %{nw: nw} do
+      other = Cympho.R3Fixtures.northwind!()
+      old = DateTime.add(nw.anchor, -8 * 86_400, :second)
+
+      insert_activity!(nw.issues["NW-3"], "user", nw.user.id, "approval_approved", old)
+      insert_activity!(nw.issues["NW-8"], "user", other.user.id, "approval_approved", nw.anchor)
+
+      insert_activity!(
+        nw.issues["NW-9"],
+        "agent",
+        nw.agents["Theo"].id,
+        "approval_approved",
+        nw.anchor
+      )
+
+      # The same person deciding in another company stays in that company.
+      insert_activity!(other.issues["NW-3"], "user", nw.user.id, "approval_approved", nw.anchor)
+
+      assert nw.company.id
+             |> OwnerAttention.recent_decisions(nw.user)
+             |> Enum.map(& &1.issue.id) ==
+               Enum.map(~w(NW-11 NW-2 NW-1), &nw.issues[&1].id)
+
+      assert OwnerAttention.recent_decisions(nw.company.id, nil) == []
+      assert OwnerAttention.recent_decisions(nil, nw.user) == []
+    end
+
+    defp insert_activity!(issue, actor_type, actor_id, action, at) do
+      Repo.insert!(%Cympho.Activities.Activity{
+        company_id: issue.company_id,
+        issue_id: issue.id,
+        actor_type: actor_type,
+        actor_id: actor_id,
+        action: action,
+        metadata: %{},
+        inserted_at: at
+      })
+    end
   end
 
   defp issue!(company_id, title, opts \\ []) do
@@ -722,7 +1104,7 @@ defmodule Cympho.OwnerAttentionTest do
       title: title,
       description: "Owner attention test issue",
       status: :todo,
-      priority: :medium,
+      priority: Keyword.get(opts, :priority, :medium),
       company_id: company_id
     }
 

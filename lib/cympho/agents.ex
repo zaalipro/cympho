@@ -1358,6 +1358,18 @@ defmodule Cympho.Agents do
           {:agent_paused, updated}
         )
 
+        Cympho.OwnerAttention.notify_changed(updated.company_id)
+
+        # B6 "Work stopped: an agent was paused".
+        Cympho.Notifications.Dispatcher.notify_company_opt_in(
+          updated.company_id,
+          "work_stopped",
+          fn ->
+            {"#{updated.name} was paused", "#{updated.name} was paused: #{reason}",
+             %{agent_id: updated.id}}
+          end
+        )
+
         {:ok, updated}
 
       error ->
@@ -1394,6 +1406,7 @@ defmodule Cympho.Agents do
           {:agent_updated, updated}
         )
 
+        Cympho.OwnerAttention.notify_changed(updated.company_id)
         {:ok, updated}
 
       error ->

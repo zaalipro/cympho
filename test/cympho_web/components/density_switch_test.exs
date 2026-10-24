@@ -78,14 +78,16 @@ defmodule CymphoWeb.Components.DensitySwitchTest do
     layout =
       File.read!(Path.join([File.cwd!(), "lib/cympho_web/controllers/layouts/root.html.heex"]))
 
-    assert script =~ "const ADVANCED_ONLY_GOTO_KEYS = new Set(['i', 'g'])"
+    # r3: Tasks is one of the six destinations in both modes (N1), so its palette
+    # entry and `g i` are in Simple too; Goals stays Advanced.
+    assert script =~ "const ADVANCED_ONLY_GOTO_KEYS = new Set(['g'])"
     assert script =~ "currentUIMode() === 'advanced' || !ADVANCED_ONLY_GOTO_KEYS.has(key)"
     assert layout =~ ~r/id="command-palette"\s+data-ui-complex-page/
     assert layout =~ ~r/id="shortcuts-modal"\s+data-ui-complex-page/
-    assert layout =~ ~r/href="\/issues"\s+class="command-item ui-advanced-only/
+    assert layout =~ ~r/href="\/issues"\s+class="command-item flex/
     assert layout =~ ~r/href="\/goals"\s+class="command-item ui-advanced-only/
-    assert layout =~ ~r/class="ui-advanced-only[^\"]*"[^>]*>\s*<span[^>]*>Go to Issues/
     assert layout =~ ~r/class="ui-advanced-only[^\"]*"[^>]*>\s*<span[^>]*>Go to Goals/
+    refute layout =~ "Go to Issues"
 
     assert layout =~
              ~r/data-testid="quick-create-swarm-controls"\s+class="ui-advanced-only/

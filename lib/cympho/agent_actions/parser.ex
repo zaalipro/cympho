@@ -606,7 +606,7 @@ defmodule Cympho.AgentActions.Parser do
         question = normalize_string_keys(question)
 
         case require_bounded_string(question, "question", 500) do
-          :ok -> {:cont, {:ok, [Map.take(question, ["question"]) | acc]}}
+          :ok -> {:cont, {:ok, [normalize_user_question(question) | acc]}}
           error -> {:halt, error}
         end
 
@@ -620,6 +620,26 @@ defmodule Cympho.AgentActions.Parser do
   end
 
   defp validate_user_questions(_questions), do: {:error, :invalid_user_questions}
+
+  # The owner answers with a numbered choice when a question carries 2–4 short
+  # answers (each non-blank, at most 120 characters). Any other options value is
+  # dropped and the question kept, so a malformed list never rejects the action.
+  defp normalize_user_question(question) do
+    options = question["options"]
+
+    if is_list(options) and length(options) in 2..4 and Enum.all?(options, &answer_option?/1) do
+      %{"question" => question["question"], "options" => Enum.map(options, &String.trim/1)}
+    else
+      Map.take(question, ["question"])
+    end
+  end
+
+  defp answer_option?(option) when is_binary(option) do
+    trimmed = String.trim(option)
+    trimmed != "" and String.length(trimmed) <= 120
+  end
+
+  defp answer_option?(_option), do: false
 
   # Inline review comments are an optional list of `%{path, line, body}`
   # objects. We allow an empty/missing list — the action body alone may be

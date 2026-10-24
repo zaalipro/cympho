@@ -363,7 +363,7 @@ defmodule CymphoWeb.PluginLive.Index do
   end
 
   def plugin_empty_action_class(:primary) do
-    "inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-white transition-colors hover:bg-primary-hover"
+    "inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-on-primary transition-colors hover:bg-primary-hover"
   end
 
   def plugin_empty_action_class(_tone) do

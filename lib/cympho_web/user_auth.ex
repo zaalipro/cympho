@@ -106,6 +106,24 @@ defmodule CymphoWeb.UserAuth do
     {:cont, socket}
   end
 
+  # The root layout's live team list (CymphoWeb.TeamRailLive): only who is signed
+  # in and which of their companies they are looking at. It runs on its own (it is
+  # not mounted at the router), so it loads no sidebar data and attaches no hooks.
+  def on_mount(:team_rail, _params, session, socket) do
+    socket = assign_current_user(socket, session)
+
+    socket =
+      if socket.assigns.current_user do
+        socket
+        |> assign_user_companies()
+        |> assign_current_company(session)
+      else
+        assign(socket, :current_company, nil)
+      end
+
+    {:cont, socket}
+  end
+
   # Blocks company-less users from the app proper; they are funneled into
   # /onboarding (its live_session mounts only :default) until they own a
   # company membership. Prevents orphan rows like projects with NULL company.
@@ -163,6 +181,34 @@ defmodule CymphoWeb.UserAuth do
   end
 
   def safe_return_path(_path), do: nil
+
+  # Origins a deep page may offer "Back to …" for (N5), with their glossary names.
+  @from_labels %{
+    "/" => "Home",
+    "/inbox" => "Inbox",
+    "/issues" => "Tasks",
+    "/kanban" => "Board",
+    "/my-issues" => "Mine",
+    "/agents" => "Team",
+    "/costs" => "Spending",
+    "/activity" => "Activity",
+    "/approvals" => "Approval history",
+    "/search" => "Search"
+  }
+
+  @doc """
+  Validates a `?from=` origin for a deep page's "Back to …" link. Returns
+  `{path, label}` for an allow-listed page (its query string dropped), else nil.
+  """
+  def safe_from(from) do
+    with path when is_binary(path) <- safe_return_path(from),
+         path = path |> String.split("?", parts: 2) |> hd(),
+         label when is_binary(label) <- Map.get(@from_labels, path) do
+      {path, label}
+    else
+      _ -> nil
+    end
+  end
 
   defp redirect_to_login(conn) do
     return_to = current_path(conn)
@@ -273,9 +319,15 @@ defmodule CymphoWeb.UserAuth do
             count = owner_inbox_badge_count(company_id, socket.assigns[:current_user])
             socket = put_inbox_badge_counts(socket, count)
 
-            if socket.view == CymphoWeb.InboxLive.Index,
-              do: {:cont, socket},
-              else: {:halt, socket}
+            # Inbox, Home, Team and Agent redraw their decisions from the same change.
+            if socket.view in [
+                 CymphoWeb.InboxLive.Index,
+                 CymphoWeb.DashboardLive.Index,
+                 CymphoWeb.AgentLive.Index,
+                 CymphoWeb.AgentLive.Show
+               ],
+               do: {:cont, socket},
+               else: {:halt, socket}
 
           _message, socket ->
             {:cont, socket}
@@ -481,6 +533,7 @@ defmodule CymphoWeb.UserAuth do
     %{
       id: company.id,
       name: company.name,
+      issue_prefix: company.issue_prefix,
       logo_url: company.logo_url,
       status: company.status,
       paused_at: company.paused_at,

@@ -1,93 +1,75 @@
 <.settings_layout active={:appearance}>
-  <.header title="Appearance">
-    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Pick a theme. It applies instantly and is saved to your account, so it follows you across devices.
-    </p>
-    <p class="ui-simple-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Pick a theme. It applies straight away.
-    </p>
-  </.header>
+  <.header title="Appearance" />
 
-  <section :for={{group, themes} <- @grouped} class="mb-10">
-    <h2 class="mb-3 font-serif text-[15px] font-510 italic tracking-[0.01em] text-brand/90">
-      {group}
-    </h2>
-    <div class="stagger-children grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <button
-        :for={theme <- themes}
-        type="button"
-        phx-click="set_theme"
-        phx-value-theme={theme.id}
-        aria-pressed={theme.id == @current_theme}
-        class={[
-          "group card-lift relative rounded-2xl border p-3 text-left transition-all focus:outline-none focus-ring",
-          if(theme.id == @current_theme,
-            do: "border-brand ring-2 ring-brand/40 shadow-card",
-            else: "border-hairline hover:border-hairline-strong hover:shadow-card"
-          )
-        ]}
-      >
-        <div
-          :if={theme.id == @current_theme}
-          class="badge-pop absolute right-4 top-4 z-[1] flex h-7 w-7 items-center justify-center rounded-full bg-brand text-on-primary shadow-card"
-        >
-          <.icon name="hero-check" class="h-4 w-4" />
-        </div>
-        <div
-          class={[
-            "aspect-[16/10] w-full overflow-hidden rounded-xl border border-black/10",
-            theme.id == @current_theme || "opacity-90 transition-opacity group-hover:opacity-100"
-          ]}
-          style={"background-color: #{theme.swatch.bg};"}
-        >
-          <div class="flex h-full w-full flex-col gap-2 p-3">
-            <div class="flex items-center gap-1.5">
-              <span
-                class="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={"background-color: #{theme.swatch.accent};"}
-              >
-              </span>
-              <span
-                class="h-1.5 w-16 rounded-full"
-                style={"background-color: #{theme.swatch.ink}; opacity:.85;"}
-              >
-              </span>
-            </div>
-            <div
-              class="h-9 w-full rounded-lg"
-              style={"background-color: #{theme.swatch.surface};"}
-            >
-            </div>
-            <div class="mt-auto flex items-center gap-2">
-              <span
-                class="inline-block h-6 w-16 rounded-md"
-                style={"background-color: #{theme.swatch.accent};"}
-              >
-              </span>
-              <span
-                class="h-1.5 w-12 rounded-full"
-                style={"background-color: #{theme.swatch.ink}; opacity:.5;"}
-              >
-              </span>
+  <section class="card" aria-label="Appearance">
+    <div class="ap">
+      <form phx-change="set_theme" aria-label="Colour">
+        <fieldset class="thm">
+          <legend>Colour</legend>
+          <div class="thm-g">
+            <div :for={theme <- @themes} class="thm-w">
+              <input
+                class="opt-in"
+                type="radio"
+                id={"theme-#{theme.id}"}
+                name="theme"
+                value={theme.id}
+                checked={theme.id == @current_theme}
+              />
+              <label class="thm-c" for={"theme-#{theme.id}"}>
+                <span class="pv" aria-hidden="true">
+                  <span :if={theme.id != "dark"} class="lt pg">
+                    <span class="cd"></span><span class="ik"></span>
+                  </span>
+                  <span
+                    :if={theme.id != "light"}
+                    class={["dk pg", theme.id == "system" && "half"]}
+                  >
+                    <span class="cd"></span><span class="ik"></span>
+                  </span>
+                </span>
+                <span class="thm-row">
+                  <span class="thm-n">{theme.name}<small>{theme.blurb}</small></span>
+                  <span class="radio" aria-hidden="true"></span>
+                </span>
+              </label>
             </div>
           </div>
-        </div>
+        </fieldset>
+      </form>
 
-        <div class="mt-3 flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-590 text-text-primary">{theme.name}</span>
-              <span
-                :if={theme.id == @current_theme}
-                class="rounded-full bg-brand/15 px-2 py-0.5 text-[10px] font-590 text-brand"
-              >
-                Active
-              </span>
-            </div>
-            <p class="truncate text-caption text-text-tertiary">{theme.blurb}</p>
-          </div>
+      <div class="ap-d">
+        <p class="ap-l" id="appearance-ui-mode">Detail</p>
+        <%!-- The shell's Simple/Advanced switch (app.js applyUIMode keeps data-active and aria-pressed). --%>
+        <div
+          class="seg"
+          data-ui-mode-switch
+          data-appearance-ui-mode
+          role="group"
+          aria-labelledby="appearance-ui-mode"
+          aria-describedby="appearance-detail-help"
+        >
+          <button
+            type="button"
+            data-ui-mode-option="simple"
+            data-active="true"
+            aria-pressed="true"
+            aria-controls="main-content"
+          >
+            Simple
+          </button>
+          <button
+            type="button"
+            data-ui-mode-option="advanced"
+            data-active="false"
+            aria-pressed="false"
+            aria-controls="main-content"
+          >
+            Advanced
+          </button>
         </div>
-      </button>
+        <p class="help" id="appearance-detail-help">Advanced adds technical pages and details.</p>
+      </div>
     </div>
   </section>
 </.settings_layout>

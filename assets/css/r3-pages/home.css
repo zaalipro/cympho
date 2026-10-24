@@ -1,0 +1,12 @@
+/* r3 page CSS: home. Owned by A3 (Home); no other track edits this file.
+   - Every selector starts with .cy-r3; scope page-only rules with .cy-r3 [data-page="…"]
+     (data-page sits on the page frame rendered by page_frame/1).
+   - No colour literal: use the tokens (app.css :root, themes.css). A new colour token goes into
+     the light block and both identical dark copies, never here.
+   - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
+   - Shared components belong in r3.css, not here. */
+
+/* Needs you is absent when the Next step is the only decision; Last 24 hours then takes the row */
+.cy-r3 [data-page="home"] .lower>:only-child{grid-column:1 / -1}
+/* "N more in Inbox" under the four Needs-you rows */
+.cy-r3 [data-page="home"] .more{padding:2px 8px 4px}

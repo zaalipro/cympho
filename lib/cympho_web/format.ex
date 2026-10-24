@@ -30,7 +30,7 @@ defmodule CymphoWeb.Format do
   def role_avatar_class(:cto), do: "bg-sky-500/15 text-sky-300"
   def role_avatar_class(:engineer), do: "bg-emerald-500/15 text-emerald-300"
   def role_avatar_class(:product_manager), do: "bg-amber-500/15 text-amber-300"
-  def role_avatar_class(:designer), do: "bg-fuchsia-500/15 text-fuchsia-300"
+  def role_avatar_class(:designer), do: "bg-subtle text-text-secondary"
   def role_avatar_class(_), do: "bg-subtle text-text-secondary"
 
   @doc """
@@ -39,4 +39,17 @@ defmodule CymphoWeb.Format do
   def format_datetime(nil), do: "—"
   def format_datetime(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M:%S")
   def format_datetime(_), do: "—"
+
+  @doc "Dollars as the r3 pages write them: \"$300\", \"$186.50\", \"$3.68\"."
+  def money(%Decimal{} = amount) do
+    rounded = Decimal.round(amount, 2)
+
+    if Decimal.equal?(rounded, Decimal.round(rounded, 0)),
+      do: "$#{rounded |> Decimal.round(0) |> Decimal.to_string(:normal)}",
+      else: "$#{Decimal.to_string(rounded, :normal)}"
+  end
+
+  @doc "A spend window in days, as the r3 pages say it: \"30 days\", \"24 hours\"."
+  def window(1), do: "24 hours"
+  def window(days), do: "#{days} days"
 end

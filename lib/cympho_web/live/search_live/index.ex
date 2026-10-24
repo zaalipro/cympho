@@ -412,7 +412,7 @@ defmodule CymphoWeb.SearchLive.Index do
   end
 
   defp search_command_action_class(:primary) do
-    "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+    "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
   end
 
   defp search_command_action_class(_tone) do

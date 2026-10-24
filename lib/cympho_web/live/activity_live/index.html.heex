@@ -214,12 +214,14 @@
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="text-sm font-590 text-text-primary">
-                    {actor_name(activity)}
+                    {actor_name(activity, @actor_names)}
                   </span>
                   <%!-- System rows printed "System" twice; only show the pill
                        when it adds something the name does not. --%>
                   <span
-                    :if={format_actor_type(activity.actor_type) != actor_name(activity)}
+                    :if={
+                      format_actor_type(activity.actor_type) != actor_name(activity, @actor_names)
+                    }
                     class="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 text-text-tertiary"
                   >
                     {format_actor_type(activity.actor_type)}

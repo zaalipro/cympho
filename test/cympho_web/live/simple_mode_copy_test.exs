@@ -39,10 +39,10 @@ defmodule CymphoWeb.SimpleModeCopyTest do
 
       {:ok, _view, html} = live(conn, "/costs")
 
-      # Cost command summary.
-      assert html =~ "No spend has landed yet, but a budget cap makes launch decisions safer"
-      assert html =~ "No spending limit is set yet."
-      # Breakdown empty state.
+      # r3: the limit block's Next step replaces the cost command summary.
+      assert html =~ "Set a spending limit"
+      assert html =~ "Nothing stops agents from spending more."
+      # Breakdown empty state: the plain line in Simple, the operator one in Advanced.
       assert html =~ "Set a spending limit before launching more runtime"
       assert html =~ "Costs appear here once agents start running."
     end
@@ -70,12 +70,14 @@ defmodule CymphoWeb.SimpleModeCopyTest do
 
       {:ok, _view, html} = live(conn, "/kanban")
 
-      # Both clusters must carry the gate class; without it simple mode shows
-      # the full re-slicing toolbar again.
-      assert html =~ "ui-advanced-only cympho-panel"
-      assert html =~ ~r/data-testid="kanban-view-controls"[^>]*ui-advanced-only/s
-      # Primary CTA and empty-board path stay reachable in simple mode.
-      assert html =~ "New Issue"
+      # r3: Simple keeps one toolbar (find, Filter, Mine) shared with the List;
+      # re-cutting the board (swimlanes, density) stays gated to Advanced.
+      doc = Floki.parse_document!(html)
+      assert [_] = Floki.find(doc, ".tbar")
+      [controls] = Floki.find(doc, "[data-testid='kanban-view-controls']")
+      assert Floki.attribute([controls], "class") |> hd() =~ "ui-advanced-only"
+      assert Floki.text(controls) =~ "Swimlanes"
+      # r3: New task is the shell's (rail, phone top bar); the empty board offers it too.
       assert html =~ ~s(href="/issues/new")
     end
 
@@ -85,8 +87,9 @@ defmodule CymphoWeb.SimpleModeCopyTest do
       {:ok, _view, html} = live(conn, "/kanban")
 
       # Fresh company has no issues: simple must not dead-end on a blank board.
-      assert html =~ "No issues yet."
-      assert html =~ "Create your first issue"
+      # r3: glossary words (task), and New task opens the quick-create sheet.
+      assert html =~ "No tasks yet."
+      assert html =~ "New task"
       assert html =~ ~s(href="/issues/new")
     end
 
@@ -251,35 +254,23 @@ defmodule CymphoWeb.SimpleModeCopyTest do
 
       # Review mode card also appears when dispatcher is off in test env —
       # advanced keeps ops anchors; simple must not.
-      {:ok, _view, html} = live(conn, "/dashboard")
+      {:ok, view, html} = live(conn, "/dashboard")
 
       assert html =~ "Something went wrong" or html =~ "Nothing is running" or
                html =~ "Some runs failed" or html =~ "Review mode is on"
 
-      # Dual-render: advanced may keep /operations#*; simple anchors never do.
-      simple_hrefs =
-        html
-        |> Floki.parse_document!()
-        |> Floki.find("section[aria-label='Needs you'] a.ui-simple-only")
-        |> Enum.map(fn {_tag, attrs, _} ->
-          attrs |> Map.new() |> Map.get("href")
-        end)
-        |> Enum.reject(&is_nil/1)
-
-      # Also check Later list simple rows if any.
-      later_hrefs =
-        html
-        |> Floki.parse_document!()
-        |> Floki.find("section[aria-label='Needs you'] details a.ui-simple-only")
-        |> Enum.map(fn {_tag, attrs, _} ->
-          attrs |> Map.new() |> Map.get("href")
-        end)
-        |> Enum.reject(&is_nil/1)
-
-      all_simple = simple_hrefs ++ later_hrefs
+      # r3: the Simple view is the r3 Home (plan §0.2); the dual Simple anchors
+      # went with the old cards. Every link outside the Advanced panels counts.
+      all_simple =
+        view
+        |> render()
+        |> Floki.parse_fragment!()
+        |> Floki.filter_out(".ui-advanced-only")
+        |> Floki.find("a[href]")
+        |> Enum.flat_map(&Floki.attribute(&1, "href"))
 
       assert all_simple != [],
-             "expected dual simple anchors for Needs-you CTAs so simple mode can navigate"
+             "expected the Simple Home to link its decisions so simple mode can navigate"
 
       for href <- all_simple do
         refute String.contains?(href, "#"),
@@ -301,8 +292,11 @@ defmodule CymphoWeb.SimpleModeCopyTest do
                  "/agents/new",
                  "/approvals",
                  "/approvals?status=pending",
-                 "/costs"
+                 "/costs",
+                 # r3: Home's own links (Last 24 hours, the hire vote).
+                 "/activity"
                ] or
+                 String.starts_with?(href, "/board-approvals/") or
                  String.starts_with?(href, "/inbox") or
                  String.starts_with?(href, "/issues/") or
                  String.starts_with?(href, "/approvals") or

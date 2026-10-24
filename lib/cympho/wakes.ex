@@ -665,10 +665,14 @@ defmodule Cympho.Wakes do
         metadata: metadata
       }
 
+      # A task that already waits on a review wake is not newly ready (the queue coalesces).
+      review_new? = reason in @review_queue_reasons and not active_review_wake?(issue_id)
+
       case WakeupQueue.enqueue(attrs) do
         {:ok, agent_wake} ->
           Logger.info("Wakes: enqueued wake for agent #{agent_id}, reason: #{reason}")
           maybe_notify_owner_attention_for_review(agent_wake)
+          if review_new?, do: notify_review_ready(issue_id)
           {:ok, agent_wake}
 
         {:error, _} = error ->
@@ -957,6 +961,20 @@ defmodule Cympho.Wakes do
   end
 
   defp notify_owner_attention_for_issue(_issue_id), do: :ok
+
+  # B6 "Work is ready for my review".
+  defp notify_review_ready(issue_id) do
+    case Repo.get(Issue, issue_id) do
+      %Issue{company_id: company_id} = issue when is_binary(company_id) ->
+        Cympho.Notifications.Dispatcher.notify_company_opt_in(company_id, "review_ready", fn ->
+          {"#{issue.identifier} is ready for your review",
+           "#{issue.title} is ready for your review.", %{issue_id: issue.id}}
+        end)
+
+      _ ->
+        :ok
+    end
+  end
 
   defp active_review_wake?(issue_id) when is_binary(issue_id) do
     Repo.exists?(

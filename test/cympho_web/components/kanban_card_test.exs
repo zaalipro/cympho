@@ -4,9 +4,11 @@ defmodule CymphoWeb.Components.KanbanCardTest do
 
   alias Cympho.Issues.Issue
 
+  # r3: the Board card (build-spec §5) reads the owner-facing state from a
+  # Tasks context; an empty one means nothing on this card needs the owner.
   defp render_card(density) do
     render_component(
-      &CymphoWeb.KanbanLive.Components.issue_card/1,
+      &CymphoWeb.KanbanLive.Components.board_card/1,
       issue: %Issue{
         id: Ecto.UUID.generate(),
         identifier: "AIL-101",
@@ -17,7 +19,7 @@ defmodule CymphoWeb.Components.KanbanCardTest do
         blocked_by: [],
         assignee: nil
       },
-      status: :todo,
+      ctx: CymphoWeb.IssueLive.Tasks.context(nil, nil, []),
       digest_density: density
     )
   end
@@ -45,7 +47,8 @@ defmodule CymphoWeb.Components.KanbanCardTest do
     [card] = Floki.find(document, "[data-kanban-card]")
     [title_link] = Floki.find(card, "a[href^='/issues/']")
 
-    assert Floki.find(card, "[data-kanban-drag-handle]") != []
+    # r3: the whole card is the drag surface (no separate grip); the title link
+    # starts a drag rather than a native link drag.
     assert Floki.attribute(title_link, "data-no-drag") == []
     assert Floki.attribute(title_link, "draggable") == ["false"]
   end

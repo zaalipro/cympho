@@ -104,6 +104,68 @@ defmodule CymphoWeb.ActivityLiveTest do
     assert html =~ ~s(href="/activity?filter_action=approval_created")
   end
 
+  # r3 ground-r1 IMP-1: rows store only the actor id, so the feed printed
+  # "User f25863fb" for the owner's own actions.
+  test "names user and agent actors from the company, not their id", %{
+    conn: conn,
+    current_company: company
+  } do
+    unique = System.unique_integer([:positive])
+    {:ok, issue} = Cympho.Issues.create_issue(%{title: "Named actors", company_id: company.id})
+
+    {:ok, member} =
+      Cympho.Users.create_user(%{
+        email: "maya-#{unique}@example.com",
+        name: "Maya Chen",
+        password: "password1234"
+      })
+
+    {:ok, _} =
+      Cympho.Companies.create_membership(%{
+        user_id: member.id,
+        company_id: company.id,
+        role: "owner"
+      })
+
+    {:ok, outsider} =
+      Cympho.Users.create_user(%{
+        email: "outsider-#{unique}@example.com",
+        name: "Olga Outsider",
+        password: "password1234"
+      })
+
+    {:ok, agent} =
+      Cympho.Agents.create_agent(%{
+        company_id: company.id,
+        name: "Ravi",
+        role: :engineer,
+        status: :idle,
+        adapter: :claude_code
+      })
+
+    Repo.delete_all(Activity)
+
+    by_member =
+      insert_activity(issue, %{actor_type: "user", actor_id: member.id, action: "status_changed"})
+
+    by_agent =
+      insert_activity(issue, %{actor_type: "agent", actor_id: agent.id, action: "assigned"})
+
+    by_outsider =
+      insert_activity(issue, %{actor_type: "user", actor_id: outsider.id, action: "title_changed"})
+
+    {:ok, view, html} = live(conn, "/activity")
+    row = fn activity -> view |> element("#activities-#{activity.id}") |> render() end
+
+    assert row.(by_member) =~ "Maya Chen"
+    refute html =~ "User #{String.slice(member.id, 0, 8)}"
+    assert row.(by_agent) =~ "Ravi"
+    refute html =~ "Agent #{String.slice(agent.id, 0, 8)}"
+    # Only the company's own members are named.
+    refute html =~ "Olga Outsider"
+    assert row.(by_outsider) =~ "User #{String.slice(outsider.id, 0, 8)}"
+  end
+
   test "filtered empty command clears back to the activity feed", %{
     conn: conn,
     current_company: company

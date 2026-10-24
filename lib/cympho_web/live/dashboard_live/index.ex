@@ -1,15 +1,34 @@
 defmodule CymphoWeb.DashboardLive.Index do
   use CymphoWeb, :live_view
+  alias Cympho.Agents
   alias Cympho.CompanyRBAC
+  alias Cympho.Costs
   alias Cympho.Dashboard
   alias Cympho.Companies
   alias Cympho.Issues
+  alias Cympho.IssueThreadInteractions
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.OwnerAttention
   alias Cympho.RuntimeOperations
   alias CymphoWeb.Events
+  alias CymphoWeb.NextStep
+  alias CymphoWeb.TeamRail
+
+  import CymphoWeb.Format, only: [money: 1, window: 1]
 
   @activity_buffer 30
+  # Needs you shows the four decisions after the Next step; finished tasks list at most five.
+  @needs_rows 4
+  @finished_rows 5
+  @home_refresh_ms 300
+  @agent_events [
+    :agent_created,
+    :agent_updated,
+    :agent_deleted,
+    :agent_paused,
+    :agent_resumed,
+    :agent_terminated
+  ]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -33,13 +52,19 @@ defmodule CymphoWeb.DashboardLive.Index do
         Cympho.PubSub,
         "company:#{socket.assigns.current_company.id}:activities"
       )
+
+      # Home's team block and paused agents follow the team live; owner-attention
+      # changes arrive through UserAuth's subscription.
+      Agents.subscribe(socket.assigns.current_company.id)
     end
 
     socket =
       socket
-      |> assign(:page_title, "Dashboard")
+      |> assign(:page_title, "Home")
       |> assign(:flash_activity_id, nil)
+      |> assign(:home_refresh, nil)
       |> assign_metrics()
+      |> assign_home()
 
     {:ok, socket}
   end
@@ -52,17 +77,26 @@ defmodule CymphoWeb.DashboardLive.Index do
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, :timer.seconds(30))
-    {:noreply, assign_metrics(socket)}
+    {:noreply, socket |> assign_metrics() |> assign_home()}
   end
 
   def handle_info({:company_updated, company}, socket) do
-    {:noreply, socket |> assign(:current_company, company) |> assign_metrics()}
+    {:noreply, socket |> assign(:current_company, company) |> assign_metrics() |> assign_home()}
   end
 
   def handle_info(%Phoenix.Socket.Broadcast{event: "run_status"}, socket) do
     # Keep the glanceable metrics fresh when runs change. No per-run toast.
-    {:noreply, assign_metrics(socket)}
+    {:noreply, socket |> assign_metrics() |> schedule_home()}
   end
+
+  def handle_info({:owner_attention_changed, _company_id}, socket),
+    do: {:noreply, schedule_home(socket)}
+
+  def handle_info({event, _agent}, socket) when event in @agent_events,
+    do: {:noreply, schedule_home(socket)}
+
+  def handle_info(:refresh_home, socket),
+    do: {:noreply, socket |> assign(:home_refresh, nil) |> assign_home()}
 
   def handle_info({:activity_created, activity}, socket) do
     entry = activity_to_dashboard_map(activity)
@@ -159,6 +193,49 @@ defmodule CymphoWeb.DashboardLive.Index do
     end
   end
 
+  def handle_event("resume_agent", %{"id" => id}, socket) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         {:ok, agent} <- Agents.get_company_agent(company_id, id),
+         {:ok, agent} <- Agents.resume_agent(agent) do
+      {:noreply,
+       socket
+       |> assign_home()
+       |> push_event("toast", %{message: "#{agent.name} can take new work.", type: "success"})}
+    else
+      _ ->
+        {:noreply,
+         push_event(socket, "toast", %{message: "Could not resume that agent.", type: "error"})}
+    end
+  end
+
+  def handle_event("respond_questions", params, socket) do
+    with {:ok, id, answer} <- NextStep.answer_from_params(params),
+         {:ok, interaction} <- scoped_question(socket, id),
+         {:ok, _resolved} <-
+           IssueThreadInteractions.resolve_interaction(interaction, %{
+             "status" => :responded,
+             "resolved_by_user_id" =>
+               socket.assigns[:current_user] && socket.assigns.current_user.id,
+             "response" => answer
+           }) do
+      {:noreply,
+       socket
+       |> assign_home()
+       |> push_event("toast", %{message: "Answer sent.", type: "success"})}
+    else
+      {:error, :empty} ->
+        {:noreply,
+         push_event(socket, "toast", %{
+           message: "Choose an answer or write your own.",
+           type: "error"
+         })}
+
+      _ ->
+        {:noreply,
+         push_event(socket, "toast", %{message: "Could not send this answer.", type: "error"})}
+    end
+  end
+
   def handle_event("accept_owner_verification", %{"issue-id" => issue_id}, socket) do
     with {:ok, issue} <- scoped_issue(socket, issue_id),
          {:ok, _issue} <-
@@ -166,6 +243,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       {:noreply,
        socket
        |> assign_metrics()
+       |> assign_home()
        |> push_event("toast", %{message: "CEO owner update accepted", type: "success"})}
     else
       {:error, :blocked_by_active_issues} ->
@@ -199,6 +277,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       {:noreply,
        socket
        |> assign_metrics()
+       |> assign_home()
        |> push_event("toast", %{message: "CEO revision queued", type: "success"})}
     else
       {:error, :blocked_by_active_issues} ->
@@ -245,16 +324,7 @@ defmodule CymphoWeb.DashboardLive.Index do
 
     running = status_count(summary.issue_status_counts, :in_progress)
     blocked = status_count(summary.issue_status_counts, :blocked)
-    next_actions = next_actions(summary, company, operations)
-    signoff_decision = owner_signoff_decision(operations.owner_signoffs)
-    {signoff_action, queue_actions} = split_signoff_action(next_actions, signoff_decision)
-    queue_actions = sort_by_urgency(queue_actions)
-
-    # Home Waiting / inbox shortcut must match the nav badge formula
-    # (OwnerAttention.unresolved_count), not length(next_actions cards).
-    # next_actions stay for Needs-you cards only — multi-item OA sets collapse
-    # to fewer cards and the all-clear card must not inflate the count.
-    needs_you_count = owner_attention_count(company_id, socket.assigns[:current_user])
+    queue_actions = summary |> next_actions(company, operations) |> sort_by_urgency()
 
     socket
     |> assign(:company, company)
@@ -262,14 +332,11 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:autonomy_status, autonomy_status(company))
     |> assign(:runtime_enabled?, Dispatcher.enabled?())
     |> assign(:operating_mode, operating_mode(company))
-    |> assign(:owner_signoff_action, signoff_action)
     |> assign(:needs_you_actions, Enum.take(queue_actions, 3))
     |> assign(:later_actions, Enum.drop(queue_actions, 3))
-    |> assign(:needs_you_count, needs_you_count)
-    |> assign(:all_clear?, is_nil(signoff_action) and all_clear?(queue_actions))
     |> assign(:agent_rollup, agent_rollup(summary.agent_status_counts))
     |> assign(:ceo_command_lane, ceo_command_lane(operations.ceo_flow))
-    |> assign(:owner_signoff_decision, signoff_decision)
+    |> assign(:owner_signoff_decision, owner_signoff_decision(operations.owner_signoffs))
     |> assign(:execution_health, execution_health(summary, operations))
     |> assign(:queued_work, queued)
     |> assign(:running_work, running)
@@ -289,6 +356,100 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:goal_alignment, summary.goal_alignment)
     |> assign(:autonomy_readiness, summary.autonomy_readiness)
     |> assign(:patrol_summary, summary.patrol_summary)
+  end
+
+  # The r3 Home (plan P1): the Next step and Needs you in the owner's order, the
+  # last 24 hours, the limit line and the phone team block. Company-scoped reads.
+  defp assign_home(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} ->
+        user = socket.assigns[:current_user]
+        now = DateTime.utc_now()
+
+        items =
+          company_id
+          |> OwnerAttention.list_items(user)
+          |> with_signoff(socket.assigns[:owner_signoff_decision])
+          |> OwnerAttention.owner_order()
+
+        day_start = DateTime.add(now, -86_400, :second)
+        finished = Issues.list_completed_since(company_id, day_start)
+        team = TeamRail.rows(company_id, user, detail: true)
+
+        assign(socket,
+          now: now,
+          day_start: day_start,
+          next_item: List.first(items),
+          needs: items |> Enum.drop(1) |> Enum.take(@needs_rows),
+          needs_more: max(length(items) - 1 - @needs_rows, 0),
+          agent_names: Map.new(team, &{&1.id, &1.name}),
+          team: team,
+          finished_count: length(finished),
+          finished: finished |> Enum.take(@finished_rows) |> Enum.reverse(),
+          spent_today: Costs.summary(company_id, 1).total_cost,
+          spending: TeamRail.spending(company_id)
+        )
+
+      _ ->
+        now = DateTime.utc_now()
+
+        assign(socket,
+          now: now,
+          day_start: DateTime.add(now, -86_400, :second),
+          next_item: nil,
+          needs: [],
+          needs_more: 0,
+          agent_names: %{},
+          team: [],
+          finished_count: 0,
+          finished: [],
+          spent_today: Decimal.new(0),
+          spending: nil
+        )
+    end
+  end
+
+  # "07:40 Tue": the ends of Home's 24-hour window.
+  defp clock_day(at), do: Calendar.strftime(at, "%H:%M %a")
+
+  # Owner-attention messages and team changes can come in bursts.
+  defp schedule_home(%{assigns: %{home_refresh: nil}} = socket) do
+    assign(socket, :home_refresh, Process.send_after(self(), :refresh_home, @home_refresh_ms))
+  end
+
+  defp schedule_home(socket), do: socket
+
+  # A CEO's owner sign-off is a decision on work: its task (blocked, so already
+  # one Needs-you row) is drawn as a review the owner accepts or sends back.
+  defp with_signoff(items, %{issue_id: issue_id} = decision) when is_binary(issue_id) do
+    key = "issue:#{issue_id}"
+
+    Enum.map(items, fn
+      %{dedup_key: ^key} = item ->
+        %{
+          item
+          | kind: :review_queue,
+            inserted_at: decision.inserted_at || item.inserted_at
+        }
+        |> Map.put(:signoff, decision)
+
+      item ->
+        item
+    end)
+  end
+
+  defp with_signoff(items, _decision), do: items
+
+  defp scoped_question(socket, id) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         {:ok, id} <- Ecto.UUID.cast(id),
+         {:ok, interaction} <- IssueThreadInteractions.get_interaction(id),
+         :ask_user_questions <- interaction.kind,
+         {:ok, _issue} <- Issues.get_company_issue(company_id, interaction.issue_id) do
+      {:ok, interaction}
+    else
+      _ -> {:error, :not_found}
+    end
   end
 
   defp current_company(socket) do
@@ -398,15 +559,7 @@ defmodule CymphoWeb.DashboardLive.Index do
           action: "Open failures",
           path: "/operations#runtime-failures",
           tone: :danger,
-          simple: %{
-            icon: "hero-exclamation-triangle-mini",
-            label: "Something went wrong",
-            detail:
-              "#{length(operations.recent_failures)} #{pluralize(length(operations.recent_failures), "attempt")} failed.",
-            action: "See what happened",
-            # Ops console is advanced-only; inbox surfaces failed-run attention.
-            path: "/inbox"
-          }
+          icon: "hero-exclamation-triangle-mini"
         }
       ),
       if(!runtime_enabled?,
@@ -416,13 +569,7 @@ defmodule CymphoWeb.DashboardLive.Index do
           action: "Go live when ready",
           path: "/operations#runtime-launch-checklist",
           tone: :attention,
-          simple: %{
-            icon: "hero-pause-circle-mini",
-            label: "Nothing is running",
-            detail: "Safe to look around. Nothing costs money yet.",
-            action: "Turn on",
-            path: "/inbox"
-          }
+          icon: "hero-pause-circle-mini"
         }
       ),
       if(company_status == :unconfigured,
@@ -432,12 +579,7 @@ defmodule CymphoWeb.DashboardLive.Index do
           action: "Open setup",
           path: "/onboarding",
           tone: :attention,
-          simple: %{
-            icon: "hero-sparkles-mini",
-            label: "Finish setting up",
-            detail: "Pick a goal and a team. Takes two minutes.",
-            action: "Finish setup"
-          }
+          icon: "hero-sparkles-mini"
         }
       ),
       if(agents == 0,
@@ -447,12 +589,7 @@ defmodule CymphoWeb.DashboardLive.Index do
           action: "Create agents",
           path: "/agents/new",
           tone: :attention,
-          simple: %{
-            icon: "hero-user-plus-mini",
-            label: "Build your team",
-            detail: "Start with a CEO, a CTO, and an engineer.",
-            action: "Add people"
-          }
+          icon: "hero-user-plus-mini"
         }
       ),
       if(blocked > 0,
@@ -462,12 +599,7 @@ defmodule CymphoWeb.DashboardLive.Index do
           action: "Review blockers",
           path: "/kanban",
           tone: :danger,
-          simple: %{
-            icon: "hero-hand-raised-mini",
-            label: "The team is stuck",
-            detail: "#{blocked} #{pluralize(blocked, "task")} can't move without you.",
-            action: "Unblock #{if blocked == 1, do: "it", else: "them"}"
-          }
+          icon: "hero-hand-raised-mini"
         }
       ),
       if(runtime_enabled? and queued > 0 and running == 0,
@@ -477,12 +609,7 @@ defmodule CymphoWeb.DashboardLive.Index do
           action: "Open board",
           path: "/kanban",
           tone: :brand,
-          simple: %{
-            icon: "hero-clock-mini",
-            label: "Work is waiting",
-            detail: "#{queued} #{pluralize(queued, "task")} ready to be picked up.",
-            action: "See the board"
-          }
+          icon: "hero-clock-mini"
         }
       )
     ]
@@ -496,12 +623,7 @@ defmodule CymphoWeb.DashboardLive.Index do
             action: "Open board",
             path: "/kanban",
             tone: :ok,
-            simple: %{
-              icon: "hero-check-circle-mini",
-              label: "All good",
-              detail: "Nothing needs you. The team is working.",
-              action: "See the board"
-            }
+            icon: "hero-check-circle-mini"
           }
         ]
 
@@ -532,19 +654,6 @@ defmodule CymphoWeb.DashboardLive.Index do
           "#{stuck_count} #{pluralize(stuck_count, "task")} stalled past patrol thresholds."
       end
 
-    # Simple mode must not reuse "patrol thresholds" — that is operator jargon.
-    simple_detail =
-      cond do
-        named != "" and more > 0 ->
-          "#{named} and #{more} more have been sitting too long."
-
-        named != "" ->
-          "#{named} #{if length(titles) == 1, do: "has", else: "have"} been sitting too long."
-
-        true ->
-          "#{stuck_count} #{pluralize(stuck_count, "task")} have been sitting too long."
-      end
-
     path =
       case first do
         %{id: id} when is_binary(id) -> "/issues/#{id}"
@@ -557,24 +666,15 @@ defmodule CymphoWeb.DashboardLive.Index do
       action: if(stuck_count == 1, do: "Open stuck task", else: "Review stuck work"),
       path: path,
       tone: :danger,
-      simple: %{
-        icon: "hero-exclamation-circle-mini",
-        label:
-          if(stuck_count == 1 and named != "",
-            do: "Stuck: #{named}",
-            else: "#{stuck_count} stuck #{pluralize(stuck_count, "task")}"
-          ),
-        detail: simple_detail,
-        action: if(stuck_count == 1, do: "Open it", else: "See stuck work")
-      }
+      icon: "hero-exclamation-circle-mini"
     }
   end
 
   defp stuck_work_action(_patrol), do: nil
 
-  # Pending board approvals surface here (and on the simple-mode home) so the
-  # owner never loses sight of them once the Approvals nav item is tucked into
-  # advanced mode.
+  # Pending board approvals surface here (Home's Advanced queue; the Next step and
+  # Needs you list each vote) so the owner never loses sight of them once the
+  # Approvals nav item is tucked into advanced mode.
   defp board_approval_action(company) do
     company_id = company && Map.get(company, :id)
 
@@ -586,13 +686,7 @@ defmodule CymphoWeb.DashboardLive.Index do
         action: "Review approvals",
         path: "/inbox?status=action",
         tone: :attention,
-        simple: %{
-          icon: "hero-hand-thumb-up-mini",
-          label: "#{count} #{pluralize(count, "thing")} to approve",
-          detail: "The team is waiting on your OK.",
-          action: "Approve",
-          path: "/inbox?status=action"
-        }
+        icon: "hero-hand-thumb-up-mini"
       }
     else
       _ -> nil
@@ -652,18 +746,6 @@ defmodule CymphoWeb.DashboardLive.Index do
   defp owner_signoff_decision(%{entries: [entry | _]}), do: entry
   defp owner_signoff_decision(_owner_signoffs), do: nil
 
-  # Pull the owner-signoff action out of the queue when its decision card is
-  # available — it becomes the hero "needs you" card with inline accept /
-  # revise buttons instead of competing with the rest of the queue.
-  defp split_signoff_action(actions, signoff_decision) when not is_nil(signoff_decision) do
-    case Enum.split_with(actions, &(Map.get(&1, :path) == "/operations#owner-signoff-queue")) do
-      {[signoff | _], rest} -> {signoff, rest}
-      _ -> {nil, actions}
-    end
-  end
-
-  defp split_signoff_action(actions, _signoff_decision), do: {nil, actions}
-
   # Stable-sort the queue so the eye lands on true urgency first: danger,
   # then attention, then ready/steady. Original order is preserved within
   # each tone.
@@ -676,12 +758,6 @@ defmodule CymphoWeb.DashboardLive.Index do
   defp tone_rank(:success), do: 2
   defp tone_rank(:brand), do: 3
   defp tone_rank(_tone), do: 4
-
-  # The queue falls back to a single :ok "steady" card when nothing needs the
-  # owner — that is the all-clear state.
-  defp all_clear?([]), do: true
-  defp all_clear?([%{tone: :ok}]), do: true
-  defp all_clear?(_actions), do: false
 
   # Roll agent statuses up into one glanceable health line.
   defp agent_rollup(counts) do
@@ -721,87 +797,11 @@ defmodule CymphoWeb.DashboardLive.Index do
   def mode_description(:paused), do: "Agents are paused. Your work is safe and still here."
   def mode_description(_), do: "Finish setup to give your agents a goal and a team."
 
-  # ── Simple-mode copy ────────────────────────────────────────────
-  # Each attention item carries an optional `:simple` map with plain
-  # wording and an icon. Both variants render; CSS shows one. Missing
-  # keys fall back to the advanced copy so a new action is never blank.
-
-  defp simple_field(action, key, fallback) do
-    action
-    |> Map.get(:simple)
-    |> case do
-      %{} = simple -> Map.get(simple, key)
-      _ -> nil
-    end
-    |> Kernel.||(fallback)
-  end
-
-  # Simple mode cannot deep-link /operations#* (Ops is advanced-only in nav and
-  # many anchors are advanced-only sections). Prefer explicit simple.path; fall
-  # back to the advanced path when it is already owner-visible; else /inbox.
-  defp simple_action_path(action) when is_map(action) do
-    case simple_field(action, :path, nil) do
-      path when is_binary(path) and path != "" ->
-        path
-
-      _ ->
-        case Map.get(action, :path) do
-          "/operations" <> _ -> "/inbox"
-          path when is_binary(path) and path != "" -> path
-          _ -> "/inbox"
-        end
-    end
-  end
-
-  defp simple_action_path(_), do: "/inbox"
-
   defp advanced_action_path(action) when is_map(action) do
     Map.get(action, :path, "/operations")
   end
 
   defp advanced_action_path(_), do: "/operations"
-
-  defp signoff_simple_path(_action, %{issue_id: issue_id}) when is_binary(issue_id) do
-    "/issues/#{issue_id}"
-  end
-
-  defp signoff_simple_path(action, _decision), do: simple_action_path(action)
-
-  defp owner_attention_count(company_id, user)
-       when is_binary(company_id) and not is_nil(user) do
-    min(99, OwnerAttention.unresolved_count(company_id, user))
-  end
-
-  defp owner_attention_count(_company_id, _user), do: 0
-
-  defp simple_paperclip_label(:critical), do: "Can't run yet"
-  defp simple_paperclip_label(:setup), do: "Needs setup first"
-  defp simple_paperclip_label(_), do: "Not ready to run yet"
-
-  defp simple_paperclip_detail(paperclip) do
-    count =
-      paperclip
-      |> Map.get(:primitives, [])
-      |> Enum.count(&(Map.get(&1, :level) != :healthy))
-
-    case count do
-      0 -> "One thing to check first."
-      n -> "#{n} #{pluralize(n, "thing")} to check first."
-    end
-  end
-
-  # Money in plain words: "$3 of $100 used this month", no percentages
-  # or threshold vocabulary.
-  defp simple_budget_detail(cost, fallback) do
-    spend = Map.get(cost, :budget_spend) || Map.get(cost, :period_cost)
-    limit = Map.get(cost, :budget_limit)
-
-    if spend && limit do
-      "#{format_cost(spend)} of #{format_cost(limit)} used so far."
-    else
-      fallback
-    end
-  end
 
   defp primary_action_badge(%{path: "/operations#owner-signoff-queue"}), do: "Owner decision"
   defp primary_action_badge(%{tone: :danger}), do: "Fix first"
@@ -817,12 +817,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   attr :action, :map, required: true
 
   defp needs_you_card(assigns) do
-    # Dual anchors: mode is CSS-only, so advanced keeps /operations#* while
-    # simple never deep-links advanced-only Ops sections.
-    assigns =
-      assigns
-      |> assign(:advanced_path, advanced_action_path(assigns.action))
-      |> assign(:simple_path, simple_action_path(assigns.action))
+    assigns = assign(assigns, :advanced_path, advanced_action_path(assigns.action))
 
     ~H"""
     <a
@@ -830,9 +825,8 @@ defmodule CymphoWeb.DashboardLive.Index do
       data-testid="needs-you-card-advanced"
       class={"ui-advanced-only card-lift group flex min-w-0 flex-col rounded-xl border p-4 transition hover:bg-surface-hover/40 #{next_action_card_class(Map.get(@action, :tone, :ok))}"}
     >
-      <%!-- A single tone icon in both modes: three identical "NEEDS SETUP"
-           chips said nothing worth reading. The badge word stays as the
-           accessible name. --%>
+      <%!-- A single tone icon: three identical "NEEDS SETUP" chips said
+           nothing worth reading. The badge word stays as the accessible name. --%>
       <span
         title={primary_action_badge(@action)}
         aria-label={primary_action_badge(@action)}
@@ -842,7 +836,7 @@ defmodule CymphoWeb.DashboardLive.Index do
         ]}
       >
         <span class={[
-          simple_field(@action, :icon, "hero-information-circle-mini"),
+          Map.get(@action, :icon, "hero-information-circle-mini"),
           "block h-4 w-4"
         ]}>
         </span>
@@ -859,125 +853,6 @@ defmodule CymphoWeb.DashboardLive.Index do
         </span>
       </span>
     </a>
-    <a
-      href={@simple_path}
-      data-testid="needs-you-card-simple"
-      class={"ui-simple-only card-lift group flex min-w-0 flex-col rounded-xl border p-4 transition hover:bg-surface-hover/40 #{next_action_card_class(Map.get(@action, :tone, :ok))}"}
-    >
-      <span
-        title={primary_action_badge(@action)}
-        aria-label={primary_action_badge(@action)}
-        class={[
-          "self-start rounded-full border p-1.5",
-          next_action_pill_class(Map.get(@action, :tone, :ok))
-        ]}
-      >
-        <span class={[
-          simple_field(@action, :icon, "hero-information-circle-mini"),
-          "block h-4 w-4"
-        ]}>
-        </span>
-      </span>
-      <p class="mt-2.5 text-sm font-590 leading-5 text-text-primary">
-        {simple_field(@action, :label, Map.get(@action, :label))}
-      </p>
-      <p class="mt-1 line-clamp-2 text-xs leading-4 text-text-tertiary">
-        {simple_field(@action, :detail, Map.get(@action, :detail))}
-      </p>
-      <span class="mt-auto flex items-center gap-1.5 pt-3 text-xs font-590 text-brand transition group-hover:text-accent-hover">
-        {simple_field(@action, :action, Map.get(@action, :action, "Open"))}
-        <span class="hero-arrow-up-right-mini h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-x-0.5">
-        </span>
-      </span>
-    </a>
-    """
-  end
-
-  attr :decision, :map, required: true
-  attr :action, :map, default: nil
-
-  defp signoff_card(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :simple_path,
-        signoff_simple_path(assigns.action, assigns.decision)
-      )
-
-    ~H"""
-    <div
-      data-testid="dashboard-owner-signoff-actions"
-      class="card-lift flex min-w-0 flex-col rounded-xl border border-teal-500/25 bg-teal-500/[0.05] p-4 sm:col-span-2"
-    >
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <span class="rounded-full border border-teal-500/25 bg-teal-500/10 px-2 py-0.5 text-[10px] font-590 uppercase tracking-[0.1em] text-teal-300">
-          Owner decision
-        </span>
-        <a
-          :if={@action}
-          href={Map.get(@action, :path, "/operations#owner-signoff-queue")}
-          class="ui-advanced-only text-[11px] font-590 text-text-tertiary transition hover:text-text-primary"
-        >
-          {Map.get(@action, :action, "Review signoff")} →
-        </a>
-        <a
-          :if={@action}
-          href={@simple_path}
-          class="ui-simple-only text-[11px] font-590 text-text-tertiary transition hover:text-text-primary"
-        >
-          {simple_field(@action, :action, Map.get(@action, :action, "Review signoff"))} →
-        </a>
-      </div>
-      <p :if={@action} class="mt-2.5 text-sm font-590 leading-5 text-text-primary">
-        <span class="ui-advanced-only">{Map.get(@action, :label)}</span>
-        <span class="ui-simple-only">
-          {simple_field(@action, :label, Map.get(@action, :label))}
-        </span>
-      </p>
-      <p :if={@action} class="mt-1 text-xs leading-4 text-text-tertiary">
-        <span class="ui-advanced-only">{Map.get(@action, :detail)}</span>
-        <span class="ui-simple-only">
-          {simple_field(@action, :detail, Map.get(@action, :detail))}
-        </span>
-      </p>
-      <p class="mt-2.5 truncate text-xs font-590 text-text-secondary">
-        {@decision.issue_identifier} · {@decision.issue_title}
-      </p>
-      <p class="mt-1 line-clamp-2 text-[11px] leading-4 text-text-tertiary">
-        {@decision.owner_update || "CEO owner update is ready for owner decision."}
-      </p>
-      <div class="mt-auto flex flex-wrap gap-1.5 pt-3">
-        <button
-          type="button"
-          phx-click="accept_owner_verification"
-          phx-value-issue-id={@decision.issue_id}
-          data-confirm="Accept this CEO owner update and close the issue?"
-          class="inline-flex items-center justify-center rounded-md border border-teal-500/25 bg-teal-500/10 px-2.5 py-1.5 text-xs font-510 text-teal-200 transition hover:bg-teal-500/15"
-        >
-          Accept and close
-        </button>
-        <button
-          type="button"
-          phx-click="request_owner_revision"
-          phx-value-issue-id={@decision.issue_id}
-          data-confirm="Request a CEO revision, reopen this issue to To Do, and queue focused dispatch?"
-          class="inline-flex items-center justify-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
-        >
-          Request revision
-        </button>
-      </div>
-    </div>
-    """
-  end
-
-  defp all_clear_card(assigns) do
-    ~H"""
-    <div class="flex min-w-0 items-center gap-3 rounded-xl border border-border bg-surface/40 p-4 sm:col-span-2 xl:col-span-3">
-      <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-teal-500/20 bg-teal-500/[0.06] text-teal-300">
-        <span class="hero-check-circle-mini h-5 w-5"></span>
-      </span>
-      <p class="text-sm font-590 text-text-primary">You're caught up.</p>
-    </div>
     """
   end
 
@@ -990,14 +865,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       action: "Open CEO monitor",
       path: "/operations#ceo-outcome-monitor",
       tone: :danger,
-      simple: %{
-        icon: "hero-exclamation-triangle-mini",
-        label: "The CEO needs you",
-        detail:
-          "#{attention} #{pluralize(attention, "task")} stalled and #{if attention == 1, do: "needs", else: "need"} a look.",
-        action: "Take a look",
-        path: "/inbox"
-      }
+      icon: "hero-exclamation-triangle-mini"
     }
   end
 
@@ -1015,13 +883,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       action: "Review signoff",
       path: "/operations#owner-signoff-queue",
       tone: :success,
-      simple: %{
-        icon: "hero-hand-thumb-up-mini",
-        label: "Work is ready for you",
-        detail: "#{count} #{pluralize(count, "update")} waiting on your yes or no.",
-        action: "Read #{if count == 1, do: "it", else: "them"}",
-        path: "/inbox"
-      }
+      icon: "hero-hand-thumb-up-mini"
     }
   end
 
@@ -1035,12 +897,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       action: "Open goals",
       path: "/goals",
       tone: :attention,
-      simple: %{
-        icon: "hero-flag-mini",
-        label: "Some work has no aim",
-        detail: "#{floating} #{pluralize(floating, "task")} not tied to anything.",
-        action: "Tie #{if floating == 1, do: "it", else: "them"} up"
-      }
+      icon: "hero-flag-mini"
     }
   end
 
@@ -1052,12 +909,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       action: "Open goals",
       path: "/goals",
       tone: :attention,
-      simple: %{
-        icon: "hero-flag-mini",
-        label: "Work has no aim",
-        detail: "#{total} open #{pluralize(total, "task")} with no goal.",
-        action: "Set a goal"
-      }
+      icon: "hero-flag-mini"
     }
   end
 
@@ -1069,12 +921,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       action: "Open goals",
       path: "/goals",
       tone: :attention,
-      simple: %{
-        icon: "hero-flag-mini",
-        label: "No goal yet",
-        detail: "Tell the team what you want.",
-        action: "Set a goal"
-      }
+      icon: "hero-flag-mini"
     }
   end
 
@@ -1087,12 +934,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       action: "Open budgets",
       path: "/budgets",
       tone: :danger,
-      simple: %{
-        icon: "hero-banknotes-mini",
-        label: "Over your limit",
-        detail: simple_budget_detail(cost, "Spending went past the limit you set."),
-        action: "Open budget"
-      }
+      icon: "hero-banknotes-mini"
     }
   end
 
@@ -1107,12 +949,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       action: "Open costs",
       path: "/costs",
       tone: :attention,
-      simple: %{
-        icon: "hero-banknotes-mini",
-        label: "Costs aren't tracked",
-        detail: "Some work ran without a price attached.",
-        action: "Add prices"
-      }
+      icon: "hero-banknotes-mini"
     }
   end
 
@@ -1123,12 +960,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       action: "Review budget",
       path: "/budgets",
       tone: :attention,
-      simple: %{
-        icon: "hero-banknotes-mini",
-        label: "Check spending",
-        detail: simple_budget_detail(cost, "Spending is getting close to your limit."),
-        action: "Open budget"
-      }
+      icon: "hero-banknotes-mini"
     }
   end
 
@@ -1141,13 +973,7 @@ defmodule CymphoWeb.DashboardLive.Index do
         action: "Create budget",
         path: "/budgets/new",
         tone: :attention,
-        simple: %{
-          icon: "hero-banknotes-mini",
-          label: "No spending limit",
-          detail:
-            "You've spent #{format_cost(Map.get(cost, :period_cost))} with nothing to stop it.",
-          action: "Set a limit"
-        }
+        icon: "hero-banknotes-mini"
       }
     end
   end
@@ -1169,15 +995,7 @@ defmodule CymphoWeb.DashboardLive.Index do
         action: "Fix #{primitive.label}",
         path: primitive.path,
         tone: paperclip_action_tone(Map.get(paperclip, :level)),
-        simple: %{
-          icon: "hero-exclamation-triangle-mini",
-          label: simple_paperclip_label(Map.get(paperclip, :level)),
-          detail: simple_paperclip_detail(paperclip),
-          action: "Check them",
-          # The card is about every blocked primitive, not the first one
-          # (which is often /org-chart). Operations is the setup hub.
-          path: "/operations"
-        }
+        icon: "hero-exclamation-triangle-mini"
       }
     end
   end
@@ -1313,14 +1131,7 @@ defmodule CymphoWeb.DashboardLive.Index do
         action: "Open launch checklist",
         path: "/operations#runtime-launch-checklist",
         tone: :attention,
-        simple: %{
-          icon: "hero-play-circle-mini",
-          label: "Ready when you are",
-          detail:
-            "#{pre_runtime_stale_count} #{pluralize(pre_runtime_stale_count, "task")} waiting for the go-ahead.",
-          action: "Start #{if pre_runtime_stale_count == 1, do: "it", else: "them"}",
-          path: "/kanban"
-        }
+        icon: "hero-play-circle-mini"
       }
     else
       %{
@@ -1330,14 +1141,7 @@ defmodule CymphoWeb.DashboardLive.Index do
         action: "Open Operations",
         path: "/operations#review-nudges",
         tone: :attention,
-        simple: %{
-          icon: "hero-clock-mini",
-          label: "Waiting on you",
-          detail:
-            "#{stale_count} #{pluralize(stale_count, "question")} #{if stale_count == 1, do: "has", else: "have"} gone unanswered.",
-          action: "Answer #{if stale_count == 1, do: "it", else: "them"}",
-          path: "/inbox"
-        }
+        icon: "hero-clock-mini"
       }
     end
   end
@@ -1802,15 +1606,6 @@ defmodule CymphoWeb.DashboardLive.Index do
   end
 
   def patrol_age(_), do: "-"
-
-  # Autonomy pulse colors used by the header status dot via inline CSS var.
-  def autonomy_pulse_color(:active), do: "rgba(74, 222, 128, 0.55)"
-  def autonomy_pulse_color(:paused), do: "rgba(250, 204, 21, 0.55)"
-  def autonomy_pulse_color(_), do: "rgba(148, 163, 184, 0.45)"
-
-  def autonomy_dot_color(:active), do: "bg-green-400"
-  def autonomy_dot_color(:paused), do: "bg-yellow-400"
-  def autonomy_dot_color(_), do: "bg-gray-500"
 
   def routine_health_dot_class(%{status: "healthy"}),
     do: "bg-green-300 shadow-[0_0_8px_rgba(134,239,172,0.6)]"

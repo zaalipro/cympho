@@ -3,8 +3,10 @@ defmodule CymphoWeb.IssueLive.Show do
 
   import CymphoWeb.IssueLive.Show.Helpers
 
+  alias Cympho.Activities
   alias Cympho.Agents
   alias Cympho.Comments
+  alias Cympho.Costs
   alias Cympho.DeliveryBriefReadiness
   alias Cympho.Documents
   alias Cympho.Finances
@@ -16,11 +18,16 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.IssueReadStates
   alias Cympho.IssueThreadInteractions
   alias Cympho.Orchestrator
+  alias Cympho.OwnerAttention
   alias Cympho.ReviewNudges
   alias Cympho.Runtime
   alias Cympho.ToolCallTraces
   alias Cympho.WorkProducts
+  alias Cympho.Issues.HumanReview
   alias CymphoWeb.IssueLive.Show.RunProgress
+  alias CymphoWeb.IssueLive.Show.Task
+  alias CymphoWeb.Live.ReviewChanges
+  alias CymphoWeb.NextStep
 
   @timeline_filters ~w(signal comments runs artifacts all)
   @repo_delivery_roles Cympho.Agents.Agent.pr_delivery_roles() |> Enum.map(&Atom.to_string/1)
@@ -104,7 +111,15 @@ defmodule CymphoWeb.IssueLive.Show do
            revisions: [],
            selected_revision_diff: nil,
            rollback_blocker: nil,
-           gate_clean_url: nil
+           gate_clean_url: nil,
+           from: nil,
+           review_changes: nil,
+           retry_choice: nil,
+           reply_n: 0,
+           task_item: nil,
+           task_cost: Decimal.new(0),
+           previous_assignee_id: nil,
+           task_close_blockers: []
          )
          |> assign_comment_authors()}
 
@@ -117,6 +132,7 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_params(%{"id" => id} = params, _url, socket) do
     socket =
       socket
+      |> assign(:from, CymphoWeb.UserAuth.safe_from(params["from"]))
       |> apply_action(socket.assigns.live_action, id)
       |> assign_description_return_to(params)
       |> apply_edit_param(params)
@@ -136,6 +152,7 @@ defmodule CymphoWeb.IssueLive.Show do
         |> reconcile_run_progress()
         |> assign_child_rollup(issue.id)
         |> assign_swarm_events(issue)
+        |> assign_task()
 
       {:error, :not_found} ->
         socket
@@ -304,10 +321,9 @@ defmodule CymphoWeb.IssueLive.Show do
         changeset = blank_comment_changeset()
 
         {:noreply,
-         assign(socket,
-           comment_changeset: changeset,
-           comment_form: to_form(changeset)
-         )}
+         socket
+         |> assign(comment_changeset: changeset, comment_form: to_form(changeset))
+         |> update(:reply_n, &(&1 + 1))}
 
       {:error, changeset} ->
         {:noreply, assign(socket, comment_changeset: changeset, comment_form: to_form(changeset))}
@@ -976,25 +992,27 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
+  # The Next step's numbered answer (or the own answer), and the Advanced
+  # timeline's free-text form, both arrive here.
   @impl true
-  def handle_event(
-        "respond_questions",
-        %{"_id" => id, "response" => response},
-        socket
-      ) do
+  def handle_event("respond_questions", params, socket) do
     current_user = socket.assigns[:current_user]
     user_id = if current_user, do: to_string(current_user.id), else: nil
 
-    with {:ok, interaction} <- scoped_interaction(socket, id),
+    with {:ok, id, response} <- NextStep.answer_from_params(params),
+         {:ok, interaction} <- scoped_interaction(socket, id),
          {:ok, _updated} <-
            IssueThreadInteractions.resolve_interaction(interaction, %{
              "status" => :responded,
              "resolved_by_user_id" => user_id,
              "response" => response
            }) do
-      # Response is posted as a comment; reload issue so Simple thread shows it.
-      {:noreply, refresh_interaction_thread(socket)}
+      # Response is posted as a comment; reload the issue so the thread shows it.
+      {:noreply, socket |> refresh_interaction_thread() |> put_flash(:info, "Answer sent.")}
     else
+      {:error, :empty} ->
+        {:noreply, put_flash(socket, :error, "Choose an answer or write your own.")}
+
       {:error, :invalid_transition} ->
         {:noreply, put_flash(socket, :error, "Invalid state transition")}
 
@@ -1004,6 +1022,86 @@ defmodule CymphoWeb.IssueLive.Show do
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to respond")}
     end
+  end
+
+  # Review decided on the task itself (the Next step's Accept & close / Request changes).
+  @impl true
+  def handle_event("approve_review", %{"id" => id}, socket) do
+    issue = socket.assigns.issue
+
+    with true <- id == issue.id,
+         {:ok, _updated} <- ReviewChanges.decide(socket, issue, :approve) do
+      {:noreply,
+       socket
+       |> refresh_issue_runtime_assigns(issue.id)
+       |> put_flash(:info, "#{issue.identifier} is marked Done.")}
+    else
+      {:error, reason} -> {:noreply, put_flash(socket, :error, HumanReview.error_message(reason))}
+      _ -> {:noreply, put_flash(socket, :error, HumanReview.error_message(:not_found))}
+    end
+  end
+
+  def handle_event("request_changes", %{"id" => id}, socket) do
+    if id == socket.assigns.issue.id,
+      do: ReviewChanges.open(socket, id),
+      else: {:noreply, put_flash(socket, :error, HumanReview.error_message(:not_found))}
+  end
+
+  def handle_event("cancel_review_changes", _params, socket) do
+    {:noreply, assign(socket, :review_changes, nil)}
+  end
+
+  def handle_event("submit_review_changes", params, socket) do
+    issue = socket.assigns.issue
+
+    ReviewChanges.submit(
+      socket,
+      params,
+      &refresh_issue_runtime_assigns(&1, issue.id),
+      "#{issue.identifier} went back to To do with your note."
+    )
+  end
+
+  # A blocked task's retry: give it to a chosen agent of this company who is not
+  # paused, reopen it to To do and prioritise it, as `prepare_relaunch` does.
+  def handle_event("pick_retry_agent", %{"agent_id" => agent_id}, socket) do
+    {:noreply, assign(socket, :retry_choice, agent_id)}
+  end
+
+  def handle_event("pick_retry_agent", _params, socket), do: {:noreply, socket}
+
+  def handle_event("assign_and_retry", %{"agent_id" => agent_id}, socket) do
+    issue = socket.assigns.issue
+
+    with {:ok, agent} <- get_scoped_agent(socket, agent_id),
+         :ok <- retryable(issue, agent),
+         {:ok, issue} <- Issues.update_issue(issue, retry_attrs(issue, agent)),
+         {:ok, issue} <-
+           Issues.prioritize_for_dispatch(issue, actor: socket.assigns[:current_user]) do
+      _ = notify_dispatcher_if_enabled(socket)
+
+      {:noreply,
+       socket
+       |> assign(:retry_choice, nil)
+       |> refresh_issue_runtime_assigns(issue.id)
+       |> put_flash(:info, "#{issue.identifier} goes to #{agent.name}.")}
+    else
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Agent not found")}
+
+      {:error, {:paused, name}} ->
+        {:noreply, put_flash(socket, :error, "#{name} is paused. Choose someone else.")}
+
+      {:error, :closed} ->
+        {:noreply, put_flash(socket, :error, "This task is closed. Reopen it first.")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to assign and retry")}
+    end
+  end
+
+  def handle_event("assign_and_retry", _params, socket) do
+    {:noreply, put_flash(socket, :error, "Choose who should retry it.")}
   end
 
   @impl true
@@ -1276,7 +1374,8 @@ defmodule CymphoWeb.IssueLive.Show do
           socket.assigns.tool_call_traces
         )
 
-      {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
+      {:noreply,
+       socket |> assign(interactions: interactions, timeline: timeline) |> assign_task()}
     else
       {:noreply, socket}
     end
@@ -1295,7 +1394,8 @@ defmodule CymphoWeb.IssueLive.Show do
           socket.assigns.tool_call_traces
         )
 
-      {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
+      {:noreply,
+       socket |> assign(interactions: interactions, timeline: timeline) |> assign_task()}
     else
       {:noreply, socket}
     end
@@ -1700,7 +1800,8 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   defp scoped_interaction(socket, id) do
-    with {:ok, interaction} <- IssueThreadInteractions.get_interaction(id),
+    with {:ok, id} <- Ecto.UUID.cast(id),
+         {:ok, interaction} <- IssueThreadInteractions.get_interaction(id),
          true <- interaction.issue_id == socket.assigns.issue.id do
       {:ok, interaction}
     else
@@ -1904,6 +2005,7 @@ defmodule CymphoWeb.IssueLive.Show do
             {:noreply,
              socket
              |> assign(issue: issue)
+             |> assign_task()
              |> put_flash(:info, "Status updated to #{status}")}
 
           {:error, {:review_gates_blocked, %{message: message}}} ->
@@ -1953,7 +2055,57 @@ defmodule CymphoWeb.IssueLive.Show do
     |> assign(:work_products, work_products)
     |> assign(:tool_call_traces, tool_call_traces)
     |> assign_comment_authors()
+    |> assign_task()
   end
+
+  # What the r3 page needs beyond the issue's own records: the task's owner
+  # item (the same one Home and Inbox show, one row per task), its whole-life
+  # cost, and who had it before an automatic pause took it back.
+  defp assign_task(%{assigns: %{issue: issue}} = socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} when is_binary(company_id) ->
+        item =
+          company_id
+          |> OwnerAttention.list_items(socket.assigns[:current_user])
+          |> Enum.find(&(&1.issue_id == issue.id))
+
+        assign(socket,
+          task_item: item,
+          task_cost: Costs.issue_total(company_id, issue.id),
+          previous_assignee_id: Activities.previous_assignee_id(issue.id),
+          task_close_blockers: close_blockers(issue, item)
+        )
+
+      _ ->
+        socket
+    end
+  end
+
+  # A review the owner decides still passes the evidence gates (HumanReview);
+  # the page says what closing needs instead of offering a refused button.
+  defp close_blockers(issue, %{kind: :review_queue}) do
+    case Issues.validate_review_transition(issue, :done) do
+      :ok -> []
+      {:error, {:review_gates_blocked, %{blockers: blockers}}} -> Enum.map(blockers, & &1.label)
+      {:error, :blocked_by_active_issues} -> ["its blocking tasks finished"]
+      {:error, _reason} -> []
+    end
+  end
+
+  defp close_blockers(_issue, _item), do: []
+
+  defp retryable(%{status: status}, _agent) when status in [:done, :cancelled],
+    do: {:error, :closed}
+
+  defp retryable(_issue, %{status: :paused, name: name}), do: {:error, {:paused, name}}
+
+  defp retryable(_issue, %{status: status}) when status in [:terminated, :pending_approval],
+    do: {:error, :not_found}
+
+  defp retryable(_issue, _agent), do: :ok
+
+  defp retry_attrs(%{status: :blocked}, agent), do: %{assignee_id: agent.id, status: :todo}
+  defp retry_attrs(_issue, agent), do: %{assignee_id: agent.id}
 
   defp assign_comment_authors(socket) do
     comments =

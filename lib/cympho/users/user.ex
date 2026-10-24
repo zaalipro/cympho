@@ -15,7 +15,7 @@ defmodule Cympho.Users.User do
     field :email_enabled, :boolean, default: true
     field :webhook_enabled, :boolean, default: false
     field :webhook_url, :string
-    field :theme, :string, default: "claude"
+    field :theme, :string, default: "system"
     field :onboarding_draft, :map, default: %{}
     field :session_version, :integer, default: 0
 
@@ -86,8 +86,8 @@ defmodule Cympho.Users.User do
   end
 
   @doc """
-  Changeset for the user's UI theme only. Validates against the known theme
-  registry so an unknown id can never reach `<html data-theme>`.
+  Changeset for the user's appearance mode only. Validates against the known
+  mode registry so an unknown id can never reach `<html data-mode>`.
   """
   def theme_changeset(user, attrs) do
     user

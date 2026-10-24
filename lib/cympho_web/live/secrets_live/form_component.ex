@@ -292,7 +292,7 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
             </button>
             <button
               type="submit"
-              class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+              class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
             >
               <.icon name="hero-shield-check-mini" class="h-4 w-4" /> {submit_label(@form_mode)}
             </button>

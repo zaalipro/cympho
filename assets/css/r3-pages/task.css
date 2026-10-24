@@ -1,0 +1,61 @@
+/* r3 page CSS: task. Owned by the task track (P2 Task); no other track edits this file.
+   - Every selector starts with .cy-r3; scope page-only rules with .cy-r3 [data-page="…"]
+     (data-page sits on the page frame rendered by page_frame/1).
+   - No colour literal: use the tokens (app.css :root, themes.css). A new colour token goes into
+     the light block and both identical dark copies, never here.
+   - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
+   - Shared components belong in r3.css, not here. */
+
+/* the brief keeps the owner's line breaks */
+.cy-r3 [data-page="task"] .brief blockquote{white-space:pre-line}
+/* inline title edit (Advanced's pencil, or a deep link) */
+.cy-r3 [data-page="task"] .t-edit{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cy-r3 [data-page="task"] .t-edit input{flex:1;min-width:200px;height:36px;padding:0 12px;border-radius:var(--r-field);background:var(--field-bg);border:1px solid var(--field);color:var(--ink);font-size:16px}
+/* the page's flash, under the chips */
+.cy-r3 [data-page="task"] .flash-msg{align-self:flex-start;padding:8px 14px;border-radius:12px;background:var(--band);border:1px solid var(--band-line);font-size:14px;line-height:20px;color:var(--ink)}
+.cy-r3 [data-page="task"] .flash-msg.err{background:var(--stopped-bg);border-color:var(--stopped-line);color:var(--stopped)}
+
+/* the Next step: several questions or proposed tasks as a numbered list; what closing a review still needs */
+.cy-r3 [data-page="task"] .qs{display:flex;flex-direction:column;gap:6px;padding-left:22px;list-style:decimal;font-size:16px;line-height:24px;color:var(--ink)}
+.cy-r3 [data-page="task"] .qs-o{display:flex;flex-wrap:wrap;gap:2px 14px;margin-top:2px;list-style:none;font-size:14px;line-height:20px;color:var(--ink-2)}
+.cy-r3 [data-page="task"] .gate b{color:var(--stopped)}
+.cy-r3 [data-page="task"] .ink-err{margin-top:6px;font-size:13px;line-height:18px;color:var(--stopped)}
+.cy-r3 [data-page="task"] .ink .own-box textarea{display:block}
+
+/* thread: rendered Markdown inside a message */
+.cy-r3 [data-page="task"] .msg-b>*+*{margin-top:8px}
+.cy-r3 [data-page="task"] .msg-b :is(ul,ol){padding-left:20px}
+.cy-r3 [data-page="task"] .msg-b ul{list-style:disc}
+.cy-r3 [data-page="task"] .msg-b ol{list-style:decimal}
+.cy-r3 [data-page="task"] .msg-b code{font:13px/20px var(--mono)}
+.cy-r3 [data-page="task"] .msg-b a{text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--underline)}
+.cy-r3 [data-page="task"] .quiet-line{padding:10px 12px 14px;font-size:14px;line-height:20px;color:var(--ink-2)}
+
+/* deliverables: one without a link opens in place */
+.cy-r3 [data-page="task"] .objt-d{display:block;padding:0}
+.cy-r3 [data-page="task"] .objt-d>summary{display:flex;align-items:center;gap:14px;min-width:0;padding:14px 14px 14px 12px;border-radius:14px;cursor:pointer}
+.cy-r3 [data-page="task"] .objt-d .objt-t::after{content:none}
+.cy-r3 [data-page="task"] .objt-d[open]{grid-column:1 / -1}
+.cy-r3 [data-page="task"] .objt-body{padding:0 14px 14px 60px;max-width:72ch;white-space:pre-line;font-size:14px;line-height:21px;color:var(--ink)}
+.cy-r3 [data-page="task"] .dl-gates{display:inline-flex;gap:8px}
+.cy-r3 [data-page="task"] .dl-form{display:flex;flex-direction:column;gap:8px;margin:6px 4px 4px;padding:12px;border-radius:14px;background:var(--band)}
+
+/* runs: a failed run's mark reads Stopped */
+.cy-r3 [data-page="task"] .step.failed .chk{background:var(--stopped-bg);color:var(--stopped);box-shadow:inset 0 0 0 1px var(--stopped-line)}
+
+/* the details' Advanced links are 24 px targets (44 on phones, below) */
+.cy-r3 [data-page="task"] .kv a.ul{display:inline-flex;align-items:center;min-height:24px}
+
+/* sub-tasks and the Advanced operator panels span the page under the r3 blocks */
+.cy-r3 [data-page="task"] .split>:is(.subtasks,.task-adv){grid-column:1 / -1}
+.cy-r3 [data-page="task"] .subtasks{padding:8px 8px 0}
+
+@media (max-width:640px){
+  /* opened from Tasks or directly there is no "from" pill, so the breadcrumb's Tasks stays as the back pill */
+  .cy-r3 [data-page="task"] header:not(:has(.from)) .crumb .back{display:inline-flex}
+  .cy-r3 [data-page="task"] header:not(:has(.from)) .crumb .sep{display:inline}
+  .cy-r3 [data-page="task"] .objt-body{padding:0 12px 12px}
+  .cy-r3 [data-page="task"] .dl-gates .pl{height:44px}
+  .cy-r3 [data-page="task"] .t-edit input{height:44px}
+  .cy-r3 [data-page="task"] .kv a.ul{min-height:44px}
+}

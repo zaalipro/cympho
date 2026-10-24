@@ -1,8 +1,12 @@
 defmodule CymphoWeb.IssueLive.SimpleThreadTest do
   @moduledoc """
   Simple mode must always show the issue thread (comment bodies), pending
-  interaction resolve controls, and a compact proof strip — without relying
-  on the Advanced-only activity timeline.
+  interaction resolve controls, and the deliverables — without relying on the
+  Advanced-only activity timeline.
+
+  r3: the Simple thread, proof strip and interaction cards became the r3 Task
+  page's Thread card, Deliverables card and Next step (plan P2); the same
+  behaviours are asserted on the new markup.
   """
   use CymphoWeb.LiveCase, async: true
 
@@ -93,47 +97,47 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
 
     {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
 
-    # Simple thread + proof always present (CSS-gated via ui-simple-only).
-    assert has_element?(view, "#issue-simple-thread.ui-simple-only")
+    # r3: the thread, deliverables and runs are the page itself (both modes).
     assert has_element?(view, "[data-testid='issue-simple-proof']")
-    assert has_element?(view, "[data-testid='issue-simple-proof-run']")
+    assert has_element?(view, "#runs li.step", "Run finished")
     assert html =~ "Finished draft."
-    assert has_element?(view, "[data-testid='issue-simple-proof-product']")
     assert html =~ "Launch notes"
-    # Proof chips with URLs are clickable links (not inert spans).
-    assert has_element?(
-             view,
-             "a[data-testid='issue-simple-proof-product'][href='https://example.com/launch-notes']"
-           )
+    # Deliverables with URLs are clickable links (not inert spans).
+    assert has_element?(view, "#deliverables a[href='https://example.com/launch-notes']")
 
     # Comment bodies are readable outside the advanced timeline.
-    assert has_element?(view, "[data-testid='simple-comment-body']")
-    assert html =~ "Owner-visible note about the launch plan."
-    assert html =~ "Thread Agent"
+    assert has_element?(view, "#thread .msg-b", "Owner-visible note about the launch plan.")
+    assert has_element?(view, "#thread .msg-h", "Thread Agent")
 
-    # Pending interaction resolve controls.
-    assert has_element?(view, "#simple-interaction-#{confirmation.id}")
-
-    assert has_element?(
-             view,
-             "#simple-interaction-#{confirmation.id} [data-testid='simple-interaction-resolve']"
-           )
-
-    assert html =~ "Approve shipping the draft?"
-    assert html =~ "Confirm"
-    assert html =~ "Reject"
-
-    assert has_element?(view, "#simple-interaction-#{questions.id}")
+    # The oldest pending interaction is the Next step, with its resolve controls;
+    # the next one waits in the thread and becomes the Next step after it.
+    assert has_element?(view, ".next .paper", "Approve shipping the draft?")
 
     assert has_element?(
              view,
-             "#simple-interaction-#{questions.id} [data-testid='simple-interaction-response']"
+             ".next .ink button[phx-value-id='#{confirmation.id}'][phx-value-status='accepted']",
+             "Confirm"
            )
 
-    assert html =~ "Ship this week?"
-    assert html =~ "Respond"
+    assert has_element?(
+             view,
+             ".next .ink button[phx-value-id='#{confirmation.id}'][phx-value-status='rejected']",
+             "Decline"
+           )
 
-    # Composer remains available below the thread.
+    assert has_element?(view, "#thread .thread-old", "Asked you something that is still open.")
+
+    view
+    |> element(".next .ink button[phx-value-status='accepted']")
+    |> render_click()
+
+    assert has_element?(view, ".next .paper .quote", "Ship this week?")
+    assert has_element?(view, ".next form.ink input[name='_id'][value='#{questions.id}']")
+    assert has_element?(view, ".next form.ink textarea[name='own_response']")
+    assert has_element?(view, ".next .pw", "Send answer")
+
+    # Composers remain available: the thread's reply box and Advanced's template composer.
+    assert has_element?(view, "#thread form.composer[phx-submit='add_comment']")
     assert has_element?(view, "#issue-comments #comment-form")
   end
 
@@ -150,17 +154,22 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
         body: "Owner follow-up from Simple mode."
       })
 
-    {:ok, _view, html} = live(conn, "/issues/#{issue.id}")
+    {:ok, view, html} = live(conn, "/issues/#{issue.id}")
 
     assert html =~ "Owner follow-up from Simple mode."
     assert html =~ user.name
+    # r3: the thread names people by first name, as the mockups do.
+    assert has_element?(view, "#thread .msg-h b", hd(String.split(user.name)))
     refute html =~ user.id
   end
 
-  test "advanced-only panels stay gated; simple thread is simple-only", %{issue: issue} do
+  test "advanced-only panels stay gated; the r3 page shows in both modes", %{issue: issue} do
     {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
 
-    assert has_element?(view, "#issue-simple-thread.ui-simple-only")
+    # r3: the Task page itself is not mode-gated; the operator panels are.
+    assert has_element?(view, "[data-ui-complex-page] #thread")
+    refute has_element?(view, ".ui-advanced-only #thread")
+    assert has_element?(view, ".ui-advanced-only #issue-activity")
     assert html =~ ~r/class="[^"]*ui-advanced-only[^"]*"/
 
     # Activity timeline (full advanced feed) remains behind the advanced gate.
@@ -183,23 +192,18 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
 
     {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
-    assert has_element?(
-             view,
-             "#simple-interaction-#{interaction.id} button[phx-value-status='accepted']"
-           )
+    # r3: the confirmation is the Next step.
+    selector = ".next .ink button[phx-value-id='#{interaction.id}'][phx-value-status='accepted']"
+    assert has_element?(view, selector)
 
-    html =
-      view
-      |> element(
-        "#simple-interaction-#{interaction.id} button[phx-value-status='accepted']",
-        "Confirm"
-      )
-      |> render_click()
+    view
+    |> element(selector, "Confirm")
+    |> render_click()
 
     reloaded = Repo.get!(IssueThreadInteraction, interaction.id)
     assert reloaded.status == :accepted
-    refute html =~ ~s(data-interaction-status="pending")
-    assert html =~ ~s(data-interaction-status="accepted")
+    refute has_element?(view, ".next .ink button[phx-value-id='#{interaction.id}']")
+    assert has_element?(view, "#thread .thread-old", "Asked you to confirm · Accepted")
   end
 
   test "resolve_interaction from simple card can reject", %{issue: issue, agent: agent} do
@@ -216,22 +220,20 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
 
     {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
-    html =
-      view
-      |> element(
-        "#simple-interaction-#{interaction.id} button[phx-value-status='rejected']",
-        "Reject"
-      )
-      |> render_click()
+    # r3: the task proposal is the Next step.
+    assert has_element?(view, ".next .paper", "Write follow-up")
+
+    view
+    |> element(
+      ".next .ink button[phx-value-id='#{interaction.id}'][phx-value-status='rejected']",
+      "Reject"
+    )
+    |> render_click()
 
     reloaded = Repo.get!(IssueThreadInteraction, interaction.id)
     assert reloaded.status == :rejected
-    assert html =~ ~s(data-interaction-status="rejected")
-
-    refute has_element?(
-             view,
-             "#simple-interaction-#{interaction.id} [data-testid='simple-interaction-resolve']"
-           )
+    assert has_element?(view, "#thread .thread-old", "Proposed tasks · Rejected")
+    refute has_element?(view, ".next .ink button[phx-value-id='#{interaction.id}']")
   end
 
   test "respond_questions from simple card stores the response", %{issue: issue, agent: agent} do
@@ -248,7 +250,8 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
 
     {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
-    assert has_element?(view, "#simple-respond-form-#{interaction.id}")
+    # r3: the question is the Next step's answer form.
+    assert has_element?(view, ".next form#ns-answer input[name='_id'][value='#{interaction.id}']")
 
     html =
       render_hook(view, "respond_questions", %{
@@ -261,7 +264,7 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
     # Response is posted as a thread comment (not written onto payload).
     assert Enum.any?(Comments.list_comments(issue.id), &(&1.body == "Start with the US market."))
     assert html =~ "Start with the US market."
-    assert html =~ ~s(data-interaction-status="responded")
+    assert has_element?(view, "#thread .thread-old", "Asked you: “Which market first?”")
   end
 
   test "simple attach-proof gate opens form and attaches work product", %{issue: issue} do
@@ -300,10 +303,7 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
     assert html =~ "Work product attached"
     assert html =~ "Simple Proof Bundle"
 
-    assert has_element?(
-             view,
-             "a[data-testid='issue-simple-proof-product'][href='https://example.com/simple-proof']"
-           )
+    assert has_element?(view, "#deliverables a[href='https://example.com/simple-proof']")
 
     [wp] = WorkProducts.list_work_products(issue.id)
     assert wp.title == "Simple Proof Bundle"
@@ -346,7 +346,7 @@ defmodule CymphoWeb.IssueLive.SimpleThreadTest do
       |> render_submit()
 
     assert html =~ "PR link saved"
-    assert has_element?(view, "a[data-testid='issue-simple-proof-pr'][href='#{pr_url}']")
+    assert has_element?(view, "#deliverables a[href='#{pr_url}']", "PR")
 
     reloaded = Issues.get_issue!(issue.id)
     assert reloaded.github_pr_url == pr_url

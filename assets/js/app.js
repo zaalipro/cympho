@@ -2,9 +2,9 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 
-// Cympho ships dark-only per DESIGN.md. Theme toggle was removed; this
-// noop preserves the global symbol so any stale inline handlers still in
-// the wild don't throw before they're cleaned up.
+// Paper & Ink: light/dark/system; tokens in app.css/themes.css, the mode is
+// <html data-mode> (see the phx:set-theme listener). This noop preserves the
+// old global symbol so any stale inline handlers don't throw.
 window.toggleTheme = function() {};
 
 const UI_MODE_KEY = "cympho-ui-mode";
@@ -385,29 +385,50 @@ const KanbanSortable = {
   }
 };
 
-// Active navigation highlighting
+// Active navigation highlighting. The Main nav (rail + phone tab bar) lives in
+// the conn-rendered root layout, so live navigation re-marks it here from the
+// same table the server renders (CymphoWeb.Components.NavRail): data-nav-matches
+// make a destination current, data-nav-roots make it aria-current="page"
+// (else "true"); a trailing /* matches the whole subtree.
+function navMatch(path, pattern) {
+  if (pattern === '/') return path === '/';
+  return path === pattern || path.startsWith(pattern + '/');
+}
+
+function navRoot(path, pattern) {
+  return pattern.endsWith('/*') ? path.startsWith(pattern.slice(0, -1)) : path === pattern;
+}
+
 function highlightActiveNav() {
   const path = window.location.pathname;
+  let currentKey = null;
 
-  // Sidebar nav items
-  document.querySelectorAll('.nav-item[data-nav-path]').forEach(el => {
-    const navPath = el.dataset.navPath;
-    const navPaths = [navPath, ...(el.dataset.navMatches || '').split(',').filter(Boolean)];
-    const isActive = navPaths.some(candidate => path === candidate || path.startsWith(candidate + '/'));
-    el.setAttribute('data-active', isActive ? 'true' : 'false');
-    if (isActive) {
-      el.setAttribute('aria-current', 'page');
+  document.querySelectorAll('.dest a.d[data-nav-matches]').forEach((el) => {
+    const matches = el.dataset.navMatches.split(',').filter(Boolean);
+    const roots = (el.dataset.navRoots || '').split(',').filter(Boolean);
+    const active = currentKey === null && matches.some((pattern) => navMatch(path, pattern));
+
+    if (active) {
+      currentKey = el.getAttribute('href');
+      el.setAttribute('aria-current', roots.some((pattern) => navRoot(path, pattern)) ? 'page' : 'true');
     } else {
       el.removeAttribute('aria-current');
     }
   });
 
-  // Mobile bottom nav
-  document.querySelectorAll('.mobile-nav-item[data-mobile-nav-path]').forEach(el => {
-    const navPath = el.dataset.mobileNavPath;
-    const navPaths = [navPath, ...(el.dataset.navMatches || '').split(',').filter(Boolean)];
-    const isActive = navPaths.some(candidate => path === candidate || path.startsWith(candidate + '/'));
-    el.setAttribute('data-active', isActive ? 'true' : 'false');
+  // A destination's page: "page" on its own path and its views, "true" on the pages below it.
+  document.querySelectorAll('.dest .kids a[href]').forEach((el) => {
+    const href = el.getAttribute('href');
+    const views = (el.dataset.navViews || '').split(',').filter(Boolean);
+    if (href === path || views.includes(path)) el.setAttribute('aria-current', 'page');
+    else if (path.startsWith(href + '/')) el.setAttribute('aria-current', 'true');
+    else el.removeAttribute('aria-current');
+  });
+
+  // Settings is not a phone tab: the top bar's gear carries the current mark there.
+  document.querySelectorAll('[data-nav-settings]').forEach((el) => {
+    if (currentKey === '/settings') el.setAttribute('aria-current', 'page');
+    else el.removeAttribute('aria-current');
   });
 }
 
@@ -460,12 +481,18 @@ const GOTO_KEYS = {
   'k': '/kanban',
   'a': '/agents',
   'g': '/goals',
-  'h': '/dashboard',
+  'h': '/',
   'd': '/docs',
-  's': '/settings/profile',
+  's': '/settings',
 };
 
-const ADVANCED_ONLY_GOTO_KEYS = new Set(['i', 'g']);
+const ADVANCED_ONLY_GOTO_KEYS = new Set(['g']);
+
+// The page's one primary sits on the Next step's resolution card (S2); act only when there is exactly one.
+function nextStepPrimary() {
+  const primaries = document.querySelectorAll('#main-content .next .ink .pw:not([disabled])');
+  return primaries.length === 1 ? primaries[0] : null;
+}
 
 let gotoBuffer = '';
 let gotoTimer = null;
@@ -474,8 +501,9 @@ function handleKeydown(e) {
   const target = e.target;
   const isInput = shortcutTargetIsTextInput(target);
 
-  // Escape always closes modals
+  // Escape always closes modals (and the rail's open menus)
   if (e.key === 'Escape') {
+    document.querySelectorAll('.rail details[open]').forEach((open) => open.removeAttribute('open'));
     const palette = document.getElementById('command-palette');
     const shortcuts = document.getElementById('shortcuts-modal');
     const quickCreate = document.getElementById('quick-create-modal');
@@ -511,6 +539,15 @@ function handleKeydown(e) {
     if (window.openCompanySwitcher) {
       window.openCompanySwitcher();
     }
+    return;
+  }
+
+  // Cmd/Ctrl+Enter presses the Next step's one primary (the ⌘↵ hint on its
+  // resolution card), also from the answer field inside that card.
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !e.shiftKey && !e.altKey &&
+      !target.closest?.('#quick-create-modal, #command-palette') && nextStepPrimary()) {
+    e.preventDefault();
+    nextStepPrimary()?.click();
     return;
   }
 
@@ -713,6 +750,10 @@ function initCompanySwitcher() {
 // Org chart export hook
 const OrgChartExport = {
   mounted() {
+    // A tree wider than its card (phones) opens on its centred root, not its left edge.
+    const area = this.el.querySelector("#org-chart-export-area");
+    if (area) area.scrollLeft = (area.scrollWidth - area.clientWidth) / 2;
+
     this.handleEvent("export_svg", () => {
       this.exportToSVG();
     });
@@ -917,60 +958,52 @@ const Combobox = {
   }
 };
 
-// User menu popover at the bottom of the sidebar.
-const UserMenu = {
+// The rail's live team list (CymphoWeb.TeamRailLive). The header button opens
+// and closes the roster (rows that need the owner stay, r3.css); the owner's
+// choice is stored. FF5: below 800 px of viewport height the list starts closed
+// unless the owner opened it. On Team (/agents) the page is the roster, so the
+// rail draws the list closed there without storing it. Attributes go through
+// this.js() so LiveView patches keep them.
+const TEAM_LIST_KEY = 'cympho.nav.team';
+
+const TeamRailToggle = {
   mounted() {
-    this.trigger = this.el.querySelector('[data-user-menu-trigger]');
-    this.popover = this.el.querySelector('[data-user-menu-popover]');
-    if (!this.trigger || !this.popover) return;
+    this.button = this.el.querySelector('.team-h');
+    if (!this.button) return;
 
-    this.toggle = (e) => {
-      e.stopPropagation();
-      const isOpen = !this.popover.classList.contains('hidden');
-      this._setOpen(!isOpen);
-    };
-
-    this.outside = (e) => {
-      if (!this.el.contains(e.target)) this._setOpen(false);
-    };
-
-    this.escape = (e) => {
-      if (e.key === 'Escape') this._setOpen(false);
-    };
-
-    this.handleAction = (e) => {
-      const item = e.target.closest('[role="menuitem"]');
-      if (!item || !this.popover.contains(item)) return;
-
-      this._setOpen(false);
-      const action = item.dataset.action;
-      if (!action) return;
-
-      if (action === 'open-shortcuts') {
-        const m = document.getElementById('shortcuts-modal');
-        if (m) m.classList.remove('hidden');
-      } else if (action === 'open-command-palette') {
-        openCommandPalette();
+    this.onClick = () => {
+      const open = this.button.getAttribute('aria-expanded') !== 'true';
+      this.setOpen(open);
+      try {
+        localStorage.setItem(TEAM_LIST_KEY, open ? 'open' : 'closed');
+      } catch (_e) {
+        /* storage disabled — the choice holds for this page load */
       }
     };
 
-    this.trigger.addEventListener('click', this.toggle);
-    document.addEventListener('click', this.outside, true);
-    document.addEventListener('keydown', this.escape);
-    this.popover.addEventListener('click', this.handleAction);
+    this.onNavigate = () => this.applyDefault();
+    this.button.addEventListener('click', this.onClick);
+    window.addEventListener('phx:page-loading-stop', this.onNavigate);
+    this.applyDefault();
   },
   destroyed() {
-    document.removeEventListener('click', this.outside, true);
-    document.removeEventListener('keydown', this.escape);
+    window.removeEventListener('phx:page-loading-stop', this.onNavigate);
   },
-  _setOpen(open) {
-    if (open) {
-      this.popover.classList.remove('hidden');
-      this.trigger.setAttribute('aria-expanded', 'true');
-    } else {
-      this.popover.classList.add('hidden');
-      this.trigger.setAttribute('aria-expanded', 'false');
+  stored() {
+    try {
+      return localStorage.getItem(TEAM_LIST_KEY);
+    } catch (_e) {
+      return null;
     }
+  },
+  applyDefault() {
+    if (window.location.pathname === '/agents') return this.setOpen(false);
+    const stored = this.stored();
+    if (stored === 'open' || stored === 'closed') return this.setOpen(stored === 'open');
+    this.setOpen(window.innerHeight >= 800);
+  },
+  setOpen(open) {
+    this.js().setAttribute(this.button, 'aria-expanded', open ? 'true' : 'false');
   }
 };
 
@@ -1202,7 +1235,7 @@ const AdapterConfigFields = {
   }
 };
 
-// Sidebar primary "New issue" button — open the quick-create modal.
+// "New task" (rail, phone top bar, deep-page tools) — open the quick-create modal.
 document.addEventListener('click', (e) => {
   const trig = e.target.closest('[data-quick-create-trigger]');
   if (trig && typeof window.openQuickCreate === 'function') {
@@ -1231,6 +1264,11 @@ document.addEventListener('click', (e) => {
   const menuClose = e.target.closest('[data-runtime-menu-close]');
   const menu = menuClose && menuClose.closest('details');
   if (menu) menu.removeAttribute('open');
+
+  // The rail's company switch and account menus are <details>: an outside click closes them.
+  document.querySelectorAll('.rail details[open]').forEach((open) => {
+    if (!open.contains(e.target)) open.removeAttribute('open');
+  });
 });
 
 window.addEventListener('phx:issue:replace_url', (e) => {
@@ -1243,26 +1281,23 @@ window.addEventListener('phx:issue:replace_url', (e) => {
   window.history.replaceState(window.history.state, '', cleanUrl);
 });
 
-// Theme switch — the Appearance picker / user menu push `set-theme` after
-// persisting the choice to the DB. Flip <html data-theme> live (no reload) and
-// mirror it into the `theme` cookie so the next full load server-renders it
+// Mode switch — the Appearance picker pushes `set-theme` after persisting the
+// mode (light | dark | system) to the DB. Flip <html data-mode> live (no reload)
+// and mirror it into the `theme` cookie so the next full load server-renders it
 // (the FetchTheme plug reads this cookie), keeping first paint flash-free.
 window.addEventListener('phx:set-theme', (e) => {
   const theme = e.detail?.theme;
   if (!theme) return;
-  document.documentElement.setAttribute('data-theme', theme);
+  document.documentElement.setAttribute('data-mode', theme);
   document.cookie = `theme=${theme}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
 });
 
-// Nav chrome (desktop nav_rail + mobile bottom nav) lives in the root layout
-// outside LiveView inner_content, so assign-only badge updates never patch the
-// DOM. UserAuth pushes `nav_badges` after OwnerAttention/Inbox/approval
-// refreshes; mirror counts into always-present [data-nav-badge] nodes.
+// The Main nav lives in the root layout outside LiveView inner_content, so
+// assign-only badge updates never patch the DOM. UserAuth pushes `nav_badges`
+// after OwnerAttention/Inbox/approval refreshes; mirror the Inbox count into the
+// always-present [data-nav-badge="inbox"] node (its [data-badge-num] holds the number).
 window.addEventListener('phx:nav_badges', (e) => {
-  const inbox = Number(e.detail?.inbox ?? 0);
-  const approval = Number(e.detail?.approval ?? 0);
-  updateNavBadgeNodes('inbox', inbox);
-  updateNavBadgeNodes('approvals', approval);
+  updateNavBadgeNodes('inbox', Number(e.detail?.inbox ?? 0));
 });
 
 function updateNavBadgeNodes(key, rawCount) {
@@ -1271,19 +1306,13 @@ function updateNavBadgeNodes(key, rawCount) {
 
   document.querySelectorAll(`[data-nav-badge="${key}"]`).forEach((el) => {
     el.dataset.count = String(count);
-    el.textContent = visible ? String(count) : '';
     el.classList.toggle('hidden', !visible);
     el.setAttribute('aria-hidden', visible ? 'false' : 'true');
 
-    if (visible) {
-      const mobile = Boolean(el.closest('#mobile-nav'));
-      el.setAttribute(
-        'data-testid',
-        mobile ? `mobile-nav-badge-${key}` : `nav-badge-${key}`
-      );
-    } else {
-      el.removeAttribute('data-testid');
-    }
+    const num = el.querySelector('[data-badge-num]') || el;
+    num.textContent = visible ? String(count) : '';
+    if (visible) num.setAttribute('data-testid', `nav-badge-${key}`);
+    else num.removeAttribute('data-testid');
   });
 }
 
@@ -2438,7 +2467,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     Toast,
     OrgChartExport,
     Combobox,
-    UserMenu,
+    TeamRailToggle,
     ColorSwatchPicker,
     AdapterConfigFields,
     DatePicker,
@@ -2908,91 +2937,11 @@ function initQuickCreate() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Sidebar collapsible sections (Projects / Agents) + inline "Show N more".
-//
-// The nav rail lives in the conn-rendered root layout, so state is client-side:
-// collapse + show-more toggles persist in localStorage and are re-applied on
-// load. LiveView live-nav keeps the layout mounted, so in-session toggles also
-// survive navigation without touching storage. Markup: a <div data-nav-section>
-// wraps a <button data-nav-toggle> (with a <span data-nav-chevron>) + a
-// <div data-nav-body> of rows; overflow rows carry data-nav-overflow + `hidden`
-// and a <button data-nav-show-more> reveals them.
-// ---------------------------------------------------------------------------
-const NAV_COLLAPSE_KEY = 'cympho.nav.collapsed';
-const NAV_EXPAND_KEY = 'cympho.nav.expanded';
-
-function readNavState(key) {
-  try {
-    return JSON.parse(localStorage.getItem(key) || '{}') || {};
-  } catch (_e) {
-    return {};
-  }
-}
-
-function writeNavState(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (_e) {
-    /* storage disabled — in-session DOM state still works */
-  }
-}
-
-function setNavCollapsed(section, collapsed) {
-  section.querySelector('[data-nav-body]')?.classList.toggle('hidden', collapsed);
-  section.querySelector('[data-nav-chevron]')?.classList.toggle('-rotate-90', collapsed);
-  section.querySelector('[data-nav-toggle]')?.setAttribute('aria-expanded', String(!collapsed));
-}
-
-function setNavExpanded(section, expanded) {
-  section.querySelectorAll('[data-nav-overflow]').forEach((row) => {
-    row.classList.toggle('hidden', !expanded);
-  });
-  section.querySelector('[data-nav-more]')?.classList.toggle('hidden', expanded);
-  section.querySelector('[data-nav-less]')?.classList.toggle('hidden', !expanded);
-}
-
-function applyNavSectionState() {
-  const collapsed = readNavState(NAV_COLLAPSE_KEY);
-  const expanded = readNavState(NAV_EXPAND_KEY);
-  document.querySelectorAll('[data-nav-section]').forEach((section) => {
-    const key = section.dataset.navSection;
-    setNavCollapsed(section, collapsed[key] === true);
-    setNavExpanded(section, expanded[key] === true);
-  });
-}
-
-document.addEventListener('click', (e) => {
-  const toggle = e.target.closest('[data-nav-toggle]');
-  if (toggle) {
-    const section = toggle.closest('[data-nav-section]');
-    const key = section?.dataset.navSection;
-    if (!key) return;
-    const state = readNavState(NAV_COLLAPSE_KEY);
-    state[key] = !(state[key] === true);
-    writeNavState(NAV_COLLAPSE_KEY, state);
-    setNavCollapsed(section, state[key]);
-    return;
-  }
-  const more = e.target.closest('[data-nav-show-more]');
-  if (more) {
-    const section = more.closest('[data-nav-section]');
-    const key = section?.dataset.navSection;
-    if (!key) return;
-    const state = readNavState(NAV_EXPAND_KEY);
-    state[key] = !(state[key] === true);
-    writeNavState(NAV_EXPAND_KEY, state);
-    setNavExpanded(section, state[key]);
-  }
-});
-
 // Initialize after DOM ready
 document.addEventListener('DOMContentLoaded', () => {
   highlightActiveNav();
-  applyNavSectionState();
   initCommandPalette();
   initCompanySwitcher();
-  initSidebarMobile();
   initShortcutsModal();
   initQuickCreate();
   applyUIMode(currentUIMode());
@@ -3006,88 +2955,12 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('phx:page-loading-stop', () => {
     window.requestAnimationFrame(() => {
       highlightActiveNav();
-      applyNavSectionState();
       initCompanySwitcher();
       initQuickCreate();
       applyUIMode(currentUIMode());
     });
   });
 });
-
-// Sidebar mobile menu handlers
-function initSidebarMobile() {
-  const overlay = document.getElementById('sidebar-overlay');
-  const sidebar = document.getElementById('sidebar');
-  const mobileMenuBtn = document.querySelector('[data-mobile-menu-btn]');
-  const desktopQuery = window.matchMedia('(min-width: 1024px)');
-
-  if (!sidebar) return;
-
-  const setSidebarOpen = (open) => {
-    const desktop = desktopQuery.matches;
-    const shouldOpen = desktop || open;
-
-    sidebar.classList.toggle('-translate-x-full', !shouldOpen);
-
-    if (shouldOpen) {
-      sidebar.removeAttribute('inert');
-      sidebar.removeAttribute('aria-hidden');
-    } else {
-      sidebar.setAttribute('inert', '');
-      sidebar.setAttribute('aria-hidden', 'true');
-    }
-
-    if (overlay) {
-      overlay.classList.toggle('hidden', desktop || !open);
-    }
-
-    if (mobileMenuBtn) {
-      mobileMenuBtn.setAttribute('aria-expanded', open && !desktop ? 'true' : 'false');
-    }
-  };
-
-  const syncSidebarForViewport = () => {
-    setSidebarOpen(desktopQuery.matches);
-  };
-
-  syncSidebarForViewport();
-
-  if (overlay) {
-    overlay.addEventListener('click', () => {
-      setSidebarOpen(false);
-    });
-  }
-
-  if (mobileMenuBtn) {
-    mobileMenuBtn.addEventListener('click', () => {
-      setSidebarOpen(true);
-    });
-  }
-
-  sidebar.addEventListener('click', (event) => {
-    if (desktopQuery.matches) return;
-
-    if (event.target.closest('a[href], [data-quick-create-trigger]')) {
-      setSidebarOpen(false);
-    }
-  });
-
-  if (desktopQuery.addEventListener) {
-    desktopQuery.addEventListener('change', syncSidebarForViewport);
-  } else {
-    desktopQuery.addListener(syncSidebarForViewport);
-  }
-
-  // Company switcher button in mobile header
-  const companySwitcherBtn = document.querySelector('[data-company-switcher-btn]');
-  if (companySwitcherBtn) {
-    companySwitcherBtn.addEventListener('click', () => {
-      if (window.openCompanySwitcher) {
-        window.openCompanySwitcher();
-      }
-    });
-  }
-}
 
 // Shortcuts modal handlers
 function initShortcutsModal() {

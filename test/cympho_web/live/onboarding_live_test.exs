@@ -15,27 +15,16 @@ defmodule CymphoWeb.OnboardingLiveTest do
       conn: conn
     } do
       {view, html} = open_start_onboarding(conn)
-      assert html =~ "Choose a blueprint"
+      # r3: the template step is a Next step pair with paper option rows (build-spec §9 a);
+      # the old blueprint card grid and its classes are gone.
+      assert html =~ "Choose a company template"
       assert html =~ "Step 1 of 5"
-      assert html =~ "Company blueprint"
       assert html =~ "data-ui-complex-page"
-      assert html =~ "onboarding-blueprint-card"
-      assert html =~ "onboarding-blueprint-input sr-only"
 
       document = Floki.parse_document!(html)
-      [blueprint_grid] = Floki.find(document, "#blueprint-form > div.grid")
-      [blueprint_card | _] = Floki.find(document, ".onboarding-blueprint-card")
-      grid_classes = blueprint_grid |> Floki.attribute("class") |> Enum.join(" ")
-      card_classes = blueprint_card |> Floki.attribute("class") |> Enum.join(" ")
 
-      assert grid_classes =~ "min-w-0"
-      assert grid_classes =~ "grid-cols-1"
-      assert card_classes =~ "w-full"
-      assert card_classes =~ "min-w-0"
-      assert card_classes =~ "max-w-full"
-
-      css = File.read!(Path.join([File.cwd!(), "assets/css/app.css"]))
-      assert css =~ ".onboarding-blueprint-card:focus-within"
+      assert [_radio | _] =
+               Floki.find(document, "#blueprint-form input.opt-in[name='company[blueprint]']")
 
       view
       |> form("#blueprint-form", company: %{"blueprint" => "software"})
@@ -56,7 +45,8 @@ defmodule CymphoWeb.OnboardingLiveTest do
 
       # company -> team
       html = view |> element("button", "Continue") |> render_click()
-      assert html =~ "Owns the goal, sets direction"
+      # r3: the CEO/CTO description cards became the team's lead tiles (build-spec §9).
+      assert html =~ "6 agents to start"
       assert html =~ "AI provider"
       assert html =~ "Choose a different AI per role"
 
@@ -79,14 +69,19 @@ defmodule CymphoWeb.OnboardingLiveTest do
       )
       |> render_change()
 
+      # r3 (B9): Continue to review unlocks only after the readiness checks pass.
+      pass_readiness(view)
+
       # team -> launch
       html = view |> element("button", "Continue") |> render_click()
-      assert html =~ "Launch autonomous company"
+      assert html =~ "Launch Wizard Co"
       assert html =~ "Ada"
 
-      html = view |> element("button", "Launch autonomous company") |> render_click()
+      html = view |> element("button", "Launch Wizard Co") |> render_click()
       assert html =~ "all set"
-      assert html =~ "Enter Cympho"
+      # r3: Ready leads into Home on its day-one state ("Enter Cympho" opened /issues).
+      assert html =~ "Open Home"
+      assert html =~ "/switch-company/"
       assert Onboarding.get_draft(live_assigns(view).current_user.id) == %{}
 
       company = Companies.get_company_by_slug("wizard-co")
@@ -190,7 +185,8 @@ defmodule CymphoWeb.OnboardingLiveTest do
       })
 
       html = view |> element("button", "Continue") |> render_click()
-      assert html =~ "Issue prefix must be 2-7 uppercase letters."
+      # r3: errors use the mockups' voice and sit under their field.
+      assert html =~ "Use 2 to 7 capital letters for task IDs, like NW."
 
       {:ok, refreshed, html} = live(conn, "/onboarding")
       assert html =~ "Step 2 of 5"
@@ -294,6 +290,8 @@ defmodule CymphoWeb.OnboardingLiveTest do
         }
       })
 
+      # r3 (B9): launch needs a passing readiness check for the shared runtime.
+      pass_readiness(view)
       render_click(view, "start_autonomous_company")
 
       company = Companies.get_company_by_slug("role-mix-co")
@@ -357,8 +355,13 @@ defmodule CymphoWeb.OnboardingLiveTest do
       |> render_change()
 
       html = view |> element("button", "Continue") |> render_click()
-      assert html =~ "Issue prefix must be 2-7 uppercase letters."
+      # r3: the mockups' voice; the Advanced-only prefix field comes back into view.
+      assert html =~ "Use 2 to 7 capital letters for task IDs, like NW."
       assert html =~ "Step 2 of 5"
+
+      [prefix_field] = Floki.find(Floki.parse_document!(html), "#onboarding-issue-prefix")
+      refute prefix_field |> Floki.attribute("class") |> Enum.join(" ") =~ "ui-advanced-only"
+      assert has_element?(view, "#onboarding-issue-prefix[aria-invalid='true']")
     end
 
     test "blocks the company step when the goal is blank", %{conn: conn} do
@@ -373,16 +376,19 @@ defmodule CymphoWeb.OnboardingLiveTest do
       |> render_change()
 
       html = view |> element("button", "Continue") |> render_click()
-      assert html =~ "Company goal is required."
+      # r3: the mockups' voice, tied to the field by aria-describedby.
+      assert html =~ "Enter a first goal."
+      assert has_element?(view, "#ob-goal[aria-invalid='true'][aria-describedby='ob-goal-e']")
       assert html =~ "Step 2 of 5"
     end
 
     test "blocks the company step when monthly budget is zero", %{conn: conn} do
       {view, html} = open_start_onboarding(conn)
-      assert html =~ "Choose a blueprint"
+      # r3: glossary words ("company template", "spending limit").
+      assert html =~ "Choose a company template"
 
       view |> element("button", "Continue") |> render_click()
-      assert render(view) =~ "Monthly budget"
+      assert render(view) =~ "Spending limit per 30 days"
 
       view
       |> form("#company-step-form",
@@ -397,7 +403,7 @@ defmodule CymphoWeb.OnboardingLiveTest do
       |> render_change()
 
       html = view |> element("button", "Continue") |> render_click()
-      assert html =~ "Monthly budget must be a positive dollar amount."
+      assert html =~ "Enter a spending limit above $0."
       assert html =~ "Step 2 of 5"
     end
 
@@ -414,6 +420,8 @@ defmodule CymphoWeb.OnboardingLiveTest do
         }
       })
 
+      # r3 (B9): the launch reaches the transaction only after the checks pass.
+      pass_readiness(view)
       html = render_click(view, "start_autonomous_company")
 
       assert html =~
@@ -431,6 +439,8 @@ defmodule CymphoWeb.OnboardingLiveTest do
         "company" => %{"name" => "Tamper Co", "issue_prefix" => "TMP", "adapter" => "process"}
       })
 
+      # r3 (B9): the checks run on the sanitised adapter, as the launch does.
+      pass_readiness(view)
       render_click(view, "start_autonomous_company")
 
       company = Companies.get_company_by_slug("tamper-co")
@@ -482,26 +492,339 @@ defmodule CymphoWeb.OnboardingLiveTest do
     test "filters the larger blueprint catalog", %{conn: conn} do
       {view, html} = open_start_onboarding(conn)
 
-      assert html =~ "17 of 17"
+      # r3: four templates first, "Show all 17" for the rest (build-spec §9 a); rows show
+      # the short names ("Security compliance"), the full name was a tooltip.
+      assert html =~ "4 of 17 templates"
+      assert view |> element("button", "Show all 17") |> render_click() =~ "17 of 17 templates"
 
       html =
         view
         |> form("#blueprint-search-form", blueprint_query: "security")
         |> render_change()
 
-      assert html =~ "Security compliance company"
+      assert html =~ "Security compliance"
       assert html =~ "1 of 17"
-      refute html =~ "Training academy company"
+      refute html =~ "Training academy"
 
       html =
         view
         |> form("#blueprint-search-form", blueprint_query: "training")
         |> render_change()
 
-      assert html =~ "Training academy company"
+      assert html =~ "Training academy"
       assert html =~ "1 of 17"
-      refute html =~ "Security compliance company"
+      refute html =~ "Security compliance"
     end
+  end
+
+  describe "r3 onboarding: Team & AI (B8, B9, B10)" do
+    test "the team step is one form: lead tiles, engineers, provider rows, readiness and the crew",
+         %{conn: conn} do
+      {view, html} = open_team_step(conn)
+      doc = Floki.parse_document!(html)
+
+      assert [_frame] = Floki.find(doc, "[data-page='onboarding'][data-ui-complex-page]")
+      assert [_h1] = Floki.find(doc, "h1")
+      assert Floki.text(Floki.find(doc, "h1")) =~ "Your team, and the AI it runs on"
+
+      # One step is current in the step list; the two before it are done and go back.
+      assert [current] = Floki.find(doc, "nav[aria-label='Setup steps'] [aria-current='step']")
+      assert Floki.text(current) =~ "Team & AI"
+
+      assert length(
+               Floki.find(doc, "nav[aria-label='Setup steps'] button[phx-click='go_to_step']")
+             ) == 2
+
+      # The pair is one form: choices on paper, the crew and the page's one primary on ink.
+      assert [_paper] = Floki.find(doc, "form#team-step-form.next > article.paper")
+      assert [_ink] = Floki.find(doc, "form#team-step-form.next > article.ink")
+      assert [_one] = Floki.find(doc, "main .pw, .ob .pw")
+
+      # B8: suggested leader names, editable in the form.
+      assert Floki.text(Floki.find(doc, ".lead")) =~ "Ada"
+      assert Floki.text(Floki.find(doc, ".lead")) =~ "Theo"
+      assert html =~ "Also on the team: Priya (Product Manager) and Jun (Designer)."
+      assert [_] = Floki.find(doc, "input[name='company[leader_names][ceo]'][value='Ada']")
+      crew = doc |> Floki.find(".crew .cn") |> Enum.map(&Floki.text/1) |> Enum.join(" | ")
+      assert crew =~ "Ada" and crew =~ "Theo" and crew =~ "Priya" and crew =~ "Jun"
+      assert length(Floki.find(doc, ".crew li")) == 6
+
+      # Claude Code and Codex are the providers offered (Cursor/HTTP report no usage).
+      providers = doc |> Floki.find("input[name='company[adapter]']") |> Floki.attribute("value")
+      assert providers == ["claude_code", "codex"]
+
+      # B9: nothing checked yet, so Continue to review is disabled.
+      assert html =~ "Not checked yet"
+      assert has_element?(view, "button.pw[disabled]", "Continue to review")
+    end
+
+    test "no check runs on mount; Check runs it once and unlocks Continue", %{conn: conn} do
+      {view, _html} = open_team_step(conn)
+      user_id = live_assigns(view).current_user.id
+
+      {:ok, view, html} = live(conn, "/onboarding")
+      assert html =~ "Step 3 of 5"
+      refute_received {:readiness_prober, _call, _args}
+
+      view |> element("button", "Check") |> render_click()
+      html = render_async(view)
+
+      assert_received {:readiness_prober, :installed?, _program}
+      assert_received {:readiness_prober, :answers?, "claude_code"}
+      assert html =~ "Ready on this server"
+      assert html =~ "a one-line test prompt was answered"
+      assert html =~ "it reports the cost of every run"
+      refute has_element?(view, "button.pw[disabled]")
+      assert has_element?(view, "button.pw", "Continue to review")
+
+      # Saved in the draft: a refresh shows the result and asks the server nothing.
+      assert Onboarding.get_draft(user_id)["form"]["readiness"]["signed_in"] == true
+      {:ok, _view, html} = live(conn, "/onboarding")
+      assert html =~ "Ready on this server"
+      refute_received {:readiness_prober, _call, _args}
+
+      assert view |> element("button", "Continue to review") |> render_click() =~ "Step 4 of 5"
+    end
+
+    test "a refused test prompt keeps Continue locked, on the client and the server", %{
+      conn: conn
+    } do
+      {view, _html} = open_team_step(conn)
+
+      render_change(view, "update_company_form", %{
+        "company" => %{"runtime_command" => "refused-claude"}
+      })
+
+      view |> element("button", "Check") |> render_click()
+      html = render_async(view)
+
+      assert html =~ "Not ready on this server"
+
+      assert html =~
+               "The test prompt was refused. Sign in to Claude Code on the server, then check again."
+
+      assert has_element?(view, "button.pl", "Check again")
+      assert has_element?(view, "a[href='/docs/ai-agents/cli-harnesses']", "How to fix this")
+      assert has_element?(view, "button.pw[disabled]", "Continue to review")
+      assert html =~ "Continue unlocks when every check passes."
+
+      # A forged Continue or launch is refused too, and nothing is created.
+      html = render_click(view, "next_step")
+      assert html =~ "Step 3 of 5"
+      assert html =~ "Every check must pass before you continue."
+
+      render_click(view, "start_autonomous_company")
+      assert Companies.get_company_by_slug("team-step-co") == nil
+    end
+
+    test "a result belongs to the runtime it was taken on", %{conn: conn} do
+      {view, _html} = open_team_step(conn)
+      pass_readiness(view)
+      assert render(view) =~ "Ready on this server"
+
+      html =
+        render_change(view, "update_company_form", %{
+          "company" => %{"runtime_model" => "claude-opus-4-8"}
+        })
+
+      assert html =~ "Not checked yet"
+      assert has_element?(view, "button.pw[disabled]", "Continue to review")
+    end
+
+    test "renamed leaders launch under their names (B8)", %{conn: conn} do
+      {view, _html} = open_team_step(conn)
+
+      html =
+        view
+        |> form("#team-step-form",
+          company: %{
+            "leader_names" => %{"ceo" => "Grace", "cto" => ""},
+            "engineer_names" => ["Ravi", "Mira"]
+          }
+        )
+        |> render_change()
+
+      assert Floki.text(Floki.find(Floki.parse_document!(html), ".crew")) =~ "Grace"
+
+      pass_readiness(view)
+      view |> element("button", "Continue to review") |> render_click()
+
+      assert render(view) =~
+               "Grace (CEO), CTO (CTO), Priya (Product Manager), Jun (Designer), Ravi and Mira (Engineers)"
+
+      render_click(view, "start_autonomous_company")
+
+      company = Companies.get_company_by_slug("team-step-co")
+      names = company.id |> Companies.list_company_agents() |> Map.new(&{&1.role, &1.name})
+
+      assert names[:ceo] == "Grace"
+      assert names[:cto] == "CTO"
+      assert names[:product_manager] == "Priya"
+      assert names[:designer] == "Jun"
+    end
+
+    test "Codex needs both prices; they are written to every agent (B10)", %{conn: conn} do
+      {view, _html} = open_team_step(conn)
+
+      html =
+        view
+        |> form("#team-step-form",
+          company: %{"adapter" => "codex", "runtime_model" => "gpt-5.4-mini"}
+        )
+        |> render_change()
+
+      assert html =~ "These prices are saved on all 6 agents."
+      assert html =~ "enter its input and output prices above"
+
+      html =
+        view
+        |> form("#team-step-form", company: %{"price_input" => "0.75", "price_output" => ""})
+        |> render_change()
+
+      assert html =~ "Enter the output price. Without it the spending limit can&#39;t stop Codex."
+
+      assert has_element?(
+               view,
+               "#ob-price_output[aria-invalid='true'][aria-describedby='ob-price-e']"
+             )
+
+      # Signed in and installed pass, but an unpriced Codex still cannot continue or launch.
+      pass_readiness(view)
+      assert has_element?(view, "button.pw[disabled]", "Continue to review")
+      assert render_click(view, "next_step") =~ "Enter the output price."
+      render_click(view, "start_autonomous_company")
+      assert Companies.get_company_by_slug("team-step-co") == nil
+
+      html =
+        view
+        |> form("#team-step-form", company: %{"price_output" => "4.50"})
+        |> render_change()
+
+      assert html =~ "you entered its prices"
+      assert html =~ "Ready on this server"
+
+      view |> element("button", "Continue to review") |> render_click()
+      render_click(view, "start_autonomous_company")
+
+      company = Companies.get_company_by_slug("team-step-co")
+      agents = Companies.list_company_agents(company.id)
+      assert length(agents) == 6
+
+      for agent <- agents do
+        assert agent.adapter == :codex
+        assert agent.runtime_config["model"] == "gpt-5.4-mini"
+
+        assert agent.runtime_config["pricing"] == %{
+                 "gpt-5.4-mini" => %{
+                   "input_usd_per_mtok" => "0.75",
+                   "output_usd_per_mtok" => "4.50"
+                 }
+               }
+      end
+    end
+  end
+
+  describe "r3 onboarding: steps and defaults" do
+    test "finished steps go back; a forged jump forward is ignored", %{conn: conn} do
+      {view, _html} = open_team_step(conn)
+
+      html =
+        view |> element("button[phx-click='go_to_step'][phx-value-step='0']") |> render_click()
+
+      assert html =~ "Step 1 of 5"
+
+      html = render_click(view, "go_to_step", %{"step" => "3"})
+      assert html =~ "Step 1 of 5"
+    end
+
+    test "the task-ID prefix and project follow the company name until set", %{conn: conn} do
+      {view, _html} = open_start_onboarding(conn)
+      view |> element("button", "Continue") |> render_click()
+
+      render_change(view, "update_company_form", %{"company" => %{"name" => "Northwind Software"}})
+
+      form = live_assigns(view).company_form
+      assert form["issue_prefix"] == "NS"
+      assert form["project_name"] == "Northwind Software app"
+
+      render_change(view, "update_company_form", %{
+        "company" => %{"name" => "Northwind Software", "issue_prefix" => "NW"}
+      })
+
+      render_change(view, "update_company_form", %{"company" => %{"name" => "Northwind Labs"}})
+      form = live_assigns(view).company_form
+      assert form["issue_prefix"] == "NW"
+      assert form["project_name"] == "Northwind Labs app"
+
+      # A name with no letters gives no prefix; the prefix is left as it was.
+      render_change(view, "update_company_form", %{"company" => %{"name" => "2026"}})
+      assert live_assigns(view).company_form["issue_prefix"] == "NW"
+    end
+
+    test "a readiness result cannot be sent in with the form", %{conn: conn} do
+      {view, _html} = open_team_step(conn)
+
+      render_change(view, "update_company_form", %{
+        "company" => %{
+          "readiness" => %{"checked" => "claude_code||", "installed" => true, "signed_in" => true}
+        }
+      })
+
+      assert has_element?(view, "button.pw[disabled]", "Continue to review")
+      assert render_click(view, "next_step") =~ "Every check must pass before you continue."
+    end
+
+    test "Review shows the team, the limit and the launch effect; Ready opens Home", %{conn: conn} do
+      {view, _html} = open_team_step(conn)
+      pass_readiness(view)
+
+      html = view |> element("button", "Continue to review") |> render_click()
+      assert html =~ "Team Step Co is ready to launch"
+      assert html =~ "Claude Code · installed, signed in, priced"
+      assert html =~ "per 30 days. Agents stop at the limit."
+      assert html =~ "Cympho creates 6 agents and 5 first tasks."
+      assert html =~ "TEAM-1 starts with Ada (CEO)."
+
+      html = view |> element("button", "Launch Team Step Co") |> render_click()
+      doc = Floki.parse_document!(html)
+      assert Floki.text(Floki.find(doc, ".launch")) =~ "6 agents hired"
+      assert Floki.text(Floki.find(doc, ".launch")) =~ "5 first tasks"
+      # The dispatcher is off in tests (plan D1): the first task waits, and the card says why.
+      assert html =~ "TEAM-1 waits for Ada (CEO)"
+      assert html =~ "Agents are switched off on this server."
+
+      company = Companies.get_company_by_slug("team-step-co")
+      assert [href] = doc |> Floki.find("a.pw") |> Floki.attribute("href")
+      assert href == "/switch-company/#{company.id}?return_to=/"
+    end
+  end
+
+  # B9: the Fake prober (config/test.exs) passes any program not named "missing"/"refused".
+  # Sent as the event, so it also works from steps that do not show the Check pill.
+  defp pass_readiness(view) do
+    render_click(view, "check_readiness")
+    # The stubbed check runs in start_async; under a full parallel suite it can
+    # take longer than render_async's 100 ms default.
+    render_async(view, 1_000)
+  end
+
+  # Template and company filled in, then Continue twice: the team step (3 of 5).
+  defp open_team_step(conn) do
+    {view, _html} = open_start_onboarding(conn)
+    view |> element("button", "Continue") |> render_click()
+
+    render_change(view, "update_company_form", %{
+      "company" => %{
+        "name" => "Team Step Co",
+        "goal_title" => "Ship the first release",
+        "issue_prefix" => "TEAM",
+        "budget_monthly_usd" => "300"
+      }
+    })
+
+    html = view |> element("button", "Continue") |> render_click()
+    assert html =~ "Step 3 of 5"
+    {view, html}
   end
 
   defp open_start_onboarding(conn) do

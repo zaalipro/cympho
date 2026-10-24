@@ -1,8 +1,11 @@
 defmodule CymphoWeb.BudgetLive.Index do
   use CymphoWeb, :live_view
 
+  import CymphoWeb.Format, only: [money: 1, window: 1]
+
   alias Cympho.Budgets
   alias Cympho.Finances
+  alias CymphoWeb.TeamRail
 
   @impl true
   def mount(_params, _session, socket) do
@@ -131,11 +134,38 @@ defmodule CymphoWeb.BudgetLive.Index do
       Finances.list_budget_policies(socket.assigns.current_company.id, is_active: true)
 
     summary = calculate_summary(budgets)
+    # The limit Spending and Settings > Billing show (TeamRail.spending/1).
+    spending = TeamRail.spending(socket.assigns.current_company.id)
+
+    command =
+      if summary.total == 0 and spending.limit,
+        do: setup_limit_command(spending),
+        else: build_budget_command(summary, budgets, policies)
 
     socket
     |> assign(:summary, summary)
     |> assign(:budget_policies, policies)
-    |> assign(:budget_command, build_budget_command(summary, budgets, policies))
+    |> assign(:spending, spending)
+    |> assign(:budget_command, command)
+  end
+
+  # No Budget yet, but the company has a limit no Budget owns (the one set up
+  # with the company, budget_id nil): name it instead of "No spending limit".
+  defp setup_limit_command(spending) do
+    %{
+      tone: :ready,
+      badge: "Company limit",
+      title: "Spending limit: #{money(spending.limit)} per #{window(spending.days)}",
+      summary: "No budget owns this limit. Change it on Spending.",
+      action_label: "Open Spending",
+      action_path: "/costs",
+      metrics: [
+        %{label: "Budgets", value: "0"},
+        %{label: "Active", value: "0"},
+        %{label: "Limit", value: money(spending.limit)},
+        %{label: "Used", value: money(spending.spent)}
+      ]
+    }
   end
 
   defp calculate_summary(budgets) do

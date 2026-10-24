@@ -1,0 +1,681 @@
+/* ================================================================
+   r3 "Paper & Ink": shell and shared components, ported from the approved mockups
+   (ui-redesign/v5/notes/r3-src/r3.css). Every selector stays under .cy-r3 (the body).
+   - Tokens are not here: light in app.css :root, dark twice in themes.css.
+   - No colour literal in this file or in r3-pages/*.css: use the tokens
+     (test/cympho_web/r3_css_contract_test.exs enforces it).
+   - Page rules go to assets/css/r3-pages/<track>.css, never here.
+   Changes from the mockup source: the token blocks, the mockup root rule and the element resets
+   Tailwind preflight covers are gone; page selectors read [data-page] on the page frame; the phone
+   column padding keys on a deep context header; the team toggle is a <button aria-expanded>; the
+   shell fills the 100dvh body with the rail and <main> scrolling on their own.
+   ================================================================ */
+
+
+/* ---------- surface scoping: inside the resolution card, the same names mean the inverse values ---------- */
+.cy-r3 .ink{
+  color-scheme:var(--inv-scheme);
+  --focus-ring:var(--inv-focus-ring);--focus-gap:var(--inv-focus-gap);
+  --accent:var(--inv-accent);--on-accent:var(--inv-on-accent);
+  --working:var(--inv-working);--waiting:var(--inv-waiting);--stopped:var(--inv-stopped);--done:var(--inv-done);--idle:var(--inv-idle);
+}
+
+/* ---------- base ----------
+   Tailwind preflight already resets margins, lists, links, buttons and box-sizing, so the mockups' element
+   resets are not repeated here (scoped under .cy-r3 they would beat utilities inside legacy markup). Two
+   differences remain: preflight has no fieldset{min-width:0}, and it draws svg as display:block */
+/* r3's 14/20 type base, only in r3 regions (legacy pages keep their own sizes) */
+.cy-r3 .rail,.cy-r3 .topbar,.cy-r3 [data-page]{font-size:14px;line-height:20px}
+.cy-r3 fieldset{min-width:0}
+.cy-r3 :is(.ico,.g,.file,.qm){display:inline;vertical-align:baseline}
+.cy-r3 summary{list-style:none;cursor:pointer}
+.cy-r3 summary::-webkit-details-marker{display:none}
+.cy-r3 b,.cy-r3 strong{font-weight:500}
+.cy-r3 .mono{font-family:var(--mono);font-feature-settings:"zero" 1,"tnum" 1;letter-spacing:0}
+.cy-r3 .num{font-variant-numeric:tabular-nums}
+.cy-r3 .sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.cy-r3 .sprite{position:absolute;width:0;height:0;overflow:hidden}
+.cy-r3 .ico{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.cy-r3 .ico.s16{width:16px;height:16px}
+.cy-r3 .ico.s14{width:14px;height:14px}
+.cy-r3 .g{width:12px;height:12px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.cy-r3 .g.lg{width:14px;height:14px}
+.cy-r3 .c-work{color:var(--working)}
+.cy-r3 .c-wait{color:var(--waiting)}
+.cy-r3 .c-stop{color:var(--stopped)}
+.cy-r3 .c-done{color:var(--done)}
+.cy-r3 .c-idle{color:var(--idle)}
+.cy-r3 .spin{animation:cy-r3-spin 1.4s cubic-bezier(.45,.05,.55,.95) infinite;transform-origin:50% 50%}
+@keyframes cy-r3-spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+/* file glyphs in the sprite take their colours from tokens */
+.cy-r3 .fp{fill:var(--file-bg);stroke:var(--file-edge)}
+.cy-r3 .ff{fill:var(--file-fold);stroke:var(--file-edge)}
+.cy-r3 .fm{fill:none;stroke:var(--file-mark)}
+
+/* focus: a 2px ring outside a 2px gap; the surface sets the two tokens */
+.cy-r3 :focus-visible{outline:none;box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+
+.cy-r3 .skip{position:absolute;left:14px;top:-64px;z-index:40;display:inline-flex;align-items:center;height:44px;padding:0 18px;border-radius:var(--r-pill);background:var(--count-bg);color:var(--count-ink);font-weight:500;transition:top .2s var(--ease)}
+.cy-r3 .skip:focus-visible{top:14px}
+
+/* ---------- shell ---------- */
+.cy-r3 .shell{display:grid;grid-template-columns:248px minmax(0,1fr);flex:1 1 auto;min-height:0}
+/* the team list is a LiveView rendered from the root layout; its container takes no box of its own */
+.cy-r3 .team-live{display:contents}
+.cy-r3 .rail{position:sticky;top:0;align-self:start;height:100%;display:flex;flex-direction:column;gap:12px;padding:16px 10px 0 14px;overflow-y:auto;scrollbar-width:none}
+.cy-r3 .rail::-webkit-scrollbar{display:none}
+.cy-r3 .rail>*{flex-shrink:0}
+
+.cy-r3 .switch{position:relative}
+.cy-r3 .switch>summary{display:flex;align-items:center;gap:10px;min-height:48px;padding:6px 8px 6px 6px;border-radius:14px;transition:background .2s var(--ease)}
+.cy-r3 .switch>summary:hover{background:var(--page-hover)}
+.cy-r3 .tile-co{width:32px;height:32px;flex:none;border-radius:9px;background:var(--brand-bg);color:var(--brand-ink);display:grid;place-items:center;font-size:12px;font-weight:600;letter-spacing:.03em;box-shadow:var(--sh-brand)}
+.cy-r3 .co-txt{display:flex;flex-direction:column;min-width:0;flex:1}
+.cy-r3 .co-name{font-size:14px;line-height:18px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cy-r3 .co-power{display:flex;align-items:center;gap:6px;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .pw-dot{width:6px;height:6px;border-radius:50%;background:var(--done);flex:none}
+.cy-r3 .menu{position:absolute;z-index:25;left:0;right:0;top:calc(100% + 6px);display:flex;flex-direction:column;padding:6px;background:var(--pop);border:1px solid var(--line);border-radius:16px;box-shadow:var(--sh-pop)}
+.cy-r3 .menu.up{top:auto;bottom:calc(100% + 6px)}
+.cy-r3 .menu a,.cy-r3 .menu button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-height:36px;padding:8px 10px;border-radius:10px;text-align:left;font-size:13px;color:var(--ink)}
+.cy-r3 .menu a:hover,.cy-r3 .menu button:hover{background:var(--hover)}
+.cy-r3 .menu small{font-size:12px;color:var(--ink-2)}
+
+.cy-r3 .search{display:flex;align-items:center;gap:8px;height:38px;padding:0 6px 0 12px;background:var(--field-bg);border:1px solid var(--field);border-radius:var(--r-pill);color:var(--ink-2);transition:box-shadow .2s var(--ease)}
+.cy-r3 .search:focus-within{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+.cy-r3 .search input{flex:1;min-width:0;height:100%;border:0;background:transparent;outline:none;font-size:13px;color:var(--ink)}
+.cy-r3 .search input::placeholder{color:var(--ink-2);opacity:1}
+.cy-r3 kbd{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 6px;border-radius:7px;background:var(--kbd-bg);border:1px solid var(--kbd-line);color:var(--kbd-ink);font:500 12px/1 var(--mono)}
+
+.cy-r3 .btn-new{display:flex;align-items:center;justify-content:center;gap:6px;height:38px;border-radius:var(--r-pill);background:var(--btn-bg);border:1px solid var(--btn-line);color:var(--ink);font-weight:500;box-shadow:var(--sh-tile);transition:transform .15s var(--press),background .2s var(--ease)}
+.cy-r3 .btn-new:hover{background:var(--btn-hover);border-color:var(--btn-line-hover)}
+.cy-r3 .btn-new:active{transform:scale(.98)}
+
+.cy-r3 .dest>ul{display:flex;flex-direction:column;gap:2px}
+.cy-r3 .d{position:relative;display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:12px;border:1px solid transparent;color:var(--ink-nav);font-weight:500;transition:background .18s var(--ease),color .18s var(--ease),box-shadow .18s var(--ease)}
+.cy-r3 .d .ico{color:var(--ink-2)}
+.cy-r3 .d:hover{background:var(--page-hover);color:var(--ink)}
+.cy-r3 .d[aria-current]{background:var(--lift);color:var(--ink-hi);border-color:var(--lift-line);box-shadow:var(--sh-raise)}
+.cy-r3 .d[aria-current] .ico{color:var(--ink)}
+.cy-r3 .d .lbl{flex:1;min-width:0}
+.cy-r3 .sel{display:none;width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
+.cy-r3 .d[aria-current] .sel{display:block}
+.cy-r3 .count{min-width:22px;height:20px;padding:0 7px;border-radius:var(--r-pill);background:var(--count-bg);color:var(--count-ink);font:600 12px/20px var(--mono);text-align:center}
+.cy-r3 .kids{display:flex;flex-direction:column;gap:1px;margin:4px 0 8px 19px;padding-left:10px;border-left:1px solid var(--spine)}
+.cy-r3 .kids a{display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:9px;font-size:13px;color:var(--ink-2);transition:background .18s var(--ease),color .18s var(--ease)}
+.cy-r3 .kids a:hover{color:var(--ink);background:var(--page-hover)}
+.cy-r3 .kids a[aria-current]{color:var(--ink);font-weight:500}
+.cy-r3 .kids a[aria-current]::before{content:"";width:4px;height:4px;border-radius:50%;background:var(--ink);margin-left:-2px}
+
+.cy-r3 .team{position:relative;background:var(--card);border:1px solid var(--lift-line);border-radius:16px;padding:5px;box-shadow:var(--sh-tile)}
+.cy-r3 .team>.team-h{display:flex;align-items:center;gap:6px;width:100%;height:32px;padding:0 8px;border-radius:10px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 .team>.team-h:hover{color:var(--ink)}
+.cy-r3 .team>.team-h .ico{transition:transform .2s var(--ease)}
+.cy-r3 .team>.team-h[aria-expanded="false"] .ico{transform:rotate(-90deg)}
+.cy-r3 .see-all{position:absolute;top:5px;right:7px;display:flex;align-items:center;height:32px;padding:0 6px;border-radius:8px;font-size:12px;color:var(--ink-2)}
+.cy-r3 .see-all:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.cy-r3 .roster{display:flex;flex-direction:column}
+.cy-r3 .mate{display:grid;grid-template-columns:12px auto minmax(0,1fr) auto;align-items:center;gap:7px;height:32px;padding:0 8px;border-radius:10px;transition:background .18s var(--ease)}
+.cy-r3 .mate:hover{background:var(--hover)}
+.cy-r3 .m-name{font-size:13px;font-weight:500;color:var(--ink)}
+.cy-r3 .m-word{font-size:12px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cy-r3 .m-word.c-work{color:var(--working)}
+.cy-r3 .m-word.c-stop{color:var(--stopped)}
+.cy-r3 .fy{height:20px;padding:0 7px;border-radius:var(--r-pill);background:var(--waiting-bg);color:var(--waiting);font:500 12px/20px var(--mono);white-space:nowrap}
+.cy-r3 .team>.team-h[aria-expanded="false"]~.roster>li:not(.pin){display:none}
+
+.cy-r3 .acct{position:sticky;bottom:0;margin-top:auto;padding:10px 0 14px;background:linear-gradient(to top,var(--page) 72%,transparent)}
+.cy-r3 .acct>details{position:relative}
+.cy-r3 .acct summary{display:flex;align-items:center;gap:10px;height:44px;padding:0 8px;border-radius:12px;font-weight:500;color:var(--ink);transition:background .18s var(--ease)}
+.cy-r3 .acct summary:hover{background:var(--page-hover)}
+.cy-r3 .acct summary .ico{margin-left:auto;color:var(--ink-2)}
+.cy-r3 .av{width:28px;height:28px;flex:none;border-radius:50%;background:var(--lift);box-shadow:inset 0 0 0 1px var(--av-line);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--ink)}
+
+.cy-r3 .topbar{display:none}
+
+/* ---------- the shell inside the app (root layout) ----------
+   The root layout is not re-rendered on live navigation, so every destination's pages are rendered and only
+   the current destination's are shown (the mockups render them for the current one only) */
+.cy-r3 .dest li>.kids{display:none}
+@media (min-width:641px){.cy-r3 .dest li>.d[aria-current]+.kids{display:flex}}
+/* pages without the shell (Onboarding) */
+.cy-r3 .shell[data-shell="bare"]{grid-template-columns:minmax(0,1fr)}
+.cy-r3 .acct-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the power dot follows the company state */
+.cy-r3 .pw-dot[data-power="paused"]{background:var(--waiting)}
+.cy-r3 .pw-dot[data-power="low"]{background:var(--idle)}
+/* switch menu: the server line, the runtime POST forms, and the account row's Simple/Advanced segment */
+.cy-r3 .menu .menu-note{padding:8px 10px 6px;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .menu-runtime,.cy-r3 .menu-runtime form{display:flex;flex-direction:column}
+.cy-r3 .menu .menu-mode{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;margin:2px 0;padding:3px;border-radius:12px;background:var(--tray)}
+.cy-r3 .menu .menu-mode button{align-items:center;justify-content:center;min-height:32px;padding:6px 8px;border:1px solid transparent;color:var(--ink-nav)}
+.cy-r3 .menu .menu-mode button[data-active="true"]{background:var(--lift);border-color:var(--lift-line);box-shadow:var(--sh-raise);color:var(--ink-hi)}
+
+/* ---------- column, frame, tray ---------- */
+.cy-r3 .col{min-width:0;display:flex;flex-direction:column;padding:12px 12px 0 2px;overflow-x:hidden;overflow-y:auto;scroll-padding-top:76px}
+.cy-r3 .frame{display:block;background:var(--frame);border-radius:var(--r-frame);padding:0 10px 10px;box-shadow:var(--sh-frame)}
+.cy-r3 .ctx{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:12px;min-height:64px;padding:12px 10px 10px 14px;background:var(--frame);border-radius:var(--r-frame) var(--r-frame) 0 0}
+.cy-r3 .ctx-title{display:flex;align-items:baseline;gap:12px;min-width:0}
+.cy-r3 .h1{font-size:24px;line-height:30px;font-weight:500;letter-spacing:-.015em;color:var(--ink-hi)}
+.cy-r3 .h1-aside{font-size:24px;line-height:30px;font-weight:400;letter-spacing:-.015em;color:var(--ink-2)}
+.cy-r3 .crumb ol{display:flex;align-items:center;gap:8px}
+.cy-r3 .crumb li{display:flex;align-items:center;gap:8px;min-width:0}
+.cy-r3 .crumb .sep{color:var(--ink-2)}
+.cy-r3 .crumb [aria-current]{font-size:13px;font-weight:500;color:var(--ink)}
+.cy-r3 .back{display:inline-flex;align-items:center;gap:4px;height:34px;padding:0 14px 0 8px;border-radius:var(--r-pill);background:var(--tray);color:var(--ink);font-size:13px;font-weight:500;transition:background .18s var(--ease)}
+.cy-r3 .back:hover{background:var(--tray-hover)}
+.cy-r3 .from{display:none}
+.cy-r3 .ret{margin-left:auto;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:var(--r-pill);font-size:13px;color:var(--ink-2);transition:color .18s var(--ease),background .18s var(--ease)}
+.cy-r3 .ret:hover{color:var(--ink);background:var(--hover)}
+.cy-r3 .ctx-tools{display:none}
+.cy-r3 .tray{display:flex;flex-direction:column;gap:16px;padding:16px;background:var(--tray);border-radius:var(--r-tray);min-width:0}
+.cy-r3 .lower{display:grid;grid-template-columns:minmax(0,1.32fr) minmax(0,1fr);gap:16px;align-items:start}
+
+/* deep-page header block */
+.cy-r3 .head{display:flex;flex-direction:column;gap:14px;padding:2px 14px 20px}
+.cy-r3 .h1.big{font-size:28px;line-height:34px;letter-spacing:-.02em}
+.cy-r3 .chips{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cy-r3 .chip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 13px 0 10px;border-radius:var(--r-pill);background:var(--btn-bg);border:1px solid var(--btn-line);box-shadow:var(--sh-chip);font-size:13px;font-weight:500;color:var(--ink);transition:border-color .18s var(--ease),background .18s var(--ease)}
+.cy-r3 button.chip:hover,.cy-r3 summary.chip:hover{border-color:var(--btn-line-hover);background:var(--btn-hover)}
+.cy-r3 .chip.st-wait{background:var(--waiting-bg);border-color:var(--waiting-line);color:var(--waiting)}
+.cy-r3 .chip.ghost{background:transparent;box-shadow:none;border-color:transparent;color:var(--ink-2);font-weight:400;padding:0 10px}
+.cy-r3 .chip.ghost:hover{color:var(--ink);background:var(--hover)}
+.cy-r3 .chip .ico{color:var(--ink-2)}
+.cy-r3 .brief{position:relative}
+.cy-r3 .brief[open]{flex-basis:100%}
+.cy-r3 .brief[open]>summary .ico{transform:rotate(180deg)}
+.cy-r3 .brief blockquote{margin-top:10px;max-width:60ch;padding:12px 14px;border-radius:12px;background:var(--band);font-size:14px;line-height:22px;color:var(--ink)}
+.cy-r3 .pri{display:inline-flex;align-items:flex-end;gap:1.5px;height:12px}
+.cy-r3 .pri i{display:block;width:3px;border-radius:1px;background:var(--tick)}
+.cy-r3 .pri i:nth-child(1){height:4px}.cy-r3 .pri i:nth-child(2){height:6.5px}.cy-r3 .pri i:nth-child(3){height:9px}.cy-r3 .pri i:nth-child(4){height:11.5px}
+.cy-r3 .pri i.on{background:var(--ink-2)}
+
+/* now capsule (136 pill-in-pill + v05 dot field). NW-6 has no live run, so the field is the still "waiting" pattern */
+.cy-r3 .now{align-self:flex-start;display:inline-flex;align-items:center;gap:12px;padding:5px 20px 5px 5px;border-radius:var(--r-pill);background:var(--band);border:1px solid var(--band-line)}
+.cy-r3 .now-t{display:flex;flex-direction:column;font-size:14px;line-height:19px;color:var(--ink)}
+.cy-r3 .now-t small{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .dots{position:relative;width:42px;height:42px;flex:none;border-radius:50%;background-color:var(--dots-bg);box-shadow:inset 0 0 0 1px var(--tile-line);background-image:radial-gradient(circle,var(--dot) 1px,transparent 1.4px);background-size:6px 6px;background-position:center;overflow:hidden}
+.cy-r3 .dots::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,var(--dot) 2.2px,transparent 2.6px);background-size:6px 6px;background-position:center;-webkit-mask-image:radial-gradient(circle at 50% 50%,var(--mask) 0,var(--mask) 30%,transparent 64%);mask-image:radial-gradient(circle at 50% 50%,var(--mask) 0,var(--mask) 30%,transparent 64%)}
+
+/* ---------- next step: problem card + resolution card (134). Light: paper + ink. Dark: ink + paper ---------- */
+.cy-r3 .next{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1fr);gap:14px}
+.cy-r3 .paper{display:flex;flex-direction:column;gap:12px;min-width:0;padding:22px 24px 20px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--sh-card)}
+.cy-r3 .eyebrow{display:flex;align-items:center;gap:8px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 .eyebrow .mono{letter-spacing:.04em}
+.cy-r3 .nt{font-size:24px;line-height:30px;font-weight:500;letter-spacing:-.015em;color:var(--ink-hi)}
+.cy-r3 .obj{max-width:46ch;font-size:16px;line-height:24px;color:var(--ink-2)}
+.cy-r3 .obj b{color:var(--ink)}
+.cy-r3 .pf{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:auto;padding-top:6px;font-size:13px;color:var(--ink-2)}
+.cy-r3 .ul{color:var(--ink);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:var(--underline);transition:text-decoration-color .18s var(--ease)}
+.cy-r3 .ul:hover{text-decoration-color:var(--ink)}
+.cy-r3 .who{display:inline-flex;align-items:center;gap:10px;color:var(--ink-2)}
+.cy-r3 .pf a{display:inline-flex;align-items:center;min-height:24px}
+.cy-r3 .who b{color:var(--ink)}
+
+.cy-r3 .quote{display:flex;flex-direction:column;gap:2px}
+.cy-r3 .qm{width:30px;height:22px;margin:4px 0 10px;color:var(--ink);fill:currentColor}
+.cy-r3 .quote p{max-width:28ch;font-size:24px;line-height:32px;letter-spacing:-.015em;color:var(--ink-2)}
+.cy-r3 .quote p b{color:var(--ink);font-weight:500}
+
+.cy-r3 .ink{position:relative;display:flex;flex-direction:column;gap:14px;min-width:0;padding:22px 24px 20px;border-radius:var(--r-card);background:linear-gradient(180deg,var(--inv-top) 0%,var(--inv-mid) 62%,var(--inv-bot) 100%);color:var(--inv-ink-hi);box-shadow:var(--inv-sh)}
+.cy-r3 .ink-h{font-size:18px;line-height:24px;font-weight:500;color:var(--inv-ink-hi)}
+.cy-r3 .conseq{display:flex;flex-direction:column}
+.cy-r3 .conseq li{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-top:1px solid var(--inv-line);font-size:15px;line-height:22px;color:var(--inv-ink)}
+.cy-r3 .conseq .g{margin-top:5px;color:var(--inv-ink-2)}
+.cy-r3 .ink-note{font-size:13px;line-height:19px;color:var(--inv-ink-2)}
+.cy-r3 .ink-f{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:auto;padding-top:16px;border-top:1px solid var(--inv-line)}
+.cy-r3 .kh{display:inline-flex;align-items:center;gap:4px;margin-right:auto;font-size:12px;color:var(--inv-ink-2)}
+.cy-r3 .ink kbd{background:var(--inv-kbd-bg);border-color:var(--inv-kbd-line);color:var(--inv-kbd-ink)}
+.cy-r3 .pw{display:inline-flex;align-items:center;gap:12px;height:44px;padding:0 6px 0 20px;border-radius:var(--r-pill);background:var(--inv-pill-bg);color:var(--inv-pill-ink);font-size:14px;font-weight:500;white-space:nowrap;box-shadow:var(--inv-sh-pill);transition:transform .15s var(--press),background .2s var(--ease)}
+.cy-r3 .pw:hover{background:var(--inv-pill-hover)}
+.cy-r3 .pw:active{transform:scale(.97)}
+.cy-r3 .nub{width:32px;height:32px;flex:none;border-radius:50%;background:var(--inv-nub-bg);color:var(--inv-nub-ink);display:grid;place-items:center;transition:transform .3s var(--ease)}
+.cy-r3 .pw:hover .nub{transform:translateX(2px)}
+.cy-r3 .pd{display:inline-flex;align-items:center;height:44px;padding:0 18px;border-radius:var(--r-pill);background:var(--inv-ghost-bg);border:1px solid var(--inv-ghost-line);color:var(--inv-ghost-ink);font-size:14px;font-weight:500;white-space:nowrap;transition:background .2s var(--ease)}
+.cy-r3 .pd:hover{background:var(--inv-ghost-hover)}
+
+/* answer option rows (148 dark, 151 light) */
+.cy-r3 .opts{display:flex;flex-direction:column;gap:8px}
+.cy-r3 .opts legend{margin-bottom:12px;font-size:18px;line-height:24px;font-weight:500;color:var(--inv-ink-hi)}
+.cy-r3 .opt-w{position:relative;display:flex;flex-direction:column;gap:8px}
+.cy-r3 .opt-in{position:absolute;top:24px;left:22px;opacity:0;width:1px;height:1px;margin:0}
+.cy-r3 .opt{position:relative;display:flex;align-items:center;gap:12px;min-height:48px;padding:8px 14px 8px 8px;border-radius:var(--r-row);background:var(--inv-row);border:1px solid var(--inv-row-line);cursor:pointer;font-size:14px;line-height:20px;color:var(--inv-ink);transition:background .18s var(--ease),border-color .18s var(--ease)}
+.cy-r3 .opt:hover{background:var(--inv-row-hover)}
+.cy-r3 .on{width:30px;height:30px;flex:none;border-radius:9px;background:var(--inv-num-bg);color:var(--inv-num-ink);display:grid;place-items:center;font:500 12px/1 var(--mono);transition:background .18s var(--ease),color .18s var(--ease)}
+.cy-r3 .ot{flex:1;min-width:0}
+.cy-r3 .radio{width:20px;height:20px;flex:none;border-radius:50%;border:1.5px solid var(--inv-radio);display:grid;place-items:center}
+.cy-r3 .opt.own{background:transparent;border:1px dashed var(--inv-dash);color:var(--inv-ink-2)}
+.cy-r3 .opt.own .on{background:transparent}
+.cy-r3 .opt-in:checked+.opt{border-color:var(--accent);background:var(--inv-accent-tint)}
+.cy-r3 .opt-in:checked+.opt .on{background:var(--accent);color:var(--on-accent)}
+.cy-r3 .opt-in:checked+.opt .radio{border-color:var(--accent)}
+.cy-r3 .opt-in:checked+.opt .radio::after{content:"";width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.cy-r3 .opt-in:focus-visible+.opt{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+.cy-r3 .own-box{display:none}
+.cy-r3 .opt-in:checked~.own-box{display:block}
+/* a question without options: the answer box is the whole form (CymphoWeb.NextStep) */
+.cy-r3 .own-box.open{display:block}
+.cy-r3 .own-box textarea{width:100%;min-height:72px;padding:10px 12px;border-radius:var(--r-row);background:var(--inv-field-bg);border:1px solid var(--inv-field);color:var(--inv-ink-hi);resize:vertical}
+
+/* ---------- cards ---------- */
+.cy-r3 .card{min-width:0;background:var(--card);border:1px solid var(--edge);border-radius:var(--r-card);padding:8px;box-shadow:var(--sh-card)}
+.cy-r3 .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:6px 10px 6px 12px}
+.cy-r3 .card-h.band{background:var(--band);border-radius:10px}
+.cy-r3 .h2{font-size:16px;line-height:22px;font-weight:500;color:var(--ink)}
+.cy-r3 .h2 .cx{font-weight:400;color:var(--ink-2)}
+.cy-r3 .meta{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .lnk{display:inline-flex;align-items:center;gap:4px;min-height:28px;padding:0 4px;border-radius:8px;font-size:13px;font-weight:500;color:var(--ink);transition:color .18s var(--ease)}
+.cy-r3 .lnk:hover{text-decoration:underline;text-underline-offset:3px}
+.cy-r3 .lnk .ico{transition:transform .25s var(--ease)}
+.cy-r3 .lnk:hover .ico{transform:translateX(2px)}
+.cy-r3 .cf{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:6px;padding:8px 8px 2px;border-top:1px solid var(--hair)}
+.cy-r3 .ruler{height:7px;margin:6px 12px;background:linear-gradient(90deg,var(--tick) 0 1px,transparent 1px) 0 0/6px 100% repeat-x}
+.cy-r3 .adv{display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:6px;background:var(--tray);color:var(--ink-2);font:500 12px/20px var(--mono)}
+.cy-r3 .pl{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;border-radius:var(--r-pill);background:var(--btn-bg);border:1px solid var(--btn-line);box-shadow:var(--sh-chip);font-size:13px;font-weight:500;color:var(--ink);white-space:nowrap;transition:background .18s var(--ease),border-color .18s var(--ease),transform .15s var(--press)}
+.cy-r3 .pl:hover{background:var(--btn-hover);border-color:var(--btn-line-hover)}
+.cy-r3 button.pl:active{transform:scale(.98)}
+
+/* needs-you rows (049 rows, 008 icon tiles) */
+.cy-r3 .rows{display:flex;flex-direction:column;padding-top:4px}
+.cy-r3 .row{position:relative;display:flex;align-items:center;gap:14px;min-height:60px;padding:10px 12px;border-radius:var(--r-row);transition:background .18s var(--ease)}
+.cy-r3 .row+.row::before{content:"";position:absolute;left:60px;right:12px;top:0;height:1px;background:var(--hair)}
+.cy-r3 .row:hover{background:var(--hover)}
+.cy-r3 .row:hover::before,.cy-r3 .row:hover+.row::before{opacity:0}
+.cy-r3 .kt{width:34px;height:34px;flex:none;border-radius:10px;background:var(--lift);border:1px solid var(--tile-line);box-shadow:var(--sh-tile);display:grid;place-items:center;color:var(--ink-2)}
+.cy-r3 .kt.q{color:var(--waiting)}
+.cy-r3 .kt.p{color:var(--stopped)}
+.cy-r3 .row-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.cy-r3 .rt{font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 .go::after,.cy-r3 .rt2::after{content:"";position:absolute;inset:0;border-radius:var(--r-row)}
+.cy-r3 .go:focus-visible,.cy-r3 .rt2:focus-visible{box-shadow:none}
+.cy-r3 .go:focus-visible::after,.cy-r3 .rt2:focus-visible::after{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+.cy-r3 .rt2{font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 .rm{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .row .pl{flex:none}
+.cy-r3 .row:hover .pl{border-color:var(--btn-line-hover)}
+
+/* last 24 hours (013 strip, 050 ruler) */
+.cy-r3 .strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:6px 4px 0}
+.cy-r3 .cell{display:flex;flex-direction:column;gap:2px;padding:6px 12px 10px}
+.cy-r3 .cell+.cell{border-left:1px solid var(--hair)}
+.cy-r3 .v{font-size:28px;line-height:34px;font-weight:500;letter-spacing:-.02em;color:var(--ink-hi);font-variant-numeric:tabular-nums}
+.cy-r3 .v.mono{font-size:24px;letter-spacing:-.02em}
+.cy-r3 .l{font-size:13px;line-height:18px;color:var(--ink-2)}
+.cy-r3 .fin{display:flex;flex-direction:column;gap:6px;padding:4px 16px 8px}
+.cy-r3 .fin li{display:flex;align-items:baseline;gap:8px;font-size:13px;line-height:18px;color:var(--ink)}
+.cy-r3 .fin .g{align-self:center;color:var(--done)}
+.cy-r3 .fin .mono{color:var(--ink-2);font-size:12px}
+.cy-r3 .lim{display:flex;flex-direction:column;gap:10px;padding:8px 12px 6px}
+.cy-r3 .lim-line{font-size:14px;line-height:20px;color:var(--ink-2)}
+.cy-r3 .lim-line b{color:var(--ink)}
+.cy-r3 .tk{position:relative;height:18px;margin:4px 0 0;background:linear-gradient(90deg,var(--tick) 0 2px,transparent 2px) 0 0/calc(100% / 60) 100% repeat-x}
+.cy-r3 .tk-fill{position:absolute;top:0;bottom:0;left:0;width:62.1667%;background:linear-gradient(90deg,var(--ink) 0 2px,transparent 2px) 0 0/calc(100% / 37.3) 100% repeat-x}
+.cy-r3 .tk-warn{position:absolute;left:80%;top:-5px;bottom:-5px;width:2px;border-radius:1px;background:var(--waiting)}
+.cy-r3 .tk-legend{position:relative;height:16px;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .tk-legend span{position:absolute;top:0}
+.cy-r3 .tk-legend .a{left:0}
+.cy-r3 .tk-legend .w{left:80%;transform:translateX(-50%);color:var(--waiting)}
+.cy-r3 .tk-legend .z{right:0}
+
+/* run bars on a shared 0-30 min axis (088, 016) */
+.cy-r3 .rb{display:grid;grid-template-columns:42px minmax(0,1fr) 112px;align-items:center;column-gap:12px;row-gap:8px;padding:4px 0 2px}
+.cy-r3 .rb-t{font:12px/16px var(--mono);color:var(--ink-2)}
+.cy-r3 .rb-track{position:relative;height:14px;background:linear-gradient(90deg,var(--tick) 0 2px,transparent 2px) 0 50%/7px 2px repeat-x}
+.cy-r3 .rb-track::after{content:"";position:absolute;right:0;top:-5px;bottom:-5px;border-right:1.5px dashed var(--ink-2)}
+.cy-r3 .hatch{border:1px solid var(--stopped);background:repeating-linear-gradient(135deg,var(--stopped) 0 1.5px,transparent 1.5px 5px);background-color:var(--card)}
+.cy-r3 .rb-bar{position:absolute;left:0;top:0;bottom:0;border-radius:3px}
+.cy-r3 .rb-v{font-size:12px;line-height:16px;color:var(--stopped);white-space:nowrap}
+.cy-r3 .rb-v .mono{color:var(--ink-2)}
+.cy-r3 .rb-axis{display:flex;justify-content:space-between;font-size:12px;line-height:16px;color:var(--ink-2)}
+
+/* agent: recent runs */
+.cy-r3 .runs{display:flex;flex-direction:column;padding:4px 0 0}
+.cy-r3 .run{position:relative;display:grid;grid-template-columns:22px minmax(0,1fr) 190px 116px;align-items:center;gap:14px;min-height:64px;padding:10px 12px;border-radius:var(--r-row);transition:background .18s var(--ease)}
+.cy-r3 .run+.run::before{content:"";position:absolute;left:48px;right:12px;top:0;height:1px;background:var(--hair)}
+.cy-r3 .run:hover{background:var(--hover)}
+.cy-r3 .sq{width:14px;height:14px;border-radius:3px}
+.cy-r3 .run-main{display:flex;flex-direction:column;gap:3px;min-width:0}
+.cy-r3 .run-sub{display:flex;flex-wrap:wrap;gap:4px 8px;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .run-sub .st{color:var(--stopped);font-weight:500}
+.cy-r3 .run .rb-track{height:12px}
+.cy-r3 .run-cost{text-align:right;font:12px/16px var(--mono);color:var(--ink)}
+.cy-r3 .run-cost span{display:block;color:var(--ink-2)}
+.cy-r3 .fold{display:flex;align-items:center;gap:10px;margin:2px 12px 0;padding:12px 0 6px;border-top:1px dashed var(--tick);font-size:13px;color:var(--ink-2)}
+.cy-r3 .fold .mono{color:var(--ink)}
+.cy-r3 .fold .lnk{margin-left:auto}
+.cy-r3 .axis-row{display:grid;grid-template-columns:22px minmax(0,1fr) 190px 116px;gap:14px;padding:4px 12px 2px}
+.cy-r3 .axis-row .rb-axis{grid-column:3}
+
+/* task: thread, deliverables, runs list (140) */
+.cy-r3 .msg{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;padding:10px 12px 14px}
+.cy-r3 .tile-ag{width:28px;height:28px;flex:none;border-radius:8px;background:var(--band);border:1px solid var(--ag-line);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--ink)}
+.cy-r3 .tile-ag.sm{width:22px;height:22px;border-radius:6px;font-size:12px}
+.cy-r3 .tile-ag.xl{width:56px;height:56px;border-radius:16px;font-size:18px;background:var(--lift);box-shadow:var(--sh-tile)}
+.cy-r3 .msg-h{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-height:28px;font-size:13px;color:var(--ink-2)}
+.cy-r3 .msg-h b{color:var(--ink)}
+.cy-r3 .tag{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:var(--r-pill);background:var(--band);border:1px solid var(--band-line);font-size:12px;color:var(--ink-nav)}
+.cy-r3 .msg-b{margin-top:4px;max-width:62ch;font-size:16px;line-height:25px;color:var(--ink)}
+.cy-r3 .earlier{margin:0 4px;border-top:1px solid var(--hair)}
+.cy-r3 .earlier>summary{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 8px;border-radius:10px;font-size:13px;color:var(--ink-2)}
+.cy-r3 .earlier>summary:hover{color:var(--ink);background:var(--hover)}
+.cy-r3 .earlier>summary .ico{margin-left:auto;transition:transform .2s var(--ease)}
+.cy-r3 .earlier[open]>summary .ico{transform:rotate(180deg)}
+.cy-r3 .thread-old{display:flex;flex-direction:column;gap:2px;padding:4px 8px 10px}
+.cy-r3 .thread-old .msg{padding:8px 4px}
+.cy-r3 .thread-old .msg-b{font-size:14px;line-height:21px}
+.cy-r3 .runline{display:flex;align-items:center;gap:10px;margin:2px 0 2px 44px;font:12px/16px var(--mono);color:var(--ink-2)}
+.cy-r3 .runline::before,.cy-r3 .runline::after{content:"";flex:1;border-top:1px dotted var(--dots-line)}
+.cy-r3 .composer{display:flex;flex-direction:column;gap:8px;margin:6px 4px 4px;padding:12px;border-radius:14px;background:var(--band)}
+.cy-r3 .composer label{font-size:13px;font-weight:500;color:var(--ink)}
+.cy-r3 .composer textarea{width:100%;min-height:64px;padding:10px 12px;border-radius:12px;background:var(--field-bg);border:1px solid var(--field);color:var(--ink);resize:vertical;font-size:14px;line-height:20px}
+.cy-r3 .composer textarea:focus-visible{border-color:var(--ink)}
+.cy-r3 .comp-f{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.cy-r3 .help{font-size:12px;line-height:16px;color:var(--ink-2)}
+
+.cy-r3 .objs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:6px 4px 4px}
+.cy-r3 .objt{position:relative;display:flex;align-items:center;gap:14px;min-width:0;padding:14px 14px 14px 12px;border-radius:14px;background:var(--well);border:1px solid var(--band-line);transition:background .18s var(--ease),border-color .18s var(--ease)}
+.cy-r3 .objt:hover{background:var(--hover);border-color:var(--tick)}
+.cy-r3 .file{width:34px;height:42px;flex:none}
+.cy-r3 .objt-m{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.cy-r3 .objt-t{font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 .objt-t::after{content:"";position:absolute;inset:0;border-radius:14px}
+.cy-r3 .objt-t:focus-visible{box-shadow:none}
+.cy-r3 .objt-t:focus-visible::after{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+.cy-r3 .objt-s{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .objt .go{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:500;color:var(--ink)}
+
+.cy-r3 .steps{display:flex;flex-direction:column;padding:6px 12px 4px}
+.cy-r3 .step{position:relative;display:grid;grid-template-columns:22px minmax(0,1fr) auto;align-items:center;gap:12px;min-height:42px}
+.cy-r3 .step:not(:last-child)::before{content:"";position:absolute;left:10.5px;top:31px;height:22px;width:1px;background:var(--tick)}
+.cy-r3 .chk{width:22px;height:22px;border-radius:50%;background:var(--step-bg);color:var(--step-ink);display:grid;place-items:center}
+.cy-r3 .step-t{font-size:14px;line-height:20px;color:var(--ink-nav)}
+.cy-r3 .step-t .mono{font-size:12px;color:var(--ink-2);margin-right:8px}
+.cy-r3 .step-c{font:12px/16px var(--mono);color:var(--ink-2)}
+
+/* details rail and property list (026) */
+.cy-r3 .split{display:grid;grid-template-columns:minmax(0,1fr) 312px;gap:16px;align-items:start}
+.cy-r3 .split>*{grid-column:1}
+.cy-r3 .split>.next{grid-column:1 / -1}
+.cy-r3 .split>.aside{grid-column:2;grid-row:2 / span 3;position:sticky;top:76px}
+.cy-r3 [data-page="agent"] .split>.aside{grid-row:2 / span 2}
+.cy-r3 .det-m{display:none}
+.cy-r3 .kv{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px 12px;padding:10px 12px 12px;font-size:13px;line-height:19px}
+.cy-r3 .kv dt{color:var(--ink-2)}
+.cy-r3 .kv dd{color:var(--ink);min-width:0}
+.cy-r3 .kv dd .adv{margin-left:6px}
+.cy-r3 .kv.tight{grid-template-columns:44px minmax(0,1fr);padding:4px 0 2px;gap:6px 10px}
+.cy-r3 .gl .lnk{align-self:flex-start;margin-left:-4px}
+.cy-r3 .det-m>summary{display:flex;align-items:center;justify-content:space-between;min-height:44px;padding:0 12px;border-radius:10px}
+.cy-r3 .det-m>summary:hover{background:var(--hover)}
+.cy-r3 .det-m[open]>summary .ico{transform:rotate(180deg)}
+
+/* agent header (001 identity, 134 segmented) */
+.cy-r3 .agent-h{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px 18px;padding:2px 14px 20px}
+.cy-r3 .agent-h .who-t{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cy-r3 .sub{font-size:14px;line-height:20px;color:var(--ink-2)}
+.cy-r3 .sub .nw{white-space:nowrap}
+.cy-r3 .agent-h .row2{grid-column:2 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.cy-r3 .sp{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 15px 0 12px;border-radius:var(--r-pill);background:var(--stopped-bg);border:1px solid var(--stopped-line);color:var(--stopped);font-size:13px;font-weight:500;white-space:nowrap}
+.cy-r3 .seg{display:inline-flex;gap:2px;padding:4px;border-radius:var(--r-pill);background:var(--tray)}
+.cy-r3 .seg a{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 16px;border-radius:var(--r-pill);border:1px solid transparent;font-size:13px;font-weight:500;color:var(--ink-nav);transition:background .18s var(--ease),color .18s var(--ease)}
+.cy-r3 .seg a:hover{color:var(--ink);background:var(--page-hover)}
+.cy-r3 .seg a[aria-current]{background:var(--lift);color:var(--ink-hi);border-color:var(--lift-line);box-shadow:var(--sh-raise)}
+.cy-r3 .seg a[aria-current]::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.cy-r3 .agent-h .tile-ag.xl{grid-row:1 / span 2;align-self:start}
+.cy-r3 .agent-h .seg{margin-left:auto}
+.cy-r3 .gl{display:flex;flex-direction:column}
+.cy-r3 .gl-sec{display:flex;flex-direction:column;gap:6px;padding:12px 12px 10px}
+.cy-r3 .gl-h{font-size:13px;line-height:18px;font-weight:500;color:var(--ink-2)}
+.cy-r3 .gl-big{font-size:16px;line-height:22px;font-weight:500;color:var(--ink)}
+.cy-r3 .gl-sub{font-size:13px;line-height:19px;color:var(--ink-2)}
+.cy-r3 .hero{display:flex;align-items:baseline;gap:8px}
+.cy-r3 .hero .mono{font-size:32px;line-height:38px;font-weight:500;letter-spacing:-.03em;color:var(--ink-hi)}
+.cy-r3 .hero .u{font-size:14px;color:var(--ink-2)}
+.cy-r3 .tech>summary{display:flex;align-items:center;justify-content:space-between;min-height:44px;padding:0 12px;border-radius:10px}
+.cy-r3 .tech>summary:hover{background:var(--hover)}
+.cy-r3 .tech>summary .h2 .cx{margin-left:2px}
+.cy-r3 .tech>summary .ico{color:var(--ink-2);transition:transform .2s var(--ease)}
+.cy-r3 .tech[open]>summary .ico{transform:rotate(180deg)}
+/* group and column headers (Tasks groups, Board columns, Team board): caps 12/16 + mono count (g1.css §2) */
+.cy-r3 .gh{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 6px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 .gh .mono{letter-spacing:0;color:var(--ink)}
+/* the reason row is the problem card's footer: it sits on the resolution card's footer line, as .pf does (argon-final) */
+.cy-r3 .reason{margin-top:auto;border-top:1px solid var(--hair);padding-top:4px}
+.cy-r3 .reason>summary{display:flex;align-items:center;gap:8px;min-height:36px;font-size:13px;color:var(--ink-2)}
+.cy-r3 .reason>summary:hover{color:var(--ink)}
+.cy-r3 .reason[open]>summary .ico{transform:rotate(180deg)}
+.cy-r3 .reason p{padding:8px 12px;border-radius:10px;background:var(--band);font:12px/18px var(--mono);color:var(--ink)}
+
+/* phone-only team block */
+.cy-r3 .team-m{display:none}
+.cy-r3 .team-m .mate{grid-template-columns:12px auto minmax(0,1fr) auto;height:auto;min-height:52px;padding:6px 10px}
+.cy-r3 .team-m .m-word{white-space:normal}
+
+/* ---------- shared page parts (build-spec §2.4 items 2, 3, 5): the header's end slot, the all-clear pair,
+   the full tick meter, the agents-off disclosure, a link-shaped primary ---------- */
+.cy-r3 .next>:only-child{grid-column:1 / -1}
+.cy-r3 .ctx-end{margin-left:auto;display:flex;align-items:center;gap:8px;min-width:0}
+.cy-r3 .tk.full .tk-fill{width:100%;background-size:calc(100% / 60) 100%}
+.cy-r3 .tk-legend .z.st{color:var(--stopped)}
+
+/* a flexible spacer in a toolbar row (the Board's column pills sit after it) */
+.cy-r3 .sf-sp{flex:1}
+
+/* Company-wide pairs: the "How to turn agents on" disclosure on the resolution card */
+.cy-r3 .howto{display:flex;flex-direction:column;align-items:flex-end;gap:12px;margin-left:auto;max-width:100%}
+.cy-r3 .howto>summary.pw{flex:none}
+.cy-r3 .howto>summary.pw .nub{transition:transform .3s var(--ease)}
+.cy-r3 .howto[open]>summary.pw .nub{transform:rotate(180deg)}
+.cy-r3 .howto>p{max-width:40ch;font-size:13px;line-height:19px;color:var(--inv-ink-2);text-align:right}
+
+/* A primary that navigates (S7) is the same pill as a link */
+.cy-r3 a.pw:active{transform:scale(.97)}
+
+/* Unavailable choices on the resolution card (consistency pass: moved from g1.css and g2.css, where each group drew its own).
+   opt(disabled=True): a native disabled radio, the row listed but quiet with a dashed edge (Tasks' paused assignee).
+   primary(…) + disabled: the one primary before its checks pass (Onboarding state c), dashed and readable */
+.cy-r3 .opt-in:disabled+.opt{cursor:not-allowed;background:transparent;border-style:dashed;border-color:var(--inv-dash)}
+.cy-r3 .opt-in:disabled+.opt:hover{background:transparent}
+.cy-r3 .opt-in:disabled+.opt .on{background:transparent;box-shadow:inset 0 0 0 1px var(--inv-dash)}
+.cy-r3 .opt-in:disabled+.opt .radio{border-style:dashed}
+.cy-r3 .ink .pw[disabled]{background:transparent;border:1px dashed var(--inv-dash);box-shadow:none;color:var(--inv-ink-2);cursor:not-allowed}
+.cy-r3 .ink .pw[disabled] .nub{background:var(--inv-num-bg);color:var(--inv-ink-2)}
+.cy-r3 .ink .pw[disabled]:hover .nub{transform:none}
+.cy-r3 .ink .pw[disabled]:active{transform:none}
+
+/* Shell parts that were drawn in g2.css (consistency pass): the current ⚙ in the phone top bar (topbar("settings"))
+   and the rail's spending slot (spend_slot(), build-spec §2.3: 003's bottom slot, 139's battery meter), shown only at
+   80% or more or when the company is paused */
+.cy-r3 .topbar .ib[aria-current]{background:var(--lift);border:1px solid var(--lift-line);box-shadow:var(--sh-raise)}
+.cy-r3 .topbar .ib[aria-current]::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent)}
+.cy-r3 .spend{display:flex;flex-direction:column;gap:6px;padding:10px 12px 12px;border-radius:16px;background:var(--well);border:1px solid var(--lift-line);box-shadow:var(--sh-tile);transition:background .18s var(--ease)}
+.cy-r3 .spend:hover{background:var(--hover)}
+.cy-r3 .spend-e{font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 .spend-v{font:500 14px/20px var(--mono);color:var(--ink)}
+.cy-r3 .spend-v b{font-weight:500;color:var(--waiting)}
+.cy-r3 .spend-v b.st{color:var(--stopped)}
+.cy-r3 .spend .tk{height:12px;margin:2px 0;background:linear-gradient(90deg,var(--tick) 0 1.5px,transparent 1.5px) 0 0/calc(100% / 60) 100% repeat-x}
+.cy-r3 .spend .tk-fill{background:linear-gradient(90deg,var(--ink) 0 1.5px,transparent 1.5px) 0 0/calc(100% / 49.2) 100% repeat-x}
+.cy-r3 .spend .tk.full .tk-fill{background-size:calc(100% / 60) 100%}
+.cy-r3 .spend .tk-warn{top:-3px;bottom:-3px}
+.cy-r3 .spend .tk-legend{display:none}
+.cy-r3 .spend-l{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .spend-l.stop{font-weight:500;color:var(--stopped)}
+.cy-r3 .spend-go{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:500;color:var(--ink)}
+.cy-r3 .spend:hover .spend-go{text-decoration:underline;text-underline-offset:3px}
+
+/* ---------- legacy pages in the r3 frame (CymphoWeb.Components.page/1 and top-level .ember-aurora roots) ---------- */
+.cy-r3 .lframe{background:var(--frame);border-radius:var(--r-frame);box-shadow:var(--sh-frame);padding:14px 24px 24px}
+.cy-r3 [data-phx-main]>.ember-aurora{background:var(--frame);border-radius:var(--r-frame);box-shadow:var(--sh-frame)}
+@media (max-width:640px){
+  .cy-r3 .lframe{border-radius:24px;padding:10px 12px 16px}
+  .cy-r3 [data-phx-main]>.ember-aurora{border-radius:24px}
+}
+
+/* ---------- states the shared components draw (CymphoWeb.Components.R3) beyond the mockups' frames ---------- */
+/* now capsule: one dot field per state; Working breathes, the others stay still */
+.cy-r3 .now{--dot:var(--waiting)}
+.cy-r3 .now.working{--dot:var(--working)}
+.cy-r3 .now.idle{--dot:var(--idle)}
+.cy-r3 .now.working .dots::after{animation:cy-r3-field 2.4s var(--ease) infinite}
+@keyframes cy-r3-field{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.8);opacity:.65}}
+/* run bars: finished runs are a quiet solid bar with an ink-2 word */
+.cy-r3 .rb-bar.solid{background:var(--ink-2)}
+.cy-r3 .rb-v.ok{color:var(--ink-2)}
+/* two-line answer options (an assignee and their role/status) */
+.cy-r3 .ot-n{display:block;font-weight:500;color:var(--inv-ink-hi)}
+.cy-r3 .ot-s{display:flex;flex-wrap:wrap;align-items:center;gap:0 6px;font-size:12px;line-height:16px;color:var(--inv-ink-2)}
+.cy-r3 .ot-s .g{width:12px;height:12px}
+.cy-r3 .opt-in:disabled+.opt .ot-n,.cy-r3 .opt-in:disabled+.opt .ot-s{color:var(--inv-ink-2)}
+
+/* ---------- the Cmd+Enter hint (ground-r1 D7) ----------
+   The mockups hide it at 1180 px and below. Between 1181 and about 1290 px it still pushed the
+   primary onto a row of its own and stretched the problem card beside it; hide it there too */
+@media (max-width:1300px){.cy-r3 .ink-f .kh{display:none}}
+
+/* ---------- 1024 layout ---------- */
+@media (max-width:1180px){
+  .cy-r3 .shell{grid-template-columns:216px minmax(0,1fr)}
+  .cy-r3 .rail{padding:14px 8px 0 12px}
+  .cy-r3 .fy-t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .cy-r3 .fy{min-width:20px;padding:0 6px;text-align:center}
+  .cy-r3 .lower{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 .split{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 .split>.aside{grid-column:1;grid-row:auto;position:static}
+  .cy-r3 .split>.aside.task-aside{display:none}
+  .cy-r3 .det-m{display:block}
+  .cy-r3 .run{grid-template-columns:22px minmax(0,1fr) 140px 108px}
+  .cy-r3 .axis-row{grid-template-columns:22px minmax(0,1fr) 140px 108px}
+}
+
+/* ---------- short viewports (argon-final; consistency D6) ----------
+   At 768 px of height the open team list ran under the sticky account row. A tighter rail rhythm keeps every
+   roster row clear of it when the current destination has up to 2 pages; on Tasks (5 pages) the idle rows still
+   scroll under it, and the rows with a "for you" chip stay clear */
+@media (min-width:641px) and (max-height:800px){
+  .cy-r3 .rail{gap:8px}
+  .cy-r3 .rail .mate{height:28px}
+}
+
+/* ---------- phone (390) ---------- */
+@media (max-width:640px){
+  .cy-r3 .shell{display:flex;flex-direction:column}
+  .cy-r3 .col{flex:1 1 auto;min-height:0}
+  .cy-r3 .rail{position:static;height:auto;display:block;padding:0;overflow:visible}
+  .cy-r3 .rail>:not(.dest){display:none}
+  .cy-r3 .dest{position:fixed;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom, 0px));z-index:20;padding:5px;border-radius:26px;background:var(--dock-bg);border:1px solid var(--dock-line);box-shadow:var(--sh-dock);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+  /* scroll edge under the floating tab bar (028's bottom fade): text passing below the bar fades into the page instead of being cut */
+  .cy-r3 .rail::after{content:"";position:fixed;left:0;right:0;bottom:0;z-index:19;height:28px;background:linear-gradient(to top,var(--page) 10px,transparent);pointer-events:none}
+  .cy-r3 .dest>ul{flex-direction:row;gap:2px;padding:3px;border-radius:21px;background:var(--tray)}
+  .cy-r3 .dest>ul>li{flex:1;min-width:0}
+  /* the current tab never drops its dot onto a line of its own: dot + "Spending" needs 63.7 px, the 69.6 px share leaves 63.6 */
+  .cy-r3 .dest>ul>li:has(>.d[aria-current]){min-width:max-content}
+  .cy-r3 .dest>ul>li.li-settings{display:none}
+  .cy-r3 .kids{display:none}
+  .cy-r3 .d{flex-direction:column;justify-content:center;gap:3px;height:48px;padding:0 2px;border-radius:18px;font-size:12px;line-height:14px}
+  .cy-r3 .d .lbl{flex:none}
+  .cy-r3 .d[aria-current]{background:var(--lift);border-color:var(--lift-line);box-shadow:var(--sh-raise)}
+  .cy-r3 .d[aria-current] .sel{display:none}
+  .cy-r3 .d[aria-current] .lbl::before{content:"";display:inline-block;width:5px;height:5px;margin:0 4px 1px 0;border-radius:50%;background:var(--accent);vertical-align:middle}
+  .cy-r3 .d .count{position:absolute;top:3px;left:calc(50% + 5px);min-width:18px;height:18px;padding:0 5px;font-size:12px;line-height:18px}
+  /* a deep page draws its own context header with the same three tools, so it hides the top bar */
+  .cy-r3:has([data-ctx="deep"]) .topbar{display:none}
+  .cy-r3 .topbar{position:sticky;top:0;z-index:15;display:flex;align-items:center;gap:4px;height:60px;padding:8px 8px 8px 6px;background:var(--topbar-bg);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+  .cy-r3 .tb-co{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 10px 0 6px;border-radius:var(--r-pill)}
+  .cy-r3 .tb-co:hover{background:var(--page-hover)}
+  .cy-r3 .tb-sp{flex:1}
+  .cy-r3 .ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;height:44px;padding:0 10px;border-radius:var(--r-pill);color:var(--ink);font-weight:500}
+  .cy-r3 .ib:hover{background:var(--ib-hover)}
+  .cy-r3 .ib.new{background:var(--btn-bg);border:1px solid var(--btn-line);box-shadow:var(--sh-tile);padding:0 14px 0 12px}
+  .cy-r3 .col{padding:0 6px 104px;scroll-padding-bottom:96px}
+  /* deep pages have no top bar: their context header sits 6 px below the screen edge */
+  .cy-r3 .col:has([data-ctx="deep"]){padding-top:6px}
+  .cy-r3 .frame{border-radius:24px;padding:0 6px 6px}
+  .cy-r3 .ctx{min-height:58px;padding:8px 2px 8px 10px;border-radius:24px 24px 0 0}
+  /* root pages carry the top bar, so their context header scrolls away with the page */
+  .cy-r3 .ctx[data-ctx="root"]{position:static}
+  .cy-r3 .howto{align-items:stretch;width:100%}
+  .cy-r3 .howto>p{text-align:left}
+  .cy-r3 .h1,.cy-r3 .h1-aside{font-size:22px;line-height:28px}
+  .cy-r3 .h1-aside{font-size:15px}
+  .cy-r3 .ctx-title{flex-wrap:wrap;gap:2px 10px}
+  .cy-r3 .ret{display:none}
+  .cy-r3 [data-page="task"] .crumb .back,.cy-r3 [data-page="task"] .crumb .sep{display:none}
+  .cy-r3 .ctx .from{display:inline-flex}
+  .cy-r3 .back,.cy-r3 .from{height:44px}
+  .cy-r3 .from{align-items:center;gap:4px;padding:0 14px 0 8px;border-radius:var(--r-pill);background:var(--tray);font-size:13px;font-weight:500;color:var(--ink)}
+  .cy-r3 .ctx-tools{display:flex;align-items:center;gap:0;margin-left:auto}
+  .cy-r3 .ctx-tools .ib.new{padding:0;width:44px}
+  .cy-r3 .head{padding:0 8px 12px;gap:10px}
+  .cy-r3 .h1.big{font-size:24px;line-height:30px}
+  .cy-r3 .chip{height:44px}
+  /* a search capsule in the page (Tasks' toolbar, Onboarding's templates) is a 44 px target; the rail's is hidden here */
+  .cy-r3 .search{height:44px}
+  .cy-r3 .pf a{min-height:44px;min-width:44px;justify-content:center}
+  .cy-r3 .now-t .ul,.cy-r3 .sub .ul{padding:15px 9px;margin:0 -9px}
+  .cy-r3 .gl-sub .ul{padding:15px 0}
+  .cy-r3 .reason>summary{min-height:44px}
+  .cy-r3 .brief{width:100%}
+  .cy-r3 .now{align-self:stretch;border-radius:22px;padding-right:14px}
+  .cy-r3 .tray{padding:8px;gap:10px;border-radius:18px}
+  .cy-r3 .next{grid-template-columns:minmax(0,1fr);gap:10px}
+  .cy-r3 .paper,.cy-r3 .ink{padding:16px;gap:10px}
+  .cy-r3 .nt{font-size:22px;line-height:28px}
+  .cy-r3 .obj{font-size:15px;line-height:22px}
+  .cy-r3 .qm{width:24px;height:18px;margin:2px 0 6px}
+  .cy-r3 .quote p{font-size:18px;line-height:25px}
+  .cy-r3 .conseq li{padding:9px 0}
+  .cy-r3 .ink-f{flex-wrap:nowrap;gap:8px;padding-top:12px}
+  .cy-r3 .ink-f .kh{display:none}
+  .cy-r3 .pd{flex:none;padding:0 16px}
+  .cy-r3 .pw{position:relative;flex:1;justify-content:center;padding:0 44px 0 16px}
+  .cy-r3 .pw .nub{position:absolute;right:6px}
+  /* Task fold fix: "Send answer" sits above the tab bar at 390x844 with nothing scrolled.
+     The Now capsule waits until a run is live (spec 3.4: the Now line shows only while a run is live; the chip already says "Waiting on you"),
+     the question card drops its attribution row (Ravi is in the title and in the chips), the legend stays for screen readers,
+     and the option rows keep 44px targets with 6px gaps. */
+  .cy-r3 [data-page="task"] .now{display:none}
+  .cy-r3 [data-page="task"] .paper .pf{display:none}
+  .cy-r3 .opts{gap:6px}
+  .cy-r3 .opts legend{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .cy-r3 .opt-w{gap:6px}
+  .cy-r3 .opt{min-height:44px;padding:6px 12px 6px 7px}
+  .cy-r3 .ink-note{font-size:12px;line-height:17px}
+  .cy-r3 .rb{grid-template-columns:40px minmax(0,1fr) max-content;column-gap:10px;row-gap:6px}
+  .cy-r3 .row{min-height:64px;padding:10px 8px;gap:12px}
+  .cy-r3 .row+.row::before{left:56px}
+  .cy-r3 .row .pl{height:44px;padding:0 16px}
+  .cy-r3 .pl,.cy-r3 .lnk{min-height:44px}
+  .cy-r3 .strip{margin:4px 0 0}
+  .cy-r3 .cell{padding:6px 10px 10px}
+  .cy-r3 .v{font-size:24px;line-height:30px}
+  .cy-r3 .v.mono{font-size:20px}
+  .cy-r3 .team-m{display:block}
+  .cy-r3 .team-m .fy-t{position:static;width:auto;height:auto;overflow:visible;clip:auto}
+  .cy-r3 .team-m .fy{padding:0 8px}
+  .cy-r3 .team-m .mate{min-height:52px}
+  .cy-r3 .objs{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 .objt{min-height:64px}
+  .cy-r3 .agent-h{grid-template-columns:auto minmax(0,1fr);padding:0 8px 12px;gap:10px 14px}
+  .cy-r3 .agent-h .tile-ag.xl{grid-row:1;width:48px;height:48px;border-radius:14px}
+  .cy-r3 .agent-h .row2{grid-column:1 / -1}
+  .cy-r3 .agent-h .seg{margin-left:0}
+  .cy-r3 .seg{width:100%}
+  .cy-r3 .seg a{flex:1;justify-content:center;height:44px;padding:0 8px}
+  .cy-r3 .sp{height:36px}
+  .cy-r3 .run{grid-template-columns:22px minmax(0,1fr) auto;padding:10px 6px;gap:10px}
+  .cy-r3 .run .rb-track{grid-column:2 / -1;grid-row:2}
+  .cy-r3 .run+.run::before{left:38px}
+  .cy-r3 .axis-row{grid-template-columns:22px minmax(0,1fr);gap:10px;padding:4px 6px 2px}
+  .cy-r3 .axis-row .rb-axis{grid-column:2}
+  .cy-r3 .composer textarea{min-height:88px}
+  .cy-r3 .comp-f{flex-direction:column;align-items:stretch}
+  .cy-r3 .composer .pl{height:44px}
+  .cy-r3 .earlier>summary,.cy-r3 .det-m>summary,.cy-r3 .tech>summary{min-height:48px}
+  .cy-r3 .mate{min-height:44px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .cy-r3 .spin,.cy-r3 .now.working .dots::after{animation:none}
+  .cy-r3 .d,.cy-r3 .pw,.cy-r3 .pw .nub,.cy-r3 .pl,.cy-r3 .btn-new,.cy-r3 .lnk .ico,.cy-r3 .row,.cy-r3 .opt,.cy-r3 .skip,.cy-r3 .howto>summary.pw .nub,.cy-r3 .spend,.cy-r3 .tech>summary .ico{transition:none}
+}
+

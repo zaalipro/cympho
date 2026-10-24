@@ -1872,9 +1872,13 @@ defmodule Mix.Tasks.Cympho.Compare do
     evidence =
       if File.exists?("docs/MOBILE_QA.md"), do: File.read!("docs/MOBILE_QA.md"), else: ""
 
+    # The phone tab bar's safe-area offset lives in the r3 shell CSS.
+    r3_css = File.read!("assets/css/r3.css")
+
     has_safe_area =
       String.contains?(app_css, "safe-area-inset-bottom") and
-        String.contains?(root_layout, "safe-area-bottom")
+        (String.contains?(root_layout, "safe-area-bottom") or
+           String.contains?(r3_css, "env(safe-area-inset-bottom"))
 
     has_dynamic_shell_viewport =
       (String.contains?(app_css, "100dvh") or String.contains?(root_layout, "100dvh")) and
@@ -2121,13 +2125,15 @@ defmodule Mix.Tasks.Cympho.Compare do
       File.read!(Path.join([File.cwd!(), "lib/cympho_web/controllers/layouts/root.html.heex"]))
 
     app_js = File.read!(Path.join([File.cwd!(), "assets/js/app.js"]))
+    # The Simple/Advanced switch moved from the root layout into the rail's account menu.
+    account_menu_source = source_for(CymphoWeb.Components.UserMenu)
 
     checks = [
       String.contains?(components_source, "data-density-switch"),
       String.contains?(components_source, "data-density-option=\"compact\""),
       String.contains?(components_source, "data-density-option=\"detailed\""),
       String.contains?(components_source, "aria-pressed={to_string(@density == \"compact\")}"),
-      String.contains?(layout_source, "data-sidebar-ui-mode-toggle"),
+      String.contains?(account_menu_source, "data-sidebar-ui-mode-toggle"),
       String.contains?(layout_source, "id=\"shortcuts-modal\""),
       String.contains?(layout_source, ">U</kbd>"),
       String.contains?(layout_source, ">V</kbd>"),

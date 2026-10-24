@@ -4,10 +4,16 @@ defmodule CymphoWeb.AgentLiveTest do
   import Phoenix.LiveViewTest
   import Mock
   alias Cympho.Agents
+  alias Cympho.Agents.Agent
   alias Cympho.AgentHeartbeat
+  alias Cympho.BoardApprovals.BoardApproval
   alias Cympho.Comments
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues
+  alias Cympho.Issues.IssueThreadInteraction
+  alias Cympho.IssueThreadInteractions
+  alias Cympho.OwnerAttention
+  alias Cympho.R3Fixtures
   alias Cympho.Repo
   alias Cympho.Secrets
   alias Cympho.Skills
@@ -244,7 +250,8 @@ defmodule CymphoWeb.AgentLiveTest do
         assert has_element?(view, "button[phx-click='kill_session'][phx-value-id='#{agent.id}']")
         assert html =~ issue.identifier
         assert html =~ "1 running now"
-        assert html =~ "1 working now"
+        # r3: the Simple "1 working now" glance is now the board's Working column.
+        assert r3_column(r3_doc(view), "working") == ["Delegated Roster CTO"]
         assert html =~ ~r/>\s*1 running\s*</
         refute html =~ ~r/>\s*1 free\s*</
         assert roster_metric(html, "Running") == "1"
@@ -261,7 +268,8 @@ defmodule CymphoWeb.AgentLiveTest do
         send(view.pid, :update_progress)
         stopped_html = render(view)
         assert stopped_html =~ "0 running now"
-        assert stopped_html =~ "0 working now"
+        # r3: the agent leaves the board's Working column once its run ends.
+        wait_until(fn -> assert r3_column(r3_doc(view), "working") == [] end)
         assert stopped_html =~ ~r/>\s*1 free\s*</
         assert roster_metric(stopped_html, "Running") == "0"
         assert roster_metric(stopped_html, "Idle") == "1"
@@ -2164,6 +2172,19 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ ~s(data-testid="new-agent-role-guide")
       assert html =~ ~s(data-testid="new-agent-form-actions")
       assert html =~ "Hire checklist"
+
+      # The actions stick on wider screens (no overflow-hidden card between
+      # them and the scroller); on phones they end the form instead, since the
+      # key notice can make the bar a third of the screen tall.
+      doc = Floki.parse_document!(html)
+      [actions] = Floki.find(doc, ~s([data-testid="new-agent-form-actions"]))
+      assert actions |> Floki.attribute("class") |> hd() =~ "max-[640px]:static"
+
+      assert Floki.find(
+               doc,
+               ~s(#main-content .overflow-hidden [data-testid="new-agent-form-actions"])
+             ) == []
+
       assert html =~ "Selected role"
       assert html =~ ~s(data-testid="new-agent-runtime-profile")
       assert html =~ "Runtime profile"
@@ -2744,5 +2765,620 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
       assert html =~ "Unavailable"
     end
+  end
+
+  # ── r3 "Paper & Ink": Team and Agent (plan P3, P6) ─────────────────
+
+  describe "r3 Team" do
+    setup do
+      nw = R3Fixtures.northwind!()
+      %{nw: nw, conn: r3_conn(nw.user, nw.company)}
+    end
+
+    test "places the team by owner-facing state", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents")
+      doc = r3_doc(view)
+
+      assert r3_text(doc, "h1") == "Team"
+      assert r3_column(doc, "stopped") == ["Mira"]
+      assert r3_column(doc, "waiting") == ["Ravi", "Priya"]
+      assert r3_column(doc, "working") == ["Theo"]
+      assert r3_column(doc, "idle") == ["Ada", "Jun", "Sol"]
+      assert r3_text(doc, ~s(.tcol[data-col="stopped"] .gh)) == "Stopped 1"
+      assert r3_text(doc, ~s(.tcol[data-col="waiting"] .gh)) == "Waiting on you 2"
+      assert r3_text(doc, ~s(.tcol[data-col="working"] .gh)) == "Working 1"
+      assert r3_text(doc, ~s(.tcol[data-col="idle"] .gh)) == "Idle 3"
+    end
+
+    test "cards carry the now-or-last line, the 30-day cost and the for-you chip", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, view, _html} = live(conn, "/agents")
+      doc = r3_doc(view)
+
+      assert r3_card(doc, "Mira") == %{
+               word: "Paused",
+               line: "last on NW-10",
+               cost: "$19.40 30 days",
+               for_you: "1 for you"
+             }
+
+      assert r3_card(doc, "Ravi") == %{
+               word: "Idle",
+               line: "asked you on NW-6",
+               cost: "$52.80 30 days",
+               for_you: "2 for you"
+             }
+
+      assert r3_card(doc, "Priya").line == "asked you on NW-7"
+      assert r3_card(doc, "Priya").cost == "$14.90 30 days"
+
+      theo = r3_card(doc, "Theo")
+      assert theo.word == "Working"
+      assert theo.line =~ ~r/^reviewing NW-9 · 2[89] min$/
+      assert theo.cost == "$41.60 30 days"
+      assert theo.for_you == "1 for you"
+
+      assert r3_card(doc, "Ada") == %{
+               word: "Idle",
+               line: "last on NW-1",
+               cost: "$38.20 30 days",
+               for_you: ""
+             }
+
+      assert r3_card(doc, "Jun").line == "NW-9 in team review"
+      assert r3_card(doc, "Jun").cost == "$12.35 30 days"
+      assert r3_card(doc, "Sol").line == "finished NW-8 at #{r3_hhmm(nw, 326)}"
+      assert r3_card(doc, "Sol").cost == "$7.25 30 days"
+
+      assert Floki.attribute(doc, ~s(.tcol[data-col="idle"] li.ac), "class") ==
+               ["ac quiet", "ac quiet", "ac quiet"]
+
+      mira = nw.agents["Mira"]
+      assert Floki.find(doc, ~s(a.ac-n[href="/agents/#{mira.id}?from=/agents"])) != []
+    end
+
+    test "a card's cost stays its own when an agent no longer on the team spent more", %{
+      conn: conn,
+      nw: nw
+    } do
+      # token_usages.agent_id has no foreign key, so a deleted agent's usage stays.
+      Repo.insert!(%Cympho.Finances.TokenUsage{
+        company_id: nw.company.id,
+        agent_id: Ecto.UUID.generate(),
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        cost_usd: Decimal.new("100.00")
+      })
+
+      {:ok, view, _html} = live(conn, "/agents")
+      doc = r3_doc(view)
+
+      assert r3_card(doc, "Sol").cost == "$7.25 30 days"
+      assert r3_card(doc, "Mira").cost == "$19.40 30 days"
+    end
+
+    test "the Next step is the stopped agent: Resume Mira", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/agents")
+      doc = r3_doc(view)
+      mira = nw.agents["Mira"]
+
+      assert r3_text(doc, ".next .paper .nt") == "Resume Mira"
+      assert r3_text(doc, ".next .paper .eyebrow") =~ "Problem"
+      assert r3_text(doc, ".next .ink .ink-h") == "After you resume"
+      assert [pw] = Floki.find(doc, ".pw")
+      assert Floki.attribute(pw, "phx-click") == ["resume_agent"]
+      assert Floki.attribute(pw, "phx-value-id") == [mira.id]
+      assert Floki.find(doc, ~s(.next a[href="/agents/#{mira.id}?from=/agents"])) != []
+    end
+
+    test "Hire sits in the header", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents")
+      doc = r3_doc(view)
+
+      assert r3_text(doc, ~s(.ctx-end a.pl[href="/agents/new"])) == "Hire"
+    end
+
+    test "the proposed hire is a dashed card that opens the vote", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/agents")
+      doc = r3_doc(view)
+
+      hire = r3_text(doc, "section.hire")
+      assert hire =~ "QA engineer"
+      assert hire =~ "Waiting for your approval"
+      assert hire =~ "Requested by Theo · #{r3_hhmm(nw, 102)}"
+
+      assert Floki.attribute(doc, "section.hire a.pl", "href") == [
+               "/board-approvals/#{nw.hire.id}?from=/agents"
+             ]
+    end
+
+    test "only a pending agent_hire shows as a proposed hire", %{conn: conn, nw: nw} do
+      Repo.update!(Ecto.Changeset.change(nw.hire, status: "approved"))
+
+      Repo.insert!(%BoardApproval{
+        company_id: nw.company.id,
+        title: "Raise the travel policy",
+        category: "policy_change",
+        status: "pending"
+      })
+
+      {:ok, view, _html} = live(conn, "/agents")
+
+      assert Floki.find(r3_doc(view), "section.hire") == []
+    end
+
+    test "Last 24 hours: 13 runs, each opening its agent's History", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/agents")
+      doc = r3_doc(view)
+      theo = nw.agents["Theo"]
+
+      assert r3_text(doc, "details.runs24 > summary") == "Last 24 hours · 13 runs"
+      assert Floki.find(doc, "details.runs24[open]") == []
+      assert length(Floki.find(doc, "details.runs24 li.run")) == 13
+
+      assert hd(Floki.attribute(doc, "details.runs24 li.run a.rt2", "href")) ==
+               "/agents/#{theo.id}?tab=runs&run_id=#{nw.runs[14].id}"
+    end
+
+    test "resuming Mira from the Next step clears the problem", %{conn: conn, nw: nw} do
+      mira = nw.agents["Mira"]
+      {:ok, view, _html} = live(conn, "/agents")
+
+      render_click(view, "resume_agent", %{"id" => mira.id})
+
+      assert Repo.get!(Agent, mira.id).status == :idle
+      doc = r3_doc(view)
+      refute r3_text(doc, ".next .paper .nt") == "Resume Mira"
+      refute "Mira" in r3_column(doc, "stopped")
+    end
+
+    test "a member cannot resume an agent", %{nw: nw} do
+      {:ok, view, _html} = live(r3_member_conn(nw.company), "/agents")
+
+      render_click(view, "resume_agent", %{"id" => nw.agents["Mira"].id})
+
+      assert Repo.get!(Agent, nw.agents["Mira"].id).status == :paused
+    end
+
+    test "the board follows agent events live", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/agents")
+
+      {:ok, _} = Agents.pause_agent(nw.agents["Ravi"], "Breaker: 3 failed attempts")
+
+      wait_until(fn ->
+        assert "Ravi" in r3_column(r3_doc(view), "stopped")
+      end)
+
+      assert Process.alive?(view.pid)
+    end
+
+    test "the board follows owner-attention changes made elsewhere", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/agents")
+      assert r3_card(r3_doc(view), "Ravi").for_you == "2 for you"
+
+      {:ok, _} =
+        IssueThreadInteractions.resolve_interaction(nw.questions["Q1"], %{
+          "status" => :responded,
+          "resolved_by_user_id" => nw.user.id,
+          "response" => "Email the customer first"
+        })
+
+      wait_until(fn ->
+        ravi = r3_card(r3_doc(view), "Ravi")
+        assert ravi.for_you == "1 for you"
+        refute ravi.line == "asked you on NW-6"
+      end)
+    end
+
+    test "Idle shows six cards, then Show all", %{conn: conn, nw: nw} do
+      for n <- 1..5 do
+        {:ok, _} =
+          Agents.create_agent(%{
+            company_id: nw.company.id,
+            name: "Zed #{n}",
+            role: :engineer,
+            status: :idle
+          })
+      end
+
+      {:ok, view, _html} = live(conn, "/agents")
+      doc = r3_doc(view)
+
+      assert length(r3_column(doc, "idle")) == 6
+      assert r3_text(doc, ~s(.tcol[data-col="idle"] .gh)) == "Idle 8"
+      assert r3_text(doc, ~s(.tcol[data-col="idle"] a.more)) == "Show all · 2 more"
+
+      assert Floki.attribute(doc, ~s(.tcol[data-col="idle"] a.more), "href") == [
+               "/agents?state=idle"
+             ]
+
+      {:ok, view, _html} = live(conn, "/agents?state=idle")
+      doc = r3_doc(view)
+
+      assert length(r3_column(doc, "idle")) == 8
+      assert Floki.find(doc, ~s(.tcol[data-col="idle"] a.more)) == []
+    end
+
+    test "the operator roster stays, Advanced only, below the board", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/agents")
+      mira = nw.agents["Mira"]
+
+      assert has_element?(
+               view,
+               ".ui-advanced-only [data-testid='agent-manage-menu-#{mira.id}']"
+             )
+    end
+
+    test "the all-clear pair offers Hire with the library's effect" do
+      html = render_component(&CymphoWeb.AgentLive.Parts.team_all_clear/1, %{})
+      doc = Floki.parse_fragment!(html)
+
+      assert r3_text(doc, ".paper .eyebrow") == "All clear"
+      assert r3_text(doc, ".paper .nt") == "Everyone is working or ready"
+      assert r3_text(doc, ".ink .ink-h") == "After you choose a role"
+
+      assert r3_text(doc, ".ink .conseq") ==
+               "Cympho asks for approval first if your company requires it."
+
+      assert Floki.attribute(doc, "a.pw", "href") == ["/agents/new"]
+      assert r3_text(doc, "a.pw") == "Hire"
+    end
+  end
+
+  describe "r3 Agent" do
+    setup do
+      nw = R3Fixtures.northwind!()
+      %{nw: nw, conn: r3_conn(nw.user, nw.company)}
+    end
+
+    test "the header says who Mira is and why she stopped", %{conn: conn, nw: nw} do
+      mira = nw.agents["Mira"]
+      {:ok, view, _html} = live(conn, "/agents/#{mira.id}")
+      doc = r3_doc(view)
+
+      assert r3_text(doc, "h1") == "Mira"
+
+      assert r3_text(doc, ".agent-h .sub") ==
+               "Engineer · reports to Theo · Runs on Codex · gpt-5.4-mini"
+
+      assert Floki.attribute(doc, ".agent-h .sub a", "href") == [
+               "/agents/#{nw.agents["Theo"].id}"
+             ]
+
+      assert r3_text(doc, ".agent-h .sp") == "Paused automatically · #{r3_hhmm(nw, 228)}"
+      assert Floki.attribute(doc, ~s(nav[aria-label="Breadcrumb"] a.back), "href") == ["/agents"]
+      assert r3_text(doc, ~s(nav[aria-label="Breadcrumb"] [aria-current="page"])) == "Mira"
+
+      assert r3_text(doc, ".agent-h .seg a[aria-current]") == "Overview"
+
+      assert Floki.attribute(doc, ".agent-h .seg a", "href") == [
+               "/agents/#{mira.id}",
+               "/agents/#{mira.id}?tab=configuration",
+               "/agents/#{mira.id}?tab=runs"
+             ]
+    end
+
+    test "Back shows only when the page was opened from elsewhere", %{conn: conn, nw: nw} do
+      path = "/agents/#{nw.agents["Mira"].id}"
+
+      {:ok, view, _html} = live(conn, path <> "?from=/")
+      assert r3_text(r3_doc(view), ".ctx .ret") == "Back to Home"
+
+      for from <- ["/agents", "//evil.example", "https://evil.example"] do
+        {:ok, view, _html} = live(conn, path <> "?from=" <> URI.encode_www_form(from))
+        assert Floki.find(r3_doc(view), ".ctx .ret") == []
+      end
+    end
+
+    test "the Next step resumes Mira, with the reason as Cympho stored it", %{
+      conn: conn,
+      nw: nw
+    } do
+      mira = nw.agents["Mira"]
+      nw10 = nw.issues["NW-10"]
+      {:ok, view, _html} = live(conn, "/agents/#{mira.id}")
+      doc = r3_doc(view)
+
+      assert r3_text(doc, ".next .paper .nt") == "Resume Mira"
+      assert r3_text(doc, ".next .paper .eyebrow") == "Next step · Problem"
+
+      assert r3_text(doc, ".next .paper .obj") ==
+               "Last 3 runs on NW-10 ended without progress: 2 failed, 1 timed out."
+
+      assert r3_text(doc, ".next details.reason > summary") == "Reason as Cympho stored it"
+      assert r3_text(doc, ".next details.reason p") == "3 failed attempts in a row on NW-10"
+      assert Floki.find(doc, ".next figure.rb") == []
+
+      assert r3_text(doc, ".next .ink .ink-h") == "After you resume"
+
+      assert Enum.map(Floki.find(doc, ".next .ink .conseq li"), &r3_squish(Floki.text(&1))) == [
+               "Mira can take new work.",
+               "NW-10 stays unassigned until someone retries it."
+             ]
+
+      assert Floki.attribute(doc, ".next .ink a.pd", "href") == ["/issues/#{nw10.id}"]
+      assert [pw] = Floki.find(doc, ".pw")
+      assert r3_squish(Floki.text(pw)) == "Resume Mira"
+      assert Floki.attribute(pw, "phx-click") == ["resume_agent"]
+    end
+
+    test "resume from Overview resumes Mira and tells the owner surfaces", %{
+      conn: conn,
+      nw: nw
+    } do
+      mira = nw.agents["Mira"]
+      company_id = nw.company.id
+      :ok = OwnerAttention.subscribe(company_id)
+      {:ok, view, _html} = live(conn, "/agents/#{mira.id}")
+
+      render_click(view, "resume_agent", %{"id" => mira.id})
+
+      assert Repo.get!(Agent, mira.id).status == :idle
+      assert_receive {:owner_attention_changed, ^company_id}
+      doc = r3_doc(view)
+      assert r3_text(doc, ".agent-h .sp") == "Idle"
+      refute r3_text(doc, ".next .paper .nt") == "Resume Mira"
+    end
+
+    test "a member cannot resume an agent", %{nw: nw} do
+      mira = nw.agents["Mira"]
+      {:ok, view, _html} = live(r3_member_conn(nw.company), "/agents/#{mira.id}")
+
+      render_click(view, "resume_agent", %{"id" => mira.id})
+
+      assert Repo.get!(Agent, mira.id).status == :paused
+    end
+
+    test "the aside: what she works on, what she costs, how she runs (key names only)", %{
+      conn: conn,
+      nw: nw
+    } do
+      mira = nw.agents["Mira"]
+      {:ok, view, html} = live(conn, "/agents/#{mira.id}")
+      doc = r3_doc(view)
+      aside = r3_text(doc, "aside.gl")
+
+      assert r3_text(doc, "aside.gl .gl-big") == "No open tasks"
+      assert aside =~ "Last: NW-10 Add automated tests for invoice totals"
+      assert r3_text(doc, "aside.gl .hero") == "$19.40 last 30 days"
+      assert aside =~ "$3.68 in the last 24 hours"
+      assert aside =~ "Price $0.75 in · $4.50 out per 1M tokens"
+      assert aside =~ "Key OPENAI_API_KEY"
+
+      assert Floki.attribute(doc, "aside.gl a.lnk", "href") == [
+               "/agents/#{mira.id}?tab=configuration"
+             ]
+
+      {:ok, secret_value} = Secrets.get_secret_value(nw.secret.id)
+      refute html =~ secret_value
+      refute render(view) =~ secret_value
+    end
+
+    test "her spend stays hers when agents no longer on the team spent more", %{
+      conn: conn,
+      nw: nw
+    } do
+      # token_usages.agent_id has no foreign key, so a deleted agent's usage stays.
+      # Seven of them, each costlier than anyone on the team, outnumber the team.
+      for _ <- 1..7 do
+        Repo.insert!(%Cympho.Finances.TokenUsage{
+          company_id: nw.company.id,
+          agent_id: Ecto.UUID.generate(),
+          provider: "codex",
+          model: "gpt-5.4-mini",
+          cost_usd: Decimal.new("100.00")
+        })
+      end
+
+      {:ok, view, _html} = live(conn, "/agents/#{nw.agents["Mira"].id}")
+      doc = r3_doc(view)
+
+      assert r3_text(doc, "aside.gl .hero") == "$19.40 last 30 days"
+      assert r3_text(doc, "aside.gl") =~ "$3.68 in the last 24 hours"
+    end
+
+    test "recent runs open the run, then the earlier spend on the task", %{conn: conn, nw: nw} do
+      mira = nw.agents["Mira"]
+      {:ok, view, _html} = live(conn, "/agents/#{mira.id}")
+      doc = r3_doc(view)
+
+      assert r3_text(doc, "#rr-t") == "Recent runs / NW-10"
+
+      assert Enum.map(Floki.find(doc, "ol.runs li.run a.rt2"), &r3_squish(Floki.text(&1))) == [
+               "Timed out after 30 minutes while running the test suite",
+               "Test database not reachable",
+               "Test database not reachable"
+             ]
+
+      assert Floki.attribute(doc, "ol.runs li.run a.rt2", "href") ==
+               Enum.map([8, 7, 6], &"/agents/#{mira.id}?tab=runs&run_id=#{nw.runs[&1].id}")
+
+      [first | _] = Floki.find(doc, "ol.runs li.run")
+
+      assert r3_text(first, ".run-sub") ==
+               "Timed out #{r3_hhmm(nw, 259)} → #{r3_hhmm(nw, 229)}"
+
+      assert r3_text(first, ".run-cost") == "30 min $3.10"
+      assert r3_text(doc, "p.fold") =~ "Earlier runs on NW-10 · $15.72"
+    end
+
+    test "tab params stay: ?tab=runs&run_id= selects the run under History", %{
+      conn: conn,
+      nw: nw
+    } do
+      mira = nw.agents["Mira"]
+      run = nw.runs[7]
+      {:ok, view, _html} = live(conn, "/agents/#{mira.id}?tab=runs&run_id=#{run.id}")
+
+      assert :sys.get_state(view.pid).socket.assigns.selected_run.id == run.id
+      assert r3_text(r3_doc(view), ".agent-h .seg a[aria-current]") == "History"
+    end
+
+    test "Ravi's question is his Next step and is answered here", %{conn: conn, nw: nw} do
+      ravi = nw.agents["Ravi"]
+      {:ok, view, _html} = live(conn, "/agents/#{ravi.id}")
+      doc = r3_doc(view)
+
+      assert r3_text(doc, ".next .paper .nt") == "Answer Ravi's question"
+      assert length(Floki.find(doc, ".next label.opt:not(.own)")) == 3
+
+      render_submit(view, "respond_questions", %{
+        "_id" => nw.questions["Q1"].id,
+        "response" => "Email the customer first"
+      })
+
+      assert Repo.get!(IssueThreadInteraction, nw.questions["Q1"].id).status == :responded
+      assert Issues.get_issue!(nw.issues["NW-6"].id).status == :todo
+      assert r3_text(r3_doc(view), ".next .paper .nt") == "Review Ravi's work"
+    end
+
+    test "the Next step follows a question answered elsewhere", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/agents/#{nw.agents["Ravi"].id}")
+      assert r3_text(r3_doc(view), ".next .paper .nt") == "Answer Ravi's question"
+
+      {:ok, _} =
+        IssueThreadInteractions.resolve_interaction(nw.questions["Q1"], %{
+          "status" => :responded,
+          "resolved_by_user_id" => nw.user.id,
+          "response" => "Email the customer first"
+        })
+
+      wait_until(fn ->
+        assert r3_text(r3_doc(view), ".next .paper .nt") == "Review Ravi's work"
+      end)
+    end
+
+    test "an answer to another company's question is refused", %{conn: conn, nw: nw} do
+      other = R3Fixtures.northwind!()
+      {:ok, view, _html} = live(conn, "/agents/#{nw.agents["Ravi"].id}")
+
+      render_submit(view, "respond_questions", %{
+        "_id" => other.questions["Q1"].id,
+        "response" => "Email the customer first"
+      })
+
+      assert Repo.get!(IssueThreadInteraction, other.questions["Q1"].id).status == :pending
+    end
+
+    test "Theo is working, and his hire request waits on a vote", %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/agents/#{nw.agents["Theo"].id}")
+      doc = r3_doc(view)
+
+      assert r3_text(doc, ".agent-h .sp") == "Working"
+
+      assert r3_text(doc, "aside.gl .gl-big") ==
+               "NW-9 Design empty states for the invoice dashboard"
+
+      assert r3_text(doc, ".next .paper .nt") == "Hire a QA engineer"
+      assert Floki.attribute(doc, "a.pw", "href") == ["/board-approvals/#{nw.hire.id}"]
+    end
+
+    test "with nothing for the owner while agents are off: Turn agents on", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, view, _html} = live(conn, "/agents/#{nw.agents["Ada"].id}")
+
+      assert r3_text(r3_doc(view), ".next .paper .nt") == "Turn agents on"
+    end
+
+    test "an agent stopped in error offers a retry", %{conn: conn, nw: nw} do
+      {:ok, broken} =
+        Agents.create_agent(%{
+          company_id: nw.company.id,
+          name: "Broken",
+          role: :engineer,
+          status: :error
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{broken.id}")
+      doc = r3_doc(view)
+
+      assert r3_text(doc, ".agent-h .sp") == "Stopped"
+      assert r3_text(doc, ".next .paper .nt") == "Retry Broken"
+      assert Floki.attribute(doc, ".pw", "phx-click") == ["run_heartbeat"]
+    end
+
+    test "technical details stay closed and name the stored status and health", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, view, _html} = live(conn, "/agents/#{nw.agents["Mira"].id}")
+      doc = r3_doc(view)
+
+      assert Floki.find(doc, "details.tech[open]") == []
+      tech = r3_text(doc, "details.tech")
+      assert tech =~ "Stored status paused"
+      assert tech =~ "Health"
+    end
+
+    test "the all-clear pair opens a task for this agent" do
+      agent = %Agent{id: Ecto.UUID.generate(), name: "Ravi"}
+      html = render_component(&CymphoWeb.AgentLive.Parts.agent_all_clear/1, %{agent: agent})
+      doc = Floki.parse_fragment!(html)
+
+      assert r3_text(doc, ".paper .nt") == "Nothing needed from you"
+      assert r3_text(doc, ".ink .ink-note") == "Opens a new task with Ravi already assigned."
+      assert Floki.attribute(doc, "a.pw", "href") == ["/issues/new?assignee_id=#{agent.id}"]
+      assert r3_text(doc, "a.pw") == "Assign a task"
+    end
+  end
+
+  defp r3_conn(user, company) do
+    Phoenix.ConnTest.build_conn()
+    |> Plug.Test.init_test_session(%{})
+    |> Plug.Conn.put_session("user_id", user.id)
+    |> Plug.Conn.put_session("company_id", company.id)
+  end
+
+  defp r3_member_conn(company) do
+    {:ok, user} =
+      Cympho.Users.create_user(%{
+        email: "team-member-#{System.unique_integer([:positive])}@example.com",
+        name: "Team Member",
+        password: "password1234"
+      })
+
+    {:ok, _} =
+      Cympho.Companies.create_membership(%{
+        user_id: user.id,
+        company_id: company.id,
+        role: "member"
+      })
+
+    r3_conn(user, company)
+  end
+
+  defp r3_doc(view), do: view |> render() |> Floki.parse_fragment!()
+
+  # Text nodes joined with a space (the gaps the CSS draws), then squished.
+  defp r3_text(node, selector),
+    do: node |> Floki.find(selector) |> Floki.text(sep: " ") |> r3_squish()
+
+  defp r3_squish(text), do: text |> String.replace(~r/\s+/u, " ") |> String.trim()
+
+  defp r3_hhmm(nw, minutes),
+    do: nw.anchor |> R3Fixtures.at(minutes) |> Calendar.strftime("%H:%M")
+
+  defp r3_column(doc, col) do
+    doc
+    |> Floki.find(~s(.tcol[data-col="#{col}"] li.ac a.ac-n))
+    |> Enum.map(&r3_squish(Floki.text(&1)))
+  end
+
+  defp r3_card(doc, name) do
+    card =
+      doc
+      |> Floki.find("li.ac")
+      |> Enum.find(&(r3_text(&1, "a.ac-n") == name))
+
+    %{
+      word: r3_text(card, ".ac-w"),
+      line: card |> r3_text(".ac-l") |> String.trim_leading("· "),
+      cost: r3_text(card, ".ac-c"),
+      for_you: r3_text(card, ".fy")
+    }
   end
 end

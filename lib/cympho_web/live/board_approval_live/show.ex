@@ -1,6 +1,7 @@
 defmodule CymphoWeb.BoardApprovalLive.Show do
   use CymphoWeb, :live_view
   alias Cympho.{BoardApprovals, Companies, GovernanceRisk}
+  alias CymphoWeb.UserAuth
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -17,6 +18,11 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
     end
   end
 
+  @impl true
+  def handle_params(params, _url, socket) do
+    {:noreply, assign(socket, :from, UserAuth.safe_from(params["from"]))}
+  end
+
   defp fetch_company_board_approval(socket, id) do
     case socket.assigns[:current_company] do
       %{id: company_id} -> BoardApprovals.get_company_board_approval(company_id, id)
@@ -25,16 +31,16 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
   end
 
   @impl true
-  def handle_event("cast_vote", %{"vote" => vote}, socket)
+  def handle_event("cast_vote", %{"vote" => vote} = params, socket)
       when vote in ["approve", "deny", "abstain"] do
     user = socket.assigns.current_user
     company = socket.assigns.current_company
     approval = socket.assigns.approval
 
     if user && company && Companies.is_board_member?(user.id, company.id) do
-      case BoardApprovals.cast_vote(approval.id, user.id, vote) do
+      case BoardApprovals.cast_vote(approval.id, user.id, vote, vote_reason(params["reason"])) do
         {:ok, _vote} ->
-          {:noreply, socket}
+          {:noreply, push_event(socket, "toast", %{message: "Vote recorded.", type: "success"})}
 
         {:error, _reason} ->
           {:noreply, put_flash(socket, :error, "Could not cast vote")}
@@ -43,6 +49,15 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
       {:noreply, socket}
     end
   end
+
+  defp vote_reason(reason) when is_binary(reason) do
+    case String.trim(reason) do
+      "" -> nil
+      reason -> reason
+    end
+  end
+
+  defp vote_reason(_reason), do: nil
 
   @impl true
   def handle_info({:board_approval_resolved, updated_approval}, socket) do

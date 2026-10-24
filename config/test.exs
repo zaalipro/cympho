@@ -91,3 +91,7 @@ config :phoenix, :plug_init_mode, :runtime
 config :swoosh, :api_client, Swoosh.ApiClient.Test
 
 config :cympho, Cympho.Mailer, adapter: Swoosh.Adapters.Test
+
+# Onboarding readiness (B9): the setup checks never touch the server's CLIs or
+# a provider in tests. The fake answers from the program name.
+config :cympho, :readiness_prober, Cympho.Onboarding.Readiness.Fake

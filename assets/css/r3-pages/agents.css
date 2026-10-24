@@ -1,0 +1,100 @@
+/* r3 page CSS: agents. Owned by the agents track (P3 Agent, P6 Team); no other track edits this file.
+   - Every selector starts with .cy-r3; scope page-only rules with .cy-r3 [data-page="…"]
+     (data-page sits on the page frame rendered by page_frame/1).
+   - No colour literal: use the tokens (app.css :root, themes.css). A new colour token goes into
+     the light block and both identical dark copies, never here.
+   - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
+   - Shared components belong in r3.css, not here. */
+
+/* ================================================================
+   Shared by Team and Agent (ported from v5 g1.css; scoped to these two pages;
+   .tech and the .gh headers are r3.css's)
+   ================================================================ */
+.cy-r3 :is([data-page="team"],[data-page="agent"]) .nw{white-space:nowrap}
+/* run rows: a finished run's word is quiet, a live one is Working (r3.css colours the failed ones) */
+.cy-r3 :is([data-page="team"],[data-page="agent"]) .run-sub .st.ok{color:var(--ink-2)}
+.cy-r3 :is([data-page="team"],[data-page="agent"]) .run-sub .st.wk{color:var(--working)}
+.cy-r3 :is([data-page="team"],[data-page="agent"]) .run>.g{justify-self:center}
+
+/* ================================================================
+   Team (g1.css §2, §5): the board, agent cards, the proposed hire
+   ================================================================ */
+.cy-r3 [data-page="team"] .tcols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:start}
+.cy-r3 [data-page="team"] .tcol{display:flex;flex-direction:column;gap:6px;min-width:0}
+.cy-r3 [data-page="team"] .acs{display:flex;flex-direction:column;gap:8px}
+/* agent card (001 identity, 142): at most 4 facts, the name covers the card */
+.cy-r3 [data-page="team"] .ac{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr) auto;grid-template-areas:"tile id id" "st st st" "cost cost fy";align-items:center;gap:10px;padding:12px 12px 11px;border-radius:14px;background:var(--lift);border:1px solid var(--lift-line);box-shadow:var(--sh-raise);transition:border-color .18s var(--ease),background .18s var(--ease)}
+.cy-r3 [data-page="team"] .ac:hover{border-color:var(--btn-line-hover)}
+.cy-r3 [data-page="team"] .ac>.tile-ag{grid-area:tile}
+.cy-r3 [data-page="team"] .ac-id{grid-area:id;display:flex;flex-direction:column;min-width:0}
+.cy-r3 [data-page="team"] .ac-n{font-size:14px;line-height:18px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="team"] .ac-n::after{content:"";position:absolute;inset:0;border-radius:14px}
+.cy-r3 [data-page="team"] .ac-n:focus-visible{box-shadow:none}
+.cy-r3 [data-page="team"] .ac-n:focus-visible::after{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+.cy-r3 [data-page="team"] .ac-r{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 [data-page="team"] .ac-st{grid-area:st;font-size:13px;line-height:18px;color:var(--ink-2)}
+.cy-r3 [data-page="team"] .ac-w{display:inline-flex;align-items:center;gap:6px;vertical-align:top;color:var(--ink-nav)}
+.cy-r3 [data-page="team"] .ac-w.c-stop{color:var(--stopped)}
+.cy-r3 [data-page="team"] .ac-w.c-work{color:var(--working)}
+.cy-r3 [data-page="team"] .ac-c{grid-area:cost;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 [data-page="team"] .ac-c .mono{font-size:13px;color:var(--ink)}
+.cy-r3 [data-page="team"] .ac>.fy{grid-area:fy;justify-self:end}
+.cy-r3 [data-page="team"] .tcol .more{align-self:flex-start;margin:2px 0 0 2px}
+/* quiet cards (142's idle cards): --quiet surface, --edge line, no shadow, name in --ink-2 */
+.cy-r3 [data-page="team"] .ac.quiet{background:var(--quiet);border-color:var(--edge);box-shadow:none}
+.cy-r3 [data-page="team"] .ac.quiet:hover{background:var(--hover);border-color:var(--tick)}
+.cy-r3 [data-page="team"] .ac.quiet .ac-n{color:var(--ink-2)}
+/* proposed hire: a dashed card under the board (018's drafted row, 125) */
+.cy-r3 [data-page="team"] .hire{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:14px;padding:14px 16px 14px 14px;border-radius:var(--r-card);border:1px dashed var(--dots-line)}
+.cy-r3 [data-page="team"] .hire-t{width:34px;height:34px;border-radius:10px;background:transparent;border-style:dashed;border-color:var(--dots-line);color:var(--ink-2)}
+.cy-r3 [data-page="team"] .hire-m{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cy-r3 [data-page="team"] .hire-s{font-size:13px;line-height:18px}
+.cy-r3 [data-page="team"] .hire-s .c-wait{display:inline-flex;align-items:center;gap:6px;font-weight:500}
+.cy-r3 [data-page="team"] .runs24 .gl-sub{padding:2px 12px 12px}
+.cy-r3 [data-page="team"] .runs24 .runs{padding-top:2px}
+.cy-r3 [data-page="team"] .flash-line{padding:0 6px}
+
+/* ================================================================
+   Agent: the status pill in every state (r3.css draws the stopped one), the Advanced tools
+   ================================================================ */
+.cy-r3 [data-page="agent"] .sp.k-work{background:var(--band);border-color:var(--band-line);color:var(--working)}
+.cy-r3 [data-page="agent"] .sp.k-wait{background:var(--waiting-bg);border-color:var(--waiting-line);color:var(--waiting)}
+.cy-r3 [data-page="agent"] .sp.k-idle{background:var(--band);border-color:var(--band-line);color:var(--ink-nav)}
+.cy-r3 [data-page="agent"] .adv-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cy-r3 [data-page="agent"] .adv-tools .pl[aria-current]{background:var(--count-bg);border-color:var(--count-bg);color:var(--count-ink)}
+.cy-r3 [data-page="agent"] .tray>.gl-sub[role="status"]{padding:0 6px}
+/* the task named under Working on is a link: give it the desktop target floor */
+.cy-r3 [data-page="agent"] .gl-big .ul{display:inline-block;padding:1px 0}
+/* Inter sets the price line 0.3 px wider than the 216 px value column; 2 px less gap keeps it on one line, as drawn */
+.cy-r3 [data-page="agent"] .aside .kv.tight{column-gap:8px}
+
+/* ================================================================
+   1024
+   ================================================================ */
+@media (max-width:1180px){
+  .cy-r3 [data-page="team"] .tcols{grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px}
+  .cy-r3 [data-page="team"] .ac{grid-template-areas:"tile id id" "st st st" "cost cost fy";padding:11px}
+}
+
+/* ================================================================
+   Phone (390): Team columns become sections, cards 52px rows with the cost on the right
+   ================================================================ */
+@media (max-width:640px){
+  .cy-r3 [data-page="team"] .tcols{grid-template-columns:minmax(0,1fr);gap:10px}
+  .cy-r3 [data-page="team"] .acs{gap:6px}
+  .cy-r3 [data-page="team"] .ac{grid-template-columns:28px minmax(0,1fr) auto;grid-template-areas:"tile id cost" "tile st fy";gap:2px 12px;min-height:52px;padding:8px 12px}
+  .cy-r3 [data-page="team"] .ac-id{flex-direction:row;align-items:baseline;gap:8px}
+  .cy-r3 [data-page="team"] .ac-c{justify-self:end;white-space:nowrap}
+  .cy-r3 [data-page="team"] .ac .fy-t{position:static;width:auto;height:auto;overflow:visible;clip:auto}
+  .cy-r3 [data-page="team"] .ac>.fy{align-self:start}
+  .cy-r3 [data-page="team"] .ac-st{font-size:12px;line-height:17px}
+  .cy-r3 [data-page="team"] .hire{grid-template-columns:34px minmax(0,1fr);row-gap:10px}
+  .cy-r3 [data-page="team"] .hire>.pl{grid-column:1 / -1;justify-self:start}
+  .cy-r3 [data-page="agent"] .gl-big .ul{padding:11px 0}
+  /* opened from elsewhere: the "‹ Home" pill replaces the crumb's back link, so the header fits 390 */
+  .cy-r3 [data-page="agent"] .ctx:has(.from) .crumb .back,.cy-r3 [data-page="agent"] .ctx:has(.from) .crumb .sep{display:none}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .cy-r3 [data-page="team"] .ac{transition:none}
+}

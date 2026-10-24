@@ -56,7 +56,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
               <span class={[
                 "rounded-full px-1.5 py-0.5 text-[10px]",
                 if(@timeline_filter == filter,
-                  do: "bg-white/20 text-white",
+                  do: "bg-white/20 text-on-primary",
                   else: "bg-canvas text-text-quaternary"
                 )
               ]}>
@@ -352,6 +352,10 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
                     "N/A"
                   )}
                 </p>
+                <%!-- The numbered answers the agent offered (B3); the owner picks one by number. --%>
+                <ol :if={answer_options(q) != []} class="space-y-0.5 pl-5 text-xs text-text-tertiary">
+                  <li :for={{option, n} <- Enum.with_index(answer_options(q), 1)}>{n}. {option}</li>
+                </ol>
               </div>
               <div :if={Map.get(entry.data.payload, "response")} class="rounded-lg bg-subtle p-2">
                 <p class="text-sm text-text-secondary">
@@ -523,4 +527,9 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
       "rounded-lg border border-border/60 bg-surface/60 p-4 transition-colors hover:border-border-hover"
     end
   end
+
+  defp answer_options(%{"options" => options}) when is_list(options),
+    do: Enum.filter(options, &is_binary/1)
+
+  defp answer_options(_question), do: []
 end
