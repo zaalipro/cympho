@@ -3300,7 +3300,7 @@ defmodule CymphoWeb.AgentLive.Show do
         <input type="checkbox" name={@name} value="true" checked={@checked} class="peer sr-only" />
         <span class="block h-5 w-9 rounded-full border border-border bg-surface peer-checked:border-brand peer-checked:bg-brand transition-colors">
         </span>
-        <span class="absolute left-0.5 top-1 h-3.5 w-3.5 rounded-full bg-text-quaternary peer-checked:left-[18px] peer-checked:bg-white transition-all">
+        <span class="absolute left-0.5 top-1 h-3.5 w-3.5 rounded-full bg-text-quaternary peer-checked:left-[18px] peer-checked:bg-on-primary transition-all">
         </span>
       </div>
     </label>

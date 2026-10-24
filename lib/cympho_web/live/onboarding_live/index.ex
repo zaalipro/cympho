@@ -531,16 +531,6 @@ defmodule CymphoWeb.OnboardingLive.Index do
     Enum.find(blueprints, &(&1.key == form["blueprint"])) || List.first(blueprints)
   end
 
-  # The team step already gives CEO and CTO a card each; the blueprint's role
-  # summary then listed them again as the first two names.
-  def other_roles_summary(blueprint) do
-    blueprint.role_summary
-    |> String.split(",")
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 in ["CEO", "CTO"]))
-    |> Enum.join(", ")
-  end
-
   # The prefix cap is 7 (not the schema's 10) because the launch engine
   # truncates prefixes to 7 characters; the name minimum is 3 because the
   # company slug derived from it must satisfy validate_length(:slug, min: 3).
@@ -638,15 +628,6 @@ defmodule CymphoWeb.OnboardingLive.Index do
   end
 
   def blueprint_short_name(name), do: String.replace_suffix(name, " company", "")
-
-  # nil when the catalog's starter-issue counts differ, in which case the cards
-  # keep printing their own.
-  def shared_seed_issue_count(blueprints) do
-    case blueprints |> Enum.map(& &1.seed_issue_count) |> Enum.uniq() do
-      [count] -> count
-      _ -> nil
-    end
-  end
 
   defp role_label(role) when is_binary(role) do
     role |> String.to_existing_atom() |> Agent.role_label()

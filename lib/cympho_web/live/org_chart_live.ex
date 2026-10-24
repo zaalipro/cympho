@@ -308,18 +308,22 @@ defmodule CymphoWeb.OrgChartLive do
             </h2>
             <div class="flex flex-wrap items-center gap-3 text-[11px] text-text-quaternary">
               <span class="inline-flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full" style="background-color: #5db872"></span>
+                <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--working)">
+                </span>
                 Running
               </span>
               <span class="inline-flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full" style="background-color: #6B7280"></span> Idle
+                <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--idle)"></span>
+                Idle
               </span>
               <span class="inline-flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full" style="background-color: #e8a55a"></span>
+                <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--waiting)">
+                </span>
                 Paused
               </span>
               <span class="inline-flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full" style="background-color: #D97757"></span>
+                <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--stopped)">
+                </span>
                 Needs attention
               </span>
               <span class="hidden sm:inline">· Click a card for stats</span>
@@ -686,16 +690,11 @@ defmodule CymphoWeb.OrgChartLive do
     status |> to_string() |> String.replace("_", " ") |> String.capitalize()
   end
 
-  def status_color(:idle), do: "#6B7280"
-  def status_color(:running), do: "#5db872"
-  def status_color(:error), do: "#D97757"
-  def status_color(:sleeping), do: "#e8a55a"
-  def status_color(:offline), do: "#423F3B"
-  def status_color(:active), do: "#5db872"
-  def status_color(:paused), do: "#e8a55a"
-  def status_color(:pending_approval), do: "#D97757"
-  def status_color(:terminated), do: "#6B7280"
-  def status_color(_), do: "#5A544C"
+  # The r3 status hues (app.css / themes.css), so the dots read in Light and Dark.
+  def status_color(status) when status in [:running, :active], do: "var(--working)"
+  def status_color(status) when status in [:sleeping, :paused], do: "var(--waiting)"
+  def status_color(status) when status in [:error, :pending_approval], do: "var(--stopped)"
+  def status_color(_status), do: "var(--idle)"
 
   defp org_health_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
   defp org_health_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"

@@ -18,6 +18,8 @@ defmodule CymphoWeb.IssueLive.Show.Task do
   alias Cympho.Agents.Agent
 
   @problem_kinds [:agent_paused, :failed_run, :stuck_issue, :human_action]
+  # The problems OwnerAttention ranks above a question on the same task (B1).
+  @outranks_questions [:agent_paused, :failed_run]
   @failed ~w(failed timed_out)
   @finished ~w(completed succeeded)
   @runs_shown 6
@@ -62,11 +64,19 @@ defmodule CymphoWeb.IssueLive.Show.Task do
     }
   end
 
-  # A pending question leads (S5: the task's own action), then a review the
-  # owner decides (an agent's delivery, or the CEO's update handed back for the
-  # owner's sign-off), then a blocked task's retry. Cancelled and all clear close it.
+  # The task's own action (S5) in the order OwnerAttention keeps one row per
+  # task (B1), so Home, Inbox and this page lead with the same decision: a
+  # paused agent or a failed run (who retries it) first, then a pending
+  # question, a review the owner decides (an agent's delivery, or the CEO's
+  # update handed back for the owner's sign-off), then a stalled or blocked
+  # task's retry. Cancelled and all clear close it.
   defp next_kind(%{status: :cancelled}, _item, _pending, _signoff?), do: :cancelled
   defp next_kind(%{status: :done}, _item, _pending, _signoff?), do: :clear
+
+  defp next_kind(%{status: :blocked}, %{kind: kind}, _pending, _signoff?)
+       when kind in @outranks_questions,
+       do: :retry
+
   defp next_kind(_issue, _item, [_ | _], _signoff?), do: :question
   defp next_kind(_issue, %{kind: :review_queue}, _pending, _signoff?), do: :review
   defp next_kind(_issue, _item, _pending, true), do: :signoff
@@ -519,14 +529,6 @@ defmodule CymphoWeb.IssueLive.Show.Task do
         </.ink_card>
       </:resolution>
     </.next_step>
-    """
-  end
-
-  defp quote_mark(assigns) do
-    ~H"""
-    <svg class="qm" viewBox="0 0 32 24" aria-hidden="true">
-      <path d="M1 24V14.5C1 6.9 5.2 1.7 12.6 0l1.7 3.3C10.2 5 8.2 8 7.9 12H13.5v12zM18 24V14.5C18 6.9 22.2 1.7 29.6 0l1.7 3.3C27.2 5 25.2 8 24.9 12h5.6v12z" />
-    </svg>
     """
   end
 

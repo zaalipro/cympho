@@ -102,16 +102,10 @@ module.exports = {
         button: "var(--color-button-bg)",
         "button-hover": "var(--color-button-hover)",
 
-        // ── Claude semantic palette (Anthropic official, DESIGN.md) ─────
-        // Anchored on Claude's real tokens — success #5db872, warning
-        // #d4a017, accent-amber #e8a55a, error #c64545, accent-teal #5db8a6.
-        // Claude uses warm TEAL for info/active status, never cool blue, so
-        // blue/sky/cyan are remapped onto the teal anchor. Roles (violet/
-        // purple/fuchsia) have no Claude equivalent; kept muted + warm.
-        // extend deep-merges, so only the shades used in templates are set.
         // Status families → semantic CSS-var tokens (full alpha support) so
-        // badges/dots read on every theme's canvas. Cool blue/sky/cyan/teal map
-        // to the info token (Claude uses warm teal for info, never cool blue).
+        // badges/dots read in Light and Dark: blue/sky/cyan/teal → info (the
+        // r3 Working teal), emerald/green → success, amber/yellow/orange →
+        // warning, red/rose → error.
         blue: semantic("info"),
         sky: semantic("info"),
         cyan: semantic("info"),
@@ -123,11 +117,15 @@ module.exports = {
         orange: semantic("warning"),
         red: semantic("error"),
         rose: semantic("error"),
-        violet: { 200: "#CFC0D6", 300: "#B6A1C2", 500: "#7F628E" },
-        purple: { 400: "#9A7CA8", 500: "#7F628E" },
-        fuchsia: { 300: "#CB9BAD", 500: "#A96B83" },
-        slate: { 300: "#B4ADA2", 400: "#9A9388", 500: "#807A6F" },
-        gray: { 300: "#C2BBB0", 400: "#9A9388", 500: "#807A6F", 700: "#4A453E" },
+        // Role and neutral families follow Light/Dark the same way: violet,
+        // purple and fuchsia read as the r3 category purple (--cat-2), slate
+        // and gray as the idle grey (--idle); fixed light shades were
+        // unreadable on paper.
+        violet: semantic("cat-2"),
+        purple: semantic("cat-2"),
+        fuchsia: semantic("cat-2"),
+        slate: semantic("idle"),
+        gray: semantic("idle"),
         zinc: { 100: "#E8E3DA", 200: "#D6D0C6", 500: "#807A6F" },
       },
       fontFamily: {

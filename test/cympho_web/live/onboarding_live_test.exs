@@ -803,7 +803,9 @@ defmodule CymphoWeb.OnboardingLiveTest do
   # Sent as the event, so it also works from steps that do not show the Check pill.
   defp pass_readiness(view) do
     render_click(view, "check_readiness")
-    render_async(view)
+    # The stubbed check runs in start_async; under a full parallel suite it can
+    # take longer than render_async's 100 ms default.
+    render_async(view, 1_000)
   end
 
   # Template and company filled in, then Continue twice: the team step (3 of 5).

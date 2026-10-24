@@ -56,7 +56,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
               <span class={[
                 "rounded-full px-1.5 py-0.5 text-[10px]",
                 if(@timeline_filter == filter,
-                  do: "bg-white/20 text-white",
+                  do: "bg-white/20 text-on-primary",
                   else: "bg-canvas text-text-quaternary"
                 )
               ]}>

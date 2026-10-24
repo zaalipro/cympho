@@ -391,6 +391,29 @@ defmodule CymphoWeb.IssueLive.R3TaskTest do
       assert html =~ "Your company role does not allow that action."
       assert is_nil(Issues.get_issue!(nw.issues["NW-10"].id).assignee_id)
     end
+
+    # Owner order on every page: problems before questions. The task's one
+    # owner row is Mira's pause (B1), so the Task page leads with it too.
+    test "a problem leads even when the task also holds a pending question", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, _ask} =
+        IssueThreadInteractions.create_interaction(%{
+          issue_id: nw.issues["NW-10"].id,
+          kind: :ask_user_questions,
+          created_by_agent_id: nw.agents["Mira"].id,
+          payload: %{"questions" => [%{"question" => "Should the tests use a real database?"}]}
+        })
+
+      {:ok, view, _html} = open(conn, nw, "NW-10")
+      doc = doc(view)
+
+      assert text(doc, ".next .paper .nt") == "Decide who retries NW-10"
+      assert [_] = Floki.find(doc, ".next form.ink[phx-submit='assign_and_retry']")
+      assert [primary] = Floki.find(doc, ".pw")
+      assert squish(Floki.text(primary)) == "Assign and retry"
+    end
   end
 
   describe "NW-11: cancelled" do

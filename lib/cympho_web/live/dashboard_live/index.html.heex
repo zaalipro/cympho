@@ -57,11 +57,10 @@
       </p>
     </.band_card>
 
-    <section class="card" aria-labelledby="day-t">
-      <div class="card-h">
-        <h2 class="h2" id="day-t">Last 24 hours</h2>
+    <.band_card id="day-t" title="Last 24 hours" band={false}>
+      <:header_end>
         <span class="meta mono">{clock_day(@day_start)} → {clock_day(@now)}</span>
-      </div>
+      </:header_end>
       <div class="strip">
         <div class="cell">
           <p class="v">{@finished_count}</p>
@@ -98,15 +97,14 @@
         <.text_link navigate={~p"/activity"}>See all activity</.text_link>
         <.text_link navigate={~p"/costs"}>Open Spending</.text_link>
       </div>
-    </section>
+    </.band_card>
   </div>
 
   <%!-- Phones only (r3.css): the rail is a tab bar there, so Home carries the team. --%>
-  <section class="card team-m" aria-labelledby="tm-t">
-    <div class="card-h">
-      <h2 class="h2" id="tm-t">Your team</h2>
-      <.link class="lnk" navigate={~p"/agents"}>See all</.link>
-    </div>
+  <.band_card id="tm-t" title="Your team" band={false} class="team-m">
+    <:header_end>
+      <.text_link navigate={~p"/agents"} arrow={false}>See all</.text_link>
+    </:header_end>
     <ul class="roster">
       <.team_row
         :for={row <- @team}
@@ -119,7 +117,7 @@
         pin={row.pin}
       />
     </ul>
-  </section>
+  </.band_card>
 
   <%!-- Advanced: the operator panels, unchanged below the r3 blocks (plan §0.2). --%>
   <div class="ui-advanced-only">

@@ -316,7 +316,7 @@ defmodule CymphoWeb.ApprovalLive.Index do
   defp pluralize(_count, word), do: word <> "s"
 
   def approval_action_class(:primary) do
-    "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+    "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
   end
 
   def approval_action_class(_tone) do
@@ -388,7 +388,7 @@ defmodule CymphoWeb.ApprovalLive.Index do
   end
 
   def approval_empty_action_class(:primary) do
-    "inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-white transition-colors hover:bg-primary-hover"
+    "inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-on-primary transition-colors hover:bg-primary-hover"
   end
 
   def approval_empty_action_class(_tone) do

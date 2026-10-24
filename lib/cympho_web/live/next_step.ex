@@ -122,9 +122,7 @@ defmodule CymphoWeb.NextStep do
         <.problem_card title={@v.title}>
           <:eyebrow><.eyebrow word={@v.word} time={@v.time} /></:eyebrow>
           <blockquote class="quote" id="ns-q">
-            <svg class="qm" viewBox="0 0 32 24" aria-hidden="true">
-              <path d="M1 24V14.5C1 6.9 5.2 1.7 12.6 0l1.7 3.3C10.2 5 8.2 8 7.9 12H13.5v12zM18 24V14.5C18 6.9 22.2 1.7 29.6 0l1.7 3.3C27.2 5 25.2 8 24.9 12h5.6v12z" />
-            </svg>
+            <.quote_mark />
             <p>{@v.question}</p>
           </blockquote>
           <:foot><.foot foot={@v.foot} /></:foot>

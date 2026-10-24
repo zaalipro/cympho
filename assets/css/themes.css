@@ -70,6 +70,8 @@
   --color-warning-rgb: 224 178 58;
   --color-error-rgb: 239 138 128;
   --color-info-rgb: 93 184 166;
+  --color-cat-2-rgb: 169 147 242;
+  --color-idle-rgb: 162 155 144;
   --color-overlay: rgba(0, 0, 0, 0.6);
   --color-selection: rgba(243, 92, 35, 0.28);
   --color-scrollbar: rgba(255, 255, 255, 0.12);
@@ -135,6 +137,8 @@
   --color-warning-rgb: 224 178 58;
   --color-error-rgb: 239 138 128;
   --color-info-rgb: 93 184 166;
+  --color-cat-2-rgb: 169 147 242;
+  --color-idle-rgb: 162 155 144;
   --color-overlay: rgba(0, 0, 0, 0.6);
   --color-selection: rgba(243, 92, 35, 0.28);
   --color-scrollbar: rgba(255, 255, 255, 0.12);

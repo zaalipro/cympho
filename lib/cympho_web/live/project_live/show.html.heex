@@ -26,7 +26,7 @@
         </a>
         <.app_link
           navigate={~p"/issues/new?project_id=#{@project.id}"}
-          class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+          class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
         >
           <.icon name="hero-plus-mini" class="h-3.5 w-3.5" /> New issue
         </.app_link>
@@ -151,7 +151,7 @@
           <:actions>
             <.app_link
               navigate={~p"/issues/new?project_id=#{@project.id}"}
-              class="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+              class="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
             >
               <.icon name="hero-plus-mini" class="h-4 w-4" /> New issue
             </.app_link>

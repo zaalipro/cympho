@@ -141,7 +141,7 @@ Company-based. Most schemas have a `company_id` FK. `CymphoWeb.UserAuth` (LiveVi
 
 ### Design System
 
-Dark-mode-first UI inspired by Linear. See `DESIGN.md` for the full spec. Tailwind CSS with custom tokens (brand indigo `#5e6ad2`, canvas/panel/surface layers). Inter Variable font. Kanban drag-and-drop via SortableJS.
+Paper & Ink (r3): Light, Dark and System modes (System is the default), stored per user in `users.theme` and stamped as `data-mode` on `<html>`. Tokens live in `assets/css/app.css` (`:root`, light) and `assets/css/themes.css` (the dark block, written twice and kept identical); shell and component styles in `assets/css/r3.css`, page rules in `assets/css/r3-pages/`; no colour literals outside the token blocks (`test/cympho_web/r3_css_contract_test.exs`). The root layout draws the one shell: the n2 rail (six destinations, the live team list `CymphoWeb.TeamRailLive`), and on phones a top bar and a tab bar. Shared function components are `CymphoWeb.Components.R3` (`page_frame/1` with breadcrumb and Back on deep pages) and `CymphoWeb.NextStep`. Every redesigned page opens with one Next step (a company stop first, then problems, questions, reviews, approvals) whose resolution card holds the page's only primary button. Inter and JetBrains Mono. See `DESIGN.md`. Kanban drag-and-drop via SortableJS.
 
 ## Conventions
 

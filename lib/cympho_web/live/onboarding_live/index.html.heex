@@ -86,9 +86,8 @@ heading =
     <div class="tray">
       <%!-- Start or improve: only for owners who already have a company. --%>
       <section :if={is_nil(@onboarding_path)} class="next" aria-labelledby="ob-t">
-        <article class="paper">
-          <p class="eyebrow">Guided setup</p>
-          <h2 class="nt" id="ob-t">What would you like to do?</h2>
+        <.problem_card title="What would you like to do?" title_id="ob-t">
+          <:eyebrow>Guided setup</:eyebrow>
           <.ob_error :if={@step_error} message={@step_error} />
           <p class="obj">
             Start another company, or turn one improvement for {@current_company.name} into ready work.
@@ -111,10 +110,10 @@ heading =
               <span class="on" aria-hidden="true">2</span><span class="ot2">Improve this company<small>Add one goal and its first task to {@current_company.name}; no new company is created.</small></span>
             </button>
           </div>
-          <div class="pf">
+          <:foot>
             <button type="button" class="ul" phx-click="skip">Skip setup</button>
-          </div>
-        </article>
+          </:foot>
+        </.problem_card>
       </section>
 
       <%!-- Improve: one goal and one CEO task in the current company. --%>
@@ -123,9 +122,8 @@ heading =
         class="next"
         aria-labelledby="ob-t"
       >
-        <article class="paper">
-          <p class="eyebrow">Improvement</p>
-          <h2 class="nt" id="ob-t">Turn one outcome into ready work</h2>
+        <.problem_card title="Turn one outcome into ready work" title_id="ob-t">
+          <:eyebrow>Improvement</:eyebrow>
           <.ob_error :if={@step_error} message={@step_error} />
           <p class="obj">
             Cympho adds a goal and one task for the CEO to {@current_company.name}. No new company is created.
@@ -154,9 +152,8 @@ heading =
               </p>
             </div>
           </form>
-        </article>
-        <article class="ink" aria-labelledby="ob-i">
-          <h3 class="ink-h" id="ob-i">After you create it</h3>
+        </.problem_card>
+        <.ink_card heading="After you create it" heading_id="ob-i">
           <.consequences rows={[
             {:done, "A goal and its first task are added to #{@current_company.name}."},
             {:idle, "The CEO turns it into scoped work."}
@@ -171,7 +168,7 @@ heading =
               </.primary_pill>
             </:primary>
           </.ink_foot>
-        </article>
+        </.ink_card>
       </section>
 
       <section
@@ -179,9 +176,8 @@ heading =
         class="next"
         aria-labelledby="ob-t"
       >
-        <article class="paper">
-          <p class="eyebrow">Ready</p>
-          <h2 class="nt" id="ob-t">{@bootstrap_result.goal.title}</h2>
+        <.problem_card title={@bootstrap_result.goal.title} title_id="ob-t">
+          <:eyebrow>Ready</:eyebrow>
           <p class="obj">
             The goal and its first task were added to {@bootstrap_result.company.name}. No new company was created.
           </p>
@@ -192,9 +188,8 @@ heading =
               · {@bootstrap_result.issue.title}
             </:item>
           </.kv_list>
-        </article>
-        <article class="ink" aria-labelledby="ob-i">
-          <h3 class="ink-h" id="ob-i">Next</h3>
+        </.problem_card>
+        <.ink_card heading="Next" heading_id="ob-i">
           <.consequences rows={[{:idle, "The CEO plans it on its task."}]} />
           <.ink_foot verb="open it">
             <:primary>
@@ -203,16 +198,15 @@ heading =
               </.primary_pill>
             </:primary>
           </.ink_foot>
-        </article>
+        </.ink_card>
       </section>
 
       <%!-- Step 1 · Template --%>
       <section :if={start? and @current_step == 0} class="next" aria-labelledby="ob-t">
         <% shown =
           visible_templates(@filtered_blueprints, @company_form, @all_templates, @blueprint_query) %>
-        <article class="paper">
-          <p class="eyebrow">Template</p>
-          <h2 class="nt" id="ob-t">Choose a company template</h2>
+        <.problem_card title="Choose a company template" title_id="ob-t">
+          <:eyebrow>Template</:eyebrow>
           <.ob_error :if={@step_error} message={@step_error} />
           <form
             id="blueprint-search-form"
@@ -245,7 +239,7 @@ heading =
             </fieldset>
           </form>
           <p :if={shown == []} class="obj">No template matches that search.</p>
-          <div class="pf">
+          <:foot>
             <span>{length(shown)} of {length(@blueprints)} templates</span>
             <button
               :if={length(shown) < length(@filtered_blueprints)}
@@ -255,19 +249,18 @@ heading =
             >
               Show all {length(@blueprints)}
             </button>
-          </div>
-        </article>
-        <article class="ink" aria-labelledby="ob-i">
-          <h3 class="ink-h" id="ob-i">{short_name}</h3>
+          </:foot>
+        </.problem_card>
+        <.ink_card heading={short_name} heading_id="ob-i">
           <.crew_tiles people={crew_roles(blueprint, @company_form)} />
-          <p class="ink-note">Creates {blueprint.seed_issue_count} first tasks.</p>
+          <.ink_note>Creates {blueprint.seed_issue_count} first tasks.</.ink_note>
           <.ink_note>Next you name it and set a spending limit.</.ink_note>
           <.ink_foot verb="continue">
             <:primary>
               <.primary_pill phx-click="next_step">Continue</.primary_pill>
             </:primary>
           </.ink_foot>
-        </article>
+        </.ink_card>
       </section>
 
       <%!-- Step 2 · Company --%>
@@ -279,9 +272,8 @@ heading =
         phx-submit="next_step"
         aria-labelledby="ob-t"
       >
-        <article class="paper">
-          <p class="eyebrow">Company</p>
-          <h2 class="nt" id="ob-t">Name your company</h2>
+        <.problem_card title="Name your company" title_id="ob-t">
+          <:eyebrow>Company</:eyebrow>
           <.ob_error :if={@step_error && is_nil(@error_field)} message={@step_error} />
           <div class="flds">
             <.ob_field
@@ -348,9 +340,8 @@ heading =
               maxlength="7"
             />
           </div>
-        </article>
-        <article class="ink" aria-labelledby="ob-i">
-          <h3 class="ink-h" id="ob-i">{short_name}</h3>
+        </.problem_card>
+        <.ink_card heading={short_name} heading_id="ob-i">
           <.crew_tiles people={crew_roles(blueprint, @company_form)} />
           <.ink_note>Next you choose the team and how it runs.</.ink_note>
           <.ink_foot verb="continue">
@@ -361,7 +352,7 @@ heading =
               <.primary_pill phx-click="next_step">Continue</.primary_pill>
             </:primary>
           </.ink_foot>
-        </article>
+        </.ink_card>
       </form>
 
       <%!-- Step 3 · Team & AI: the choices, the provider's readiness and the crew, one form. --%>
@@ -381,9 +372,8 @@ heading =
           price_error &&
             (@error_field == :price or
                Enum.any?(["price_input", "price_output"], &present(@company_form[&1]))) %>
-        <article class="paper">
-          <p class="eyebrow">Team</p>
-          <h2 class="nt" id="ob-t">{length(crew)} agents to start</h2>
+        <.problem_card title={"#{length(crew)} agents to start"} title_id="ob-t">
+          <:eyebrow>Team</:eyebrow>
           <.ob_error :if={@step_error && @error_field != :price} message={@step_error} />
           <p class="obj">
             The {short_name} template gives {@company_form["name"]} this team. Names are suggestions; you can rename anyone later.
@@ -579,9 +569,8 @@ heading =
           >
             <option :for={model <- models} value={model}></option>
           </datalist>
-        </article>
-        <article class="ink" aria-labelledby="ob-i">
-          <h3 class="ink-h" id="ob-i">Your crew</h3>
+        </.problem_card>
+        <.ink_card heading="Your crew" heading_id="ob-i">
           <.crew_tiles people={crew} />
           <dl class="ikv">
             <dt>Runs on</dt>
@@ -614,15 +603,14 @@ heading =
               </.primary_pill>
             </:primary>
           </.ink_foot>
-        </article>
+        </.ink_card>
       </form>
 
       <%!-- Step 4 · Review & launch --%>
       <section :if={start? and @current_step == 3} class="next" aria-labelledby="ob-t">
         <% owner = first_task_owner(blueprint, crew) %>
-        <article class="paper">
-          <p class="eyebrow">Review</p>
-          <h2 class="nt" id="ob-t">{@company_form["name"]} is ready to launch</h2>
+        <.problem_card title={"#{@company_form["name"]} is ready to launch"} title_id="ob-t">
+          <:eyebrow>Review</:eyebrow>
           <.ob_error :if={@step_error} message={@step_error} />
           <.kv_list class="wide">
             <:item term="Template">{short_name}</:item>
@@ -655,9 +643,8 @@ heading =
               )}
             </:item>
           </.kv_list>
-        </article>
-        <article class="ink" aria-labelledby="ob-i">
-          <h3 class="ink-h" id="ob-i">After you launch</h3>
+        </.problem_card>
+        <.ink_card heading="After you launch" heading_id="ob-i">
           <.consequences rows={[
             {:done,
              "Cympho creates #{length(crew)} agents and #{blueprint.seed_issue_count} first tasks."},
@@ -673,7 +660,7 @@ heading =
               </.primary_pill>
             </:primary>
           </.ink_foot>
-        </article>
+        </.ink_card>
       </section>
 
       <%!-- Step 5 · Ready: what was created, and the way into Home. --%>
@@ -686,9 +673,8 @@ heading =
         first = List.first(result.seed_issues)
         last = List.last(result.seed_issues)
         lead = first && Enum.find(result.agents, &(&1.id == first.assignee_id)) %>
-        <article class="paper">
-          <p class="eyebrow">Ready</p>
-          <h2 class="nt" id="ob-t">{result.company.name} is set up</h2>
+        <.problem_card title={"#{result.company.name} is set up"} title_id="ob-t">
+          <:eyebrow>Ready</:eyebrow>
           <ul class="launch">
             <li>
               <.status_glyph kind={:done} big color={false} />Company, goal and project created
@@ -705,9 +691,8 @@ heading =
               </span>
             </li>
           </ul>
-        </article>
-        <article class="ink" aria-labelledby="ob-i">
-          <h3 class="ink-h" id="ob-i">First result</h3>
+        </.problem_card>
+        <.ink_card heading="First result" heading_id="ob-i">
           <.consequences
             :if={first && lead}
             rows={[
@@ -731,7 +716,7 @@ heading =
               </.primary_pill>
             </:primary>
           </.ink_foot>
-        </article>
+        </.ink_card>
       </section>
 
       <%!-- Five keys for an app the reader has not opened yet: Advanced only. --%>

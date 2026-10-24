@@ -30,14 +30,6 @@ defmodule CymphoWeb.IssueLive.Tasks do
     for key <- @filter_keys, value = params[key], value not in [nil, ""], do: {key, value}
   end
 
-  @doc "`path` with the shared filters of `params`."
-  def with_filters(path, params) do
-    case filter_params(params) do
-      [] -> path
-      query -> path <> "?" <> URI.encode_query(query)
-    end
-  end
-
   @doc """
   The tasks a view shows for its filters: status, priority, person, project,
   label, a search by ID or title, and the Advanced triage lane (the list's

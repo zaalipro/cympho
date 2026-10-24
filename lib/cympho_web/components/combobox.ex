@@ -146,7 +146,7 @@ defmodule CymphoWeb.Components.Combobox do
                 opt.id in @selected_ids && "bg-primary border-primary"
               ]}
             >
-              <span :if={opt.id in @selected_ids} class="hero-check-mini text-white w-3 h-3" />
+              <span :if={opt.id in @selected_ids} class="hero-check-mini text-on-primary w-3 h-3" />
             </span>
             <span :if={Map.get(opt, :color)} class={["w-2 h-2 rounded-pill", Map.get(opt, :color)]} />
             <span

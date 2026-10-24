@@ -207,7 +207,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         >
           <div class="flex items-start gap-2.5">
             <span class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10">
-              <.icon name="hero-exclamation-triangle-mini" class="h-4 w-4 text-white" />
+              <.icon name="hero-exclamation-triangle-mini" class="h-4 w-4 text-ink" />
             </span>
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center justify-between gap-2">
@@ -218,7 +218,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
                   {blocker_packet_kind_label(@blocker_packet)}
                 </span>
               </div>
-              <p class="mt-1 text-sm font-590 leading-5 text-white">
+              <p class="mt-1 text-sm font-590 leading-5 text-ink">
                 {blocker_packet_value(@blocker_packet, "needs") || "Needs owner decision"}
               </p>
               <p class="mt-1 text-[11px] leading-4 text-amber-100/75">

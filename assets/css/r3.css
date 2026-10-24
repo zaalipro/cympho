@@ -323,8 +323,6 @@
 .cy-r3 .rb-track::after{content:"";position:absolute;right:0;top:-5px;bottom:-5px;border-right:1.5px dashed var(--ink-2)}
 .cy-r3 .hatch{border:1px solid var(--stopped);background:repeating-linear-gradient(135deg,var(--stopped) 0 1.5px,transparent 1.5px 5px);background-color:var(--card)}
 .cy-r3 .rb-bar{position:absolute;left:0;top:0;bottom:0;border-radius:3px}
-.cy-r3 .w2{width:6.667%;min-width:10px}
-.cy-r3 .w30{width:100%}
 .cy-r3 .rb-v{font-size:12px;line-height:16px;color:var(--stopped);white-space:nowrap}
 .cy-r3 .rb-v .mono{color:var(--ink-2)}
 .cy-r3 .rb-axis{display:flex;justify-content:space-between;font-size:12px;line-height:16px;color:var(--ink-2)}
@@ -452,33 +450,14 @@
 .cy-r3 .team-m .mate{grid-template-columns:12px auto minmax(0,1fr) auto;height:auto;min-height:52px;padding:6px 10px}
 .cy-r3 .team-m .m-word{white-space:normal}
 
-/* build notes: one quiet footer */
-.cy-r3 .notes{max-width:980px;margin:22px 14px 40px;padding-top:14px;border-top:1px solid var(--tick);font-size:12px;line-height:18px;color:var(--ink-2)}
-.cy-r3 .notes h2{font-size:12px;line-height:16px;font-weight:600;color:var(--ink-nav);margin-bottom:8px}
-.cy-r3 .notes ol{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 28px;list-style:lower-alpha;padding-left:18px}
-.cy-r3 .notes li::marker{font-style:italic}
-.cy-r3 .notes code{font:12px/18px var(--mono);color:var(--ink-nav)}
-.cy-r3 .bn{font:italic 400 12px/0 var(--sans);color:var(--ink-2);vertical-align:super;margin-left:2px;letter-spacing:0;text-transform:none}
-.cy-r3 .wt{display:inline}
-.cy-r3 .ink .bn{color:var(--inv-ink-2)}
-
-/* ---------- shared page parts (build-spec §2.4 items 2, 3, 4, 5): the header's end slot, the all-clear pair,
-   tick-meter fills, the "Other states" strip, the agents-off disclosure, a link-shaped primary ---------- */
+/* ---------- shared page parts (build-spec §2.4 items 2, 3, 5): the header's end slot, the all-clear pair,
+   the full tick meter, the agents-off disclosure, a link-shaped primary ---------- */
 .cy-r3 .next>:only-child{grid-column:1 / -1}
-.cy-r3 .tk.p82 .tk-fill{width:82%;background-size:calc(100% / 49.2) 100%}
 .cy-r3 .ctx-end{margin-left:auto;display:flex;align-items:center;gap:8px;min-width:0}
 .cy-r3 .tk.full .tk-fill{width:100%;background-size:calc(100% / 60) 100%}
 .cy-r3 .tk-legend .z.st{color:var(--stopped)}
 
-/* "Other states" strip (item 4) */
-.cy-r3 .states{margin:28px 14px 0}
-.cy-r3 .states>h2{font-size:16px;line-height:22px;font-weight:500;color:var(--ink)}
-.cy-r3 .states>p{margin-top:2px;font-size:13px;line-height:18px;color:var(--ink-2)}
-.cy-r3 .sgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:16px;margin-top:14px}
-.cy-r3 .sf{display:flex;flex-direction:column;gap:12px;min-width:0;padding:12px;border-radius:var(--r-tray);background:var(--tray);border:1px solid var(--line)}
-.cy-r3 .sf>figcaption{padding:2px 4px 0;font:12px/16px var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2)}
-.cy-r3 .sf.wide{grid-column:1 / -1}
-.cy-r3 .sf-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+/* a flexible spacer in a toolbar row (the Board's column pills sit after it) */
 .cy-r3 .sf-sp{flex:1}
 
 /* Company-wide pairs: the "How to turn agents on" disclosure on the resolution card */
@@ -488,9 +467,8 @@
 .cy-r3 .howto[open]>summary.pw .nub{transform:rotate(180deg)}
 .cy-r3 .howto>p{max-width:40ch;font-size:13px;line-height:19px;color:var(--inv-ink-2);text-align:right}
 
-/* A primary that navigates (S7) is the same pill as a link; a build-note mark inside a pill takes the pill's ink */
+/* A primary that navigates (S7) is the same pill as a link */
 .cy-r3 a.pw:active{transform:scale(.97)}
-.cy-r3 .pw .bn{color:inherit}
 
 /* Unavailable choices on the resolution card (consistency pass: moved from g1.css and g2.css, where each group drew its own).
    opt(disabled=True): a native disabled radio, the row listed but quiet with a dashed edge (Tasks' paused assignee).
@@ -615,9 +593,6 @@
   .cy-r3 .ctx{min-height:58px;padding:8px 2px 8px 10px;border-radius:24px 24px 0 0}
   /* root pages carry the top bar, so their context header scrolls away with the page */
   .cy-r3 .ctx[data-ctx="root"]{position:static}
-  .cy-r3 .states{margin:18px 8px 0}
-  .cy-r3 .sf{padding:8px;border-radius:18px}
-  .cy-r3 .sgrid{gap:12px}
   .cy-r3 .howto{align-items:stretch;width:100%}
   .cy-r3 .howto>p{text-align:left}
   .cy-r3 .h1,.cy-r3 .h1-aside{font-size:22px;line-height:28px}
@@ -697,8 +672,6 @@
   .cy-r3 .composer .pl{height:44px}
   .cy-r3 .earlier>summary,.cy-r3 .det-m>summary,.cy-r3 .tech>summary{min-height:48px}
   .cy-r3 .mate{min-height:44px}
-  .cy-r3 .notes{margin:18px 8px 24px}
-  .cy-r3 .notes ol{grid-template-columns:minmax(0,1fr)}
 }
 
 @media (prefers-reduced-motion:reduce){

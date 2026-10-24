@@ -12,11 +12,10 @@
   />
 
   <div :if={@spending && @agent_rows != []} class="money-g">
-    <section class="card" aria-labelledby="ba-t">
-      <div class="card-h">
-        <h2 class="h2" id="ba-t">By agent</h2>
+    <.band_card id="ba-t" title="By agent" band={false}>
+      <:header_end>
         <span class="meta">Last 24 hours <span class="mono">{money(@day_total)}</span></span>
-      </div>
+      </:header_end>
       <table class="money">
         <thead>
           <tr>
@@ -38,13 +37,12 @@
           </tr>
         </tbody>
       </table>
-    </section>
+    </.band_card>
 
-    <section class="card" aria-labelledby="bt-t">
-      <div class="card-h">
-        <h2 class="h2" id="bt-t">By task</h2>
+    <.band_card id="bt-t" title="By task" band={false}>
+      <:header_end>
         <span class="meta">Last {window(@spending.days)}</span>
-      </div>
+      </:header_end>
       <.task_table :if={@top_tasks != []} rows={@top_tasks} total={@window_total} />
       <details :if={@more_tasks != []} class="earlier more">
         <summary>
@@ -63,7 +61,7 @@
         </p>
         <.amount value={@untied_total} total={@window_total} />
       </div>
-    </section>
+    </.band_card>
   </div>
 
   <.band_card

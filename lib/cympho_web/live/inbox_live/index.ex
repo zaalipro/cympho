@@ -40,7 +40,7 @@ defmodule CymphoWeb.InboxLive.Index do
     review: "i-doc-check",
     approval: "i-shield"
   }
-  @row_tiles %{stopped: "p", problem: "p", question: "q"}
+  @row_tiles %{stopped: :problem, problem: :problem, question: :question}
   @decision_words %{
     answered: "Answered",
     accepted: "Accepted",
@@ -713,7 +713,7 @@ defmodule CymphoWeb.InboxLive.Index do
     issue = item.issue
 
     %{
-      tile: Map.get(@row_tiles, owner),
+      tile: Map.get(@row_tiles, owner, :neutral),
       icon: Map.fetch!(@row_icons, owner),
       word: Map.fetch!(@row_words, owner),
       title: row_title(item),
@@ -832,32 +832,26 @@ defmodule CymphoWeb.InboxLive.Index do
   # NextStep's row with the Inbox's own title and a verb that can open in place.
   defp inbox_row(assigns) do
     ~H"""
-    <li class="row">
-      <span class={["kt", @row.tile]}><.r3_icon name={@row.icon} /></span>
-      <span class="row-main">
-        <span class="rt" id={"ib#{@n}"}>{@row.title}</span>
-        <span class="rm" id={"ib#{@n}m"}>
-          {@row.word}
-          <%= for part <- @row.meta do %>
-            <span aria-hidden="true"> · </span>
-            <%= case part do %>
-              <% {:mono, text} -> %>
-                <span class="mono">{text}</span>
-              <% text -> %>
-                {text}
-            <% end %>
-          <% end %>
-        </span>
-      </span>
-      <.link
-        class="pl go"
-        patch={@row.patch}
-        navigate={@row.navigate}
-        aria-describedby={"ib#{@n} ib#{@n}m"}
-      >
-        {@row.verb}
-      </.link>
-    </li>
+    <.needs_row
+      id={"ib#{@n}"}
+      kind={@row.tile}
+      icon={@row.icon}
+      title={@row.title}
+      verb={@row.verb}
+      patch={@row.patch}
+      navigate={@row.navigate}
+    >
+      {@row.word}
+      <%= for part <- @row.meta do %>
+        <span aria-hidden="true"> · </span>
+        <%= case part do %>
+          <% {:mono, text} -> %>
+            <span class="mono">{text}</span>
+          <% text -> %>
+            {text}
+        <% end %>
+      <% end %>
+    </.needs_row>
     """
   end
 
@@ -1451,7 +1445,7 @@ defmodule CymphoWeb.InboxLive.Index do
   defp status_filter_label("review"), do: "Awaiting review"
   defp status_filter_label(status), do: String.capitalize(status)
 
-  defp status_dot("action"), do: "bg-white"
+  defp status_dot("action"), do: "bg-text-primary"
   defp status_dot("unread"), do: "bg-blue-400"
   defp status_dot("read"), do: "bg-slate-400"
   defp status_dot("dismissed"), do: "bg-amber-400"

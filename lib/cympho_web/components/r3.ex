@@ -383,6 +383,15 @@ defmodule CymphoWeb.Components.R3 do
     """
   end
 
+  @doc "The quotation mark that opens an agent's question (133)."
+  def quote_mark(assigns) do
+    ~H"""
+    <svg class="qm" viewBox="0 0 32 24" aria-hidden="true">
+      <path d="M1 24V14.5C1 6.9 5.2 1.7 12.6 0l1.7 3.3C10.2 5 8.2 8 7.9 12H13.5v12zM18 24V14.5C18 6.9 22.2 1.7 29.6 0l1.7 3.3C27.2 5 25.2 8 24.9 12h5.6v12z" />
+    </svg>
+    """
+  end
+
   ## ── Answer options ────────────────────────────────────────────
 
   attr :name, :string, required: true
@@ -658,6 +667,7 @@ defmodule CymphoWeb.Components.R3 do
   attr :title, :string, required: true
   attr :verb, :string, required: true
   attr :navigate, :string, default: nil
+  attr :patch, :string, default: nil, doc: "opens the decision in place (Inbox `?item=`)"
   attr :href, :string, default: nil
   slot :inner_block, doc: "the meta line: at most 4 parts"
 
@@ -670,7 +680,13 @@ defmodule CymphoWeb.Components.R3 do
         <span class="rt" id={@id}>{@title}</span>
         <span class="rm" id={@id <> "m"}>{render_slot(@inner_block)}</span>
       </span>
-      <.link class="pl go" navigate={@navigate} href={@href} aria-describedby={"#{@id} #{@id}m"}>
+      <.link
+        class="pl go"
+        navigate={@navigate}
+        patch={@patch}
+        href={@href}
+        aria-describedby={"#{@id} #{@id}m"}
+      >
         {@verb}
       </.link>
     </li>

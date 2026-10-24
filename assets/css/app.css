@@ -2,8 +2,6 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500;700&family=Saira+Condensed:wght@300;400;600;700&display=swap');
-
 /* Paper & Ink tokens. :root below is the light mode; themes.css holds the dark
    block twice (System follows the device unless data-mode="light"; data-mode="dark"
    forces it), kept identical by test/cympho_web/r3_css_contract_test.exs. */
@@ -160,6 +158,9 @@
   --color-error-rgb:    178 58 58;
   --color-info:         var(--working);
   --color-info-rgb:     42 115 102;
+  /* Tailwind's violet/purple/fuchsia and slate/gray families (tailwind.config.js) */
+  --color-cat-2-rgb:    109 79 216;   /* --cat-2 */
+  --color-idle-rgb:     107 102 96;   /* --idle */
   --color-overlay:      rgba(20, 20, 20, 0.4);
 
   /* Buttons */
@@ -353,21 +354,6 @@
   line-height: 1;
 }
 
-/* Focus ring utility for accessibility */
-.focus-ring:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-brand);
-}
-
-.focus-ring:focus:not(:focus-visible) {
-  box-shadow: none;
-}
-
-.focus-ring:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-brand);
-}
-
 /* Simple / Advanced product mode. Mode and row density are independent:
    choosing detailed rows must not expose expert-only controls in Simple. */
 html:not([data-ui-mode="simple"]) .ui-simple-only {
@@ -403,11 +389,6 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
   grid-column: 1 / -1 !important;
 }
 
-.ui-mode-toggle[data-mode="advanced"] {
-  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
-  background: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface-2));
-  color: var(--color-ink);
-}
 
 .ui-mode-option {
   color: var(--color-text-quaternary);
@@ -480,19 +461,6 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
    would otherwise win (and turn to ink on hover). */
 .text-on-primary {
   color: var(--color-on-primary) !important;
-}
-
-.cympho-field {
-  background: var(--color-panel);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  color: var(--color-text-primary);
-  outline: none;
-}
-
-.cympho-field:focus {
-  border-color: rgb(var(--color-primary-rgb) / 0.75);
-  box-shadow: 0 0 0 2px rgb(var(--color-primary-rgb) / 0.22);
 }
 
 #kanban-board[data-drag-unavailable="true"] .kanban-card-actions {
@@ -591,7 +559,7 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
     min-height: 44px;
   }
 
-  button, a, nav, .kanban-column-cards {
+  button, a, nav {
     -webkit-user-select: none;
     user-select: none;
   }
@@ -1241,17 +1209,6 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   transition: width 800ms var(--ease-out-expo);
 }
 
-/* Badge micro-pop when a live badge count changes (retriggered via JS
-   class flip or LiveView re-render remount). */
-@keyframes badge-pop {
-  0% { transform: scale(1); }
-  40% { transform: scale(1.25); }
-  100% { transform: scale(1); }
-}
-.badge-pop {
-  animation: badge-pop 360ms var(--ease-spring);
-}
-
 /* Kanban cards get pickup physics: lifted + slightly rotated while
    dragging, soft landing via the confirmed outline fade. */
 .kanban-card-dragging {
@@ -1283,7 +1240,6 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   .page-enter,
   .stagger-children > *,
   .dialog-enter,
-  .badge-pop,
   .skeleton-shimmer {
     animation: none !important;
   }
@@ -1291,28 +1247,6 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   .ui-simple-card:hover,
   .cta-glow:hover {
     transform: none !important;
-  }
-}
-
-/* Kanban card hover — soft raise + hairline warm-up; grab affordance. */
-.kanban-column-cards [data-issue-id] {
-  transition:
-    transform 320ms var(--ease-spring),
-    box-shadow 320ms var(--ease-spring),
-    border-color 180ms ease-out,
-    background-color 180ms ease-out;
-}
-.kanban-column-cards [data-issue-id]:hover {
-  transform: translateY(-1px);
-  border-color: var(--color-hairline-strong);
-  box-shadow:
-    inset 0 1px 0 0 var(--shadow-inset-highlight),
-    0 3px 10px rgb(var(--shadow-rgb) / calc(0.22 * var(--shadow-strength)));
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .kanban-column-cards [data-issue-id]:hover {
-    transform: none;
   }
 }
 
