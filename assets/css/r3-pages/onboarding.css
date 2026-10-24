@@ -4,4 +4,173 @@
    - No colour literal: use the tokens (app.css :root, themes.css). A new colour token goes into
      the light block and both identical dark copies, never here.
    - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
-   - Shared components belong in r3.css, not here. */
+   - Shared components belong in r3.css, not here.
+   Ported from v5/notes/r3-src/g2.css "Onboarding". Onboarding draws its own chrome (bar, step list),
+   so data-page sits on the LiveView's root (.ob), which holds the bar and the frame. */
+
+/* ---------- Own chrome: no rail, no tab bar ---------- */
+/* The bare shell's column stays the scroller; the page centres itself at 1240 px. */
+.cy-r3 .col:has([data-page="onboarding"]){padding:0}
+.cy-r3 [data-page="onboarding"]{width:100%;max-width:1240px;margin:0 auto;padding:0 24px 24px}
+.cy-r3 [data-page="onboarding"] .ob-bar{display:flex;align-items:center;gap:12px;height:64px;padding:0 2px 0 0}
+.cy-r3 [data-page="onboarding"] .ob-brand{display:inline-flex;align-items:center;gap:10px;font-size:15px;line-height:20px;font-weight:600;color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .ob-step{display:inline-flex;align-items:center;gap:10px;font-size:14px;color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .ob-sep{color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .ob-sp{flex:1}
+.cy-r3 [data-page="onboarding"] .ob-help{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px 0 10px;border-radius:var(--r-pill);font-size:13px;font-weight:500;color:var(--ink);transition:background .18s var(--ease)}
+.cy-r3 [data-page="onboarding"] .ob-help:hover{background:var(--page-hover)}
+.cy-r3 [data-page="onboarding"] .ob-help .ico{color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .ob-acct{position:relative}
+.cy-r3 [data-page="onboarding"] .ob-acct>summary{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;cursor:pointer}
+.cy-r3 [data-page="onboarding"] .ob-acct>summary:hover{background:var(--page-hover)}
+.cy-r3 [data-page="onboarding"] .ob-acct .menu{left:auto;right:0;width:220px}
+
+/* step list (141's segmented 2/4, 111's "2 of 3"): bars on top, the current step carries the orange dot */
+.cy-r3 [data-page="onboarding"] .ob-h{align-items:flex-start;padding-top:22px}
+.cy-r3 [data-page="onboarding"] .so{flex:1;min-width:0}
+.cy-r3 [data-page="onboarding"] .so ol{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.cy-r3 [data-page="onboarding"] .so li{display:flex;min-width:0;border-top:3px solid var(--tick);padding-top:8px}
+.cy-r3 [data-page="onboarding"] .so li.dn,.cy-r3 [data-page="onboarding"] .so li.cu{border-top-color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .so li>button,.cy-r3 [data-page="onboarding"] .so li>span{display:inline-flex;align-items:center;gap:8px;min-height:28px;padding:0 8px 0 2px;border-radius:8px;font-size:13px;line-height:18px;color:var(--ink-2);white-space:nowrap}
+.cy-r3 [data-page="onboarding"] .so li.dn>button,.cy-r3 [data-page="onboarding"] .so li.dn>span{color:var(--ink-nav)}
+.cy-r3 [data-page="onboarding"] .so li.dn>button:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.cy-r3 [data-page="onboarding"] .so li.cu>span{color:var(--ink-hi);font-weight:500}
+.cy-r3 [data-page="onboarding"] .so .sn{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:6px;border:1px solid var(--tile-line);font-size:12px;line-height:1;color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .so li.cu .sn{border-color:transparent;background:var(--count-bg);color:var(--count-ink)}
+.cy-r3 [data-page="onboarding"] .so li.cu .sl::after{content:"";display:inline-block;width:6px;height:6px;margin:0 0 1px 8px;border-radius:50%;background:var(--accent);vertical-align:middle}
+.cy-r3 [data-page="onboarding"] .so-m{display:none}
+.cy-r3 [data-page="onboarding"] .head{padding:4px 14px 18px}
+.cy-r3 [data-page="onboarding"] .frame>.head:first-child{padding-top:22px}  /* start-or-improve has no step list */
+
+/* the choices card: paper option rows (151) restyled with page tokens */
+.cy-r3 [data-page="onboarding"] .ob-sec{display:flex;flex-direction:column;gap:12px}
+.cy-r3 [data-page="onboarding"] .paper .opts legend:not(.sr){margin-bottom:4px;font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .paper .opts>.help{margin:-6px 0 2px;font-size:13px;line-height:19px}
+.cy-r3 [data-page="onboarding"] .lead{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.cy-r3 [data-page="onboarding"] .lead li{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:var(--r-row);background:var(--well);border:1px solid var(--band-line)}
+.cy-r3 [data-page="onboarding"] .who2{display:flex;flex-direction:column;min-width:0;font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .who2 small{font-size:12px;line-height:16px;font-weight:400;color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .also{font-size:13px;line-height:19px;color:var(--ink-2)}
+/* "Rename the leaders" (B8) ends the "Also on the team" line, so the step keeps the mockup's rows; open, it takes its own row */
+.cy-r3 [data-page="onboarding"] .ob-also{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 12px}
+.cy-r3 [data-page="onboarding"] .ob-ren[open]{flex-basis:100%;margin-top:12px}
+.cy-r3 [data-page="onboarding"] .ob-ren>summary{display:inline-flex;align-items:center;min-height:24px;font-size:13px;font-weight:500;color:var(--ink);cursor:pointer;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:var(--underline)}
+.cy-r3 [data-page="onboarding"] .ob-ren>summary:hover{text-decoration-color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .ob-ren[open]>summary{margin-bottom:10px}
+.cy-r3 [data-page="onboarding"] .flds{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.cy-r3 [data-page="onboarding"] .fld{display:flex;flex-direction:column;gap:6px;min-width:0}
+.cy-r3 [data-page="onboarding"] .fld>label{font-size:12px;line-height:16px;font-weight:500;color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .fld input{width:100%;height:40px;padding:0 16px;border-radius:var(--r-pill);background:var(--field-bg);border:1px solid var(--field);font-size:14px;color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .fld input::placeholder,.cy-r3 [data-page="onboarding"] .fld textarea::placeholder{color:var(--ink-2);opacity:1}
+.cy-r3 [data-page="onboarding"] .fld input:focus-visible{border-color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .fld input.mono{font-family:var(--mono);font-size:13px}
+.cy-r3 [data-page="onboarding"] .fld textarea{width:100%;min-height:96px;padding:10px 16px;border-radius:var(--r-row);background:var(--field-bg);border:1px solid var(--field);font-size:14px;line-height:20px;color:var(--ink);resize:vertical}
+.cy-r3 [data-page="onboarding"] .fld .inp{display:flex;align-items:center;gap:6px;height:40px;padding:0 16px;border-radius:var(--r-pill);background:var(--field-bg);border:1px solid var(--field);color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .fld .inp:focus-within{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+.cy-r3 [data-page="onboarding"] .fld .inp input{height:100%;padding:0;border:0;border-radius:0;background:transparent;outline:none}
+.cy-r3 [data-page="onboarding"] .fld .inp input:focus-visible{box-shadow:none}
+.cy-r3 [data-page="onboarding"] .fld input[aria-invalid="true"],.cy-r3 [data-page="onboarding"] .fld .inp:has(input[aria-invalid="true"]){border-color:var(--stopped)}
+.cy-r3 [data-page="onboarding"] .fld.ob-count{max-width:200px}
+.cy-r3 [data-page="onboarding"] .err{display:flex;align-items:center;gap:6px;font-size:13px;line-height:18px;font-weight:500;color:var(--stopped)}
+.cy-r3 [data-page="onboarding"] .flds>.full{grid-column:1 / -1}
+.cy-r3 [data-page="onboarding"] .paper .opt{background:var(--well);border-color:var(--band-line);color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .paper .opt:hover{background:var(--hover);border-color:var(--btn-line-hover)}
+.cy-r3 [data-page="onboarding"] .paper .on{background:var(--lift);border:1px solid var(--tile-line);color:var(--ink-nav)}
+.cy-r3 [data-page="onboarding"] .paper .radio{border-color:var(--field)}
+.cy-r3 [data-page="onboarding"] .paper .opt-in:checked+.opt{border-color:var(--accent);background:var(--well)}
+/* the chosen row's three cues share one orange per surface (theme-dark.md §3.4); on paper the tile only drops its edge */
+.cy-r3 [data-page="onboarding"] .paper .opt-in:checked+.opt .on{border-color:transparent}
+.cy-r3 [data-page="onboarding"] .ot2{display:flex;flex-direction:column;flex:1;min-width:0;font-weight:500}
+.cy-r3 [data-page="onboarding"] .ot2 small{font-size:12px;line-height:16px;font-weight:400;color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .ot2 .mono{margin-left:6px;font-size:12px;font-weight:400;color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .ob-choices{display:flex;flex-direction:column;gap:8px}
+.cy-r3 [data-page="onboarding"] .ob-choices .opt{width:100%;text-align:left;padding:12px 14px 12px 12px}
+.cy-r3 [data-page="onboarding"] .pf .ul{min-height:24px}
+
+/* readiness (111's pre-flight, 140's checklist): glyph, the check in ink, what it found in ink-2 */
+.cy-r3 [data-page="onboarding"] .rd{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border-radius:var(--r-row);background:var(--well);border:1px solid var(--band-line)}
+.cy-r3 [data-page="onboarding"] .rd-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:6px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .rd li{display:grid;grid-template-columns:14px 104px minmax(0,1fr);align-items:baseline;gap:10px;padding:5px 0;font-size:13px;line-height:19px}
+.cy-r3 [data-page="onboarding"] .rd li .g{align-self:center}
+.cy-r3 [data-page="onboarding"] .rd b{font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .rd li span:last-child{color:var(--ink-2)}
+.cy-r3 [data-page="onboarding"] .rd li.bad b,.cy-r3 [data-page="onboarding"] .rd li.bad span:last-child{color:var(--stopped)}
+.cy-r3 [data-page="onboarding"] .rd-a{display:flex;align-items:center;gap:14px;padding-top:8px}
+.cy-r3 [data-page="onboarding"] .rd-a .ul{padding:2px 0}  /* 24 px target; the row is taller, so nothing moves */
+.cy-r3 [data-page="onboarding"] .rd-a .pl[disabled]{cursor:progress;color:var(--ink-2)}
+
+/* Advanced: the shared command/model fields and the per-role choices */
+.cy-r3 [data-page="onboarding"] .ob-roles{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+.cy-r3 [data-page="onboarding"] .ob-roles>.ul{min-height:24px;font-size:13px;font-weight:500}
+.cy-r3 [data-page="onboarding"] .ob-role-list{display:flex;flex-direction:column;gap:8px;width:100%}
+.cy-r3 [data-page="onboarding"] .ob-role{display:grid;grid-template-columns:80px repeat(3,minmax(0,1fr));align-items:center;gap:8px}
+.cy-r3 [data-page="onboarding"] .ob-role-n{font-size:13px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .ob-role :is(select,input){width:100%;min-width:0;height:36px;padding:0 12px;border-radius:var(--r-row);background:var(--field-bg);border:1px solid var(--field);font-size:13px;color:var(--ink)}
+
+/* the crew card (001, 125): tiles on the resolution card read --inv-* */
+.cy-r3 [data-page="onboarding"] .crew{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.cy-r3 [data-page="onboarding"] .crew li{display:flex;align-items:center;gap:10px;min-width:0;padding:8px;border-radius:var(--r-row);background:var(--inv-row);border:1px solid var(--inv-row-line)}
+.cy-r3 [data-page="onboarding"] .ct{width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:9px;background:var(--inv-num-bg);color:var(--inv-num-ink);font:600 12px/1 var(--sans);letter-spacing:.02em}
+.cy-r3 [data-page="onboarding"] .cn{display:flex;flex-direction:column;min-width:0;font-size:14px;line-height:19px;font-weight:500;color:var(--inv-ink);overflow-wrap:anywhere}
+.cy-r3 [data-page="onboarding"] .cn small{font-size:12px;line-height:16px;font-weight:400;color:var(--inv-ink-2)}
+.cy-r3 [data-page="onboarding"] .ikv{display:grid;grid-template-columns:80px minmax(0,1fr);gap:8px 12px;padding:12px 0 0;border-top:1px solid var(--inv-line);font-size:14px;line-height:20px}
+.cy-r3 [data-page="onboarding"] .ikv dt{color:var(--inv-ink-2)}
+.cy-r3 [data-page="onboarding"] .ikv dd{min-width:0;color:var(--inv-ink)}
+.cy-r3 [data-page="onboarding"] .next{align-items:start}
+.cy-r3 [data-page="onboarding"] .next>.ink{position:sticky;top:84px}
+
+/* template list, review summary, launch list, the Advanced keys */
+.cy-r3 [data-page="onboarding"] .tpl{display:flex;flex-direction:column;gap:8px}
+.cy-r3 [data-page="onboarding"] .tpl .opt{align-items:flex-start;padding:12px 14px 12px 12px}
+.cy-r3 [data-page="onboarding"] .tpl .opt .radio{margin-top:2px}
+.cy-r3 [data-page="onboarding"] .kv.wide{grid-template-columns:120px minmax(0,1fr);padding:4px 0 0}
+.cy-r3 [data-page="onboarding"] .launch{display:flex;flex-direction:column}
+.cy-r3 [data-page="onboarding"] .launch li{display:flex;align-items:center;gap:10px;min-height:36px;font-size:14px;color:var(--ink)}
+.cy-r3 [data-page="onboarding"] .launch li .g{flex:none;color:var(--done)}
+.cy-r3 [data-page="onboarding"] .kv.ob-keys{grid-template-columns:160px minmax(0,1fr)}
+
+/* ================================================================
+   2. 1024
+   ================================================================ */
+@media (max-width:1180px){
+  .cy-r3 [data-page="onboarding"] .rd li{grid-template-columns:14px 96px minmax(0,1fr)}
+}
+
+/* ================================================================
+   3. phone (390): bar; step label over the segments; choices; crew. The crew card's footer stays
+   in flow, at the end of the step form: the owner meets the readiness lines and the crew summary
+   before "Continue to review"
+   ================================================================ */
+@media (max-width:640px){
+  .cy-r3 [data-page="onboarding"]{padding:0 6px 24px}
+  .cy-r3 [data-page="onboarding"] .ob-bar{height:60px;padding:0 0 0 4px;gap:6px}
+  .cy-r3 [data-page="onboarding"] .ob-step{display:none}
+  .cy-r3 [data-page="onboarding"] .ob-help{height:44px;padding:0 12px 0 10px}
+  .cy-r3 [data-page="onboarding"] .ctx{position:static}
+  .cy-r3 [data-page="onboarding"] .ob-h{padding:12px 10px 4px 10px}
+  .cy-r3 [data-page="onboarding"] .so-m{display:block;margin-bottom:8px;font-size:13px;line-height:18px;font-weight:500;color:var(--ink)}
+  .cy-r3 [data-page="onboarding"] .so ol{gap:4px}
+  .cy-r3 [data-page="onboarding"] .so li{padding-top:0}
+  .cy-r3 [data-page="onboarding"] .so li>button,.cy-r3 [data-page="onboarding"] .so li>span{display:none}
+  .cy-r3 [data-page="onboarding"] .head{padding:2px 8px 12px}
+  .cy-r3 [data-page="onboarding"] .frame>.head:first-child{padding-top:14px}
+  .cy-r3 [data-page="onboarding"] .flds{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 [data-page="onboarding"] .lead li{padding:8px 10px;gap:10px}
+  .cy-r3 [data-page="onboarding"] .fld input,.cy-r3 [data-page="onboarding"] .fld .inp{height:44px}
+  /* an input inside a 44 px capsule fills it, edge included, so the target is the capsule */
+  .cy-r3 [data-page="onboarding"] :is(.fld .inp,.search) input{height:calc(100% + 2px);margin:-1px 0}
+  .cy-r3 [data-page="onboarding"] .rd li{grid-template-columns:14px minmax(0,1fr);row-gap:0}
+  .cy-r3 [data-page="onboarding"] .rd li span:last-child{grid-column:2}
+  .cy-r3 [data-page="onboarding"] .next>.ink{position:relative;top:auto}
+  .cy-r3 [data-page="onboarding"] .rd-a{flex-wrap:wrap}
+  /* r3.css hides answer legends on phones; on paper it is the section heading */
+  .cy-r3 [data-page="onboarding"] .paper .opts legend:not(.sr){position:static;width:auto;height:auto;margin:0 0 4px;overflow:visible;clip:auto;white-space:normal}
+  .cy-r3 [data-page="onboarding"] .rd-a .pl{height:44px}
+  .cy-r3 [data-page="onboarding"] .rd-a .ul{padding:12px 0}
+  .cy-r3 [data-page="onboarding"] :is(.ob-ren>summary,.pf .ul,.ob-roles>.ul){min-height:44px}
+  /* [Back] [Launch Northwind Software] needs more than the card's width: the footer may wrap */
+  .cy-r3 [data-page="onboarding"] .ink-f{flex-wrap:wrap}
+  .cy-r3 [data-page="onboarding"] .kv.wide,.cy-r3 [data-page="onboarding"] .kv.ob-keys{grid-template-columns:minmax(0,1fr);gap:2px 0}
+  .cy-r3 [data-page="onboarding"] .kv.wide dd,.cy-r3 [data-page="onboarding"] .kv.ob-keys dd{margin-bottom:10px}
+  .cy-r3 [data-page="onboarding"] .ob-role{grid-template-columns:minmax(0,1fr)}
+}
