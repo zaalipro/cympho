@@ -251,10 +251,15 @@ defmodule Cympho.OwnerAttention do
   The agent an owner item counts for, the rule behind the "N for you" chips
   (`counts/2`'s `by_agent`): a review waits on the work of the task's
   assignee (the wake itself belongs to whoever reviews, the CEO for an
-  unassigned root task); every other item on its own agent.
+  unassigned root task), and so does a blocked task assigned to an agent;
+  every other item on its own agent.
   """
   def for_you_agent_id(%{kind: :review_queue, issue: %{assignee_id: id}}) when is_binary(id),
     do: id
+
+  def for_you_agent_id(%{kind: :human_action, issue: %{status: :blocked, assignee_id: id}})
+      when is_binary(id),
+      do: id
 
   def for_you_agent_id(item), do: Map.get(item, :agent_id)
 

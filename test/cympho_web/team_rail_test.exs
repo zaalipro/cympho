@@ -79,6 +79,31 @@ defmodule CymphoWeb.TeamRailTest do
     assert chips["Ada"] == 0
   end
 
+  test "the chips add up to the Inbox badge when tasks assigned to agents are blocked" do
+    nw = Cympho.R3Fixtures.northwind!()
+
+    # NW-7's question answered puts it back to To do; the owner then blocks it and NW-5.
+    {:ok, _} =
+      Cympho.IssueThreadInteractions.resolve_interaction(nw.questions["Q2"], %{
+        "status" => :responded,
+        "resolved_by_user_id" => nw.user.id,
+        "response" => "Two tiers"
+      })
+
+    for id <- ["NW-7", "NW-5"] do
+      issue = Cympho.Issues.get_issue!(nw.issues[id].id)
+      {:ok, _} = Cympho.Issues.transition_issue(issue, :blocked)
+    end
+
+    chips = Map.new(TeamRail.rows(nw.company.id, nw.user), &{&1.name, &1.for_you})
+    badge = Cympho.OwnerAttention.unresolved_count(nw.company.id, nw.user)
+
+    assert badge == 6
+    assert chips["Priya"] == 1
+    assert chips["Ada"] == 1
+    assert chips |> Map.values() |> Enum.sum() == badge
+  end
+
   describe "spending/1, the one spend read of the rail slot and Home" do
     test "the spend of the limit's window against the limit", %{company: company} do
       spend!(company, "300", "186.50")

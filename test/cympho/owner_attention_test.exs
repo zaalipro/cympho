@@ -903,6 +903,22 @@ defmodule Cympho.OwnerAttentionTest do
                by_agent: %{context.agent.id => 1}
              }
     end
+
+    test "a blocked task counts for its assignee agent; a person's task for no agent", context do
+      blocked = issue!(context.company.id, "Waiting on a decision", assignee_id: context.agent.id)
+      {:ok, _blocked} = Issues.transition_issue(blocked, :blocked)
+      # Waiting on the person it is assigned to, even with an agent on it too.
+      issue!(context.company.id, "The owner's own task",
+        assignee_user_id: context.user.id,
+        assignee_id: context.agent.id
+      )
+
+      assert OwnerAttention.counts(context.company.id, context.user) == %{
+               total: 2,
+               by_kind: %{stopped: 0, problem: 2, question: 0, review: 0, approval: 0},
+               by_agent: %{context.agent.id => 1}
+             }
+    end
   end
 
   describe "question answer options" do
