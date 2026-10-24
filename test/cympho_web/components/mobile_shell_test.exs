@@ -89,4 +89,34 @@ defmodule CymphoWeb.MobileShellTest do
 
     assert css =~ ".sticky-above-mobile-nav"
   end
+
+  # Every `@media (max-width:640px)` block of a stylesheet, comments stripped.
+  defp phone_css(path) do
+    css = path |> File.read!() |> then(&Regex.replace(~r{/\*.*?\*/}s, &1, ""))
+
+    ~r/@media \(max-width: ?640px\) ?\{/
+    |> Regex.split(css)
+    |> tl()
+    |> Enum.map_join("\n", &take_block(&1, 1, []))
+  end
+
+  defp take_block(<<"}", _::binary>>, 1, acc), do: acc |> Enum.reverse() |> to_string()
+  defp take_block(<<"}", rest::binary>>, d, acc), do: take_block(rest, d - 1, ["}" | acc])
+  defp take_block(<<"{", rest::binary>>, d, acc), do: take_block(rest, d + 1, ["{" | acc])
+  defp take_block(<<c::utf8, rest::binary>>, d, acc), do: take_block(rest, d, [<<c::utf8>> | acc])
+
+  # B13: iOS zooms into a focused field whose text is under 16px.
+  test "phone form fields are 16px, desktop sizes stay" do
+    phone = phone_css(@r3_css)
+
+    assert phone =~
+             ".cy-r3 :is(input,textarea,select),.cy-r3 .search input,.cy-r3 .composer textarea{font-size:16px}"
+
+    assert phone_css("assets/css/r3-pages/onboarding.css") =~
+             ~s|.cy-r3 [data-page="onboarding"] :is(.fld input,.fld input.mono,.fld textarea,.ob-role select,.ob-role input){font-size:16px}|
+
+    r3 = File.read!(@r3_css)
+    assert r3 =~ "background:transparent;outline:none;font-size:13px;color:var(--ink)}"
+    assert r3 =~ "color:var(--ink);resize:vertical;font-size:14px;line-height:20px}"
+  end
 end

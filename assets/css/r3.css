@@ -610,6 +610,8 @@
   .cy-r3 .chip{height:44px}
   /* a search capsule in the page (Tasks' toolbar, Onboarding's templates) is a 44 px target; the rail's is hidden here */
   .cy-r3 .search{height:44px}
+  /* iOS zooms into a field whose text is under 16 px when it takes focus (B13): every field is 16 px on phones */
+  .cy-r3 :is(input,textarea,select),.cy-r3 .search input,.cy-r3 .composer textarea{font-size:16px}
   .cy-r3 .pf a{min-height:44px;min-width:44px;justify-content:center}
   .cy-r3 .now-t .ul,.cy-r3 .sub .ul{padding:15px 9px;margin:0 -9px}
   .cy-r3 .gl-sub .ul{padding:15px 0}
