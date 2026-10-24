@@ -202,7 +202,9 @@
               class="flex items-start justify-between gap-4 py-2.5"
             >
               <div class="min-w-0">
-                <span class="text-sm text-text-primary">{vote.user.name}</span>
+                <span class="text-sm text-text-primary">
+                  {(vote.user && vote.user.name) || "A former member"}
+                </span>
                 <p
                   :if={vote.reasoning}
                   data-vote-reason

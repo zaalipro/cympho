@@ -287,6 +287,32 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
     refute html =~ ~s(id="vote")
   end
 
+  # Review r1 (Argon IMP-2): board_approval_votes.user_id has no foreign key, so
+  # a deleted voter's vote stays and preloads with user: nil.
+  test "a vote whose voter was deleted still renders", %{
+    conn: conn,
+    current_company: company
+  } do
+    gone = create_board_user(company, "gone")
+    _second = create_board_user(company, "second")
+    _third = create_board_user(company, "third")
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a QA engineer",
+        description: "Owns the test suite.",
+        category: "agent_hire",
+        company_id: company.id
+      })
+
+    {:ok, vote} = BoardApprovals.cast_vote(approval.id, gone.id, "deny", "Not this quarter.")
+    :ok = Users.delete_user(gone)
+
+    {:ok, view, _html} = live(conn, "/board-approvals/#{approval.id}")
+    assert has_element?(view, "#board-vote-#{vote.id}", "A former member")
+    assert has_element?(view, "#board-vote-#{vote.id} [data-vote-reason]", "Not this quarter.")
+  end
+
   defp crumb_parent(html) do
     html
     |> Floki.parse_document!()
