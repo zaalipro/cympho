@@ -416,10 +416,11 @@ function highlightActiveNav() {
     }
   });
 
-  // A destination's page: "page" on its own path, "true" on the pages below it.
+  // A destination's page: "page" on its own path and its views, "true" on the pages below it.
   document.querySelectorAll('.dest .kids a[href]').forEach((el) => {
     const href = el.getAttribute('href');
-    if (href === path) el.setAttribute('aria-current', 'page');
+    const views = (el.dataset.navViews || '').split(',').filter(Boolean);
+    if (href === path || views.includes(path)) el.setAttribute('aria-current', 'page');
     else if (path.startsWith(href + '/')) el.setAttribute('aria-current', 'true');
     else el.removeAttribute('aria-current');
   });
@@ -749,6 +750,10 @@ function initCompanySwitcher() {
 // Org chart export hook
 const OrgChartExport = {
   mounted() {
+    // A tree wider than its card (phones) opens on its centred root, not its left edge.
+    const area = this.el.querySelector("#org-chart-export-area");
+    if (area) area.scrollLeft = (area.scrollWidth - area.clientWidth) / 2;
+
     this.handleEvent("export_svg", () => {
       this.exportToSVG();
     });

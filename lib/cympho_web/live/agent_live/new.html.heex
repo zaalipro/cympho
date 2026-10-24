@@ -16,7 +16,7 @@
 
     <.header>
       <div class="min-w-0">
-        <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        <h1 class="ember-ink mt-3 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           New Agent
         </h1>
         <p class="ui-simple-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
@@ -92,7 +92,7 @@
 
         <%!-- No panel preamble: the page h1 and its one sentence already
              introduce the form, and each section below carries its own lead. --%>
-        <.panel class="ember-glass overflow-hidden">
+        <.panel class="ember-glass overflow-clip">
           <div class="space-y-8 p-5 sm:p-6">
             <section
               data-testid="new-agent-identity-section"
@@ -686,8 +686,10 @@
 
           <div
             data-testid="new-agent-form-actions"
-            class="sticky-above-mobile-nav sticky z-20 flex flex-col gap-3 border-t border-border bg-surface/95 px-5 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-end sm:px-6"
+            class="sticky-above-mobile-nav sticky z-20 flex flex-col gap-3 border-t border-border bg-surface/95 px-5 py-4 backdrop-blur max-[640px]:static sm:flex-row sm:items-center sm:justify-end sm:px-6"
           >
+            <%!-- Sticky on wider screens; on phones it ends the form, since the
+                 key notice can make it a third of the screen tall. --%>
             <%!-- The sentence that used to sit here only restated the form. It
                  now rides along on the button that acts on it. --%>
             <% hire_help =
@@ -713,7 +715,7 @@
                 Add {@hire_readiness.primary_key}
               </.app_link>
             </div>
-            <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+            <div class="flex flex-col-reverse gap-2 sm:shrink-0 sm:flex-row sm:items-center">
               <.app_link
                 navigate={~p"/agents"}
                 class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"

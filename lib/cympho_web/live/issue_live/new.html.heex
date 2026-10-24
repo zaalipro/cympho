@@ -2,7 +2,7 @@
   <div class="relative z-[1] mx-auto max-w-4xl">
     <.header>
       <div class="min-w-0">
-        <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        <h1 class="ember-ink mt-3 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           New issue
         </h1>
         <p class="mt-2 text-sm text-text-tertiary">What should the team do?</p>
@@ -12,7 +12,7 @@
       </:actions>
     </.header>
 
-    <section class="ember-glass overflow-hidden">
+    <section class="ember-glass overflow-clip">
       <.simple_form
         for={@form}
         phx-change="validate"
@@ -245,18 +245,18 @@
           </section>
         </div>
 
-        <:actions>
-          <div class="sticky-above-mobile-nav sticky z-20 -mx-5 flex justify-end border-t border-border bg-panel/95 px-5 py-3 backdrop-blur sm:-mx-6 sm:px-6">
-            <.button type="submit" variant="primary" class="cta-glow min-w-32">
-              {submit_label(
-                @brief_readiness,
-                @queue_dispatch_focus?,
-                @intake_route,
-                @swarm_config
-              )}
-            </.button>
-          </div>
-        </:actions>
+        <%!-- The form's own child, not the :actions slot: inside that slot's
+             wrapper (its own height) the bar could never stick. --%>
+        <div class="sticky-above-mobile-nav sticky z-20 -mx-5 flex justify-end border-t border-border bg-panel/95 px-5 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+          <.button type="submit" variant="primary" class="cta-glow min-w-32">
+            {submit_label(
+              @brief_readiness,
+              @queue_dispatch_focus?,
+              @intake_route,
+              @swarm_config
+            )}
+          </.button>
+        </div>
       </.simple_form>
     </section>
   </div>

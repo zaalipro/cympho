@@ -32,7 +32,7 @@
   /* Phone shell geometry (r3.css phone block, max-width 640px) — keep board
      height / sticky CTAs / scroll padding in lockstep with the r3 shell. */
   --mobile-header-height: 60px; /* .topbar */
-  --mobile-nav-height: 66px; /* floating .dest tab bar: 48 + 2 x 5 padding + 8 offset */
+  --mobile-nav-height: 74px; /* floating .dest tab bar's top edge: 48 tab + 2 x 3 track + 2 x 5 padding + 2 x 1 border + 8 offset */
   --mobile-nav-offset: calc(
     var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px)
   );
@@ -316,9 +316,12 @@
   scroll-padding-bottom: var(--mobile-shell-bottom);
 }
 
-/* Sticky primary actions sit above fixed #mobile-nav + home-indicator. */
+/* Sticky primary actions sit on the floating tab bar + home-indicator. A sticky
+   inset counts from the scroller's padding edge, and on phones #main-content
+   (.col, r3.css phone block) already pads 104px at the bottom, so the inset is
+   the tab bar's top edge minus that padding (the bare offset left a 104px gap). */
 .sticky-above-mobile-nav {
-  bottom: var(--mobile-nav-offset);
+  bottom: calc(var(--mobile-nav-offset) - 104px);
 }
 
 @media (min-width: 641px) {

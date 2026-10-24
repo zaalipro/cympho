@@ -35,7 +35,8 @@ defmodule CymphoWeb.MobileShellTest do
     end
 
     assert css =~ "--mobile-header-height: 60px"
-    assert css =~ "--mobile-nav-height: 66px"
+    # The tab bar's top edge (measured at 390x844: 770 = 844 - 74).
+    assert css =~ "--mobile-nav-height: 74px"
     assert css =~ "--mobile-nav-offset: calc("
     assert css =~ "--mobile-shell-bottom: calc(4rem + env(safe-area-inset-bottom, 0px))"
     assert css =~ "padding-bottom: var(--mobile-shell-bottom)"
@@ -64,10 +65,18 @@ defmodule CymphoWeb.MobileShellTest do
     refute board =~ "h-screen"
   end
 
+  # r3: #main-content (.col) pads 104 px at the bottom on phones, and a sticky
+  # inset counts from the scroller's padding edge (measured in Chromium: the
+  # bare offset left the bar 104 px above the tab bar; w3c/csswg-drafts#3352),
+  # so the inset is the tab bar's top edge minus that padding.
   test "sticky CTAs clear fixed mobile bottom nav via nav+safe-area offset" do
     issue_new = File.read!(@issue_new)
     agent_new = File.read!(@agent_new)
     css = File.read!(@app_css)
+    r3 = File.read!(@r3_css)
+
+    assert css =~ "bottom: calc(var(--mobile-nav-offset) - 104px)"
+    assert r3 =~ ".cy-r3 .col{padding:0 6px 104px;"
 
     assert issue_new =~ "sticky-above-mobile-nav"
     assert issue_new =~ "sticky"
@@ -79,6 +88,5 @@ defmodule CymphoWeb.MobileShellTest do
     refute agent_new =~ "sticky bottom-0"
 
     assert css =~ ".sticky-above-mobile-nav"
-    assert css =~ "bottom: var(--mobile-nav-offset)"
   end
 end

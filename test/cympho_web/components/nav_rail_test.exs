@@ -85,8 +85,25 @@ defmodule CymphoWeb.Components.NavRailTest do
     assert marked.("/issues/x") == [{"All tasks", "true"}]
     assert marked.("/agents/a1") == [{"People", "true"}]
     assert marked.("/projects/p1") == [{"Projects", "true"}]
-    assert marked.("/kanban") == []
     assert marked.("/issuesx") == []
+  end
+
+  # Board and Mine are views of the one Tasks page (List | Board, the Mine
+  # chip), so All tasks stays the current page under Tasks on both.
+  test "marks All tasks on its Board and Mine views, for the server render and app.js" do
+    marked = fn path ->
+      nav(current_path: path)
+      |> Floki.find(".kids a[aria-current]")
+      |> Enum.map(&{Floki.text(&1), &1 |> Floki.attribute("aria-current") |> hd()})
+    end
+
+    assert marked.("/kanban") == [{"All tasks", "page"}]
+    assert marked.("/my-issues") == [{"All tasks", "page"}]
+    assert marked.("/kanbanx") == []
+
+    [all_tasks] = Floki.find(nav([]), ~s(.kids a[href="/issues"]))
+    assert Floki.attribute(all_tasks, "data-nav-views") == ["/kanban,/my-issues"]
+    assert Floki.find(nav([]), ~s(.kids a[href="/projects"][data-nav-views])) == []
   end
 
   test "Compare companies appears only with more than one company" do

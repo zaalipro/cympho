@@ -348,6 +348,19 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ ~s(<title data-suffix=" · Cympho">New Issue · Cympho</title>)
     end
 
+    # A sticky bar sticks only inside a block taller than itself and only to a
+    # real scroller: the form, not a wrapper of its own height, and no
+    # overflow-hidden card between it and #main-content (overflow-clip clips
+    # the corners without becoming the scroller).
+    test "the Create issue bar is a sticky child of the form, not trapped by its card" do
+      {:ok, _view, html} = live(conn(), "/issues/new")
+      doc = Floki.parse_document!(html)
+
+      assert [_bar] = Floki.find(doc, "form > .sticky-above-mobile-nav")
+      assert Floki.find(doc, "#main-content .overflow-hidden .sticky-above-mobile-nav") == []
+      assert [_card] = Floki.find(doc, "section.overflow-clip form")
+    end
+
     test "creates authenticated company issues as CEO-owned todo work" do
       {:ok, company} =
         Companies.create_company(%{

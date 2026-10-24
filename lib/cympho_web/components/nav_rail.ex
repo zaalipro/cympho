@@ -92,6 +92,10 @@ defmodule CymphoWeb.Components.NavRail do
     }
   ]
 
+  # A page whose other views keep it current: Board and Mine are views of the
+  # one Tasks page (List | Board, the Mine chip), so All tasks stays marked.
+  @kid_views %{"/issues" => ~w(/kanban /my-issues)}
+
   @doc "The destination table (single source for the server render and app.js)."
   def destinations, do: @destinations
 
@@ -147,7 +151,7 @@ defmodule CymphoWeb.Components.NavRail do
           <.dest_link dest={dest} count={@count} />
           <ul :if={dest.kids != []} class="kids">
             <li :for={{href, label, kind} <- dest.kids} class={kind != :simple && "ui-advanced-only"}>
-              <.link navigate={href} aria-current={kid_state(@current_path, href)}>{label}</.link>
+              <.link navigate={href} {kid_attrs(@current_path, href)}>{label}</.link>
             </li>
           </ul>
         </li>
@@ -216,13 +220,20 @@ defmodule CymphoWeb.Components.NavRail do
     """
   end
 
-  # A destination's page: "page" on its own path, "true" on the pages below it.
-  defp kid_state(path, href) do
-    cond do
-      path == href -> "page"
-      prefix_match?(path, href) -> "true"
-      true -> nil
-    end
+  # A destination's page: "page" on its own path and its views, "true" on the
+  # pages below it. The views go to app.js as data-nav-views (nil attrs are
+  # not rendered).
+  defp kid_attrs(path, href) do
+    views = Map.get(@kid_views, href, [])
+
+    state =
+      cond do
+        path == href or path in views -> "page"
+        prefix_match?(path, href) -> "true"
+        true -> nil
+      end
+
+    ["aria-current": state, "data-nav-views": views != [] && Enum.join(views, ",")]
   end
 
   defp prefix_match?(path, "/"), do: path == "/"

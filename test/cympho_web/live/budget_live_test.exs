@@ -21,6 +21,34 @@ defmodule CymphoWeb.BudgetLiveTest do
       refute html =~ "Budget command"
     end
 
+    # The setup-time limit is a company policy no Budget owns (budget_id nil):
+    # the page lists no Budget, but it must not say there is no limit, which
+    # Spending and Settings > Billing contradict.
+    test "names the company's setup-time limit instead of saying there is none" do
+      {conn, company} = board_conn()
+
+      {:ok, _policy} =
+        Finances.create_budget_policy(%{
+          company_id: company.id,
+          scope: "company",
+          budget_limit_usd: Decimal.new("300"),
+          action_on_exceed: "block"
+        })
+
+      {:ok, _view, html} = live(conn, "/budgets")
+      doc = Floki.parse_document!(html)
+      empty = Floki.find(doc, "#budget-empty")
+
+      assert Floki.text(empty) =~ "$300 per 30 days"
+      refute Floki.text(empty) =~ "No spending limit"
+      assert Floki.attribute(Floki.find(empty, "a"), "href") == ["/costs"]
+
+      command = Floki.find(doc, "#budget-command")
+      assert Floki.text(command) =~ "$300 per 30 days"
+      refute Floki.text(command) =~ "No spending limit"
+      refute Floki.text(command) =~ "without a cap"
+    end
+
     test "creates an enforceable company runtime guardrail from the new form", %{
       conn: _conn,
       current_company: _setup_company

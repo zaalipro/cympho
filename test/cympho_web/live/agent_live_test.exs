@@ -2172,6 +2172,19 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ ~s(data-testid="new-agent-role-guide")
       assert html =~ ~s(data-testid="new-agent-form-actions")
       assert html =~ "Hire checklist"
+
+      # The actions stick on wider screens (no overflow-hidden card between
+      # them and the scroller); on phones they end the form instead, since the
+      # key notice can make the bar a third of the screen tall.
+      doc = Floki.parse_document!(html)
+      [actions] = Floki.find(doc, ~s([data-testid="new-agent-form-actions"]))
+      assert actions |> Floki.attribute("class") |> hd() =~ "max-[640px]:static"
+
+      assert Floki.find(
+               doc,
+               ~s(#main-content .overflow-hidden [data-testid="new-agent-form-actions"])
+             ) == []
+
       assert html =~ "Selected role"
       assert html =~ ~s(data-testid="new-agent-runtime-profile")
       assert html =~ "Runtime profile"
