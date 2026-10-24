@@ -116,6 +116,10 @@ defmodule Cympho.Onboarding.ReadinessTest do
       refute Readiness.Shell.answers?("claude_code", refused, nil)
       refute Readiness.Shell.answers?("claude_code", failing, nil)
     end
+
+    test "a command that starts with a dash is not read as an option of `command -v`" do
+      refute Readiness.Shell.installed?("-p")
+    end
   end
 
   defp fake_program(dir, name, output, status) do

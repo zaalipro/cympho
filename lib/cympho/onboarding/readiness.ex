@@ -132,7 +132,7 @@ defmodule Cympho.Onboarding.Readiness do
     def installed?(program) do
       match?(
         {_output, 0},
-        run("command -v #{shell_quote(program)} >/dev/null 2>&1", [], @find_timeout_ms)
+        run("command -v -- #{shell_quote(program)} >/dev/null 2>&1", [], @find_timeout_ms)
       )
     end
 
