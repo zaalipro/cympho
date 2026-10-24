@@ -51,7 +51,8 @@ defmodule CymphoWeb.OverviewIssueIsolationTest do
     refute "company:#{a.id}:runs" in Registry.keys(Cympho.PubSub, b_view.pid)
 
     # Leaving issue Show must remove its company subscriptions, not just hide the panel.
-    {:ok, b_tasks, _} = navigate(b_view, recycle(b_conn), "/issues", "Issues")
+    # r3: the task page's way back is the breadcrumb's "Tasks" (was the "Issues" back link).
+    {:ok, b_tasks, _} = navigate(b_view, recycle(b_conn), "/issues", "Tasks")
     wait_until(fn -> assert Registry.keys(Cympho.PubSub, b_view.pid) == [] end)
     GenServer.stop(b_tasks.pid)
     {:ok, overview, _} = live(recycle(b_conn), "/overview")
