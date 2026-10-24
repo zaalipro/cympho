@@ -621,15 +621,16 @@ defmodule CymphoWeb.IssueLive.Show.Task do
             kind={d.kind}
             title={d.title}
             href={d.href}
-            sub={d.sub}
             go={d.go}
             external={d.external}
-          />
+          >
+            <:sub_line><.deliverable_sub d={d} /></:sub_line>
+          </.object_tile>
           <details :if={!d.href} class="objt objt-d">
             <summary>
               {Phoenix.HTML.raw(d.file)}
               <span class="objt-m">
-                <span class="objt-t">{d.title}</span><span class="objt-s">{d.sub}</span>
+                <span class="objt-t">{d.title}</span><span class="objt-s"><.deliverable_sub d={d} /></span>
               </span>
               <span class="go" aria-hidden="true">Show</span>
             </summary>
@@ -639,6 +640,15 @@ defmodule CymphoWeb.IssueLive.Show.Task do
       </div>
       {render_slot(@inner_block)}
     </section>
+    """
+  end
+
+  attr :d, :map, required: true
+
+  # "Document · Ravi · Mon 15:24", the time in mono as in the mockup.
+  defp deliverable_sub(assigns) do
+    ~H"""
+    {@d.sub}<span :if={@d.at}><span aria-hidden="true"> · </span>{stamp_day(@d.at)} <span class="mono">{clock(@d.at)}</span></span>
     """
   end
 
@@ -1070,13 +1080,10 @@ defmodule CymphoWeb.IssueLive.Show.Task do
           external: is_binary(url),
           go: if(github?, do: "Open on GitHub", else: "Open"),
           sub:
-            [
-              kind_word(wp.kind, github?),
-              agent_name(agents, wp.created_by_agent_id),
-              stamp(wp.inserted_at)
-            ]
+            [kind_word(wp.kind, github?), agent_name(agents, wp.created_by_agent_id)]
             |> Enum.reject(&(&1 in [nil, "Someone"]))
             |> Enum.join(" · "),
+          at: wp.inserted_at,
           body: present(wp.description) || present((wp.payload || %{})["text"]),
           file: if(wp.kind == "code_change", do: code_file(), else: doc_file())
         }
@@ -1094,6 +1101,7 @@ defmodule CymphoWeb.IssueLive.Show.Task do
             external: true,
             go: if(String.contains?(pr_url, "github.com"), do: "Open on GitHub", else: "Open"),
             sub: "Pull request",
+            at: nil,
             body: nil,
             file: code_file()
           }
@@ -1347,13 +1355,14 @@ defmodule CymphoWeb.IssueLive.Show.Task do
 
   # "Mon 15:24" within the week, else "19 Oct 15:24".
   defp stamp(nil), do: ""
+  defp stamp(at), do: "#{stamp_day(at)} #{clock(at)}"
 
-  defp stamp(at) do
+  defp stamp_day(at) do
     at = to_dt(at)
 
     if DateTime.diff(DateTime.utc_now(), at, :day) < 6,
-      do: Calendar.strftime(at, "%a %H:%M"),
-      else: Calendar.strftime(at, "%-d %b %H:%M")
+      do: Calendar.strftime(at, "%a"),
+      else: Calendar.strftime(at, "%-d %b")
   end
 
   defp doc_file,

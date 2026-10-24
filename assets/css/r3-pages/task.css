@@ -51,6 +51,9 @@
 .cy-r3 [data-page="task"] .subtasks{padding:8px 8px 0}
 
 @media (max-width:640px){
+  /* opened from Tasks or directly there is no "from" pill, so the breadcrumb's Tasks stays as the back pill */
+  .cy-r3 [data-page="task"] header:not(:has(.from)) .crumb .back{display:inline-flex}
+  .cy-r3 [data-page="task"] header:not(:has(.from)) .crumb .sep{display:inline}
   .cy-r3 [data-page="task"] .objt-body{padding:0 12px 12px}
   .cy-r3 [data-page="task"] .dl-gates .pl{height:44px}
   .cy-r3 [data-page="task"] .t-edit input{height:44px}

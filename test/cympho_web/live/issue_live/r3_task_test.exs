@@ -112,6 +112,12 @@ defmodule CymphoWeb.IssueLive.R3TaskTest do
                Floki.find(doc, "#deliverables a")
              )
 
+      # The time in each deliverable's line is set in mono, as in the mockup.
+      assert Enum.map(Floki.find(doc, "#deliverables .objt-s .mono"), &squish(Floki.text(&1))) ==
+               [hhmm(nw, 2416), hhmm(nw, 509)]
+
+      assert text(doc, "#deliverables .objt-d .objt-s") =~ ~r/^Document · Ravi · \S+ \d\d:\d\d$/
+
       steps = Floki.find(doc, "#runs li.step")
       assert Enum.map(steps, &text(&1, ".step-c")) == ["$2.31", "$3.42", "$1.12"]
       assert text(hd(steps), ".step-t") =~ "Run finished · 22 min"
