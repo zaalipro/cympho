@@ -48,6 +48,7 @@ defmodule CymphoWeb.IssueLive.Index do
       |> assign(:orchestrator_enabled?, Cympho.Orchestrator.Dispatcher.enabled?())
       |> assign(:digest_density, "compact")
       |> assign(:unread_issues, %{})
+      |> assign(:retry_pick, nil)
 
     {:ok, socket}
   end
@@ -164,6 +165,15 @@ defmodule CymphoWeb.IssueLive.Index do
         {:noreply,
          push_event(socket, "toast", %{message: "Could not assign that task.", type: "error"})}
     end
+  end
+
+  # The owner's pick on the retry card: the effect line names that agent, and a
+  # redraw keeps it. Nothing is written until Assign and retry.
+  def handle_event("pick_retry_agent", params, socket) do
+    pick = {params["issue_id"], params["agent_id"]}
+
+    {:noreply,
+     socket |> assign(:retry_pick, pick) |> update(:open_decision, &pick_retry(&1, pick))}
   end
 
   def handle_event("delete_issue", %{"id" => id}, socket) do
@@ -285,7 +295,7 @@ defmodule CymphoWeb.IssueLive.Index do
     assign(socket,
       view_params: filters,
       task_groups: Enum.map(groups, &group_view(&1, open_issue, ctx)),
-      open_decision: open_view(open, ctx),
+      open_decision: open |> open_view(ctx) |> pick_retry(socket.assigns[:retry_pick]),
       tasks_stopped?: stopped?,
       owner_items?: ctx.items != [],
       agent_names: Map.new(ctx.agents, fn {id, agent} -> {id, agent.name} end),
@@ -377,6 +387,25 @@ defmodule CymphoWeb.IssueLive.Index do
     }
   end
 
+  # Only an agent the card offers and allows (not paused) can be picked.
+  defp pick_retry(%{kind: :retry, issue: %{id: id}} = open, {id, agent_id}) do
+    if Enum.any?(open.options, &(&1.value == agent_id and not &1.disabled)),
+      do: %{open | checked: agent_id},
+      else: open
+  end
+
+  defp pick_retry(open, _pick), do: open
+
+  defp retry_effect(%{issue: issue} = open) do
+    case Enum.find(open.options, &(&1.value == open.checked)) do
+      %{label: name} ->
+        "#{issue.identifier} goes to #{name} and moves to To do; it starts when #{name} is free."
+
+      nil ->
+        "#{issue.identifier} goes to the agent you choose and moves to To do; it starts when they're free."
+    end
+  end
+
   defp holder_runs_label(runs, %{agent: %{name: name}}, issue) when runs != [],
     do: "#{name}'s last #{length(runs)} runs on #{issue.identifier}, in minutes"
 
@@ -431,7 +460,11 @@ defmodule CymphoWeb.IssueLive.Index do
         </.problem_card>
       </:problem>
       <:resolution>
-        <.ink_card form={"Assign #{@open.issue.identifier} and retry"} phx-submit="assign_and_retry">
+        <.ink_card
+          form={"Assign #{@open.issue.identifier} and retry"}
+          phx-submit="assign_and_retry"
+          phx-change="pick_retry_agent"
+        >
           <input type="hidden" name="issue_id" value={@open.issue.id} />
           <.option_rows
             :if={@open.options != []}
@@ -442,7 +475,7 @@ defmodule CymphoWeb.IssueLive.Index do
             own={false}
           />
           <.ink_note :if={@open.options != []}>
-            After you assign: {@open.issue.identifier} goes to the agent you choose and moves to To do; it starts when they're free.
+            After you assign: {retry_effect(@open)}
           </.ink_note>
           <.ink_note :if={@open.options == []}>
             No agent can take {@open.issue.identifier} now. Hire one with its role, then assign it.

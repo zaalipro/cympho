@@ -155,6 +155,39 @@ defmodule CymphoWeb.IssueLive.IndexR3Test do
       assert "NW-10" in Enum.map(Floki.find(todo, ".tid"), &squish(Floki.text(&1)))
     end
 
+    test "the effect names the agent who retries it and follows the owner's pick", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, view, _html} = live(conn, "/issues")
+      form = "form[phx-submit='assign_and_retry']"
+      checked = fn -> text(main_doc(view), "#{form} input[checked] + label .ot-n") end
+      effect = fn -> text(main_doc(view), "#{form} .ink-note") end
+
+      assert checked.() == "Ravi"
+
+      assert effect.() ==
+               "After you assign: NW-10 goes to Ravi and moves to To do; it starts when Ravi is free."
+
+      view |> element(form) |> render_change(%{"agent_id" => nw.agents["Theo"].id})
+
+      assert checked.() == "Theo"
+      assert effect.() =~ "NW-10 goes to Theo and moves to To do; it starts when Theo is free."
+
+      # A redraw (any task or run event) keeps the pick.
+      send(view.pid, {:issue_updated, nil})
+      assert checked.() == "Theo"
+
+      # A paused agent cannot be picked, and nothing was assigned yet.
+      render_change(view, "pick_retry_agent", %{
+        "issue_id" => nw.issues["NW-10"].id,
+        "agent_id" => nw.agents["Mira"].id
+      })
+
+      assert checked.() == "Theo"
+      assert_unchanged(nw)
+    end
+
     test "refuses a paused agent", %{conn: conn, nw: nw} do
       {:ok, view, _html} = live(conn, "/issues")
 

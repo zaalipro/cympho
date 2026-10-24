@@ -1431,6 +1431,18 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ nw.questions["Q1"].id
     end
 
+    test "an Advanced agent scope leaves the owner's decisions company-wide", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, view, _html} = live(conn, "/inbox?agent_id=#{nw.agents["Priya"].id}")
+      main = main_doc(view)
+
+      assert text(main, ".next .paper .nt") == "Resume Mira"
+      assert main |> Floki.find("section[aria-labelledby='ny-t'] li.row") |> length() == 4
+      assert text(main, "nav.seg[aria-label='Show'] a[aria-current='page']") =~ "All 5"
+    end
+
     test "answers a question inline with a numbered option", %{conn: conn, nw: nw} do
       {:ok, view, _html} = live(conn, "/inbox?kind=question")
 
