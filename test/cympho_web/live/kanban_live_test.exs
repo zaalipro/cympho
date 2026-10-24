@@ -57,6 +57,23 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ "Cancelled"
     end
 
+    test "an open Move menu stays with its card when a live update reorders the column",
+         %{issue_todo: issue_todo} do
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      [menu] =
+        view
+        |> render()
+        |> Floki.parse_document!()
+        |> Floki.find("[data-issue-id='#{issue_todo.id}'] details.bc-mv")
+
+      # The patch keeps the open the browser set; the issue's id makes it match
+      # this card's menu, not whichever card now sits in the same place.
+      [mounted] = Floki.attribute(menu, "phx-mounted")
+      assert Jason.decode!(mounted) == [["ignore_attrs", %{"attrs" => ["open"]}]]
+      assert Floki.attribute(menu, "id") == ["bc-mv-#{issue_todo.id}"]
+    end
+
     test "Later and Cancelled start as collapsed pills that open a column" do
       {:ok, view, html} = live(conn(), "/kanban")
       doc = Floki.parse_document!(html)

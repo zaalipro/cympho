@@ -47,6 +47,7 @@ defmodule CymphoWeb.KanbanLive.Components do
           <Tasks.priority priority={@issue.priority} label={false} />
           <details
             :if={@next_statuses != []}
+            id={"bc-mv-#{@issue.id}"}
             class="bc-mv"
             data-no-drag
             phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}

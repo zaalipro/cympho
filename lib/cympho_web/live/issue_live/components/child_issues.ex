@@ -157,6 +157,7 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
               </button>
               <details
                 :if={Cympho.Issues.dispatch_pinned?(node.issue)}
+                id={"child-command-#{node.issue.id}"}
                 class="group max-w-72 text-right"
                 phx-mounted={JS.ignore_attributes("open")}
               >
