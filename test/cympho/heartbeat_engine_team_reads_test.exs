@@ -2,6 +2,7 @@ defmodule Cympho.HeartbeatEngineTeamReadsTest do
   @moduledoc "The run reads behind the r3 Team and Agent pages (plan P3, P6)."
   use Cympho.DataCase, async: true
 
+  alias Cympho.Finances.TokenUsage
   alias Cympho.HeartbeatEngine
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.R3Fixtures
@@ -112,6 +113,46 @@ defmodule Cympho.HeartbeatEngineTeamReadsTest do
         )
 
       assert Decimal.equal?(spend, 0)
+    end
+  end
+
+  describe "spend_by_agent/3" do
+    test "sums each listed agent's spend since then, keyed by agent id", %{nw: nw} do
+      ids = Enum.map(["Mira", "Sol"], &nw.agents[&1].id)
+      since = DateTime.add(DateTime.utc_now(), -30 * 86_400, :second)
+
+      spend = HeartbeatEngine.spend_by_agent(nw.company.id, ids, since)
+
+      assert map_size(spend) == 2
+      assert Decimal.equal?(spend[nw.agents["Mira"].id], "19.40")
+      assert Decimal.equal?(spend[nw.agents["Sol"].id], "7.25")
+    end
+
+    test "an agent outside the list never pushes a listed one out", %{nw: nw} do
+      # token_usages.agent_id has no foreign key: a deleted agent's usage stays.
+      gone = Ecto.UUID.generate()
+
+      Repo.insert!(%TokenUsage{
+        company_id: nw.company.id,
+        agent_id: gone,
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        cost_usd: Decimal.new("100.00")
+      })
+
+      ids = Enum.map(nw.agents, fn {_name, agent} -> agent.id end)
+      since = DateTime.add(DateTime.utc_now(), -30 * 86_400, :second)
+      spend = HeartbeatEngine.spend_by_agent(nw.company.id, ids, since)
+
+      assert Enum.sort(Map.keys(spend)) == Enum.sort(ids)
+      refute Map.has_key?(spend, gone)
+    end
+
+    test "never sums another company's usage", %{nw: nw, other: other} do
+      ids = Enum.map(other.agents, fn {_name, agent} -> agent.id end)
+      since = DateTime.add(DateTime.utc_now(), -30 * 86_400, :second)
+
+      assert HeartbeatEngine.spend_by_agent(nw.company.id, ids, since) == %{}
     end
   end
 end

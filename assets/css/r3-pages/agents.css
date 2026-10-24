@@ -70,6 +70,8 @@
 .cy-r3 [data-page="agent"] .tray>.gl-sub[role="status"]{padding:0 6px}
 /* the task named under Working on is a link: give it the desktop target floor */
 .cy-r3 [data-page="agent"] .gl-big .ul{display:inline-block;padding:1px 0}
+/* Inter sets the price line 0.3 px wider than the 216 px value column; 2 px less gap keeps it on one line, as drawn */
+.cy-r3 [data-page="agent"] .aside .kv.tight{column-gap:8px}
 
 /* ================================================================
    1024

@@ -4,7 +4,6 @@ defmodule CymphoWeb.AgentLive.Index do
   alias Cympho.Agents.Agent
   alias Cympho.Agents.RuntimeEnv
   alias Cympho.BoardApprovals
-  alias Cympho.Costs
   alias Cympho.HeartbeatEngine
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.OrgHealth
@@ -563,9 +562,11 @@ defmodule CymphoWeb.AgentLive.Index do
     runs = HeartbeatEngine.latest_runs_by_agent(company_id)
 
     costs =
-      company_id
-      |> Costs.by_agent(30, max(length(agents), 1))
-      |> Map.new(&{&1.agent_id, &1.total_cost})
+      HeartbeatEngine.spend_by_agent(
+        company_id,
+        Enum.map(agents, & &1.id),
+        DateTime.add(DateTime.utc_now(), -30 * 86_400, :second)
+      )
 
     # The first owner item per agent, in the owner's order, names what it waits on.
     first_items =

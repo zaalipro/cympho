@@ -2825,6 +2825,26 @@ defmodule CymphoWeb.AgentLiveTest do
       assert Floki.find(doc, ~s(a.ac-n[href="/agents/#{mira.id}?from=/agents"])) != []
     end
 
+    test "a card's cost stays its own when an agent no longer on the team spent more", %{
+      conn: conn,
+      nw: nw
+    } do
+      # token_usages.agent_id has no foreign key, so a deleted agent's usage stays.
+      Repo.insert!(%Cympho.Finances.TokenUsage{
+        company_id: nw.company.id,
+        agent_id: Ecto.UUID.generate(),
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        cost_usd: Decimal.new("100.00")
+      })
+
+      {:ok, view, _html} = live(conn, "/agents")
+      doc = r3_doc(view)
+
+      assert r3_card(doc, "Sol").cost == "$7.25 30 days"
+      assert r3_card(doc, "Mira").cost == "$19.40 30 days"
+    end
+
     test "the Next step is the stopped agent: Resume Mira", %{conn: conn, nw: nw} do
       {:ok, view, _html} = live(conn, "/agents")
       doc = r3_doc(view)
@@ -3102,6 +3122,29 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, secret_value} = Secrets.get_secret_value(nw.secret.id)
       refute html =~ secret_value
       refute render(view) =~ secret_value
+    end
+
+    test "her spend stays hers when agents no longer on the team spent more", %{
+      conn: conn,
+      nw: nw
+    } do
+      # token_usages.agent_id has no foreign key, so a deleted agent's usage stays.
+      # Seven of them, each costlier than anyone on the team, outnumber the team.
+      for _ <- 1..7 do
+        Repo.insert!(%Cympho.Finances.TokenUsage{
+          company_id: nw.company.id,
+          agent_id: Ecto.UUID.generate(),
+          provider: "codex",
+          model: "gpt-5.4-mini",
+          cost_usd: Decimal.new("100.00")
+        })
+      end
+
+      {:ok, view, _html} = live(conn, "/agents/#{nw.agents["Mira"].id}")
+      doc = r3_doc(view)
+
+      assert r3_text(doc, "aside.gl .hero") == "$19.40 last 30 days"
+      assert r3_text(doc, "aside.gl") =~ "$3.68 in the last 24 hours"
     end
 
     test "recent runs open the run, then the earlier spend on the task", %{conn: conn, nw: nw} do

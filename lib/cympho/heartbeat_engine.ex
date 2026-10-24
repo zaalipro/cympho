@@ -686,6 +686,25 @@ defmodule Cympho.HeartbeatEngine do
     |> Kernel.||(Decimal.new(0))
   end
 
+  @doc """
+  Each listed agent's spend in one company since `since`, keyed by agent id
+  (an agent with no usage is absent). Only the listed agents are summed, so
+  usage of agents no longer listed (deleted, temporary) cannot crowd them out.
+  """
+  @spec spend_by_agent(String.t(), [String.t()], DateTime.t()) :: %{String.t() => Decimal.t()}
+  def spend_by_agent(company_id, agent_ids, %DateTime{} = since)
+      when is_binary(company_id) and is_list(agent_ids) do
+    from(tu in TokenUsage,
+      where:
+        tu.company_id == ^company_id and tu.agent_id in ^agent_ids and
+          tu.inserted_at >= ^since,
+      group_by: tu.agent_id,
+      select: {tu.agent_id, sum(tu.cost_usd)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
   @spec issue_run_history_limit() :: pos_integer()
   def issue_run_history_limit, do: @default_issue_run_limit
 

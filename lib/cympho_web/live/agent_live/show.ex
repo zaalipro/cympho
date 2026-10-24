@@ -11,7 +11,7 @@ defmodule CymphoWeb.AgentLive.Show do
   alias Cympho.AgentInstructionStudio
   alias Cympho.AgentInstructionTuner
   alias Cympho.AgentHeartbeat
-  alias Cympho.Costs
+  alias Cympho.Finances
   alias Cympho.Finances.Pricing
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
@@ -845,8 +845,8 @@ defmodule CymphoWeb.AgentLive.Show do
       overview_model: runtime.model,
       working_on: working_on(runs, socket.assigns.recent_issues, agent.id, running?),
       last_task: last_task(runs, socket.assigns.recent_issues),
-      spend_30d: agent_spend(company_id, agent.id, 30, length(team)),
-      spend_1d: agent_spend(company_id, agent.id, 1, length(team)),
+      spend_30d: Finances.spend_for_scope(company_id, "agent", agent.id, "monthly"),
+      spend_1d: Finances.spend_for_scope(company_id, "agent", agent.id, "daily"),
       price: price_line(agent, runtime.model),
       key_name: key_name(agent, runtime, socket.assigns.env_vars),
       overview_runs:
@@ -932,12 +932,6 @@ defmodule CymphoWeb.AgentLive.Show do
   defp last_task([%{issue: %{} = issue} | _], _recent), do: issue
   defp last_task(_runs, [issue | _]), do: issue
   defp last_task(_runs, _recent), do: nil
-
-  defp agent_spend(company_id, agent_id, days, team_size) do
-    company_id
-    |> Costs.by_agent(days, max(team_size, 1))
-    |> Enum.find_value(Decimal.new(0), &(&1.agent_id == agent_id && &1.total_cost))
-  end
 
   # "$0.75 in · $4.50 out per 1M tokens", a flat rate, or a runtime that reports
   # its own cost; nil when nothing prices it (readiness then says so).
