@@ -131,6 +131,45 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
     assert [%{vote: "deny", reasoning: nil}] = updated.votes
   end
 
+  # B5: the only board member's Approve meets the threshold, so cast_vote/4 also
+  # resolves the approval. The page must update in place, not crash on the
+  # resolved broadcast (which carries no votes) and re-join.
+  test "a vote that settles the approval updates the page in place", %{
+    conn: conn,
+    current_company: company
+  } do
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    membership = Companies.get_membership(user_id, company.id)
+    {:ok, _membership} = Companies.update_board_membership(membership, %{is_board_member: true})
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a QA engineer",
+        description: "Owns the test suite.",
+        category: "agent_hire",
+        company_id: company.id,
+        review_deadline: DateTime.utc_now() |> DateTime.add(2 * 60 * 60, :second)
+      })
+
+    {:ok, view, _html} = live(conn, "/board-approvals/#{approval.id}?from=/inbox")
+    pid = view.pid
+
+    view
+    |> form("#vote", %{"reason" => "Mira needs help with the test suite."})
+    |> render_submit(%{"vote" => "approve"})
+
+    # render/1 is queued behind the vote and resolution broadcasts the view sent itself.
+    html = render(view)
+
+    assert Process.alive?(pid)
+    assert html =~ "APPROVED"
+    assert html =~ "1 approve"
+    refute has_element?(view, "form#vote")
+
+    {:ok, updated} = BoardApprovals.get_board_approval(approval.id)
+    assert updated.status == "approved"
+  end
+
   defp crumb_parent(html) do
     html
     |> Floki.parse_document!()
