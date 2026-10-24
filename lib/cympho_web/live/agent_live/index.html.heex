@@ -1,114 +1,132 @@
-<.page size="wide" data-ui-complex-page class="ember-aurora">
-  <div class="relative z-[1]">
-    <.header>
-      <div class="min-w-0">
-        <span class="ui-advanced-only ember-eyebrow">
-          Roster · {@status_counts[:running] || 0} running now
-        </span>
-        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-          {@page_title}
-        </h1>
-        <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-          Your team — who's working, who's idle, and who needs attention.
-        </p>
-      </div>
-      <:actions>
-        <.app_link
-          navigate={~p"/org-chart"}
-          class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        >
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-          </svg>
-          Org Chart
-        </.app_link>
-        <.app_link
-          navigate={~p"/agents/remote"}
-          class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        >
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"
-            />
-          </svg>
-          Hire Remote Agent
-        </.app_link>
-        <.app_link
-          navigate={~p"/agents/new"}
-          class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
-        >
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
-          New Agent
-        </.app_link>
-      </:actions>
-    </.header>
-
-    <div
-      :if={@flash && @flash[:info]}
-      class="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
+<.page_frame page="team" title="Team" data-ui-complex-page>
+  <:header_end>
+    <%!-- Advanced keeps its two extra doors; Org chart is also the rail's page under Team. --%>
+    <.app_link
+      navigate={~p"/org-chart"}
+      class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
     >
-      {@flash[:info]}
-    </div>
-
-    <div
-      :if={@flash && @flash[:error]}
-      class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300"
+      Org Chart
+    </.app_link>
+    <.app_link
+      navigate={~p"/agents/remote"}
+      class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
     >
-      {@flash[:error]}
-    </div>
+      Hire Remote Agent
+    </.app_link>
+    <%!-- Hire is secondary (S2); in the all-clear state it is the Next step's primary instead. --%>
+    <.pill :if={@next_item || !@runtime_enabled?} navigate={~p"/agents/new"}>
+      <.r3_icon name="i-plus" />Hire
+    </.pill>
+  </:header_end>
 
-    <%!-- Two facts, not four. "Idle" is just the roster minus "working now", and
-         "Coverage" linked into the operations console — the opposite of a simple
-         flow. The uppercase eyebrow above each number is dropped too: the icon
-         and the sentence already say it. --%>
-    <div class="ui-simple-only stagger-children mb-4 grid gap-2 sm:grid-cols-2">
-      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-        <span class="ui-simple-icon">
-          <span class="hero-play-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0 truncate text-sm font-590 text-text-primary">
-          {@status_counts[:running] || 0} working now
-        </span>
-      </div>
-      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-        <span class="ui-simple-icon">
-          <span class={[
-            "h-4 w-4",
-            if((@status_counts[:error] || 0) > 0,
-              do: "hero-exclamation-triangle-mini",
-              else: "hero-check-circle-mini"
-            )
-          ]}>
-          </span>
-        </span>
-        <span class={[
-          "min-w-0 truncate text-sm font-590",
-          if((@status_counts[:error] || 0) > 0, do: "text-red-300", else: "text-text-primary")
-        ]}>
-          <%= if (@status_counts[:error] || 0) > 0 do %>
-            {@status_counts[:error]} need help
-          <% else %>
-            Everyone is fine
-          <% end %>
-        </span>
-      </div>
-    </div>
+  <div :if={@flash[:info] || @flash[:error]} class="flash-line" role="status">
+    <p :if={@flash[:info]} class="text-sm text-success">{@flash[:info]}</p>
+    <p :if={@flash[:error]} class="text-sm text-error">{@flash[:error]}</p>
+  </div>
 
+  <%!-- The Next step: the company stopped at its limit, else a stopped agent;
+       with none, agents-off or all clear (plan §11 D1). A hire is its own card below. --%>
+  <NextStep.pair
+    :if={@next_item}
+    item={@next_item}
+    from="/agents"
+    agents={@agent_names}
+    spending={@spending}
+  />
+  <NextStep.server_off_step :if={!@next_item and !@runtime_enabled?} />
+  <Parts.team_all_clear
+    :if={!@next_item and @runtime_enabled?}
+    title={if @team_size == 0, do: "Hire your first agent", else: "Everyone is working or ready"}
+  />
+
+  <section :if={@team_size > 0} class="tboard" aria-labelledby="tb-h">
+    <h2 class="sr" id="tb-h">Team board</h2>
+    <div class="tcols">
+      <section
+        :for={{col, label, hid} <- board_columns()}
+        class="tcol"
+        data-col={col}
+        aria-labelledby={hid}
+      >
+        <% cards = Map.fetch!(@board, col) %>
+        <% shown =
+          if col == :idle and not @show_all_idle, do: Enum.take(cards, idle_cap()), else: cards %>
+        <h3 class="gh" id={hid}>{label} <span class="mono">{length(cards)}</span></h3>
+        <ul class="acs">
+          <li :for={card <- shown} class={["ac", col == :idle && "quiet"]}>
+            <span class="tile-ag" aria-hidden="true">{card.initials}</span>
+            <p class="ac-id">
+              <.link class="ac-n" navigate={"/agents/#{card.id}?from=/agents"}>{card.name}</.link><span class="ac-r">{card.role}</span>
+            </p>
+            <p class="ac-st">
+              <span class={["ac-w", ac_word_class(card.kind)]}>
+                <.status_glyph kind={card.kind} />{card.word}
+              </span>
+              <span class="ac-l">
+                <span aria-hidden="true"> · </span>{elem(card.line, 0)}
+                <span :if={elem(card.line, 1)} aria-hidden="true"> · </span>
+                <span :if={elem(card.line, 1)} class="mono">{elem(card.line, 1)}</span>
+              </span>
+            </p>
+            <p class="ac-c"><span class="mono">{card.cost}</span> 30 days</p>
+            <span :if={card.for_you > 0} class="fy">
+              {card.for_you}<span class="fy-t"> for you</span>
+            </span>
+          </li>
+        </ul>
+        <.link
+          :if={length(shown) < length(cards)}
+          class="lnk more"
+          patch={~p"/agents?state=idle"}
+        >
+          Show all<span aria-hidden="true"> · </span>{length(cards) - length(shown)} more<.r3_icon name="i-arrow-right" />
+        </.link>
+      </section>
+    </div>
+  </section>
+
+  <div :if={@team_size == 0} class="card">
+    <.quiet_empty title="No agents yet">
+      Your workforce starts here. Hire a CEO, CTO, or your first engineer and Cympho routes queued work to them automatically.
+    </.quiet_empty>
+  </div>
+
+  <section :for={hire <- @hires} class="hire" aria-labelledby={"hr-#{hire.id}"}>
+    <% name = hire_name(hire) %>
+    <span class="tile-ag hire-t" aria-hidden="true">{Parts.initials(name)}</span>
+    <div class="hire-m">
+      <h2 class="h2" id={"hr-#{hire.id}"}><span class="sr">Proposed hire: </span>{name}</h2>
+      <p class="hire-s">
+        <span class="c-wait"><.status_glyph kind={:waiting} />Waiting for your approval</span>
+      </p>
+      <p class="meta">
+        <span :if={hire.requested_by}>
+          Requested by {hire.requested_by.name}<span aria-hidden="true"> · </span>
+        </span>
+        <span class="mono">{Parts.stamp(hire.inserted_at)}</span>
+      </p>
+    </div>
+    <.pill navigate={"/board-approvals/#{hire.id}?from=/agents"}>Open vote</.pill>
+  </section>
+
+  <details :if={@team_size > 0} class="card tech runs24">
+    <summary>
+      <span class="h2">
+        Last 24 hours
+        <span class="cx">· {@runs_24h} {if @runs_24h == 1, do: "run", else: "runs"}</span>
+      </span>
+      <.r3_icon name="i-chev-down" />
+    </summary>
+    <Parts.run_list :if={@day_runs != []} rows={@day_runs} />
+    <p :if={@runs_24h > length(@day_runs)} class="gl-sub">
+      The newest {length(@day_runs)} of {@runs_24h}; each agent's History has the rest.
+    </p>
+    <p :if={@day_runs == []} class="gl-sub">No runs in the last 24 hours.</p>
+  </details>
+
+  <%!-- Advanced: the operator panels and the roster, unchanged below the r3 blocks (plan §0.2). --%>
+  <div class="relative z-[1] ui-advanced-only">
+    <p class="ember-eyebrow mb-4">Roster · {@status_counts[:running] || 0} running now</p>
     <div class="ui-advanced-only stagger-children mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
       <.metric class="ember-stat" label="Idle" value={@status_counts[:idle] || 0} />
       <.metric
@@ -258,48 +276,6 @@
           </.app_link>
         </div>
       </div>
-    </.panel>
-
-    <div
-      :if={agents_needing_attention(@agents) != []}
-      data-testid="agents-needing-attention"
-      class="mb-4 rounded-lg border border-red-500/25 bg-red-500/[0.06] px-4 py-3"
-    >
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <p class="text-sm font-590 text-red-200">
-          {length(agents_needing_attention(@agents))} {plural_noun(
-            length(agents_needing_attention(@agents)),
-            "agent"
-          )} stuck in error
-        </p>
-        <p class="text-xs text-text-tertiary">Open a profile to see the failure and recover.</p>
-        <div class="flex flex-wrap gap-1.5">
-          <.app_link
-            :for={agent <- agents_needing_attention(@agents)}
-            navigate={~p"/agents/#{agent.id}"}
-            class="inline-flex items-center gap-1.5 rounded-full border border-red-500/25 bg-canvas/40 px-2.5 py-1 text-xs font-510 text-red-200 transition hover:border-red-400/50 hover:text-red-100"
-          >
-            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400"></span>
-            {agent.name}
-          </.app_link>
-        </div>
-      </div>
-    </div>
-
-    <.panel :if={Enum.empty?(@agents)}>
-      <.empty_state
-        title="No agents yet"
-        message="Your workforce starts here. Hire a CEO, CTO, or your first engineer and Cympho routes queued work to them automatically."
-      >
-        <:actions>
-          <.app_link
-            navigate={~p"/agents/new"}
-            class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
-          >
-            Create Agent
-          </.app_link>
-        </:actions>
-      </.empty_state>
     </.panel>
 
     <% shared_adapter = shared_adapter_label(@agents) %>
@@ -524,4 +500,4 @@
       </.panel>
     </div>
   </div>
-</.page>
+</.page_frame>

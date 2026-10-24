@@ -621,6 +621,90 @@ defmodule Cympho.HeartbeatEngine do
     |> Repo.one()
   end
 
+  @doc """
+  Each agent's now-or-last run in one company, keyed by agent id, with its
+  issue: the running run when there is one, else the newest by start.
+  """
+  @spec latest_runs_by_agent(String.t()) :: %{String.t() => Run.t()}
+  def latest_runs_by_agent(company_id) when is_binary(company_id) do
+    from(r in Run,
+      where: r.company_id == ^company_id,
+      distinct: r.agent_id,
+      order_by: [
+        asc: r.agent_id,
+        desc: r.status == "running",
+        desc: coalesce(r.started_at, r.inserted_at)
+      ],
+      preload: [:issue]
+    )
+    |> Repo.all()
+    |> Map.new(&{&1.agent_id, &1})
+  end
+
+  @doc "How many of the company's runs started at or after `since`."
+  @spec count_runs_since(String.t(), DateTime.t()) :: non_neg_integer()
+  def count_runs_since(company_id, %DateTime{} = since) when is_binary(company_id) do
+    company_id
+    |> runs_since_query(since)
+    |> select([r], count(r.id))
+    |> Repo.one()
+  end
+
+  @doc "The company's runs started at or after `since`, newest first, with agent and issue."
+  @spec list_runs_since(String.t(), DateTime.t(), keyword()) :: [Run.t()]
+  def list_runs_since(company_id, %DateTime{} = since, opts \\ []) when is_binary(company_id) do
+    company_id
+    |> runs_since_query(since)
+    |> order_by([r], desc: coalesce(r.started_at, r.inserted_at))
+    |> limit(^Keyword.get(opts, :limit, 20))
+    |> preload([:agent, :issue])
+    |> Repo.all()
+  end
+
+  defp runs_since_query(company_id, since) do
+    where(
+      Run,
+      [r],
+      r.company_id == ^company_id and coalesce(r.started_at, r.inserted_at) >= ^since
+    )
+  end
+
+  @doc """
+  An agent's whole-life spend on one issue (its token usage rows), leaving out
+  the usage of `exclude_run_ids`: what came before the runs a page already shows.
+  """
+  @spec issue_spend_for_agent(String.t(), String.t(), String.t(), [String.t()]) :: Decimal.t()
+  def issue_spend_for_agent(company_id, agent_id, issue_id, exclude_run_ids \\ [])
+      when is_binary(company_id) and is_binary(agent_id) and is_binary(issue_id) do
+    from(tu in TokenUsage,
+      where:
+        tu.company_id == ^company_id and tu.agent_id == ^agent_id and tu.issue_id == ^issue_id,
+      where: is_nil(tu.heartbeat_run_id) or tu.heartbeat_run_id not in ^exclude_run_ids,
+      select: sum(tu.cost_usd)
+    )
+    |> Repo.one()
+    |> Kernel.||(Decimal.new(0))
+  end
+
+  @doc """
+  Each listed agent's spend in one company since `since`, keyed by agent id
+  (an agent with no usage is absent). Only the listed agents are summed, so
+  usage of agents no longer listed (deleted, temporary) cannot crowd them out.
+  """
+  @spec spend_by_agent(String.t(), [String.t()], DateTime.t()) :: %{String.t() => Decimal.t()}
+  def spend_by_agent(company_id, agent_ids, %DateTime{} = since)
+      when is_binary(company_id) and is_list(agent_ids) do
+    from(tu in TokenUsage,
+      where:
+        tu.company_id == ^company_id and tu.agent_id in ^agent_ids and
+          tu.inserted_at >= ^since,
+      group_by: tu.agent_id,
+      select: {tu.agent_id, sum(tu.cost_usd)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
   @spec issue_run_history_limit() :: pos_integer()
   def issue_run_history_limit, do: @default_issue_run_limit
 
