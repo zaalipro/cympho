@@ -388,7 +388,7 @@ heading =
               <p :if={also_on_team(crew) != ""} class="also">
                 Also on the team: {also_on_team(crew)}.
               </p>
-              <details class="ob-ren">
+              <details class="ob-ren" phx-mounted={JS.ignore_attributes("open")}>
                 <summary>Rename the leaders</summary>
                 <div class="flds">
                   <.ob_field
