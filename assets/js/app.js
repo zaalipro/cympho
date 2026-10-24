@@ -1301,8 +1301,10 @@ window.addEventListener('phx:nav_badges', (e) => {
 });
 
 function updateNavBadgeNodes(key, rawCount) {
-  const count = Math.min(99, Math.max(0, Number.isFinite(rawCount) ? rawCount : 0));
+  const count = Math.max(0, Number.isFinite(rawCount) ? rawCount : 0);
   const visible = count > 0;
+  // Over 99 the badge reads "99+" and screen readers get the full count (nav_rail.ex).
+  const capped = count > 99;
 
   document.querySelectorAll(`[data-nav-badge="${key}"]`).forEach((el) => {
     el.dataset.count = String(count);
@@ -1310,9 +1312,16 @@ function updateNavBadgeNodes(key, rawCount) {
     el.setAttribute('aria-hidden', visible ? 'false' : 'true');
 
     const num = el.querySelector('[data-badge-num]') || el;
-    num.textContent = visible ? String(count) : '';
+    num.textContent = visible ? (capped ? '99+' : String(count)) : '';
     if (visible) num.setAttribute('data-testid', `nav-badge-${key}`);
     else num.removeAttribute('data-testid');
+
+    const full = el.querySelector('[data-badge-full]');
+    if (full) {
+      full.textContent = capped ? String(count) : '';
+      if (capped) num.setAttribute('aria-hidden', 'true');
+      else num.removeAttribute('aria-hidden');
+    }
   });
 }
 
