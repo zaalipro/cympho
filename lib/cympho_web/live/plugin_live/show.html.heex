@@ -83,7 +83,7 @@
       <%!-- The pretty-printed blob repeated the name, identifier, version,
            author, and permissions the Details and Permissions panels beside it
            already show in plain rows. --%>
-      <details class="group">
+      <details class="group" phx-mounted={JS.ignore_attributes("open")}>
         <summary class="flex cursor-pointer list-none items-center gap-1.5 text-sm font-590 text-text-primary [&::-webkit-details-marker]:hidden">
           <span class="hero-chevron-right-mini h-3.5 w-3.5 transition-transform group-open:rotate-90">
           </span>

@@ -158,6 +158,7 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
               <details
                 :if={Cympho.Issues.dispatch_pinned?(node.issue)}
                 class="group max-w-72 text-right"
+                phx-mounted={JS.ignore_attributes("open")}
               >
                 <summary class="inline-flex cursor-pointer list-none items-center gap-1 text-[11px] font-510 text-ink-tertiary transition hover:text-ink [&::-webkit-details-marker]:hidden">
                   Show command

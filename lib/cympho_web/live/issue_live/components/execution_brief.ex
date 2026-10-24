@@ -234,6 +234,7 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           data-testid="issue-ceo-flow-checklist"
           class="group/fold border-t border-hairline bg-surface-1/50"
           open={@ceo_flow_checklist.status == :attention}
+          phx-mounted={JS.ignore_attributes("open")}
         >
           <summary class="flex cursor-pointer select-none list-none items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-surface-1/70 [&::-webkit-details-marker]:hidden">
             <div class="flex flex-wrap items-center gap-2">
@@ -883,7 +884,11 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
 
   defp brief_fold(assigns) do
     ~H"""
-    <details class="group/fold border-t border-hairline" open={@open}>
+    <details
+      class="group/fold border-t border-hairline"
+      open={@open}
+      phx-mounted={JS.ignore_attributes("open")}
+    >
       <summary class="flex cursor-pointer select-none list-none items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-surface-1/50 [&::-webkit-details-marker]:hidden">
         <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
           {@title}

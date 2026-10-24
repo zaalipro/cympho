@@ -470,7 +470,10 @@ defmodule CymphoWeb.Components do
 
   def overflow_menu(assigns) do
     ~H"""
-    <details class={["cympho-menu relative", @class]}>
+    <details
+      class={["cympho-menu relative", @class]}
+      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+    >
       <summary
         class={[
           "flex h-8 cursor-pointer list-none items-center justify-center rounded-md text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-primary",

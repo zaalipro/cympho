@@ -89,7 +89,7 @@ defmodule CymphoWeb.IssueLive.Show.Header do
         <span :if={Cympho.Issues.issue_runtime_paused?(@issue)} class="chip">
           <.status_glyph kind={:stopped} />Paused
         </span>
-        <details :if={@v.brief} class="brief">
+        <details :if={@v.brief} class="brief" phx-mounted={JS.ignore_attributes("open")}>
           <summary class="chip ghost">
             {@v.brief.by}<span aria-hidden="true"> · </span>{@v.brief.day}
             <span class="mono">{@v.brief.time}</span>

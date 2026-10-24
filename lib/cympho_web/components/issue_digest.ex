@@ -891,7 +891,10 @@ defmodule CymphoWeb.Components.IssueDigest do
 
   def action_help(assigns) do
     ~H"""
-    <details class="group relative inline-flex">
+    <details
+      class="group relative inline-flex"
+      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+    >
       <summary
         class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-hairline bg-surface-1 text-[11px] font-590 text-ink-tertiary transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
         aria-label={"Why #{@action.label}?"}

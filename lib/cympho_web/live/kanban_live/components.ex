@@ -45,7 +45,12 @@ defmodule CymphoWeb.KanbanLive.Components do
         <span class="mono">{@identifier}</span>
         <span class="bc-top-r">
           <Tasks.priority priority={@issue.priority} label={false} />
-          <details :if={@next_statuses != []} class="bc-mv" data-no-drag>
+          <details
+            :if={@next_statuses != []}
+            class="bc-mv"
+            data-no-drag
+            phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+          >
             <summary aria-label="Move issue" title="Move issue">
               <span class="hero-ellipsis-horizontal-mini" aria-hidden="true"></span>
             </summary>

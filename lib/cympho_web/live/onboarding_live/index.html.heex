@@ -23,7 +23,7 @@ heading =
     </span>
     <span class="ob-sp"></span>
     <a class="ob-help" href="/docs"><.r3_icon name="i-question" />Help</a>
-    <details class="ob-acct">
+    <details class="ob-acct" phx-mounted={JS.ignore_attributes("open")}>
       <summary>
         <span class="av" aria-hidden="true">{user_initials(@current_user)}</span>
         <span class="sr">{@current_user.name || @current_user.email}, account</span>

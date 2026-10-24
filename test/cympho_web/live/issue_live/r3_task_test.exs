@@ -138,6 +138,31 @@ defmodule CymphoWeb.IssueLive.R3TaskTest do
       assert text(doc(view), "#timeline-stream") =~ "1. Retry automatically after 3 days"
     end
 
+    test "a reply from another page leaves the brief, the thread and a deliverable as opened (B1)",
+         %{conn: conn, nw: nw} do
+      {:ok, view, _html} = open(conn, nw, "NW-6")
+      issue = nw.issues["NW-6"]
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          issue_id: issue.id,
+          body: "Posted from the Inbox.",
+          author_type: "user",
+          author_id: nw.user.id
+        })
+
+      # The reply re-renders the page; the patch must not drop the `open` the reader set.
+      doc = doc(view)
+      assert render(view) =~ "Posted from the Inbox."
+
+      for selector <- ["details.brief", "#thread details.earlier", "#deliverables details.objt-d"] do
+        assert [mounted] = doc |> Floki.find(selector) |> Floki.attribute("phx-mounted"),
+               "#{selector} has no phx-mounted"
+
+        assert Jason.decode!(mounted) == [["ignore_attrs", %{"attrs" => ["open"]}]]
+      end
+    end
+
     test "Back appears only for an allow-listed origin other than the parent", %{
       conn: conn,
       nw: nw

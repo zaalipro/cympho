@@ -266,6 +266,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
               <details
                 :if={adapter_error.detail not in [nil, ""]}
                 class="mt-2 text-xs text-text-tertiary"
+                phx-mounted={JS.ignore_attributes("open")}
               >
                 <summary class="cursor-pointer select-none text-text-quaternary hover:text-text-secondary">
                   Show adapter details
@@ -493,6 +494,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
             <details
               :if={entry.data.tool_result not in [nil, ""]}
               class="mt-2 rounded border border-border/50 bg-canvas px-2 py-1 text-xs text-text-tertiary"
+              phx-mounted={JS.ignore_attributes("open")}
             >
               <summary class="cursor-pointer text-text-quaternary">Show raw tool result</summary>
               <p class="mt-2 whitespace-pre-wrap">{entry.data.tool_result}</p>

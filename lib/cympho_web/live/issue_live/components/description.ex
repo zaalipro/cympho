@@ -96,7 +96,7 @@ defmodule CymphoWeb.IssueLive.Show.Description do
             </button>
           </div>
         </div>
-        <details class="group/scaffold mt-2">
+        <details class="group/scaffold mt-2" phx-mounted={JS.ignore_attributes("open")}>
           <summary class="inline-flex cursor-pointer select-none list-none items-center gap-1 text-[11px] font-510 text-amber-100/80 transition hover:text-amber-50 [&::-webkit-details-marker]:hidden">
             <.icon
               name="hero-chevron-down-mini"

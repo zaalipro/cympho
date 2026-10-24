@@ -82,7 +82,10 @@
             </div>
           </fieldset>
 
-          <details class="group rounded-xl border border-border bg-surface/55">
+          <details
+            class="group rounded-xl border border-border bg-surface/55"
+            phx-mounted={JS.ignore_attributes("open")}
+          >
             <summary class="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-590 text-text-secondary transition-colors hover:text-text-primary">
               <.icon name="hero-adjustments-horizontal-mini" class="h-4 w-4 text-text-quaternary" />
               <span class="flex-1">Options</span>

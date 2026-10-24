@@ -48,6 +48,7 @@ defmodule CymphoWeb.DocsLive.Components.TocComponent do
     <details
       :if={@anchors != []}
       class="xl:hidden my-4 rounded-xl border border-hairline bg-surface-2 p-3 text-sm"
+      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
     >
       <summary class="font-510 text-ink cursor-pointer flex items-center justify-between">
         <span>On this page ({length(@anchors)} sections)</span>

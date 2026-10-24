@@ -44,7 +44,11 @@
         <span class="meta">Last {window(@spending.days)}</span>
       </:header_end>
       <.task_table :if={@top_tasks != []} rows={@top_tasks} total={@window_total} />
-      <details :if={@more_tasks != []} class="earlier more">
+      <details
+        :if={@more_tasks != []}
+        class="earlier more"
+        phx-mounted={JS.ignore_attributes("open")}
+      >
         <summary>
           <span>
             <span class="mono">{length(@more_tasks)}</span> more<span aria-hidden="true"> ·</span>
