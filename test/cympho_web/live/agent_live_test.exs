@@ -3108,6 +3108,62 @@ defmodule CymphoWeb.AgentLiveTest do
       refute Map.has_key?(after_pause.by_agent, ada.id)
     end
 
+    test "an unsaved Setup edit stays while the agent is paused and resumed elsewhere", %{
+      conn: conn,
+      nw: nw
+    } do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}?tab=configuration")
+
+      view
+      |> form("form[phx-submit='config_save']", %{"agent" => %{"name" => "Ada Byron"}})
+      |> render_change()
+
+      {:ok, paused} = Agents.pause_agent(ada, "Breaker")
+      wait_until(fn -> assert r3_text(r3_doc(view), ".agent-h .sp") =~ "Paused" end)
+      assert setup_name(view) == ["Ada Byron"]
+
+      {:ok, _} = Agents.resume_agent(paused)
+      wait_until(fn -> refute r3_text(r3_doc(view), ".agent-h .sp") =~ "Paused" end)
+      assert setup_name(view) == ["Ada Byron"]
+    end
+
+    test "an unsaved Setup edit stays through this page's own Pause", %{conn: conn, nw: nw} do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}?tab=configuration")
+
+      view
+      |> form("form[phx-submit='config_save']", %{"agent" => %{"name" => "Ada Byron"}})
+      |> render_change()
+
+      render_click(view, "pause_agent", %{})
+
+      assert Repo.get!(Agent, ada.id).status == :paused
+      assert setup_name(view) == ["Ada Byron"]
+    end
+
+    test "an unsaved runtime profile choice stays through a live update", %{conn: conn, nw: nw} do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}?tab=configuration")
+      before = :sys.get_state(view.pid).socket.assigns.selected_runtime_profile_id
+      refute before == "codex-mini"
+
+      render_click(view, "select_runtime_profile", %{"profile_id" => "codex-mini"})
+
+      {:ok, _} = Agents.pause_agent(ada, "Breaker")
+      wait_until(fn -> assert r3_text(r3_doc(view), ".agent-h .sp") =~ "Paused" end)
+      assert :sys.get_state(view.pid).socket.assigns.selected_runtime_profile_id == "codex-mini"
+    end
+
+    test "an untouched Setup form follows the agent saved elsewhere", %{conn: conn, nw: nw} do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}?tab=configuration")
+
+      {:ok, _} = Agents.update_agent(ada, %{name: "Ada Lovelace"})
+
+      wait_until(fn -> assert setup_name(view) == ["Ada Lovelace"] end)
+    end
+
     test "the Next step resumes Mira, with the reason as Cympho stored it", %{
       conn: conn,
       nw: nw
@@ -3388,6 +3444,8 @@ defmodule CymphoWeb.AgentLiveTest do
   end
 
   defp r3_doc(view), do: view |> render() |> Floki.parse_fragment!()
+
+  defp setup_name(view), do: Floki.attribute(r3_doc(view), ~s(input[name="agent[name]"]), "value")
 
   # Text nodes joined with a space (the gaps the CSS draws), then squished.
   defp r3_text(node, selector),

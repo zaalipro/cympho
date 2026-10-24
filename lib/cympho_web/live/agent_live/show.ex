@@ -153,7 +153,8 @@ defmodule CymphoWeb.AgentLive.Show do
      |> assign(:billing, billing_form(socket.assigns.agent, runtime.model, billing))
      |> assign(:adapter_health_check_result, nil)
      |> assign(:instruction_patch_feedback, nil)
-     |> assign(:form, to_form(changeset))}
+     |> assign(:form, to_form(changeset))
+     |> assign(:setup_edited?, true)}
   end
 
   def handle_event("config_save", %{"agent" => agent_params} = params, socket) do
@@ -284,7 +285,8 @@ defmodule CymphoWeb.AgentLive.Show do
         {:noreply,
          socket
          |> assign(:instruction_patch_feedback, feedback)
-         |> assign(:form, to_form(changeset))}
+         |> assign(:form, to_form(changeset))
+         |> assign(:setup_edited?, true)}
     end
   end
 
@@ -326,7 +328,8 @@ defmodule CymphoWeb.AgentLive.Show do
       {:noreply,
        socket
        |> assign(:instruction_patch_feedback, feedback)
-       |> assign(:form, to_form(changeset))}
+       |> assign(:form, to_form(changeset))
+       |> assign(:setup_edited?, true)}
     else
       feedback = %{
         patch_id: "recommended",
@@ -373,7 +376,8 @@ defmodule CymphoWeb.AgentLive.Show do
      socket
      |> assign(:env_rows, rows)
      |> assign(:env_vars, env_map_from_rows(rows))
-     |> assign(:adapter_health_check_result, nil)}
+     |> assign(:adapter_health_check_result, nil)
+     |> assign(:setup_edited?, true)}
   end
 
   def handle_event("remove_env_row", %{"index" => index}, socket) do
@@ -385,13 +389,14 @@ defmodule CymphoWeb.AgentLive.Show do
      socket
      |> assign(:env_rows, rows)
      |> assign(:env_vars, env_map_from_rows(rows))
-     |> assign(:adapter_health_check_result, nil)}
+     |> assign(:adapter_health_check_result, nil)
+     |> assign(:setup_edited?, true)}
   end
 
   def handle_event("toggle_permission", %{"key" => key}, socket) do
     current = !!Map.get(socket.assigns.permissions, key, false)
     permissions = Map.put(socket.assigns.permissions, key, !current)
-    {:noreply, assign(socket, :permissions, permissions)}
+    {:noreply, assign(socket, permissions: permissions, setup_edited?: true)}
   end
 
   def handle_event("select_runtime_profile", %{"profile_id" => profile_id}, socket) do
@@ -417,7 +422,8 @@ defmodule CymphoWeb.AgentLive.Show do
      |> assign_env_rows_for_profile(profile_id)
      |> assign_runtime_form(runtime)
      |> refresh_billing(runtime.model)
-     |> assign(:adapter_health_check_result, nil)}
+     |> assign(:adapter_health_check_result, nil)
+     |> assign(:setup_edited?, true)}
   end
 
   def handle_event("apply_runtime_preset", %{"preset" => preset_id}, socket) do
@@ -454,7 +460,8 @@ defmodule CymphoWeb.AgentLive.Show do
          |> assign_runtime_form(runtime)
          |> refresh_billing(runtime.model)
          |> assign(:adapter_health_check_result, nil)
-         |> assign(:form, to_form(changeset))}
+         |> assign(:form, to_form(changeset))
+         |> assign(:setup_edited?, true)}
     end
   end
 
@@ -595,7 +602,7 @@ defmodule CymphoWeb.AgentLive.Show do
         {:noreply,
          socket
          |> put_flash(:info, "Agent paused.")
-         |> assign_agent(agent)}
+         |> assign_agent_keeping_edits(agent)}
 
       _ ->
         {:noreply, put_flash(socket, :error, "Could not pause agent.")}
@@ -608,7 +615,7 @@ defmodule CymphoWeb.AgentLive.Show do
         {:noreply,
          socket
          |> put_flash(:info, "Agent resumed.")
-         |> assign_agent(agent)
+         |> assign_agent_keeping_edits(agent)
          |> push_event("toast", %{message: "#{agent.name} can take new work.", type: "success"})}
 
       _ ->
@@ -688,7 +695,7 @@ defmodule CymphoWeb.AgentLive.Show do
   @impl true
   def handle_info({:agent_updated, updated_agent}, socket) do
     if socket.assigns.agent.id == updated_agent.id do
-      {:noreply, assign_agent(socket, updated_agent)}
+      {:noreply, assign_agent_keeping_edits(socket, updated_agent)}
     else
       {:noreply, socket}
     end
@@ -699,7 +706,7 @@ defmodule CymphoWeb.AgentLive.Show do
         %{assigns: %{agent: %{id: id}}} = socket
       )
       when event in @agent_events do
-    {:noreply, assign_agent(socket, updated_agent)}
+    {:noreply, assign_agent_keeping_edits(socket, updated_agent)}
   end
 
   def handle_info({:agent_deleted, _deleted_id}, socket) do
@@ -730,7 +737,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
   defp refresh_agent(socket) do
     case get_scoped_agent(socket, socket.assigns.agent.id) do
-      {:ok, agent} -> assign_agent(socket, agent)
+      {:ok, agent} -> assign_agent_keeping_edits(socket, agent)
       {:error, :not_found} -> socket
     end
   end
@@ -744,16 +751,44 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   defp assign_agent(socket, agent) do
+    socket
+    |> assign_agent_record(agent)
+    |> assign_setup_form()
+    |> assign_overview()
+  end
+
+  # A live update (a pause, resume or run, here or on another page) refreshes
+  # the agent; the Setup form is rebuilt from it only while it has no unsaved edits.
+  defp assign_agent_keeping_edits(%{assigns: %{setup_edited?: true}} = socket, agent),
+    do: socket |> assign_agent_record(agent) |> assign_overview()
+
+  defp assign_agent_keeping_edits(socket, agent), do: assign_agent(socket, agent)
+
+  # The Setup form as the saved agent has it; `setup_edited?` turns true on the
+  # first unsaved edit.
+  defp assign_setup_form(%{assigns: %{agent: agent}} = socket) do
+    socket
+    |> assign(:setup_edited?, false)
+    |> assign(:env_vars, RuntimeEnv.from_agent(agent))
+    |> assign(:env_rows, env_rows_from(agent))
+    |> assign(:selected_adapter, selected_adapter_from_agent(agent))
+    |> assign_runtime_profile(RuntimeProfiles.from_agent(agent))
+    |> assign_runtime_form(runtime_form_from_agent(agent))
+    |> assign(:billing, billing_form(agent, runtime_form_from_agent(agent).model, %{}))
+    |> assign(:adapter_health_check_result, nil)
+    |> assign(:instruction_patch_feedback, nil)
+    |> assign(:permissions, normalise_permissions(agent.permissions))
+    |> assign(:form, to_form(Agents.change_agent(agent)))
+  end
+
+  defp assign_agent_record(socket, agent) do
     agent = Cympho.Repo.preload(agent, [:parent, :children])
     wake_history = Wakes.list_agent_wakes(agent.id)
     runs = HeartbeatEngine.list_runs_for_agent(agent.id, limit: 30)
     recent_issues = Issues.list_recent_for_agent(agent.id, 10)
-    env_vars = RuntimeEnv.from_agent(agent)
     secrets = Secrets.list_secrets_for_agent(agent.id)
     secret_count = length(secrets)
     secret_keys = Enum.map(secrets, & &1.key)
-    changeset = Agents.change_agent(agent)
-    selected_profile_id = RuntimeProfiles.from_agent(agent)
     config_revisions = Agents.list_config_revisions(agent.id, limit: 8)
     latest_prompt_tuning_revision = latest_prompt_tuning_revision(config_revisions)
 
@@ -779,27 +814,16 @@ defmodule CymphoWeb.AgentLive.Show do
     |> assign(:latest_failure_reason, failure_reason)
     |> assign(:recent_issues, recent_issues)
     |> assign_new(:heartbeat_feedback, fn -> nil end)
-    |> assign(:env_vars, env_vars)
     |> assign(:secret_count, secret_count)
     |> assign(:secret_keys, secret_keys)
-    |> assign(:env_rows, env_rows_from(agent))
-    |> assign(:selected_adapter, selected_adapter_from_agent(agent))
-    |> assign_runtime_profile(selected_profile_id)
-    |> assign_runtime_form(runtime_form_from_agent(agent))
-    |> assign(:billing, billing_form(agent, runtime_form_from_agent(agent).model, %{}))
     |> assign(:spending_limit_items, RuntimePreflight.spending_limit_items(agent))
-    |> assign(:adapter_health_check_result, nil)
-    |> assign(:instruction_patch_feedback, nil)
     |> assign(:config_revisions, config_revisions)
     |> assign(:latest_config_revision, List.first(config_revisions))
     |> assign(:latest_prompt_tuning_revision, latest_prompt_tuning_revision)
-    |> assign(:permissions, normalise_permissions(agent.permissions))
     |> assign(:instructions_preview?, false)
-    |> assign(:form, to_form(changeset))
     |> assign(:reports_to_options, reports_to_options(socket.assigns[:current_company], agent.id))
     |> refresh_skills()
     |> maybe_default_tab()
-    |> assign_overview()
   end
 
   ## ── The r3 Overview (plan P3) ────────────────────────────────
