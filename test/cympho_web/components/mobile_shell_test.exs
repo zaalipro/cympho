@@ -119,4 +119,50 @@ defmodule CymphoWeb.MobileShellTest do
     assert r3 =~ "background:transparent;outline:none;font-size:13px;color:var(--ink)}"
     assert r3 =~ "color:var(--ink);resize:vertical;font-size:14px;line-height:20px}"
   end
+
+  # C3: a sticky header sticks at the scroller's content edge, under .col's top
+  # padding (w3c/csswg-drafts#3352), and its corners are rounded, so scrolled
+  # content showed above it and in its corners. Its layers redraw the frame's top.
+  test "the stuck context header covers the strip above it and its corners" do
+    r3 = File.read!(@r3_css)
+
+    assert r3 =~
+             ~s|.cy-r3 .ctx[data-ctx]::before,.cy-r3 .ctx[data-ctx]::after{content:"";position:absolute;z-index:-1;left:-10px;right:-10px;pointer-events:none}|
+
+    assert r3 =~
+             ".cy-r3 .ctx[data-ctx]::before{top:-12px;height:calc(12px + var(--r-frame));background:var(--page)}"
+
+    assert r3 =~
+             ".cy-r3 .ctx[data-ctx]::after{top:0;bottom:0;border-radius:var(--r-frame) var(--r-frame) 0 0;background:var(--frame)}"
+
+    phone = phone_css(@r3_css)
+
+    assert phone =~
+             ".cy-r3 .ctx[data-ctx]::before,.cy-r3 .ctx[data-ctx]::after{left:-6px;right:-6px}"
+
+    assert phone =~ ".cy-r3 .ctx[data-ctx]::before{height:36px}"
+    assert phone =~ ".cy-r3 .ctx[data-ctx]::after{border-radius:24px 24px 0 0}"
+
+    assert phone =~
+             ~s|.cy-r3 .ctx[data-ctx="root"]::before,.cy-r3 .ctx[data-ctx="root"]::after{content:none}|
+  end
+
+  # C3: toasts sat over the header's end (the Inbox filter, "Back to Home").
+  # On phones the band between the Next step's primary (ends by y 729 at
+  # 390x844) and the tab bar (770) is the clear spot: a 36 px toast 4 px above it.
+  test "toasts sit at the bottom, in the band above the phone tab bar, and never take a tap" do
+    css = File.read!(@app_css)
+    [container] = Regex.run(~r/\.safe-area-toast \{[^}]*\}/, css)
+
+    refute container =~ "top:"
+    assert container =~ "bottom: calc(1rem + env(safe-area-inset-bottom, 0px));"
+    assert container =~ "right: calc(1rem + env(safe-area-inset-right, 0px));"
+
+    phone = phone_css(@app_css)
+    assert phone =~ "bottom: calc(var(--mobile-nav-offset) + 4px);"
+    assert phone =~ "padding: 8px 14px;"
+
+    [toast] = Regex.run(~r/\n\.toast \{[^}]*\}/, css)
+    assert toast =~ "pointer-events: none;"
+  end
 end
