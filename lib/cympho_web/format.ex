@@ -40,13 +40,16 @@ defmodule CymphoWeb.Format do
   def format_datetime(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M:%S")
   def format_datetime(_), do: "—"
 
-  @doc "Dollars as the r3 pages write them: \"$300\", \"$186.50\", \"$3.68\"."
+  @doc "Dollars as the r3 pages write them: \"$300\", \"$186.50\", \"$3.68\", \"$1,000\"."
   def money(%Decimal{} = amount) do
     rounded = Decimal.round(amount, 2)
 
-    if Decimal.equal?(rounded, Decimal.round(rounded, 0)),
-      do: "$#{rounded |> Decimal.round(0) |> Decimal.to_string(:normal)}",
-      else: "$#{Decimal.to_string(rounded, :normal)}"
+    text =
+      if Decimal.equal?(rounded, Decimal.round(rounded, 0)),
+        do: rounded |> Decimal.round(0) |> Decimal.to_string(:normal),
+        else: Decimal.to_string(rounded, :normal)
+
+    "$" <> Regex.replace(~r/\d(?=(\d{3})+(?!\d))/, text, "\\0,")
   end
 
   @doc "A spend window in days, as the r3 pages say it: \"30 days\", \"24 hours\"."
