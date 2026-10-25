@@ -1257,9 +1257,31 @@ document.addEventListener('click', (e) => {
 // The <details> menus a LiveView renders ignore `open` on patch, so a live
 // update leaves them open; picking one of their items closes them instead.
 const LIVE_MENUS = 'details.cympho-menu, details.bc-mv, details.ob-acct';
-// With the rail's company switch and account menus (root layout), these close
-// on an outside click and on Escape.
-const DETAILS_MENUS = `.rail details, ${LIVE_MENUS}`;
+// With the rail's company switch and account menus (root layout) and the "?"
+// help popovers, these close on an outside click, on Escape and on a live
+// navigation.
+const DETAILS_MENUS = `.rail details, ${LIVE_MENUS}, details.help-pop`;
+
+// Back, Forward and a server patch click nothing, and a patch keeps these
+// menus' `open`: close them on every live navigation, as a new page would.
+window.addEventListener('phx:navigate', () => {
+  document.querySelectorAll(DETAILS_MENUS).forEach((open) => open.removeAttribute('open'));
+});
+
+// A <details> whose `open` the server derives from the data (a failed run, a
+// set PR, an active filter) ignores `open` on patch like the others, so the
+// reader's toggle holds, and renders it again as data-open: when that value
+// changes, the fold follows it.
+const ServerOpen = {
+  mounted() {
+    this.serverOpen = this.el.dataset.open;
+  },
+  updated() {
+    if (this.el.dataset.open === this.serverOpen) return;
+    this.serverOpen = this.el.dataset.open;
+    this.el.open = this.serverOpen === 'true';
+  }
+};
 
 // Company rail controls. These used inline onclick handlers, which the
 // Content-Security-Policy (script-src with a nonce) now blocks.
@@ -2480,7 +2502,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
     IssueGateCleanup,
     InfiniteScroll,
     CopyToClipboard,
-    CompanyImportTransfer
+    CompanyImportTransfer,
+    ServerOpen
   }
 });
 

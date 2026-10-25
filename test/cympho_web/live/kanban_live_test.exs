@@ -58,7 +58,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "an open Move menu stays with its card when a live update reorders the column",
-         %{issue_todo: issue_todo} do
+         %{issue_backlog: issue_backlog, issue_todo: issue_todo} do
       {:ok, view, _html} = live(conn(), "/kanban")
 
       [menu] =
@@ -71,7 +71,23 @@ defmodule CymphoWeb.KanbanLiveTest do
       # this card's menu, not whichever card now sits in the same place.
       [mounted] = Floki.attribute(menu, "phx-mounted")
       assert Jason.decode!(mounted) == [["ignore_attrs", %{"attrs" => ["open"]}]]
-      assert Floki.attribute(menu, "id") == ["bc-mv-#{issue_todo.id}"]
+
+      # Another page moves the backlog card into To do, ahead of this one.
+      {:ok, moved} = Issues.update_issue(issue_backlog, %{status: :todo})
+      send(view.pid, {:issue_updated, moved})
+
+      cards =
+        view
+        |> render()
+        |> Floki.parse_document!()
+        |> Floki.find("[data-kanban-column='todo'] li[data-issue-id]")
+
+      assert Enum.flat_map(cards, &Floki.attribute(&1, "data-issue-id")) ==
+               [issue_backlog.id, issue_todo.id]
+
+      for card <- cards, [id] = Floki.attribute(card, "data-issue-id") do
+        assert card |> Floki.find("details.bc-mv") |> Floki.attribute("id") == ["bc-mv-#{id}"]
+      end
     end
 
     test "Later and Cancelled start as collapsed pills that open a column" do

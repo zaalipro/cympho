@@ -10,6 +10,8 @@ defmodule CymphoWeb.IssueLive.R3TaskTest do
 
   alias Cympho.{Comments, Companies, IssueThreadInteractions, Issues, R3Fixtures, Repo, Users}
   alias Cympho.Issues.IssueThreadInteraction
+  alias Cympho.WorkProducts
+  alias Cympho.WorkProducts.IssueWorkProduct
 
   setup do
     nw = R3Fixtures.northwind!()
@@ -161,6 +163,64 @@ defmodule CymphoWeb.IssueLive.R3TaskTest do
 
         assert Jason.decode!(mounted) == [["ignore_attrs", %{"attrs" => ["open"]}]]
       end
+    end
+
+    # Unkeyed, the patch matches deliverables by position: removing an earlier one
+    # would hand a later one's `open` to its neighbour. Keyed by the work product,
+    # each keeps its own element.
+    test "each deliverable keeps its own element when an earlier one is removed",
+         %{conn: conn, nw: nw} do
+      issue = nw.issues["NW-6"]
+
+      [refunds, dunning] =
+        for {title, minutes} <- [{"Refund policy", 60}, {"Dunning emails", 30}] do
+          Repo.insert!(%IssueWorkProduct{
+            issue_id: issue.id,
+            kind: "document",
+            title: title,
+            inserted_at: R3Fixtures.at(nw.anchor, minutes),
+            updated_at: R3Fixtures.at(nw.anchor, minutes)
+          })
+        end
+
+      spec = Repo.get_by!(IssueWorkProduct, issue_id: issue.id, title: "Payment flow spec")
+      {:ok, view, _html} = open(conn, nw, "NW-6")
+
+      ids = fn ->
+        view |> doc() |> Floki.find("#deliverables details.objt-d") |> Floki.attribute("id")
+      end
+
+      assert ids.() == Enum.map([spec, refunds, dunning], &"deliverable-#{&1.id}")
+
+      :ok = WorkProducts.delete_work_product(spec)
+
+      assert ids.() == Enum.map([refunds, dunning], &"deliverable-#{&1.id}")
+    end
+
+    # The quiet line before it gives way to the latest update when the first agent
+    # comment arrives; unkeyed, the earlier thread would be replaced (and closed).
+    test "the earlier thread keeps its element when the first agent update arrives",
+         %{conn: conn, nw: nw} do
+      issue = nw.issues["NW-11"]
+      {:ok, view, _html} = open(conn, nw, "NW-11")
+
+      assert [_] = Floki.find(doc(view), "#thread p.quiet-line")
+
+      assert ["thread-earlier"] =
+               view |> doc() |> Floki.find("details.earlier") |> Floki.attribute("id")
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          issue_id: issue.id,
+          body: "Picking this up after the first 10 customers.",
+          author_type: "agent",
+          author_id: nw.agents["Ada"].id
+        })
+
+      doc = doc(view)
+      assert [] = Floki.find(doc, "#thread p.quiet-line")
+      assert text(doc, "#thread article.msg") =~ "Picking this up"
+      assert ["thread-earlier"] = doc |> Floki.find("details.earlier") |> Floki.attribute("id")
     end
 
     test "Back appears only for an allow-listed origin other than the parent", %{

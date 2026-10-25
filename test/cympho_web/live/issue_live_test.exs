@@ -4207,6 +4207,90 @@ defmodule CymphoWeb.IssueLiveTest do
     end
   end
 
+  # These <details> ignore `open` on patch, so a reader's toggle survives live
+  # updates; their `open` comes from the data, rendered again as data-open, and
+  # the ServerOpen hook (assets/js/app.js) follows it when that state changes.
+  describe "Show - disclosures that follow their state" do
+    test "the CEO checklist and the run ledger open when a run fails", %{issue: issue} do
+      {:ok, ceo} = create_agent(%{name: "Disclosure CEO", role: :ceo, status: :idle})
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          title: "Improve onboarding activation",
+          description: """
+          Goal: improve onboarding activation.
+          Context: setup drops after project creation.
+          Constraints / risks: must not slow first project creation.
+          Definition of done: CEO creates a plan or handoff with acceptance criteria.
+          CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`): handoff if execution is needed.
+          Evidence to inspect after the run: scoped child issues and verification notes.
+          """,
+          status: :todo,
+          assigned_role: "ceo",
+          assignee_id: ceo.id
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      for selector <- ["#issue-ceo-flow-checklist", "#brief-run-ledger"] do
+        assert %{"phx-hook" => "ServerOpen", "data-open" => "false"} =
+                 element_attrs(html, selector)
+      end
+
+      Repo.insert!(%Run{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        company_id: issue.company_id,
+        status: "failed",
+        adapter: "claude_code"
+      })
+
+      send(view.pid, {:issue_updated, issue})
+      html = render(view)
+
+      for selector <- ["#issue-ceo-flow-checklist", "#brief-run-ledger"] do
+        assert %{"data-open" => "true"} = element_attrs(html, selector)
+      end
+    end
+
+    test "the CTO review queue opens when a sub-issue is blocked", %{issue: issue} do
+      {:ok, child} =
+        create_issue(%{
+          title: "Delegated slice",
+          description: "A slice of the parent.",
+          status: :todo,
+          priority: :medium,
+          parent_id: issue.id
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert %{"phx-hook" => "ServerOpen", "data-open" => "false"} =
+               element_attrs(html, "#brief-review-queue")
+
+      {:ok, child} = Issues.update_issue(child, %{status: :blocked})
+      send(view.pid, {:issue_updated, child})
+
+      assert %{"data-open" => "true"} = element_attrs(render(view), "#brief-review-queue")
+    end
+
+    test "the GitHub PR panel opens when a PR is set", %{issue: issue} do
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert %{"phx-hook" => "ServerOpen", "data-open" => "false"} =
+               element_attrs(html, "#issue-github-pr")
+
+      html =
+        view
+        |> form("#issue-github-pr form[phx-submit='update_github_pr_number']", %{
+          github_pr_number: "123"
+        })
+        |> render_submit()
+
+      assert %{"data-open" => "true"} = element_attrs(html, "#issue-github-pr")
+    end
+  end
+
   defp html_has_any?(html, labels) do
     Enum.any?(labels, &String.contains?(html, &1))
   end

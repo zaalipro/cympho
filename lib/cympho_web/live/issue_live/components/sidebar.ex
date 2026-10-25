@@ -769,7 +769,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         <details
           id="issue-github-pr"
           class="group"
-          open={@issue.github_pr_number not in [nil, 0] or @issue.github_pr_url not in [nil, ""]}
+          open={pr_set?(@issue)}
+          data-open={to_string(pr_set?(@issue))}
+          phx-hook="ServerOpen"
           phx-mounted={JS.ignore_attributes("open")}
         >
           <summary class="flex items-center justify-between gap-2 cursor-pointer font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90 list-none">
@@ -929,6 +931,10 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
     </aside>
     """
   end
+
+  # The GitHub PR panel opens once a PR is set.
+  defp pr_set?(issue),
+    do: issue.github_pr_number not in [nil, 0] or issue.github_pr_url not in [nil, ""]
 
   defp work_mode_combobox_options do
     [

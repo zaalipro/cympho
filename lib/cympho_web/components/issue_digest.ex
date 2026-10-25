@@ -892,7 +892,7 @@ defmodule CymphoWeb.Components.IssueDigest do
   def action_help(assigns) do
     ~H"""
     <details
-      class="group relative inline-flex"
+      class="help-pop group relative inline-flex"
       phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
     >
       <summary

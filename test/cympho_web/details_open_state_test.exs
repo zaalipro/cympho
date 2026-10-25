@@ -25,6 +25,24 @@ defmodule CymphoWeb.DetailsOpenStateTest do
     assert missing == []
   end
 
+  # Where the server derives `open` from the data, ignoring it on patch would
+  # also hide a change of that state (a run fails, a PR is set, Back restores a
+  # filter). Those render it again as data-open for the ServerOpen hook
+  # (assets/js/app.js); the Inbox's Decided list instead swaps its id with
+  # ?decided, so the patch brings a new element.
+  test "a <details> whose open comes from the server still follows that state" do
+    unfollowed =
+      for path <- Path.wildcard("lib/cympho_web/**/*.{ex,heex}"),
+          path not in @root_layout_only,
+          {tag, line} <- details_tags(File.read!(path)),
+          tag =~ ~r/\sopen=/,
+          not (tag =~ ~s(phx-hook="ServerOpen") and tag =~ "data-open="),
+          not String.contains?(tag, "id={if @decided_open"),
+          do: "#{path}:#{line}"
+
+    assert unfollowed == []
+  end
+
   # Each `<details` opening tag with its line; a backticked mention in a doc is not a tag.
   defp details_tags(source) do
     ~r/(?<!`)<details(?=[\s>])/
