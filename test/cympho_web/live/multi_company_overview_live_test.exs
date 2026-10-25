@@ -1,6 +1,8 @@
 defmodule CymphoWeb.MultiCompanyOverviewLiveTest do
   use CymphoWeb.LiveCase, async: true
 
+  import CymphoWeb.R3PageHelpers
+
   alias Cympho.{Companies, Issues, Repo}
 
   @moduletag membership_role: "viewer"
@@ -26,7 +28,23 @@ defmodule CymphoWeb.MultiCompanyOverviewLiveTest do
     assert html =~ ~s(data-page="home")
     assert html =~ ~s(href="/overview")
     {:ok, view, html} = live(conn, "/overview")
-    assert html =~ "Company overview"
+    doc = main_doc(html)
+    # r3 (v7 G7): "Compare companies" under Home; Refresh is the one header pill.
+    assert_r3_page(doc, page: "overview", h1: "Compare companies", kind: :root, primaries: 0)
+    assert Floki.find(doc, ~s(.ctx-end button#refresh-overview.pl[phx-click="refresh"])) != []
+    # One band per company: its name, three counts, the budget, the way in.
+    assert text(doc, "#overview-company-#{b.id} .card-h .h2") == b.name
+    assert Floki.attribute(doc, "#overview-company-#{b.id}", "aria-label") == [b.name]
+
+    assert texts(doc, "#overview-company-#{b.id} .strip .l") ==
+             ["Running now", "Tasks in review", "Blocked tasks"]
+
+    # Reviews is an Advanced-only page; Costs reads Spending.
+    assert Floki.find(doc, "#overview-company-#{b.id} .ui-advanced-only a[href*='%2Freviews']") !=
+             []
+
+    assert text(doc, ~s(#overview-company-#{b.id} a[href$="%2Fcosts"])) == "Spending"
+
     assert html =~ b.name
     refute html =~ c.name
     assert html =~ "No budget"
