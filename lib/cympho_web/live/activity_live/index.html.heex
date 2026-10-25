@@ -1,264 +1,141 @@
-<div class="ember-aurora p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0" data-ui-complex-page>
-  <div class="relative z-[1]">
-    <header class="mb-5">
-      <span class="ember-eyebrow">Company record</span>
-      <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-        {@page_title}
-      </h1>
-      <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-        Every change to issues, runs, spend, and approvals.
-      </p>
-    </header>
-
-    <section
-      data-testid="activity-command"
-      class="ember-glass ui-advanced-only mb-5 overflow-hidden"
+<.page_frame page="activity" title="Activity" data-ui-complex-page>
+  <div class="tbar">
+    <.filter_menu
+      id="activity-filter"
+      active={active_filter_count(@filter_action, @filter_actor_type)}
     >
-      <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Activity History
-            </p>
-            <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{activity_command_badge_class(@activity_command.tone)}"}>
-              {@activity_command.badge}
-            </span>
-          </div>
-
-          <h2 class="mt-2 text-lg font-590 text-text-primary">
-            {@activity_command.heading}
-          </h2>
-          <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-            {@activity_command.detail}
-          </p>
-
-          <div
-            :if={@activity_command.focus_label}
-            class="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs"
-          >
-            <span class="max-w-full truncate rounded-full border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
-              {@activity_command.focus_label}
-            </span>
-            <span
-              :if={@activity_command.focus_detail}
-              class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary"
-            >
-              {@activity_command.focus_detail}
-            </span>
-          </div>
-        </div>
-
-        <.app_link
-          navigate={@activity_command.action_path}
-          class={"inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-590 transition-colors #{activity_command_action_class(@activity_command.tone)}"}
-        >
-          <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
-          {@activity_command.action_label}
-        </.app_link>
-      </div>
-
-      <%!-- No metric strip: the audit lane cards below carry the same per-family
-           counts next to the label that explains them. --%>
-
-      <div class="border-t border-border px-4 py-3">
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Audit lanes
-        </p>
-        <p class="mt-1 text-sm text-text-tertiary">
-          Jump to the kind of change you want to see.
-        </p>
-      </div>
-
-      <div
-        id="activity-audit-lanes"
-        data-testid="activity-audit-lanes"
-        class="grid gap-px border-t border-border bg-border md:grid-cols-2 xl:grid-cols-5"
+      <form phx-change="filter" phx-submit="prevent" class="act-f">
+        <.input
+          type="select"
+          id="activity-filter-action"
+          name="filter_action"
+          label="What happened"
+          value={@filter_action || ""}
+          options={[
+            {"All actions", ""},
+            {"Created", "created"},
+            {"Title changed", "title_changed"},
+            {"Description changed", "description_changed"},
+            {"Priority changed", "priority_changed"},
+            {"Status changed", "status_changed"},
+            {"Assigned", "assigned"},
+            {"Unassigned", "unassigned"},
+            {"Blocker added", "blocker_added"},
+            {"Blocker removed", "blocker_removed"},
+            {"Comment added", "comment_added"},
+            {"Approval created", "approval_created"},
+            {"Approval approved", "approval_approved"},
+            {"Approval rejected", "approval_rejected"},
+            {"Approval requested changes", "approval_requested_changes"},
+            {"Heartbeat started", "heartbeat_started"},
+            {"Heartbeat completed", "heartbeat_completed"},
+            {"Heartbeat failed", "heartbeat_failed"},
+            {"Cost incurred", "cost_incurred"},
+            {"Budget threshold exceeded", "budget_threshold_exceeded"},
+            {"Work product created", "work_product_created"}
+          ]}
+        />
+      </form>
+      <form phx-change="filter" phx-submit="prevent" class="act-f">
+        <.input
+          type="select"
+          id="activity-filter-actor"
+          name="filter_actor_type"
+          label="Who did it"
+          value={@filter_actor_type || ""}
+          options={[
+            {"All actors", ""},
+            {"Agents", "agent"},
+            {"Users", "user"},
+            {"System", "system"}
+          ]}
+        />
+      </form>
+      <button
+        :if={@filter_action != "" or @filter_actor_type != ""}
+        type="button"
+        class="lnk"
+        phx-click="clear_filters"
       >
-        <%!-- The whole card is the link, so the repeated "Open feed" row is
-             gone; the state pill only appears when the lane has events. --%>
-        <.app_link
-          :for={lane <- @activity_audit_lanes}
-          navigate={lane.action_path}
-          title={lane.action_label}
-          aria-label={lane.action_label}
-          class={"block bg-panel px-4 py-3 transition-colors hover:bg-surface-hover #{activity_lane_card_class(lane.category)}"}
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                {lane.label}
-              </p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">{lane.summary}</p>
-            </div>
-            <div class="shrink-0 text-right">
-              <p class={"font-mono text-xl font-590 tabular-nums #{activity_lane_count_class(lane.category)}"}>
-                {lane.count}
-              </p>
-              <span
-                :if={lane.show_state?}
-                class={"rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{activity_lane_badge_class(lane.category, lane.count)}"}
-              >
-                {lane.state_label}
-              </span>
-            </div>
-          </div>
-        </.app_link>
-      </div>
-    </section>
-
-    <section class="ui-advanced-only mb-5 rounded-lg border border-border bg-panel px-4 py-3">
-      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div class="min-w-0">
-          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Feed controls
-          </p>
-          <p class="mt-1 text-xs leading-5 text-text-tertiary">
-            Filter by what happened or who did it.
-          </p>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-3">
-          <form phx-change="filter" phx-submit="prevent">
-            <.select_menu
-              name="filter_action"
-              value={@filter_action || ""}
-              options={[
-                {"All actions", ""},
-                {"Created", "created"},
-                {"Title changed", "title_changed"},
-                {"Description changed", "description_changed"},
-                {"Priority changed", "priority_changed"},
-                {"Status changed", "status_changed"},
-                {"Assigned", "assigned"},
-                {"Unassigned", "unassigned"},
-                {"Blocker added", "blocker_added"},
-                {"Blocker removed", "blocker_removed"},
-                {"Comment added", "comment_added"},
-                {"Approval created", "approval_created"},
-                {"Approval approved", "approval_approved"},
-                {"Approval rejected", "approval_rejected"},
-                {"Approval requested changes", "approval_requested_changes"},
-                {"Heartbeat started", "heartbeat_started"},
-                {"Heartbeat completed", "heartbeat_completed"},
-                {"Heartbeat failed", "heartbeat_failed"},
-                {"Cost incurred", "cost_incurred"},
-                {"Budget threshold exceeded", "budget_threshold_exceeded"},
-                {"Work product created", "work_product_created"}
-              ]}
-            />
-          </form>
-
-          <form phx-change="filter" phx-submit="prevent">
-            <.select_menu
-              name="filter_actor_type"
-              value={@filter_actor_type || ""}
-              options={[
-                {"All actors", ""},
-                {"Agents", "agent"},
-                {"Users", "user"},
-                {"System", "system"}
-              ]}
-            />
-          </form>
-
-          <button
-            :if={@filter_action != "" or @filter_actor_type != ""}
-            type="button"
-            phx-click="clear_filters"
-            class="rounded-md border border-border px-2.5 py-1.5 text-xs font-510 text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary"
-          >
-            Clear filters
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <section id="activity-feed" class="overflow-hidden rounded-lg border border-border bg-panel">
-      <div class="border-b border-border px-4 py-3">
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Activity feed
-        </p>
-        <p class="ui-advanced-only mt-1 text-xs text-text-tertiary">
-          Newest first. Open an issue for the full story.
-        </p>
-      </div>
-
-      <.infinite_scroll
-        id="activity"
-        has_more={@infinite_scroll[:activities][:has_more?] || false}
-        container_class="divide-y divide-border"
-      >
-        <:empty>
-          <div class="flex flex-col items-center justify-center px-6 py-16 text-center">
-            <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface">
-              <.icon name="hero-clipboard-document-list-mini" class="h-6 w-6 text-text-tertiary" />
-            </div>
-            <p class="text-sm font-510 text-text-secondary">No activity found.</p>
-            <p class="mt-1 max-w-sm text-xs leading-5 text-text-tertiary">
-              Create work, clear filters, or start runtime to populate the company record.
-            </p>
-          </div>
-        </:empty>
-
-        <div
-          :for={{dom_id, activity} <- @streams.activities}
-          id={dom_id}
-          class="group relative isolate flex items-start gap-4 p-4 transition-colors hover:bg-surface-hover before:absolute before:-z-10 before:left-[33px] before:top-0 before:bottom-0 before:w-px before:bg-gradient-to-b before:from-brand/30 before:via-border before:to-border before:content-['']"
-        >
-          <div class={"flex h-9 w-9 shrink-0 items-center justify-center rounded-full #{activity_icon_tone(activity.action)}"}>
-            <.icon name={activity_icon(activity.action)} class="h-4 w-4" />
-          </div>
-
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-sm font-590 text-text-primary">
-                    {actor_name(activity, @actor_names)}
-                  </span>
-                  <%!-- System rows printed "System" twice; only show the pill
-                       when it adds something the name does not. --%>
-                  <span
-                    :if={
-                      format_actor_type(activity.actor_type) != actor_name(activity, @actor_names)
-                    }
-                    class="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 text-text-tertiary"
-                  >
-                    {format_actor_type(activity.actor_type)}
-                  </span>
-                  <span class="text-xs font-510 text-text-secondary">
-                    {format_action(activity.action)}
-                  </span>
-                </div>
-
-                <div class="mt-1 min-w-0">
-                  <%= if activity.issue do %>
-                    <.app_link
-                      navigate={~p"/issues/#{activity.issue.id}"}
-                      class="inline-block max-w-full truncate text-xs text-text-tertiary transition-colors hover:text-text-primary"
-                    >
-                      {activity.issue.identifier || "Issue"} - {activity.issue.title}
-                    </.app_link>
-                  <% else %>
-                    <span class="text-xs text-text-quaternary">Issue removed</span>
-                  <% end %>
-                </div>
-              </div>
-
-              <p class="shrink-0 text-xs text-text-quaternary">
-                {format_timestamp(activity.inserted_at)}
-              </p>
-            </div>
-
-            <div
-              :if={activity_detail_visible?(activity.action)}
-              class="ui-advanced-only mt-2 rounded-md border border-border bg-surface px-3 py-2 text-xs leading-5 text-text-tertiary"
-            >
-              <.render_metadata metadata={activity.metadata} action={activity.action} />
-            </div>
-          </div>
-        </div>
-      </.infinite_scroll>
-    </section>
+        Clear filters
+      </button>
+    </.filter_menu>
   </div>
-</div>
+
+  <.band_card id="activity-list-t" title="What happened" section_id="activity-feed">
+    <.infinite_scroll
+      id="activity"
+      has_more={@infinite_scroll[:activities][:has_more?] || false}
+      container_class="rows"
+    >
+      <:empty>
+        <.quiet_empty title="No activity found.">
+          Create work, clear filters, or start runtime to populate the company record.
+        </.quiet_empty>
+      </:empty>
+
+      <.list_row
+        :for={{dom_id, activity} <- @streams.activities}
+        tag="div"
+        id={dom_id}
+        icon={activity_icon(activity.action)}
+        kind={if problem_action?(activity.action), do: :problem, else: :neutral}
+        title={activity_title(activity)}
+      >
+        <:meta>
+          {actor_name(activity, @actor_names)}<span aria-hidden="true"> · </span>
+          <%= if activity.issue do %>
+            <.task_link issue={activity.issue} />
+          <% else %>
+            Task removed
+          <% end %>
+          <span aria-hidden="true"> · </span><span class="mono">{CymphoWeb.AgentLive.Parts.stamp(activity.inserted_at)}</span>
+        </:meta>
+      </.list_row>
+    </.infinite_scroll>
+  </.band_card>
+
+  <div class="ui-advanced-only">
+    <.band_card id="activity-command-t" title="Activity History" data-testid="activity-command">
+      <:header_end><span class="tag">{@activity_command.badge}</span></:header_end>
+      <div class="gl-sec">
+        <p class="gl-big">{@activity_command.heading}</p>
+        <p class="gl-sub">{@activity_command.detail}</p>
+        <p :if={@activity_command.focus_label} class="act-tags">
+          <span class="tag">{@activity_command.focus_label}</span>
+          <span :if={@activity_command.focus_detail} class="tag">
+            {@activity_command.focus_detail}
+          </span>
+        </p>
+        <.text_link navigate={@activity_command.action_path}>
+          {@activity_command.action_label}
+        </.text_link>
+      </div>
+    </.band_card>
+  </div>
+
+  <div class="ui-advanced-only">
+    <.band_card
+      id="activity-audit-lanes-t"
+      title="Audit lanes"
+      section_id="activity-audit-lanes"
+      data-testid="activity-audit-lanes"
+    >
+      <ul class="rows">
+        <.list_row
+          :for={lane <- @activity_audit_lanes}
+          id={"activity-lane-#{lane.category}"}
+          title={lane.label}
+        >
+          <:meta>{lane.summary}</:meta>
+          <:trail>
+            <span class="mono">{lane.count}</span><span :if={lane.show_state?}><span aria-hidden="true"> · </span>{lane.state_label}</span>
+          </:trail>
+          <:actions>
+            <.text_link navigate={lane.action_path}>{lane.action_label}</.text_link>
+          </:actions>
+        </.list_row>
+      </ul>
+    </.band_card>
+  </div>
+</.page_frame>

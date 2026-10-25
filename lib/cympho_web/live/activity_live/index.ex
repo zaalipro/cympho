@@ -10,12 +10,8 @@ defmodule CymphoWeb.ActivityLive.Index do
   )
   @cost_actions ~w(cost_incurred budget_threshold_exceeded)
   @runtime_actions ~w(heartbeat_started heartbeat_completed heartbeat_failed)
-  # Only actions whose metadata says something the action label does not. The
-  # rest ("assigned" -> "Assigned to agent") just restated the row above.
-  @detail_actions ~w(
-    title_changed status_changed priority_changed cost_incurred
-    budget_threshold_exceeded work_product_created
-  )
+  # Events that report a problem: their row's tile is the problem tone.
+  @problem_actions ~w(heartbeat_failed budget_threshold_exceeded)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -23,7 +19,7 @@ defmodule CymphoWeb.ActivityLive.Index do
 
     socket =
       socket
-      |> assign(:page_title, "Activity Feed")
+      |> assign(:page_title, "Activity")
       |> assign(:company_id, company_id)
       |> assign(:actor_names, actor_names(company_id))
       |> assign(:filter_action, "")
@@ -346,56 +342,77 @@ defmodule CymphoWeb.ActivityLive.Index do
   end
 
   defp format_action(action), do: String.capitalize(String.replace(action, "_", " "))
-  defp format_actor_type(type), do: String.capitalize(type)
 
-  defp format_timestamp(nil), do: ""
+  defp active_filter_count(action, actor_type),
+    do: Enum.count([action, actor_type], &(&1 not in [nil, ""]))
 
-  defp format_timestamp(datetime) do
-    datetime =
-      case DateTime.shift_zone(datetime, "America/Los_Angeles") do
-        {:ok, shifted} -> shifted
-        {:error, _reason} -> datetime
-      end
+  # The row's sentence (v7 G4): the action, with the detail its metadata adds
+  # (what a status or priority changed to, the amount, the work product).
+  defp activity_title(%{action: action, metadata: metadata}) do
+    label = format_action(action)
 
-    Calendar.strftime(datetime, "%b %d, %Y %I:%M %p")
-  end
-
-  defp activity_icon(action) do
     case action do
-      "created" -> "hero-plus-mini"
-      "title_changed" -> "hero-pencil-mini"
-      "description_changed" -> "hero-document-text-mini"
-      "priority_changed" -> "hero-adjustments-horizontal-mini"
-      "status_changed" -> "hero-arrow-path-mini"
-      "assigned" -> "hero-user-plus-mini"
-      "unassigned" -> "hero-user-minus-mini"
-      "blocker_added" -> "hero-no-symbol-mini"
-      "blocker_removed" -> "hero-check-circle-mini"
-      "comment_added" -> "hero-chat-bubble-left-right-mini"
-      "approval_created" -> "hero-shield-check-mini"
-      "approval_approved" -> "hero-check-badge-mini"
-      "approval_rejected" -> "hero-x-circle-mini"
-      "approval_requested_changes" -> "hero-pencil-square-mini"
-      "approval_resolved" -> "hero-shield-check-mini"
-      "heartbeat_started" -> "hero-play-mini"
-      "heartbeat_completed" -> "hero-check-badge-mini"
-      "heartbeat_failed" -> "hero-exclamation-triangle-mini"
-      "cost_incurred" -> "hero-currency-dollar-mini"
-      "budget_threshold_exceeded" -> "hero-exclamation-triangle-mini"
-      "feedback_submitted" -> "hero-chart-bar-mini"
-      "feedback_exported" -> "hero-arrow-down-tray-mini"
-      "work_product_created" -> "hero-paper-clip-mini"
-      _ -> "hero-bolt-mini"
+      "title_changed" ->
+        with_suffix(label, detail(metadata, "to"), &"#{&1} to “#{&2}”")
+
+      changed when changed in ~w(status_changed priority_changed) ->
+        with_suffix(label, change(metadata), &"#{&1} #{&2}")
+
+      _ ->
+        with_suffix(label, action_suffix(action, metadata), &"#{&1}: #{&2}")
     end
   end
 
-  defp activity_icon_tone(action) do
+  defp change(metadata) do
+    case {detail(metadata, "from"), detail(metadata, "to")} do
+      {_from, nil} -> nil
+      {nil, to} -> "to #{to}"
+      {from, to} -> "from #{from} to #{to}"
+    end
+  end
+
+  defp action_suffix("cost_incurred", metadata), do: detail(metadata, "amount")
+
+  defp action_suffix("budget_threshold_exceeded", metadata),
+    do: detail(metadata, "threshold_type")
+
+  defp action_suffix("work_product_created", metadata), do: detail(metadata, "title")
+  defp action_suffix(_action, _metadata), do: nil
+
+  defp with_suffix(label, nil, _join), do: label
+  defp with_suffix(label, suffix, join), do: join.(label, suffix)
+
+  # A printable metadata value, or nil (a nested map or list is not a sentence part).
+  defp detail(metadata, key) do
+    case metadata_value(metadata, key) do
+      value when is_binary(value) and value != "" -> String.replace(value, "_", " ")
+      value when is_number(value) -> to_string(value)
+      %Decimal{} = value -> Decimal.to_string(value)
+      _ -> nil
+    end
+  end
+
+  attr :issue, :map, required: true
+
+  # One line, so the underline ends with the title (a formatted multi-line link renders a trailing space).
+  defp task_link(assigns) do
+    ~H"""
+    <.link class="ul" navigate={~p"/issues/#{@issue.id}"}>{@issue.title}</.link>
+    """
+  end
+
+  defp problem_action?(action), do: action in @problem_actions
+
+  # The row's kind tile: a problem, else the family the event belongs to.
+  defp activity_icon(action) when action in @problem_actions, do: "i-alert"
+
+  defp activity_icon(action) do
     case activity_category(action) do
-      :cost -> "bg-amber-500/10 text-amber-300"
-      :runtime -> "bg-cyan-500/10 text-cyan-300"
-      :governance -> "bg-brand/10 text-brand"
-      :issue -> "bg-emerald-500/10 text-emerald-300"
-      _ -> "bg-surface-2 text-text-tertiary"
+      :issue -> "i-tasks"
+      :governance -> "i-shield"
+      :cost -> "i-spend"
+      :runtime -> "i-term"
+      :other -> "i-doc-check"
     end
   end
 
@@ -439,93 +456,4 @@ defmodule CymphoWeb.ActivityLive.Index do
 
   defp short_identity(type, id),
     do: "#{String.capitalize(to_string(type))} #{String.slice(id, 0, 8)}"
-
-  defp activity_command_badge_class(:danger), do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  defp activity_command_badge_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp activity_command_badge_class(:review), do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp activity_command_badge_class(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp activity_command_badge_class(:filtered),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-
-  defp activity_command_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp activity_command_action_class(:danger),
-    do: "border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/15"
-
-  defp activity_command_action_class(:attention),
-    do: "border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
-
-  defp activity_command_action_class(:review),
-    do: "border-brand/30 bg-brand/10 text-brand hover:bg-brand/15"
-
-  defp activity_command_action_class(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
-
-  defp activity_command_action_class(:filtered),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-200 hover:bg-blue-500/15"
-
-  defp activity_command_action_class(_),
-    do: "border-border bg-surface text-text-secondary hover:bg-surface-hover"
-
-  defp activity_lane_card_class(:issue), do: "border-l-2 border-l-emerald-400/70"
-  defp activity_lane_card_class(:governance), do: "border-l-2 border-l-brand/70"
-  defp activity_lane_card_class(:cost), do: "border-l-2 border-l-amber-400/70"
-  defp activity_lane_card_class(:runtime), do: "border-l-2 border-l-cyan-400/70"
-  defp activity_lane_card_class(_), do: ""
-
-  defp activity_lane_count_class(:issue), do: "text-emerald-300"
-  defp activity_lane_count_class(:governance), do: "text-brand"
-  defp activity_lane_count_class(:cost), do: "text-amber-300"
-  defp activity_lane_count_class(:runtime), do: "text-cyan-300"
-  defp activity_lane_count_class(_), do: "text-text-primary"
-
-  defp activity_lane_badge_class(_category, 0),
-    do: "border-border bg-surface text-text-tertiary"
-
-  defp activity_lane_badge_class(:issue, _count),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp activity_lane_badge_class(:governance, _count),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp activity_lane_badge_class(:cost, _count),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp activity_lane_badge_class(:runtime, _count),
-    do: "border-cyan-500/25 bg-cyan-500/10 text-cyan-300"
-
-  defp activity_lane_badge_class(_category, _count),
-    do: "border-border bg-surface text-text-secondary"
-
-  defp activity_detail_visible?(action), do: action in @detail_actions
-
-  defp render_metadata(assigns) do
-    ~H"""
-    <%= case @action do %>
-      <% "title_changed" -> %>
-        Changed title from <code class="text-xs bg-surface px-1 rounded">{@metadata["from"]}</code>
-        to <code class="text-xs bg-surface px-1 rounded">{@metadata["to"]}</code>
-      <% "status_changed" -> %>
-        Changed status from <span class="text-xs">{@metadata["from"]}</span>
-        to <span class="text-xs">{@metadata["to"]}</span>
-      <% "cost_incurred" -> %>
-        Incurred cost: <span class="text-xs">{@metadata["amount"]}</span>
-      <% "budget_threshold_exceeded" -> %>
-        Budget threshold exceeded: <span class="text-xs">{@metadata["threshold_type"]}</span>
-      <% "priority_changed" -> %>
-        Changed priority from <span class="text-xs">{@metadata["from"]}</span>
-        to <span class="text-xs">{@metadata["to"]}</span>
-      <% "work_product_created" -> %>
-        Attached work product: <span class="text-xs">{@metadata["title"]}</span>
-      <% _ -> %>
-        <span></span>
-    <% end %>
-    """
-  end
 end
