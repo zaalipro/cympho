@@ -1,7 +1,7 @@
 <.settings_layout active={:appearance}>
-  <.header title="Appearance" />
+  <.flash_line flash={@flash} />
 
-  <section class="card" aria-label="Appearance">
+  <.band_card id="ap-t" title="Appearance">
     <div class="ap">
       <form phx-change="set_theme" aria-label="Colour">
         <fieldset class="thm">
@@ -71,5 +71,5 @@
         <p class="help" id="appearance-detail-help">Advanced adds technical pages and details.</p>
       </div>
     </div>
-  </section>
+  </.band_card>
 </.settings_layout>

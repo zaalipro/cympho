@@ -100,6 +100,40 @@ defmodule CymphoWeb.SettingsLiveTest do
     end
   end
 
+  describe "r3 section (v7 S2)" do
+    import CymphoWeb.R3PageHelpers
+
+    test "renders in the settings frame with the Alerts matrix and no primary", %{
+      conn: conn,
+      user: user
+    } do
+      Users.ensure_default_prefs(user.id)
+      {:ok, view, _html} = live(conn, "/settings/notifications")
+      doc = main_doc(view)
+
+      assert_r3_page(doc, page: "settings", h1: "Settings", kind: :root, primaries: 0)
+      assert texts(doc, ".set-main .card-h h2") == ["Alerts", "Channels"]
+
+      switches = Floki.find(doc, ".mx input[type=checkbox][role=switch]")
+      assert length(switches) == 15
+      assert length(Floki.find(doc, ".mx label.tg .sr")) == 15
+
+      assert Floki.find(doc, ".set-main .kt svg use[href='#i-inbox']") != []
+      assert Floki.find(doc, ".fld input[name=telegram_chat_id]") != []
+      assert Floki.find(doc, ".fld input[name=webhook_url][type=url]") != []
+      assert Floki.find(doc, ".set-main [class*='hero-']") == []
+    end
+
+    test "a channel switch says what it did on the page", %{conn: conn, user: user} do
+      Users.ensure_default_prefs(user.id)
+      {:ok, view, _html} = live(conn, "/settings/notifications")
+
+      view |> element("#channel-email button[phx-click='toggle_channel']") |> render_click()
+
+      assert has_element?(view, ".flash-line .flash-msg[role=status]", "Email disabled")
+    end
+  end
+
   describe "Channel toggles" do
     test "toggle email channel off writes to notification_preferences", %{conn: conn, user: user} do
       Users.ensure_default_prefs(user.id)

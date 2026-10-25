@@ -43,6 +43,24 @@ defmodule CymphoWeb.SettingsAppearanceLiveTest do
       assert user.theme == "system"
     end
 
+    # v7 S3: the body sits in the Appearance band under the layout's one H1.
+    test "renders in the settings frame inside the Appearance band", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/settings/appearance")
+      doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+      CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+        page: "settings",
+        h1: "Settings",
+        kind: :root,
+        primaries: 0
+      )
+
+      assert CymphoWeb.R3PageHelpers.text(doc, "section[aria-labelledby=ap-t] .card-h h2") ==
+               "Appearance"
+
+      assert Floki.find(doc, "section[aria-labelledby=ap-t] .ap .thm input[name=theme]") != []
+    end
+
     test "keeps the Simple and Advanced switch", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/appearance")
       document = Floki.parse_document!(html)
