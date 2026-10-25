@@ -4,16 +4,48 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
   alias Cympho.ExecutionPolicies
 
   test "new policy form starts with a staged governance template", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/settings/policies/new")
+    {:ok, view, html} = live(conn, "/settings/policies/new")
 
     assert html =~ ~s(id="execution-policy-form")
     assert html =~ "Default staged execution"
-    assert html =~ "Governance stage plan"
-    assert html =~ "Stage builder"
-    assert html =~ "Default governance flow"
-    assert html =~ ~s(data-testid="execution-policy-setup-checklist")
     assert html =~ "require_different_actor"
     assert html =~ "require_human"
+
+    # v7 S10: a deep form page under Review steps; the form is a pair.
+    doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+    CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+      page: "policy-form",
+      h1: "New review step",
+      kind: :deep,
+      parent: "Review steps",
+      primaries: 1
+    )
+
+    assert CymphoWeb.R3PageHelpers.texts(doc, ".crumb [aria-current=page]") == ["New review step"]
+
+    assert CymphoWeb.R3PageHelpers.text(doc, "form#execution-policy-form.fpair .ink .pw") ==
+             "Save review step"
+
+    assert CymphoWeb.R3PageHelpers.texts(
+             doc,
+             "form#execution-policy-form .fp-main > section .card-h h2"
+           ) ==
+             ["Name", "Stages"]
+
+    assert Floki.find(doc, "form#execution-policy-form .ink a.pd[href='/settings/policies']") !=
+             []
+
+    assert length(Floki.find(doc, ".fld-ck input[type=checkbox]")) == 9
+
+    assert [_] =
+             Floki.find(
+               doc,
+               ".ui-advanced-only details#policy-json-preview textarea[name='execution_policy[stage_configs]'][spellcheck=false]"
+             )
+
+    refute html =~ "execution-policy-setup-checklist"
+    assert Floki.find(doc, ".set-main") == []
   end
 
   @tag membership_role: "admin"
@@ -162,9 +194,27 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
 
     assert html =~ ~s(id="execution-policy-form")
     assert html =~ "Original policy"
-    assert html =~ "Governance stage plan"
-    assert html =~ "Stage builder"
-    assert html =~ ~s(data-testid="execution-policy-setup-checklist")
+
+    # v7 S11: the crumb names the action, the H1 the record; Cancel returns to it.
+    doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+    CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+      page: "policy-form",
+      h1: "Edit Original policy",
+      kind: :deep,
+      parent: "Review steps",
+      primaries: 1
+    )
+
+    assert CymphoWeb.R3PageHelpers.texts(doc, ".crumb [aria-current=page]") == [
+             "Edit review step"
+           ]
+
+    assert Floki.find(
+             doc,
+             "form#execution-policy-form .ink a.pd[href='/settings/policies/#{policy.id}']"
+           ) !=
+             []
 
     result =
       render_submit(view, "save", %{
@@ -257,13 +307,64 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
   end
 
   test "empty policy library explains the first governance step", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/settings/policies")
+    {:ok, view, html} = live(conn, "/settings/policies")
 
     assert html =~ ~s(data-testid="policy-command")
     assert html =~ "Create a default execution policy before scaling autonomy"
-    assert html =~ "No governance policies configured yet."
-    assert html =~ "Create one so every run has an owner, a reviewer, and an approver."
-    assert html =~ "New policy"
+    # r3 (v7 S9, mockup frame f): the empty list carries the only Add control.
+    assert html =~ "No review steps yet"
+    assert html =~ "Add one to have an agent or you check work before it is done."
+
+    assert has_element?(
+             view,
+             "#execution_policies-empty a.pl[href='/settings/policies/new']",
+             "Add a review step"
+           )
+
+    refute has_element?(view, ".card-h a.pl[href='/settings/policies/new']")
+  end
+
+  test "lists review steps as rows in the Review steps band", %{
+    conn: conn,
+    current_company: company
+  } do
+    {:ok, policy} =
+      ExecutionPolicies.create_execution_policy(%{
+        name: "Quick fixes",
+        company_id: company.id,
+        stage_configs: [%{"type" => "executor", "participant_id" => "engineer"}]
+      })
+
+    {:ok, view, _html} = live(conn, "/settings/policies")
+    doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+    CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+      page: "settings",
+      h1: "Settings",
+      kind: :root,
+      primaries: 0
+    )
+
+    assert CymphoWeb.R3PageHelpers.text(doc, "section[aria-labelledby=po-t] .card-h h2") ==
+             "Review steps"
+
+    assert Floki.find(
+             doc,
+             "section[aria-labelledby=po-t] .card-h a.pl[href='/settings/policies/new']"
+           ) !=
+             []
+
+    assert [row] = Floki.find(doc, "#execution_policies-#{policy.id}.lrow")
+
+    assert Floki.attribute(Floki.find(row, "a.rt2"), "href") == [
+             "/settings/policies/#{policy.id}"
+           ]
+
+    assert CymphoWeb.R3PageHelpers.text(row, ".lr-st") == "Review gap"
+    assert Floki.find(row, ".lr-acts a.pl[href='/settings/policies/#{policy.id}/edit']") != []
+
+    assert Floki.find(row, ".lr-acts button.pl.warn[phx-click=delete_execution_policy]") != []
+    assert Floki.find(doc, ".ui-advanced-only section[data-testid=policy-command]") != []
   end
 
   test "policy command prioritizes missing participants", %{
@@ -315,7 +416,7 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
     assert html =~ "Execution policies are ready for autonomous work"
     assert html =~ "Owner review pipeline"
     assert html =~ "Different actor"
-    assert html =~ "Human required"
+    assert html =~ "Human approval"
     assert html =~ "Ready"
   end
 
@@ -380,6 +481,38 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
     assert html =~ "Create a default execution policy before scaling autonomy"
     refute html =~ "Foreign governed pipeline"
     refute html =~ "Execution policies are ready for autonomous work"
+  end
+
+  # v7 S12: the stages read as an r3 step list on a deep page under Review steps.
+  test "policy show lists its stages as steps", %{conn: conn, current_company: company} do
+    {:ok, policy} =
+      ExecutionPolicies.create_execution_policy(%{
+        name: "Staged pipeline",
+        company_id: company.id,
+        stage_configs: [
+          %{"type" => "executor", "participant_id" => "engineer"},
+          %{"type" => "reviewer", "participant_id" => "", "require_different_actor" => true}
+        ]
+      })
+
+    {:ok, view, _html} = live(conn, "/settings/policies/#{policy.id}")
+    doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+    CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+      page: "policy",
+      h1: "Staged pipeline",
+      kind: :deep,
+      parent: "Review steps",
+      primaries: 0
+    )
+
+    assert CymphoWeb.R3PageHelpers.text(doc, ".head .chips .chip") == "2 stages"
+    assert Floki.find(doc, ".head .chips a.pl[href='/settings/policies/#{policy.id}/edit']") != []
+    assert length(Floki.find(doc, "section[aria-labelledby=st-t] .steps .step")) == 2
+    assert CymphoWeb.R3PageHelpers.text(doc, ".steps .step:nth-child(2) .nop") == "No participant"
+
+    assert CymphoWeb.R3PageHelpers.text(doc, ".steps .step:nth-child(2) .tag") ==
+             "Different actor"
   end
 
   test "show and edit of a foreign policy redirect with Policy not found", %{conn: conn} do

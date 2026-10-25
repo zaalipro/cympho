@@ -1,6 +1,8 @@
 defmodule CymphoWeb.ExecutionPolicyLive.FormHelpers do
   @moduledoc false
 
+  use CymphoWeb, :html
+
   alias Cympho.ExecutionPolicies
   alias Cympho.ExecutionPolicies.ExecutionPolicy
 
@@ -14,6 +16,139 @@ defmodule CymphoWeb.ExecutionPolicyLive.FormHelpers do
   @stage_indexes 1..3
 
   def default_stage_configs, do: @default_stage_configs
+
+  attr :form, :any, required: true
+  attr :stage_configs_text, :string, default: nil
+
+  attr :name_value, :string,
+    default: nil,
+    doc: "the new page's default name; nil keeps the form's"
+
+  attr :effect, :string, required: true, doc: "what saving does, as one consequence"
+
+  attr :cancel, :string,
+    required: true,
+    doc: "where Cancel goes: the list (new) or the policy (edit)"
+
+  @doc """
+  The review-step form shared by New and Edit (v7 S10/S11): a form pair with the
+  Name and Stages cards on paper and the ink card holding Save. Field names and
+  ids are the ones `normalize_policy_params/1` reads.
+  """
+  def policy_form(assigns) do
+    ~H"""
+    <.form_pair
+      id="execution-policy-form"
+      for={@form}
+      phx-change="validate"
+      phx-submit="save"
+      heading="After you save"
+      verb="save"
+    >
+      <input type="hidden" name="execution_policy[stage_input_mode]" value="builder" />
+      <.band_card id="pn-t" title="Name">
+        <div class="flds">
+          <.input
+            field={@form[:name]}
+            label="Policy name"
+            type="text"
+            value={@name_value}
+            required
+            wrapper_class="full"
+          />
+        </div>
+      </.band_card>
+
+      <.band_card id="ps-t" title="Stages">
+        <p class="help stg-l">
+          Participants can be role handles like engineer, cto and ceo, or agent IDs.
+        </p>
+        <div :for={index <- stage_indexes()} class="stg" role="group" aria-labelledby={"stg-#{index}"}>
+          <p class="gh" id={"stg-" <> to_string(index)}>
+            Stage
+            <span class="mono">{index}</span><span aria-hidden="true"> · </span>{stage_title(index)}
+          </p>
+          <p class="help">{stage_hint(index)}</p>
+          <div class="flds">
+            <.input
+              id={"execution_policy_stage_#{index}_type"}
+              name={"execution_policy[stage_#{index}_type]"}
+              type="select"
+              label="Stage type"
+              value={stage_value(@form, index, "type")}
+              options={stage_type_options()}
+            />
+            <.input
+              id={"execution_policy_stage_#{index}_participant_id"}
+              name={"execution_policy[stage_#{index}_participant_id]"}
+              label="Participant"
+              value={stage_value(@form, index, "participant_id")}
+              placeholder="engineer, cto, ceo, or agent UUID"
+              autocomplete="off"
+            />
+          </div>
+          <%!-- The hints stay for screen readers and on hover, but are not painted:
+               three stages would print the same three sentences nine times. --%>
+          <div class="cks">
+            <.input
+              :for={{key, label, hint} <- stage_gates()}
+              type="checkbox"
+              id={"execution_policy_stage_#{index}_#{key}"}
+              name={"execution_policy[stage_#{index}_#{key}]"}
+              label={label}
+              value={stage_checked?(@form, index, key)}
+              help={hint}
+              title={hint}
+            />
+          </div>
+        </div>
+      </.band_card>
+
+      <div class="ui-advanced-only">
+        <details
+          id="policy-json-preview"
+          class="card tech"
+          phx-mounted={JS.ignore_attributes("open")}
+        >
+          <summary>
+            <h2 class="h2">Stage JSON</h2>
+            <.r3_icon name="i-chev-down" />
+          </summary>
+          <div class="flds">
+            <.input
+              field={@form[:stage_configs]}
+              label="Stage configs (JSON array)"
+              type="textarea"
+              rows={9}
+              value={@stage_configs_text || stage_configs_text(@form)}
+              help="Direct JSON submissions are still validated before saving."
+              spellcheck="false"
+              required
+              wrapper_class="full"
+            />
+          </div>
+        </details>
+      </div>
+
+      <:effect><.consequences rows={[{:done, @effect}]} /></:effect>
+      <:secondary>
+        <.ghost_pill navigate={@cancel}>Cancel</.ghost_pill>
+      </:secondary>
+      <:primary>
+        <.primary_pill type="submit" phx-disable-with="Saving…">Save review step</.primary_pill>
+      </:primary>
+    </.form_pair>
+    """
+  end
+
+  # {param suffix, label, hint} for the three gates of every stage.
+  defp stage_gates do
+    [
+      {"require_different_actor", "Different actor", "Reviewer cannot be the executor."},
+      {"require_human", "Human approval", "Requires an explicit human gate."},
+      {"auto_advance", "Auto-advance", "Continue when the stage passes."}
+    ]
+  end
 
   def stage_indexes, do: Enum.to_list(@stage_indexes)
 

@@ -21,7 +21,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.Index do
 
   defp apply_action(socket, :index, _params) do
     socket
-    |> assign(:page_title, "Execution Policies")
+    |> assign(:page_title, "Review steps")
     |> assign(:execution_policy, nil)
   end
 
@@ -198,15 +198,13 @@ defmodule CymphoWeb.ExecutionPolicyLive.Index do
   defp policy_metric_total(%{metrics: [%{value: total} | _]}), do: total
   defp policy_metric_total(_command), do: 0
 
+  # One strip of at most four cells (v7 P7); the total stays first (policy_metric_total/1).
   defp policy_metrics(posture) do
     [
-      %{label: "Policies", value: posture.total, tone: :neutral},
-      %{label: "Ready", value: posture.ready_count, tone: :ready},
-      %{label: "Needs fix", value: posture.total - posture.ready_count, tone: :danger},
-      %{label: "Stages", value: posture.stage_count, tone: :neutral},
-      %{label: "Review gates", value: posture.review_gate_count, tone: :review},
-      %{label: "Human gates", value: posture.human_gate_count, tone: :human},
-      %{label: "Auto", value: posture.auto_advance_count, tone: :auto}
+      %{label: "Review steps", value: posture.total},
+      %{label: "Ready", value: posture.ready_count},
+      %{label: "Need a fix", value: posture.total - posture.ready_count},
+      %{label: "Human gates", value: posture.human_gate_count}
     ]
   end
 
@@ -231,61 +229,28 @@ defmodule CymphoWeb.ExecutionPolicyLive.Index do
   defp policy_status_label(:no_review_gate), do: "Review gap"
   defp policy_status_label(_), do: "Needs review"
 
-  defp policy_status_detail(:ready), do: "Ready to assign to issue execution."
-  defp policy_status_detail(:empty), do: "Add at least one stage before assignment."
+  # Status as a word plus a shape (v7 §1.5): ready is done, anything else waits on a fix.
+  defp policy_status(:ready), do: {:done, policy_status_label(:ready)}
+  defp policy_status(status), do: {:waiting, policy_status_label(status)}
 
-  defp policy_status_detail(:missing_participant),
-    do: "Fill every stage participant before assignment."
+  # ["3 stages", "Executor, reviewer, approver", "Different actor", "Human approval"]
+  defp policy_meta(summary) do
+    [
+      stage_count_label(summary.stage_count),
+      stage_types_label(summary.stage_types),
+      summary.has_different_actor_gate? && "Different actor",
+      summary.has_human_gate? && "Human approval"
+    ]
+    |> Enum.filter(&is_binary/1)
+  end
 
-  defp policy_status_detail(:no_review_gate),
-    do: "Add a reviewer or approver stage for governance coverage."
+  defp stage_count_label(1), do: "1 stage"
+  defp stage_count_label(count), do: "#{count} stages"
 
-  defp policy_status_detail(_), do: "Review this policy before assigning it to work."
-
-  defp policy_command_badge_class(:danger), do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  defp policy_command_badge_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp policy_command_badge_class(:review), do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp policy_command_badge_class(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp policy_command_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp policy_command_action_class(:danger),
-    do: "border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/15"
-
-  defp policy_command_action_class(:attention),
-    do: "border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
-
-  defp policy_command_action_class(:review),
-    do: "border-brand/30 bg-brand/10 text-brand hover:bg-brand/15"
-
-  defp policy_command_action_class(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
-
-  defp policy_command_action_class(_),
-    do: "border-border bg-surface text-text-secondary hover:bg-surface-hover"
-
-  defp policy_metric_value_class(:ready), do: "text-emerald-300"
-  defp policy_metric_value_class(:danger), do: "text-red-300"
-  defp policy_metric_value_class(:review), do: "text-brand"
-  defp policy_metric_value_class(:human), do: "text-cyan-300"
-  defp policy_metric_value_class(:auto), do: "text-amber-300"
-  defp policy_metric_value_class(_), do: "text-text-primary"
-
-  defp policy_status_badge_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp policy_status_badge_class(:empty), do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  defp policy_status_badge_class(:missing_participant),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  defp policy_status_badge_class(:no_review_gate),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp policy_status_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+  defp stage_types_label(types) do
+    case Enum.reject(types, &(&1 in [nil, ""])) do
+      [] -> nil
+      types -> types |> Enum.join(", ") |> String.capitalize()
+    end
+  end
 end
