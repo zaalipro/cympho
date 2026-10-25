@@ -1,219 +1,137 @@
-<div class={[
-  "p-6 lg:p-8 mx-auto",
-  if(@live_action == :edit, do: "max-w-7xl", else: "max-w-6xl")
-]}>
-  <div
-    :if={@flash && @flash[:info]}
-    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
+<%= if @live_action == :edit do %>
+  <.page_frame
+    page="budget-form"
+    kind={:deep}
+    parent={{~p"/budgets", "Spending limit"}}
+    current="Edit limit"
+    data-ui-complex-page
   >
-    {@flash[:info]}
-  </div>
+    <:head>
+      <section class="head" aria-labelledby="bf-h">
+        <h1 class="h1 big" id="bf-h">Edit {@budget.name}</h1>
+      </section>
+    </:head>
 
-  <div
-    :if={@flash && @flash[:error]}
-    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
+    <.flash_line flash={@flash} />
+
+    <.live_component
+      module={CymphoWeb.BudgetLive.FormComponent}
+      id={@budget.id}
+      action={@live_action}
+      budget={@budget}
+      current_user_id={@current_user.id}
+      current_company_id={@current_company.id}
+      patch={~p"/budgets/#{@budget.id}"}
+    />
+  </.page_frame>
+<% else %>
+  <% status = budget_status(@budget) %>
+  <.page_frame
+    page="budget"
+    kind={:deep}
+    parent={{~p"/budgets", "Spending limit"}}
+    current={@budget.name}
+    tray_class="split"
+    data-ui-complex-page
   >
-    {@flash[:error]}
-  </div>
+    <:head>
+      <section class="head" aria-labelledby="bd-h">
+        <h1 class="h1 big" id="bd-h">{@budget.name}</h1>
+        <div class="chips">
+          <span :if={status} class={["chip", elem(status, 0) == :waiting && "st-wait"]}>
+            <.status_word kind={elem(status, 0)} word={elem(status, 1)} />
+          </span>
+          <span :if={@budget.status == "cancelled"} class="tag">Cancelled</span>
+          <.pill navigate={~p"/budgets/#{@budget}/edit"}><.r3_icon name="i-pencil" />Edit</.pill>
+        </div>
+      </section>
+    </:head>
 
-  <%= if @live_action == :edit do %>
-    <section class="space-y-5">
-      <.live_component
-        module={CymphoWeb.BudgetLive.FormComponent}
-        id={@budget.id}
-        title={@page_title}
-        action={@live_action}
-        budget={@budget}
-        current_user_id={@current_user.id}
-        current_company_id={@current_company.id}
-        patch={~p"/budgets/#{@budget.id}"}
-      />
-    </section>
-  <% else %>
-    <.header title={@budget.name}>
-      <:actions>
-        <.app_link
-          navigate={~p"/budgets/#{@budget}/edit"}
-          class="bg-surface hover:bg-surface border border-border text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-            />
-          </svg>
-          Edit Budget
-        </.app_link>
+    <.flash_line flash={@flash} />
 
-        <.app_link
-          navigate={~p"/budgets"}
-          class="text-text-secondary hover:text-text-primary text-sm"
-        >
-          Back to Budgets
-        </.app_link>
-      </:actions>
-    </.header>
-
-    <div class="mb-6">
-      <% {status_class, status_label} = status_badge(@budget) %>
-      <span class={"inline-flex items-center px-3 py-1 rounded-lg text-sm font-510 border #{status_class}"}>
-        {status_label}
-      </span>
-    </div>
-
-    <div
+    <.next_step
       :if={recovery_card?(@budget, @budget_policy)}
+      id="bd-ns-"
       data-testid="budget-recovery-card"
-      class="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] px-5 py-4"
     >
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div class="min-w-0">
-          <h2 class="font-serif text-[15px] font-510 tracking-[-0.01em] text-text-primary">
-            <span class="ui-advanced-only">Hard stop recovery</span>
-            <span class="ui-simple-only">Spending hit its limit</span>
-          </h2>
-          <p class="mt-1 max-w-2xl text-sm leading-5 text-text-secondary">
-            <span class="ui-advanced-only">
-              Runtime blocked new work for this scope. Raise the limit so enforcement can clear, then resume paused agents.
-            </span>
+      <:problem>
+        <.problem_card title="Spending hit its limit" title_id="bd-ns-t">
+          <:eyebrow>
+            Next step<span aria-hidden="true"> · </span>
             <span class="ui-simple-only">
-              Raise the limit first, then resume agents that were paused by the stop.
+              Spending limit
             </span>
+            <span class="ui-advanced-only">Hard stop recovery</span>
+          </:eyebrow>
+          <p class="obj">
+            {@budget.name} reached
+            <span class="mono">{format_currency(@budget.limit_amount, @budget.currency)}</span>
+            for this period.
           </p>
-        </div>
-        <div class="flex shrink-0 flex-wrap gap-2">
-          <.app_link
-            navigate={~p"/budgets/#{@budget}/edit"}
-            data-testid="budget-raise-limit"
-            class="rounded-lg border border-brand/30 bg-brand/15 px-3 py-2 text-xs font-590 text-brand transition-colors hover:bg-brand/25"
-          >
-            Raise limit
-          </.app_link>
-          <.app_link
-            navigate={~p"/agents"}
-            data-testid="budget-resume-after-raise"
-            class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-510 text-amber-200 transition-colors hover:bg-amber-500/15"
-          >
-            Resume after raise
-          </.app_link>
-        </div>
+          <.tick_meter percent={100} class="full">
+            <:legend><span class="z st">agents stop</span></:legend>
+          </.tick_meter>
+        </.problem_card>
+      </:problem>
+      <:resolution>
+        <.ink_card heading="After you raise it" heading_id="bd-ns-i">
+          <.consequences rows={[
+            {:idle, "Raise the limit first, then resume agents that were paused by the stop."}
+          ]} />
+          <.ink_foot verb="raise">
+            <:secondary>
+              <.ghost_pill navigate={~p"/agents"} data-testid="budget-resume-after-raise">
+                Resume after raise
+              </.ghost_pill>
+            </:secondary>
+            <:primary>
+              <.primary_pill
+                navigate={~p"/budgets/#{@budget}/edit"}
+                data-testid="budget-raise-limit"
+              >
+                Raise limit
+              </.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </.ink_card>
+      </:resolution>
+    </.next_step>
+
+    <.band_card id="bd-period-t" title="This period">
+      <div class="lim">
+        <p class="hero">
+          <span class="mono" data-testid="budget-show-used">
+            {format_currency(@budget.spent_amount, @budget.currency)}
+          </span>
+          <span class="u">of {format_currency(@budget.limit_amount, @budget.currency)}</span>
+        </p>
+        <.tick_meter
+          percent={Budgets.Budget.utilization_percentage(@budget)}
+          warn_percent={@budget.threshold_alert_percentage}
+        />
+        <% {left, left_word} = left_parts(@budget) %>
+        <p class="lim-line">
+          <b class="mono">{utilization_percentage(@budget)}</b>
+          used<span aria-hidden="true"> · </span><b class="mono">{left}</b>
+          {left_word}
+        </p>
       </div>
-    </div>
+    </.band_card>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-      <div class="bg-surface border border-border rounded-xl p-6">
-        <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-          Budget Limit
-        </div>
-        <div class="text-2xl font-510 text-text-primary">
-          {format_currency(@budget.limit_amount, @budget.currency)}
-        </div>
-      </div>
-
-      <div class="bg-surface border border-border rounded-xl p-6">
-        <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-          Used
-        </div>
-        <div class="text-2xl font-510 text-amber-400" data-testid="budget-show-used">
-          {format_currency(@budget.spent_amount, @budget.currency)}
-        </div>
-        <p class="mt-1 text-xs text-text-quaternary">From provider token usage this period</p>
-      </div>
-
-      <div class="bg-surface border border-border rounded-xl p-6">
-        <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-          Available
-        </div>
-        <div class="text-2xl font-510 text-green-400">
-          {format_currency(available_amount(@budget), @budget.currency)}
-        </div>
-      </div>
-
-      <div class="bg-surface border border-border rounded-xl p-6">
-        <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-          Utilization
-        </div>
-        <div class="text-2xl font-510 text-brand">
-          {utilization_percentage(@budget)}
-        </div>
-      </div>
-    </div>
-
-    <div class="bg-surface border border-border rounded-xl p-6 mb-8">
-      <div class="flex items-center justify-between mb-2">
-        <h3 class="font-serif text-sm font-510 text-text-primary">Budget Utilization</h3>
-        <span class="text-sm text-text-secondary">{utilization_percentage(@budget)}</span>
-      </div>
-      <div class="w-full bg-black/20 rounded-full h-3">
-        <div
-          class={"h-3 rounded-full #{progress_color(@budget)}"}
-          style={"width: #{min(progress_percentage(@budget), 100)}%"}
-        >
-        </div>
-      </div>
-    </div>
-
-    <div class="bg-surface border border-border rounded-xl overflow-hidden">
-      <div class="px-6 py-4 border-b border-border">
-        <h2 class="font-serif text-lg font-510 text-text-primary">Budget Details</h2>
-      </div>
-
-      <div class="p-6">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-              Scope Type
-            </div>
-            <div class="text-text-primary">{scope_label(@budget)}</div>
-          </div>
-
-          <div>
-            <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-              Currency
-            </div>
-            <div class="text-text-primary">{@budget.currency}</div>
-          </div>
-
-          <div>
-            <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-              Period Start
-            </div>
-            <div class="text-text-primary">{format_datetime(@budget.period_start)}</div>
-          </div>
-
-          <div>
-            <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-              Period End
-            </div>
-            <div class="text-text-primary">{format_datetime(@budget.period_end)}</div>
-          </div>
-
-          <div>
-            <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-              Hard Stop
-            </div>
-            <div class="text-text-primary">{boolean_label(@budget.hard_stop)}</div>
-          </div>
-
-          <div>
-            <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-              Runtime enforcement
-            </div>
-            <div class="text-text-primary" data-testid="budget-runtime-enforcement">
-              {enforcement_label(@budget_policy)}
-            </div>
-          </div>
-
-          <div>
-            <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-              Alert Threshold
-            </div>
-            <div class="text-text-primary">{@budget.threshold_alert_percentage}%</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  <% end %>
-</div>
+    <.band_card id="bd-det-t" title="Details" class="aside">
+      <.kv_list>
+        <:item term="Applies to">{@scope_text}</:item>
+        <:item term="Period">{period_label(@budget) || "No fixed window"}</:item>
+        <:item term="Hard stop">{boolean_label(@budget.hard_stop)}</:item>
+        <:item term="Enforced">
+          <span data-testid="budget-runtime-enforcement">
+            {enforcement_label(@budget_policy)}
+          </span>
+        </:item>
+        <:item term="Warns at">
+          <span class="mono">{@budget.threshold_alert_percentage}%</span>
+        </:item>
+      </.kv_list>
+    </.band_card>
+  </.page_frame>
+<% end %>

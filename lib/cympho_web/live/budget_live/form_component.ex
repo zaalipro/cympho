@@ -185,13 +185,13 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
   defp format_budget_window_date(%DateTime{} = value) do
     value
     |> DateTime.to_date()
-    |> Calendar.strftime("%b %-d, %Y")
+    |> Calendar.strftime("%-d %b %Y")
   end
 
   defp format_budget_window_date(%NaiveDateTime{} = value) do
     value
     |> NaiveDateTime.to_date()
-    |> Calendar.strftime("%b %-d, %Y")
+    |> Calendar.strftime("%-d %b %Y")
   end
 
   defp format_budget_window_date(value) when is_binary(value) do

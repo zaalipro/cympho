@@ -1,294 +1,121 @@
-<div class="space-y-6">
-  <header class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-    <div class="min-w-0">
-      <h1 class="text-headline text-text-primary">{@title}</h1>
-      <p class="mt-2 max-w-2xl text-sm leading-6 text-text-tertiary">
-        Create the spend envelope agents must satisfy before runtime starts.
-      </p>
-    </div>
-    <.link
-      patch={@patch || ~p"/budgets"}
-      class="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-lg border border-border bg-panel px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-    >
-      Cancel
-    </.link>
-  </header>
+<div data-testid="budget-form-shell">
+  <% scope_type = selected_scope_type(@form, @budget) %>
+  <% hard_stop? = hard_stop_enabled?(@form, @budget) %>
 
-  <.form
-    for={@form}
+  <.form_pair
     id="budget-form"
+    for={@form}
     phx-target={@myself}
     phx-change="validate"
     phx-submit="save"
-    class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
+    heading="After you save"
+    verb="save"
   >
-    <% scope_type = selected_scope_type(@form, @budget) %>
-    <% hard_stop? = hard_stop_enabled?(@form, @budget) %>
+    <input type="hidden" name="budget[company_id]" value={@budget.company_id} />
 
-    <.panel class="overflow-hidden">
-      <div class="border-b border-border px-5 py-4 sm:px-6">
-        <p class="ember-eyebrow text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Budget guardrail plan
-        </p>
-        <h2 class="mt-1 text-lg font-590 text-text-primary">Set a spending limit</h2>
-        <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-          Pick a cap, when to warn you, and what it covers.
-        </p>
-      </div>
-
-      <div class="space-y-8 p-5 sm:p-6">
-        <input type="hidden" name="budget[company_id]" value={@budget.company_id} />
-
-        <section class="space-y-4">
-          <div>
-            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Identity and scope
-            </p>
-            <p class="mt-1 text-sm leading-5 text-text-tertiary">
-              Name the guardrail and choose the runtime lane it protects.
-            </p>
-          </div>
-
-          <div class="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.65fr)]">
-            <.input
-              field={@form[:name]}
-              type="text"
-              label="Budget Name"
-              placeholder="Monthly runtime guardrail"
-              required
-            />
-
-            <.input
-              field={@form[:scope_type]}
-              type="select"
-              label="Scope Type"
-              options={[
-                {"Company", "company"},
-                {"Project", "project"},
-                {"Agent", "agent"},
-                {"Custom", "custom"}
-              ]}
-              required
-            />
-          </div>
-
-          <div
-            :if={scope_type == "company"}
-            class="flex min-h-[56px] items-start gap-3 rounded-lg border border-brand/20 bg-brand/10 px-4 py-3 text-sm leading-5 text-text-tertiary"
-          >
+    <.band_card id="bf-limit-t" title="Limit">
+      <div class="flds">
+        <.input
+          field={@form[:name]}
+          type="text"
+          label="Name"
+          placeholder="Monthly runtime guardrail"
+          required
+          wrapper_class="full"
+        />
+        <.input
+          field={@form[:scope_type]}
+          type="select"
+          label="Applies to"
+          options={[
+            {"Company", "company"},
+            {"Project", "project"},
+            {"Agent", "agent"},
+            {"Custom", "custom"}
+          ]}
+          required
+        />
+        <%= if scope_type == "company" do %>
+          <div class="fld bf-scope">
             <input type="hidden" name="budget[scope_id]" value={@budget.company_id} />
-            <span class="hero-building-office-2-mini mt-0.5 h-4 w-4 shrink-0 text-brand"></span>
-            <span class="min-w-0">
-              <span class="block font-510 text-text-primary">Company-wide runtime</span>
-              <span class="mt-0.5 block">
-                Applies to every autonomous preflight in this company.
-              </span>
-            </span>
+            <p class="gl-big">Company-wide runtime</p>
+            <p class="help">Applies to every autonomous preflight in this company.</p>
           </div>
-
+        <% else %>
           <.input
-            :if={scope_type != "company"}
             field={@form[:scope_id]}
             type="text"
             label={scope_id_label(scope_type)}
             value={scoped_scope_id_value(@form, @budget)}
             placeholder={scope_id_placeholder(scope_type)}
           />
-        </section>
-
-        <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5">
-          <div>
-            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Spending limit
-            </p>
-            <p class="mt-1 text-sm leading-5 text-text-tertiary">
-              Define the cap, alert point, and whether work stops at exhaustion.
-            </p>
-          </div>
-
-          <div class="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(150px,180px)]">
-            <.input
-              field={@form[:limit_amount]}
-              type="number"
-              label="Limit Amount"
-              step="0.01"
-              required
-            />
-
-            <.input
-              field={@form[:currency]}
-              type="select"
-              label="Currency"
-              options={[{"USD", "USD"}, {"EUR", "EUR"}, {"GBP", "GBP"}]}
-            />
-          </div>
-
-          <div class="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(190px,220px)] md:items-start">
-            <label class="flex min-h-[76px] items-start gap-3 rounded-lg border border-border bg-panel/80 px-4 py-3">
-              <input type="hidden" name="budget[hard_stop]" value="false" />
-              <input
-                id="budget_hard_stop"
-                type="checkbox"
-                name="budget[hard_stop]"
-                value="true"
-                checked={@form[:hard_stop].value in [true, "true", "on", 1, "1"]}
-                class="mt-0.5 h-4 w-4 rounded border-border bg-subtle text-brand focus:ring-brand/30"
-              />
-              <span>
-                <span class="block text-xs font-510 text-text-secondary">Hard Stop</span>
-                <span class="mt-1 block text-sm leading-5 text-text-tertiary">
-                  Block runtime when the budget is exhausted.
-                </span>
-              </span>
-            </label>
-
-            <.input
-              field={@form[:threshold_alert_percentage]}
-              type="number"
-              label="Alert Threshold (%)"
-              min="1"
-              max="100"
-            />
-          </div>
-        </section>
-
-        <section class="space-y-4">
-          <div>
-            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Budget window
-            </p>
-            <p class="mt-1 text-sm leading-5 text-text-tertiary">
-              Optional dates keep the cap bound to a billing cycle or launch period.
-            </p>
-          </div>
-
-          <details
-            id="budget-window"
-            class="group rounded-lg border border-border bg-surface/80 px-4 py-3"
-            phx-mounted={JS.ignore_attributes("open")}
-          >
-            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 py-1 [&::-webkit-details-marker]:hidden">
-              <span class="min-w-0">
-                <span class="block text-xs font-510 text-text-secondary">Budget Window</span>
-                <span class="mt-0.5 block truncate text-sm leading-5 text-text-tertiary">
-                  {budget_window_summary(@form)}
-                </span>
-              </span>
-              <span class="hero-chevron-down-mini h-4 w-4 shrink-0 text-text-tertiary transition-transform group-open:rotate-180">
-              </span>
-            </summary>
-
-            <div class="mt-4 hidden gap-5 border-t border-border pt-4 group-open:grid md:grid-cols-2">
-              <.input
-                field={@form[:period_start]}
-                type="datetime-local"
-                label="Period Start"
-              />
-
-              <.input
-                field={@form[:period_end]}
-                type="datetime-local"
-                label="Period End"
-              />
-            </div>
-          </details>
-        </section>
-      </div>
-
-      <div
-        data-testid="budget-form-actions"
-        class="flex flex-col gap-3 border-t border-border bg-surface/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
-      >
-        <p class="max-w-2xl text-xs leading-5 text-text-tertiary">
-          <%= if hard_stop? do %>
-            Saving creates a runtime BudgetPolicy that blocks new agent work when spend hits this cap. Agents whose cost can't be priced stay queued until you set their Billing.
-          <% else %>
-            Saving creates a warn-only BudgetPolicy — agents keep spending after this cap.
-          <% end %>
-        </p>
-        <.button type="submit" variant="primary" class="min-h-[40px] w-full shrink-0 sm:w-auto">
-          Save Budget
-        </.button>
-      </div>
-    </.panel>
-
-    <aside class="space-y-4 lg:sticky lg:top-6">
-      <section
-        data-testid="budget-setup-checklist"
-        class="rounded-xl border border-border bg-panel p-4 shadow-card"
-      >
-        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Setup checklist
-        </p>
-        <div class="mt-4 space-y-3">
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
-              1
-            </span>
-            <div>
-              <p class="text-sm font-590 text-text-primary">Choose the scope</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Company budgets protect every autonomous run by default.
-              </p>
-            </div>
-          </div>
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
-              2
-            </span>
-            <div>
-              <p class="text-sm font-590 text-text-primary">Set the spend cap</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Keep the limit tight enough to catch provider-cost surprises early.
-              </p>
-            </div>
-          </div>
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
-              3
-            </span>
-            <div>
-              <p class="text-sm font-590 text-text-primary">Save before launch</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                <%= if hard_stop? do %>
-                  Runtime preflight blocks new runs once this BudgetPolicy is exhausted. An agent whose cost can't be priced stays queued until you set its Billing on the agent's Configuration tab.
-                <% else %>
-                  Runtime tracks spend and warns — it will not stop agents without hard stop.
-                <% end %>
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section
-        data-testid="budget-preflight-behavior"
-        class={[
-          "rounded-xl border p-4",
-          if(hard_stop?,
-            do: "border-brand/25 bg-brand/10",
-            else: "border-amber-500/25 bg-amber-500/10"
-          )
-        ]}
-      >
-        <p class={[
-          "ember-eyebrow text-[11px] font-590 uppercase tracking-[0.14em]",
-          if(hard_stop?, do: "text-brand", else: "text-amber-200")
-        ]}>
-          Preflight behavior
-        </p>
-        <%= if hard_stop? do %>
-          <p class="mt-2 text-sm font-590 text-text-primary">Hard stop (block) by default</p>
-          <p class="mt-1 text-xs leading-5 text-text-tertiary">
-            Once the limit is hit, agents stop starting new work.
-          </p>
-        <% else %>
-          <p class="mt-2 text-sm font-590 text-text-primary">Warn only — agents keep spending</p>
-          <p class="mt-1 text-xs leading-5 text-text-tertiary">
-            Spend is tracked and alerts fire, but runtime will not pause agents at this cap.
-          </p>
         <% end %>
-      </section>
-    </aside>
-  </.form>
+        <.input field={@form[:limit_amount]} type="number" label="Amount" step="0.01" required />
+        <.input
+          field={@form[:currency]}
+          type="select"
+          label="Currency"
+          options={[{"USD", "USD"}, {"EUR", "EUR"}, {"GBP", "GBP"}]}
+        />
+      </div>
+    </.band_card>
+
+    <.band_card id="bf-reach-t" title="When it is reached">
+      <div class="flds">
+        <.input
+          field={@form[:hard_stop]}
+          type="checkbox"
+          label="Hard stop"
+          help="Blocks new agent work when spend reaches the limit."
+          wrapper_class="full"
+        />
+        <.input
+          field={@form[:threshold_alert_percentage]}
+          type="number"
+          label="Warn at (%)"
+          min="1"
+          max="100"
+        />
+      </div>
+    </.band_card>
+
+    <details
+      id="budget-window"
+      class="card tech ui-advanced-only"
+      phx-mounted={JS.ignore_attributes("open")}
+    >
+      <summary>
+        <span class="h2">Period <span class="cx">{budget_window_summary(@form)}</span></span>
+        <.r3_icon name="i-chev-down" />
+      </summary>
+      <div class="flds">
+        <.input field={@form[:period_start]} type="datetime-local" label="Starts" />
+        <.input field={@form[:period_end]} type="datetime-local" label="Ends" />
+      </div>
+    </details>
+
+    <:effect>
+      <div class="bf-effect" data-testid="budget-preflight-behavior">
+        <.consequences
+          :if={hard_stop?}
+          rows={[{:stopped, "Hard stop — agents stop starting new work once spend reaches it."}]}
+        />
+        <.consequences
+          :if={!hard_stop?}
+          rows={[{:waiting, "Warn only — agents keep spending after this cap."}]}
+        />
+        <.ink_note :if={hard_stop?}>
+          An agent whose cost can't be priced stays queued until you set its Billing.
+        </.ink_note>
+      </div>
+    </:effect>
+    <:secondary>
+      <.ghost_pill patch={@patch || ~p"/budgets"}>Cancel</.ghost_pill>
+    </:secondary>
+    <:primary>
+      <.primary_pill type="submit" phx-disable-with="Saving…">
+        {if @action == :new, do: "Create limit", else: "Save limit"}
+      </.primary_pill>
+    </:primary>
+  </.form_pair>
 </div>
