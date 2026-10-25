@@ -223,6 +223,44 @@ defmodule CymphoWeb.IssueLive.R3TaskTest do
       assert ["thread-earlier"] = doc |> Floki.find("details.earlier") |> Floki.attribute("id")
     end
 
+    # Pausing the task inserts the Paused chip just before the brief; unkeyed, the
+    # patch replaced the brief (closed) instead of keeping the reader's element.
+    test "the brief keeps its element when the task is paused elsewhere",
+         %{conn: conn, nw: nw} do
+      {:ok, view, _html} = open(conn, nw, "NW-6")
+      brief_id = fn doc -> doc |> Floki.find("details.brief") |> Floki.attribute("id") end
+      assert brief_id.(doc(view)) == ["task-brief"]
+
+      {:ok, _} =
+        nw.issues["NW-6"].id
+        |> Issues.get_issue!()
+        |> Issues.pause_issue_runtime(reason: "Paused from another page")
+
+      wait_until(fn -> assert text(doc(view), ".head .chips") =~ "Paused" end)
+      assert brief_id.(doc(view)) == ["task-brief"]
+    end
+
+    # Answering switches the Next step to another branch, which gets a new
+    # LiveView element key; the patch then replaced every unkeyed element after
+    # it, so the phone's Details card closed.
+    test "the phone Details card keeps its element when the Next step changes",
+         %{conn: conn, nw: nw} do
+      {:ok, view, _html} = open(conn, nw, "NW-6")
+      details_id = fn doc -> doc |> Floki.find("details.det-m") |> Floki.attribute("id") end
+      assert details_id.(doc(view)) == ["task-details-m"]
+
+      view
+      |> form(".next form.ink", %{
+        "_id" => nw.questions["Q1"].id,
+        "response" => "Email the customer first"
+      })
+      |> render_submit()
+
+      doc = doc(view)
+      assert text(doc, ".next .paper .nt") == "Nothing needed from you"
+      assert details_id.(doc) == ["task-details-m"]
+    end
+
     test "Back appears only for an allow-listed origin other than the parent", %{
       conn: conn,
       nw: nw

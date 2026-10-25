@@ -842,6 +842,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             </div>
             <details
               :if={pr_quality(@issue) && pr_quality(@issue)["status"] == "attention"}
+              id="issue-pr-quality-repair"
               class="rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-2.5 py-2 text-caption text-amber-100"
               phx-mounted={JS.ignore_attributes("open")}
             >
@@ -874,7 +875,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
                   <p class="uppercase tracking-[0.08em] text-amber-100/55">Suggested commands</p>
                   <pre class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded border border-amber-500/15 bg-black/25 px-2 py-1 font-mono text-[10px] text-amber-50">{pr_repair_commands(repair_packet)}</pre>
                 </div>
-                <details phx-mounted={JS.ignore_attributes("open")}>
+                <details id="issue-pr-body-template" phx-mounted={JS.ignore_attributes("open")}>
                   <summary class="cursor-pointer text-amber-100/80">PR body template</summary>
                   <pre class="mt-1 max-h-44 overflow-auto whitespace-pre-wrap rounded border border-amber-500/15 bg-black/25 px-2 py-1 font-mono text-[10px] text-amber-50">{repair_packet.body_template}</pre>
                 </details>

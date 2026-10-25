@@ -256,6 +256,7 @@
 
             <details
               :if={capability_count(plugin.capabilities) > 0}
+              id={"plugin-capabilities-#{plugin.id}"}
               class="group/cap mt-2.5 max-w-3xl"
               phx-mounted={JS.ignore_attributes("open")}
             >

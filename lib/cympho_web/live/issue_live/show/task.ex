@@ -693,7 +693,12 @@ defmodule CymphoWeb.IssueLive.Show.Task do
 
   def task_details(assigns) do
     ~H"""
-    <details :if={@mobile} class="card det-m" phx-mounted={JS.ignore_attributes("open")}>
+    <details
+      :if={@mobile}
+      id="task-details-m"
+      class="card det-m"
+      phx-mounted={JS.ignore_attributes("open")}
+    >
       <summary><span class="h2">Details</span> <.r3_icon name="i-chev-down" /></summary>
       <.details_list issue={@issue} v={@v} cost={@cost} />
     </details>

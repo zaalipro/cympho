@@ -293,6 +293,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
 
       <details
         :if={@compact}
+        id={"#{@id}-proxy"}
         class="rounded-md border border-border bg-panel/70 px-3 py-2 text-xs text-text-secondary"
         phx-mounted={JS.ignore_attributes("open")}
       >

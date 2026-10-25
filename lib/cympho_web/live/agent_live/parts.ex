@@ -172,6 +172,7 @@ defmodule CymphoWeb.AgentLive.Parts do
           <p class="obj"><b :if={@lead}>{@lead}</b>{@rest}</p>
           <details
             :if={@item.diagnostic}
+            id="paused-reason"
             class="reason"
             phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
           >
@@ -246,6 +247,7 @@ defmodule CymphoWeb.AgentLive.Parts do
           </p>
           <details
             :if={@reason}
+            id="retry-reason"
             class="reason"
             phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
           >

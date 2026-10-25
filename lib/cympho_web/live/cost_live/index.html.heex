@@ -46,6 +46,7 @@
       <.task_table :if={@top_tasks != []} rows={@top_tasks} total={@window_total} />
       <details
         :if={@more_tasks != []}
+        id="cost-more-tasks"
         class="earlier more"
         phx-mounted={JS.ignore_attributes("open")}
       >

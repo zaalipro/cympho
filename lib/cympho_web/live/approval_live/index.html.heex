@@ -251,6 +251,7 @@
 
               <details
                 :if={approval.issues != []}
+                id={"approval-issues-#{approval.id}"}
                 class="group mt-3"
                 phx-mounted={JS.ignore_attributes("open")}
               >

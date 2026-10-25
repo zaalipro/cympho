@@ -252,6 +252,7 @@
 
         <div class="flex shrink-0 justify-end self-end sm:self-auto">
           <.overflow_menu
+            id={"secret-menu-#{secret.id}"}
             label={"Manage #{secret.key}"}
             trigger_text="Manage"
             data-testid={"secret-manage-menu-#{secret.id}"}

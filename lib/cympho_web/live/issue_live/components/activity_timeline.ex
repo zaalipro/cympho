@@ -265,6 +265,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
               </p>
               <details
                 :if={adapter_error.detail not in [nil, ""]}
+                id={"entry-#{entry.type}-#{entry.id}-error"}
                 class="mt-2 text-xs text-text-tertiary"
                 phx-mounted={JS.ignore_attributes("open")}
               >
@@ -493,6 +494,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
             </p>
             <details
               :if={entry.data.tool_result not in [nil, ""]}
+              id={"entry-#{entry.type}-#{entry.id}-result"}
               class="mt-2 rounded border border-border/50 bg-canvas px-2 py-1 text-xs text-text-tertiary"
               phx-mounted={JS.ignore_attributes("open")}
             >

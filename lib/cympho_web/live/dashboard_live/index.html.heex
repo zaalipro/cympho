@@ -6,7 +6,7 @@
   <:header_end :if={@runtime_controls_allowed}>
     <%!-- Advanced only: the company switch in the rail holds these for Simple. --%>
     <div class="ui-advanced-only">
-      <.overflow_menu label="Company controls">
+      <.overflow_menu id="company-controls-menu" label="Company controls">
         <.menu_item
           :if={@company && @autonomy_status == :active && @operating_mode != :low_power}
           phx-click="low_power_company"
@@ -139,6 +139,7 @@
 
       <details
         :if={@later_actions != []}
+        id="later-actions"
         class="group mt-3 px-1"
         phx-mounted={JS.ignore_attributes("open")}
       >

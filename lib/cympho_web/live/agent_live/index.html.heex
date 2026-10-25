@@ -111,6 +111,7 @@
 
   <details
     :if={@team_size > 0}
+    id="team-runs-24h"
     class="card tech runs24"
     phx-mounted={JS.ignore_attributes("open")}
   >
@@ -453,6 +454,7 @@
               Open
             </.app_link>
             <.overflow_menu
+              id={"agent-menu-#{agent.id}"}
               label={"Manage #{agent.name}"}
               data-testid={"agent-manage-menu-#{agent.id}"}
             >

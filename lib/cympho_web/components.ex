@@ -461,6 +461,7 @@ defmodule CymphoWeb.Components do
     """
   end
 
+  attr :id, :string, required: true, doc: "unique per menu; from the row's item in a list"
   attr :label, :string, default: "Actions"
   attr :align, :string, default: "right"
   attr :class, :any, default: nil
@@ -471,6 +472,7 @@ defmodule CymphoWeb.Components do
   def overflow_menu(assigns) do
     ~H"""
     <details
+      id={@id}
       class={["cympho-menu relative", @class]}
       phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
     >

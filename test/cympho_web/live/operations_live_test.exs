@@ -261,6 +261,65 @@ defmodule CymphoWeb.OperationsLiveTest do
       refute html =~ "Process has unhealthy agents"
     end
 
+    # The candidate rows have no id, so morphdom matches them by position: after
+    # "Run this one first" moves B ahead of A, an unkeyed Checks or focus
+    # disclosure opened on B would show A's (and A would get B's). Keyed by the
+    # candidate, each disclosure moves with its own row.
+    test "each launch candidate's disclosures move with it when the queue reorders", %{
+      conn: conn
+    } do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn, %{role: "admin"})
+      conn = live_session_conn(conn, user, company)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Reorder Runtime Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      [a, b] =
+        for {title, priority} <- [{"Candidate A", :high}, {"Candidate B", :low}] do
+          {:ok, issue} =
+            Issues.create_issue(%{
+              title: title,
+              status: :todo,
+              priority: priority,
+              company_id: company.id,
+              assignee_id: agent.id
+            })
+
+          issue
+        end
+
+      {:ok, view, _html} = live(conn, "/operations")
+
+      ids = fn prefix ->
+        view
+        |> render()
+        |> Floki.parse_document!()
+        |> Floki.find(~s(details[id^="#{prefix}"]))
+        |> Floki.attribute("id")
+      end
+
+      assert ids.("runtime-preflight-checks-") ==
+               ["runtime-preflight-checks-#{a.id}", "runtime-preflight-checks-#{b.id}"]
+
+      assert ids.("runtime-launch-focus-") ==
+               ["runtime-launch-focus-#{a.id}", "runtime-launch-focus-#{b.id}"]
+
+      view |> element("#runtime-queue-dispatch-focus-#{b.id}") |> render_click()
+
+      assert ids.("runtime-preflight-checks-") ==
+               ["runtime-preflight-checks-#{b.id}", "runtime-preflight-checks-#{a.id}"]
+
+      assert ids.("runtime-launch-focus-") ==
+               ["runtime-launch-focus-#{b.id}", "runtime-launch-focus-#{a.id}"]
+    end
+
     test "keeps a cleared dispatch focus candidate visible in a crowded preview", %{conn: conn} do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
       conn = live_session_conn(conn, user, company)

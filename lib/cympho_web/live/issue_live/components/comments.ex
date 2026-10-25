@@ -28,7 +28,11 @@ defmodule CymphoWeb.IssueLive.Show.Comments do
             />
           </div>
           <div class="flex items-end gap-2">
-            <details class="cympho-menu relative" phx-mounted={JS.ignore_attributes("open")}>
+            <details
+              id="comment-templates-menu"
+              class="cympho-menu relative"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
               <summary
                 class="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-lg border border-border bg-surface-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
                 aria-label="Comment templates"

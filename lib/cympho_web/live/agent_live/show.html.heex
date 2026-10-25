@@ -240,7 +240,7 @@
       </.quiet_empty>
     </section>
 
-    <details class="card tech" phx-mounted={JS.ignore_attributes("open")}>
+    <details id="agent-tech-details" class="card tech" phx-mounted={JS.ignore_attributes("open")}>
       <summary>
         <span class="h2">Technical details</span> <.r3_icon name="i-chev-down" />
       </summary>
@@ -1016,6 +1016,7 @@
                     — Eval coverage: {instruction_studio.eval_coverage.summary}</span>
               </span>
               <details
+                id="instruction-studio-help"
                 class="help-pop group relative inline-flex"
                 phx-mounted={JS.ignore_attributes("open")}
               >
@@ -1039,6 +1040,7 @@
               {instruction_studio.summary}
             </p>
             <details
+              id="instruction-eval-details"
               class="mt-3 rounded-lg border border-border bg-surface"
               phx-mounted={JS.ignore_attributes("open")}
             >
@@ -1163,6 +1165,7 @@
                    reference text Cympho injects for you — nothing here is edited
                    on this page, so each one opens on demand. --%>
             <details
+              id="required-final-comment"
               class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
               phx-mounted={JS.ignore_attributes("open")}
             >
@@ -1200,6 +1203,7 @@
               </div>
             </details>
             <details
+              id="turn-guide"
               class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
               phx-mounted={JS.ignore_attributes("open")}
             >
@@ -1290,6 +1294,7 @@
           <div class="mt-3 grid gap-2 lg:grid-cols-2">
             <details
               :for={section <- instruction_studio.effective_sections}
+              id={"prompt-section-#{String.replace(section.label, " ", "-")}"}
               class={[
                 "rounded-lg border px-3 py-2",
                 studio_card_class(section.status)
@@ -1413,7 +1418,11 @@
               <%!-- The Apply button is the interface; the patch text only
                      matters when you want to read it first. Ten identical
                      "read the text" links became one marker per row. --%>
-              <details class="mt-3" phx-mounted={JS.ignore_attributes("open")}>
+              <details
+                id={"instruction-patch-text-#{patch.id}"}
+                class="mt-3"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
                 <summary
                   class="inline-flex cursor-pointer list-none items-center text-text-quaternary hover:text-text-secondary [&::-webkit-details-marker]:hidden"
                   title="Read the patch text"
