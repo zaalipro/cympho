@@ -105,6 +105,49 @@ defmodule CymphoWeb.SkillLiveTest do
       assert {:ok, %{enabled: true}} = Skills.get_company_skill(company.id, skill.id)
       assert text(main_doc(view), ".flash-line .flash-msg") == "Skill enabled"
     end
+
+    # v7 hire r2 (Argon IMP-HIRE-R2-1): a one-option Company select is noise.
+    test "the company filter shows only when there is another company to pick", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, view, _html} = live(conn, "/skills")
+      refute has_element?(view, "#skill-company-filter")
+
+      other_company = create_company("second")
+
+      {:ok, _membership} =
+        Companies.create_membership(%{
+          user_id: Plug.Conn.get_session(conn, :user_id),
+          company_id: other_company.id,
+          role: "member"
+        })
+
+      {:ok, _skill} =
+        Skills.create_skill(%{
+          identifier: "second-skill-#{System.unique_integer([:positive])}",
+          name: "Second Company Skill",
+          version: "1.0.0",
+          manifest: valid_manifest("Second Company Skill", []),
+          enabled: true,
+          company_id: other_company.id
+        })
+
+      {:ok, view, html} = live(conn, "/skills")
+
+      assert Floki.attribute(
+               main_doc(view),
+               ~s(#skill-company-filter select[name="company_id"] option),
+               "value"
+             )
+             |> Enum.sort() == Enum.sort([company.id, other_company.id])
+
+      refute html =~ "Second Company Skill"
+
+      assert view
+             |> form("#skill-company-filter", %{company_id: other_company.id})
+             |> render_change() =~ "Second Company Skill"
+    end
   end
 
   describe "SkillLive.Show" do

@@ -6,6 +6,7 @@
   <.flash_line flash={@flash} />
 
   <form
+    :if={length(@companies) > 1}
     id="skill-company-filter"
     phx-change="filter_company"
     phx-submit="filter_company"
