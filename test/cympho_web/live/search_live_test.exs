@@ -1,6 +1,8 @@
 defmodule CymphoWeb.SearchLiveTest do
   use CymphoWeb.LiveCase, async: true
 
+  import CymphoWeb.R3PageHelpers
+
   alias Cympho.Companies
   alias Cympho.Goals
   alias Cympho.Issues
@@ -9,13 +11,29 @@ defmodule CymphoWeb.SearchLiveTest do
   describe "Search page" do
     test "renders starter command actions before a query", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/search")
+      doc = main_doc(html)
+
+      # r3 (v7 G6): an unfiled root page; the filters sit behind one Filter chip.
+      assert_r3_page(doc, page: "search", h1: "Search", kind: :root, primaries: 0)
+      assert Floki.find(doc, ~s(form[phx-submit="search"] input[name="search[query]"])) != []
+      assert Floki.find(doc, ~s(details#search-filter [data-testid="search-core-filters"])) != []
+      assert Floki.find(doc, ~s(details#search-filter #search-advanced-filters)) != []
+      # The tabs are segmented buttons; All is pressed.
+      assert texts(doc, ~s(.seg button[aria-pressed="true"])) == ["All"]
 
       assert html =~ ~s(data-testid="search-command")
       assert html =~ "Search Overview"
       assert html =~ "Ready for scoped company search."
-      assert html =~ "New issue"
+      assert html =~ "New task"
       assert html =~ "Board"
       assert html =~ "Operations"
+      # Operations is an Advanced-only page: its link stays Advanced-only.
+      assert [_ | _] =
+               doc
+               |> Floki.find(~s([data-testid="search-results-empty"] .ui-advanced-only a))
+               |> Floki.attribute("href")
+               |> Enum.filter(&(&1 == "/operations"))
+
       assert html =~ "No top match."
       assert html =~ ~s(data-testid="search-core-filters")
       assert html =~ ~s(data-testid="search-advanced-filters")
@@ -24,7 +42,7 @@ defmodule CymphoWeb.SearchLiveTest do
       refute advanced_filter_open?(html)
       assert html =~ ~s(data-testid="search-results-empty")
       assert html =~ "Search is ready"
-      assert html =~ "Jump to current work, open the board, or create the next issue from here."
+      assert html =~ "Jump to current work, open the board, or create the next task from here."
     end
 
     test "opens advanced filters when an advanced filter is active", %{conn: conn} do
@@ -97,16 +115,20 @@ defmodule CymphoWeb.SearchLiveTest do
       {:ok, _view, html} = live(conn, "/search?q=#{needle}")
 
       # The subtitle used to end in "one scoped command surface", matching the
-      # "COMMAND SURFACE" eyebrow above it.
-      assert html =~ "Find issues, people, projects, and goals in this company."
+      # "COMMAND SURFACE" eyebrow above it; r3 keeps the purpose as the field's label.
+      assert html =~ "Find tasks, people, projects and goals in this company"
       refute html =~ "command surface"
-      assert html =~ "Filters"
+      assert html =~ ~s(id="search-filter")
       assert html =~ ~s(data-testid="search-command")
       assert html =~ "Search Overview"
-      assert html =~ "3 total matches. Top match: Issue. No filters active."
+      assert html =~ "3 total matches. Top match: Task. No filters active."
       assert html =~ "Open top result"
-      assert html =~ "Focus issues"
+      assert html =~ "Focus tasks"
       assert html =~ "Results"
+
+      # Results are rows: a title link, the kind as a tag.
+      doc = main_doc(html)
+      assert texts(doc, "#search-results .lrow .lr-tr .tag") == ["Task", "Project", "Goal"]
       assert html =~ "#{needle} current issue"
       assert html =~ "#{needle} project"
       assert html =~ "#{needle} goal"
@@ -115,7 +137,7 @@ defmodule CymphoWeb.SearchLiveTest do
 
       {:ok, _view, issue_tab_html} = live(conn, "/search?q=#{needle}&tab=issues")
 
-      assert issue_tab_html =~ "1 issue match for &quot;#{needle}&quot;"
+      assert issue_tab_html =~ "1 task match for &quot;#{needle}&quot;"
     end
 
     test "finds an issue by ticket identifier", %{conn: conn, current_company: company} do
@@ -163,8 +185,8 @@ defmodule CymphoWeb.SearchLiveTest do
       assert html =~ "No matches inside these filters"
       assert html =~ "The query exists, but the active filters exclude every matching item."
       assert html =~ "Clear filters"
-      assert html =~ "New issue"
-      assert html =~ "Issues"
+      assert html =~ "New task"
+      assert html =~ "Tasks"
       refute html =~ "#{needle} todo issue"
     end
   end

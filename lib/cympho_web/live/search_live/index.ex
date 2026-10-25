@@ -178,23 +178,14 @@ defmodule CymphoWeb.SearchLive.Index do
     %{
       active: false,
       result_mix: [
-        %{key: :issues, label: "Issues", count: 0, url: ~p"/search?tab=issues"},
+        %{key: :issues, label: "Tasks", count: 0, url: ~p"/search?tab=issues"},
         %{key: :agents, label: "Agents", count: 0, url: ~p"/search?tab=agents"},
         %{key: :projects, label: "Projects", count: 0, url: ~p"/search?tab=projects"},
         %{key: :goals, label: "Goals", count: 0, url: ~p"/search?tab=goals"}
       ],
       summary: search_command_summary("", 0, filters, nil),
       top_result: nil,
-      actions: [
-        %{label: "New issue", url: ~p"/issues/new", tone: :primary, icon: "hero-plus-mini"},
-        %{label: "Board", url: ~p"/kanban", tone: :neutral, icon: "hero-view-columns-mini"},
-        %{
-          label: "Operations",
-          url: ~p"/operations",
-          tone: :neutral,
-          icon: "hero-command-line-mini"
-        }
-      ]
+      actions: starter_search_actions()
     }
   end
 
@@ -243,7 +234,7 @@ defmodule CymphoWeb.SearchLive.Index do
 
   defp result_mix(socket, results) do
     [
-      {:issues, "Issues", length(results.issues)},
+      {:issues, "Tasks", length(results.issues)},
       {:agents, "Agents", length(results.agents)},
       {:projects, "Projects", length(results.projects)},
       {:goals, "Goals", length(results.goals)}
@@ -255,11 +246,10 @@ defmodule CymphoWeb.SearchLive.Index do
 
   defp top_search_result(%{issues: [issue | _]}) do
     %{
-      kind: "Issue",
+      kind: "Task",
       title: issue.title,
       subtitle: issue_result_subtitle(issue),
-      url: ~p"/issues/#{issue.id}",
-      icon: "hero-document-text-mini"
+      url: ~p"/issues/#{issue.id}"
     }
   end
 
@@ -269,8 +259,7 @@ defmodule CymphoWeb.SearchLive.Index do
       title: agent.name,
       subtitle:
         [Agent.role_label(agent.role), format_search_value(agent.status)] |> compact_join(" / "),
-      url: ~p"/agents/#{agent.id}",
-      icon: "hero-sparkles-mini"
+      url: ~p"/agents/#{agent.id}"
     }
   end
 
@@ -279,8 +268,7 @@ defmodule CymphoWeb.SearchLive.Index do
       kind: "Project",
       title: project.name,
       subtitle: [project.prefix, format_search_value(project.status)] |> compact_join(" / "),
-      url: ~p"/projects/#{project.id}",
-      icon: "hero-folder-mini"
+      url: ~p"/projects/#{project.id}"
     }
   end
 
@@ -291,8 +279,7 @@ defmodule CymphoWeb.SearchLive.Index do
       subtitle:
         [format_search_value(goal.status), format_search_value(goal.priority)]
         |> compact_join(" / "),
-      url: ~p"/goals/#{goal.id}",
-      icon: "hero-flag-mini"
+      url: ~p"/goals/#{goal.id}"
     }
   end
 
@@ -336,22 +323,14 @@ defmodule CymphoWeb.SearchLive.Index do
         starter_search_actions()
 
       total_count == 0 and filters_active?(socket.assigns.filters) ->
-        [
-          %{label: "Clear filters", url: clear_url, tone: :primary, icon: "hero-x-mark-mini"},
-          %{label: "New issue", url: ~p"/issues/new", tone: :neutral, icon: "hero-plus-mini"},
-          %{label: "Issues", url: ~p"/issues", tone: :neutral, icon: "hero-document-text-mini"}
-        ]
+        [action("Clear filters", clear_url), new_task_action(), action("Tasks", ~p"/issues")]
 
       total_count == 0 ->
-        [
-          %{label: "New issue", url: ~p"/issues/new", tone: :primary, icon: "hero-plus-mini"},
-          %{label: "Issues", url: ~p"/issues", tone: :neutral, icon: "hero-document-text-mini"},
-          %{label: "Board", url: ~p"/kanban", tone: :neutral, icon: "hero-view-columns-mini"}
-        ]
+        [new_task_action(), action("Tasks", ~p"/issues"), action("Board", ~p"/kanban")]
 
       true ->
         [
-          %{label: "Open top result", url: top_result.url, tone: :primary, icon: top_result.icon},
+          action("Open top result", top_result.url),
           dominant_result_action(result_mix, active_tab),
           maybe_clear_filters_action(socket, clear_url)
         ]
@@ -360,17 +339,22 @@ defmodule CymphoWeb.SearchLive.Index do
     end
   end
 
+  # Operations is an Advanced-only page (v7 §7): its link carries `advanced`.
   defp starter_search_actions do
     [
-      %{label: "New issue", url: ~p"/issues/new", tone: :primary, icon: "hero-plus-mini"},
-      %{label: "Board", url: ~p"/kanban", tone: :neutral, icon: "hero-view-columns-mini"},
-      %{label: "Operations", url: ~p"/operations", tone: :neutral, icon: "hero-command-line-mini"}
+      new_task_action(),
+      action("Board", ~p"/kanban"),
+      %{action("Operations", ~p"/operations") | advanced: true}
     ]
   end
 
+  defp new_task_action, do: action("New task", ~p"/issues/new")
+
+  defp action(label, url), do: %{label: label, url: url, advanced: false}
+
   defp maybe_clear_filters_action(socket, clear_url) do
     if filters_active?(socket.assigns.filters) do
-      %{label: "Clear filters", url: clear_url, tone: :neutral, icon: "hero-x-mark-mini"}
+      action("Clear filters", clear_url)
     end
   end
 
@@ -386,12 +370,7 @@ defmodule CymphoWeb.SearchLive.Index do
         nil
 
       %{label: label, url: url} ->
-        %{
-          label: "Focus #{String.downcase(label)}",
-          url: url,
-          tone: :neutral,
-          icon: "hero-funnel-mini"
-        }
+        action("Focus #{String.downcase(label)}", url)
     end
   end
 
@@ -411,38 +390,23 @@ defmodule CymphoWeb.SearchLive.Index do
     |> String.capitalize()
   end
 
-  defp search_command_action_class(:primary) do
-    "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
-  end
+  defp tab_count(_results, :all, total_count), do: total_count
+  defp tab_count(results, tab, _total_count), do: length(Map.fetch!(results, tab))
 
-  defp search_command_action_class(_tone) do
-    "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-  end
+  defp tab_label(:all), do: "All"
+  defp tab_label(:issues), do: "Tasks"
+  defp tab_label(:agents), do: "Agents"
+  defp tab_label(:projects), do: "Projects"
+  defp tab_label(:goals), do: "Goals"
 
-  defp search_mix_card_class(count) when count > 0 do
-    "flex min-h-24 min-w-0 flex-col justify-between rounded-lg border border-primary/25 bg-primary/10 px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/15"
-  end
+  # The results a tab lists of one kind: All lists every kind, in this order.
+  defp tab_items(results, active_tab, kind) when active_tab in [:all, kind],
+    do: Map.fetch!(results, kind)
 
-  defp search_mix_card_class(_count) do
-    "flex min-h-24 min-w-0 flex-col justify-between rounded-lg border border-border bg-surface-1 px-4 py-3 text-left transition-colors hover:bg-surface-2"
-  end
+  defp tab_items(_results, _active_tab, _kind), do: []
 
-  defp search_mix_count_class(count) when count > 0,
-    do: "mt-4 font-mono text-2xl font-590 text-primary"
-
-  defp search_mix_count_class(_count),
-    do: "mt-4 font-mono text-2xl font-590 text-text-quaternary"
-
-  defp tab_count(_results, :all), do: nil
-
-  defp tab_count(results, tab) do
-    case tab do
-      :issues -> length(results.issues)
-      :agents -> length(results.agents)
-      :projects -> length(results.projects)
-      :goals -> length(results.goals)
-    end
-  end
+  defp tab_empty?(_results, :all), do: false
+  defp tab_empty?(results, tab), do: Map.fetch!(results, tab) == []
 
   defp result_heading(results, total_count, active_tab, query) do
     count = active_result_count(results, total_count, active_tab)
@@ -453,13 +417,13 @@ defmodule CymphoWeb.SearchLive.Index do
 
   defp active_result_count(_results, total_count, :all), do: total_count
 
-  defp active_result_count(results, _total_count, active_tab),
-    do: tab_count(results, active_tab) || 0
+  defp active_result_count(results, total_count, active_tab),
+    do: tab_count(results, active_tab, total_count)
 
   defp active_result_label(:all, 1), do: "match"
   defp active_result_label(:all, _count), do: "matches"
-  defp active_result_label(:issues, 1), do: "issue match"
-  defp active_result_label(:issues, _count), do: "issue matches"
+  defp active_result_label(:issues, 1), do: "task match"
+  defp active_result_label(:issues, _count), do: "task matches"
   defp active_result_label(:agents, 1), do: "agent match"
   defp active_result_label(:agents, _count), do: "agent matches"
   defp active_result_label(:projects, 1), do: "project match"
@@ -469,9 +433,8 @@ defmodule CymphoWeb.SearchLive.Index do
 
   defp result_empty_state("", _total_count, _filters, actions) do
     %{
-      icon: "hero-magnifying-glass-mini",
       title: "Search is ready",
-      detail: "Jump to current work, open the board, or create the next issue from here.",
+      detail: "Jump to current work, open the board, or create the next task from here.",
       actions: actions
     }
   end
@@ -479,17 +442,15 @@ defmodule CymphoWeb.SearchLive.Index do
   defp result_empty_state(query, 0, filters, actions) do
     if filters_active?(filters) do
       %{
-        icon: "hero-funnel-mini",
         title: "No matches inside these filters",
         detail: "The query exists, but the active filters exclude every matching item.",
         actions: actions
       }
     else
       %{
-        icon: "hero-magnifying-glass-mini",
         title: ~s(No company work matches "#{query}"),
         detail:
-          "Create a new issue if this is new work, or open the board to inspect active queues.",
+          "Create a new task if this is new work, or open the board to inspect active queues.",
         actions: actions
       }
     end
@@ -502,11 +463,35 @@ defmodule CymphoWeb.SearchLive.Index do
 
   defp parse_tab(_), do: :all
 
-  defp agent_status_dot_class(:running), do: "bg-emerald-400"
-  defp agent_status_dot_class(:error), do: "bg-red-400"
-  defp agent_status_dot_class(:sleeping), do: "bg-amber-400"
-  defp agent_status_dot_class(:offline), do: "bg-text-quaternary"
-  defp agent_status_dot_class(_status), do: "bg-text-tertiary"
+  # A task's state in the owner's words (the Task page's).
+  @task_states %{
+    backlog: "Later",
+    todo: "To do",
+    in_progress: "In progress",
+    in_review: "In review",
+    blocked: "Blocked",
+    done: "Done",
+    cancelled: "Cancelled"
+  }
+  defp task_state(status), do: Map.get(@task_states, status) || format_search_value(status)
+
+  defp agent_line(%{title: title}) when is_binary(title) and title != "", do: title
+  defp agent_line(agent), do: Agent.role_label(agent.role)
+
+  attr :result, :map, required: true
+
+  # One line, so the underline ends with the title (a formatted multi-line link renders a trailing space).
+  defp top_link(assigns) do
+    ~H"""
+    <.link class="ul" navigate={@result.url}>{@result.title}</.link>
+    """
+  end
+
+  defp snippet(text) when is_binary(text) and text != "" do
+    if String.length(text) > 90, do: String.slice(text, 0, 90) <> "…", else: text
+  end
+
+  defp snippet(_text), do: nil
 
   defp filters_active?(filters) do
     Enum.any?(filters, fn {_key, value} -> value not in ["", nil] end)
@@ -540,165 +525,5 @@ defmodule CymphoWeb.SearchLive.Index do
   defp role_options do
     Agent.role_options()
     |> Enum.map(&{Agent.role_label(&1), Atom.to_string(&1)})
-  end
-
-  defp render_issues(assigns, issues, title) do
-    assigns = assign(assigns, issues: issues, section_title: title)
-
-    ~H"""
-    <div :if={@issues != []} class="space-y-2">
-      <div :if={@section_title} class="mb-3 flex items-center gap-2">
-        <.icon name="hero-document-text-mini" class="h-4 w-4 text-text-quaternary" />
-        <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          {@section_title}
-        </h2>
-        <span class="font-mono text-xs text-text-quaternary">{length(@issues)}</span>
-      </div>
-      <div class="space-y-2">
-        <.app_link
-          :for={issue <- @issues}
-          navigate={~p"/issues/#{issue.id}"}
-          class="block rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
-        >
-          <div class="flex min-w-0 flex-col gap-2">
-            <div class="flex flex-wrap items-center gap-2">
-              <span
-                :if={issue.identifier}
-                class="font-mono text-xs font-510 text-text-tertiary"
-              >
-                {issue.identifier}
-              </span>
-              <.badge variant="status" value={to_string(issue.status)} />
-              <.badge variant="priority" value={to_string(issue.priority)} />
-            </div>
-            <div class="min-w-0">
-              <h3 class="truncate text-base font-590 text-text-primary">{issue.title}</h3>
-              <p class="mt-1 text-sm text-text-tertiary line-clamp-2">{issue.description}</p>
-            </div>
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
-              <span :if={issue.assignee}>Assignee: {issue.assignee.name}</span>
-              <span :if={issue.project}>Project: {issue.project.name}</span>
-              <span :if={issue.goal}>Goal: {issue.goal.title}</span>
-              <span :if={issue.labels != []}>
-                Labels: {Enum.map_join(issue.labels, ", ", & &1.name)}
-              </span>
-            </div>
-          </div>
-        </.app_link>
-      </div>
-    </div>
-    """
-  end
-
-  defp render_agents(assigns, agents, title) do
-    assigns = assign(assigns, agents: agents, section_title: title)
-
-    ~H"""
-    <div :if={@agents != []} class="space-y-2">
-      <div :if={@section_title} class="mb-3 flex items-center gap-2">
-        <.icon name="hero-sparkles-mini" class="h-4 w-4 text-text-quaternary" />
-        <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          {@section_title}
-        </h2>
-        <span class="font-mono text-xs text-text-quaternary">{length(@agents)}</span>
-      </div>
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <.app_link
-          :for={agent <- @agents}
-          navigate={~p"/agents/#{agent.id}"}
-          class="block rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <h3 class="truncate text-base font-590 text-text-primary">{agent.name}</h3>
-              <p :if={agent.title not in [nil, ""]} class="mt-1 text-sm text-text-tertiary">
-                {agent.title}
-              </p>
-              <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-quaternary">
-                <span>{Agent.role_label(agent.role)}</span>
-                <span>/</span>
-                <span class="capitalize">{agent.status}</span>
-              </div>
-            </div>
-            <span class={[
-              "mt-1 h-2.5 w-2.5 shrink-0 rounded-full",
-              agent_status_dot_class(agent.status)
-            ]}>
-            </span>
-          </div>
-        </.app_link>
-      </div>
-    </div>
-    """
-  end
-
-  defp render_projects(assigns, projects, title) do
-    assigns = assign(assigns, projects: projects, section_title: title)
-
-    ~H"""
-    <div :if={@projects != []} class="space-y-2">
-      <div :if={@section_title} class="mb-3 flex items-center gap-2">
-        <.icon name="hero-folder-mini" class="h-4 w-4 text-text-quaternary" />
-        <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          {@section_title}
-        </h2>
-        <span class="font-mono text-xs text-text-quaternary">{length(@projects)}</span>
-      </div>
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <.app_link
-          :for={project <- @projects}
-          navigate={~p"/projects/#{project.id}"}
-          class="block rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
-        >
-          <div class="mb-2 flex flex-wrap items-center gap-2">
-            <.badge variant="pill" value={project.prefix} />
-            <.badge variant="status" value={to_string(project.status)} />
-          </div>
-          <h3 class="truncate text-base font-590 text-text-primary">{project.name}</h3>
-          <p class="mt-1 text-sm text-text-tertiary line-clamp-2">{project.description}</p>
-        </.app_link>
-      </div>
-    </div>
-    """
-  end
-
-  defp render_goals(assigns, goals, title) do
-    assigns = assign(assigns, goals: goals, section_title: title)
-
-    ~H"""
-    <div :if={@goals != []} class="space-y-2">
-      <div :if={@section_title} class="mb-3 flex items-center gap-2">
-        <.icon name="hero-flag-mini" class="h-4 w-4 text-text-quaternary" />
-        <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          {@section_title}
-        </h2>
-        <span class="font-mono text-xs text-text-quaternary">{length(@goals)}</span>
-      </div>
-      <div class="space-y-2">
-        <.app_link
-          :for={goal <- @goals}
-          navigate={~p"/goals/#{goal.id}"}
-          class="block rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
-        >
-          <div class="flex min-w-0 flex-col gap-2">
-            <div class="flex flex-wrap items-center gap-2">
-              <.badge variant="status" value={goal.status} />
-              <.badge variant="priority" value={goal.priority} />
-              <span class="text-xs text-text-quaternary">
-                {goal.goal_type |> to_string() |> String.capitalize()}
-              </span>
-            </div>
-            <div class="min-w-0">
-              <h3 class="truncate text-base font-590 text-text-primary">{goal.title}</h3>
-              <p class="mt-1 text-sm text-text-tertiary line-clamp-2">{goal.description}</p>
-            </div>
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
-              <span :if={goal.project}>Project: {goal.project.name}</span>
-            </div>
-          </div>
-        </.app_link>
-      </div>
-    </div>
-    """
   end
 end
