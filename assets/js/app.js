@@ -247,11 +247,12 @@ const Toast = {
   },
 
   _renderNext() {
-    if (this._activeToasts.length >= this._MAX_ACTIVE || this._queue.length === 0) return;
+    // Phones show one toast at a time, each for its full time, as Material's snackbar (C3).
+    const max = window.matchMedia("(max-width: 640px)").matches ? 1 : this._MAX_ACTIVE;
+    if (this._activeToasts.length >= max || this._queue.length === 0) return;
     const {message, type} = this._queue.shift();
     const container = document.getElementById("toast-container");
     if (!container) return;
-    this._clearStickyBar(container);
     const el = document.createElement("div");
     el.className = `toast toast-${type}`;
     el.textContent = message;
@@ -259,21 +260,17 @@ const Toast = {
     requestAnimationFrame(() => el.classList.add("toast-visible"));
     const id = setTimeout(() => this._dismiss(el), this._DISMISS_MS);
     this._activeToasts.push({el, id});
+    this._reserveLane();
   },
 
-  // Phones: the toast band sits just above the tab bar (app.css). A bottom action bar stuck
-  // there (.sticky-above-mobile-nav: New task's, the Advanced comment box) owns that band,
-  // so the toast rises above the bar instead of covering it (C3).
-  _clearStickyBar(container) {
-    container.style.bottom = "";
-    if (!window.matchMedia("(max-width: 640px)").matches) return;
-    const band = container.getBoundingClientRect().bottom;
-    document.querySelectorAll(".sticky-above-mobile-nav").forEach((bar) => {
-      const r = bar.getBoundingClientRect();
-      if (r.height > 0 && r.top < band && r.bottom > band - 48) {
-        container.style.bottom = `${window.innerHeight - r.top + 4}px`;
-      }
-    });
+  // While a toast shows, the page's scroller ends above it (app.css: .col's bottom margin), so a
+  // toast never sits over a button or a stuck action bar (C3).
+  _reserveLane() {
+    const root = document.documentElement.style;
+    const container = document.getElementById("toast-container");
+    if (!container || this._activeToasts.length === 0) return root.removeProperty("--toast-lane");
+    const top = container.getBoundingClientRect().top;
+    root.setProperty("--toast-lane", `${Math.ceil(window.innerHeight - top) + 8}px`);
   },
 
   _dismiss(el) {
@@ -283,6 +280,7 @@ const Toast = {
       el.remove();
       this._activeToasts = this._activeToasts.filter(t => t.el !== el);
       this._renderNext();
+      this._reserveLane();
     }, 300);
   }
 };

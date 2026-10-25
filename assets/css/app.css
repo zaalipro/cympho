@@ -300,11 +300,16 @@
 }
 
 /* Toasts sit at the bottom, clear of the context header's controls (the Inbox filter, "Back to …"; C3).
-   On phones they span the screen in the band between the Next step's primary (it ends by y 729 at
-   390x844) and the floating tab bar (770): one 36 px toast, 4 px above the bar. */
+   On phones they span the screen 4 px above the floating tab bar, one at a time (the Toast hook, app.js). */
 .safe-area-toast {
   bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
   right: calc(1rem + env(safe-area-inset-right, 0px));
+}
+
+/* While a toast shows, the page's scroller ends above it: the Toast hook sets --toast-lane to the
+   toasts' height from the screen's bottom edge, so a toast never covers a button at the fold (C3). */
+.cy-r3 .col {
+  margin-bottom: var(--toast-lane, 0px);
 }
 
 @media (max-width: 640px) {
@@ -319,10 +324,10 @@
     padding: 8px 14px;
   }
 
-  /* One toast at a time, the newest, as Material's snackbar: a stack grew up over the Next step's
-     primary ("Send answer", "Change limit"). Above a stuck bottom action bar the Toast hook lifts it (app.js). */
-  .safe-area-toast .toast:not(:last-child) {
-    display: none;
+  /* The lane takes the tab bar's strip too, so a stuck bottom bar (New task's, the Advanced comment
+     box) sits on the scroller's edge, above the toast: -104px undoes .col's phone padding (r3.css). */
+  .cy-r3:has(#toast-container > .toast) .sticky-above-mobile-nav {
+    bottom: -104px;
   }
 }
 

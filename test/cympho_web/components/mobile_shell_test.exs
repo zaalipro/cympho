@@ -147,10 +147,12 @@ defmodule CymphoWeb.MobileShellTest do
              ~s|.cy-r3 .ctx[data-ctx="root"]::before,.cy-r3 .ctx[data-ctx="root"]::after{content:none}|
   end
 
-  # C3: toasts sat over the header's end (the Inbox filter, "Back to Home").
-  # On phones the band between the Next step's primary (ends by y 729 at
-  # 390x844) and the tab bar (770) is the clear spot: a 36 px toast 4 px above it.
-  test "toasts sit at the bottom, in the band above the phone tab bar, and never take a tap" do
+  # C3: toasts sat over the header's end (the Inbox filter, "Back to Home"), then,
+  # at the bottom, over the page's buttons at the fold ("Send answer", "Open vote").
+  # They sit at the bottom (on phones 4 px above the tab bar), and while one shows
+  # the page's scroller ends above it: the Toast hook (app.js, test/js/toast_test.mjs)
+  # sets --toast-lane and shows one toast at a time on phones.
+  test "toasts sit at the bottom, in a lane the page's scroller leaves them, and never take a tap" do
     css = File.read!(@app_css)
     [container] = Regex.run(~r/\.safe-area-toast \{[^}]*\}/, css)
 
@@ -158,14 +160,19 @@ defmodule CymphoWeb.MobileShellTest do
     assert container =~ "bottom: calc(1rem + env(safe-area-inset-bottom, 0px));"
     assert container =~ "right: calc(1rem + env(safe-area-inset-right, 0px));"
 
+    assert css =~ ".cy-r3 .col {\n  margin-bottom: var(--toast-lane, 0px);\n}"
+
     phone = phone_css(@app_css)
     assert phone =~ "bottom: calc(var(--mobile-nav-offset) + 4px);"
     assert phone =~ "padding: 8px 14px;"
 
-    # Up to five toasts stacked up from the band over the Next step's primary
-    # ("Send answer", "Change limit"): a phone shows only the newest, one at a
-    # time, as Material's snackbar does.
-    assert phone =~ ".safe-area-toast .toast:not(:last-child) {\n    display: none;\n  }"
+    # The lane takes the tab bar's strip too, so a stuck bottom bar (New task's,
+    # the Advanced comment box) sits on the scroller's edge, over the toast.
+    assert phone =~
+             ".cy-r3:has(#toast-container > .toast) .sticky-above-mobile-nav {\n    bottom: -104px;\n  }"
+
+    # Hiding all but the newest let the hidden ones time out unseen.
+    refute css =~ ":not(:last-child)"
 
     [toast] = Regex.run(~r/\n\.toast \{[^}]*\}/, css)
     assert toast =~ "pointer-events: none;"
