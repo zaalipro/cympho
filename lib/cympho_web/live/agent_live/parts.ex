@@ -170,7 +170,12 @@ defmodule CymphoWeb.AgentLive.Parts do
         <.problem_card title={@item.title}>
           <:eyebrow>Next step<span aria-hidden="true"> · </span>Problem</:eyebrow>
           <p class="obj"><b :if={@lead}>{@lead}</b>{@rest}</p>
-          <details :if={@item.diagnostic} class="reason">
+          <details
+            :if={@item.diagnostic}
+            id="paused-reason"
+            class="reason"
+            phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+          >
             <summary>
               <span>Reason as Cympho stored it</span> <.r3_icon name="i-chev-down" class="ico s14" />
             </summary>
@@ -229,6 +234,7 @@ defmodule CymphoWeb.AgentLive.Parts do
 
   attr :agent, :map, required: true
   attr :reason, :string, default: nil, doc: "the latest failure as Cympho stored it"
+  attr :history, :string, required: true, doc: "the History tab's path, with the page's ?from="
 
   @doc "An agent stopped in error (no owner item exists for it): a fresh heartbeat."
   def retry_pair(assigns) do
@@ -240,7 +246,12 @@ defmodule CymphoWeb.AgentLive.Parts do
           <p class="obj">
             <b>{@agent.name} stopped in error:</b> the last session did not finish cleanly.
           </p>
-          <details :if={@reason} class="reason">
+          <details
+            :if={@reason}
+            id="retry-reason"
+            class="reason"
+            phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+          >
             <summary>
               <span>Reason as Cympho stored it</span> <.r3_icon name="i-chev-down" class="ico s14" />
             </summary>
@@ -253,7 +264,7 @@ defmodule CymphoWeb.AgentLive.Parts do
           <.consequences rows={[{:idle, "#{@agent.name} picks up its assigned To do work, if any."}]} />
           <.ink_foot verb="retry">
             <:secondary>
-              <.ghost_pill patch={"/agents/#{@agent.id}?tab=runs"}>Open History</.ghost_pill>
+              <.ghost_pill patch={@history}>Open History</.ghost_pill>
             </:secondary>
             <:primary>
               <.primary_pill phx-click="run_heartbeat">Retry with heartbeat</.primary_pill>

@@ -484,6 +484,22 @@ defmodule Cympho.OwnerAttentionTest do
     assert OwnerAttention.unresolved_count(context.company.id, context.user) == 0
   end
 
+  test "a blocked task notifies when its agent changes, not when it is retitled", context do
+    company_id = context.company.id
+
+    {:ok, blocked} =
+      Issues.transition_issue(issue!(company_id, "Waiting on a decision"), :blocked)
+
+    :ok = OwnerAttention.subscribe(company_id)
+
+    # Its "for you" chip moves to the assignee agent (for_you_agent_id/1).
+    {:ok, assigned} = Issues.update_issue(blocked, %{assignee_id: context.agent.id})
+    assert_receive {:owner_attention_changed, ^company_id}
+
+    {:ok, _retitled} = Issues.update_issue(assigned, %{title: "Still waiting on a decision"})
+    refute_receive {:owner_attention_changed, _}, 50
+  end
+
   test "unrelated field updates and same-audience status moves do not notify", context do
     issue =
       issue!(context.company.id, "Stable human work", assignee_user_id: context.user.id)
@@ -812,6 +828,26 @@ defmodule Cympho.OwnerAttentionTest do
              )
     end
 
+    test "a resume forgets the person's pause, so a later automatic pause is listed", context do
+      paused? = fn ->
+        Enum.any?(
+          OwnerAttention.list_items(context.company.id, context.user),
+          &(&1.kind == :agent_paused)
+        )
+      end
+
+      {:ok, paused} =
+        Agents.pause_agent(context.agent, "Agent paused", paused_by_user_id: context.user.id)
+
+      refute paused?.()
+
+      {:ok, resumed} = Agents.resume_agent(paused)
+      assert resumed.paused_by_user_id == nil
+
+      {:ok, _paused} = Agents.pause_agent(resumed, "No-progress circuit breaker")
+      assert paused?.()
+    end
+
     test "pausing and resuming notify, and resuming clears the row", context do
       company_id = context.company.id
       :ok = OwnerAttention.subscribe(company_id)
@@ -902,6 +938,166 @@ defmodule Cympho.OwnerAttentionTest do
                by_kind: %{stopped: 0, problem: 0, question: 0, review: 1, approval: 0},
                by_agent: %{context.agent.id => 1}
              }
+    end
+
+    test "a blocked task counts for its assignee agent; a person's task for no agent", context do
+      blocked = issue!(context.company.id, "Waiting on a decision", assignee_id: context.agent.id)
+      {:ok, _blocked} = Issues.transition_issue(blocked, :blocked)
+      # Waiting on the person it is assigned to, even with an agent on it too.
+      issue!(context.company.id, "The owner's own task",
+        assignee_user_id: context.user.id,
+        assignee_id: context.agent.id
+      )
+
+      assert OwnerAttention.counts(context.company.id, context.user) == %{
+               total: 2,
+               by_kind: %{stopped: 0, problem: 2, question: 0, review: 0, approval: 0},
+               by_agent: %{context.agent.id => 1}
+             }
+    end
+
+    # B15: the badge speaks the full count, so the counts go past the 200 rows a
+    # list shows, for blocked tasks and for reviews alike.
+    test "counts every blocked task and every review past a list's 200", context do
+      for n <- 1..201 do
+        {:ok, _} =
+          Issues.create_issue(%{
+            title: "Blocked #{n}",
+            status: :blocked,
+            company_id: context.company.id,
+            assignee_id: context.agent.id
+          })
+
+        insert_wake!(
+          context.agent,
+          issue!(context.company.id, "Review #{n}"),
+          "final_review_required"
+        )
+      end
+
+      assert OwnerAttention.unresolved_count(context.company.id, context.user) == 402
+
+      assert OwnerAttention.counts(context.company.id, context.user) == %{
+               total: 402,
+               by_kind: %{stopped: 0, problem: 201, question: 0, review: 201, approval: 0},
+               by_agent: %{context.agent.id => 402}
+             }
+
+      assert length(OwnerAttention.list_items(context.company.id, context.user)) == 200
+    end
+
+    # Astra final-r2: a blocked task that also waits on a review is one row, the
+    # review. Past 200 the list picks its rows from the same full membership as
+    # the counts; picking 200 tasks by update time and 200 wakes by insertion
+    # time showed the task left out of the wakes as a Problem the counts never had.
+    test "past 200 blocked tasks under review, the list kinds agree with the counts", context do
+      base = DateTime.utc_now() |> DateTime.add(-600) |> DateTime.truncate(:second)
+
+      for n <- 1..201 do
+        {:ok, issue} =
+          Issues.create_issue(%{
+            title: "Blocked review #{n}",
+            status: :blocked,
+            priority: :high,
+            company_id: context.company.id,
+            assignee_id: context.agent.id
+          })
+
+        # The newest task update has the oldest review wake.
+        Repo.update_all(from(i in Issues.Issue, where: i.id == ^issue.id),
+          set: [updated_at: DateTime.add(base, n)]
+        )
+
+        wake = insert_wake!(context.agent, issue, "final_review_required")
+
+        Repo.update_all(from(w in AgentWake, where: w.id == ^wake.id),
+          set: [inserted_at: DateTime.add(base, -n)]
+        )
+      end
+
+      assert OwnerAttention.counts(context.company.id, context.user) == %{
+               total: 201,
+               by_kind: %{stopped: 0, problem: 0, question: 0, review: 201, approval: 0},
+               by_agent: %{context.agent.id => 201}
+             }
+
+      items = OwnerAttention.list_items(context.company.id, context.user)
+
+      assert length(items) == 200
+      assert Enum.frequencies_by(items, &OwnerAttention.owner_kind/1) == %{review: 200}
+      # Newest wakes first, as before; the shown rows carry their full records.
+      assert hd(items).issue.title == "Blocked review 1"
+      assert List.last(items).issue.title == "Blocked review 200"
+      assert Enum.all?(items, &match?(%{wake: %{agent: %Agents.Agent{}}}, &1))
+    end
+
+    # Astra final-r2: the counts read every row, so they read bare rows: only
+    # what dedup, precedence and the "for you" chips need, never a task's
+    # comment history or its other associations.
+    test "the counts read bare rows: no comments, labels, project, goal or agents", context do
+      {:ok, _blocked} =
+        Issues.create_issue(%{
+          title: "Blocked with history",
+          status: :blocked,
+          company_id: context.company.id,
+          assignee_id: context.agent.id
+        })
+
+      reviewed = issue!(context.company.id, "Under review", assignee_id: context.agent.id)
+      insert_wake!(context.agent, reviewed, "final_review_required")
+
+      {_, queries} =
+        queries_of(fn ->
+          assert OwnerAttention.counts(context.company.id, context.user).total == 2
+          assert OwnerAttention.unresolved_count(context.company.id, context.user) == 2
+        end)
+
+      sources = for {source, _sql, _params} <- queries, do: source
+
+      for table <- ~w(comments labels projects goals) do
+        refute table in sources
+      end
+
+      # No row is hydrated by id either: no assignee, wake agent or wake task.
+      assert for(
+               {_source, sql, _params} <- queries,
+               sql =~ ~r/WHERE \(\w+\."id" = \$1\)$/,
+               do: sql
+             ) == []
+
+      # One read per call for each source, with only the fields that dedup,
+      # precedence and attribution need: no description, no wake metadata.
+      human_action =
+        for {"issues", sql, _params} <- queries, sql =~ ~s("assignee_user_id" = $2), do: sql
+
+      review = for {"agent_wakes", sql, _params} <- queries, do: sql
+
+      assert length(human_action) == 2
+      assert length(review) == 2
+      refute Enum.any?(human_action, &(&1 =~ ~s("description")))
+      refute Enum.any?(review, &(&1 =~ ~s("metadata")))
+    end
+
+    # Astra final-r2: a list loads full records (comment history included) for
+    # the rows it shows, not for every row it chose from.
+    test "a list loads the full records of the rows it shows only", context do
+      for n <- 1..3 do
+        {:ok, _} =
+          Issues.create_issue(%{
+            title: "Blocked #{n}",
+            status: :blocked,
+            company_id: context.company.id
+          })
+      end
+
+      {[shown], queries} =
+        queries_of(fn ->
+          OwnerAttention.list_items(context.company.id, context.user, limit: 1)
+        end)
+
+      assert %{kind: :human_action, issue: %{comments: [], title: "Blocked " <> _}} = shown
+      assert [[issue_id]] = for({"comments", _sql, params} <- queries, do: params)
+      assert issue_id == Ecto.UUID.dump!(shown.issue_id)
     end
   end
 
@@ -1173,6 +1369,41 @@ defmodule Cympho.OwnerAttentionTest do
       triggered_by_id: "test"
     })
     |> Repo.insert!()
+  end
+
+  # `fun`'s result and every query it ran, preload tasks included, as
+  # `{source, sql, params}`.
+  defp queries_of(fun) do
+    handler_id = "owner-attention-queries-#{System.unique_integer([:positive])}"
+    test_pid = self()
+
+    :telemetry.attach(
+      handler_id,
+      [:cympho, :repo, :query],
+      fn _event, _measurements, metadata, _config ->
+        if self() == test_pid or test_pid in (Process.get(:"$callers") || []) do
+          send(test_pid, {:query, {metadata.source, metadata.query, metadata.params}})
+        end
+      end,
+      nil
+    )
+
+    result =
+      try do
+        fun.()
+      after
+        :telemetry.detach(handler_id)
+      end
+
+    {result, collect_queries([])}
+  end
+
+  defp collect_queries(acc) do
+    receive do
+      {:query, query} -> collect_queries([query | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
   end
 
   defp insert_budget_policy!(company, attrs \\ %{}) do

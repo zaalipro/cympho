@@ -278,7 +278,11 @@ defmodule CymphoWeb.NextStep do
         <.ink_card heading="Until it changes">
           <.ink_note>Nothing runs here until the server setting changes.</.ink_note>
           <div class="ink-f">
-            <details class="howto">
+            <details
+              id="server-off-howto"
+              class="howto"
+              phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+            >
               <summary class="pw">
                 How to turn agents on<span class="nub"><.r3_icon name="i-chev-down" /></span>
               </summary>
@@ -306,9 +310,10 @@ defmodule CymphoWeb.NextStep do
       </:problem>
       <:resolution>
         <.ink_card heading="After you add it">
-          <.ink_note>
-            After you add it: Cympho gives it to an agent with the right role, or keeps it in Later if nobody is free.
-          </.ink_note>
+          <.consequences rows={[
+            {:done,
+             "Cympho gives it to an agent with the right role, or keeps it in Later if nobody is free."}
+          ]} />
           <.ink_foot verb="add">
             <:primary>
               <.primary_pill href="/issues/new" data-quick-create-trigger>New task</.primary_pill>

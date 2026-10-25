@@ -176,6 +176,39 @@ defmodule CymphoWeb.InboxLiveTest do
       assert has_element?(view, "button[phx-click='approve_review']")
     end
 
+    # B15: the badge draws "99+" itself; Inbox's own refresh must not cap the
+    # count the next nav_badges push reads.
+    test "a Needs you change keeps a count over 99 uncapped", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{name: "Busy Inbox Agent", role: :engineer, company_id: company.id})
+
+      blocked = fn title ->
+        {:ok, _issue} =
+          Issues.create_issue(%{
+            title: title,
+            status: :blocked,
+            company_id: company.id,
+            assignee_id: agent.id
+          })
+      end
+
+      for n <- 1..100, do: blocked.("Blocked #{n}")
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/inbox")
+      assert :sys.get_state(view.pid).socket.assigns.inbox_badge_count == 100
+
+      blocked.("Blocked 101")
+
+      wait_until(fn ->
+        render(view)
+        assert :sys.get_state(view.pid).socket.assigns.inbox_badge_count == 101
+        assert :sys.get_state(view.pid).socket.assigns.nav_inbox_count == 101
+      end)
+    end
+
     test "final_review_required enqueue live-refreshes Needs you and badge", %{conn: conn} do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
 
@@ -1521,6 +1554,38 @@ defmodule CymphoWeb.InboxLiveTest do
       assert [_] = Floki.find(main_doc(view), "details.dec[open]")
     end
 
+    test "an answer from another page leaves Decided as the reader set it; ?decided=open still opens it (B2)",
+         %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/inbox")
+      [decided] = Floki.find(main_doc(view), "details.dec")
+      [mounted] = Floki.attribute(decided, "phx-mounted")
+      assert Jason.decode!(mounted) == [["ignore_attrs", %{"attrs" => ["open"]}]]
+      [id] = Floki.attribute(decided, "id")
+
+      {:ok, interaction} = IssueThreadInteractions.get_interaction(nw.questions["Q1"].id)
+
+      {:ok, _} =
+        IssueThreadInteractions.resolve_interaction(interaction, %{
+          "status" => :responded,
+          "resolved_by_user_id" => nw.user.id,
+          "response" => "Email the customer first"
+        })
+
+      send(view.pid, {:owner_attention_changed, nw.company.id})
+
+      # The list re-renders with the answer; it stays the same element, so the
+      # browser keeps whatever the reader opened.
+      [decided] = Floki.find(main_doc(view), "details.dec")
+      assert text(decided, "summary") =~ "Decided in the last 7 days 4"
+      assert Floki.attribute(decided, "id") == [id]
+
+      # The all-clear's "See recent decisions" patches to ?decided=open: a new
+      # element, so the server's open is applied before it is ignored again.
+      render_patch(view, "/inbox?decided=open")
+      [opened] = Floki.find(main_doc(view), "details.dec[open]")
+      refute Floki.attribute(opened, "id") == [id]
+    end
+
     test "past 200 items the list says how many there are (B4)" do
       {conn, _user, company} = ConnCase.register_and_log_in_user(Phoenix.ConnTest.build_conn())
       now = DateTime.utc_now() |> DateTime.truncate(:second)
@@ -1544,6 +1609,69 @@ defmodule CymphoWeb.InboxLiveTest do
       main = main_doc(view)
 
       assert text(main, "nav.seg a[aria-current='page']") == "All 201"
+      assert text(main, ".b4") == "Showing the first 200 of 201."
+    end
+
+    test "past 200 blocked tasks the list still says how many there are (B15)" do
+      {conn, _user, company} = ConnCase.register_and_log_in_user(Phoenix.ConnTest.build_conn())
+
+      for n <- 1..201 do
+        {:ok, _} =
+          Issues.create_issue(%{title: "Blocked #{n}", status: :blocked, company_id: company.id})
+      end
+
+      {:ok, view, _html} = live(conn, "/inbox")
+      main = main_doc(view)
+
+      assert text(main, "nav.seg a[aria-current='page']") == "All 201"
+      assert text(main, ".b4") == "Showing the first 200 of 201."
+    end
+
+    # Astra final-r2: a blocked task under review is a review. Past 200, the list
+    # picked a task the review wakes' first 200 left out as a Problem, so the
+    # Next step was a Problem while the counts hid the Problems filter.
+    test "past 200 blocked tasks under review, the Next step's kind keeps its filter" do
+      {conn, _user, company} = ConnCase.register_and_log_in_user(Phoenix.ConnTest.build_conn())
+
+      {:ok, agent} =
+        Agents.create_agent(%{name: "Mira", role: :engineer, company_id: company.id})
+
+      base = DateTime.utc_now() |> DateTime.add(-600) |> DateTime.truncate(:second)
+
+      for n <- 1..201 do
+        {:ok, issue} =
+          Issues.create_issue(%{
+            title: "Blocked review #{n}",
+            status: :blocked,
+            priority: :high,
+            company_id: company.id,
+            assignee_id: agent.id
+          })
+
+        # The newest task update has the oldest review wake.
+        Repo.update_all(from(i in Issues.Issue, where: i.id == ^issue.id),
+          set: [updated_at: DateTime.add(base, n)]
+        )
+
+        Repo.insert!(%Cympho.Wakes.AgentWake{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "final_review_required",
+          status: "pending",
+          triggered_by_type: "system",
+          triggered_by_id: "test",
+          inserted_at: DateTime.add(base, -n)
+        })
+      end
+
+      {:ok, view, _html} = live(conn, "/inbox")
+      main = main_doc(view)
+
+      assert main |> Floki.find("nav.seg a") |> Enum.map(&squish(Floki.text(&1))) ==
+               ["All 201", "Reviews 201"]
+
+      assert text(main, ".next .paper .eyebrow") =~ "Review"
+      refute text(main, ".next .paper .eyebrow") =~ "Problem"
       assert text(main, ".b4") == "Showing the first 200 of 201."
     end
 

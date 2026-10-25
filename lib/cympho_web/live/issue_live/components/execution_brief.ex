@@ -234,6 +234,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           data-testid="issue-ceo-flow-checklist"
           class="group/fold border-t border-hairline bg-surface-1/50"
           open={@ceo_flow_checklist.status == :attention}
+          data-open={to_string(@ceo_flow_checklist.status == :attention)}
+          phx-hook="ServerOpen"
+          phx-mounted={JS.ignore_attributes("open")}
         >
           <summary class="flex cursor-pointer select-none list-none items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-surface-1/70 [&::-webkit-details-marker]:hidden">
             <div class="flex flex-wrap items-center gap-2">
@@ -513,6 +516,7 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
         </div>
 
         <.brief_fold
+          id="brief-run-ledger"
           title="Runtime run ledger"
           badge={run_ledger_badge(@run_history, @run_ledger)}
           open={runs_need_attention?(@run_ledger)}
@@ -610,7 +614,11 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           </div>
         </.brief_fold>
 
-        <.brief_fold title="Work narrative" badge={"#{length(@narrative_cards)} phases"}>
+        <.brief_fold
+          id="brief-narrative"
+          title="Work narrative"
+          badge={"#{length(@narrative_cards)} phases"}
+        >
           <p class="mb-3 text-caption text-ink-tertiary">
             Condensed owner-readable phases before the raw activity stream.
           </p>
@@ -643,6 +651,7 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
         </.brief_fold>
 
         <.brief_fold
+          id="brief-delegation"
           title="Delegation map"
           badge={"#{length(@child_health_cards)} tracked sub-issues"}
         >
@@ -691,6 +700,7 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
         </.brief_fold>
 
         <.brief_fold
+          id="brief-review-queue"
           title="CTO review queue"
           badge={"#{length(@review_queue.ready)} ready"}
           open={@review_queue.ready != [] or @review_queue.blocked != []}
@@ -811,7 +821,11 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           </div>
         </.brief_fold>
 
-        <.brief_fold title="Agent contributions" badge={"#{length(@contribution_cards)} agents"}>
+        <.brief_fold
+          id="brief-contributions"
+          title="Agent contributions"
+          badge={"#{length(@contribution_cards)} agents"}
+        >
           <div
             :if={Enum.empty?(@contribution_cards)}
             class="rounded-lg border border-dashed border-hairline px-4 py-5 text-sm text-ink-tertiary"
@@ -876,6 +890,7 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
   # Collapsible section shell for the execution brief. Keeps every audit
   # section reachable while letting the default reading path stay short:
   # owner update, review signals, and handoff stay open; the rest folds.
+  attr :id, :string, required: true, doc: "unique on the page; the ServerOpen hook needs it"
   attr :title, :string, required: true
   attr :badge, :string, default: nil
   attr :open, :boolean, default: false
@@ -883,7 +898,14 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
 
   defp brief_fold(assigns) do
     ~H"""
-    <details class="group/fold border-t border-hairline" open={@open}>
+    <details
+      id={@id}
+      class="group/fold border-t border-hairline"
+      open={@open}
+      data-open={to_string(@open)}
+      phx-hook="ServerOpen"
+      phx-mounted={JS.ignore_attributes("open")}
+    >
       <summary class="flex cursor-pointer select-none list-none items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-surface-1/50 [&::-webkit-details-marker]:hidden">
         <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
           {@title}

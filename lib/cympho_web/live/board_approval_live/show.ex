@@ -59,10 +59,15 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
 
   defp vote_reason(_reason), do: nil
 
+  # The broadcast approval does not preload :votes, which the page renders, so
+  # reload it through the company-scoped query instead of assigning it.
   @impl true
   def handle_info({:board_approval_resolved, updated_approval}, socket) do
     if socket.assigns.approval.id == updated_approval.id do
-      {:noreply, assign_approval(socket, updated_approval)}
+      case fetch_company_board_approval(socket, updated_approval.id) do
+        {:ok, approval} -> {:noreply, assign_approval(socket, approval)}
+        {:error, :not_found} -> {:noreply, socket}
+      end
     else
       {:noreply, socket}
     end
@@ -93,7 +98,8 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
       approval: approval,
       governance_risk: GovernanceRisk.approval_brief(approval),
       page_title: approval.title,
-      board_member?: board_member?
+      board_member?: board_member?,
+      voted?: is_binary(user_id) and Enum.any?(approval.votes, &(&1.user_id == user_id))
     )
   end
 

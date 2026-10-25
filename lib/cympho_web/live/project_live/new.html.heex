@@ -99,8 +99,10 @@
         <%!-- Steps 1 and 2 restated the form sections they sit next to. Worth
              keeping for a first project, not worth a column of prose every visit. --%>
         <details
+          id="project-setup-checklist"
           data-testid="project-setup-checklist"
           class="rounded-xl border border-border bg-panel p-4 shadow-card"
+          phx-mounted={JS.ignore_attributes("open")}
         >
           <summary class="cursor-pointer list-none text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary [&::-webkit-details-marker]:hidden">
             Setup checklist

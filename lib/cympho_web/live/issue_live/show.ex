@@ -1232,40 +1232,14 @@ defmodule CymphoWeb.IssueLive.Show do
         socket
       ) do
     case get_scoped_issue(socket, issue_id) do
-      {:ok, issue} -> handle_info({:issue_updated, issue}, socket)
+      # The {:issue_updated, issue} sent with this event decides the notice.
+      {:ok, issue} -> apply_issue_update(socket, issue, false)
       {:error, _} -> {:noreply, socket}
     end
   end
 
   def handle_info({:issue_updated, updated_issue}, socket) do
-    cond do
-      socket.assigns.issue.id == updated_issue.id ->
-        case get_scoped_issue(socket, updated_issue.id) do
-          {:ok, issue} ->
-            {runs, run_history} = load_issue_run_history(issue.id)
-
-            socket =
-              socket
-              |> assign(issue: issue, runs: runs, run_history: run_history)
-              |> assign_child_rollup(issue.id)
-              |> push_event("toast", %{
-                message: "Issue updated by another user",
-                type: "info",
-                key: "issue_#{issue.id}_updated"
-              })
-
-            {:noreply, maybe_rebuild_timeline(socket)}
-
-          {:error, _} ->
-            {:noreply, socket}
-        end
-
-      updated_issue.parent_id == socket.assigns.issue.id ->
-        {:noreply, assign_child_rollup(socket, socket.assigns.issue.id)}
-
-      true ->
-        {:noreply, socket}
-    end
+    apply_issue_update(socket, updated_issue, others_update?(socket, updated_issue))
   end
 
   def handle_info({:issue_deleted, _deleted_id}, socket) do
@@ -1277,10 +1251,12 @@ defmodule CymphoWeb.IssueLive.Show do
       socket.assigns.issue.id == updated_issue.id ->
         case get_scoped_issue(socket, updated_issue.id) do
           {:ok, issue} ->
+            news? = others_update?(socket, updated_issue)
+
             socket =
               socket
               |> assign(:issue, issue)
-              |> push_event("toast", %{
+              |> toast_if(news?, %{
                 message: "New comment added",
                 type: "info",
                 key: "comment_#{issue.id}_created"
@@ -1772,6 +1748,48 @@ defmodule CymphoWeb.IssueLive.Show do
       %{id: company_id} -> Issues.get_company_issue(company_id, id)
       _ -> {:error, :not_found}
     end
+  end
+
+  defp apply_issue_update(socket, updated_issue, notice?) do
+    cond do
+      socket.assigns.issue.id == updated_issue.id ->
+        case get_scoped_issue(socket, updated_issue.id) do
+          {:ok, issue} ->
+            {runs, run_history} = load_issue_run_history(issue.id)
+
+            socket =
+              socket
+              |> assign(issue: issue, runs: runs, run_history: run_history)
+              |> assign_child_rollup(issue.id)
+              |> toast_if(notice?, %{
+                message: "Issue updated by another user",
+                type: "info",
+                key: "issue_#{issue.id}_updated"
+              })
+
+            {:noreply, maybe_rebuild_timeline(socket)}
+
+          {:error, _} ->
+            {:noreply, socket}
+        end
+
+      updated_issue.parent_id == socket.assigns.issue.id ->
+        {:noreply, assign_child_rollup(socket, socket.assigns.issue.id)}
+
+      true ->
+        {:noreply, socket}
+    end
+  end
+
+  defp toast_if(socket, true, toast), do: push_event(socket, "toast", toast)
+  defp toast_if(socket, false, _toast), do: socket
+
+  # An {:issue_updated, issue} broadcast names the signed-in user who made the
+  # change (Issues.with_actor/1), a {:comment_created, issue} one the user who
+  # wrote the comment: theirs, from any tab, is no news to them.
+  defp others_update?(socket, %{actor_user_id: actor}) do
+    me = socket.assigns[:current_user] && to_string(socket.assigns.current_user.id)
+    is_nil(actor) or actor != me
   end
 
   defp get_scoped_agent(socket, id) do

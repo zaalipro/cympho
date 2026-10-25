@@ -57,7 +57,8 @@ defmodule Cympho.Issues do
 
   This powers the board/operator "Needs my action" queue. It is intentionally
   issue-backed rather than notification-backed so human blockers do not get
-  buried in a noisy agent inbox.
+  buried in a noisy agent inbox. `:limit` defaults to 100; `limit: nil` lists
+  them all. `:ids` keeps only those issues.
   """
   def list_human_action_issues(company_id, user_id, opts \\ [])
 
@@ -67,6 +68,7 @@ defmodule Cympho.Issues do
 
     Issue
     |> human_action_query(company_id, user_id)
+    |> maybe_filter_ids(Keyword.get(opts, :ids))
     |> order_by([i],
       asc:
         fragment(
@@ -77,12 +79,33 @@ defmodule Cympho.Issues do
       desc: i.updated_at,
       desc: i.id
     )
-    |> limit(^limit)
+    |> maybe_limit(limit)
     |> Repo.all()
     |> Repo.preload([:comments, :assignee, :project, :labels, :goal])
   end
 
   def list_human_action_issues(_company_id, _user_id, _opts), do: []
+
+  @doc """
+  Every issue of `list_human_action_issues/3`, bare: only the fields owner
+  attention counts, dedups and attributes by, and no associations, so counting
+  a large backlog never loads its comment histories.
+  """
+  def list_human_action_memberships(company_id, user_id)
+      when is_binary(company_id) and is_binary(user_id) do
+    Issue
+    |> human_action_query(company_id, user_id)
+    |> select([i], struct(i, [:id, :status, :priority, :assignee_id, :inserted_at, :updated_at]))
+    |> Repo.all()
+  end
+
+  def list_human_action_memberships(_company_id, _user_id), do: []
+
+  defp maybe_filter_ids(query, nil), do: query
+  defp maybe_filter_ids(query, ids), do: where(query, [i], i.id in ^ids)
+
+  defp maybe_limit(query, nil), do: query
+  defp maybe_limit(query, limit), do: limit(query, ^limit)
 
   def human_action_count(company_id, user_id) when is_binary(company_id) and is_binary(user_id) do
     Issue
@@ -1762,7 +1785,7 @@ defmodule Cympho.Issues do
     Cympho.PubSubGuard.company_broadcast(
       updated.company_id,
       "issues",
-      {:issue_updated, updated}
+      {:issue_updated, with_actor(updated)}
     )
 
     event_type = determine_update_event_type(old_issue, updated, attrs)
@@ -3155,7 +3178,7 @@ defmodule Cympho.Issues do
     Cympho.PubSubGuard.company_broadcast(
       issue.company_id,
       "issues",
-      {:issue_updated, issue}
+      {:issue_updated, with_actor(issue)}
     )
 
     CymphoWeb.Events.broadcast_issue_update(issue, event_type, metadata)
@@ -3217,7 +3240,7 @@ defmodule Cympho.Issues do
             Cympho.PubSubGuard.company_broadcast(
               issue.company_id,
               "issues",
-              {:issue_updated, issue}
+              {:issue_updated, with_actor(issue)}
             )
           end
 
@@ -3336,7 +3359,7 @@ defmodule Cympho.Issues do
         Cympho.PubSubGuard.company_broadcast(
           issue.company_id,
           "issues",
-          {:issue_updated, issue}
+          {:issue_updated, with_actor(issue)}
         )
 
         {:ok, issue}
@@ -3749,6 +3772,16 @@ defmodule Cympho.Issues do
 
   # Fail-closed: never subscribe to company::issues from a nil/blank company_id.
   def subscribe(_company_id), do: :ok
+
+  @doc """
+  Names the signed-in user a LiveView process acts for (`CymphoWeb.UserAuth`), so
+  the `{:issue_updated, issue}` broadcasts it sends carry `issue.actor_user_id`.
+  """
+  def put_actor_user_id(user_id), do: Process.put(:cympho_actor_user_id, user_id)
+
+  @doc "The issue as broadcast: `actor_user_id` is this process's user, or nil."
+  def with_actor(%Issue{} = issue),
+    do: %{issue | actor_user_id: Process.get(:cympho_actor_user_id)}
 
   def change_issue(%Issue{} = issue, attrs \\ %{}) do
     Issue.changeset(issue, attrs)

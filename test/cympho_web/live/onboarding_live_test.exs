@@ -558,6 +558,20 @@ defmodule CymphoWeb.OnboardingLiveTest do
       assert has_element?(view, "button.pw[disabled]", "Continue to review")
     end
 
+    test "the rename disclosure stays open while names are typed (B8)", %{conn: conn} do
+      {_view, html} = open_team_step(conn)
+
+      # Each keystroke re-renders the form; without this the patch drops the
+      # browser-set `open` attribute, closing the fields after one letter.
+      [mounted] =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find("details.ob-ren")
+        |> Floki.attribute("phx-mounted")
+
+      assert Jason.decode!(mounted) == [["ignore_attrs", %{"attrs" => ["open"]}]]
+    end
+
     test "no check runs on mount; Check runs it once and unlocks Continue", %{conn: conn} do
       {view, _html} = open_team_step(conn)
       user_id = live_assigns(view).current_user.id

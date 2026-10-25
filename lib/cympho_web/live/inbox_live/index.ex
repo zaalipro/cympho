@@ -141,8 +141,8 @@ defmodule CymphoWeb.InboxLive.Index do
     if socket.assigns[:current_company] && socket.assigns.current_company.id == company_id do
       # Keep nav badge parity with Needs you when review wakes land while Inbox is open.
       # UserAuth's owner_attention hook also updates these assigns (cont for this view).
-      count =
-        min(99, OwnerAttention.unresolved_count(company_id, socket.assigns[:current_user]))
+      # Uncapped: the badge draws "99+" itself (B15).
+      count = OwnerAttention.unresolved_count(company_id, socket.assigns[:current_user])
 
       {:noreply,
        socket

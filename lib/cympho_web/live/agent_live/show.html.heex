@@ -34,16 +34,19 @@
         </p>
         <%!-- The tab params stay dashboard/configuration/runs (plan §11 D6). --%>
         <.segmented label={"#{@agent.name}'s pages"}>
-          <:item patch={~p"/agents/#{@agent.id}"} current={@current_tab == "dashboard"}>
+          <:item patch={agent_path(@agent.id, @from, [])} current={@current_tab == "dashboard"}>
             Overview
           </:item>
           <:item
-            patch={~p"/agents/#{@agent.id}?tab=configuration"}
+            patch={agent_path(@agent.id, @from, tab: "configuration")}
             current={@current_tab == "configuration"}
           >
             Setup
           </:item>
-          <:item patch={~p"/agents/#{@agent.id}?tab=runs"} current={@current_tab == "runs"}>
+          <:item
+            patch={agent_path(@agent.id, @from, tab: "runs")}
+            current={@current_tab == "runs"}
+          >
             History
           </:item>
         </.segmented>
@@ -134,7 +137,11 @@
       <% {:paused, item} -> %>
         <Parts.paused_pair item={item} />
       <% {:retry, reason} -> %>
-        <Parts.retry_pair agent={@agent} reason={reason} />
+        <Parts.retry_pair
+          agent={@agent}
+          reason={reason}
+          history={agent_path(@agent.id, @from, tab: "runs")}
+        />
       <% {:item, item} -> %>
         <NextStep.pair item={item} from={@step_from} agents={@agent_names} spending={@spending} />
       <% :server_off -> %>
@@ -194,7 +201,7 @@
             secret_keys: @secret_keys,
             spending_limit_items: @spending_limit_items
           }) %>
-        <% fix = readiness_fix(readiness, @agent) %>
+        <% fix = readiness_fix(readiness, @agent, @from) %>
         <h2 class="gl-h">How it runs</h2>
         <.kv_list :if={@price || @key_name} tight>
           <:item :if={@price} term="Price">
@@ -210,7 +217,9 @@
           <:item :if={@key_name} term="Key"><span class="mono">{@key_name}</span></:item>
         </.kv_list>
         <p :if={fix} class="gl-sub">{readiness.summary}</p>
-        <.text_link patch={(fix && fix.path) || ~p"/agents/#{@agent.id}?tab=configuration"}>
+        <.text_link patch={
+          (fix && fix.path) || agent_path(@agent.id, @from, tab: "configuration")
+        }>
           {(fix && fix.label) || "Change in Setup"}
         </.text_link>
       </div>
@@ -221,7 +230,7 @@
         <h2 class="h2" id="rr-t">
           Recent runs <span :if={@runs_issue} class="cx">/ {@runs_issue.identifier}</span>
         </h2>
-        <.text_link :if={@overview_runs != []} patch={~p"/agents/#{@agent.id}?tab=runs"}>
+        <.text_link :if={@overview_runs != []} patch={agent_path(@agent.id, @from, tab: "runs")}>
           Open History
         </.text_link>
       </div>
@@ -233,14 +242,14 @@
             {Parts.usd(@earlier_spend)}
           </span>
         </span>
-        <.text_link patch={~p"/agents/#{@agent.id}?tab=runs"}>History</.text_link>
+        <.text_link patch={agent_path(@agent.id, @from, tab: "runs")}>History</.text_link>
       </p>
       <.quiet_empty :if={@overview_runs == []} title="No runs yet">
         The first one starts when work is assigned or a heartbeat fires.
       </.quiet_empty>
     </section>
 
-    <details class="card tech">
+    <details id="agent-tech-details" class="card tech" phx-mounted={JS.ignore_attributes("open")}>
       <summary>
         <span class="h2">Technical details</span> <.r3_icon name="i-chev-down" />
       </summary>
@@ -292,7 +301,8 @@
         dashboard_studio,
         @recent_issues,
         @wake_history,
-        @latest_run
+        @latest_run,
+        @from
       ) %>
 
     <div class="ui-advanced-only stagger-children grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -429,7 +439,7 @@
               {prompt_canary.summary}
             </p>
             <.app_link
-              navigate={~p"/agents/#{@agent.id}?tab=runs"}
+              navigate={agent_path(@agent.id, @from, tab: "runs")}
               class="mt-2 inline-flex text-[11px] font-590 text-text-secondary hover:text-brand"
             >
               Open runs
@@ -467,13 +477,13 @@
           </p>
           <div class="mt-3 flex flex-wrap gap-2">
             <.app_link
-              navigate={~p"/agents/#{@agent.id}?tab=configuration#agent-instruction-studio"}
+              navigate={agent_path(@agent.id, @from, tab: "configuration") <> "#agent-instruction-studio"}
               class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
             >
               Open guide
             </.app_link>
             <.app_link
-              navigate={~p"/agents/#{@agent.id}?tab=configuration#agent-runtime-profile"}
+              navigate={agent_path(@agent.id, @from, tab: "configuration") <> "#agent-runtime-profile"}
               class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
             >
               Open runtime
@@ -1015,7 +1025,11 @@
                 Eval {instruction_studio.eval_coverage.passed}/{instruction_studio.eval_coverage.total}<span class="sr-only">
                     — Eval coverage: {instruction_studio.eval_coverage.summary}</span>
               </span>
-              <details class="group relative inline-flex">
+              <details
+                id="instruction-studio-help"
+                class="help-pop group relative inline-flex"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
                 <summary
                   class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-border bg-surface text-[11px] font-590 text-text-tertiary hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
                   aria-label="How instruction studio health works"
@@ -1035,7 +1049,11 @@
             <p class="mt-2 text-sm leading-6 text-text-tertiary">
               {instruction_studio.summary}
             </p>
-            <details class="mt-3 rounded-lg border border-border bg-surface">
+            <details
+              id="instruction-eval-details"
+              class="mt-3 rounded-lg border border-border bg-surface"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
               <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-590 text-text-secondary hover:bg-surface-hover [&::-webkit-details-marker]:hidden">
                 <span>Eval details</span>
                 <span class="font-510 text-text-quaternary">
@@ -1156,7 +1174,11 @@
             <%!-- The template and the three playbook checklists below are
                    reference text Cympho injects for you — nothing here is edited
                    on this page, so each one opens on demand. --%>
-            <details class="mt-3 rounded-lg border border-border bg-surface px-3 py-3">
+            <details
+              id="required-final-comment"
+              class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
               <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
                 <span class="text-xs font-590 text-text-primary">Required final comment</span>
                 <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
@@ -1171,6 +1193,7 @@
               id="runtime-drill-guide"
               data-testid="runtime-drill-guide"
               class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
+              phx-mounted={JS.ignore_attributes("open")}
             >
               <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
                 <span class="text-xs font-590 text-text-primary">Runtime drill</span>
@@ -1189,7 +1212,11 @@
                 </div>
               </div>
             </details>
-            <details class="mt-3 rounded-lg border border-border bg-surface px-3 py-3">
+            <details
+              id="turn-guide"
+              class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
               <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
                 <span class="text-xs font-590 text-text-primary">Turn guide</span>
                 <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
@@ -1215,6 +1242,7 @@
               id="turn-ledger-guide"
               data-testid="turn-ledger-guide"
               class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
+              phx-mounted={JS.ignore_attributes("open")}
             >
               <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
                 <span class="text-xs font-590 text-text-primary">Turn ledger</span>
@@ -1276,10 +1304,12 @@
           <div class="mt-3 grid gap-2 lg:grid-cols-2">
             <details
               :for={section <- instruction_studio.effective_sections}
+              id={"prompt-section-#{String.replace(section.label, " ", "-")}"}
               class={[
                 "rounded-lg border px-3 py-2",
                 studio_card_class(section.status)
               ]}
+              phx-mounted={JS.ignore_attributes("open")}
             >
               <summary class="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                 <div class="flex flex-wrap items-center justify-between gap-2">
@@ -1398,7 +1428,11 @@
               <%!-- The Apply button is the interface; the patch text only
                      matters when you want to read it first. Ten identical
                      "read the text" links became one marker per row. --%>
-              <details class="mt-3">
+              <details
+                id={"instruction-patch-text-#{patch.id}"}
+                class="mt-3"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
                 <summary
                   class="inline-flex cursor-pointer list-none items-center text-text-quaternary hover:text-text-secondary [&::-webkit-details-marker]:hidden"
                   title="Read the patch text"

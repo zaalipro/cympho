@@ -60,6 +60,69 @@ defmodule Cympho.OrgHealthTest do
       assert Enum.any?(snapshot.recommendations, &(&1.label == "Repair adapter health"))
     end
 
+    # C5: /org-chart printed "1 agent are paused, offline, or errored".
+    test "words a count of one with a singular verb" do
+      company = create_company("singular")
+      _ceo = create_agent(company, "CEO", :ceo)
+      cto = create_agent(company, "CTO", :cto)
+
+      for index <- 1..7 do
+        create_agent(company, "Engineer #{index}", :engineer, parent_id: cto.id)
+      end
+
+      create_agent(company, "Paused Designer", :designer,
+        parent_id: cto.id,
+        status: :paused,
+        health_status: :degraded
+      )
+
+      details = recommendation_details(OrgHealth.snapshot(company.id))
+
+      assert details["Restore inactive agents"] ==
+               "1 agent is paused, offline, or errored inside the active org."
+
+      assert details["Repair adapter health"] ==
+               "1 agent has degraded or unavailable adapter health."
+
+      assert details["Split manager span"] ==
+               "1 manager exceeds 6 direct reports; add leads or redistribute reports."
+    end
+
+    test "words a count of more than one with a plural verb" do
+      company = create_company("plural")
+      _ceo = create_agent(company, "CEO", :ceo)
+      _cto = create_agent(company, "CTO", :cto)
+      create_agent(company, "Paused One", :engineer, status: :paused, health_status: :degraded)
+      create_agent(company, "Paused Two", :engineer, status: :offline, health_status: :degraded)
+
+      details = recommendation_details(OrgHealth.snapshot(company.id))
+
+      assert details["Restore inactive agents"] ==
+               "2 agents are paused, offline, or errored inside the active org."
+
+      assert details["Repair adapter health"] ==
+               "2 agents have degraded or unavailable adapter health."
+    end
+
+    test "words one detached report with a singular verb" do
+      company = create_company("detached-one")
+      other_parent = create_agent(create_company("detached-other"), "External CTO", :cto)
+      detached_agent = create_agent(company, "Detached Engineer", :engineer)
+
+      {1, nil} =
+        Repo.update_all(
+          from(agent in Cympho.Agents.Agent, where: agent.id == ^detached_agent.id),
+          set: [parent_id: other_parent.id]
+        )
+
+      snapshot = OrgHealth.snapshot(company.id)
+
+      assert recommendation_details(snapshot)["Reattach reports"] ==
+               "1 agent references a missing or inactive manager; assign them to an active reporting line."
+
+      assert snapshot.summary =~ "; 1 detached agent needs reassignment."
+    end
+
     test "recommends staffing roles that have open issue demand" do
       company = create_company("demand")
       ceo = create_agent(company, "CEO", :ceo)
@@ -102,6 +165,9 @@ defmodule Cympho.OrgHealthTest do
              end)
     end
   end
+
+  defp recommendation_details(snapshot),
+    do: Map.new(snapshot.recommendations, &{&1.label, &1.detail})
 
   defp create_company(label) do
     unique = System.unique_integer([:positive])

@@ -121,6 +121,26 @@ defmodule CymphoWeb.Components.NavRailTest do
     assert Floki.text(Floki.find(count, ".sr")) == " need you"
   end
 
+  # B15: 201 items showed "99", read as the whole count.
+  test "caps the Inbox count at 99+ and keeps the full count for screen readers" do
+    doc = nav(inbox_count: 201)
+
+    assert [count] = Floki.find(doc, ~s(a.d[href="/inbox"] .count[data-nav-badge="inbox"]))
+    assert Floki.attribute(count, "data-count") == ["201"]
+    assert [num] = Floki.find(count, "[data-badge-num][data-testid='nav-badge-inbox']")
+    assert String.trim(Floki.text(num)) == "99+"
+    assert Floki.attribute(num, "aria-hidden") == ["true"]
+    assert Floki.text(Floki.find(count, ".sr")) == "201 need you"
+  end
+
+  test "shows a count of 99 as it is" do
+    doc = nav(inbox_count: 99)
+
+    assert [num] = Floki.find(doc, "[data-badge-num][data-testid='nav-badge-inbox']")
+    assert String.trim(Floki.text(num)) == "99"
+    assert Floki.attribute(num, "aria-hidden") == []
+  end
+
   test "keeps a hidden Inbox count node at zero and shows no other badge" do
     html = render_rail(inbox_count: 0)
 

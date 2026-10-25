@@ -2922,6 +2922,33 @@ defmodule CymphoWeb.AgentLiveTest do
                "/agents/#{theo.id}?tab=runs&run_id=#{nw.runs[14].id}"
     end
 
+    # A hire proposed elsewhere inserts its section just before Last 24 hours;
+    # unkeyed, the patch replaced the disclosure (closed) instead of keeping it.
+    test "Last 24 hours keeps its element when a hire is proposed elsewhere", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, view, _html} = live(conn, "/agents")
+
+      runs24_id = fn ->
+        view |> r3_doc() |> Floki.find("details.runs24") |> Floki.attribute("id")
+      end
+
+      assert runs24_id.() == ["team-runs-24h"]
+
+      {:ok, _} =
+        Cympho.BoardApprovals.create_board_approval(%{
+          company_id: nw.company.id,
+          title: "Hire a designer",
+          category: "agent_hire",
+          status: "pending",
+          proposal_data: %{"attrs" => %{"name" => "Designer"}}
+        })
+
+      wait_until(fn -> assert length(Floki.find(r3_doc(view), "section.hire")) == 2 end)
+      assert runs24_id.() == ["team-runs-24h"]
+    end
+
     test "resuming Mira from the Next step clears the problem", %{conn: conn, nw: nw} do
       mira = nw.agents["Mira"]
       {:ok, view, _html} = live(conn, "/agents")
@@ -2940,6 +2967,22 @@ defmodule CymphoWeb.AgentLiveTest do
       render_click(view, "resume_agent", %{"id" => nw.agents["Mira"].id})
 
       assert Repo.get!(Agent, nw.agents["Mira"].id).status == :paused
+    end
+
+    test "a pause made here is the owner's: no Resume problem for them", %{conn: conn, nw: nw} do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents")
+
+      render_click(view, "pause_agent", %{"id" => ada.id})
+
+      paused = Repo.get!(Agent, ada.id)
+      assert paused.status == :paused
+      assert paused.paused_by_user_id == nw.user.id
+
+      refute Enum.any?(
+               OwnerAttention.list_items(nw.company.id, nw.user),
+               &(&1.kind == :agent_paused and &1.agent_id == ada.id)
+             )
     end
 
     test "the board follows agent events live", %{conn: conn, nw: nw} do
@@ -3072,6 +3115,218 @@ defmodule CymphoWeb.AgentLiveTest do
       end
     end
 
+    test "Back to Home stays while the tabs change", %{conn: conn, nw: nw} do
+      mira = nw.agents["Mira"]
+      {:ok, view, _html} = live(conn, "/agents/#{mira.id}?from=/")
+
+      view |> element(".agent-h .seg a", "Setup") |> render_click()
+      assert r3_text(r3_doc(view), ".agent-h .seg a[aria-current]") == "Setup"
+      assert r3_text(r3_doc(view), ".ctx .ret") == "Back to Home"
+
+      render_click(view, "set_tab", %{"tab" => "instructions"})
+      assert r3_text(r3_doc(view), ".ctx .ret") == "Back to Home"
+
+      view |> element(".agent-h .seg a", "Overview") |> render_click()
+      assert r3_text(r3_doc(view), ".ctx .ret") == "Back to Home"
+
+      # Opened without one, the tabs add no Back link.
+      {:ok, view, _html} = live(conn, "/agents/#{mira.id}")
+      view |> element(".agent-h .seg a", "Setup") |> render_click()
+      assert Floki.find(r3_doc(view), ".ctx .ret") == []
+    end
+
+    test "the page's own links carry the origin, so Back to Home survives a reload", %{
+      conn: conn,
+      nw: nw
+    } do
+      mira = nw.agents["Mira"]
+      base = "/agents/#{mira.id}"
+      run = nw.runs[7]
+      {:ok, view, _html} = live(conn, base <> "?from=/")
+      doc = r3_doc(view)
+
+      assert Floki.attribute(doc, ".agent-h .seg a", "href") == [
+               base <> "?from=%2F",
+               base <> "?tab=configuration&from=%2F",
+               base <> "?tab=runs&from=%2F"
+             ]
+
+      # Every in-page link: the tabs, Setup, History and the run rows.
+      patches = Floki.attribute(doc, ~s(a[data-phx-link="patch"]), "href")
+      assert length(patches) > 3
+      assert Enum.all?(patches, &(&1 =~ "from=%2F"))
+
+      render_click(view, "set_tab", %{"tab" => "instructions"})
+      assert_patch(view, base <> "?tab=instructions&from=%2F")
+
+      render_click(view, "select_file", %{"file" => "AGENTS.md"})
+      assert_patch(view, base <> "?tab=instructions&file=AGENTS.md&from=%2F")
+
+      render_click(view, "select_run", %{"run_id" => run.id})
+      assert_patch(view, base <> "?tab=runs&run_id=#{run.id}&from=%2F")
+
+      # A reload is a fresh mount of the patched URL.
+      {:ok, view, _html} = live(conn, base <> "?tab=runs&run_id=#{run.id}&from=%2F")
+      assert r3_text(r3_doc(view), ".ctx .ret") == "Back to Home"
+
+      # The retry's Open History keeps it too.
+      {:ok, broken} =
+        Agents.create_agent(%{
+          company_id: nw.company.id,
+          name: "Broken",
+          role: :engineer,
+          status: :error
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{broken.id}?from=/")
+
+      assert Floki.attribute(r3_doc(view), ~s(.next a.pd[data-phx-link="patch"]), "href") == [
+               "/agents/#{broken.id}?tab=runs&from=%2F"
+             ]
+
+      # Absent or refused, the links carry none.
+      for query <- ["", "?from=" <> URI.encode_www_form("//evil.example/x")] do
+        {:ok, view, _html} = live(conn, base <> query)
+
+        assert Floki.attribute(r3_doc(view), ".agent-h .seg a", "href") == [
+                 base,
+                 base <> "?tab=configuration",
+                 base <> "?tab=runs"
+               ]
+
+        render_click(view, "set_tab", %{"tab" => "configuration"})
+        assert_patch(view, base <> "?tab=configuration")
+        assert Floki.find(r3_doc(view), ".ctx .ret") == []
+      end
+    end
+
+    test "the Advanced links back to this agent keep the origin too", %{conn: conn, nw: nw} do
+      mira = nw.agents["Mira"]
+      base = "/agents/#{mira.id}"
+      {:ok, _revision} = Agents.create_config_revision(mira, %{source: "prompt_tuning"})
+      own = ~s(a[data-phx-link="redirect"][href^="#{base}?"])
+      {:ok, view, _html} = live(conn, base <> "?from=/")
+
+      # The overview's action (here Tune guide), the prompt canary's Open runs, Open guide
+      # and Open runtime.
+      assert view
+             |> r3_doc()
+             |> Floki.find(own)
+             |> Enum.map(&{r3_squish(Floki.text(&1)), hd(Floki.attribute(&1, "href"))}) == [
+               {"Tune guide", base <> "?tab=configuration&from=%2F#agent-instruction-studio"},
+               {"Open runs", base <> "?tab=runs&from=%2F"},
+               {"Open guide", base <> "?tab=configuration&from=%2F#agent-instruction-studio"},
+               {"Open runtime", base <> "?tab=configuration&from=%2F#agent-runtime-profile"}
+             ]
+
+      for label <- ["Tune guide", "Open runs", "Open guide", "Open runtime"] do
+        {:ok, view, _html} = live(conn, base <> "?from=/")
+
+        {:ok, next, _html} =
+          view |> element(own, label) |> render_click() |> follow_redirect(conn)
+
+        assert r3_text(r3_doc(next), ".ctx .ret") == "Back to Home"
+      end
+    end
+
+    test "Pause here is the owner's: it reads Paused and is no Inbox problem", %{
+      conn: conn,
+      nw: nw
+    } do
+      ada = nw.agents["Ada"]
+      before = OwnerAttention.counts(nw.company.id, nw.user)
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}")
+
+      render_click(view, "pause_agent", %{})
+
+      paused = Repo.get!(Agent, ada.id)
+      assert paused.status == :paused
+      assert paused.paused_by_user_id == nw.user.id
+      assert r3_text(r3_doc(view), ".agent-h .sp") =~ ~r/^Paused · \d\d:\d\d$/
+
+      after_pause = OwnerAttention.counts(nw.company.id, nw.user)
+      assert after_pause.total == before.total
+      refute Map.has_key?(after_pause.by_agent, ada.id)
+    end
+
+    test "an unsaved Setup edit stays while the agent is paused and resumed elsewhere", %{
+      conn: conn,
+      nw: nw
+    } do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}?tab=configuration")
+
+      view
+      |> form("form[phx-submit='config_save']", %{"agent" => %{"name" => "Ada Byron"}})
+      |> render_change()
+
+      {:ok, paused} = Agents.pause_agent(ada, "Breaker")
+      wait_until(fn -> assert r3_text(r3_doc(view), ".agent-h .sp") =~ "Paused" end)
+      assert setup_name(view) == ["Ada Byron"]
+
+      {:ok, _} = Agents.resume_agent(paused)
+      wait_until(fn -> refute r3_text(r3_doc(view), ".agent-h .sp") =~ "Paused" end)
+      assert setup_name(view) == ["Ada Byron"]
+    end
+
+    test "an unsaved Setup edit stays through this page's own Pause", %{conn: conn, nw: nw} do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}?tab=configuration")
+
+      view
+      |> form("form[phx-submit='config_save']", %{"agent" => %{"name" => "Ada Byron"}})
+      |> render_change()
+
+      render_click(view, "pause_agent", %{})
+
+      assert Repo.get!(Agent, ada.id).status == :paused
+      assert setup_name(view) == ["Ada Byron"]
+    end
+
+    test "an unsaved runtime profile choice stays through a live update", %{conn: conn, nw: nw} do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}?tab=configuration")
+      before = :sys.get_state(view.pid).socket.assigns.selected_runtime_profile_id
+      refute before == "codex-mini"
+
+      render_click(view, "select_runtime_profile", %{"profile_id" => "codex-mini"})
+
+      {:ok, _} = Agents.pause_agent(ada, "Breaker")
+      wait_until(fn -> assert r3_text(r3_doc(view), ".agent-h .sp") =~ "Paused" end)
+      assert :sys.get_state(view.pid).socket.assigns.selected_runtime_profile_id == "codex-mini"
+    end
+
+    test "an untouched Setup form follows the agent saved elsewhere", %{conn: conn, nw: nw} do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}?tab=configuration")
+
+      {:ok, _} = Agents.update_agent(ada, %{name: "Ada Lovelace"})
+
+      wait_until(fn -> assert setup_name(view) == ["Ada Lovelace"] end)
+    end
+
+    test "once the kept edit is saved, the form follows live updates again", %{
+      conn: conn,
+      nw: nw
+    } do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}?tab=configuration")
+
+      setup_form =
+        form(view, "form[phx-submit='config_save']", %{"agent" => %{"name" => "Ada Byron"}})
+
+      render_change(setup_form)
+      {:ok, paused} = Agents.pause_agent(ada, "Breaker")
+      wait_until(fn -> assert r3_text(r3_doc(view), ".agent-h .sp") =~ "Paused" end)
+      assert setup_name(view) == ["Ada Byron"]
+
+      render_submit(setup_form)
+      assert Repo.get!(Agent, ada.id).name == "Ada Byron"
+
+      {:ok, _} = Agents.update_agent(Repo.get!(Agent, paused.id), %{name: "Ada Lovelace"})
+      wait_until(fn -> assert setup_name(view) == ["Ada Lovelace"] end)
+    end
+
     test "the Next step resumes Mira, with the reason as Cympho stored it", %{
       conn: conn,
       nw: nw
@@ -3120,6 +3375,28 @@ defmodule CymphoWeb.AgentLiveTest do
       doc = r3_doc(view)
       assert r3_text(doc, ".agent-h .sp") == "Idle"
       refute r3_text(doc, ".next .paper .nt") == "Resume Mira"
+    end
+
+    # A pause made elsewhere switches the Next step to another branch, which gets
+    # a new LiveView element key; the patch then replaced every unkeyed element
+    # after it, so Technical details closed.
+    test "Technical details keeps its element when the agent is paused elsewhere", %{
+      conn: conn,
+      nw: nw
+    } do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}")
+
+      tech_id = fn ->
+        view |> r3_doc() |> Floki.find("details.card.tech") |> Floki.attribute("id")
+      end
+
+      assert tech_id.() == ["agent-tech-details"]
+
+      {:ok, _} = Agents.pause_agent(ada, "Paused from another page")
+
+      wait_until(fn -> assert r3_text(r3_doc(view), ".agent-h .sp") =~ "Paused" end)
+      assert tech_id.() == ["agent-tech-details"]
     end
 
     test "a member cannot resume an agent", %{nw: nw} do
@@ -3352,6 +3629,8 @@ defmodule CymphoWeb.AgentLiveTest do
   end
 
   defp r3_doc(view), do: view |> render() |> Floki.parse_fragment!()
+
+  defp setup_name(view), do: Floki.attribute(r3_doc(view), ~s(input[name="agent[name]"]), "value")
 
   # Text nodes joined with a space (the gaps the CSS draws), then squished.
   defp r3_text(node, selector),

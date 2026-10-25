@@ -96,6 +96,19 @@ defmodule Cympho.AgentsTest do
       assert paused.pause_reason == "adapter circuit breaker"
       assert paused.governance_reasoning == "adapter circuit breaker"
       assert paused.paused_at != nil
+      # A breaker or a hard stop: nobody is recorded as the pauser.
+      assert paused.paused_by_user_id == nil
+    end
+
+    test "a person's pause records who paused", %{agent: agent} do
+      user_id = Ecto.UUID.generate()
+
+      assert {:ok, paused} =
+               Agents.pause_agent(agent, "Agent paused", paused_by_user_id: user_id)
+
+      assert paused.status == :paused
+      assert paused.pause_reason == "Agent paused"
+      assert Repo.get!(Agent, agent.id).paused_by_user_id == user_id
     end
 
     test "resume_agent/1 clears runtime and governance pause metadata", %{agent: agent} do

@@ -792,7 +792,8 @@ defmodule Cympho.Wakes do
   preloaded. Filtered by `reason in ("final_review_required",
   "child_status_changed", "issue_children_completed")` — the wakes the
   autonomous loop produces when something is asking for human or boss
-  judgment.
+  judgment. `:limit` defaults to 50; `limit: nil` lists them all. `:ids` keeps
+  only those wakes.
   """
   @spec list_review_queue({:agent, binary()} | {:company, binary()}, keyword()) ::
           [%{wake: AgentWake.t(), issue: Issue.t()}]
@@ -800,32 +801,13 @@ defmodule Cympho.Wakes do
 
   def list_review_queue({:agent, nil}, _opts), do: []
 
-  def list_review_queue({:agent, agent_id}, opts) when is_binary(agent_id) do
-    limit = Keyword.get(opts, :limit, 50)
-    company_id = Keyword.get(opts, :company_id)
-
-    AgentWake
-    |> join(:inner, [w], i in assoc(w, :issue))
-    |> where([w, _i], w.agent_id == ^agent_id and w.status in ["pending", "running"])
-    |> where([w, _i], w.reason in ^@review_queue_reasons)
-    |> scope_review_queue_company(company_id)
+  def list_review_queue({kind, id} = scope, opts)
+      when kind in [:agent, :company] and is_binary(id) do
+    scope
+    |> review_queue_query(Keyword.get(opts, :company_id))
+    |> maybe_filter_ids(Keyword.get(opts, :ids))
     |> order_by([w], desc: w.inserted_at)
-    |> limit(^limit)
-    |> preload([:issue, :agent])
-    |> Repo.all()
-    |> Enum.reject(&(&1.issue == nil))
-    |> Enum.map(&%{wake: &1, issue: &1.issue})
-  end
-
-  def list_review_queue({:company, company_id}, opts) when is_binary(company_id) do
-    limit = Keyword.get(opts, :limit, 50)
-
-    AgentWake
-    |> join(:inner, [w], i in assoc(w, :issue))
-    |> where([w, i], i.company_id == ^company_id and w.status in ["pending", "running"])
-    |> where([w, _i], w.reason in ^@review_queue_reasons)
-    |> order_by([w], desc: w.inserted_at)
-    |> limit(^limit)
+    |> maybe_limit(Keyword.get(opts, :limit, 50))
     |> preload([:issue, :agent])
     |> Repo.all()
     |> Enum.reject(&(&1.issue == nil))
@@ -833,6 +815,51 @@ defmodule Cympho.Wakes do
   end
 
   def list_review_queue(_, _), do: []
+
+  @doc """
+  Every wake of `list_review_queue/2`, bare: the wake's id, agent, task and
+  time and the task's id and assignee, which is what owner attention counts,
+  dedups and attributes by. Nothing is preloaded.
+  """
+  @spec list_review_queue_memberships({:agent, binary()} | {:company, binary()}, keyword()) ::
+          [%{wake: AgentWake.t(), issue: Issue.t()}]
+  def list_review_queue_memberships(scope, opts \\ [])
+
+  def list_review_queue_memberships({:agent, nil}, _opts), do: []
+
+  def list_review_queue_memberships({kind, id} = scope, opts)
+      when kind in [:agent, :company] and is_binary(id) do
+    scope
+    |> review_queue_query(Keyword.get(opts, :company_id))
+    |> select([w, i], %{
+      wake: struct(w, [:id, :agent_id, :issue_id, :inserted_at]),
+      issue: struct(i, [:id, :assignee_id])
+    })
+    |> Repo.all()
+  end
+
+  def list_review_queue_memberships(_, _), do: []
+
+  defp review_queue_query({:agent, agent_id}, company_id) do
+    AgentWake
+    |> join(:inner, [w], i in assoc(w, :issue))
+    |> where([w, _i], w.agent_id == ^agent_id and w.status in ["pending", "running"])
+    |> where([w, _i], w.reason in ^@review_queue_reasons)
+    |> scope_review_queue_company(company_id)
+  end
+
+  defp review_queue_query({:company, company_id}, _company_id) do
+    AgentWake
+    |> join(:inner, [w], i in assoc(w, :issue))
+    |> where([w, i], i.company_id == ^company_id and w.status in ["pending", "running"])
+    |> where([w, _i], w.reason in ^@review_queue_reasons)
+  end
+
+  defp maybe_filter_ids(query, nil), do: query
+  defp maybe_filter_ids(query, ids), do: where(query, [w], w.id in ^ids)
+
+  defp maybe_limit(query, nil), do: query
+  defp maybe_limit(query, limit), do: limit(query, ^limit)
 
   defp scope_review_queue_company(query, company_id) when is_binary(company_id) do
     where(query, [_w, i], i.company_id == ^company_id)

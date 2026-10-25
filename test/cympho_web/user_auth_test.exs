@@ -428,6 +428,41 @@ defmodule CymphoWeb.UserAuthTest do
       assert Cympho.OwnerAttention.unresolved_count(company.id, user) == 1
     end
 
+    # B15: the badge draws "99+" itself (nav_rail.ex, app.js), so the count must
+    # reach it uncapped, on the first render and on every company-scoped push,
+    # past the 200 rows a list shows too.
+    test "Inbox badge carries a count over 99 to the first render and to live pushes", %{
+      user: user,
+      company1: company
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{name: "Busy Badge Agent", role: :engineer, company_id: company.id})
+
+      for n <- 1..201, do: insert_blocked_issue!(company, agent, "Blocked #{n}")
+
+      conn =
+        build_conn()
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session("user_id", user.id)
+        |> Plug.Conn.put_session("company_id", company.id)
+
+      {:ok, view, html} = live(conn, "/issues")
+
+      assert live_assigns(view).nav_inbox_count == 201
+      assert live_assigns(view).inbox_badge_count == 201
+      assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*99\+\s*<\/span>/s
+      assert html =~ ~r/<span[^>]*data-badge-full[^>]*>201<\/span>/
+
+      insert_blocked_issue!(company, agent, "Blocked 202")
+
+      wait_until(fn ->
+        render(view)
+        assert live_assigns(view).inbox_badge_count == 202
+      end)
+
+      assert_push_event(view, "nav_badges", %{inbox: 202})
+    end
+
     test "pure agent unreads do not inflate the Needs you badge", %{
       user: user,
       company1: company
@@ -470,6 +505,19 @@ defmodule CymphoWeb.UserAuthTest do
   defp assert_redirected_to_login(conn) do
     assert {:error, {:redirect, %{to: "/login?return_to=%2Fissues"}}} =
              live(conn, "/issues")
+  end
+
+  # A blocked task needs every owner (OwnerAttention); creating one notifies the company.
+  defp insert_blocked_issue!(company, agent, title) do
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: title,
+        status: :blocked,
+        company_id: company.id,
+        assignee_id: agent.id
+      })
+
+    issue
   end
 
   defp insert_budget_policy!(company) do

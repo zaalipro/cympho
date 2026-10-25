@@ -10,6 +10,8 @@ defmodule CymphoWeb.IssueLive.R3TaskTest do
 
   alias Cympho.{Comments, Companies, IssueThreadInteractions, Issues, R3Fixtures, Repo, Users}
   alias Cympho.Issues.IssueThreadInteraction
+  alias Cympho.WorkProducts
+  alias Cympho.WorkProducts.IssueWorkProduct
 
   setup do
     nw = R3Fixtures.northwind!()
@@ -136,6 +138,127 @@ defmodule CymphoWeb.IssueLive.R3TaskTest do
       # The Advanced timeline lists the numbered answers of the question (B3).
       render_click(view, "set_timeline_filter", %{"filter" => "all"})
       assert text(doc(view), "#timeline-stream") =~ "1. Retry automatically after 3 days"
+    end
+
+    test "a reply from another page leaves the brief, the thread and a deliverable as opened (B1)",
+         %{conn: conn, nw: nw} do
+      {:ok, view, _html} = open(conn, nw, "NW-6")
+      issue = nw.issues["NW-6"]
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          issue_id: issue.id,
+          body: "Posted from the Inbox.",
+          author_type: "user",
+          author_id: nw.user.id
+        })
+
+      # The reply re-renders the page; the patch must not drop the `open` the reader set.
+      doc = doc(view)
+      assert render(view) =~ "Posted from the Inbox."
+
+      for selector <- ["details.brief", "#thread details.earlier", "#deliverables details.objt-d"] do
+        assert [mounted] = doc |> Floki.find(selector) |> Floki.attribute("phx-mounted"),
+               "#{selector} has no phx-mounted"
+
+        assert Jason.decode!(mounted) == [["ignore_attrs", %{"attrs" => ["open"]}]]
+      end
+    end
+
+    # Unkeyed, the patch matches deliverables by position: removing an earlier one
+    # would hand a later one's `open` to its neighbour. Keyed by the work product,
+    # each keeps its own element.
+    test "each deliverable keeps its own element when an earlier one is removed",
+         %{conn: conn, nw: nw} do
+      issue = nw.issues["NW-6"]
+
+      [refunds, dunning] =
+        for {title, minutes} <- [{"Refund policy", 60}, {"Dunning emails", 30}] do
+          Repo.insert!(%IssueWorkProduct{
+            issue_id: issue.id,
+            kind: "document",
+            title: title,
+            inserted_at: R3Fixtures.at(nw.anchor, minutes),
+            updated_at: R3Fixtures.at(nw.anchor, minutes)
+          })
+        end
+
+      spec = Repo.get_by!(IssueWorkProduct, issue_id: issue.id, title: "Payment flow spec")
+      {:ok, view, _html} = open(conn, nw, "NW-6")
+
+      ids = fn ->
+        view |> doc() |> Floki.find("#deliverables details.objt-d") |> Floki.attribute("id")
+      end
+
+      assert ids.() == Enum.map([spec, refunds, dunning], &"deliverable-#{&1.id}")
+
+      :ok = WorkProducts.delete_work_product(spec)
+
+      assert ids.() == Enum.map([refunds, dunning], &"deliverable-#{&1.id}")
+    end
+
+    # The quiet line before it gives way to the latest update when the first agent
+    # comment arrives; unkeyed, the earlier thread would be replaced (and closed).
+    test "the earlier thread keeps its element when the first agent update arrives",
+         %{conn: conn, nw: nw} do
+      issue = nw.issues["NW-11"]
+      {:ok, view, _html} = open(conn, nw, "NW-11")
+
+      assert [_] = Floki.find(doc(view), "#thread p.quiet-line")
+
+      assert ["thread-earlier"] =
+               view |> doc() |> Floki.find("details.earlier") |> Floki.attribute("id")
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          issue_id: issue.id,
+          body: "Picking this up after the first 10 customers.",
+          author_type: "agent",
+          author_id: nw.agents["Ada"].id
+        })
+
+      doc = doc(view)
+      assert [] = Floki.find(doc, "#thread p.quiet-line")
+      assert text(doc, "#thread article.msg") =~ "Picking this up"
+      assert ["thread-earlier"] = doc |> Floki.find("details.earlier") |> Floki.attribute("id")
+    end
+
+    # Pausing the task inserts the Paused chip just before the brief; unkeyed, the
+    # patch replaced the brief (closed) instead of keeping the reader's element.
+    test "the brief keeps its element when the task is paused elsewhere",
+         %{conn: conn, nw: nw} do
+      {:ok, view, _html} = open(conn, nw, "NW-6")
+      brief_id = fn doc -> doc |> Floki.find("details.brief") |> Floki.attribute("id") end
+      assert brief_id.(doc(view)) == ["task-brief"]
+
+      {:ok, _} =
+        nw.issues["NW-6"].id
+        |> Issues.get_issue!()
+        |> Issues.pause_issue_runtime(reason: "Paused from another page")
+
+      wait_until(fn -> assert text(doc(view), ".head .chips") =~ "Paused" end)
+      assert brief_id.(doc(view)) == ["task-brief"]
+    end
+
+    # Answering switches the Next step to another branch, which gets a new
+    # LiveView element key; the patch then replaced every unkeyed element after
+    # it, so the phone's Details card closed.
+    test "the phone Details card keeps its element when the Next step changes",
+         %{conn: conn, nw: nw} do
+      {:ok, view, _html} = open(conn, nw, "NW-6")
+      details_id = fn doc -> doc |> Floki.find("details.det-m") |> Floki.attribute("id") end
+      assert details_id.(doc(view)) == ["task-details-m"]
+
+      view
+      |> form(".next form.ink", %{
+        "_id" => nw.questions["Q1"].id,
+        "response" => "Email the customer first"
+      })
+      |> render_submit()
+
+      doc = doc(view)
+      assert text(doc, ".next .paper .nt") == "Nothing needed from you"
+      assert details_id.(doc) == ["task-details-m"]
     end
 
     test "Back appears only for an allow-listed origin other than the parent", %{

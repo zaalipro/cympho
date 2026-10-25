@@ -153,8 +153,10 @@
              checklist is worth keeping for a first routine, not worth the
              column of prose on every visit, so it opens on demand. --%>
         <details
+          id="routine-setup-checklist"
           data-testid="routine-setup-checklist"
           class="rounded-xl border border-border bg-panel p-4 shadow-card"
+          phx-mounted={JS.ignore_attributes("open")}
         >
           <summary class="cursor-pointer list-none text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary [&::-webkit-details-marker]:hidden">
             Setup checklist

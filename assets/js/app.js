@@ -247,7 +247,9 @@ const Toast = {
   },
 
   _renderNext() {
-    if (this._activeToasts.length >= this._MAX_ACTIVE || this._queue.length === 0) return;
+    // Phones show one toast at a time, each for its full time, as Material's snackbar (C3).
+    const max = window.matchMedia("(max-width: 640px)").matches ? 1 : this._MAX_ACTIVE;
+    if (this._activeToasts.length >= max || this._queue.length === 0) return;
     const {message, type} = this._queue.shift();
     const container = document.getElementById("toast-container");
     if (!container) return;
@@ -258,6 +260,17 @@ const Toast = {
     requestAnimationFrame(() => el.classList.add("toast-visible"));
     const id = setTimeout(() => this._dismiss(el), this._DISMISS_MS);
     this._activeToasts.push({el, id});
+    this._reserveLane();
+  },
+
+  // While a toast shows, the page's scroller ends above it (app.css: .col's bottom margin), so a
+  // toast never sits over a button or a stuck action bar (C3).
+  _reserveLane() {
+    const root = document.documentElement.style;
+    const container = document.getElementById("toast-container");
+    if (!container || this._activeToasts.length === 0) return root.removeProperty("--toast-lane");
+    const top = container.getBoundingClientRect().top;
+    root.setProperty("--toast-lane", `${Math.ceil(window.innerHeight - top) + 8}px`);
   },
 
   _dismiss(el) {
@@ -267,6 +280,7 @@ const Toast = {
       el.remove();
       this._activeToasts = this._activeToasts.filter(t => t.el !== el);
       this._renderNext();
+      this._reserveLane();
     }, 300);
   }
 };
@@ -501,9 +515,9 @@ function handleKeydown(e) {
   const target = e.target;
   const isInput = shortcutTargetIsTextInput(target);
 
-  // Escape always closes modals (and the rail's open menus)
+  // Escape always closes modals (and the open <details> menus)
   if (e.key === 'Escape') {
-    document.querySelectorAll('.rail details[open]').forEach((open) => open.removeAttribute('open'));
+    document.querySelectorAll(DETAILS_MENUS).forEach((open) => open.removeAttribute('open'));
     const palette = document.getElementById('command-palette');
     const shortcuts = document.getElementById('shortcuts-modal');
     const quickCreate = document.getElementById('quick-create-modal');
@@ -1244,6 +1258,17 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// The Next step's "Or write your own answer" row reveals its text box with CSS
+// only (.opt-in:checked ~ .own-box). Choosing the row, by mouse or keyboard,
+// also moves the caret there, so what the owner types becomes the answer.
+function focusOwnAnswer(e) {
+  const radio = e.target;
+  if (!radio.classList?.contains('opt-in') || !radio.checked) return;
+  radio.closest('.opt-w')?.querySelector('.own-box textarea')?.focus();
+}
+document.addEventListener('change', focusOwnAnswer);
+document.addEventListener('click', focusOwnAnswer);
+
 // The dashboard prompt bar has a standalone command-palette button outside
 // the user-menu hook, so it needs the same delegated behavior here.
 document.addEventListener('click', (e) => {
@@ -1254,6 +1279,35 @@ document.addEventListener('click', (e) => {
   openCommandPalette();
 });
 
+// The <details> menus a LiveView renders ignore `open` on patch, so a live
+// update leaves them open; picking one of their items closes them instead.
+const LIVE_MENUS = 'details.cympho-menu, details.bc-mv, details.ob-acct';
+// With the rail's company switch and account menus (root layout) and the "?"
+// help popovers, these close on an outside click, on Escape and on a live
+// navigation.
+const DETAILS_MENUS = `.rail details, ${LIVE_MENUS}, details.help-pop`;
+
+// Back, Forward and a server patch click nothing, and a patch keeps these
+// menus' `open`: close them on every live navigation, as a new page would.
+window.addEventListener('phx:navigate', () => {
+  document.querySelectorAll(DETAILS_MENUS).forEach((open) => open.removeAttribute('open'));
+});
+
+// A <details> whose `open` the server derives from the data (a failed run, a
+// set PR, an active filter) ignores `open` on patch like the others, so the
+// reader's toggle holds, and renders it again as data-open: when that value
+// changes, the fold follows it.
+const ServerOpen = {
+  mounted() {
+    this.serverOpen = this.el.dataset.open;
+  },
+  updated() {
+    if (this.el.dataset.open === this.serverOpen) return;
+    this.serverOpen = this.el.dataset.open;
+    this.el.open = this.serverOpen === 'true';
+  }
+};
+
 // Company rail controls. These used inline onclick handlers, which the
 // Content-Security-Policy (script-src with a nonce) now blocks.
 document.addEventListener('click', (e) => {
@@ -1261,12 +1315,11 @@ document.addEventListener('click', (e) => {
     window.openCompanySwitcher();
   }
 
-  const menuClose = e.target.closest('[data-runtime-menu-close]');
+  const menuClose = e.target.closest(`[data-runtime-menu-close], :is(${LIVE_MENUS}) :is(a, button)`);
   const menu = menuClose && menuClose.closest('details');
   if (menu) menu.removeAttribute('open');
 
-  // The rail's company switch and account menus are <details>: an outside click closes them.
-  document.querySelectorAll('.rail details[open]').forEach((open) => {
+  document.querySelectorAll(DETAILS_MENUS).forEach((open) => {
     if (!open.contains(e.target)) open.removeAttribute('open');
   });
 });
@@ -1301,8 +1354,10 @@ window.addEventListener('phx:nav_badges', (e) => {
 });
 
 function updateNavBadgeNodes(key, rawCount) {
-  const count = Math.min(99, Math.max(0, Number.isFinite(rawCount) ? rawCount : 0));
+  const count = Math.max(0, Number.isFinite(rawCount) ? rawCount : 0);
   const visible = count > 0;
+  // Over 99 the badge reads "99+" and screen readers get the full count (nav_rail.ex).
+  const capped = count > 99;
 
   document.querySelectorAll(`[data-nav-badge="${key}"]`).forEach((el) => {
     el.dataset.count = String(count);
@@ -1310,9 +1365,16 @@ function updateNavBadgeNodes(key, rawCount) {
     el.setAttribute('aria-hidden', visible ? 'false' : 'true');
 
     const num = el.querySelector('[data-badge-num]') || el;
-    num.textContent = visible ? String(count) : '';
+    num.textContent = visible ? (capped ? '99+' : String(count)) : '';
     if (visible) num.setAttribute('data-testid', `nav-badge-${key}`);
     else num.removeAttribute('data-testid');
+
+    const full = el.querySelector('[data-badge-full]');
+    if (full) {
+      full.textContent = capped ? String(count) : '';
+      if (capped) num.setAttribute('aria-hidden', 'true');
+      else num.removeAttribute('aria-hidden');
+    }
   });
 }
 
@@ -2474,7 +2536,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
     IssueGateCleanup,
     InfiniteScroll,
     CopyToClipboard,
-    CompanyImportTransfer
+    CompanyImportTransfer,
+    ServerOpen
   }
 });
 

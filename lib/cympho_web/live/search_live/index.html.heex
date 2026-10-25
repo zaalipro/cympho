@@ -133,9 +133,13 @@
             </div>
 
             <details
+              id="search-advanced-filters"
               data-testid="search-advanced-filters"
               open={advanced_filters_active?(@filters)}
+              data-open={to_string(advanced_filters_active?(@filters))}
               class="ui-advanced-only rounded-lg border border-border bg-surface-1/50"
+              phx-hook="ServerOpen"
+              phx-mounted={JS.ignore_attributes("open")}
             >
               <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary">
                 <span class="inline-flex min-w-0 items-center gap-2">

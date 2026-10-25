@@ -554,7 +554,12 @@ defmodule CymphoWeb.IssueLive.Show.Task do
         </div>
       </article>
       <p :if={!@v.thread.latest} class="quiet-line">No update from an agent yet.</p>
-      <details :if={@v.thread.earlier != []} class="earlier">
+      <details
+        :if={@v.thread.earlier != []}
+        id="thread-earlier"
+        class="earlier"
+        phx-mounted={JS.ignore_attributes("open")}
+      >
         <summary>
           <span>{@v.thread.summary}</span> <.r3_icon name="i-chev-down" />
         </summary>
@@ -628,7 +633,12 @@ defmodule CymphoWeb.IssueLive.Show.Task do
           >
             <:sub_line><.deliverable_sub d={d} /></:sub_line>
           </.object_tile>
-          <details :if={!d.href} class="objt objt-d">
+          <details
+            :if={!d.href}
+            id={"deliverable-#{d.id}"}
+            class="objt objt-d"
+            phx-mounted={JS.ignore_attributes("open")}
+          >
             <summary>
               {Phoenix.HTML.raw(d.file)}
               <span class="objt-m">
@@ -683,7 +693,12 @@ defmodule CymphoWeb.IssueLive.Show.Task do
 
   def task_details(assigns) do
     ~H"""
-    <details :if={@mobile} class="card det-m">
+    <details
+      :if={@mobile}
+      id="task-details-m"
+      class="card det-m"
+      phx-mounted={JS.ignore_attributes("open")}
+    >
       <summary><span class="h2">Details</span> <.r3_icon name="i-chev-down" /></summary>
       <.details_list issue={@issue} v={@v} cost={@cost} />
     </details>
@@ -1076,6 +1091,7 @@ defmodule CymphoWeb.IssueLive.Show.Task do
         github? = is_binary(url) and String.contains?(url, "github.com")
 
         %{
+          id: wp.id,
           kind: if(wp.kind == "code_change", do: :code, else: :doc),
           title: wp.title,
           href: url,
@@ -1097,6 +1113,7 @@ defmodule CymphoWeb.IssueLive.Show.Task do
       if is_binary(pr_url) and pr_url != "" and not Enum.any?(items, &(&1.href == pr_url)) do
         [
           %{
+            id: nil,
             kind: :code,
             title: pr_title(issue, pr_url),
             href: pr_url,

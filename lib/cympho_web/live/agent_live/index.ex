@@ -192,10 +192,12 @@ defmodule CymphoWeb.AgentLive.Index do
   end
 
   def handle_event("pause_agent", %{"id" => id}, socket) do
+    user_id = socket.assigns[:current_user] && socket.assigns.current_user.id
+
     scoped_agent_action(
       socket,
       id,
-      &Agents.pause_agent/1,
+      &Agents.pause_agent(&1, "Agent paused", paused_by_user_id: user_id),
       "Agent paused successfully",
       "Failed to pause agent"
     )

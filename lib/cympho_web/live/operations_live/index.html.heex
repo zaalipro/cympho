@@ -353,7 +353,11 @@
               <%!-- The scaffold is a copy payload, not reading material: the button
                    beside it is the interface. Printing all six placeholder lines
                    inline cost more page than every other panel here combined. --%>
-              <details class="group mt-2">
+              <details
+                id="launch-plan-scaffold-preview"
+                class="group mt-2"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
                 <summary
                   title="Preview the repair scaffold"
                   aria-label="Preview the repair scaffold"
@@ -554,7 +558,11 @@
                         Copy repair scaffold
                       </button>
                     </div>
-                    <details class="group mt-2">
+                    <details
+                      id="ceo-flow-scaffold-preview"
+                      class="group mt-2"
+                      phx-mounted={JS.ignore_attributes("open")}
+                    >
                       <summary
                         title="Preview the repair scaffold"
                         aria-label="Preview the repair scaffold"
@@ -769,7 +777,11 @@
                       {preflight_action_target_label(candidate.preflight.first_action)}
                     </.app_link>
                   </p>
-                  <details class="group mt-2">
+                  <details
+                    id={"runtime-preflight-checks-#{candidate.id}"}
+                    class="group mt-2"
+                    phx-mounted={JS.ignore_attributes("open")}
+                  >
                     <summary
                       title="View preflight checks"
                       aria-label="View preflight checks"
@@ -823,7 +835,11 @@
                   <%!-- Both paragraphs below are static template text, identical for
                        every CEO candidate in the queue. Six rows printed them six
                        times; collapsed, the row keeps its label and copy button. --%>
-                  <details class="group mt-1">
+                  <details
+                    id={"runtime-ceo-brief-asks-#{candidate.id}"}
+                    class="group mt-1"
+                    phx-mounted={JS.ignore_attributes("open")}
+                  >
                     <summary
                       title="What this brief asks the CEO to do"
                       aria-label="What this brief asks the CEO to do"
@@ -861,7 +877,11 @@
                         Copy repair scaffold
                       </button>
                     </div>
-                    <details class="group mt-2">
+                    <details
+                      id={"runtime-ceo-brief-scaffold-#{candidate.id}"}
+                      class="group mt-2"
+                      phx-mounted={JS.ignore_attributes("open")}
+                    >
                       <summary
                         title="Preview the repair scaffold"
                         aria-label="Preview the repair scaffold"
@@ -875,7 +895,11 @@
                     </details>
                   </div>
                 </div>
-                <details class="group mt-2">
+                <details
+                  id={"runtime-launch-focus-#{candidate.id}"}
+                  class="group mt-2"
+                  phx-mounted={JS.ignore_attributes("open")}
+                >
                   <%!-- The chevron alone was a 14x14 target, ~1/10th of the 44px
                        the rest of the app standardises on. Padding grows the hit
                        area without changing where the glyph sits. --%>
@@ -1882,7 +1906,9 @@
                 </div>
                 <details
                   :if={repairable_ceo_outcome?(outcome)}
+                  id={"ceo-outcome-repair-#{outcome.id}"}
                   class="group mt-2"
+                  phx-mounted={JS.ignore_attributes("open")}
                 >
                   <summary class="inline-flex cursor-pointer list-none items-center gap-1.5 text-[11px] font-510 text-brand hover:text-brand/80 [&::-webkit-details-marker]:hidden">
                     {ceo_outcome_repair_label(outcome)}
@@ -1958,7 +1984,11 @@
                 <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{doctor_badge_class(@doctor.level)}"}>
                   {@doctor.label}
                 </span>
-                <details class="group relative inline-flex">
+                <details
+                  id="doctor-help"
+                  class="help-pop group relative inline-flex"
+                  phx-mounted={JS.ignore_attributes("open")}
+                >
                   <summary
                     class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-border bg-surface text-[11px] font-590 text-text-tertiary hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
                     aria-label="How Operations Doctor works"
@@ -2069,7 +2099,11 @@
                   <p class="mt-2 text-xs leading-5 text-text-tertiary">{finding.body}</p>
                 </div>
 
-                <details class="group relative shrink-0">
+                <details
+                  id={"doctor-finding-help-#{String.replace(finding.title, ~r/\s+/, "-")}"}
+                  class="help-pop group relative shrink-0"
+                  phx-mounted={JS.ignore_attributes("open")}
+                >
                   <summary
                     class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-border bg-surface text-[11px] font-590 text-text-tertiary hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
                     aria-label={"Why #{finding.title}?"}
@@ -2166,7 +2200,11 @@
                 <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{prompt_status_badge_class(if(@prompt_radar.counts.watchlist == 0, do: :ready, else: :needs_tuning))}"}>
                   {@prompt_radar.counts.watchlist} need review
                 </span>
-                <details class="group relative inline-flex">
+                <details
+                  id="prompt-radar-help"
+                  class="help-pop group relative inline-flex"
+                  phx-mounted={JS.ignore_attributes("open")}
+                >
                   <summary
                     class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-border bg-surface text-[11px] font-590 text-text-tertiary hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
                     aria-label="How Prompt Drift Radar works"

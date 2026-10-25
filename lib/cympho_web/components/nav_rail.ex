@@ -137,7 +137,7 @@ defmodule CymphoWeb.Components.NavRail do
         %{dest | kids: kids} |> Map.put(:state, state)
       end)
 
-    count = assigns.inbox_count |> max(0) |> min(99)
+    count = max(assigns.inbox_count, 0)
 
     assigns =
       assigns
@@ -203,7 +203,9 @@ defmodule CymphoWeb.Components.NavRail do
   attr :count, :integer, required: true
 
   # The one badge (N6). The node is always present so the `nav_badges` push
-  # can update it; at zero it is hidden. The number carries the test id.
+  # can update it; at zero it is hidden. The number carries the test id. Over
+  # 99 it reads "99+" and screen readers get the full count (B15); app.js
+  # updateNavBadgeNodes draws the same.
   defp inbox_count(assigns) do
     ~H"""
     <span
@@ -212,10 +214,14 @@ defmodule CymphoWeb.Components.NavRail do
       data-count={@count}
       aria-hidden={if(@count > 0, do: "false", else: "true")}
     >
-      <span data-badge-num data-testid={@count > 0 && "nav-badge-inbox"}>
-        {if @count > 0, do: @count}
+      <span
+        data-badge-num
+        data-testid={@count > 0 && "nav-badge-inbox"}
+        aria-hidden={@count > 99 && "true"}
+      >
+        {if @count > 99, do: "99+", else: if(@count > 0, do: @count)}
       </span>
-      <span class="sr"> need you</span>
+      <span class="sr" data-badge-full>{if @count > 99, do: @count}</span><span class="sr"> need you</span>
     </span>
     """
   end

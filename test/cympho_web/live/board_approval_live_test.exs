@@ -131,6 +131,188 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
     assert [%{vote: "deny", reasoning: nil}] = updated.votes
   end
 
+  # B5: the only board member's Approve meets the threshold, so cast_vote/4 also
+  # resolves the approval. The page must update in place, not crash on the
+  # resolved broadcast (which carries no votes) and re-join.
+  test "a vote that settles the approval updates the page in place", %{
+    conn: conn,
+    current_company: company
+  } do
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    membership = Companies.get_membership(user_id, company.id)
+    {:ok, _membership} = Companies.update_board_membership(membership, %{is_board_member: true})
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a QA engineer",
+        description: "Owns the test suite.",
+        category: "agent_hire",
+        company_id: company.id,
+        review_deadline: DateTime.utc_now() |> DateTime.add(2 * 60 * 60, :second)
+      })
+
+    {:ok, view, _html} = live(conn, "/board-approvals/#{approval.id}?from=/inbox")
+    pid = view.pid
+
+    view
+    |> form("#vote", %{"reason" => "Mira needs help with the test suite."})
+    |> render_submit(%{"vote" => "approve"})
+
+    # render/1 is queued behind the vote and resolution broadcasts the view sent itself.
+    html = render(view)
+
+    assert Process.alive?(pid)
+    assert html =~ "APPROVED"
+    assert html =~ "1 approve"
+    refute has_element?(view, "form#vote")
+
+    {:ok, updated} = BoardApprovals.get_board_approval(approval.id)
+    assert updated.status == "approved"
+  end
+
+  # B14: the reason saved with a vote is shown with its voter.
+  test "the Votes list shows each vote's reason with its voter", %{
+    conn: conn,
+    current_company: company
+  } do
+    voter = create_board_user(company, "voter")
+    silent = create_board_user(company, "silent")
+    third = create_board_user(company, "third")
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a QA engineer",
+        description: "Owns the test suite.",
+        category: "agent_hire",
+        company_id: company.id,
+        review_deadline: DateTime.utc_now() |> DateTime.add(2 * 60 * 60, :second)
+      })
+
+    {:ok, with_reason} =
+      BoardApprovals.cast_vote(approval.id, voter.id, "approve", "Release checks keep slipping.")
+
+    {:ok, without_reason} = BoardApprovals.cast_vote(approval.id, silent.id, "abstain")
+    {:ok, _third} = BoardApprovals.cast_vote(approval.id, third.id, "approve")
+
+    {:ok, view, html} = live(conn, "/board-approvals/#{approval.id}")
+    assert html =~ "APPROVED"
+    assert html =~ "Release checks keep slipping."
+
+    row = view |> element("#board-vote-#{with_reason.id}") |> render()
+    assert row =~ voter.name
+    assert row =~ "Release checks keep slipping."
+    assert row =~ "APPROVE"
+
+    # A vote cast without a reason shows its voter and vote, and no empty reason line.
+    assert has_element?(view, "#board-vote-#{without_reason.id}", silent.name)
+    refute has_element?(view, "#board-vote-#{without_reason.id} [data-vote-reason]")
+  end
+
+  # B14, review r1: on a board of three, one vote leaves the approval pending
+  # (quorum 3). The reason must still show with its voter on the same page.
+  test "a vote that leaves the approval pending shows its voter and reason", %{
+    conn: conn,
+    current_company: company
+  } do
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    membership = Companies.get_membership(user_id, company.id)
+    {:ok, _membership} = Companies.update_board_membership(membership, %{is_board_member: true})
+    _second = create_board_user(company, "second")
+    _third = create_board_user(company, "third")
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a QA engineer",
+        description: "Owns the test suite.",
+        category: "agent_hire",
+        company_id: company.id,
+        review_deadline: DateTime.utc_now() |> DateTime.add(2 * 60 * 60, :second)
+      })
+
+    {:ok, view, _html} = live(conn, "/board-approvals/#{approval.id}?from=/inbox")
+
+    view
+    |> form("#vote", %{"reason" => "Release checks keep slipping."})
+    |> render_submit(%{"vote" => "approve"})
+
+    # render/1 is queued behind the :board_vote_cast broadcast the view sent itself.
+    html = render(view)
+    assert html =~ "PENDING"
+
+    {:ok, updated} = BoardApprovals.get_board_approval(approval.id)
+    assert updated.status == "pending"
+    assert [vote] = updated.votes
+
+    voter = Users.get_user!(user_id)
+    assert has_element?(view, "#board-vote-#{vote.id}", voter.name)
+    assert has_element?(view, "#board-vote-#{vote.id}", "APPROVE")
+
+    assert has_element?(
+             view,
+             "#board-vote-#{vote.id} [data-vote-reason]",
+             "Release checks keep slipping."
+           )
+  end
+
+  # Review r1 (Argon IMP-1): a member votes once (unique per approval and user),
+  # so after voting on a still-pending approval the form is a dead end.
+  test "a board member who already voted gets no vote form while it is pending", %{
+    conn: conn,
+    current_company: company
+  } do
+    user_id = Plug.Conn.get_session(conn, :user_id)
+    membership = Companies.get_membership(user_id, company.id)
+    {:ok, _membership} = Companies.update_board_membership(membership, %{is_board_member: true})
+    _second = create_board_user(company, "second")
+    _third = create_board_user(company, "third")
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a QA engineer",
+        description: "Owns the test suite.",
+        category: "agent_hire",
+        company_id: company.id
+      })
+
+    {:ok, view, _html} = live(conn, "/board-approvals/#{approval.id}")
+    assert has_element?(view, "form#vote")
+
+    view |> form("#vote") |> render_submit(%{"vote" => "abstain"})
+
+    assert render(view) =~ "PENDING"
+    refute has_element?(view, "form#vote")
+
+    {:ok, _view, html} = live(conn, "/board-approvals/#{approval.id}")
+    assert html =~ "PENDING"
+    refute html =~ ~s(id="vote")
+  end
+
+  # Review r1 (Argon IMP-2): board_approval_votes.user_id has no foreign key, so
+  # a deleted voter's vote stays and preloads with user: nil.
+  test "a vote whose voter was deleted still renders", %{
+    conn: conn,
+    current_company: company
+  } do
+    gone = create_board_user(company, "gone")
+    _second = create_board_user(company, "second")
+    _third = create_board_user(company, "third")
+
+    {:ok, approval} =
+      BoardApprovals.create_board_approval(%{
+        title: "Hire a QA engineer",
+        description: "Owns the test suite.",
+        category: "agent_hire",
+        company_id: company.id
+      })
+
+    {:ok, vote} = BoardApprovals.cast_vote(approval.id, gone.id, "deny", "Not this quarter.")
+    :ok = Users.delete_user(gone)
+
+    {:ok, view, _html} = live(conn, "/board-approvals/#{approval.id}")
+    assert has_element?(view, "#board-vote-#{vote.id}", "A former member")
+    assert has_element?(view, "#board-vote-#{vote.id} [data-vote-reason]", "Not this quarter.")
+  end
+
   defp crumb_parent(html) do
     html
     |> Floki.parse_document!()
