@@ -484,6 +484,22 @@ defmodule Cympho.OwnerAttentionTest do
     assert OwnerAttention.unresolved_count(context.company.id, context.user) == 0
   end
 
+  test "a blocked task notifies when its agent changes, not when it is retitled", context do
+    company_id = context.company.id
+
+    {:ok, blocked} =
+      Issues.transition_issue(issue!(company_id, "Waiting on a decision"), :blocked)
+
+    :ok = OwnerAttention.subscribe(company_id)
+
+    # Its "for you" chip moves to the assignee agent (for_you_agent_id/1).
+    {:ok, assigned} = Issues.update_issue(blocked, %{assignee_id: context.agent.id})
+    assert_receive {:owner_attention_changed, ^company_id}
+
+    {:ok, _retitled} = Issues.update_issue(assigned, %{title: "Still waiting on a decision"})
+    refute_receive {:owner_attention_changed, _}, 50
+  end
+
   test "unrelated field updates and same-audience status moves do not notify", context do
     issue =
       issue!(context.company.id, "Stable human work", assignee_user_id: context.user.id)
@@ -812,6 +828,26 @@ defmodule Cympho.OwnerAttentionTest do
              )
     end
 
+    test "a resume forgets the person's pause, so a later automatic pause is listed", context do
+      paused? = fn ->
+        Enum.any?(
+          OwnerAttention.list_items(context.company.id, context.user),
+          &(&1.kind == :agent_paused)
+        )
+      end
+
+      {:ok, paused} =
+        Agents.pause_agent(context.agent, "Agent paused", paused_by_user_id: context.user.id)
+
+      refute paused?.()
+
+      {:ok, resumed} = Agents.resume_agent(paused)
+      assert resumed.paused_by_user_id == nil
+
+      {:ok, _paused} = Agents.pause_agent(resumed, "No-progress circuit breaker")
+      assert paused?.()
+    end
+
     test "pausing and resuming notify, and resuming clears the row", context do
       company_id = context.company.id
       :ok = OwnerAttention.subscribe(company_id)
@@ -900,6 +936,22 @@ defmodule Cympho.OwnerAttentionTest do
       assert OwnerAttention.counts(context.company.id, context.user) == %{
                total: 1,
                by_kind: %{stopped: 0, problem: 0, question: 0, review: 1, approval: 0},
+               by_agent: %{context.agent.id => 1}
+             }
+    end
+
+    test "a blocked task counts for its assignee agent; a person's task for no agent", context do
+      blocked = issue!(context.company.id, "Waiting on a decision", assignee_id: context.agent.id)
+      {:ok, _blocked} = Issues.transition_issue(blocked, :blocked)
+      # Waiting on the person it is assigned to, even with an agent on it too.
+      issue!(context.company.id, "The owner's own task",
+        assignee_user_id: context.user.id,
+        assignee_id: context.agent.id
+      )
+
+      assert OwnerAttention.counts(context.company.id, context.user) == %{
+               total: 2,
+               by_kind: %{stopped: 0, problem: 2, question: 0, review: 0, approval: 0},
                by_agent: %{context.agent.id => 1}
              }
     end

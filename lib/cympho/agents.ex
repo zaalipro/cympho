@@ -1327,6 +1327,9 @@ defmodule Cympho.Agents do
 
   @doc """
   Pauses an agent by setting runtime and governance status to paused.
+
+  `paused_by_user_id:` records the person who paused it; without one the pause
+  is automatic (a breaker or a hard stop) and becomes an owner item.
   """
   def pause_agent(%Agent{} = agent) do
     pause_agent(agent, "Agent paused")
@@ -1336,7 +1339,9 @@ defmodule Cympho.Agents do
     pause_agent(agent_id, "Agent paused")
   end
 
-  def pause_agent(%Agent{} = agent, reason) when is_binary(reason) do
+  def pause_agent(agent, reason, opts \\ [])
+
+  def pause_agent(%Agent{} = agent, reason, opts) when is_binary(reason) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     agent
@@ -1345,7 +1350,8 @@ defmodule Cympho.Agents do
       governance_status: "paused",
       governance_reasoning: reason,
       paused_at: now,
-      pause_reason: reason
+      pause_reason: reason,
+      paused_by_user_id: Keyword.get(opts, :paused_by_user_id)
     })
     |> Repo.update()
     |> case do
@@ -1377,9 +1383,9 @@ defmodule Cympho.Agents do
     end
   end
 
-  def pause_agent(agent_id, reason) when is_binary(agent_id) and is_binary(reason) do
+  def pause_agent(agent_id, reason, opts) when is_binary(agent_id) and is_binary(reason) do
     case get_agent(agent_id) do
-      {:ok, agent} -> pause_agent(agent, reason)
+      {:ok, agent} -> pause_agent(agent, reason, opts)
       error -> error
     end
   end

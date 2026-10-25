@@ -178,6 +178,48 @@ defmodule CymphoWeb.TeamRailLiveTest do
     end)
   end
 
+  test "a blocked task's chip follows its agent live, and the chips add up to the badge", %{
+    conn: conn,
+    company: company
+  } do
+    user = %{id: Plug.Conn.get_session(conn, :user_id)}
+    agent_id = fn name -> Repo.get_by!(Agents.Agent, company_id: company.id, name: name).id end
+
+    {:ok, task} =
+      Cympho.Issues.create_issue(%{title: "Waiting on a decision", company_id: company.id})
+
+    {:ok, task} = Cympho.Issues.transition_issue(task, :blocked)
+    {:ok, view, _html} = live_isolated(conn, TeamRailLive, session: session(conn, company.id))
+
+    chips = fn ->
+      view |> render() |> rows() |> Map.new(&{&1.name, &1.chip})
+    end
+
+    chip_sum = fn ->
+      chips.()
+      |> Map.values()
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.map(&(&1 |> String.split(" ") |> hd() |> String.to_integer()))
+      |> Enum.sum()
+    end
+
+    # Unassigned, it counts for no agent.
+    assert chips.()["Ada"] == ""
+
+    {:ok, task} = Cympho.Issues.update_issue(task, %{assignee_id: agent_id.("Ada")})
+    wait_until(fn -> assert chips.()["Ada"] == "1 for you" end)
+    assert chip_sum.() == Cympho.OwnerAttention.unresolved_count(company.id, user)
+
+    {:ok, _task} = Cympho.Issues.update_issue(task, %{assignee_id: agent_id.("Priya")})
+
+    wait_until(fn ->
+      assert chips.()["Ada"] == ""
+      assert chips.()["Priya"] == "2 for you"
+    end)
+
+    assert chip_sum.() == Cympho.OwnerAttention.unresolved_count(company.id, user)
+  end
+
   describe "the spending slot" do
     test "stays out of the rail below the warning threshold", %{conn: conn, company: company} do
       spend!(company, "300", "186.50")

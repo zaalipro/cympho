@@ -33,9 +33,10 @@ defmodule CymphoWeb.TeamRail do
 
   @doc """
   "N for you" per agent id, from the same unlimited membership as the Inbox
-  badge (`OwnerAttention.counts/2`): a review counts for the task's assignee.
-  The chips add up to the badge whenever every item has an agent (a budget
-  incident or a task waiting on a person has none).
+  badge (`OwnerAttention.counts/2`): a review or a blocked task counts for the
+  task's assignee. The chips add up to the badge whenever every item has an
+  agent (a budget incident, a task waiting on a person or an unassigned
+  blocked task has none).
   """
   def for_you_counts(company_id, user) do
     OwnerAttention.counts(company_id, user).by_agent

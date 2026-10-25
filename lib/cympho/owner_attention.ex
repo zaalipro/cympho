@@ -64,8 +64,10 @@ defmodule Cympho.OwnerAttention do
 
   Matches `Issues.human_action_query/3` membership: non-terminal issues that are
   either assigned to a human (`assignee_user_id`) or `:blocked` (visible to every
-  owner). Unrelated field updates and status moves that keep the same audience
-  (e.g. `:todo` → `:in_progress` with the same assignee) do not notify.
+  owner). A blocked issue's assignee agent changing notifies too, since its
+  "for you" chip moves (`for_you_agent_id/1`). Unrelated field updates and
+  status moves that keep the same audience (e.g. `:todo` → `:in_progress` with
+  the same assignee) do not notify.
   """
   def maybe_notify_human_action_membership(previous, current)
 
@@ -251,10 +253,15 @@ defmodule Cympho.OwnerAttention do
   The agent an owner item counts for, the rule behind the "N for you" chips
   (`counts/2`'s `by_agent`): a review waits on the work of the task's
   assignee (the wake itself belongs to whoever reviews, the CEO for an
-  unassigned root task); every other item on its own agent.
+  unassigned root task), and so does a blocked task assigned to an agent;
+  every other item on its own agent.
   """
   def for_you_agent_id(%{kind: :review_queue, issue: %{assignee_id: id}}) when is_binary(id),
     do: id
+
+  def for_you_agent_id(%{kind: :human_action, issue: %{status: :blocked, assignee_id: id}})
+      when is_binary(id),
+      do: id
 
   def for_you_agent_id(item), do: Map.get(item, :agent_id)
 
@@ -1123,12 +1130,17 @@ defmodule Cympho.OwnerAttention do
 
   # Audience fingerprint for human_action_query membership (company-wide).
   # :none — not in any owner's Needs-you set
-  # :all — :blocked non-terminal (every owner sees it)
+  # {:all, agent_id} — :blocked non-terminal (every owner sees it), counted
+  #   for its assignee agent's "for you" chip (for_you_agent_id/1)
   # {:user, id} — assigned to that human owner
-  defp human_action_audience(%Issue{status: status, assignee_user_id: assignee}) do
+  defp human_action_audience(%Issue{
+         status: status,
+         assignee_user_id: assignee,
+         assignee_id: agent_id
+       }) do
     cond do
       status in @terminal_issue_statuses -> :none
-      status == :blocked -> :all
+      status == :blocked -> {:all, agent_id}
       is_binary(assignee) -> {:user, assignee}
       true -> :none
     end

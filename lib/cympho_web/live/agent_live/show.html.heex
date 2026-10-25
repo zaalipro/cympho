@@ -34,16 +34,19 @@
         </p>
         <%!-- The tab params stay dashboard/configuration/runs (plan §11 D6). --%>
         <.segmented label={"#{@agent.name}'s pages"}>
-          <:item patch={~p"/agents/#{@agent.id}"} current={@current_tab == "dashboard"}>
+          <:item patch={agent_path(@agent.id, @from, [])} current={@current_tab == "dashboard"}>
             Overview
           </:item>
           <:item
-            patch={~p"/agents/#{@agent.id}?tab=configuration"}
+            patch={agent_path(@agent.id, @from, tab: "configuration")}
             current={@current_tab == "configuration"}
           >
             Setup
           </:item>
-          <:item patch={~p"/agents/#{@agent.id}?tab=runs"} current={@current_tab == "runs"}>
+          <:item
+            patch={agent_path(@agent.id, @from, tab: "runs")}
+            current={@current_tab == "runs"}
+          >
             History
           </:item>
         </.segmented>
@@ -134,7 +137,11 @@
       <% {:paused, item} -> %>
         <Parts.paused_pair item={item} />
       <% {:retry, reason} -> %>
-        <Parts.retry_pair agent={@agent} reason={reason} />
+        <Parts.retry_pair
+          agent={@agent}
+          reason={reason}
+          history={agent_path(@agent.id, @from, tab: "runs")}
+        />
       <% {:item, item} -> %>
         <NextStep.pair item={item} from={@step_from} agents={@agent_names} spending={@spending} />
       <% :server_off -> %>
@@ -194,7 +201,7 @@
             secret_keys: @secret_keys,
             spending_limit_items: @spending_limit_items
           }) %>
-        <% fix = readiness_fix(readiness, @agent) %>
+        <% fix = readiness_fix(readiness, @agent, @from) %>
         <h2 class="gl-h">How it runs</h2>
         <.kv_list :if={@price || @key_name} tight>
           <:item :if={@price} term="Price">
@@ -210,7 +217,9 @@
           <:item :if={@key_name} term="Key"><span class="mono">{@key_name}</span></:item>
         </.kv_list>
         <p :if={fix} class="gl-sub">{readiness.summary}</p>
-        <.text_link patch={(fix && fix.path) || ~p"/agents/#{@agent.id}?tab=configuration"}>
+        <.text_link patch={
+          (fix && fix.path) || agent_path(@agent.id, @from, tab: "configuration")
+        }>
           {(fix && fix.label) || "Change in Setup"}
         </.text_link>
       </div>
@@ -221,7 +230,7 @@
         <h2 class="h2" id="rr-t">
           Recent runs <span :if={@runs_issue} class="cx">/ {@runs_issue.identifier}</span>
         </h2>
-        <.text_link :if={@overview_runs != []} patch={~p"/agents/#{@agent.id}?tab=runs"}>
+        <.text_link :if={@overview_runs != []} patch={agent_path(@agent.id, @from, tab: "runs")}>
           Open History
         </.text_link>
       </div>
@@ -233,7 +242,7 @@
             {Parts.usd(@earlier_spend)}
           </span>
         </span>
-        <.text_link patch={~p"/agents/#{@agent.id}?tab=runs"}>History</.text_link>
+        <.text_link patch={agent_path(@agent.id, @from, tab: "runs")}>History</.text_link>
       </p>
       <.quiet_empty :if={@overview_runs == []} title="No runs yet">
         The first one starts when work is assigned or a heartbeat fires.
