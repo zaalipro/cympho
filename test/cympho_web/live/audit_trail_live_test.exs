@@ -82,7 +82,9 @@ defmodule CymphoWeb.AuditTrailLiveTest do
     assert html =~ "Runtime"
     assert html =~ "Decision reversed"
     assert html =~ ~s(data-testid="audit-payload-#{reversed.id}")
-    assert html =~ "Decision reversed payload - 1 key: reason"
+    # The payload summary no longer repeats the event title printed above it.
+    assert html =~ "Payload · 1 key: reason"
+    refute html =~ "Decision reversed payload"
   end
 
   test "filtered empty command links back to the full audit trail", %{
@@ -121,7 +123,27 @@ defmodule CymphoWeb.AuditTrailLiveTest do
     assert html =~ "Runtime"
     assert html =~ "Company runtime stopped"
     assert html =~ ~s(data-testid="audit-payload-#{stopped.id}")
-    assert html =~ "Company runtime stopped payload"
+    assert html =~ "Payload · 3 keys: issues_released, runs_cancelled, wakes_cancelled"
+  end
+
+  # An audit row must date its event exactly: year, seconds and time zone, so two
+  # events in one minute, or a past year's event, can be told apart.
+  test "rows keep the full event timestamp", %{conn: conn, current_company: company} do
+    first = insert_event(company, %{inserted_at: ~U[2024-03-05 14:07:09Z]})
+    second = insert_event(company, %{inserted_at: ~U[2024-03-05 14:07:42Z]})
+
+    {:ok, view, _html} = live(conn, "/settings/audit")
+    doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+    for {event, iso, words} <- [
+          {first, "2024-03-05T14:07:09Z", "Tue 5 Mar 2024 14:07:09 UTC"},
+          {second, "2024-03-05T14:07:42Z", "Tue 5 Mar 2024 14:07:42 UTC"}
+        ] do
+      assert [row] = Floki.find(doc, "#events-#{event.id}.lrow")
+      assert [stamp] = Floki.find(row, ".rm time")
+      assert Floki.attribute(stamp, "datetime") == [iso]
+      assert stamp |> Floki.text() |> String.split() |> Enum.join(" ") == words
+    end
   end
 
   # v7 S13: one Audit log band of event rows; the filters live in its Filter menu.

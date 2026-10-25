@@ -9,6 +9,8 @@
 /* Settings sections render in the r3 frame (SettingsLayout, v7 §3.1 B12): money.css's .set-page .snav{top:8px},
    written for the old frame without a sticky header, would slide the section nav under the context header */
 .cy-r3 [data-page="settings"] .set-page .snav{top:76px}
+/* "All settings": only phones, where money.css hides the section nav on a section page (shown in §5) */
+.cy-r3 .set-page .set-bk{display:none}
 
 /* ================================================================
    1. Shared by the settings sections and their deep pages (v7 §4.1)
@@ -39,6 +41,12 @@
 /* disabled pills (r3.css styles only the disabled primary): the same dashed, quiet edge */
 .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .ink .pd:disabled{background:transparent;border-style:dashed;border-color:var(--inv-dash);color:var(--inv-ink-2);cursor:not-allowed}
 .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .pl:disabled{background:transparent;border-style:dashed;box-shadow:none;color:var(--ink-2);cursor:not-allowed}
+/* a form pair whose fields are shorter than its ink card: the field card grows to the ink card's height (as a
+   Next step pair does), instead of leaving a gap above the next band; the ink card keeps its sticky top */
+.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .fpair>.fp-main{align-self:stretch}
+.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .fpair>.fp-main>.card:last-child{flex:1 1 auto}
+/* checkbox rows: a 32 px hit area on desktop (r3.css gives 24, and 44 on phones) */
+.cy-r3 :is([data-page="adapter"],[data-page="policy-form"]) .fld-ck{min-height:32px}
 
 /* ================================================================
    2. Sections
@@ -138,6 +146,15 @@
   /* a row's status and its actions share one line under the title (r3.css puts the actions on their own line) */
   .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .lrow:has(>.kt)>.lr-st{padding-left:46px}
   .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .lrow>.lr-st+.lr-acts{flex-basis:auto;margin-left:auto;padding-left:0}
+  /* actions on a line of their own (no status word) sit at the row's end, as they do beside a status word */
+  .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .lrow .lr-acts{justify-content:flex-end}
+  /* the section nav is hidden here (money.css): a way back to Settings' list, above the section */
+  .cy-r3 .set-page .set-bk{display:inline-flex;align-self:flex-start;padding:0 16px 0 10px}
+  /* the deep header's current crumb would be cut to a few letters beside the tools; the H1 below names the page */
+  .cy-r3 :is([data-page="adapter"],[data-page="policy"],[data-page="policy-form"]) .crumb :is(li:last-child,.sep){display:none}
+  /* Profile › Signed in: Sign out stays beside the email (money.css stacks .end under the words) */
+  .cy-r3 .set-main[data-section="profile"] .srow{flex-wrap:nowrap}
+  .cy-r3 .set-main[data-section="profile"] .srow .end{width:auto;padding-left:0}
   .cy-r3 .set-main[data-section="notifications"] .ch-f{max-width:none}
   /* the switch keeps its place beside the channel instead of wrapping under it (money.css stacks .end) */
   .cy-r3 .set-main[data-section="notifications"] .srow{flex-wrap:nowrap}
@@ -151,4 +168,6 @@
   .cy-r3 [data-page="policy"] .step-g{grid-column:2;justify-content:flex-start}
   .cy-r3 [data-page="policy"] .step:not(:last-child)::before{display:none}
   .cy-r3 [data-page="policy-form"] .cks{flex-direction:column;gap:0}
+  /* the 32 px desktop rule above outranks r3.css's 44 px phone floor */
+  .cy-r3 :is([data-page="adapter"],[data-page="policy-form"]) .fld-ck{min-height:44px}
 }

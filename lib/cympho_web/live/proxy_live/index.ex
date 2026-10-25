@@ -158,12 +158,7 @@ defmodule CymphoWeb.ProxyLive.Index do
   def profile_stats(profiles) do
     counts = Enum.frequencies_by(profiles, & &1.last_status)
 
-    %{
-      total: length(profiles),
-      online: Map.get(counts, "online", 0),
-      offline: Map.get(counts, "offline", 0),
-      untested: Map.get(counts, "untested", 0)
-    }
+    %{total: length(profiles), online: Map.get(counts, "online", 0)}
   end
 
   defp assign_form(socket, %ProxyProfile{} = proxy) do

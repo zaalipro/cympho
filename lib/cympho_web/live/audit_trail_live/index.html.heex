@@ -122,12 +122,15 @@
         title={event_title(event)}
       >
         <:meta>
+          <%!-- An audit record dates its event exactly: year, seconds and zone. --%>
           {format_actor_type(event.actor_type)}
-          <span :if={event.actor_id} class="mono">{String.slice(event.actor_id, 0..7)}</span><span aria-hidden="true"> · </span>{Calendar.strftime(
-            event.inserted_at,
-            "%a %-d %b"
-          )}
-          <span class="mono">{Calendar.strftime(event.inserted_at, "%H:%M")}</span><span
+          <span :if={event.actor_id} class="mono">{String.slice(event.actor_id, 0..7)}</span><span aria-hidden="true"> · </span>
+          <time datetime={DateTime.to_iso8601(event.inserted_at)}>
+            {Calendar.strftime(event.inserted_at, "%a %-d %b %Y")}
+            <span class="mono">{Calendar.strftime(event.inserted_at, "%H:%M:%S")}</span>
+            {Calendar.strftime(event.inserted_at, "%Z")}
+          </time>
+          <span
             :if={event.resource_id}
             class="ui-advanced-only"
           ><span aria-hidden="true"> · </span>{resource_words(event.resource_type)}

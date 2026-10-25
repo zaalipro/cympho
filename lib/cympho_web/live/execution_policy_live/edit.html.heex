@@ -16,7 +16,7 @@
   <FormHelpers.policy_form
     form={@form}
     stage_configs_text={@stage_configs_text}
-    effect="Tasks that use it follow the new stages from their next hand-off."
+    effect="Applies at once to tasks already using it, including the checks on their current stage."
     cancel={~p"/settings/policies/#{@execution_policy.id}"}
   />
 </.page_frame>

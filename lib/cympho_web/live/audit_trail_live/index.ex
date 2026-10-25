@@ -407,9 +407,8 @@ defmodule CymphoWeb.AuditTrailLive.Index do
 
   def format_payload(_), do: ""
 
-  def payload_summary(event) do
-    "#{format_event_type(event.event_type)} payload - #{payload_key_summary(event.payload)}"
-  end
+  # The row's title already names the event, so the summary does not repeat it.
+  def payload_summary(event), do: "Payload · #{payload_key_summary(event.payload)}"
 
   defp payload_key_summary(payload) when is_map(payload) do
     keys =

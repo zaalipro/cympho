@@ -39,6 +39,21 @@ defmodule CymphoWeb.SettingsHubTest do
       assert html =~ ~s(<p class="sn-g" id="sn-2">You</p>)
     end
 
+    # Phones hide the section nav on a section page; this link (settings.css shows
+    # it only there) leads back to Settings' own list: Company without ?section=.
+    test "a section leads back to the settings list", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/settings/secrets")
+      doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+      assert [link] = Floki.find(doc, ".set-main > a.pl.set-bk")
+      assert Floki.attribute(link, "href") == ["/settings/company"]
+      assert link |> Floki.text() |> String.trim() == "All settings"
+      assert Floki.find(link, "svg use[href='#i-chev-left']") != []
+
+      assert {:error, {:live_redirect, %{to: "/settings/company"}}} =
+               view |> element(".set-main > a.set-bk") |> render_click()
+    end
+
     test "adapters", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/adapters")
       # r3 (v7 S5): the section's band carries its nav label.
@@ -72,12 +87,39 @@ defmodule CymphoWeb.SettingsHubTest do
           description: "Row description"
         })
 
+      created_at =
+        DateTime.utc_now() |> DateTime.add(-120 * 86_400, :second) |> DateTime.truncate(:second)
+
       Repo.update_all(from(s in Secret, where: s.id == ^secret.id),
-        set: [inserted_at: DateTime.add(DateTime.utc_now(), -120 * 86_400, :second)]
+        set: [inserted_at: created_at]
       )
 
       {:ok, view, _html} = live(conn, "/settings/secrets")
       doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+      # Advanced keeps when the stored value was created, with its year.
+      assert [created] =
+               Floki.find(
+                 doc,
+                 ~s([data-testid="secret-row-#{secret.id}"] .rm .ui-advanced-only time)
+               )
+
+      assert Floki.attribute(created, "datetime") == [DateTime.to_iso8601(created_at)]
+
+      assert created |> Floki.text() |> String.split() |> Enum.join(" ") ==
+               Calendar.strftime(created_at, "%a %-d %b %Y")
+
+      # The version history dates each version with its year.
+      versions =
+        view
+        |> render_click("show_versions", %{"id" => secret.id})
+        |> CymphoWeb.R3PageHelpers.main_doc()
+        |> CymphoWeb.R3PageHelpers.text("#versions-modal #secret-version-#{secret.id} .rm")
+
+      assert versions ==
+               "Created #{Calendar.strftime(created_at, "%a %-d %b %Y %H:%M")}"
+
+      render_click(view, "hide_versions", %{})
 
       CymphoWeb.R3PageHelpers.assert_r3_page(doc,
         page: "settings",

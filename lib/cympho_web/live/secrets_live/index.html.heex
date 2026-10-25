@@ -63,6 +63,12 @@
             {secret.description}<span aria-hidden="true"> · </span>
           </span>
           <span class="tag">{format_scope(secret.scope)}</span><span aria-hidden="true"> · </span><span class="mono">v{secret.version}</span>
+          <span class="ui-advanced-only">
+            <span aria-hidden="true"> · </span>created
+            <time datetime={DateTime.to_iso8601(secret.inserted_at)}>
+              {Calendar.strftime(secret.inserted_at, "%a %-d %b %Y")}
+            </time>
+          </span>
         </:meta>
         <:actions>
           <.overflow_menu
@@ -174,7 +180,7 @@
         title={"#{version.key} v#{version.version}"}
       >
         <:meta>
-          Created {Calendar.strftime(version.inserted_at, "%a %-d %b")}
+          Created {Calendar.strftime(version.inserted_at, "%a %-d %b %Y")}
           <span class="mono">{Calendar.strftime(version.inserted_at, "%H:%M")}</span>
         </:meta>
         <:trail :if={!version.is_active}><span class="tag">Inactive</span></:trail>

@@ -216,6 +216,11 @@ defmodule CymphoWeb.ExecutionPolicyLiveTest do
            ) !=
              []
 
+    # Saving takes effect at once: Issues.execution_policy_decision/3 reloads the
+    # policy and checks the current stage's gates against it.
+    assert CymphoWeb.R3PageHelpers.text(doc, "form#execution-policy-form .ink .conseq") ==
+             "Applies at once to tasks already using it, including the checks on their current stage."
+
     result =
       render_submit(view, "save", %{
         "execution_policy" => %{
