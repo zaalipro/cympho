@@ -61,7 +61,7 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
 
     assert_r3_page(doc,
       page: "export",
-      h1: "Export #{company.name}",
+      h1: "Export",
       kind: :deep,
       parent: company.name,
       primaries: 1
@@ -76,7 +76,7 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
 
     assert_r3_page(doc,
       page: "export",
-      h1: "Export #{company.name}",
+      h1: "Export",
       kind: :deep,
       parent: company.name,
       primaries: 1
@@ -91,7 +91,9 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
     assert [href] = Floki.attribute(download, "href")
     assert String.starts_with?(href, "data:application/json")
     assert text(doc, ~s(.next .ink button.pd[phx-click="generate_export"])) == "Regenerate export"
-    assert text(doc, ".next .paper .obj") =~ "Exported"
+
+    assert text(doc, ".next .paper .obj") =~
+             ~r/^Exported \w{3} \d{1,2} \w{3} \d\d:\d\d · version \S+$/
   end
 
   test "export rejects a company the current board member cannot access" do

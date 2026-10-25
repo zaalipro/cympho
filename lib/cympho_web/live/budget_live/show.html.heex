@@ -105,7 +105,9 @@
           </span>
           <span class="u">of {format_currency(@budget.limit_amount, @budget.currency)}</span>
         </p>
+        <%!-- When the limit was hit, the Next step above already draws the full meter. --%>
         <.tick_meter
+          :if={!recovery_card?(@budget, @budget_policy)}
           percent={Budgets.Budget.utilization_percentage(@budget)}
           warn_percent={@budget.threshold_alert_percentage}
         />

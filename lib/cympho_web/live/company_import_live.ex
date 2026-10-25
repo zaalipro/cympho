@@ -481,14 +481,7 @@ defmodule CymphoWeb.CompanyImportLive do
             do: "Stop without importing if the slug already exists.",
             else: "Create a safe -copy slug if the requested slug already exists."}
         </:item>
-        <:item term="Records">
-          <span class="mono">{@preview_plan.inventory.package_records}</span>
-          package records<span aria-hidden="true"> · </span>
-          <span class="mono">
-            {@preview_plan.inventory.planned_writes}
-          </span>
-          planned writes
-        </:item>
+        <:item term="Records">{records_line(@preview_plan.inventory)}</:item>
         <:item term="Contents">{inventory_line(@preview_plan.inventory)}</:item>
       </.kv_list>
     </.band_card>
@@ -528,7 +521,6 @@ defmodule CymphoWeb.CompanyImportLive do
           id={"im-warning-#{n}"}
           title={warning.message}
           icon="i-alert"
-          kind={:problem}
         />
       </ul>
     </.band_card>
@@ -702,6 +694,10 @@ defmodule CymphoWeb.CompanyImportLive do
         {:waiting, "#{secrets} secret values to restore afterwards; they are not in the file."}
       ],
       else: [created]
+  end
+
+  defp records_line(inventory) do
+    "#{inventory.package_records || 0} package records · #{inventory.planned_writes || 0} planned writes"
   end
 
   defp inventory_line(inventory) do

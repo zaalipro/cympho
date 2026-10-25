@@ -66,8 +66,7 @@ defmodule CymphoWeb.CompanyExportLive do
     >
       <:head>
         <section class="head" aria-labelledby="ex-h">
-          <h1 class="h1 big" id="ex-h">Export {@company.name}</h1>
-          <p class="sub">Move this company into another Cympho instance.</p>
+          <h1 class="h1 big" id="ex-h">Export</h1>
         </section>
       </:head>
 
@@ -82,8 +81,8 @@ defmodule CymphoWeb.CompanyExportLive do
               Move the company graph, work queues, agents, goals, labels, memberships, and task history into another Cympho instance. Secret values stay out of the file; only a restore checklist is included.
             </p>
             <p :if={exported?} class="obj">
-              Exported
-              <span class="mono">{@export_data.exported_at}</span><span aria-hidden="true"> · </span>version
+              Exported {exported_day(@export_data.exported_at)}
+              <span class="mono">{exported_clock(@export_data.exported_at)}</span><span aria-hidden="true"> · </span>version
               <span class="mono">{@export_data.version}</span>
             </p>
           </.problem_card>
@@ -109,7 +108,7 @@ defmodule CymphoWeb.CompanyExportLive do
             <.ink_note>
               The file still contains company work content, comments, and operating metadata. Store it with the same care as a production backup.
             </.ink_note>
-            <.ink_foot :if={!@loading} verb={if exported?, do: "download", else: "generate"}>
+            <.ink_foot :if={!@loading} verb={!exported? && "generate"}>
               <:secondary :if={exported?}>
                 <.ghost_pill phx-click="generate_export">Regenerate export</.ghost_pill>
               </:secondary>
@@ -176,6 +175,19 @@ defmodule CymphoWeb.CompanyExportLive do
     </.page_frame>
     """
   end
+
+  # exported_at is an ISO 8601 string: "Sun 25 Oct" and the mono clock (v7 §1.7).
+  defp exported_day(at), do: format_exported(at, "%a %-d %b", at)
+  defp exported_clock(at), do: format_exported(at, "%H:%M", nil)
+
+  defp format_exported(at, format, fallback) when is_binary(at) do
+    case DateTime.from_iso8601(at) do
+      {:ok, datetime, _offset} -> Calendar.strftime(datetime, format)
+      _ -> fallback
+    end
+  end
+
+  defp format_exported(_at, _format, fallback), do: fallback
 
   defp download_href(export_data) do
     "data:application/json;charset=utf-8,#{URI.encode(Jason.encode!(export_data))}"
