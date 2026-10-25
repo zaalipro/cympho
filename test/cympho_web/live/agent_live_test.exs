@@ -343,13 +343,111 @@ defmodule CymphoWeb.AgentLiveTest do
   end
 
   describe "Remote agent marketplace" do
+    import CymphoWeb.R3PageHelpers
+
     test "renders configuration guidance when Agrenting is not connected", %{conn: conn} do
       {:ok, view, html} = live(conn, "/agents/remote")
 
-      assert html =~ "Hire Remote Agent"
+      assert html =~ "Remote agents"
       assert render(view) =~ "Agrenting is not connected"
       assert render(view) =~ "Connect Agrenting"
       assert render(view) =~ "/settings/integrations"
+
+      # r3 (v7 H2): a deep page under Team; the empty state is one quiet section.
+      doc = main_doc(view)
+
+      assert_r3_page(doc,
+        page: "remote",
+        h1: "Remote agents",
+        kind: :deep,
+        parent: "Team",
+        primaries: 0
+      )
+
+      assert text(doc, ".gl-sec .gl-big") == "Connect Agrenting first"
+      assert Floki.attribute(doc, ".gl-sec a.pl", "href") == ["/settings/integrations"]
+      assert Floki.find(doc, ~s(.head .chips button.pl[phx-click="refresh"])) |> length() == 1
+      refute render(view) =~ "ember-"
+    end
+
+    @remote_agents [
+      %{
+        "did" => "did:agr:writer-1",
+        "name" => "Copy Writer",
+        "status" => "online",
+        "base_price" => "12",
+        "reputation_score" => "4.5",
+        "capabilities" => ["copy_writing", "editing"],
+        "ai_provider" => "anthropic",
+        "ai_model" => "claude"
+      },
+      %{
+        "did" => "did:agr:coder-2",
+        "name" => "Hired Coder",
+        "status" => "busy",
+        "base_price" => "30",
+        "capabilities" => ["code_review"]
+      }
+    ]
+
+    @tag membership_role: "admin"
+    test "lists marketplace agents as rows with a closed Hire disclosure", %{
+      conn: conn,
+      current_company: company
+    } do
+      assert {:ok, _status} =
+               Cympho.Agrenting.save_company_config(company.id, %{
+                 "api_key" => "agrenting-test-key",
+                 "base_url" => "https://agrenting.example.test"
+               })
+
+      {:ok, _hired} =
+        create_agent(%{
+          name: "Hired Coder",
+          role: :engineer,
+          adapter: :agrenting,
+          config: %{"agent_did" => "did:agr:coder-2"}
+        })
+
+      with_mock Cympho.Agrenting.Client, [:passthrough],
+        list_agents: fn _config, _filters -> {:ok, @remote_agents} end do
+        {:ok, view, _html} = live(conn, "/agents/remote")
+        doc = main_doc(view)
+
+        assert Floki.find(doc, ~s(form[phx-change="search"] input[name="filters[query]"])) != []
+
+        assert Floki.find(doc, ~s(form[phx-change="search"] select[name="filters[capability]"])) !=
+                 []
+
+        assert texts(doc, ".rows .lrow .rt") == ["Copy Writer", "Hired Coder"]
+        assert text(doc, ~s([id="remote-agent-did:agr:writer-1"] .rm)) =~ "Copy Writing, Editing"
+        assert text(doc, ~s([id="remote-agent-did:agr:writer-1"] .rm)) =~ "$12"
+        assert text(doc, ~s([id="remote-agent-did:agr:writer-1"] .lr-st)) == "Online"
+        assert text(doc, ~s([id="remote-agent-did:agr:coder-2"] .lr-st)) == "Connected"
+
+        [details] = Floki.find(doc, ~s(details.earlier[id="remote-hire-did:agr:writer-1"]))
+        assert Floki.attribute(details, "open") == []
+
+        assert Floki.find(details, ~s(form[phx-submit="hire_agent"] input[name="agent_did"])) !=
+                 []
+
+        for name <- ~w(capability role delivery_mode) do
+          assert Floki.find(details, ~s(select[name="#{name}"])) != []
+        end
+
+        assert Floki.find(details, ~s(input[name="max_price"][value="12"])) != []
+        assert Floki.find(details, "button.pl[type=submit]") |> Floki.text() =~ "Hire in Cympho"
+        # Already connected: no Hire disclosure.
+        assert Floki.find(doc, ~s(details[id="remote-hire-did:agr:coder-2"])) == []
+
+        result =
+          view
+          |> form(~s(form[id="remote-hire-form-did:agr:writer-1"]), %{"role" => "engineer"})
+          |> render_submit()
+
+        assert {:error, {:live_redirect, %{to: "/agents/" <> _}}} = result
+        assert Enum.any?(Agents.list_agents_by_company(company.id), &(&1.name == "Copy Writer"))
+      end
     end
 
     test "does not show an API key echoed in an Agrenting error message", %{

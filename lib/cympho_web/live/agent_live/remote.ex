@@ -11,7 +11,7 @@ defmodule CymphoWeb.AgentLive.Remote do
   def mount(_params, _session, socket) do
     socket =
       socket
-      |> assign(:page_title, "Hire Remote Agent")
+      |> assign(:page_title, "Remote agents")
       |> assign(:query, "")
       |> assign(:capability, "")
       |> assign(:remote_agents, [])
@@ -362,10 +362,41 @@ defmodule CymphoWeb.AgentLive.Remote do
 
   def humanize(value), do: to_string(value)
 
-  def status_badge_class("active"), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  def status_badge_class("online"), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  def status_badge_class("busy"), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def status_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+  @doc "A row's status word: Connected once hired, else the marketplace availability."
+  def remote_status(hired_dids, agent) do
+    if hired_remote_agent?(hired_dids, agent),
+      do: {:done, "Connected"},
+      else: availability(agent["status"])
+  end
+
+  defp availability(status) when status in ["active", "online"], do: {:done, "Online"}
+  defp availability("busy"), do: {:waiting, "Busy"}
+  defp availability(status) when status in [nil, ""], do: nil
+  defp availability(status), do: {:idle, humanize(status)}
+
+  @doc "The row's meta line: provider/model, up to three capabilities, price, rating."
+  def remote_meta_parts(agent) do
+    capabilities = agent["capabilities"] || []
+
+    capability_part =
+      case capabilities do
+        [] ->
+          nil
+
+        _ ->
+          shown = capabilities |> Enum.take(3) |> Enum.map_join(", ", &humanize/1)
+          more = length(capabilities) - 3
+          if more > 0, do: "#{shown} +#{more} more", else: shown
+      end
+
+    [
+      if(agent["ai_provider"] || agent["ai_model"], do: provider_model_label(agent)),
+      capability_part,
+      "#{price_label(agent["base_price"])} base price",
+      rating_label(agent["reputation_score"])
+    ]
+    |> Enum.reject(&is_nil/1)
+  end
 
   def price_label(nil), do: "No price"
   def price_label(""), do: "No price"
