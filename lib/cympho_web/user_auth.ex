@@ -83,6 +83,11 @@ defmodule CymphoWeb.UserAuth do
         |> subscribe_approval_badge_updates()
         |> subscribe_owner_attention_updates()
 
+      # A connected LiveView is one user's own process: its issue changes are theirs.
+      if Phoenix.LiveView.connected?(socket) do
+        Cympho.Issues.put_actor_user_id(socket.assigns.current_user.id)
+      end
+
       {:cont, socket}
     end
   end

@@ -196,7 +196,7 @@ defmodule Cympho.IssueThreadInteractions do
     Cympho.PubSubGuard.company_broadcast(
       issue.company_id,
       "issues",
-      {:issue_updated, issue}
+      {:issue_updated, Cympho.Issues.with_actor(issue)}
     )
 
     CymphoWeb.Events.broadcast_issue_update(issue, :issue_updated)

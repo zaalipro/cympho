@@ -91,7 +91,7 @@ defmodule Cympho.Comments do
         Cympho.PubSubGuard.company_broadcast(
           issue.company_id,
           "comments",
-          {:comment_created, issue}
+          {:comment_created, %{issue | actor_user_id: user_author_id(comment)}}
         )
     end
 
@@ -101,6 +101,11 @@ defmodule Cympho.Comments do
     maybe_reconcile_review_nudges(comment)
     :ok
   end
+
+  # The user who wrote the comment, if a user did: the {:comment_created, issue}
+  # broadcast names them, as a newer comment may already be on the issue.
+  defp user_author_id(%Comment{author_type: "user", author_id: author_id}), do: author_id
+  defp user_author_id(_comment), do: nil
 
   @doc """
   Updates a comment.

@@ -1762,7 +1762,7 @@ defmodule Cympho.Issues do
     Cympho.PubSubGuard.company_broadcast(
       updated.company_id,
       "issues",
-      {:issue_updated, updated}
+      {:issue_updated, with_actor(updated)}
     )
 
     event_type = determine_update_event_type(old_issue, updated, attrs)
@@ -3155,7 +3155,7 @@ defmodule Cympho.Issues do
     Cympho.PubSubGuard.company_broadcast(
       issue.company_id,
       "issues",
-      {:issue_updated, issue}
+      {:issue_updated, with_actor(issue)}
     )
 
     CymphoWeb.Events.broadcast_issue_update(issue, event_type, metadata)
@@ -3217,7 +3217,7 @@ defmodule Cympho.Issues do
             Cympho.PubSubGuard.company_broadcast(
               issue.company_id,
               "issues",
-              {:issue_updated, issue}
+              {:issue_updated, with_actor(issue)}
             )
           end
 
@@ -3336,7 +3336,7 @@ defmodule Cympho.Issues do
         Cympho.PubSubGuard.company_broadcast(
           issue.company_id,
           "issues",
-          {:issue_updated, issue}
+          {:issue_updated, with_actor(issue)}
         )
 
         {:ok, issue}
@@ -3749,6 +3749,16 @@ defmodule Cympho.Issues do
 
   # Fail-closed: never subscribe to company::issues from a nil/blank company_id.
   def subscribe(_company_id), do: :ok
+
+  @doc """
+  Names the signed-in user a LiveView process acts for (`CymphoWeb.UserAuth`), so
+  the `{:issue_updated, issue}` broadcasts it sends carry `issue.actor_user_id`.
+  """
+  def put_actor_user_id(user_id), do: Process.put(:cympho_actor_user_id, user_id)
+
+  @doc "The issue as broadcast: `actor_user_id` is this process's user, or nil."
+  def with_actor(%Issue{} = issue),
+    do: %{issue | actor_user_id: Process.get(:cympho_actor_user_id)}
 
   def change_issue(%Issue{} = issue, attrs \\ %{}) do
     Issue.changeset(issue, attrs)

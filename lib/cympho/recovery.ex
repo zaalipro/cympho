@@ -782,7 +782,11 @@ defmodule Cympho.Recovery do
           metadata: %{recovery_case_id: child.id, parent_case_id: child.parent_case_id}
         })
 
-      Cympho.PubSubGuard.company_broadcast(company_id, "issues", {:issue_updated, issue})
+      Cympho.PubSubGuard.company_broadcast(
+        company_id,
+        "issues",
+        {:issue_updated, Issues.with_actor(issue)}
+      )
     end
 
     _ = Cympho.OwnerAttention.notify_changed(company_id)
