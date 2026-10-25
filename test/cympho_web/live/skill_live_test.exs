@@ -6,6 +6,8 @@ defmodule CymphoWeb.SkillLiveTest do
   alias Cympho.Skills
   alias Cympho.Skills.Manifest
 
+  import CymphoWeb.R3PageHelpers
+
   describe "SkillLive.Index" do
     test "renders an actionable empty state before skills are configured", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/skills")
@@ -19,6 +21,12 @@ defmodule CymphoWeb.SkillLiveTest do
       refute html =~ ~s(data-testid="skill-health")
       refute html =~ "Runtime checklist"
       refute html =~ "No skills found"
+
+      # r3 (v7 H3): a root page under Team; the empty state sits in the list band.
+      doc = main_doc(html)
+      assert_r3_page(doc, page: "skills", h1: "Skills", kind: :root, primaries: 0)
+      assert Floki.attribute(doc, ".ctx-end a.pl", "href") == ["/skills/new"]
+      assert [_] = Floki.find(doc, ~s(#skill-list [data-testid="skills-empty"].gl-sec))
     end
 
     test "lists current-company skills and shows skill health diagnostics", %{
@@ -51,9 +59,9 @@ defmodule CymphoWeb.SkillLiveTest do
 
       {:ok, view, html} = live(conn, "/skills")
 
-      assert has_element?(view, "[data-testid='skill-health']")
-      assert has_element?(view, "[data-testid='skill-next-action']")
-      assert html =~ "Skill Health"
+      assert has_element?(view, "[data-testid='skill-health'].ui-advanced-only")
+      assert has_element?(view, "[data-testid='skill-health'] [data-testid='skill-next-action']")
+      assert html =~ "Skill health"
       # "Cap gaps" and "Next operator move" were unexplained jargon.
       assert html =~ "Capability gaps"
       assert html =~ "Auto-reload"
@@ -63,18 +71,122 @@ defmodule CymphoWeb.SkillLiveTest do
       assert html =~ "Current Company Skill"
       refute html =~ "Other Company Skill"
     end
+
+    test "rows link to the skill and carry its actions", %{conn: conn, current_company: company} do
+      {:ok, skill} =
+        Skills.create_skill(%{
+          identifier: "row-skill-#{System.unique_integer([:positive])}",
+          name: "Row Skill",
+          version: "1.2.0",
+          author: "Cympho",
+          manifest: valid_manifest("Row Skill", ["triage"]),
+          enabled: false,
+          company_id: company.id
+        })
+
+      {:ok, view, _html} = live(conn, "/skills")
+      doc = main_doc(view)
+      row = ~s(#skill-list .lrow[id="skill-#{skill.id}"])
+
+      assert Floki.attribute(doc, "#{row} a.rt2", "href") == ["/skills/#{skill.id}"]
+      assert text(doc, "#{row} .rm") == "#{skill.identifier} · v1.2.0 · Cympho"
+      assert text(doc, "#{row} .lr-tr .tag") == "Off"
+      assert text(doc, ~s(#{row} .lr-acts button.pl[phx-click="toggle_skill"])) == "Turn on"
+      assert Floki.attribute(doc, "#{row} .lr-acts a.pl", "href") == ["/skills/#{skill.id}/edit"]
+
+      assert Floki.attribute(
+               doc,
+               ~s(#{row} .lr-acts button.pl.warn[phx-click="delete"]),
+               "data-confirm"
+             ) ==
+               ["Delete this skill?"]
+
+      view |> element(~s(#{row} button[phx-click="toggle_skill"])) |> render_click()
+      assert {:ok, %{enabled: true}} = Skills.get_company_skill(company.id, skill.id)
+      assert text(main_doc(view), ".flash-line .flash-msg") == "Skill enabled"
+    end
+  end
+
+  describe "SkillLive.Show" do
+    @tag membership_role: "admin"
+    test "is a deep page under Skills with its actions in the head and Delete last", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, skill} =
+        Skills.create_skill(%{
+          identifier: "show-skill-#{System.unique_integer([:positive])}",
+          name: "Shown Skill",
+          description: "Audit a repository.",
+          version: "1.0.0",
+          author: "Cympho",
+          manifest: valid_manifest("Shown Skill", ["repo_audit"]),
+          enabled: true,
+          company_id: company.id
+        })
+
+      {:ok, view, _html} = live(conn, "/skills/#{skill.id}")
+      doc = main_doc(view)
+
+      assert_r3_page(doc,
+        page: "skill",
+        h1: "Shown Skill",
+        kind: :deep,
+        parent: "Skills",
+        primaries: 0
+      )
+
+      assert text(doc, ~s(.head .chips button.pl[phx-click="toggle_skill"])) == "Turn off"
+      assert Floki.attribute(doc, ".head .chips a.pl", "href") == ["/skills/#{skill.id}/edit"]
+      assert text(doc, ".sk-desc") == "Audit a repository."
+      assert text(doc, ".sk-caps .tag") == "repo_audit"
+      assert [_] = Floki.find(doc, ".ui-advanced-only details#skill-manifest pre")
+      assert text(doc, ".aside .kv") =~ skill.identifier
+
+      assert Floki.attribute(
+               doc,
+               ~s(.tray > .card:last-child button.pl.warn[phx-click="delete"]),
+               "data-confirm"
+             ) ==
+               ["Delete this skill?"]
+
+      view |> element(~s(.head button[phx-click="toggle_skill"])) |> render_click()
+      assert {:ok, %{enabled: false}} = Skills.get_company_skill(company.id, skill.id)
+      assert [_] = Floki.find(main_doc(view), ".head .chips .tag")
+
+      assert {:error, {:live_redirect, %{to: "/skills"}}} =
+               view |> element(~s(button[phx-click="delete"])) |> render_click()
+
+      assert {:error, :not_found} = Skills.get_company_skill(company.id, skill.id)
+    end
   end
 
   describe "SkillLive.New" do
     test "renders the capability launch form", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/skills/new")
+      {:ok, view, html} = live(conn, "/skills/new")
 
-      assert html =~ "Skill launch plan"
-      assert html =~ "Capability brief"
-      assert html =~ "Runtime manifest"
+      # r3 (v7 H4): three field cards beside the ink card; the checklist went.
+      doc = main_doc(view)
+
+      assert_r3_page(doc,
+        page: "skill-form",
+        h1: "New skill",
+        kind: :deep,
+        parent: "Skills",
+        primaries: 1
+      )
+
+      assert texts(doc, "#skill-form .fp-main .card-h .h2") == [
+               "Skill",
+               "How agents call it",
+               "Scope"
+             ]
+
       assert html =~ "Project scope"
-      assert html =~ "Setup checklist"
-      assert html =~ "Creates a valid manifest"
+      assert text(doc, "#skill-form .ink .conseq") == "Agents can use it once it is on."
+      assert text(doc, "#skill-form .ink .pw[type=submit]") == "Create skill"
+      assert Floki.attribute(doc, "#skill-form .ink a.pd", "href") == ["/skills"]
+      refute html =~ "Setup checklist"
     end
 
     test "creates a skill with a valid manifest and project scope", %{
@@ -176,9 +288,25 @@ defmodule CymphoWeb.SkillLiveTest do
 
       {:ok, view, html} = live(conn, "/skills/#{skill.id}/edit")
 
-      assert html =~ "Skill capability plan"
-      assert html =~ "Runtime manifest"
-      assert html =~ "Maintenance checklist"
+      doc = main_doc(html)
+
+      assert_r3_page(doc,
+        page: "skill-form",
+        h1: "Edit Editable Skill",
+        kind: :deep,
+        parent: "Skills",
+        primaries: 1
+      )
+
+      assert texts(doc, "#skill-form .fp-main .card-h .h2") == [
+               "Skill",
+               "How agents call it",
+               "Scope"
+             ]
+
+      assert text(doc, "#skill-form .ink .pw[type=submit]") == "Save skill"
+      assert Floki.attribute(doc, "#skill-form .ink a.pd", "href") == ["/skills/#{skill.id}"]
+      refute html =~ "Maintenance checklist"
 
       result =
         view

@@ -10,7 +10,7 @@ defmodule CymphoWeb.SkillLive.New do
 
     {:ok,
      socket
-     |> assign(:page_title, "New Skill")
+     |> assign(:page_title, "New skill")
      |> assign(:skill, %Skills.Skill{})
      |> FormHelpers.assign_context_options()
      |> assign_form(changeset)}

@@ -47,3 +47,17 @@
 .cy-r3 [data-page="remote"] .rm-hire>.gl-sub{overflow-wrap:anywhere}
 .cy-r3 [data-page="remote"] .rm-go{display:flex;justify-content:flex-end}
 .cy-r3 [data-page="remote"] .lrow .rm{overflow-wrap:anywhere}
+
+/* ================================================================
+   Skills (H3-H6) and the shared health band (Skills, Plugins)
+   ================================================================ */
+.cy-r3 [data-page="skills"] .sk-co{flex:0 1 280px;min-width:0}
+.cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-line{padding:4px 12px 2px}
+.cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-strip{grid-template-columns:repeat(4,minmax(0,1fr))}
+.cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-next{margin:4px 4px 0;border-top:1px solid var(--hair)}
+.cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-next .lnk{align-self:flex-start;margin-left:-4px}
+/* the detail pages have no Next step above their aside: it starts on the first row */
+.cy-r3 :is([data-page="skill"],[data-page="plugin"]) .split>.aside{grid-row:1 / span 3}
+.cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-desc{max-width:62ch;font-size:14px;line-height:21px;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+.cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-caps{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px}
+.cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-pre{max-height:520px;overflow:auto;margin:4px 8px 8px;padding:12px 14px;border-radius:12px;background:var(--well);border:1px solid var(--band-line);font-size:12px;line-height:18px;color:var(--ink)}
