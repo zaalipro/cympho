@@ -1,0 +1,30 @@
+<form class="auth-form" method="post" action={~p"/login"}>
+  <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+  <input :if={@return_to} type="hidden" name="return_to" value={@return_to} />
+  <div class="auth-head">
+    <h1>Sign in to Cympho</h1>
+    <p>Enter the company workspace with your real projects, agents, and approvals.</p>
+  </div>
+  <p :if={@error} class="err" role="alert"><.r3_icon name="i-alert" />{@error}</p>
+  <.auth_field
+    id="login-email"
+    label="Email"
+    name="user[email]"
+    type="email"
+    value={@email}
+    autocomplete="email"
+    required
+  />
+  <.auth_field
+    id="login-password"
+    label="Password"
+    name="user[password]"
+    type="password"
+    autocomplete="current-password"
+    required
+  />
+  <button type="submit" class="auth-go">Sign in</button>
+  <p :if={@dev_login_href} class="auth-foot">
+    Local dev: <a class="ul" href={@dev_login_href}>enter seeded company</a>
+  </p>
+</form>

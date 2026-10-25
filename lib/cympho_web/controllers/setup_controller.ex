@@ -23,7 +23,7 @@ defmodule CymphoWeb.SetupController do
         bootstrap_unavailable(conn)
 
       true ->
-        render_setup(conn, %{}, nil)
+        render_setup(conn, %{}, %{})
     end
   end
 
@@ -49,10 +49,15 @@ defmodule CymphoWeb.SetupController do
         bootstrap_unavailable(conn)
 
       {:error, :invalid_bootstrap_secret} ->
-        render_setup(conn, user_params, "Bootstrap secret is invalid.", :forbidden)
+        render_setup(
+          conn,
+          user_params,
+          %{bootstrap_secret: "Bootstrap secret is invalid."},
+          :forbidden
+        )
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        render_setup(conn, user_params, first_error(changeset))
+        render_setup(conn, user_params, field_errors(changeset))
     end
   end
 
@@ -127,138 +132,46 @@ defmodule CymphoWeb.SetupController do
     bootstrap_required?() and not is_binary(Keyword.get(bootstrap_config(), :secret))
   end
 
-  defp render_setup(conn, params, error, status \\ :ok) do
+  defp render_setup(conn, params, errors, status \\ :ok) do
     conn
     |> put_status(status)
-    |> put_layout(false)
-    |> html(setup_page(params, error, bootstrap_required?()))
+    |> render_auth(:setup,
+      page_title: "Set up",
+      name: text(params["name"]),
+      email: text(params["email"]),
+      errors: errors,
+      bootstrap_required: bootstrap_required?()
+    )
   end
 
   defp bootstrap_unavailable(conn) do
     conn
     |> put_resp_header("retry-after", "300")
     |> put_status(:service_unavailable)
-    |> put_layout(false)
-    |> html(setup_unavailable_page())
+    |> render_auth(:setup_locked, page_title: "Setup locked", noindex: true)
   end
 
-  defp first_error(changeset) do
+  # The signed-out pages draw their own Paper & Ink document (CymphoWeb.AuthHTML).
+  defp render_auth(conn, template, assigns) do
+    conn
+    |> put_root_layout(html: {CymphoWeb.AuthHTML, :root})
+    |> put_layout(false)
+    |> put_view(html: CymphoWeb.AuthHTML)
+    |> render(template, assigns)
+  end
+
+  # One message per field, shown under that field (the onboarding error pattern).
+  defp field_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
       Enum.reduce(opts, msg, fn {key, value}, acc ->
         String.replace(acc, "%{#{key}}", to_string(value))
       end)
     end)
-    |> Enum.map(fn {field, messages} -> "#{field} #{Enum.join(messages, ", ")}" end)
-    |> List.first()
+    |> Map.new(fn {field, messages} ->
+      {field, "#{Phoenix.Naming.humanize(field)} #{Enum.join(messages, ", ")}"}
+    end)
   end
 
-  defp setup_page(params, error, bootstrap_required?) do
-    csrf = Plug.CSRFProtection.get_csrf_token()
-    error_html = if error, do: ~s(<p class="error">#{escape(error)}</p>), else: ""
-
-    bootstrap_secret_input =
-      if bootstrap_required? do
-        """
-        <label>
-          Bootstrap secret
-          <input name="bootstrap_secret" type="password" autocomplete="off" required>
-        </label>
-        """
-      else
-        ""
-      end
-
-    """
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <link rel="icon" type="image/svg+xml" href="/images/favicon.svg">
-        <title>Set up · Cympho</title>
-        <style>
-          :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #20201E; color: #FAF9F5; }
-          body { min-height: 100dvh; margin: 0; display: grid; place-items: center; background: radial-gradient(900px 480px at 50% -120px, rgba(217, 119, 87, .18), transparent 70%), #20201E; }
-          main { width: min(420px, calc(100vw - 32px)); border: 1px solid rgba(255,250,245,.10); border-radius: 20px; background: rgba(38, 38, 36, .96); box-shadow: inset 0 1px 0 0 rgba(255,250,245,.05), 0 24px 80px rgba(0,0,0,.42); animation: enter 700ms cubic-bezier(0.16,1,0.3,1) both; }
-          @keyframes enter { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
-          @media (prefers-reduced-motion: reduce) { main { animation: none; } }
-          form { display: grid; gap: 14px; padding: 30px; }
-          .mark { display: inline-flex; align-items: center; gap: 8px; color: #D97757; font-size: 13px; font-weight: 620; letter-spacing: .08em; text-transform: uppercase; }
-          .mark svg { width: 14px; height: 14px; }
-          h1 { margin: 6px 0 0; font-family: "Source Serif 4", Georgia, "Times New Roman", serif; font-size: 27px; line-height: 1.15; font-weight: 600; letter-spacing: -0.3px; }
-          p { margin: 6px 0 0; color: #B0A99C; font-size: 14px; line-height: 1.5; }
-          label { display: grid; gap: 7px; color: #E5E1D8; font-size: 13px; font-weight: 560; }
-          input { width: 100%; box-sizing: border-box; border: 1px solid rgba(255,250,245,.12); border-radius: 10px; background: #2D2C2A; color: #FAF9F5; padding: 10px 11px; font: inherit; transition: border-color 160ms ease, box-shadow 160ms ease; }
-          input:focus { outline: none; border-color: rgba(217,119,87,.75); box-shadow: 0 0 0 3px rgba(217,119,87,.22); }
-          button { border: 0; border-radius: 10px; background: #D97757; color: #20201E; padding: 11px 12px; font: inherit; font-weight: 620; cursor: pointer; box-shadow: inset 0 1px 0 0 rgba(255,255,255,.18); transition: background 160ms ease; }
-          button:hover { background: #E08A6B; }
-          .error { color: #E0AEAE; background: rgba(198, 69, 69, .12); border: 1px solid rgba(198, 69, 69, .26); border-radius: 8px; padding: 9px 10px; }
-        </style>
-      </head>
-      <body>
-        <main>
-          <form method="post" action="/setup">
-            <input type="hidden" name="_csrf_token" value="#{csrf}">
-            <div>
-              <span class="mark">
-                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 L13.8 10.2 L22 12 L13.8 13.8 L12 22 L10.2 13.8 L2 12 L10.2 10.2 Z"/></svg>
-                Cympho
-              </span>
-              <h1>Create your owner account</h1>
-              <p>This instance is brand new. Create the owner account, then the setup wizard will launch your first autonomous company.</p>
-            </div>
-            #{error_html}
-            #{bootstrap_secret_input}
-            <label>
-              Name
-              <input name="user[name]" type="text" autocomplete="name" value="#{escape(params["name"])}" required>
-            </label>
-            <label>
-              Email
-              <input name="user[email]" type="email" autocomplete="email" value="#{escape(params["email"])}" required>
-            </label>
-            <label>
-              Password
-              <input name="user[password]" type="password" autocomplete="new-password" minlength="8" required>
-            </label>
-            <button type="submit">Create owner account</button>
-          </form>
-        </main>
-      </body>
-    </html>
-    """
-  end
-
-  defp setup_unavailable_page do
-    """
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="robots" content="noindex, nofollow">
-        <title>Setup locked · Cympho</title>
-        <style>
-          :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #20201E; color: #FAF9F5; }
-          body { min-height: 100dvh; margin: 0; display: grid; place-items: center; }
-          main { width: min(420px, calc(100vw - 32px)); padding: 30px; box-sizing: border-box; border: 1px solid rgba(255,250,245,.10); border-radius: 20px; background: #262624; }
-          h1 { margin: 0 0 10px; font-size: 27px; }
-          p { margin: 0; color: #B0A99C; font-size: 14px; line-height: 1.5; }
-          code { color: #E08A6B; }
-        </style>
-      </head>
-      <body>
-        <main>
-          <h1>First-run setup is locked</h1>
-          <p>An operator must configure a strong <code>CYMPHO_BOOTSTRAP_SECRET</code> and restart the service before the first owner can be created.</p>
-        </main>
-      </body>
-    </html>
-    """
-  end
-
-  defp escape(value) when is_binary(value),
-    do: Phoenix.HTML.html_escape(value) |> Phoenix.HTML.safe_to_string()
-
-  defp escape(_), do: ""
+  defp text(value) when is_binary(value), do: value
+  defp text(_), do: nil
 end

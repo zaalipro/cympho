@@ -219,6 +219,102 @@ defmodule CymphoWeb.SessionControllerTest do
     end
   end
 
+  describe "sign-in page in Paper & Ink" do
+    test "follows the theme cookie like the app shell: data-mode on <html>, the app tokens" do
+      registered_user()
+
+      for {cookie, mode} <- [
+            {"light", "light"},
+            {"dark", "dark"},
+            {"claude", "dark"},
+            {nil, "system"}
+          ] do
+        conn = if cookie, do: put_req_cookie(build_conn(), "theme", cookie), else: build_conn()
+        doc = conn |> get("/login") |> html_response(200) |> Floki.parse_document!()
+
+        assert doc |> Floki.find("html") |> Floki.attribute("data-mode") == [mode]
+        assert doc |> Floki.find("body") |> Floki.attribute("class") == ["cy-r3"]
+
+        assert [href] =
+                 doc
+                 |> Floki.find(~s(link[rel="stylesheet"][href^="/assets/app"]))
+                 |> Floki.attribute("href")
+
+        assert href =~ ~r{^/assets/app(-[0-9a-f]+)?\.css}
+        # The palette comes only from the tokens; no page-local style, no script needing a nonce.
+        assert Floki.find(doc, "style") == []
+        assert Floki.find(doc, "script") == []
+      end
+    end
+
+    test "draws one paper card: wordmark, title, labelled fields, one primary", %{conn: conn} do
+      registered_user()
+
+      doc =
+        conn |> get("/login?return_to=/issues") |> html_response(200) |> Floki.parse_document!()
+
+      assert [card] = Floki.find(doc, ~s([data-page="auth"] .auth-card))
+      assert Floki.text(Floki.find(card, ".auth-brand")) =~ "Cympho"
+      assert Floki.text(Floki.find(card, "h1")) == "Sign in to Cympho"
+
+      for {name, type} <- [{"user[email]", "email"}, {"user[password]", "password"}] do
+        assert [input] = Floki.find(card, ~s(.fld input[name="#{name}"]))
+        assert Floki.attribute(input, "type") == [type]
+        [id] = Floki.attribute(input, "id")
+        assert [_label] = Floki.find(card, ~s(.fld label[for="#{id}"]))
+      end
+
+      assert [_] =
+               Floki.find(
+                 card,
+                 ~s(form[method="post"][action="/login"] input[name="_csrf_token"])
+               )
+
+      assert [_] = Floki.find(card, ~s(input[type="hidden"][name="return_to"][value="/issues"]))
+      assert [primary] = Floki.find(card, "button")
+      assert Floki.attribute(primary, "type") == ["submit"]
+      assert Floki.attribute(primary, "class") == ["auth-go"]
+    end
+
+    test "escapes a prefilled email instead of injecting markup", %{conn: conn} do
+      registered_user()
+
+      html =
+        conn |> get("/login", %{"email" => ~s|"><script>alert(1)</script>|}) |> html_response(200)
+
+      refute html =~ "<script>alert(1)</script>"
+      assert html =~ "&quot;&gt;&lt;script&gt;"
+    end
+
+    test "shows a failed sign-in as the onboarding error line" do
+      user = registered_user()
+
+      conn =
+        build_conn()
+        |> post("/login", %{"user" => %{"email" => user.email, "password" => "wrong-password"}})
+
+      assert redirected_to(conn) == "/login"
+
+      doc = conn |> recycle() |> get("/login") |> html_response(200) |> Floki.parse_document!()
+
+      assert [error] = Floki.find(doc, ~s(.auth-card p.err[role="alert"]))
+      assert Floki.text(error) == "Invalid email or password"
+      assert [_icon] = Floki.find(error, "svg use")
+    end
+
+    test "its stylesheet is imported with the other r3 page files" do
+      assert File.exists?("assets/css/r3-pages/auth.css")
+      assert File.read!("assets/css/app.css") =~ ~s|@import "r3-pages/auth.css";|
+    end
+
+    test "the primary pill restates the r3 focus ring its own shadow would hide" do
+      css = File.read!("assets/css/r3-pages/auth.css")
+
+      assert css =~
+               ~s|.cy-r3 [data-page="auth"] .auth-go:focus-visible{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}|
+    end
+  end
+
   describe "logout" do
     test "requires DELETE", %{conn: conn} do
       conn = get(conn, "/logout")
