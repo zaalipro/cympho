@@ -22,7 +22,7 @@ defmodule CymphoWeb.AuditTrailLive.Index do
 
     socket =
       socket
-      |> assign(:page_title, "Audit Trail")
+      |> assign(:page_title, "Audit log")
       |> assign(:company_id, company_id)
       |> assign(:infinite_scroll, %{})
       |> assign(:filter_event_type, "")
@@ -33,6 +33,7 @@ defmodule CymphoWeb.AuditTrailLive.Index do
       |> assign(:filter_date_from, "")
       |> assign(:filter_date_to, "")
       |> assign(:event_types, [])
+      |> assign(:filter_count, 0)
       |> assign(:audit_command, empty_audit_command())
 
     {:ok, socket}
@@ -49,6 +50,7 @@ defmodule CymphoWeb.AuditTrailLive.Index do
       |> assign(:filter_resource_id, params["filter_resource_id"] || "")
       |> assign(:filter_date_from, params["filter_date_from"] || "")
       |> assign(:filter_date_to, params["filter_date_to"] || "")
+      |> assign_filter_count()
       |> load_event_types()
       |> assign_audit_command()
 
@@ -103,6 +105,27 @@ defmodule CymphoWeb.AuditTrailLive.Index do
   defp assign_audit_command(socket) do
     snapshot = AuditTrail.company_audit_snapshot(socket.assigns.company_id, filter_opts(socket))
     assign(socket, :audit_command, build_audit_command(snapshot, filters_active?(socket)))
+  end
+
+  # The Filter menu's count: how many filters the URL sets.
+  defp assign_filter_count(socket) do
+    a = socket.assigns
+
+    count =
+      Enum.count(
+        [
+          a.filter_event_type,
+          a.filter_actor_type,
+          a.filter_actor_id,
+          a.filter_resource_type,
+          a.filter_resource_id,
+          a.filter_date_from,
+          a.filter_date_to
+        ],
+        &(&1 not in [nil, ""])
+      )
+
+    assign(socket, :filter_count, count)
   end
 
   defp filters_active?(socket) do
@@ -212,7 +235,7 @@ defmodule CymphoWeb.AuditTrailLive.Index do
             detail:
               "Budget thresholds changed. Confirm spend controls still match the company’s autonomy level.",
             action_path: ~p"/costs",
-            action_label: "Open costs"
+            action_label: "Open Spending"
           }
 
         true ->
@@ -238,17 +261,15 @@ defmodule CymphoWeb.AuditTrailLive.Index do
   defp audit_metric_total(%{metrics: [%{value: total} | _]}), do: total
   defp audit_metric_total(_command), do: 0
 
+  # One strip of at most four cells (v7 P7); the total stays first (audit_metric_total/1).
   defp audit_metrics(total, by_event_type) do
     counts = audit_counts(by_event_type)
 
     [
-      %{label: "Total", value: total, tone: :neutral},
-      %{label: "Governance", value: counts.governance, tone: :governance},
-      %{label: "Runtime", value: counts.runtime, tone: :runtime},
-      %{label: "Agents", value: counts.agent, tone: :agent},
-      %{label: "Issues", value: counts.issue, tone: :issue},
-      %{label: "Budget", value: counts.budget, tone: :budget},
-      %{label: "Evidence", value: counts.evidence, tone: :evidence}
+      %{label: "Total", value: total},
+      %{label: "Governance", value: counts.governance},
+      %{label: "Runtime", value: counts.runtime},
+      %{label: "Agents", value: counts.agent}
     ]
   end
 
@@ -356,21 +377,26 @@ defmodule CymphoWeb.AuditTrailLive.Index do
     end
   end
 
-  # Formatting functions
-  def format_event_type(type), do: String.capitalize(String.replace(type, "_", " "))
+  # Formatting functions. Visible words say "task" for the issue event types (v7 §1.2).
+  def format_event_type(type),
+    do: type |> String.replace("_", " ") |> String.replace("issue", "task") |> String.capitalize()
+
   def format_actor_type(type), do: String.capitalize(type)
 
-  def format_timestamp(nil), do: ""
+  # "Task created"; the resource is appended only when the event's words do not name it.
+  defp event_title(%{event_type: type, resource_type: resource_type}) do
+    title = format_event_type(type)
+    resource = resource_words(resource_type)
 
-  def format_timestamp(datetime) do
-    datetime =
-      case DateTime.shift_zone(datetime, "America/Los_Angeles") do
-        {:ok, shifted} -> shifted
-        {:error, _reason} -> datetime
-      end
-
-    Calendar.strftime(datetime, "%Y-%m-%d %H:%M:%S %Z")
+    if resource == "" or String.contains?(String.downcase(title), resource),
+      do: title,
+      else: "#{title} · #{resource}"
   end
+
+  defp resource_words(nil), do: ""
+
+  defp resource_words(type),
+    do: type |> String.replace("_", " ") |> String.replace("issue", "task")
 
   def format_payload(nil), do: "{}"
 
@@ -408,66 +434,21 @@ defmodule CymphoWeb.AuditTrailLive.Index do
 
   defp payload_key_summary(_payload), do: "unstructured"
 
-  defp audit_command_badge_class(:danger), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  # Blocks, stops and terminations read as problems (.kt.p with i-stop).
+  @problem_events ~w(issue_blocked agent_terminated company_runtime_stopped)
 
-  defp audit_command_badge_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  defp problem_event?(event_type), do: event_type in @problem_events
 
-  defp audit_command_badge_class(:review), do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp audit_command_badge_class(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp audit_command_badge_class(:filtered),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-
-  defp audit_command_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp audit_command_action_class(:danger),
-    do: "border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/15"
-
-  defp audit_command_action_class(:attention),
-    do: "border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
-
-  defp audit_command_action_class(:review),
-    do: "border-brand/30 bg-brand/10 text-brand hover:bg-brand/15"
-
-  defp audit_command_action_class(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
-
-  defp audit_command_action_class(:filtered),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-200 hover:bg-blue-500/15"
-
-  defp audit_command_action_class(_),
-    do: "border-border bg-surface text-text-secondary hover:bg-surface-hover"
-
-  defp audit_metric_value_class(:governance), do: "text-brand"
-  defp audit_metric_value_class(:runtime), do: "text-cyan-300"
-  defp audit_metric_value_class(:agent), do: "text-violet-300"
-  defp audit_metric_value_class(:issue), do: "text-emerald-300"
-  defp audit_metric_value_class(:budget), do: "text-amber-300"
-  defp audit_metric_value_class(:evidence), do: "text-blue-300"
-  defp audit_metric_value_class(_), do: "text-text-primary"
+  defp audit_icon(event_type) when event_type in @problem_events, do: "i-stop"
 
   defp audit_icon(event_type) do
     case audit_category(event_type) do
-      :governance -> "hero-shield-check-mini"
-      :runtime -> "hero-command-line-mini"
-      :agent -> "hero-user-circle-mini"
-      :budget -> "hero-currency-dollar-mini"
-      :issue -> "hero-clipboard-document-list-mini"
-      :evidence -> "hero-document-check-mini"
-    end
-  end
-
-  defp audit_icon_tone(event_type) do
-    case audit_category(event_type) do
-      :governance -> "bg-brand/10 text-brand"
-      :runtime -> "bg-cyan-500/10 text-cyan-300"
-      :agent -> "bg-violet-500/10 text-violet-300"
-      :budget -> "bg-amber-500/10 text-amber-300"
-      :issue -> "bg-emerald-500/10 text-emerald-300"
-      :evidence -> "bg-blue-500/10 text-blue-300"
+      :governance -> "i-shield"
+      :runtime -> "i-term"
+      :agent -> "i-team"
+      :budget -> "i-spend"
+      :issue -> "i-tasks"
+      :evidence -> "i-doc-check"
     end
   end
 end

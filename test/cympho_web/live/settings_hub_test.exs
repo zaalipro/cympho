@@ -41,23 +41,78 @@ defmodule CymphoWeb.SettingsHubTest do
 
     test "adapters", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/adapters")
-      assert html =~ "Adapter Status Overview"
+      # r3 (v7 S5): the section's band carries its nav label.
+      assert html =~ "How agents run"
+      assert html =~ ~s(data-testid="adapter-runtime-readiness")
     end
 
     test "secrets (company derived from current_company, no path param)", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/settings/secrets")
-      assert html =~ "Add Secret"
+      {:ok, view, html} = live(conn, "/settings/secrets")
       assert html =~ "Runtime credentials"
       assert html =~ "0 of 5 ready"
       assert html =~ "LLMotions runtime"
-      assert html =~ "No runtime secrets stored yet"
+      # r3 (v7 S7): the empty list carries the only Add control.
+      assert html =~ "No keys or secrets yet"
       assert html =~ "Runtime preflight uses these encrypted secrets"
-      assert html =~ "Add runtime secret"
+      assert has_element?(view, "#secrets-empty button[phx-click=show_create_form]", "Add secret")
+      refute has_element?(view, ".card-h button[phx-click=show_create_form]")
+    end
+
+    # v7 S7: one band of rows; the form opens as a pair at the top of the section.
+    test "secrets list as rows in the Keys and secrets band", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "ROW_RUNTIME_KEY",
+          value: "row-secret-value",
+          description: "Row description"
+        })
+
+      Repo.update_all(from(s in Secret, where: s.id == ^secret.id),
+        set: [inserted_at: DateTime.add(DateTime.utc_now(), -120 * 86_400, :second)]
+      )
+
+      {:ok, view, _html} = live(conn, "/settings/secrets")
+      doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+      CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+        page: "settings",
+        h1: "Settings",
+        kind: :root,
+        primaries: 0
+      )
+
+      assert CymphoWeb.R3PageHelpers.text(doc, "section[aria-labelledby=se-t] .card-h h2") ==
+               "Keys and secrets"
+
+      assert [row] = Floki.find(doc, ~s(.lrow[data-testid="secret-row-#{secret.id}"]))
+      assert CymphoWeb.R3PageHelpers.text(row, ".rt") == "ROW_RUNTIME_KEY"
+      assert CymphoWeb.R3PageHelpers.text(row, ".lr-st") == "Rotate soon"
+      assert Floki.find(row, ".lr-acts details.cympho-menu#secret-menu-#{secret.id}") != []
+      refute render(view) =~ "row-secret-value"
+
+      view |> element(".card-h button[phx-click=show_create_form]") |> render_click()
+      doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+      CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+        page: "settings",
+        h1: "Settings",
+        kind: :root,
+        primaries: 1
+      )
+
+      assert CymphoWeb.R3PageHelpers.text(doc, "form#secret-form .ink .pw") == "Add secret"
+      assert Floki.find(doc, "form#secret-form .ink button[phx-click]") != []
+      refute has_element?(view, ".card-h button[phx-click=show_create_form]")
     end
 
     test "proxies", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/proxies")
-      assert html =~ "Proxy Profiles"
+      assert html =~ ~s(<h2 class="h2" id="px-t">Network proxies</h2>)
       # r3: the nav calls it "Network proxies" (Advanced).
       assert html =~ "Network proxies"
     end
@@ -250,6 +305,7 @@ defmodule CymphoWeb.SettingsHubTest do
       assert html =~ "Rotation status"
       assert html =~ "1 of 1 active secrets need rotation attention."
       assert html =~ "Overdue"
+      assert has_element?(view, ~s([data-testid="secret-row-#{secret.id}"] .lr-st), "Rotate now")
       refute html =~ "old-runtime-key"
 
       html =
@@ -257,7 +313,7 @@ defmodule CymphoWeb.SettingsHubTest do
         |> element(~s(button[phx-click="rotate"][phx-value-id="#{secret.id}"]))
         |> render_click()
 
-      assert html =~ "Rotate Secret"
+      assert has_element?(view, "form#secret-form .ink .pw", "Rotate secret")
       assert html =~ "ROTATE_ME"
       refute html =~ "old-runtime-key"
     end
@@ -286,11 +342,15 @@ defmodule CymphoWeb.SettingsHubTest do
       assert html =~ "Credential key"
       assert html =~ "Accepted by"
       assert html =~ "qwen3.6-flash for cheap smoke"
-      assert html =~ "Save effect"
       assert html =~ "Runtime preflight can use this credential"
       assert html =~ "Encrypted at rest; the value is never shown after save."
-      assert html =~ "No provider call on save"
-      assert html =~ "Store encrypted runtime secret"
+
+      assert has_element?(
+               view,
+               "form#secret-form .ink",
+               "Runtime preflight can use this credential"
+             )
+
       assert html =~ "OpenAI Chat Qwen DashScope"
       assert html =~ "OpenAI Chat Qwen DashScope Flash / Plus / Intl"
       assert html =~ "qwen3.7-plus"
@@ -364,7 +424,6 @@ defmodule CymphoWeb.SettingsHubTest do
       assert html =~ "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
       assert html =~ "Runtime preflight marks DashScope Qwen profiles ready"
       assert html =~ "After saving, Cympho returns to the runtime page"
-      assert html =~ "No provider call on save"
       refute html =~ "sk-"
     end
 
@@ -531,12 +590,12 @@ defmodule CymphoWeb.SettingsHubTest do
 
     test "execution policies", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/policies")
-      assert html =~ "No governance policies configured yet."
+      assert html =~ "No review steps yet"
     end
 
     test "audit log", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/audit")
-      assert html =~ "Audit Trail"
+      assert html =~ ~s(<h2 class="h2" id="au-t">Audit log</h2>)
     end
   end
 

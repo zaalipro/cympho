@@ -124,6 +124,61 @@ defmodule CymphoWeb.AuditTrailLiveTest do
     assert html =~ "Company runtime stopped payload"
   end
 
+  # v7 S13: one Audit log band of event rows; the filters live in its Filter menu.
+  test "renders events as rows in the Audit log band", %{conn: conn, current_company: company} do
+    stopped =
+      insert_event(company, %{
+        event_type: "company_runtime_stopped",
+        actor_type: "user",
+        resource_type: "company",
+        resource_id: company.id,
+        payload: %{"runs_cancelled" => 3}
+      })
+
+    created = insert_event(company, %{event_type: "issue_created", actor_type: "agent"})
+
+    {:ok, view, _html} = live(conn, "/settings/audit")
+    doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+    CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+      page: "settings",
+      h1: "Settings",
+      kind: :root,
+      primaries: 0
+    )
+
+    assert CymphoWeb.R3PageHelpers.text(doc, "section#audit-events .card-h h2") == "Audit log"
+    assert [filter] = Floki.find(doc, "section#audit-events .card-h details#audit-filter.flt-d")
+    assert Floki.find(filter, "summary .mono") == []
+
+    assert Floki.find(filter, ".flt-p .fld [data-select-trigger], .flt-p .fld button.fld-sel") !=
+             []
+
+    assert [stop_row] = Floki.find(doc, "#events-#{stopped.id}.lrow")
+    assert Floki.find(stop_row, ".kt.p use[href='#i-stop']") != []
+    assert CymphoWeb.R3PageHelpers.text(stop_row, ".rt") == "Company runtime stopped"
+
+    assert Floki.find(
+             stop_row,
+             ".lr-below details.earlier#audit-payload-#{stopped.id}[data-testid=audit-payload-#{stopped.id}]"
+           ) != []
+
+    assert [created_row] = Floki.find(doc, "#events-#{created.id}.lrow")
+    assert CymphoWeb.R3PageHelpers.text(created_row, ".rt") == "Task created"
+    assert Floki.find(created_row, ".kt:not(.p)") != []
+
+    assert Floki.find(doc, ".ui-advanced-only section[data-testid=audit-command]") != []
+    refute render(view) =~ ~r/ember-|font-serif|text-cyan|bg-brand/
+  end
+
+  test "the Filter menu counts the filters in the URL", %{conn: conn} do
+    {:ok, view, _html} =
+      live(conn, "/settings/audit?filter_actor_type=user&filter_resource_type=issue")
+
+    assert has_element?(view, "details#audit-filter summary .mono", "2")
+    assert has_element?(view, "details#audit-filter .flt-p button[phx-click=clear_filters]")
+  end
+
   test "streams events and appends the next page", %{conn: conn, current_company: company} do
     seed_events(company, 51)
 
