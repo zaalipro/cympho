@@ -484,6 +484,22 @@ defmodule Cympho.OwnerAttentionTest do
     assert OwnerAttention.unresolved_count(context.company.id, context.user) == 0
   end
 
+  test "a blocked task notifies when its agent changes, not when it is retitled", context do
+    company_id = context.company.id
+
+    {:ok, blocked} =
+      Issues.transition_issue(issue!(company_id, "Waiting on a decision"), :blocked)
+
+    :ok = OwnerAttention.subscribe(company_id)
+
+    # Its "for you" chip moves to the assignee agent (for_you_agent_id/1).
+    {:ok, assigned} = Issues.update_issue(blocked, %{assignee_id: context.agent.id})
+    assert_receive {:owner_attention_changed, ^company_id}
+
+    {:ok, _retitled} = Issues.update_issue(assigned, %{title: "Still waiting on a decision"})
+    refute_receive {:owner_attention_changed, _}, 50
+  end
+
   test "unrelated field updates and same-audience status moves do not notify", context do
     issue =
       issue!(context.company.id, "Stable human work", assignee_user_id: context.user.id)
