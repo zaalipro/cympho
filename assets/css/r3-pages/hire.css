@@ -5,3 +5,35 @@
      the light block and both identical dark copies, never here.
    - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
    - Shared components belong in r3.css, not here. */
+
+/* ================================================================
+   Shared by the hire pages (v7 §4.4): a band header's end, long tokens, a native select
+   ================================================================ */
+/* a band header's end holding a tag and a meta word, or two pills */
+.cy-r3 :is([data-page="hire"],[data-page="skills"],[data-page="settings"],[data-page="marketplace"]) .hr-end{display:inline-flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+/* identifiers, DIDs, module names and URLs wrap instead of widening a row on phones */
+.cy-r3 .hr-wrap{overflow-wrap:anywhere}
+/* a native <select> in an r3 field (AdapterConfigFields reads its options' data-*): the field box and a chevron */
+.cy-r3 .hr-sel{position:relative;display:flex}
+.cy-r3 .hr-sel select{-webkit-appearance:none;appearance:none;padding-right:36px;cursor:pointer}
+.cy-r3 .hr-sel .ico{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--ink-2);pointer-events:none}
+/* a status word inside text (a property value, a row line) */
+.cy-r3 .hr-st{display:inline-flex;align-items:center;gap:6px}
+
+/* ================================================================
+   Hire (H1)
+   ================================================================ */
+/* field grids nested in a band (the runtime part, the adapter panels) get the card padding too */
+.cy-r3 [data-page="hire"] .card .flds{padding:8px 12px 12px}
+.cy-r3 [data-page="hire"] .hr-role{padding:0 12px 12px;font-size:13px;line-height:19px;color:var(--ink-2)}
+.cy-r3 [data-page="hire"] .hr-role b{color:var(--ink)}
+.cy-r3 [data-page="hire"] .hr-rt{display:block;font-size:12px;line-height:16px}
+.cy-r3 [data-page="hire"] .hr-ex{padding-top:4px}
+.cy-r3 [data-page="hire"] .hr-ex .chip{max-width:100%}
+.cy-r3 [data-page="hire"] .hr-ex-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the chosen runtime profile, beside its picker */
+.cy-r3 [data-page="hire"] .hr-pcard{display:flex;flex-direction:column;gap:6px;min-width:0;padding:12px 14px;border-radius:14px;background:var(--well);border:1px solid var(--band-line)}
+.cy-r3 [data-page="hire"] .hr-tags{display:flex;flex-wrap:wrap;gap:6px}
+.cy-r3 [data-page="hire"] .hr-pname{font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="hire"] .hr-pfoot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;padding-top:8px;border-top:1px solid var(--hair);font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 [data-page="hire"] .hr-cmd{align-self:end;padding-bottom:12px;font-size:12px;line-height:16px;color:var(--ink-2);overflow-wrap:anywhere}

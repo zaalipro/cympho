@@ -137,9 +137,9 @@ defmodule CymphoWeb.SimpleModeCopyTest do
       assert html =~ "Choose the agent"
       assert html =~ "role and reporting line"
       assert html =~ "Create an autonomous teammate with a role"
-      # Simple drops the orphaned step number when sections 2/3 are hidden.
-      assert html =~ "Identity and reporting"
-      assert html =~ "1 · Identity and reporting"
+      # r3 (v7 H1): the first band is "Who", with no step numbers in either mode.
+      assert has_element?(view, "[data-testid='new-agent-identity-section'] .h2", "Who")
+      refute html =~ "1 · Identity and reporting"
     end
 
     test "demand-backed hire banners both operator and plain wording", %{conn: conn} do
