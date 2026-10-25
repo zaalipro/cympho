@@ -97,7 +97,7 @@ defmodule Cympho.OwnerAttention do
     limit = opts |> Keyword.get(:limit, @default_limit) |> normalize_limit()
 
     company_id
-    |> membership_items(user, agent_id)
+    |> membership_items(user, agent_id, @default_limit)
     |> Enum.take(limit)
   end
 
@@ -126,11 +126,11 @@ defmodule Cympho.OwnerAttention do
 
   Derived after category merge and issue-level dedup (reviews included), so nav
   badges, Simple Needs you, and Inbox cannot drift from hand-rolled category sums.
-  Prefer this for badge counts.
+  Counts every row, not only the ones a list shows. Prefer this for badge counts.
   """
   def unresolved_count(company_id, user) when is_binary(company_id) do
     company_id
-    |> membership_items(user, nil)
+    |> membership_items(user, nil, nil)
     |> length()
   end
 
@@ -141,7 +141,7 @@ defmodule Cympho.OwnerAttention do
   the total per owner kind (`owner_kind/1`) and the "for you" count per agent id.
   """
   def counts(company_id, user) when is_binary(company_id) do
-    items = membership_items(company_id, user, nil)
+    items = membership_items(company_id, user, nil, nil)
 
     %{
       total: length(items),
@@ -283,16 +283,18 @@ defmodule Cympho.OwnerAttention do
     }
   end
 
-  # Single membership path for list_items and unresolved_count.
-  defp membership_items(company_id, user, agent_id) do
+  # Single membership path for list_items and the counts. A list reads at most
+  # `source_limit` human-action and review rows; the counts pass nil and read
+  # them all, so a badge over 200 speaks its full number (B15).
+  defp membership_items(company_id, user, agent_id, source_limit) do
     company_id
-    |> source_items(user, agent_id)
+    |> source_items(user, agent_id, source_limit)
     |> sort_and_deduplicate()
   end
 
-  defp source_items(company_id, user, agent_id) do
-    human_action_items(company_id, user) ++
-      review_items(company_id, agent_id) ++
+  defp source_items(company_id, user, agent_id, source_limit) do
+    human_action_items(company_id, user, source_limit) ++
+      review_items(company_id, agent_id, source_limit) ++
       approval_items(company_id, agent_id) ++
       board_approval_items(company_id, agent_id) ++
       interaction_items(company_id, agent_id) ++
@@ -302,14 +304,14 @@ defmodule Cympho.OwnerAttention do
       paused_agent_items(company_id, agent_id)
   end
 
-  defp human_action_items(company_id, user) do
+  defp human_action_items(company_id, user, source_limit) do
     case user_id(user) do
       nil ->
         []
 
       user_id ->
         company_id
-        |> Issues.list_human_action_issues(user_id, limit: @default_limit)
+        |> Issues.list_human_action_issues(user_id, limit: source_limit)
         |> Enum.map(fn issue ->
           attention_item(%{
             id: "human-action-#{issue.id}",
@@ -329,11 +331,11 @@ defmodule Cympho.OwnerAttention do
     end
   end
 
-  defp review_items(company_id, agent_id) do
+  defp review_items(company_id, agent_id, source_limit) do
     scope = if is_binary(agent_id), do: {:agent, agent_id}, else: {:company, company_id}
 
     scope
-    |> Wakes.list_review_queue(limit: @default_limit, company_id: company_id)
+    |> Wakes.list_review_queue(limit: source_limit, company_id: company_id)
     |> Enum.map(fn %{wake: wake, issue: issue} ->
       attention_item(%{
         id: wake.id,

@@ -57,7 +57,8 @@ defmodule Cympho.Issues do
 
   This powers the board/operator "Needs my action" queue. It is intentionally
   issue-backed rather than notification-backed so human blockers do not get
-  buried in a noisy agent inbox.
+  buried in a noisy agent inbox. `:limit` defaults to 100; `limit: nil` lists
+  them all.
   """
   def list_human_action_issues(company_id, user_id, opts \\ [])
 
@@ -77,12 +78,15 @@ defmodule Cympho.Issues do
       desc: i.updated_at,
       desc: i.id
     )
-    |> limit(^limit)
+    |> maybe_limit(limit)
     |> Repo.all()
     |> Repo.preload([:comments, :assignee, :project, :labels, :goal])
   end
 
   def list_human_action_issues(_company_id, _user_id, _opts), do: []
+
+  defp maybe_limit(query, nil), do: query
+  defp maybe_limit(query, limit), do: limit(query, ^limit)
 
   def human_action_count(company_id, user_id) when is_binary(company_id) and is_binary(user_id) do
     Issue

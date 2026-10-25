@@ -1612,6 +1612,21 @@ defmodule CymphoWeb.InboxLiveTest do
       assert text(main, ".b4") == "Showing the first 200 of 201."
     end
 
+    test "past 200 blocked tasks the list still says how many there are (B15)" do
+      {conn, _user, company} = ConnCase.register_and_log_in_user(Phoenix.ConnTest.build_conn())
+
+      for n <- 1..201 do
+        {:ok, _} =
+          Issues.create_issue(%{title: "Blocked #{n}", status: :blocked, company_id: company.id})
+      end
+
+      {:ok, view, _html} = live(conn, "/inbox")
+      main = main_doc(view)
+
+      assert text(main, "nav.seg a[aria-current='page']") == "All 201"
+      assert text(main, ".b4") == "Showing the first 200 of 201."
+    end
+
     test "with nothing to decide and agents off, the Next step says so", %{conn: conn} do
       {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
       {:ok, view, _html} = live(conn, "/inbox")

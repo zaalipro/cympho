@@ -2361,7 +2361,15 @@ defmodule CymphoWeb.AgentLive.Show do
   def health_pill_class(:unavailable), do: "border-border bg-surface text-text-quaternary"
   def health_pill_class(_), do: "border-border bg-surface text-text-secondary"
 
-  defp agent_command_summary(agent, readiness, studio, recent_issues, wake_history, latest_run) do
+  defp agent_command_summary(
+         agent,
+         readiness,
+         studio,
+         recent_issues,
+         wake_history,
+         latest_run,
+         from
+       ) do
     active_count = count_status(recent_issues, [:in_progress])
     review_count = count_status(recent_issues, [:in_review])
     queued_count = count_status(recent_issues, [:todo, :backlog])
@@ -2374,7 +2382,7 @@ defmodule CymphoWeb.AgentLive.Show do
             tone: :attention,
             label: "Fix runtime",
             detail: readiness.summary,
-            path: "/agents/#{agent.id}?tab=configuration#agent-runtime-profile"
+            path: agent_path(agent.id, from, tab: "configuration") <> "#agent-runtime-profile"
           }
 
         readiness.status == :spending_limit ->
@@ -2382,7 +2390,7 @@ defmodule CymphoWeb.AgentLive.Show do
             tone: :attention,
             label: "Set billing",
             detail: readiness.summary,
-            path: "/agents/#{agent.id}?tab=configuration#agent-billing"
+            path: agent_path(agent.id, from, tab: "configuration") <> "#agent-billing"
           }
 
         studio.status in [:attention, :weak] or studio.score < 70 ->
@@ -2390,7 +2398,7 @@ defmodule CymphoWeb.AgentLive.Show do
             tone: :attention,
             label: "Tune guide",
             detail: studio.summary,
-            path: "/agents/#{agent.id}?tab=configuration#agent-instruction-studio"
+            path: agent_path(agent.id, from, tab: "configuration") <> "#agent-instruction-studio"
           }
 
         review_count > 0 ->
@@ -2408,7 +2416,7 @@ defmodule CymphoWeb.AgentLive.Show do
             label: "Observe runs",
             detail:
               "#{active_count} active issue#{plural_suffix(active_count)} assigned to this agent.",
-            path: "/agents/#{agent.id}?tab=runs"
+            path: agent_path(agent.id, from, tab: "runs")
           }
 
         queued_count > 0 ->

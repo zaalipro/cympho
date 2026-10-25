@@ -792,7 +792,7 @@ defmodule Cympho.Wakes do
   preloaded. Filtered by `reason in ("final_review_required",
   "child_status_changed", "issue_children_completed")` — the wakes the
   autonomous loop produces when something is asking for human or boss
-  judgment.
+  judgment. `:limit` defaults to 50; `limit: nil` lists them all.
   """
   @spec list_review_queue({:agent, binary()} | {:company, binary()}, keyword()) ::
           [%{wake: AgentWake.t(), issue: Issue.t()}]
@@ -810,7 +810,7 @@ defmodule Cympho.Wakes do
     |> where([w, _i], w.reason in ^@review_queue_reasons)
     |> scope_review_queue_company(company_id)
     |> order_by([w], desc: w.inserted_at)
-    |> limit(^limit)
+    |> maybe_limit(limit)
     |> preload([:issue, :agent])
     |> Repo.all()
     |> Enum.reject(&(&1.issue == nil))
@@ -825,7 +825,7 @@ defmodule Cympho.Wakes do
     |> where([w, i], i.company_id == ^company_id and w.status in ["pending", "running"])
     |> where([w, _i], w.reason in ^@review_queue_reasons)
     |> order_by([w], desc: w.inserted_at)
-    |> limit(^limit)
+    |> maybe_limit(limit)
     |> preload([:issue, :agent])
     |> Repo.all()
     |> Enum.reject(&(&1.issue == nil))
@@ -833,6 +833,9 @@ defmodule Cympho.Wakes do
   end
 
   def list_review_queue(_, _), do: []
+
+  defp maybe_limit(query, nil), do: query
+  defp maybe_limit(query, limit), do: limit(query, ^limit)
 
   defp scope_review_queue_company(query, company_id) when is_binary(company_id) do
     where(query, [_w, i], i.company_id == ^company_id)

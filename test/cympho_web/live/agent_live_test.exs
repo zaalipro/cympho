@@ -3200,6 +3200,35 @@ defmodule CymphoWeb.AgentLiveTest do
       end
     end
 
+    test "the Advanced links back to this agent keep the origin too", %{conn: conn, nw: nw} do
+      mira = nw.agents["Mira"]
+      base = "/agents/#{mira.id}"
+      {:ok, _revision} = Agents.create_config_revision(mira, %{source: "prompt_tuning"})
+      own = ~s(a[data-phx-link="redirect"][href^="#{base}?"])
+      {:ok, view, _html} = live(conn, base <> "?from=/")
+
+      # The overview's action (here Tune guide), the prompt canary's Open runs, Open guide
+      # and Open runtime.
+      assert view
+             |> r3_doc()
+             |> Floki.find(own)
+             |> Enum.map(&{r3_squish(Floki.text(&1)), hd(Floki.attribute(&1, "href"))}) == [
+               {"Tune guide", base <> "?tab=configuration&from=%2F#agent-instruction-studio"},
+               {"Open runs", base <> "?tab=runs&from=%2F"},
+               {"Open guide", base <> "?tab=configuration&from=%2F#agent-instruction-studio"},
+               {"Open runtime", base <> "?tab=configuration&from=%2F#agent-runtime-profile"}
+             ]
+
+      for label <- ["Tune guide", "Open runs", "Open guide", "Open runtime"] do
+        {:ok, view, _html} = live(conn, base <> "?from=/")
+
+        {:ok, next, _html} =
+          view |> element(own, label) |> render_click() |> follow_redirect(conn)
+
+        assert r3_text(r3_doc(next), ".ctx .ret") == "Back to Home"
+      end
+    end
+
     test "Pause here is the owner's: it reads Paused and is no Inbox problem", %{
       conn: conn,
       nw: nw

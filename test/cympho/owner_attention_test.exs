@@ -955,6 +955,36 @@ defmodule Cympho.OwnerAttentionTest do
                by_agent: %{context.agent.id => 1}
              }
     end
+
+    # B15: the badge speaks the full count, so the counts go past the 200 rows a
+    # list shows, for blocked tasks and for reviews alike.
+    test "counts every blocked task and every review past a list's 200", context do
+      for n <- 1..201 do
+        {:ok, _} =
+          Issues.create_issue(%{
+            title: "Blocked #{n}",
+            status: :blocked,
+            company_id: context.company.id,
+            assignee_id: context.agent.id
+          })
+
+        insert_wake!(
+          context.agent,
+          issue!(context.company.id, "Review #{n}"),
+          "final_review_required"
+        )
+      end
+
+      assert OwnerAttention.unresolved_count(context.company.id, context.user) == 402
+
+      assert OwnerAttention.counts(context.company.id, context.user) == %{
+               total: 402,
+               by_kind: %{stopped: 0, problem: 201, question: 0, review: 201, approval: 0},
+               by_agent: %{context.agent.id => 402}
+             }
+
+      assert length(OwnerAttention.list_items(context.company.id, context.user)) == 200
+    end
   end
 
   describe "question answer options" do
