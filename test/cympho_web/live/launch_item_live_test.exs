@@ -2,6 +2,7 @@ defmodule CymphoWeb.LaunchItemLiveTest do
   use CymphoWeb.LiveCase, async: false
 
   import Phoenix.LiveViewTest
+  import CymphoWeb.R3PageHelpers
 
   alias Cympho.{Companies, LaunchItems, Users}
 
@@ -42,10 +43,25 @@ defmodule CymphoWeb.LaunchItemLiveTest do
   end
 
   test "renders the empty state when no launch items exist", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/launch-items")
+    {:ok, view, html} = live(conn, "/launch-items")
+
+    # r3 (v7 L11): the checklist is a root page whose add form is its one pair.
+    assert_r3_page(main_doc(view),
+      page: "launch",
+      h1: "Launch checklist",
+      kind: :root,
+      primaries: 1
+    )
 
     assert html =~ "No launch items yet"
-    assert html =~ "Create launch item"
+
+    assert has_element?(
+             view,
+             "form#launch-item-create-form.fpair .ink button.pw[type='submit']",
+             "Add to checklist"
+           )
+
+    refute html =~ "Back to dashboard"
   end
 
   test "can create, edit, complete, and block launch items", %{
@@ -56,7 +72,7 @@ defmodule CymphoWeb.LaunchItemLiveTest do
   } do
     {:ok, view, html} = live(conn, "/launch-items")
 
-    assert html =~ "Add work to the tracker"
+    assert has_element?(view, "#launch-item-create-form #li-new-t", "New item")
     # On an empty tracker the blocked panel and the readiness card each repeated
     # the list's empty state; they only appear once there is work to report on.
     refute html =~ "No blocked launch items"
@@ -76,7 +92,8 @@ defmodule CymphoWeb.LaunchItemLiveTest do
     assert html =~ "Ship launch checklist"
     assert html =~ owner_a.name
     assert html =~ "No blocked launch items"
-    assert html =~ "Readiness summary"
+    # The readiness hero is the list card's count now.
+    assert has_element?(view, "#launch-list-t + .meta", "0 of 1 done")
 
     [item] = LaunchItems.list_company_launch_items(company.id)
 
@@ -93,14 +110,18 @@ defmodule CymphoWeb.LaunchItemLiveTest do
     assert {:ok, updated_owner} = LaunchItems.get_company_launch_item(company.id, item.id)
     assert updated_owner.owner_user_id == owner_b.id
 
-    html =
-      view
-      |> element(
-        "#launch-item-#{item.id} button[phx-click='update_status'][phx-value-status='completed']"
-      )
-      |> render_click()
+    view
+    |> element(
+      "#launch-item-#{item.id} button[phx-click='update_status'][phx-value-status='completed']"
+    )
+    |> render_click()
 
-    assert html =~ "Completed"
+    assert has_element?(
+             view,
+             "#launch-item-#{item.id} .seg button[aria-pressed='true'][phx-value-status='completed']"
+           )
+
+    assert has_element?(view, "#launch-list-t + .meta", "1 of 1 done")
 
     assert {:ok, completed_item} = LaunchItems.get_company_launch_item(company.id, item.id)
     assert completed_item.status == "completed"
@@ -121,7 +142,7 @@ defmodule CymphoWeb.LaunchItemLiveTest do
     # The blocked titles used to be listed a second time inside the readiness
     # summary; the summary now only carries the count.
     refute html =~ "Blocked titles"
-    assert html =~ "1 blocked"
+    assert has_element?(view, "#blocked-launch-item-#{item.id} .lr-st", "Blocked")
 
     assert {:ok, blocked_item} = LaunchItems.get_company_launch_item(company.id, item.id)
     assert blocked_item.is_blocked
