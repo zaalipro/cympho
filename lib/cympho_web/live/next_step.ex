@@ -278,7 +278,11 @@ defmodule CymphoWeb.NextStep do
         <.ink_card heading="Until it changes">
           <.ink_note>Nothing runs here until the server setting changes.</.ink_note>
           <div class="ink-f">
-            <details class="howto">
+            <details
+              id="server-off-howto"
+              class="howto"
+              phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+            >
               <summary class="pw">
                 How to turn agents on<span class="nub"><.r3_icon name="i-chev-down" /></span>
               </summary>

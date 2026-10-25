@@ -228,7 +228,7 @@ defmodule CymphoWeb.Components.IssueDigest do
                   >
                     {action.label}
                   </button>
-                  <.action_help action={action} />
+                  <.action_help id={action_help_id(action)} action={action} />
                 </div>
               <% end %>
             </div>
@@ -887,11 +887,16 @@ defmodule CymphoWeb.Components.IssueDigest do
     """
   end
 
+  attr :id, :string, required: true
   attr :action, :map, required: true
 
   def action_help(assigns) do
     ~H"""
-    <details class="group relative inline-flex">
+    <details
+      id={@id}
+      class="help-pop group relative inline-flex"
+      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+    >
       <summary
         class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-hairline bg-surface-1 text-[11px] font-590 text-ink-tertiary transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
         aria-label={"Why #{@action.label}?"}
@@ -1444,6 +1449,14 @@ defmodule CymphoWeb.Components.IssueDigest do
         "Disabled until Cympho can identify a responsible agent."
     end
   end
+
+  # Each help popover keeps its element (and its open state) with its action when a
+  # live update adds or drops an action before it. A copy action's key is its text,
+  # which changes as the issue does, so its label names it instead.
+  defp action_help_id(%{type: :copy, label: label}),
+    do: "digest-help-#{:erlang.phash2({:copy, label})}"
+
+  defp action_help_id(action), do: "digest-help-#{:erlang.phash2(quick_action_key(action))}"
 
   defp quick_action_key(%{type: :gate_event, action: action}), do: {:gate_event, action}
   defp quick_action_key(%{type: :event, event: event}), do: {:event, event}

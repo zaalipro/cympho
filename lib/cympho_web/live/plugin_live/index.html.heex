@@ -256,7 +256,9 @@
 
             <details
               :if={capability_count(plugin.capabilities) > 0}
+              id={"plugin-capabilities-#{plugin.id}"}
               class="group/cap mt-2.5 max-w-3xl"
+              phx-mounted={JS.ignore_attributes("open")}
             >
               <summary class="inline-flex cursor-pointer list-none items-center gap-1.5 text-xs font-510 text-text-tertiary transition-colors hover:text-text-secondary [&::-webkit-details-marker]:hidden">
                 <.icon

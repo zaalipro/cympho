@@ -109,7 +109,12 @@
     <.pill navigate={"/board-approvals/#{hire.id}?from=/agents"}>Open vote</.pill>
   </section>
 
-  <details :if={@team_size > 0} class="card tech runs24">
+  <details
+    :if={@team_size > 0}
+    id="team-runs-24h"
+    class="card tech runs24"
+    phx-mounted={JS.ignore_attributes("open")}
+  >
     <summary>
       <span class="h2">
         Last 24 hours
@@ -449,6 +454,7 @@
               Open
             </.app_link>
             <.overflow_menu
+              id={"agent-menu-#{agent.id}"}
               label={"Manage #{agent.name}"}
               data-testid={"agent-manage-menu-#{agent.id}"}
             >

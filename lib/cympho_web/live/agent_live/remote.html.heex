@@ -164,7 +164,11 @@
           <form phx-submit="hire_agent" class="mt-4 border-t border-border pt-4">
             <input type="hidden" name="agent_did" value={agent["did"]} />
             <div class="flex items-start justify-between gap-3">
-              <details class="min-w-0 flex-1">
+              <details
+                id={"remote-hire-options-#{agent["did"]}"}
+                class="min-w-0 flex-1"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
                 <summary class="cursor-pointer list-none text-sm font-510 text-text-tertiary hover:text-text-primary">
                   Adjust role, price, delivery ▾
                 </summary>

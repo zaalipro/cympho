@@ -220,7 +220,11 @@
               </p>
             </div>
 
-            <details class="group rounded-lg border border-border bg-surface/80 px-4 py-3">
+            <details
+              id="policy-json-preview"
+              class="group rounded-lg border border-border bg-surface/80 px-4 py-3"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
               <summary class="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
                 <span>
                   <span class="block text-xs font-510 text-text-secondary">

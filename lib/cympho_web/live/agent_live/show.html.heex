@@ -240,7 +240,7 @@
       </.quiet_empty>
     </section>
 
-    <details class="card tech">
+    <details id="agent-tech-details" class="card tech" phx-mounted={JS.ignore_attributes("open")}>
       <summary>
         <span class="h2">Technical details</span> <.r3_icon name="i-chev-down" />
       </summary>
@@ -1015,7 +1015,11 @@
                 Eval {instruction_studio.eval_coverage.passed}/{instruction_studio.eval_coverage.total}<span class="sr-only">
                     — Eval coverage: {instruction_studio.eval_coverage.summary}</span>
               </span>
-              <details class="group relative inline-flex">
+              <details
+                id="instruction-studio-help"
+                class="help-pop group relative inline-flex"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
                 <summary
                   class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-border bg-surface text-[11px] font-590 text-text-tertiary hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
                   aria-label="How instruction studio health works"
@@ -1035,7 +1039,11 @@
             <p class="mt-2 text-sm leading-6 text-text-tertiary">
               {instruction_studio.summary}
             </p>
-            <details class="mt-3 rounded-lg border border-border bg-surface">
+            <details
+              id="instruction-eval-details"
+              class="mt-3 rounded-lg border border-border bg-surface"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
               <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-590 text-text-secondary hover:bg-surface-hover [&::-webkit-details-marker]:hidden">
                 <span>Eval details</span>
                 <span class="font-510 text-text-quaternary">
@@ -1156,7 +1164,11 @@
             <%!-- The template and the three playbook checklists below are
                    reference text Cympho injects for you — nothing here is edited
                    on this page, so each one opens on demand. --%>
-            <details class="mt-3 rounded-lg border border-border bg-surface px-3 py-3">
+            <details
+              id="required-final-comment"
+              class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
               <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
                 <span class="text-xs font-590 text-text-primary">Required final comment</span>
                 <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
@@ -1171,6 +1183,7 @@
               id="runtime-drill-guide"
               data-testid="runtime-drill-guide"
               class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
+              phx-mounted={JS.ignore_attributes("open")}
             >
               <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
                 <span class="text-xs font-590 text-text-primary">Runtime drill</span>
@@ -1189,7 +1202,11 @@
                 </div>
               </div>
             </details>
-            <details class="mt-3 rounded-lg border border-border bg-surface px-3 py-3">
+            <details
+              id="turn-guide"
+              class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
               <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
                 <span class="text-xs font-590 text-text-primary">Turn guide</span>
                 <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
@@ -1215,6 +1232,7 @@
               id="turn-ledger-guide"
               data-testid="turn-ledger-guide"
               class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
+              phx-mounted={JS.ignore_attributes("open")}
             >
               <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
                 <span class="text-xs font-590 text-text-primary">Turn ledger</span>
@@ -1276,10 +1294,12 @@
           <div class="mt-3 grid gap-2 lg:grid-cols-2">
             <details
               :for={section <- instruction_studio.effective_sections}
+              id={"prompt-section-#{String.replace(section.label, " ", "-")}"}
               class={[
                 "rounded-lg border px-3 py-2",
                 studio_card_class(section.status)
               ]}
+              phx-mounted={JS.ignore_attributes("open")}
             >
               <summary class="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                 <div class="flex flex-wrap items-center justify-between gap-2">
@@ -1398,7 +1418,11 @@
               <%!-- The Apply button is the interface; the patch text only
                      matters when you want to read it first. Ten identical
                      "read the text" links became one marker per row. --%>
-              <details class="mt-3">
+              <details
+                id={"instruction-patch-text-#{patch.id}"}
+                class="mt-3"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
                 <summary
                   class="inline-flex cursor-pointer list-none items-center text-text-quaternary hover:text-text-secondary [&::-webkit-details-marker]:hidden"
                   title="Read the patch text"

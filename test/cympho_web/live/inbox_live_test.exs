@@ -1521,6 +1521,38 @@ defmodule CymphoWeb.InboxLiveTest do
       assert [_] = Floki.find(main_doc(view), "details.dec[open]")
     end
 
+    test "an answer from another page leaves Decided as the reader set it; ?decided=open still opens it (B2)",
+         %{conn: conn, nw: nw} do
+      {:ok, view, _html} = live(conn, "/inbox")
+      [decided] = Floki.find(main_doc(view), "details.dec")
+      [mounted] = Floki.attribute(decided, "phx-mounted")
+      assert Jason.decode!(mounted) == [["ignore_attrs", %{"attrs" => ["open"]}]]
+      [id] = Floki.attribute(decided, "id")
+
+      {:ok, interaction} = IssueThreadInteractions.get_interaction(nw.questions["Q1"].id)
+
+      {:ok, _} =
+        IssueThreadInteractions.resolve_interaction(interaction, %{
+          "status" => :responded,
+          "resolved_by_user_id" => nw.user.id,
+          "response" => "Email the customer first"
+        })
+
+      send(view.pid, {:owner_attention_changed, nw.company.id})
+
+      # The list re-renders with the answer; it stays the same element, so the
+      # browser keeps whatever the reader opened.
+      [decided] = Floki.find(main_doc(view), "details.dec")
+      assert text(decided, "summary") =~ "Decided in the last 7 days 4"
+      assert Floki.attribute(decided, "id") == [id]
+
+      # The all-clear's "See recent decisions" patches to ?decided=open: a new
+      # element, so the server's open is applied before it is ignored again.
+      render_patch(view, "/inbox?decided=open")
+      [opened] = Floki.find(main_doc(view), "details.dec[open]")
+      refute Floki.attribute(opened, "id") == [id]
+    end
+
     test "past 200 items the list says how many there are (B4)" do
       {conn, _user, company} = ConnCase.register_and_log_in_user(Phoenix.ConnTest.build_conn())
       now = DateTime.utc_now() |> DateTime.truncate(:second)

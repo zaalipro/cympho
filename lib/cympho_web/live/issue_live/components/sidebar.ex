@@ -769,7 +769,10 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         <details
           id="issue-github-pr"
           class="group"
-          open={@issue.github_pr_number not in [nil, 0] or @issue.github_pr_url not in [nil, ""]}
+          open={pr_set?(@issue)}
+          data-open={to_string(pr_set?(@issue))}
+          phx-hook="ServerOpen"
+          phx-mounted={JS.ignore_attributes("open")}
         >
           <summary class="flex items-center justify-between gap-2 cursor-pointer font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90 list-none">
             <span>GitHub PR</span>
@@ -839,7 +842,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             </div>
             <details
               :if={pr_quality(@issue) && pr_quality(@issue)["status"] == "attention"}
+              id="issue-pr-quality-repair"
               class="rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-2.5 py-2 text-caption text-amber-100"
+              phx-mounted={JS.ignore_attributes("open")}
             >
               <% repair_packet = pr_repair_packet(@issue) %>
               <summary class="cursor-pointer font-590 text-amber-100">
@@ -870,7 +875,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
                   <p class="uppercase tracking-[0.08em] text-amber-100/55">Suggested commands</p>
                   <pre class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded border border-amber-500/15 bg-black/25 px-2 py-1 font-mono text-[10px] text-amber-50">{pr_repair_commands(repair_packet)}</pre>
                 </div>
-                <details>
+                <details id="issue-pr-body-template" phx-mounted={JS.ignore_attributes("open")}>
                   <summary class="cursor-pointer text-amber-100/80">PR body template</summary>
                   <pre class="mt-1 max-h-44 overflow-auto whitespace-pre-wrap rounded border border-amber-500/15 bg-black/25 px-2 py-1 font-mono text-[10px] text-amber-50">{repair_packet.body_template}</pre>
                 </details>
@@ -927,6 +932,10 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
     </aside>
     """
   end
+
+  # The GitHub PR panel opens once a PR is set.
+  defp pr_set?(issue),
+    do: issue.github_pr_number not in [nil, 0] or issue.github_pr_url not in [nil, ""]
 
   defp work_mode_combobox_options do
     [

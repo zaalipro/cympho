@@ -23,7 +23,7 @@ heading =
     </span>
     <span class="ob-sp"></span>
     <a class="ob-help" href="/docs"><.r3_icon name="i-question" />Help</a>
-    <details class="ob-acct">
+    <details id="ob-account-menu" class="ob-acct" phx-mounted={JS.ignore_attributes("open")}>
       <summary>
         <span class="av" aria-hidden="true">{user_initials(@current_user)}</span>
         <span class="sr">{@current_user.name || @current_user.email}, account</span>
@@ -388,7 +388,11 @@ heading =
               <p :if={also_on_team(crew) != ""} class="also">
                 Also on the team: {also_on_team(crew)}.
               </p>
-              <details class="ob-ren" phx-mounted={JS.ignore_attributes("open")}>
+              <details
+                id="ob-rename-leaders"
+                class="ob-ren"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
                 <summary>Rename the leaders</summary>
                 <div class="flds">
                   <.ob_field

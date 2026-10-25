@@ -18,7 +18,7 @@
       <%!-- The pretty-printed manifest was the longest thing on the page and
            repeated the name, description, identifier, version, author, and
            capabilities that the panel beside it already shows in plain rows. --%>
-      <details class="group">
+      <details id="skill-manifest" class="group" phx-mounted={JS.ignore_attributes("open")}>
         <summary class="flex cursor-pointer list-none items-center gap-1.5 text-xs font-510 uppercase tracking-wide text-text-secondary [&::-webkit-details-marker]:hidden">
           <span class="hero-chevron-right-mini h-3.5 w-3.5 transition-transform group-open:rotate-90">
           </span>

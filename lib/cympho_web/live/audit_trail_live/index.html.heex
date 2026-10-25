@@ -274,8 +274,10 @@
 
           <details
             :if={event.payload not in [nil, %{}]}
+            id={"audit-payload-#{event.id}"}
             data-testid={"audit-payload-#{event.id}"}
             class="mt-3"
+            phx-mounted={JS.ignore_attributes("open")}
           >
             <summary
               class="inline-flex max-w-full cursor-pointer flex-wrap items-center gap-1.5 text-xs font-510 text-text-tertiary transition-colors hover:text-text-primary"

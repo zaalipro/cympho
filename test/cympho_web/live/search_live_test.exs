@@ -34,6 +34,20 @@ defmodule CymphoWeb.SearchLiveTest do
       assert advanced_filter_open?(html)
     end
 
+    # The patch ignores `open` (the reader's toggle holds); data-open carries the
+    # server's value, which the ServerOpen hook applies when it changes.
+    test "advanced filters follow a URL that sets or clears one (Back, Forward)", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/search")
+
+      assert %{"phx-hook" => "ServerOpen", "data-open" => "false"} = advanced_filter_attrs(html)
+
+      assert %{"data-open" => "true"} =
+               view |> render_patch("/search?role=engineer") |> advanced_filter_attrs()
+
+      assert %{"data-open" => "false"} =
+               view |> render_patch("/search") |> advanced_filter_attrs()
+    end
+
     test "renders company-scoped results and scoped filter options", %{
       conn: conn,
       current_company: company
@@ -180,5 +194,12 @@ defmodule CymphoWeb.SearchLiveTest do
       _ ->
         false
     end
+  end
+
+  defp advanced_filter_attrs(html) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find(~s(details[data-testid="search-advanced-filters"]))
+    |> then(fn [{"details", attrs, _children}] -> Map.new(attrs) end)
   end
 end

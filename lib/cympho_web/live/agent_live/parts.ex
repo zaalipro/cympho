@@ -170,7 +170,12 @@ defmodule CymphoWeb.AgentLive.Parts do
         <.problem_card title={@item.title}>
           <:eyebrow>Next step<span aria-hidden="true"> · </span>Problem</:eyebrow>
           <p class="obj"><b :if={@lead}>{@lead}</b>{@rest}</p>
-          <details :if={@item.diagnostic} class="reason">
+          <details
+            :if={@item.diagnostic}
+            id="paused-reason"
+            class="reason"
+            phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+          >
             <summary>
               <span>Reason as Cympho stored it</span> <.r3_icon name="i-chev-down" class="ico s14" />
             </summary>
@@ -240,7 +245,12 @@ defmodule CymphoWeb.AgentLive.Parts do
           <p class="obj">
             <b>{@agent.name} stopped in error:</b> the last session did not finish cleanly.
           </p>
-          <details :if={@reason} class="reason">
+          <details
+            :if={@reason}
+            id="retry-reason"
+            class="reason"
+            phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+          >
             <summary>
               <span>Reason as Cympho stored it</span> <.r3_icon name="i-chev-down" class="ico s14" />
             </summary>

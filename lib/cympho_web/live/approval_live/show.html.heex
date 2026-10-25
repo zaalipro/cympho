@@ -125,7 +125,12 @@
             </div>
           </dl>
 
-          <details :if={@approval.payload} class="ui-advanced-only group mt-3">
+          <details
+            :if={@approval.payload}
+            id="approval-payload-json"
+            class="ui-advanced-only group mt-3"
+            phx-mounted={JS.ignore_attributes("open")}
+          >
             <summary class="inline-flex cursor-pointer select-none items-center gap-1.5 text-xs font-510 text-text-tertiary transition-colors hover:text-text-primary [&::-webkit-details-marker]:hidden">
               <span class="hero-chevron-right-mini h-3.5 w-3.5 transition-transform group-open:rotate-90">
               </span>

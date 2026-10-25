@@ -501,9 +501,9 @@ function handleKeydown(e) {
   const target = e.target;
   const isInput = shortcutTargetIsTextInput(target);
 
-  // Escape always closes modals (and the rail's open menus)
+  // Escape always closes modals (and the open <details> menus)
   if (e.key === 'Escape') {
-    document.querySelectorAll('.rail details[open]').forEach((open) => open.removeAttribute('open'));
+    document.querySelectorAll(DETAILS_MENUS).forEach((open) => open.removeAttribute('open'));
     const palette = document.getElementById('command-palette');
     const shortcuts = document.getElementById('shortcuts-modal');
     const quickCreate = document.getElementById('quick-create-modal');
@@ -1254,6 +1254,35 @@ document.addEventListener('click', (e) => {
   openCommandPalette();
 });
 
+// The <details> menus a LiveView renders ignore `open` on patch, so a live
+// update leaves them open; picking one of their items closes them instead.
+const LIVE_MENUS = 'details.cympho-menu, details.bc-mv, details.ob-acct';
+// With the rail's company switch and account menus (root layout) and the "?"
+// help popovers, these close on an outside click, on Escape and on a live
+// navigation.
+const DETAILS_MENUS = `.rail details, ${LIVE_MENUS}, details.help-pop`;
+
+// Back, Forward and a server patch click nothing, and a patch keeps these
+// menus' `open`: close them on every live navigation, as a new page would.
+window.addEventListener('phx:navigate', () => {
+  document.querySelectorAll(DETAILS_MENUS).forEach((open) => open.removeAttribute('open'));
+});
+
+// A <details> whose `open` the server derives from the data (a failed run, a
+// set PR, an active filter) ignores `open` on patch like the others, so the
+// reader's toggle holds, and renders it again as data-open: when that value
+// changes, the fold follows it.
+const ServerOpen = {
+  mounted() {
+    this.serverOpen = this.el.dataset.open;
+  },
+  updated() {
+    if (this.el.dataset.open === this.serverOpen) return;
+    this.serverOpen = this.el.dataset.open;
+    this.el.open = this.serverOpen === 'true';
+  }
+};
+
 // Company rail controls. These used inline onclick handlers, which the
 // Content-Security-Policy (script-src with a nonce) now blocks.
 document.addEventListener('click', (e) => {
@@ -1261,12 +1290,11 @@ document.addEventListener('click', (e) => {
     window.openCompanySwitcher();
   }
 
-  const menuClose = e.target.closest('[data-runtime-menu-close]');
+  const menuClose = e.target.closest(`[data-runtime-menu-close], :is(${LIVE_MENUS}) :is(a, button)`);
   const menu = menuClose && menuClose.closest('details');
   if (menu) menu.removeAttribute('open');
 
-  // The rail's company switch and account menus are <details>: an outside click closes them.
-  document.querySelectorAll('.rail details[open]').forEach((open) => {
+  document.querySelectorAll(DETAILS_MENUS).forEach((open) => {
     if (!open.contains(e.target)) open.removeAttribute('open');
   });
 });
@@ -2474,7 +2502,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
     IssueGateCleanup,
     InfiniteScroll,
     CopyToClipboard,
-    CompanyImportTransfer
+    CompanyImportTransfer,
+    ServerOpen
   }
 });
 

@@ -2922,6 +2922,33 @@ defmodule CymphoWeb.AgentLiveTest do
                "/agents/#{theo.id}?tab=runs&run_id=#{nw.runs[14].id}"
     end
 
+    # A hire proposed elsewhere inserts its section just before Last 24 hours;
+    # unkeyed, the patch replaced the disclosure (closed) instead of keeping it.
+    test "Last 24 hours keeps its element when a hire is proposed elsewhere", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, view, _html} = live(conn, "/agents")
+
+      runs24_id = fn ->
+        view |> r3_doc() |> Floki.find("details.runs24") |> Floki.attribute("id")
+      end
+
+      assert runs24_id.() == ["team-runs-24h"]
+
+      {:ok, _} =
+        Cympho.BoardApprovals.create_board_approval(%{
+          company_id: nw.company.id,
+          title: "Hire a designer",
+          category: "agent_hire",
+          status: "pending",
+          proposal_data: %{"attrs" => %{"name" => "Designer"}}
+        })
+
+      wait_until(fn -> assert length(Floki.find(r3_doc(view), "section.hire")) == 2 end)
+      assert runs24_id.() == ["team-runs-24h"]
+    end
+
     test "resuming Mira from the Next step clears the problem", %{conn: conn, nw: nw} do
       mira = nw.agents["Mira"]
       {:ok, view, _html} = live(conn, "/agents")
@@ -3120,6 +3147,28 @@ defmodule CymphoWeb.AgentLiveTest do
       doc = r3_doc(view)
       assert r3_text(doc, ".agent-h .sp") == "Idle"
       refute r3_text(doc, ".next .paper .nt") == "Resume Mira"
+    end
+
+    # A pause made elsewhere switches the Next step to another branch, which gets
+    # a new LiveView element key; the patch then replaced every unkeyed element
+    # after it, so Technical details closed.
+    test "Technical details keeps its element when the agent is paused elsewhere", %{
+      conn: conn,
+      nw: nw
+    } do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}")
+
+      tech_id = fn ->
+        view |> r3_doc() |> Floki.find("details.card.tech") |> Floki.attribute("id")
+      end
+
+      assert tech_id.() == ["agent-tech-details"]
+
+      {:ok, _} = Agents.pause_agent(ada, "Paused from another page")
+
+      wait_until(fn -> assert r3_text(r3_doc(view), ".agent-h .sp") =~ "Paused" end)
+      assert tech_id.() == ["agent-tech-details"]
     end
 
     test "a member cannot resume an agent", %{nw: nw} do
