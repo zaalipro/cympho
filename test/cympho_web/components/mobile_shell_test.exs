@@ -82,10 +82,10 @@ defmodule CymphoWeb.MobileShellTest do
     assert issue_new =~ "sticky"
     refute issue_new =~ "sticky bottom-0"
 
-    assert agent_new =~ "sticky-above-mobile-nav"
-    assert agent_new =~ ~s(data-testid="new-agent-form-actions")
-    assert agent_new =~ "sticky"
-    refute agent_new =~ "sticky bottom-0"
+    # v7 H1: Hire's primary sits on the form pair's ink card, not a sticky bar.
+    refute agent_new =~ "sticky-above-mobile-nav"
+    refute agent_new =~ ~s(data-testid="new-agent-form-actions")
+    assert agent_new =~ "<.form_pair"
 
     assert css =~ ".sticky-above-mobile-nav"
   end
