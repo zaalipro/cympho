@@ -63,7 +63,6 @@
   <.band_card id="goal-details-t" title="Details" class="aside">
     <.kv_list class="wide">
       <:item term="Type">{goal_type_label(@goal.goal_type)}</:item>
-      <:item term="Priority">{String.capitalize(@goal.priority)}</:item>
       <:item term="Target">
         <span :if={@goal.target_date}>
           {Calendar.strftime(@goal.target_date, "%a %-d %b %Y")}

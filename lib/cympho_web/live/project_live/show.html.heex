@@ -24,7 +24,6 @@
         {@project.description}
       </p>
       <div class="chips">
-        <span class="tag mono">{@project.prefix}</span>
         <span :if={@project.status == :archived} class="tag">Archived</span>
         <.pill href="#project-settings"><.r3_icon name="i-pencil" />Edit</.pill>
         <.pill navigate={~p"/issues/new?project_id=#{@project.id}"}>
@@ -78,11 +77,15 @@
         navigate={~p"/goals/#{goal.id}"}
       >
         <:meta>
-          {goal_type_label(goal.goal_type)}<span aria-hidden="true"> · </span>{progress.done} of {progress.total} tasks done
+          {goal_type_label(goal.goal_type)}<span aria-hidden="true"> · </span>
+          <span :if={progress.total > 0}>
+            {progress.done} of {progress.total} tasks done
+          </span>
+          <span :if={progress.total == 0}>No tasks linked yet</span>
         </:meta>
         <:trail>
           <span :if={goal.status != "active"} class="tag">{String.capitalize(goal.status)}</span>
-          <span class="mono">{progress.percent}%</span>
+          <span :if={progress.total > 0} class="mono">{progress.percent}%</span>
         </:trail>
       </.list_row>
     </ul>
@@ -106,7 +109,6 @@
         </a>
         <span :if={@project.repo_url in [nil, ""]}>None yet</span>
       </:item>
-      <:item term="Status">{status_label(@project.status)}</:item>
       <:item term="Created">
         {Calendar.strftime(@project.inserted_at, "%a %-d %b")}
         <span class="mono">{Calendar.strftime(@project.inserted_at, "%H:%M")}</span>

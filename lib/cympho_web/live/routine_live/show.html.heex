@@ -56,16 +56,11 @@
       <.problem_card title="Look at the failed run" title_id="rt-ns-t">
         <:eyebrow>Next step<span aria-hidden="true"> · </span>Repeating task</:eyebrow>
         <p class="obj">{(last && last.failure_reason) || show_alert_note(:failed)}</p>
-        <:foot>
-          <span>
-            Failed<span :if={last.triggered_at}><span aria-hidden="true"> · </span><span class="mono">{stamp(last.triggered_at)}</span></span>
-          </span>
-        </:foot>
       </.problem_card>
     </:problem>
     <:resolution>
       <.ink_card heading="After you run it" heading_id="rt-ns-i">
-        <.consequences rows={[{:working, "Runs it once now."}]} />
+        <.consequences rows={[{:done, "Runs it once now."}]} />
         <.ink_foot verb="run">
           <:secondary>
             <.ghost_pill navigate={~p"/routines/#{@routine.id}/edit"}>Edit</.ghost_pill>
@@ -88,8 +83,8 @@
             )}</span></span>
       </:item>
       <:item term="Next run">{next_run(@triggers) || "Manual only"}</:item>
-      <:item term="Last run">
-        <span :if={last} class="rt-last">
+      <:item :if={last} term="Last run">
+        <span class="rt-last">
           <.status_word
             kind={elem(run_state(last.status), 0)}
             word={elem(run_state(last.status), 1)}
@@ -98,7 +93,6 @@
             <span aria-hidden="true"> · </span><span class="mono">{stamp(last.triggered_at)}</span>
           </span>
         </span>
-        <span :if={!last}>No runs yet</span>
       </:item>
     </.kv_list>
     <form

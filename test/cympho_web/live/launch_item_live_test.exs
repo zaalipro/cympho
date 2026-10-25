@@ -142,7 +142,7 @@ defmodule CymphoWeb.LaunchItemLiveTest do
     # The blocked titles used to be listed a second time inside the readiness
     # summary; the summary now only carries the count.
     refute html =~ "Blocked titles"
-    assert has_element?(view, "#blocked-launch-item-#{item.id} .lr-st", "Blocked")
+    assert has_element?(view, "#launch-item-#{item.id} .lr-st", "Blocked")
 
     assert {:ok, blocked_item} = LaunchItems.get_company_launch_item(company.id, item.id)
     assert blocked_item.is_blocked

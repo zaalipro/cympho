@@ -82,7 +82,6 @@ defmodule CymphoWeb.LaunchItemLive.Index do
             title={item.title}
             icon="i-stop"
             kind={:problem}
-            status={{:stopped, "Blocked"}}
           >
             <:meta>
               {status_label(item.status)}<span aria-hidden="true"> · </span>{owner_name(
@@ -109,7 +108,7 @@ defmodule CymphoWeb.LaunchItemLive.Index do
               field={@form[:title]}
               label="Title"
               required
-              placeholder="Ship launch checklist, QA signoff, or release comms"
+              placeholder="QA sign-off, release notes…"
               wrapper_class="full"
             />
             <.input

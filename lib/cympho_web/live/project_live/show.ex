@@ -171,10 +171,6 @@ defmodule CymphoWeb.ProjectLive.Show do
     )
   end
 
-  def status_label(:in_progress), do: "In progress"
-  def status_label(:in_review), do: "In review"
-  def status_label(s), do: s |> to_string() |> String.capitalize()
-
   defp project_health(%{company_id: company_id, id: project_id}) when is_binary(company_id) do
     company_id
     |> Projects.project_work_health()

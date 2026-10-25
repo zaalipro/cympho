@@ -14,12 +14,15 @@
 /* long tokens (repository URLs, folder paths) wrap instead of widening a row on phones */
 .cy-r3 .pn-wrap{overflow-wrap:anywhere}
 /* a user's data colour at the start of a row's meta line (projects, labels) */
-.cy-r3 :is([data-page="projects"],[data-page="settings"]) .rm .sw{margin-right:6px;vertical-align:-1px}
+.cy-r3 :is([data-page="projects"],[data-section="labels"]) .rm .sw{margin-right:6px;vertical-align:-1px}
 /* three- and four-cell strips: Tier A summaries and a goal's progress */
 .cy-r3 :is([data-page="projects"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4{grid-template-columns:repeat(4,minmax(0,1fr))}
 .cy-r3 [data-page="goals"] .strip.s3{grid-template-columns:repeat(3,minmax(0,1fr))}
-/* project and goal pages have no Next step above their aside: it starts on the first row */
-.cy-r3 :is([data-page="project"],[data-page="goal"]) .split>.aside{grid-row:1 / span 3}
+/* project and goal pages have no Next step above their aside: it starts on the first row
+   (two columns only; at 1180 and below r3.css puts the aside back in the flow) */
+@media (min-width:1181px){
+  .cy-r3 :is([data-page="project"],[data-page="goal"]) .split>.aside{grid-row:1 / span 3}
+}
 
 /* ================================================================
    New task (L1)
@@ -67,6 +70,9 @@
 
 /* ---------- phone ---------- */
 @media (max-width:640px){
+  /* a row's status stays at its end and its title wraps, instead of the status dropping under
+     some titles and not others (list_row's 240 px title basis is wider than a phone row allows) */
+  .cy-r3 :is([data-page="projects"],[data-page="project"],[data-page="goals"],[data-page="goal"],[data-page="launch"],[data-page="routines"],[data-section="labels"]) .lrow>.row-main{flex-basis:0}
   .cy-r3 :is([data-page="projects"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4{grid-template-columns:repeat(2,minmax(0,1fr))}
   .cy-r3 :is([data-page="projects"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4>.cell:nth-child(3){border-left:0}
   .cy-r3 [data-page="project"] .pj-sub{white-space:normal}
