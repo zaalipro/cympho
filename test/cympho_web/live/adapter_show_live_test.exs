@@ -2,8 +2,9 @@ defmodule CymphoWeb.AdapterShowLiveTest do
   use CymphoWeb.LiveCase, async: true
 
   import Phoenix.LiveViewTest
+  import CymphoWeb.R3PageHelpers
 
-  alias Cympho.{Agents, Companies, Secrets}
+  alias Cympho.{Adapters, Agents, Companies, Secrets}
 
   describe "AdapterLive.Show" do
     setup %{conn: conn, current_company: company} = context do
@@ -22,11 +23,31 @@ defmodule CymphoWeb.AdapterShowLiveTest do
       :ok
     end
 
+    # v7 S6: a deep page under How agents run; managers get the one primary.
     test "mounts and renders a registered adapter", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/settings/adapters/claude_code")
+      {:ok, adapter} = Adapters.get_adapter(:claude_code)
+      {:ok, view, _html} = live(conn, "/settings/adapters/claude_code")
+      doc = main_doc(view)
 
-      assert html =~ "Runtime adapter"
-      assert html =~ "All adapters"
+      assert_r3_page(doc,
+        page: "adapter",
+        h1: adapter.name,
+        kind: :deep,
+        parent: "How agents run",
+        primaries: 1
+      )
+
+      assert texts(doc, ".crumb [aria-current=page]") == [adapter.name]
+      assert text(doc, "form#adapter-config .ink .pw") == "Save configuration"
+      assert Floki.find(doc, ".head .chips .chip svg.g") != []
+
+      assert texts(doc, ".tray .card-h h2") |> Enum.take(3) == [
+               "Connect this provider",
+               "Health",
+               "Assigned agents"
+             ]
+
+      assert Floki.find(doc, ".set-main") == []
     end
 
     test "associates adapter labels and explains encrypted API-key storage", %{conn: conn} do
@@ -36,8 +57,8 @@ defmodule CymphoWeb.AdapterShowLiveTest do
       assert has_element?(view, "#adapter-config-endpoint[required]")
       assert has_element?(view, "label[for='adapter-config-api_key']")
       assert has_element?(view, "#adapter-config-api_key[required]")
-      assert html =~ "encrypted company Secrets"
-      assert html =~ "and are not copied into agent configs"
+      assert html =~ "Keys go to Keys and secrets, not into agent settings."
+      assert has_element?(view, "form#adapter-config .ink a[href='/settings/secrets']")
     end
 
     test "redirects back to the index for an unknown adapter key", %{conn: conn} do
@@ -49,14 +70,23 @@ defmodule CymphoWeb.AdapterShowLiveTest do
     # (:process, :http) used to crash mount — the map was rendered straight
     # into an <input> value attribute. Now encoded as JSON via input_value/1.
     test "mounts the process adapter (map-default config)", %{conn: conn} do
-      {:ok, view, html} = live(conn, "/settings/adapters/process")
+      {:ok, view, _html} = live(conn, "/settings/adapters/process")
 
-      assert html =~ "Runtime adapter"
+      assert has_element?(view, "h1.h1.big")
 
       assert has_element?(
                view,
                ~s(input[name="config[prompt_stdin]"][type="checkbox"][value="true"][checked])
              )
+
+      # The checkbox field posts its own hidden "false": exactly one per boolean key.
+      hidden =
+        view
+        |> render()
+        |> Floki.parse_fragment!()
+        |> Floki.find(~s(input[type="hidden"][name="config[prompt_stdin]"]))
+
+      assert length(hidden) == 1
     end
 
     test "saves company provider settings when no agents use the adapter yet", %{
@@ -164,6 +194,15 @@ defmodule CymphoWeb.AdapterShowLiveTest do
       assert html =~ ~s(data-testid="adapter-config-read-only")
       refute has_element?(view, "form[phx-submit='save_config']")
       refute has_element?(view, "button[phx-click='test_health']")
+      {:ok, adapter} = Adapters.get_adapter(:openai_chat)
+
+      assert_r3_page(main_doc(view),
+        page: "adapter",
+        h1: adapter.name,
+        kind: :deep,
+        parent: "How agents run",
+        primaries: 0
+      )
     end
 
     test "shows connect form in Simple mode so owners can add an endpoint", %{conn: conn} do
@@ -174,7 +213,7 @@ defmodule CymphoWeb.AdapterShowLiveTest do
 
       assert has_element?(
                view,
-               "[data-testid='adapter-config-card'] form[phx-submit='save_config']"
+               "form[data-testid='adapter-config-card'][phx-submit='save_config']"
              )
 
       assert has_element?(view, "[data-testid='adapter-config-card']", "Connect this provider")
@@ -485,11 +524,13 @@ defmodule CymphoWeb.AdapterShowLiveTest do
 
       {:ok, view, html} = live(conn, "/settings/adapters/openai_chat")
 
-      assert html =~ "Healthy"
+      assert has_element?(view, ".head .chips .chip", "Ready")
       refute html =~ "stored-test-key"
       assert has_element?(view, ~s(input[name="config[api_key]"][type="password"]))
 
-      html = view |> element("button", "Validate config") |> render_click()
+      html =
+        view |> element("button[phx-click='send_test_heartbeat']", "Validate") |> render_click()
+
       assert html =~ "OpenAI-compatible chat configuration is present"
       refute html =~ "No chat completions endpoint configured"
 
@@ -628,6 +669,8 @@ defmodule CymphoWeb.AdapterShowLiveTest do
       refute has_element?(view, ~s(input[name="config[timeout]"]))
       assert has_element?(view, ~s(input[name="config[max_tokens]"][type="number"]))
       refute has_element?(view, ~s(input[name="config[max_tokens]"][type="password"]))
+      # A float field keeps step="any", so the browser accepts a decimal like 0.7.
+      assert has_element?(view, ~s(input[name="config[temperature]"][type="number"][step="any"]))
 
       view
       |> form("form[phx-submit='save_config']", %{

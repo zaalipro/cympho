@@ -1,261 +1,134 @@
-<.settings_layout active={:adapters}>
-  <.header>
-    <span class="ember-eyebrow">Runtime adapter</span>
-    <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-      {@page_title}
-    </h1>
-    <:actions>
-      <span class={[
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-510",
-        health_status_class(@health.status)
-      ]}>
-        <span class={["h-1.5 w-1.5 rounded-full", health_dot_class(@health.status)]}></span>
-        {health_status_label(@health.status)}
-      </span>
-      <.app_link
-        navigate={~p"/settings/adapters"}
-        class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-      >
-        <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> All adapters
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <hr class="ember-rule mb-6" />
-
-  <div
-    :if={@flash && @flash[:info]}
-    role="status"
-    aria-live="polite"
-    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
-  >
-    {@flash[:info]}
-  </div>
-
-  <div
-    :if={@flash && @flash[:error]}
-    role="alert"
-    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
-  >
-    {@flash[:error]}
-  </div>
-
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- Left column: Health & Details -->
-    <div class="space-y-6">
-      <!-- Health Panel -->
-      <div class="card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
-        <div class="flex items-center justify-between">
-          <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Health Status
-          </h2>
-          <div class="flex items-center gap-2">
-            <%= if @can_manage_adapter_settings do %>
-              <button
-                type="button"
-                phx-click="test_health"
-                class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
-              >
-                Refresh
-              </button>
-              <button
-                type="button"
-                phx-click="send_test_heartbeat"
-                class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
-              >
-                Validate config
-              </button>
-            <% end %>
-          </div>
-        </div>
-
-        <div class="space-y-3">
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-text-tertiary">Status</span>
-            <span class={[
-              "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-510",
-              health_status_class(@health.status)
-            ]}>
-              <span class={["h-1.5 w-1.5 rounded-full", health_dot_class(@health.status)]}></span>
-              {health_status_label(@health.status)}
-            </span>
-          </div>
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-text-tertiary">Last Checked</span>
-            <span class="font-serif tabular-nums text-text-secondary">
-              {format_datetime(@health.checked_at)}
-            </span>
-          </div>
-          <div
-            :if={@health.message}
-            class="text-xs text-text-tertiary pt-2 border-t border-border"
-          >
-            {@health.message}
-          </div>
-          <p class="text-[11px] leading-4 text-text-quaternary">
-            This checks required settings only. Run an assigned issue to verify the provider connection end to end.
-          </p>
-        </div>
+<.page_frame
+  page="adapter"
+  kind={:deep}
+  parent={{~p"/settings/adapters", "How agents run"}}
+  current={@adapter.name}
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="ad-h">
+      <h1 class="h1 big" id="ad-h">{@adapter.name}</h1>
+      <p class="sub">
+        <%= if @health.checked_at do %>
+          Checked <span class="mono">{AgentParts.stamp(@health.checked_at)}</span>
+        <% else %>
+          Not checked yet
+        <% end %>
+      </p>
+      <div class="chips">
+        <span class="chip">
+          <.status_word
+            kind={elem(health_status(@health.status), 0)}
+            word={elem(health_status(@health.status), 1)}
+          />
+        </span>
       </div>
-      
-<!-- Adapter Details -->
-      <div class="ui-advanced-only card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
-        <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Details
-        </h2>
-        <div class="space-y-3">
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-text-tertiary">Key</span>
-            <span class="text-text-secondary font-mono">{@adapter_key}</span>
-          </div>
-          <div class="flex items-center justify-between gap-2 text-xs">
-            <span class="shrink-0 text-text-tertiary">Module</span>
-            <span
-              class="min-w-0 truncate text-text-secondary font-mono text-[10px]"
-              title={to_string(@adapter.module)}
-            >
-              {@adapter.module}
-            </span>
-          </div>
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-text-tertiary">Available</span>
-            <span class={"text-xs #{if @adapter.available, do: "text-success", else: "text-brand"}"}>
-              {if @adapter.available, do: "Yes", else: "No"}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-    
-<!-- Center + Right columns: Config & Agents -->
-    <div class="lg:col-span-2 space-y-6">
-      <!-- Configuration -->
-      <div
-        data-testid="adapter-config-card"
-        class="card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card"
-      >
-        <div class="flex items-center justify-between">
-          <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Connect this provider
-          </h2>
-          <span class="ui-advanced-only text-xs text-text-tertiary">
+    </section>
+  </:head>
+
+  <.flash_line flash={@flash} />
+
+  <%= if @can_manage_adapter_settings do %>
+    <.form_pair
+      id="adapter-config"
+      phx-change="validate_config"
+      phx-submit="save_config"
+      heading="After you save"
+      verb="save"
+      data-testid="adapter-config-card"
+    >
+      <.band_card id="cfg-t" title="Connect this provider">
+        <:header_end>
+          <span class="ui-advanced-only meta mono">
             {length(visible_config_schema(@config_schema))} fields
           </span>
-        </div>
-
-        <p class="text-xs leading-5 text-text-quaternary">
-          Endpoint, model, and API key are enough to run. Keys are stored in
-          <.app_link navigate={~p"/settings/secrets"} class="text-brand hover:underline">
-            encrypted company Secrets
-          </.app_link>
-          and are not copied into agent configs.
+        </:header_end>
+        <p :if={@validation_error} class="err cfg-err" role="alert">
+          <.r3_icon name="i-alert" />{@validation_error}
         </p>
-
-        <div
-          :if={@validation_error}
-          role="alert"
-          aria-live="polite"
-          class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2 rounded-lg"
-        >
-          {@validation_error}
+        <%!-- Every field of some runtimes is optional (Advanced), so Simple would show an empty card. --%>
+        <p :if={no_required_fields?(@config_schema)} class="gl-sub cfg-ro ui-simple-only">
+          {@adapter.name} needs nothing filled in here. Advanced shows its optional settings.
+        </p>
+        <div class="flds">
+          <.input
+            :for={field <- visible_config_schema(@config_schema)}
+            id={"adapter-config-#{field.key}"}
+            name={"config[#{field.key}]"}
+            type={input_type(field)}
+            label={simple_field_label(field)}
+            value={field_input_value(field, @config)}
+            required={field_required?(field, @config)}
+            aria-required={field_required?(field, @config) && "true"}
+            placeholder={input_placeholder(field, @config)}
+            autocomplete={input_autocomplete(field)}
+            step={input_step(field)}
+            wrapper_class={field.required != true && "ui-advanced-only"}
+          />
         </div>
+      </.band_card>
+      <:effect>
+        <.ink_note>
+          Keys go to Keys and secrets, not into agent settings.
+          <.text_link navigate={~p"/settings/secrets"}>Keys and secrets</.text_link>
+        </.ink_note>
+      </:effect>
+      <:secondary>
+        <.ghost_pill phx-click="send_test_heartbeat">Validate</.ghost_pill>
+      </:secondary>
+      <:primary>
+        <.primary_pill type="submit" phx-disable-with="Saving…">
+          Save configuration
+        </.primary_pill>
+      </:primary>
+    </.form_pair>
+  <% else %>
+    <.band_card id="cfg-t" title="Connect this provider" data-testid="adapter-config-card">
+      <p :if={@validation_error} class="err cfg-err" role="alert">
+        <.r3_icon name="i-alert" />{@validation_error}
+      </p>
+      <p data-testid="adapter-config-read-only" class="gl-sub cfg-ro">
+        Adapter settings are read-only. Only company owners, admins, and board members can
+        change configuration or run validation checks.
+      </p>
+    </.band_card>
+  <% end %>
 
-        <%= if @can_manage_adapter_settings do %>
-          <form phx-change="validate_config" phx-submit="save_config" class="space-y-4">
-            <div
-              :for={field <- visible_config_schema(@config_schema)}
-              class={["space-y-1", field.required != true && "ui-advanced-only"]}
-            >
-              <label
-                for={"adapter-config-#{field.key}"}
-                class="block text-xs font-510 text-text-secondary"
-              >
-                {simple_field_label(field)}
-                <%= if field.required do %>
-                  <span class="text-red-400">*</span>
-                <% end %>
-              </label>
-              <div class="flex items-center gap-2">
-                <input
-                  :if={field.type == :boolean}
-                  type="hidden"
-                  name={"config[#{field.key}]"}
-                  value="false"
-                />
-                <input
-                  id={"adapter-config-#{field.key}"}
-                  type={input_type(field)}
-                  name={"config[#{field.key}]"}
-                  value={field_input_value(field, @config)}
-                  checked={field_checked?(field, @config)}
-                  required={field_required?(field, @config)}
-                  aria-required={field_required?(field, @config)}
-                  placeholder={input_placeholder(field, @config)}
-                  autocomplete={input_autocomplete(field)}
-                  step={input_step(field)}
-                  class="flex-1 bg-surface-hover border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-quaternary focus:outline-none focus:border-brand transition-colors"
-                />
-              </div>
-            </div>
+  <.band_card id="hl-t" title="Health">
+    <:header_end>
+      <.pill :if={@can_manage_adapter_settings} phx-click="test_health">Check again</.pill>
+    </:header_end>
+    <p class="gl-sub hl-m">{@health.message || "The last check gave no details."}</p>
+    <p class="cfoot">
+      <span>
+        This checks required settings only. Run an assigned task to verify the provider connection end to end.
+      </span>
+    </p>
+  </.band_card>
 
-            <div class="pt-2 border-t border-border">
-              <button
-                type="submit"
-                class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-button transition-colors"
-              >
-                Save Configuration
-              </button>
-            </div>
-          </form>
-        <% else %>
-          <p data-testid="adapter-config-read-only" class="text-sm leading-5 text-text-tertiary">
-            Adapter settings are read-only. Only company owners, admins, and board members can
-            change configuration or run validation checks.
-          </p>
-        <% end %>
-      </div>
-      
-<!-- Assigned Agents -->
-      <div class="card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
-        <div class="flex items-center justify-between">
-          <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Assigned Agents
-          </h2>
-          <span class="text-xs text-text-tertiary">
-            {length(@agents)} {if length(@agents) == 1, do: "agent", else: "agents"}
-          </span>
-        </div>
+  <.band_card id="ag-t" title="Assigned agents">
+    <:header_end><span class="meta mono">{length(@agents)}</span></:header_end>
+    <ul :if={@agents != []} class="rows">
+      <.list_row
+        :for={agent <- @agents}
+        id={"adapter-agent-#{agent.id}"}
+        title={agent.name}
+        navigate={~p"/agents/#{agent.id}"}
+        status={AgentParts.status(agent, false)}
+      >
+        <:meta :if={distinct_role_label(agent)}>{distinct_role_label(agent)}</:meta>
+      </.list_row>
+    </ul>
+    <.quiet_empty :if={@agents == []} title="No agents use it yet." />
+  </.band_card>
 
-        <div :if={Enum.empty?(@agents)} class="text-xs text-text-tertiary text-center py-6">
-          No agents assigned to this adapter.
-        </div>
-
-        <div :if={not Enum.empty?(@agents)} class="space-y-2">
-          <%!-- The whole row navigates, so the per-row "View" button is a
-               chevron; the role line is dropped when it just echoes the name. --%>
-          <.app_link
-            :for={agent <- @agents}
-            navigate={~p"/agents/#{agent.id}"}
-            title={"View #{agent.name}"}
-            class="flex items-center justify-between gap-3 bg-subtle hover:bg-surface-hover border border-border rounded-lg p-3 transition-colors"
-          >
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-sm font-510 text-text-primary">{agent.name}</span>
-                <.badge variant="agent" value={to_string(agent.status)} />
-              </div>
-              <div :if={distinct_role_label(agent)} class="text-xs text-text-tertiary mt-0.5">
-                {distinct_role_label(agent)}
-              </div>
-            </div>
-            <.icon
-              name="hero-chevron-right-mini"
-              class="h-4 w-4 shrink-0 text-text-tertiary"
-              aria-label={"View #{agent.name}"}
-            />
-          </.app_link>
-        </div>
-      </div>
-    </div>
+  <div class="ui-advanced-only">
+    <.band_card id="dt-t" title="Details">
+      <.kv_list class="wide">
+        <:item term="Key"><span class="mono">{@adapter_key}</span></:item>
+        <:item term="Module"><span class="mono brk">{@adapter.module}</span></:item>
+        <:item term="Available">{if @adapter.available, do: "Yes", else: "No"}</:item>
+      </.kv_list>
+    </.band_card>
   </div>
-</.settings_layout>
+</.page_frame>

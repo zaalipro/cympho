@@ -1,219 +1,64 @@
 <.settings_layout active={:adapters}>
-  <.header>
-    <span class="ember-eyebrow">
-      Runtime fleet · {List.first(@runtime_readiness.stats).value} healthy
-    </span>
-    <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-      {@page_title}
-    </h1>
-    <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-      Connect an agent runtime and check that it works.
-    </p>
-    <:actions>
-      <button
-        type="button"
-        phx-click="refresh_health"
-        class="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+  <.flash_line flash={@flash} />
+  <p :if={@adapter_event_error} class="err" role="alert">
+    <.r3_icon name="i-alert" />{@adapter_event_error}
+  </p>
+
+  <.band_card id="ad-t" title="How agents run">
+    <:header_end>
+      <.pill phx-click="refresh_health">Check all</.pill>
+    </:header_end>
+
+    <div id="adapter-runtime-readiness" data-testid="adapter-runtime-readiness" class="ad-sum">
+      <p class="gl-sub">{@runtime_readiness.summary}</p>
+      <p class="ad-acts">
+        <%= for action <- @runtime_readiness.actions do %>
+          <span :if={action[:advanced?]} class="ui-advanced-only">
+            <.text_link navigate={action.url}>{action.label}</.text_link>
+          </span>
+          <.text_link :if={!action[:advanced?]} navigate={action.url}>{action.label}</.text_link>
+        <% end %>
+      </p>
+      <div class="ui-advanced-only strip s4">
+        <div :for={stat <- @runtime_readiness.stats} class="cell">
+          <p class="v mono">{stat.value}</p>
+          <p class="l">{stat.label}<span aria-hidden="true"> · </span>{stat.note}</p>
+        </div>
+        <div class="cell">
+          <p class="v">
+            {(@runtime_readiness.attention_adapter && @runtime_readiness.attention_adapter.name) ||
+              "None"}
+          </p>
+          <p class="l">First attention</p>
+        </div>
+      </div>
+    </div>
+
+    <ul :if={@adapters != []} class="rows">
+      <.list_row
+        :for={adapter <- @adapters}
+        id={"adapter-#{adapter.key}"}
+        icon="i-term"
+        title={adapter.name}
+        navigate={~p"/settings/adapters/#{adapter.key}"}
+        status={health_status(card_health_status(adapter, Map.get(@health, adapter.key, %{})))}
       >
-        <.icon name="hero-arrow-path-mini" class="h-4 w-4" /> Refresh Health
-      </button>
-    </:actions>
-  </.header>
-
-  <hr class="ember-rule mb-6" />
-
-  <div
-    :if={@flash && @flash[:info]}
-    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
-  >
-    {@flash[:info]}
-  </div>
-
-  <div
-    :if={@flash && @flash[:error]}
-    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
-  >
-    {@flash[:error]}
-  </div>
-
-  <div
-    :if={@adapter_event_error}
-    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
-  >
-    {@adapter_event_error}
-  </div>
-
-  <div
-    id="adapter-runtime-readiness"
-    data-testid="adapter-runtime-readiness"
-    class={[
-      "mb-6 overflow-hidden rounded-xl border",
-      runtime_panel_class(@runtime_readiness.tone)
-    ]}
-  >
-    <div class="border-b border-border/70 px-5 py-4">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0">
-          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Adapter Status Overview
-          </p>
-          <h2 class="mt-1 font-serif text-[19px] font-510 text-text-primary">
-            Runtime readiness
-          </h2>
-          <p class="mt-2 max-w-3xl text-sm leading-6 text-text-secondary">
-            {@runtime_readiness.summary}
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <.app_link
-            :for={action <- @runtime_readiness.actions}
-            navigate={action.url}
-            class={runtime_action_class(action.tone)}
-          >
-            <.icon name={action.icon} class="h-4 w-4" />
-            <span>{action.label}</span>
-          </.app_link>
-        </div>
-      </div>
-    </div>
-
-    <div class="ui-advanced-only grid gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-      <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
-        <div
-          :for={stat <- @runtime_readiness.stats}
-          class="ember-stat rounded-lg border border-border bg-surface-1 px-4 py-3"
-        >
-          <p class="text-eyebrow uppercase text-text-quaternary">{stat.label}</p>
-          <p class="mt-3 font-serif text-2xl font-590 text-text-primary tabular-nums">
-            {stat.value}
-          </p>
-          <p class="mt-1 text-xs text-text-tertiary">{stat.note}</p>
-        </div>
-      </div>
-
-      <div class="min-w-0 rounded-lg border border-border bg-surface-1 px-4 py-3">
-        <p class="text-eyebrow uppercase text-text-quaternary">First attention</p>
-        <%= if @runtime_readiness.attention_adapter do %>
-          <p class="mt-3 truncate font-serif text-sm font-510 text-text-primary">
-            {@runtime_readiness.attention_adapter.name}
-          </p>
-          <p class="mt-1 text-xs text-text-tertiary">
-            Test health or configure credentials before routing more work here.
-          </p>
-        <% else %>
-          <p class="mt-3 text-sm font-590 text-text-primary">None</p>
-          <p class="mt-1 text-xs text-text-tertiary">
-            Registered adapters are not reporting attention signals.
-          </p>
-        <% end %>
-      </div>
-    </div>
-  </div>
-  
-<!-- Adapter Grid -->
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-    <.card :for={adapter <- @adapters} id={"adapter-#{adapter.key}"}>
-      <div class="p-5 space-y-3">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="text-lg">{adapter_icon(adapter.key)}</span>
-            <h3 class="font-serif text-sm font-510 text-text-primary">{adapter.name}</h3>
-          </div>
-          <%= with status <- card_health_status(adapter, Map.get(@health, adapter.key, %{})) do %>
-            <span class={[
-              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-510",
-              health_status_class(status)
-            ]}>
-              <span class={["h-1.5 w-1.5 rounded-full", health_dot_class(status)]}></span>
-              {health_status_label(status)}
-            </span>
-          <% end %>
-        </div>
-
-        <%!-- The badge above already states health, so the Availability row is
-             gone; the two counts read as icon + number. --%>
-        <div class="flex flex-wrap items-center gap-4 text-xs">
-          <span
-            class="inline-flex items-center gap-1.5 text-text-secondary"
-            title="Assigned Agents"
-            aria-label="Assigned Agents"
-          >
-            <.icon name="hero-users-mini" class="h-4 w-4 text-text-tertiary" />
-            {agent_count(assigns, adapter.key)}
-          </span>
-          <span
-            class="ui-advanced-only inline-flex items-center gap-1.5 text-text-secondary"
-            title="Config Fields"
-            aria-label="Config Fields"
-          >
-            <.icon name="hero-adjustments-horizontal-mini" class="h-4 w-4 text-text-tertiary" />
-            {length(adapter.config_schema)}
-          </span>
-        </div>
-
-        <%= with health <- Map.get(@health, adapter.key, %{}), msg <- Map.get(health, :message) do %>
-          <div
-            :if={msg}
-            class="text-xs text-text-tertiary truncate pt-1 border-t border-border"
-            title={msg}
-          >
-            {msg}
-          </div>
-        <% end %>
-
-        <div class="flex flex-wrap items-center gap-2 pt-2">
-          <%!-- Matches the Test Health button beside it, which has been icon-only
-               all along; the word repeated once per adapter card while its
-               neighbour did not. --%>
-          <.app_link
-            navigate={~p"/settings/adapters/#{adapter.key}"}
-            title="Configure"
-            aria-label={"Configure #{adapter.name}"}
-            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center justify-center gap-1.5"
-          >
-            <.icon name="hero-cog-6-tooth-mini" class="h-4 w-4" />
-            <span>Configure</span>
-          </.app_link>
-          <button
-            type="button"
+        <:meta>
+          {agents_label(Map.get(@agents_by_adapter, adapter.key, []))}<span :if={
+            health_message(@health, adapter.key)
+          }><span aria-hidden="true"> · </span>{health_message(@health, adapter.key)}</span>
+        </:meta>
+        <:actions>
+          <.pill
             phx-click="test_adapter"
             phx-value-key={adapter.key}
-            title="Test Health"
-            aria-label="Test Health"
-            class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-3 py-2 min-h-[44px] min-w-[44px] rounded-lg transition-colors inline-flex items-center justify-center"
+            aria-label={"Check #{adapter.name}"}
           >
-            <.icon name="hero-signal-mini" class="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-    </.card>
-  </div>
-
-  <div
-    :if={Enum.empty?(@adapters)}
-    class="flex flex-col items-center justify-center py-20 text-center"
-  >
-    <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-brand/20 bg-brand/10 text-brand shadow-[0_0_24px_rgba(217,119,87,0.12)]">
-      <svg
-        class="w-6 h-6"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-        />
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-        />
-      </svg>
-    </div>
-    <p class="text-sm text-text-tertiary">No adapters registered.</p>
-  </div>
+            Check
+          </.pill>
+        </:actions>
+      </.list_row>
+    </ul>
+    <.quiet_empty :if={@adapters == []} title="No adapters registered." />
+  </.band_card>
 </.settings_layout>
