@@ -97,8 +97,9 @@ defmodule Cympho.OwnerAttention do
     limit = opts |> Keyword.get(:limit, @default_limit) |> normalize_limit()
 
     company_id
-    |> membership_items(user, agent_id, @default_limit)
+    |> membership_items(user, agent_id)
     |> Enum.take(limit)
+    |> hydrate(company_id, user)
   end
 
   def list_items(_company_id, _user, _opts), do: []
@@ -130,7 +131,7 @@ defmodule Cympho.OwnerAttention do
   """
   def unresolved_count(company_id, user) when is_binary(company_id) do
     company_id
-    |> membership_items(user, nil, nil)
+    |> membership_items(user, nil)
     |> length()
   end
 
@@ -141,7 +142,7 @@ defmodule Cympho.OwnerAttention do
   the total per owner kind (`owner_kind/1`) and the "for you" count per agent id.
   """
   def counts(company_id, user) when is_binary(company_id) do
-    items = membership_items(company_id, user, nil, nil)
+    items = membership_items(company_id, user, nil)
 
     %{
       total: length(items),
@@ -283,18 +284,19 @@ defmodule Cympho.OwnerAttention do
     }
   end
 
-  # Single membership path for list_items and the counts. A list reads at most
-  # `source_limit` human-action and review rows; the counts pass nil and read
-  # them all, so a badge over 200 speaks its full number (B15).
-  defp membership_items(company_id, user, agent_id, source_limit) do
+  # Single membership path for list_items and the counts: every row, deduped
+  # and ordered before any list takes its first rows, so a list's kinds always
+  # agree with the counts (B15). Human-action and review rows are bare here;
+  # `hydrate/3` loads the full records of the rows a list shows.
+  defp membership_items(company_id, user, agent_id) do
     company_id
-    |> source_items(user, agent_id, source_limit)
+    |> source_items(user, agent_id)
     |> sort_and_deduplicate()
   end
 
-  defp source_items(company_id, user, agent_id, source_limit) do
-    human_action_items(company_id, user, source_limit) ++
-      review_items(company_id, agent_id, source_limit) ++
+  defp source_items(company_id, user, agent_id) do
+    human_action_items(company_id, user) ++
+      review_items(company_id, agent_id) ++
       approval_items(company_id, agent_id) ++
       board_approval_items(company_id, agent_id) ++
       interaction_items(company_id, agent_id) ++
@@ -304,57 +306,93 @@ defmodule Cympho.OwnerAttention do
       paused_agent_items(company_id, agent_id)
   end
 
-  defp human_action_items(company_id, user, source_limit) do
-    case user_id(user) do
-      nil ->
-        []
-
-      user_id ->
-        company_id
-        |> Issues.list_human_action_issues(user_id, limit: source_limit)
-        |> Enum.map(fn issue ->
-          attention_item(%{
-            id: "human-action-#{issue.id}",
-            dedup_key: "issue:#{issue.id}",
-            kind: :human_action,
-            issue: issue,
-            issue_id: issue.id,
-            target_user: user,
-            title: issue.title,
-            summary: issue.description,
-            target_path: "/issues/#{issue.id}",
-            target_label: "Open issue",
-            severity: issue_severity(issue.priority),
-            inserted_at: issue.updated_at || issue.inserted_at
-          })
-        end)
-    end
+  defp human_action_items(company_id, user) do
+    company_id
+    |> Issues.list_human_action_memberships(user_id(user))
+    |> Enum.map(&human_action_item(&1, user))
   end
 
-  defp review_items(company_id, agent_id, source_limit) do
+  defp human_action_item(issue, user) do
+    attention_item(%{
+      id: "human-action-#{issue.id}",
+      dedup_key: "issue:#{issue.id}",
+      kind: :human_action,
+      issue: issue,
+      issue_id: issue.id,
+      target_user: user,
+      title: issue.title,
+      summary: issue.description,
+      target_path: "/issues/#{issue.id}",
+      target_label: "Open issue",
+      severity: issue_severity(issue.priority),
+      inserted_at: issue.updated_at || issue.inserted_at
+    })
+  end
+
+  defp review_items(company_id, agent_id) do
     scope = if is_binary(agent_id), do: {:agent, agent_id}, else: {:company, company_id}
 
     scope
-    |> Wakes.list_review_queue(limit: source_limit, company_id: company_id)
-    |> Enum.map(fn %{wake: wake, issue: issue} ->
-      attention_item(%{
-        id: wake.id,
-        dedup_key: "issue:#{issue.id}",
-        kind: :review_queue,
-        wake: wake,
-        wake_id: wake.id,
-        issue: issue,
-        issue_id: issue.id,
-        agent: wake.agent,
-        agent_id: wake.agent_id,
-        status: "review",
-        title: issue.title,
-        summary: "Delivery is waiting for an approve or request-changes decision.",
-        target_path: "/issues/#{issue.id}",
-        target_label: "Open issue",
-        severity: :medium,
-        inserted_at: wake.inserted_at
-      })
+    |> Wakes.list_review_queue_memberships(company_id: company_id)
+    |> Enum.map(&review_item/1)
+  end
+
+  defp review_item(%{wake: wake, issue: issue}) do
+    attention_item(%{
+      id: wake.id,
+      dedup_key: "issue:#{issue.id}",
+      kind: :review_queue,
+      wake: wake,
+      wake_id: wake.id,
+      issue: issue,
+      issue_id: issue.id,
+      agent: wake.agent,
+      agent_id: wake.agent_id,
+      status: "review",
+      title: issue.title,
+      summary: "Delivery is waiting for an approve or request-changes decision.",
+      target_path: "/issues/#{issue.id}",
+      target_label: "Open issue",
+      severity: :medium,
+      inserted_at: wake.inserted_at
+    })
+  end
+
+  # The full records (issue preloads, wake agent and task) of the bare
+  # human-action and review rows a list shows, in the same order. A row
+  # resolved since the membership read is dropped.
+  defp hydrate(items, company_id, user) do
+    issues =
+      case for(%{kind: :human_action, issue_id: id} <- items, do: id) do
+        [] ->
+          %{}
+
+        ids ->
+          company_id
+          |> Issues.list_human_action_issues(user_id(user), ids: ids, limit: nil)
+          |> Map.new(&{&1.id, &1})
+      end
+
+    reviews =
+      case for(%{kind: :review_queue, wake_id: id} <- items, do: id) do
+        [] ->
+          %{}
+
+        ids ->
+          {:company, company_id}
+          |> Wakes.list_review_queue(ids: ids, limit: nil)
+          |> Map.new(&{&1.wake.id, &1})
+      end
+
+    Enum.flat_map(items, fn
+      %{kind: :human_action, issue_id: id} ->
+        for issue <- List.wrap(issues[id]), do: human_action_item(issue, user)
+
+      %{kind: :review_queue, wake_id: id} ->
+        for review <- List.wrap(reviews[id]), do: review_item(review)
+
+      item ->
+        [item]
     end)
   end
 

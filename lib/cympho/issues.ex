@@ -58,7 +58,7 @@ defmodule Cympho.Issues do
   This powers the board/operator "Needs my action" queue. It is intentionally
   issue-backed rather than notification-backed so human blockers do not get
   buried in a noisy agent inbox. `:limit` defaults to 100; `limit: nil` lists
-  them all.
+  them all. `:ids` keeps only those issues.
   """
   def list_human_action_issues(company_id, user_id, opts \\ [])
 
@@ -68,6 +68,7 @@ defmodule Cympho.Issues do
 
     Issue
     |> human_action_query(company_id, user_id)
+    |> maybe_filter_ids(Keyword.get(opts, :ids))
     |> order_by([i],
       asc:
         fragment(
@@ -84,6 +85,24 @@ defmodule Cympho.Issues do
   end
 
   def list_human_action_issues(_company_id, _user_id, _opts), do: []
+
+  @doc """
+  Every issue of `list_human_action_issues/3`, bare: only the fields owner
+  attention counts, dedups and attributes by, and no associations, so counting
+  a large backlog never loads its comment histories.
+  """
+  def list_human_action_memberships(company_id, user_id)
+      when is_binary(company_id) and is_binary(user_id) do
+    Issue
+    |> human_action_query(company_id, user_id)
+    |> select([i], struct(i, [:id, :status, :priority, :assignee_id, :inserted_at, :updated_at]))
+    |> Repo.all()
+  end
+
+  def list_human_action_memberships(_company_id, _user_id), do: []
+
+  defp maybe_filter_ids(query, nil), do: query
+  defp maybe_filter_ids(query, ids), do: where(query, [i], i.id in ^ids)
 
   defp maybe_limit(query, nil), do: query
   defp maybe_limit(query, limit), do: limit(query, ^limit)

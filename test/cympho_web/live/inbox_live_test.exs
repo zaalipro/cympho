@@ -1627,6 +1627,54 @@ defmodule CymphoWeb.InboxLiveTest do
       assert text(main, ".b4") == "Showing the first 200 of 201."
     end
 
+    # Astra final-r2: a blocked task under review is a review. Past 200, the list
+    # picked a task the review wakes' first 200 left out as a Problem, so the
+    # Next step was a Problem while the counts hid the Problems filter.
+    test "past 200 blocked tasks under review, the Next step's kind keeps its filter" do
+      {conn, _user, company} = ConnCase.register_and_log_in_user(Phoenix.ConnTest.build_conn())
+
+      {:ok, agent} =
+        Agents.create_agent(%{name: "Mira", role: :engineer, company_id: company.id})
+
+      base = DateTime.utc_now() |> DateTime.add(-600) |> DateTime.truncate(:second)
+
+      for n <- 1..201 do
+        {:ok, issue} =
+          Issues.create_issue(%{
+            title: "Blocked review #{n}",
+            status: :blocked,
+            priority: :high,
+            company_id: company.id,
+            assignee_id: agent.id
+          })
+
+        # The newest task update has the oldest review wake.
+        Repo.update_all(from(i in Issues.Issue, where: i.id == ^issue.id),
+          set: [updated_at: DateTime.add(base, n)]
+        )
+
+        Repo.insert!(%Cympho.Wakes.AgentWake{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "final_review_required",
+          status: "pending",
+          triggered_by_type: "system",
+          triggered_by_id: "test",
+          inserted_at: DateTime.add(base, -n)
+        })
+      end
+
+      {:ok, view, _html} = live(conn, "/inbox")
+      main = main_doc(view)
+
+      assert main |> Floki.find("nav.seg a") |> Enum.map(&squish(Floki.text(&1))) ==
+               ["All 201", "Reviews 201"]
+
+      assert text(main, ".next .paper .eyebrow") =~ "Review"
+      refute text(main, ".next .paper .eyebrow") =~ "Problem"
+      assert text(main, ".b4") == "Showing the first 200 of 201."
+    end
+
     test "with nothing to decide and agents off, the Next step says so", %{conn: conn} do
       {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
       {:ok, view, _html} = live(conn, "/inbox")
