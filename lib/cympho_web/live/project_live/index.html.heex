@@ -1,326 +1,102 @@
-<.page size="wide" data-ui-complex-page class="ember-aurora">
-  <div class="relative z-[1]">
-    <.header>
-      <span class="ui-advanced-only ember-eyebrow">
-        Portfolio · {@project_overview.active_projects} active
-      </span>
-      <h1 class="ember-ink mt-3 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-        {@page_title}
-      </h1>
-      <p class="ui-advanced-only mt-2 max-w-2xl text-body-sm text-text-tertiary">
-        Track workstreams by repo, execution health, goals, and the project queues that need attention.
-      </p>
-      <:actions>
-        <.app_link
-          navigate={~p"/projects/new"}
-          class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
-        >
-          <.icon name="hero-plus-mini" class="h-4 w-4" /> New project
-        </.app_link>
-      </:actions>
-    </.header>
+<.page_frame page="projects" title="Projects" data-ui-complex-page>
+  <:header_end>
+    <.pill navigate={~p"/projects/new"}><.r3_icon name="i-plus" />New project</.pill>
+  </:header_end>
 
-    <div
-      :if={@flash["info"]}
-      class="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
-    >
-      {@flash["info"]}
-    </div>
+  <.flash_line flash={@flash} />
 
-    <div
-      :if={@flash["error"]}
-      class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
-    >
-      {@flash["error"]}
-    </div>
-
-    <div class="ui-simple-only mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-        <span class="ui-simple-icon">
-          <span class="hero-folder-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Projects
-          </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-            {@project_overview.active_projects} active
-          </span>
-        </span>
-      </div>
-      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-        <span class="ui-simple-icon">
-          <span class="hero-list-bullet-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Open issues
-          </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-            {@project_overview.open_issues}
-          </span>
-        </span>
-      </div>
-      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-        <span class="ui-simple-icon">
-          <span class="hero-hand-raised-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Blocked
-          </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-            {@project_overview.blocked_projects}
-          </span>
-        </span>
-      </div>
-      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-        <span class="ui-simple-icon">
-          <span class="hero-eye-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            In review
-          </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-            {@project_overview.review_projects}
-          </span>
-        </span>
-      </div>
-    </div>
-
-    <div class="ui-advanced-only mb-5">
-      <.panel class="overflow-hidden">
-        <div class="border-b border-border px-5 py-4">
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p class="text-eyebrow uppercase text-text-quaternary">Workstream health</p>
-              <h2 class="mt-1 text-card-title text-text-primary">
-                {workstream_summary(@project_overview)}
-              </h2>
-            </div>
-            <span class={[
-              "rounded-full border px-2.5 py-1 text-xs font-510",
-              overview_status_class(@project_overview.status)
-            ]}>
-              {overview_status_label(@project_overview.status)}
-            </span>
-          </div>
-          <p class="mt-2 max-w-3xl text-body-sm text-text-tertiary">
-            {overview_status_detail(@project_overview.status)}
-          </p>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2 px-5 py-5 sm:grid-cols-3 xl:grid-cols-6">
-          <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
-            <p class="text-eyebrow uppercase text-text-quaternary">Projects</p>
-            <p class="mt-1 font-serif text-2xl font-590 text-text-primary">
-              {@project_overview.total_projects}
-            </p>
-          </div>
-          <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
-            <p class="text-eyebrow uppercase text-text-quaternary">Open</p>
-            <p class="mt-1 font-serif text-2xl font-590 text-text-primary">
-              {@project_overview.open_issues}
-            </p>
-          </div>
-          <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
-            <p class="text-eyebrow uppercase text-text-quaternary">Blocked</p>
-            <p class="mt-1 font-serif text-2xl font-590 text-red-300">
-              {@project_overview.blocked_projects}
-            </p>
-          </div>
-          <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
-            <p class="text-eyebrow uppercase text-text-quaternary">Review</p>
-            <p class="mt-1 font-serif text-2xl font-590 text-cyan-300">
-              {@project_overview.review_projects}
-            </p>
-          </div>
-          <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
-            <p class="text-eyebrow uppercase text-text-quaternary">Goals</p>
-            <p class="mt-1 font-serif text-2xl font-590 text-emerald-300">
-              {@project_overview.active_goals}
-            </p>
-          </div>
-          <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
-            <p class="text-eyebrow uppercase text-text-quaternary">No Repo</p>
-            <p class="mt-1 font-serif text-2xl font-590 text-amber-300">
-              {@project_overview.missing_repo_projects}
-            </p>
-          </div>
-        </div>
-      </.panel>
-    </div>
-
+  <.band_card id="projects-list-t" title="Projects">
+    <:header_end>
+      <span class="meta">{@project_overview.active_projects} active</span>
+    </:header_end>
     <.infinite_scroll
       id="projects"
       has_more={@infinite_scroll[:projects][:has_more?] || false}
-      container_class="stagger-children grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
-      end_label="All projects loaded"
+      container_class="rows"
     >
       <:empty>
-        <div class="rounded-xl border border-dashed border-border bg-panel px-6 py-14 text-center">
-          <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface-1 text-text-tertiary">
-            <.icon name="hero-folder-mini" class="h-6 w-6" />
-          </div>
-          <p class="text-sm font-510 text-text-primary">No projects yet</p>
-          <p class="mt-1 text-sm text-text-tertiary">
-            Create a project to group issues by repo, environment, and operational owner.
-          </p>
-          <.app_link
-            navigate={~p"/projects/new"}
-            class="cta-glow mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
-          >
-            <.icon name="hero-plus-mini" class="h-4 w-4" /> Create your first project
-          </.app_link>
-        </div>
+        <.quiet_empty title="No projects yet">
+          Group tasks by the codebase or outcome they belong to.
+          <:action>
+            <.pill navigate={~p"/projects/new"}>New project</.pill>
+          </:action>
+        </.quiet_empty>
       </:empty>
 
-      <div :for={{dom_id, project} <- @streams.projects} id={dom_id}>
+      <%= for {dom_id, project} <- @streams.projects do %>
         <% health = project_health(@project_work_health, project.id) %>
-        <% state = project_state(project, health) %>
-
-        <.card>
-          <div class="relative flex h-full flex-col overflow-hidden rounded-xl p-5">
+        <.list_row
+          tag="div"
+          id={dom_id}
+          title={project.name}
+          navigate={~p"/projects/#{project.id}"}
+          status={project_status(project, health)}
+        >
+          <:meta>
             <span
+              :if={project.color not in [nil, ""]}
+              class="sw"
+              style={"background:#{project.color}"}
               aria-hidden="true"
-              class="pointer-events-none absolute inset-y-0 left-0 w-[3px]"
-              style={"background: linear-gradient(180deg, #{project.color || "#D97757"}, transparent 90%)"}
             >
             </span>
-            <span
-              aria-hidden="true"
-              class="pointer-events-none absolute -left-12 -top-12 h-36 w-36 rounded-full opacity-[0.16] blur-2xl"
-              style={"background: radial-gradient(closest-side, #{project.color || "#D97757"}, transparent)"}
-            >
+            <span class="mono">{project.prefix}</span><span aria-hidden="true"> · </span>
+            <span :if={project.repo_url not in [nil, ""]} class="pn-wrap">
+              {strip_protocol(project.repo_url)}
             </span>
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <.badge variant="pill" value={project.prefix} />
-                <h3 class="mt-3 truncate text-base font-650 text-text-primary">{project.name}</h3>
-              </div>
-              <span class={[
-                "shrink-0 rounded-full border px-2 py-1 text-xs font-510",
-                project_state_class(state)
-              ]}>
-                {project_state_label(state)}
-              </span>
-            </div>
-
-            <p
-              :if={project.description not in [nil, ""]}
-              class="mt-3 min-h-10 text-sm leading-5 text-text-tertiary line-clamp-2"
+            <span :if={project.repo_url in [nil, ""]} class="ui-advanced-only">
+              No repository configured
+            </span>
+            <span :if={project.repo_url in [nil, ""]} class="ui-simple-only">
+              No code repo yet
+            </span>
+            <span aria-hidden="true"> · </span>{health.open} open
+          </:meta>
+          <:trail :if={project.status == :archived}><span class="tag">Archived</span></:trail>
+          <:actions>
+            <.pill navigate={~p"/issues?project_id=#{project.id}"}>Tasks</.pill>
+            <button
+              :if={project.status != :archived}
+              type="button"
+              class="pl warn"
+              aria-label={"Archive #{project.name}"}
+              phx-click="delete_project"
+              phx-value-id={project.id}
+              data-confirm="Archive this project?"
             >
-              {project.description}
-            </p>
-            <p
-              :if={project.description in [nil, ""]}
-              class="mt-3 min-h-10 text-sm leading-5 text-text-quaternary"
-            >
-              No description yet.
-            </p>
-
-            <div
-              :if={state == :blocked}
-              class="mt-3 flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-2.5 py-2 text-[11px] font-510 text-red-200/90"
-            >
-              <span class="hero-hand-raised-mini h-3.5 w-3.5 shrink-0"></span>
-              {health.blocked} blocked — needs attention.
-            </div>
-            <div
-              :if={state == :review}
-              class="mt-3 flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.06] px-2.5 py-2 text-[11px] font-510 text-cyan-200/90"
-            >
-              <span class="hero-eye-mini h-3.5 w-3.5 shrink-0"></span>
-              {health.in_review} in review — waiting on a decision.
-            </div>
-
-            <div class="mt-4 flex items-center gap-2 rounded-lg border border-border bg-surface-1 px-3 py-2 text-xs text-text-tertiary">
-              <.icon name="hero-link-mini" class="h-3.5 w-3.5 shrink-0" />
-              <span :if={project.repo_url not in [nil, ""]} class="truncate">
-                {strip_protocol(project.repo_url)}
-              </span>
-              <span :if={project.repo_url in [nil, ""]} class="ui-advanced-only truncate">
-                No repository configured
-              </span>
-              <span :if={project.repo_url in [nil, ""]} class="ui-simple-only truncate">
-                No code repo yet
-              </span>
-            </div>
-
-            <p class="ui-advanced-only mt-3 text-xs text-text-tertiary">
-              {project_state_detail(state)}
-            </p>
-
-            <div class="ui-advanced-only mt-5 grid grid-cols-4 gap-2">
-              <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
-                <p class="text-[10px] font-650 uppercase text-text-quaternary">Open</p>
-                <p class={"mt-1 font-serif text-xl font-590 #{count_color(health.open, "text-text-primary")}"}>
-                  {health.open}
-                </p>
-              </div>
-              <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
-                <p class="text-[10px] font-650 uppercase text-text-quaternary">Review</p>
-                <p class={"mt-1 font-serif text-xl font-590 #{count_color(health.in_review, "text-cyan-300")}"}>
-                  {health.in_review}
-                </p>
-              </div>
-              <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
-                <p class="text-[10px] font-650 uppercase text-text-quaternary">Blocked</p>
-                <p class={"mt-1 font-serif text-xl font-590 #{count_color(health.blocked, "text-red-300")}"}>
-                  {health.blocked}
-                </p>
-              </div>
-              <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
-                <p class="text-[10px] font-650 uppercase text-text-quaternary">Done</p>
-                <p class={"mt-1 font-serif text-xl font-590 #{count_color(health.done, "text-emerald-300")}"}>
-                  {health.done}
-                </p>
-              </div>
-            </div>
-
-            <div class="mt-4">
-              <div class="mb-2 flex items-center justify-between gap-3 text-xs text-text-tertiary">
-                <span>{health.progress_percent}% complete</span>
-                <span>{active_goal_label(health.active_goals)}</span>
-              </div>
-              <div class="h-2 overflow-hidden rounded-full bg-surface-2">
-                <div
-                  class="progress-spring h-full rounded-full bg-emerald-400"
-                  style={progress_width(health.progress_percent)}
-                >
-                </div>
-              </div>
-            </div>
-
-            <div class="mt-auto flex items-center gap-2 pt-5">
-              <.app_link
-                navigate={~p"/projects/#{project.id}"}
-                class="inline-flex items-center gap-1.5 rounded-lg border border-brand/25 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition-colors hover:bg-brand/15"
-              >
-                <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" /> Open
-              </.app_link>
-              <.app_link
-                navigate={~p"/issues?project_id=#{project.id}"}
-                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-              >
-                <.icon name="hero-list-bullet-mini" class="h-3.5 w-3.5" /> Issues
-              </.app_link>
-              <button
-                type="button"
-                aria-label={"Archive #{project.name}"}
-                title={"Archive #{project.name}"}
-                class="ml-auto inline-flex items-center justify-center rounded-lg border border-transparent p-1.5 text-text-quaternary transition-colors hover:border-border hover:bg-surface hover:text-text-secondary"
-                phx-click="delete_project"
-                phx-value-id={project.id}
-                data-confirm="Archive this project?"
-              >
-                <.icon name="hero-archive-box-mini" class="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        </.card>
-      </div>
+              Archive
+            </button>
+          </:actions>
+        </.list_row>
+      <% end %>
     </.infinite_scroll>
-  </div>
-</.page>
+  </.band_card>
+
+  <.band_card
+    id="project-health-t"
+    title="Workstream health"
+    class="ui-advanced-only"
+    data-testid="project-workstream-health"
+  >
+    <:header_end>
+      <span class="meta">{overview_status_label(@project_overview.status)}</span>
+    </:header_end>
+    <p class="gl-sub pn-line">
+      {workstream_summary(@project_overview)}. {overview_status_detail(@project_overview.status)}
+    </p>
+    <div class="strip s4">
+      <div class="cell">
+        <span class="v mono">{@project_overview.open_issues}</span><span class="l">Open tasks</span>
+      </div>
+      <div class="cell">
+        <span class="v mono">{@project_overview.blocked_projects}</span><span class="l">Blocked</span>
+      </div>
+      <div class="cell">
+        <span class="v mono">{@project_overview.review_projects}</span><span class="l">In review</span>
+      </div>
+      <div class="cell">
+        <span class="v mono">{@project_overview.missing_repo_projects}</span><span class="l">No repo</span>
+      </div>
+    </div>
+  </.band_card>
+</.page_frame>

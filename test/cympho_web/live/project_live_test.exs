@@ -2,6 +2,7 @@ defmodule CymphoWeb.ProjectLiveTest do
   use CymphoWeb.LiveCase, async: true
 
   import Phoenix.LiveViewTest
+  import CymphoWeb.R3PageHelpers
 
   alias Cympho.Goals
   alias Cympho.Issues
@@ -50,19 +51,29 @@ defmodule CymphoWeb.ProjectLiveTest do
       end
 
       conn = live_session_conn(conn, user, company)
-      {:ok, _view, html} = live(conn, "/projects")
+      {:ok, view, html} = live(conn, "/projects")
 
-      assert html =~ "Workstream health"
-      assert html =~ "3 open issues across 2 active projects"
+      # r3 (v7 L2): one list card of rows; the overview tiles and the workstream
+      # panel are one Advanced strip.
+      assert_r3_page(main_doc(view), page: "projects", h1: "Projects", kind: :root, primaries: 0)
+      assert has_element?(view, "#projects-list-t", "Projects")
+      assert has_element?(view, ".ui-advanced-only #project-health-t", "Workstream health")
+      assert html =~ "3 open tasks across 2 active projects"
       # The "Project queue signals" panel restated Blocked/Review/No Repo from the
       # stat strip next to it; the strip is the single home for those counts now.
       refute html =~ "Project queue signals"
-      assert html =~ "No Repo"
-      assert html =~ "Flow Project"
+      assert html =~ "No repo"
+      assert has_element?(view, "#projects-#{project.id} a.rt2[href='/projects/#{project.id}']")
+      assert has_element?(view, "#projects-#{project.id} .lr-st", "1 blocked")
+      assert has_element?(view, "#projects-#{project.id} .rm", "3 open")
       assert html =~ "No repository configured"
-      assert html =~ "1 active goal"
-      assert html =~ "25% complete"
-      assert html =~ ~s(href="/issues?project_id=#{project.id}")
+
+      assert has_element?(
+               view,
+               "#projects-#{project.id} .lr-acts a[href='/issues?project_id=#{project.id}']"
+             )
+
+      refute html =~ "ember-"
     end
 
     test "does not archive a project from another company", %{conn: conn} do
@@ -119,35 +130,26 @@ defmodule CymphoWeb.ProjectLiveTest do
 
       {:ok, view, html} = live(conn, "/projects/new")
 
-      assert html =~ "New project"
-      # The section eyebrows restated the fields under them and each carried a
-      # help paragraph; the help is now a ? marker's title/aria-label.
+      # r3 (v7 L3): a form pair; the Advanced setup checklist and the ? hints are gone.
+      assert_r3_page(main_doc(view),
+        page: "project-form",
+        h1: "New project",
+        kind: :deep,
+        parent: "Projects",
+        primaries: 1
+      )
+
       refute html =~ "Project launch plan"
       refute html =~ "Operating boundary"
       refute html =~ "Workspace posture"
-      assert html =~ "Create the workstream overview"
-
-      assert html =~
-               "Describe what belongs in this project so intake and handoffs do not blur together."
-
-      assert html =~ "Prefixes become issue IDs."
-      assert html =~ "Keep active work visible and give the sidebar a stable visual marker."
-      assert html =~ "Setup checklist"
-      # "Create behavior" was a prose panel; it is one sentence under the button now.
+      refute html =~ "Setup checklist"
       refute html =~ "Create behavior"
-      assert html =~ "Creates an active workstream."
+      assert html =~ "Becomes the task ID prefix, like ACME-12."
+      assert html =~ "Tasks can be filed under it right away."
       assert has_element?(view, "[data-ui-complex-page]")
-      assert has_element?(view, "form[data-ui-simple-single-column]")
-
-      assert has_element?(
-               view,
-               "[data-testid='project-identifier-fields'][data-ui-simple-single-column]"
-             )
-
-      assert has_element?(
-               view,
-               "[data-testid='project-create-actions'][data-ui-simple-full-span]"
-             )
+      assert has_element?(view, "form#project-form.fpair")
+      assert has_element?(view, "[data-testid='project-identifier-fields']")
+      assert has_element?(view, "#project-form .ink button.pw[type='submit']", "Create project")
 
       assert has_element?(view, "input[name='project[name]']")
       assert has_element?(view, "input[name='project[prefix]']")
@@ -166,7 +168,7 @@ defmodule CymphoWeb.ProjectLiveTest do
                "[data-testid='project-workspace-posture'].ui-advanced-only select[name='project[status]']"
              )
 
-      assert has_element?(view, "[data-testid='project-setup-rail'].ui-advanced-only")
+      refute has_element?(view, "[data-testid='project-setup-rail']")
 
       result =
         view
@@ -269,14 +271,20 @@ defmodule CymphoWeb.ProjectLiveTest do
       conn = live_session_conn(conn, user, company)
       {:ok, view, html} = live(conn, "/projects/#{project.id}")
 
+      # r3 (v7 L4): a deep page with the settings form as its one pair.
+      assert_r3_page(main_doc(view),
+        page: "project",
+        h1: "AILogic",
+        kind: :deep,
+        parent: "Projects",
+        primaries: 1
+      )
+
       assert has_element?(view, "[data-testid='project-command']")
-      assert has_element?(view, "[data-testid='project-readiness']")
+      assert has_element?(view, "[data-testid='project-readiness'].ui-advanced-only")
       assert has_element?(view, "[data-testid='project-goals']")
-      assert html =~ "Project Overview"
+      refute html =~ "Project Overview"
       assert html =~ "Project work is moving through execution"
-      # "Execution readiness" / "Mission control" were jargon for "Setup" and the
-      # goals list; the readiness sentence now rides a ? tooltip.
-      assert html =~ "The minimum context agents need before they can execute safely."
       refute html =~ "Execution readiness"
       refute html =~ "Mission control"
       assert html =~ "AILogic Workspace"
@@ -284,8 +292,17 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert html =~ "Ship autonomous project command"
       assert html =~ "Project settings"
       assert html =~ "Environment variables"
-      assert html =~ "Work queue"
+      assert html =~ "Recent tasks"
+      assert html =~ "Implement project command center"
       assert html =~ "Save changes"
+      assert has_element?(view, "a[href='#project-settings']", "Edit")
+
+      assert has_element?(
+               view,
+               "a[href='/issues/new?project_id=#{project.id}']",
+               "New task in it"
+             )
+
       assert has_element?(view, "[data-testid='project-status-field'].ui-advanced-only")
 
       assert has_element?(
@@ -295,8 +312,7 @@ defmodule CymphoWeb.ProjectLiveTest do
 
       assert has_element?(view, "[data-testid='project-color-field'].ui-advanced-only")
       assert has_element?(view, "[data-testid='project-environment-variables'].ui-advanced-only")
-      assert has_element?(view, "#project-settings[data-ui-simple-single-column]")
-      assert has_element?(view, "#project-settings [data-ui-simple-single-column]")
+      assert has_element?(view, "form#project-settings.fpair")
       refute html =~ "/projects/#{project.id}/edit"
 
       {:ok, _edit_view, edit_html} = live(conn, "/projects/#{project.id}/edit")
