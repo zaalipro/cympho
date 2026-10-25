@@ -42,9 +42,11 @@
         status={approval_status(approval.status, @can_resolve_approvals)}
       >
         <:meta>
-          Requested by {requester_name(approval)}<span aria-hidden="true"> · </span><span class="mono">
-            {CymphoWeb.AgentLive.Parts.stamp(approval.inserted_at)}
-          </span><span :if={approval.issues != []}><span aria-hidden="true"> · </span>{linked_tasks(approval.issues)}</span>
+          Requested by {requester_name(approval)}
+          <span aria-hidden="true">·</span>
+          <span class="mono">{CymphoWeb.AgentLive.Parts.stamp(approval.inserted_at)}</span>
+          <span :if={approval.issues != []} aria-hidden="true">·</span>
+          <span :if={approval.issues != []}>{linked_tasks(approval.issues)}</span>
         </:meta>
         <:trail>
           <span class="ui-advanced-only mono">{approval.type}</span>
