@@ -13,9 +13,7 @@
           <.r3_icon name="i-plus" />New company
         </.pill>
         <.pill navigate={~p"/companies/import"}>Import</.pill>
-        <span class="ui-advanced-only">
-          <.pill navigate={~p"/onboarding"}>Start company setup</.pill>
-        </span>
+        <.pill navigate={~p"/onboarding"}>Start company setup</.pill>
       </div>
     </section>
   </:head>
@@ -62,7 +60,9 @@
             members_label(@member_counts[company.id])
           }><span aria-hidden="true"> · </span>{members_label(@member_counts[company.id])}</span>
         </:meta>
-        <:trail :if={company.status == "paused"}><span class="tag">Paused</span></:trail>
+        <:trail :if={company.status != "active"}>
+          <span class="tag">{String.capitalize(company.status)}</span>
+        </:trail>
         <:actions :if={
           can_manage_company?(@current_user, company) or
             can_delete_company?(@current_user, company)

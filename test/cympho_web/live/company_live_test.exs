@@ -22,16 +22,10 @@ defmodule CymphoWeb.CompanyLiveTest do
       assert has_element?(view, "[data-testid='company-blueprint-strip']")
       assert has_element?(view, "[data-testid='company-fleet']")
       assert has_element?(view, "[data-ui-complex-page]")
-      # v7 C5: New company and Import are the head's pills in both modes; the guided
-      # setup is the Advanced "Start company setup".
+      # v7 C5: New company, Import and the guided "Start company setup" are the head's pills.
       assert has_element?(view, ".head .chips a[href='/companies/new']", "New company")
       assert has_element?(view, ".head .chips a[href='/companies/import']", "Import")
-
-      assert has_element?(
-               view,
-               ".head .chips .ui-advanced-only a[href='/onboarding']",
-               "Start company setup"
-             )
+      assert has_element?(view, ".head .chips a[href='/onboarding']", "Start company setup")
 
       assert_r3_page(main_doc(view),
         page: "companies",
@@ -76,6 +70,41 @@ defmodule CymphoWeb.CompanyLiveTest do
 
       assert html =~ "Company not found or you cannot manage it."
       assert Companies.get_company!(foreign_company.id).name == foreign_company.name
+    end
+
+    # Review r1: guided setup was Simple mode's way to start a company before the restyle.
+    test "Simple mode keeps the guided company setup", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/companies")
+      simple = view |> main_doc() |> Floki.filter_out(".ui-advanced-only")
+
+      assert text(simple, ".head .chips a[href='/onboarding']") == "Start company setup"
+    end
+
+    test "each company row counts its members and names a status other than active", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, colleague} =
+        Cympho.Users.create_user(%{
+          email: "colleague-#{System.unique_integer([:positive])}@example.com",
+          name: "Colleague",
+          password: "password1234"
+        })
+
+      {:ok, _} =
+        Companies.create_membership(%{
+          user_id: colleague.id,
+          company_id: company.id,
+          role: "member"
+        })
+
+      {:ok, view, _html} = live(conn, "/companies")
+      assert has_element?(view, "#companies-#{company.id} .rm", "2 members")
+      refute has_element?(view, "#companies-#{company.id} .lr-tr")
+
+      company |> Ecto.Changeset.change(status: "archived") |> Cympho.Repo.update!()
+      {:ok, view, _html} = live(conn, "/companies")
+      assert has_element?(view, "#companies-#{company.id} .lr-tr .tag", "Archived")
     end
 
     test "keeps the plain company form available for manual companies", %{conn: conn} do
@@ -151,6 +180,47 @@ defmodule CymphoWeb.CompanyLiveTest do
 
       assert resume_html =~
                "Resume #{company.name}? This re-enables agent dispatch for this company."
+    end
+
+    # Review r1: only an active company can be paused (the old guard was status == "active").
+    test "an archived company offers neither Pause nor Resume", %{
+      conn: conn,
+      current_company: company
+    } do
+      [membership] = Companies.list_memberships(company.id)
+      {:ok, _} = Companies.update_membership(membership, %{role: "owner", is_board_member: true})
+      company |> Ecto.Changeset.change(status: "archived") |> Cympho.Repo.update!()
+
+      {:ok, view, _html} = live(conn, "/companies/#{company.id}")
+
+      refute has_element?(view, "[phx-click='show_pause_modal']")
+      refute has_element?(view, "[phx-click='show_resume_modal']")
+      refute has_element?(view, ".next")
+      assert has_element?(view, ".head .chips .tag", "Archived")
+    end
+
+    # Review r1: the old page showed the pause reason to everyone who could open it.
+    test "a paused company shows its reason to a member who cannot resume it", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, paused} = Companies.pause_company(company, "Quarterly audit")
+
+      {:ok, view, _html} = live(conn, "/companies/#{paused.id}")
+      doc = main_doc(view)
+
+      assert_r3_page(doc,
+        page: "company",
+        h1: paused.name,
+        kind: :deep,
+        parent: "Companies",
+        primaries: 0
+      )
+
+      assert text(doc, ".next .paper") =~ "Quarterly audit"
+      assert text(doc, ".next .paper") =~ "Only owners, admins and board members can resume it."
+      assert Floki.find(doc, ".next .ink") == []
+      refute has_element?(view, "[phx-click='show_resume_modal']")
     end
 
     test "redirects users away from a company they cannot access", %{conn: conn} do
@@ -255,6 +325,8 @@ defmodule CymphoWeb.CompanyLiveTest do
              )
 
       refute has_element?(view, ~s(#company-form a[href="#"]))
+      # the page is the edit form already: no Edit pill pointing back at it
+      refute has_element?(view, ~s(.head .chips a[href="/companies/#{company.id}/edit"]))
     end
 
     # v7 §2.6: while editing, the edit pair is the page's only pair and Save its only primary.

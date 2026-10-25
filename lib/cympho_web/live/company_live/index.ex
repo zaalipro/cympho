@@ -76,8 +76,8 @@ defmodule CymphoWeb.CompanyLive.Index do
     Companies.list_companies_for_user_page(user_id, after: cursor)
   end
 
-  # The viewer's role in each of their companies (one query) and each company's
-  # member count, for the rows' meta line.
+  # The viewer's role in each of their companies and each company's member count
+  # (one query each), for the rows' meta line.
   defp assign_memberships(socket) do
     memberships = Companies.list_memberships_for_user(socket.assigns.current_user.id)
 
@@ -85,7 +85,7 @@ defmodule CymphoWeb.CompanyLive.Index do
     |> assign(:roles, Map.new(memberships, &{&1.company_id, &1.role}))
     |> assign(
       :member_counts,
-      Map.new(memberships, &{&1.company_id, length(Companies.list_memberships(&1.company_id))})
+      Companies.count_memberships_by_company(Enum.map(memberships, & &1.company_id))
     )
   end
 
@@ -106,8 +106,6 @@ defmodule CymphoWeb.CompanyLive.Index do
 
     %{
       total_companies: length(companies),
-      active_companies: active_count,
-      paused_companies: paused_count,
       blueprint_count: length(blueprints),
       default_agent_count: Enum.reduce(blueprints, 0, &(&1.default_agent_count + &2)),
       capability_count:
@@ -115,7 +113,6 @@ defmodule CymphoWeb.CompanyLive.Index do
         |> Enum.flat_map(& &1.capability_tags)
         |> Enum.uniq()
         |> length(),
-      seed_issue_count: Enum.reduce(blueprints, 0, &(&1.seed_issue_count + &2)),
       launch_posture: launch_posture(length(companies), active_count, paused_count)
     }
   end

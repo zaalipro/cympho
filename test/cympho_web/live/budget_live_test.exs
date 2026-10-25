@@ -195,14 +195,12 @@ defmodule CymphoWeb.BudgetLiveTest do
 
       insert_token_usage(company, cost_usd: Decimal.new("33.25"))
 
-      {:ok, _view, html} = live(conn, "/budgets")
+      {:ok, view, html} = live(conn, "/budgets")
 
       assert html =~ "Runtime budget"
-      assert html =~ ~s(data-testid="budget-card-used")
-      assert html =~ "USD 33.25"
       assert html =~ "33.3%"
-      # Static budgets.spent_amount stayed 0 — card must not show that as Used.
-      refute html =~ ~s(data-testid="budget-card-used">USD 0.00)
+      # Static budgets.spent_amount stayed 0 — card must show the TokenUsage spend as Used.
+      assert text(main_doc(view), "[data-testid='budget-card-used']") == "USD 33.25"
     end
 
     test "surfaces watch command when token usage crosses the threshold" do
@@ -483,6 +481,30 @@ defmodule CymphoWeb.BudgetLiveTest do
       assert Floki.attribute(Floki.find(doc, "#budget-form .ink a.pd"), "href") == [
                "/budgets/#{budget.id}"
              ]
+    end
+
+    # Review r1: the period was editable in both modes before the restyle.
+    test "the period stays visible and editable in Simple mode" do
+      {conn, company} = board_conn()
+      budget = insert_runtime_budget(company, name: "Window guardrail")
+
+      {:ok, view, _html} = live(conn, "/budgets/#{budget.id}/edit")
+      simple = view |> main_doc() |> Floki.filter_out(".ui-advanced-only")
+
+      assert Floki.find(simple, ~s(details#budget-window input[name="budget[period_start]"])) !=
+               []
+
+      assert Floki.find(simple, ~s(details#budget-window input[name="budget[period_end]"])) != []
+
+      view
+      |> form("#budget-form",
+        budget: %{period_start: "2026-11-01T09:00", period_end: "2026-11-30T18:00"}
+      )
+      |> render_submit()
+
+      saved = Budgets.get_budget!(budget.id)
+      assert saved.period_start == ~U[2026-11-01 09:00:00Z]
+      assert saved.period_end == ~U[2026-11-30 18:00:00Z]
     end
   end
 

@@ -1,4 +1,5 @@
 <% paused? = @company.status == "paused" %>
+<% editing? = @can_manage? && @live_action == :edit %>
 <.page_frame
   page="company"
   kind={:deep}
@@ -14,8 +15,9 @@
       </p>
       <div class="chips">
         <span :if={paused?} class="chip"><.status_word kind={:stopped} word="Paused" /></span>
+        <span :if={@company.status == "archived"} class="tag">Archived</span>
         <.pill :if={@can_manage?} navigate={~p"/companies/#{@company}/export"}>Export</.pill>
-        <.pill :if={@can_manage?} navigate={~p"/companies/#{@company}/edit"}>
+        <.pill :if={@can_manage? && !editing?} navigate={~p"/companies/#{@company}/edit"}>
           <.r3_icon name="i-pencil" />Edit
         </.pill>
         <span :if={@can_manage?} class="ui-advanced-only">
@@ -29,7 +31,7 @@
 
   <%!-- While editing, the edit pair is the page's only pair (v7 §2.6). --%>
   <.live_component
-    :if={@can_manage? && @live_action in [:edit]}
+    :if={editing?}
     module={CymphoWeb.CompanyLive.FormComponent}
     id={@company.id}
     action={@live_action}
@@ -38,14 +40,19 @@
     patch={~p"/companies/#{@company.id}"}
   />
 
-  <.next_step :if={paused? && @can_manage? && @live_action != :edit} id="cs-ns-">
+  <%!-- Everyone who can open the company sees why it is paused; only managers get Resume
+       (the lone card is the approval page's pattern for someone who cannot decide). --%>
+  <.next_step :if={paused? && !editing?} id="cs-ns-">
     <:problem>
       <.problem_card title={"Resume #{@company.name}"} title_id="cs-ns-t">
         <:eyebrow>Next step<span aria-hidden="true"> · </span>Company paused</:eyebrow>
         <p class="obj">{@company.paused_reason || "Agents are paused for this company."}</p>
+        <p :if={!@can_manage?} class="obj">
+          Only owners, admins and board members can resume it.
+        </p>
       </.problem_card>
     </:problem>
-    <:resolution>
+    <:resolution :if={@can_manage?}>
       <.ink_card heading="After you resume it" heading_id="cs-ns-i">
         <.consequences rows={[{:done, "Agents pick up work again and new runs can start."}]} />
         <.ink_foot verb="resume">
@@ -101,7 +108,7 @@
   </.band_card>
 
   <section
-    :if={@can_manage? && !paused? && @live_action != :edit}
+    :if={@can_manage? && @company.status == "active" && !editing?}
     class="card"
     aria-label="Pause"
   >
