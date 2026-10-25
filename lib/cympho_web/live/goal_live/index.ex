@@ -133,7 +133,6 @@ defmodule CymphoWeb.GoalLive.Index do
 
   defp empty_goal_command do
     %{
-      tone: :empty,
       badge: "No goals yet",
       heading: "Set your first goal",
       detail: "Tell your team what outcome you're after — everything else hangs off that.",
@@ -141,7 +140,6 @@ defmodule CymphoWeb.GoalLive.Index do
       action_path: "/goals/new",
       focus_label: nil,
       focus_detail: nil,
-      aligned_percent: 0,
       floating_count: 0,
       idle_count: 0,
       blocked_goal_count: 0,
@@ -160,7 +158,6 @@ defmodule CymphoWeb.GoalLive.Index do
       cond do
         summary.active_missions == 0 ->
           %{
-            tone: :attention,
             badge: "No mission",
             heading: "Set a mission",
             detail: "Your agents work best with a clear outcome to aim at. Give them one.",
@@ -172,7 +169,6 @@ defmodule CymphoWeb.GoalLive.Index do
 
         risk_issue ->
           %{
-            tone: :attention,
             badge: "Unlinked work",
             heading: "Link floating work to strategy",
             detail: "#{risk_issue.title} is active without a goal. Link it to one, or cancel it.",
@@ -187,7 +183,6 @@ defmodule CymphoWeb.GoalLive.Index do
           {goal, health} = blocked_goal
 
           %{
-            tone: :danger,
             badge: "Goal blocked",
             heading: "A goal is stuck",
             detail:
@@ -202,7 +197,6 @@ defmodule CymphoWeb.GoalLive.Index do
           {goal, health} = review_goal
 
           %{
-            tone: :review,
             badge: "Evidence ready",
             heading: "Review goal evidence",
             detail:
@@ -217,7 +211,6 @@ defmodule CymphoWeb.GoalLive.Index do
           {goal, health} = idle_goal
 
           %{
-            tone: :idle,
             badge: "Idle goal",
             heading: "Start the idle goal",
             detail:
@@ -230,7 +223,6 @@ defmodule CymphoWeb.GoalLive.Index do
 
         summary.total_open == 0 ->
           %{
-            tone: :empty,
             badge: "No open work",
             heading: "Nothing in flight",
             detail: "Your goals are set, but no one is working toward them yet. Create a task.",
@@ -243,7 +235,6 @@ defmodule CymphoWeb.GoalLive.Index do
 
         true ->
           %{
-            tone: :ok,
             badge: "On track",
             heading: "Work is tied to your goals",
             detail: "#{summary.aligned_percent}% of open work is linked to a goal.",
@@ -256,7 +247,6 @@ defmodule CymphoWeb.GoalLive.Index do
       end
 
     command
-    |> Map.put(:aligned_percent, summary.aligned_percent)
     |> Map.put(:floating_count, summary.floating + summary.project_only)
     |> Map.put(:idle_count, summary.goals_without_work)
     |> Map.put(
@@ -346,8 +336,11 @@ defmodule CymphoWeb.GoalLive.Index do
   def goal_type_label(:milestone), do: "Milestone"
   def goal_type_label(_type), do: "Goal"
 
-  @doc "The row's status: blocked linked work, then work that has not moved in a week."
+  @doc "The row's status: blocked linked work, work in review, then work that has not moved in a week."
   def goal_status(%{status: "active"}, %{blocked: n}) when n > 0, do: {:stopped, "#{n} blocked"}
+
+  def goal_status(%{status: "active"}, %{in_review: n}) when n > 0,
+    do: {:waiting, "#{n} in review"}
 
   def goal_status(%{status: "active"}, health) do
     case goal_idle_days(health) do

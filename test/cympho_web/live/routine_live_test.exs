@@ -341,6 +341,55 @@ defmodule CymphoWeb.RoutineLiveTest do
       assert has_element?(view, "#routine-run-#{run.id} .mono", "09:47")
     end
 
+    test "phones keep each run's trigger and finish time under the start time", %{conn: conn} do
+      {:ok, routine} = create_routine(%{name: "Phone Runs"})
+
+      same_day =
+        insert_run(routine.id, "completed", ~U[2026-03-04 09:15:00Z], ~U[2026-03-04 09:47:00Z])
+
+      overnight =
+        insert_run(routine.id, "failed", ~U[2026-03-05 23:50:00Z], ~U[2026-03-06 00:10:00Z])
+
+      running = insert_run(routine.id, "running", ~U[2026-03-07 09:00:00Z], nil)
+
+      {:ok, view, _html} = live(conn, "/routines/#{routine.id}")
+
+      # The Trigger and Finished columns are m-hide (gone at <= 640 px); the line under
+      # the Triggered time (.rt-ph, shown only there) carries both.
+      assert has_element?(view, "#routine-run-#{same_day.id} td.m-hide", "Manual")
+      assert has_element?(view, "#routine-run-#{same_day.id} .rt-ph", "Manual")
+      assert has_element?(view, "#routine-run-#{same_day.id} .rt-ph", "finished")
+      assert has_element?(view, "#routine-run-#{same_day.id} .rt-ph .mono", "09:47")
+      # Same day: the clock alone; another day: the date too.
+      refute has_element?(view, "#routine-run-#{same_day.id} .rt-ph", "Wed 4 Mar")
+      assert has_element?(view, "#routine-run-#{overnight.id} .rt-ph", "Fri 6 Mar 2026")
+      assert has_element?(view, "#routine-run-#{overnight.id} .rt-ph .mono", "00:10")
+      # Not finished yet: the trigger alone.
+      assert has_element?(view, "#routine-run-#{running.id} .rt-ph", "Manual")
+      refute has_element?(view, "#routine-run-#{running.id} .rt-ph", "finished")
+    end
+
+    test "a failed run's Next step holds the page's only Edit and Run now", %{conn: conn} do
+      {:ok, routine} = create_routine(%{name: "Failed Last"})
+
+      {:ok, _trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
+      insert_run(routine.id, "failed", ~U[2026-03-04 09:15:00Z], ~U[2026-03-04 09:16:00Z])
+
+      {:ok, view, html} = live(conn, "/routines/#{routine.id}")
+
+      assert has_element?(view, ".next .paper h2", "Look at the failed run")
+      edit = "a[href='/routines/#{routine.id}/edit']"
+      assert has_element?(view, ".next .ink " <> edit, "Edit")
+      refute has_element?(view, ".head " <> edit)
+      refute has_element?(view, ".head [phx-click='manual_run']")
+      assert length(Regex.scan(~r{href="/routines/#{routine.id}/edit"}, html)) == 1
+    end
+
     test "a paused schedule does not offer a second schedule", %{conn: conn} do
       {:ok, routine} = create_routine(%{name: "Paused Schedule"})
 

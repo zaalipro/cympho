@@ -73,6 +73,8 @@
 .cy-r3 [data-page="routine"] :is(.rt-st,.rt-last){display:inline-flex;align-items:center;gap:6px}
 .cy-r3 [data-page="routine"] .rt-cron{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;margin-top:4px;padding:12px 12px 8px;border-top:1px solid var(--hair)}
 .cy-r3 [data-page="routine"] .rt-cron .fld{flex:1 1 220px}
+/* run history: the trigger and finish line under the start time, for phones only (they hide those columns) */
+.cy-r3 [data-page="routine"] .rt-ph{display:none}
 
 /* ---------- phone ---------- */
 @media (max-width:640px){
@@ -92,6 +94,7 @@
   .cy-r3 [data-page="launch"] .li-ctl>.pl{flex:1}
   /* each status sizes to its words (the pressed one carries a dot), so "In progress" never wraps */
   .cy-r3 [data-page="launch"] .li-ctl .seg button{flex:1 1 auto;white-space:nowrap}
+  .cy-r3 [data-page="routine"] .rt-ph{display:block;margin-top:2px;font-size:12px;line-height:16px;color:var(--ink-2)}
 }
 
 @media (prefers-reduced-motion:reduce){

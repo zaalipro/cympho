@@ -58,7 +58,12 @@
           <:trail :if={project.status == :archived or health.total > 0}>
             <span :if={project.status == :archived} class="tag">Archived</span>
             <span :if={health.total > 0}>
-              <span class="mono">{health.progress_percent}%</span> done
+              <span class="ui-advanced-only">
+                <span class="mono">{health.done}/{health.total}</span>
+                tasks<span aria-hidden="true"> · </span>
+              </span>
+              <span class="mono">{health.progress_percent}%</span>
+              done
             </span>
           </:trail>
           <:actions>

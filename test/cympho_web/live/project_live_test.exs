@@ -79,6 +79,32 @@ defmodule CymphoWeb.ProjectLiveTest do
       refute html =~ "ember-"
     end
 
+    test "a row keeps the exact completed count beside the percentage", %{conn: conn} do
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, project} =
+        Projects.create_project(%{name: "Counted Project", prefix: "CNT", company_id: company.id})
+
+      # 1 done + 1 cancelled reads "50% done", exactly like 50 done + 50 cancelled;
+      # the count tells them apart (Advanced, like the old card's Done tile).
+      for status <- [:done, :cancelled] do
+        {:ok, _issue} =
+          Issues.create_issue(%{
+            title: "Counted #{status}",
+            company_id: company.id,
+            project_id: project.id,
+            status: status
+          })
+      end
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/projects")
+
+      assert has_element?(view, "#projects-#{project.id} .lr-tr", "50% done")
+      assert has_element?(view, "#projects-#{project.id} .lr-tr .ui-advanced-only", "1/2 tasks")
+      assert has_element?(view, "#projects-#{project.id} .rm", "0 open")
+    end
+
     test "does not archive a project from another company", %{conn: conn} do
       {_conn, user, company} = ConnCase.register_and_log_in_user(conn, %{role: "admin"})
 
@@ -329,6 +355,12 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert edit_html =~ "Project settings"
       assert edit_html =~ "Save changes"
       assert has_element?(edit_view, "form#project-settings[phx-mounted*='focus_first']")
+      # /edit lands on the form with the head scrolled away: the sticky crumb and the
+      # tab title say "Edit", and the head's Edit pill (a jump to this form) goes.
+      assert has_element?(view, ".crumb [aria-current='page']", project.name)
+      assert has_element?(edit_view, ".crumb [aria-current='page']", "Edit project")
+      assert page_title(edit_view) =~ "Edit #{project.name}"
+      refute has_element?(edit_view, "a[href='#project-settings']")
 
       view
       |> form("form[phx-submit='save']", %{

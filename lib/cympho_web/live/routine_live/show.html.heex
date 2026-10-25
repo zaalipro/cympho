@@ -12,9 +12,10 @@
     <section class="head" aria-labelledby="r-h">
       <h1 class="h1 big" id="r-h">{@routine.name}</h1>
       <p :if={@routine.description not in [nil, ""]} class="sub">{@routine.description}</p>
-      <div class="chips">
+      <%!-- Edit and Run now hide while the failed-run Next step offers both. --%>
+      <div :if={@routine.status != :active or alert != :failed} class="chips">
         <span :if={@routine.status != :active} class="tag">{routine_label(@routine.status)}</span>
-        <.pill navigate={~p"/routines/#{@routine.id}/edit"}>
+        <.pill :if={alert != :failed} navigate={~p"/routines/#{@routine.id}/edit"}>
           <.r3_icon name="i-pencil" />Edit
         </.pill>
         <.pill :if={alert != :failed} phx-click="manual_run" phx-disable-with="Starting…">
@@ -158,7 +159,16 @@
               </span>
             </td>
             <td class="m-hide">{routine_label(run.trigger_type)}</td>
-            <td><.run_time at={run.triggered_at} /></td>
+            <td>
+              <.run_time at={run.triggered_at} />
+              <%!-- Phones hide the Trigger and Finished columns; this line carries them. --%>
+              <span class="rt-ph">
+                {routine_label(run.trigger_type)}<span :if={run.completed_at}><span aria-hidden="true"> · </span>finished <.run_time
+                    at={run.completed_at}
+                    since={run.triggered_at}
+                  /></span>
+              </span>
+            </td>
             <td class="m-hide"><.run_time at={run.completed_at} /></td>
             <td>
               <.link :if={run.issue_id} class="lnk" navigate={~p"/issues/#{run.issue_id}"}>

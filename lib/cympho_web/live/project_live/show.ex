@@ -163,7 +163,7 @@ defmodule CymphoWeb.ProjectLive.Show do
     secrets = list_project_secrets(project)
 
     socket
-    |> assign(:page_title, project.name)
+    |> assign(:page_title, (socket.assigns[:editing?] && "Edit #{project.name}") || project.name)
     |> assign(:project, project)
     |> assign(:form, to_form(Projects.change_project(project)))
     |> assign(:env_form, to_form(%{"key" => "", "value" => ""}, as: :env))

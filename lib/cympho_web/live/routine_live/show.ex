@@ -131,16 +131,20 @@ defmodule CymphoWeb.RoutineLive.Show do
   def last_run(_), do: nil
 
   attr :at, :any, required: true
+  attr :since, :any, default: nil, doc: "an earlier time: on the same day only the clock shows"
 
   @doc "A run's full date and clock for the history table (the compact stamp drops the clock after a day)."
   def run_time(assigns) do
     ~H"""
     <span :if={@at}>
-      {Calendar.strftime(@at, "%a %-d %b %Y")}
+      <span :if={!same_day?(@at, @since)}>{Calendar.strftime(@at, "%a %-d %b %Y")}</span>
       <span class="mono">{Calendar.strftime(@at, "%H:%M")}</span>
     </span>
     """
   end
+
+  defp same_day?(at, %DateTime{} = since), do: DateTime.to_date(at) == DateTime.to_date(since)
+  defp same_day?(_at, _since), do: false
 
   @doc "Only-loud-when-needed health signal for the routine header."
   def show_alert(routine, triggers, runs) do

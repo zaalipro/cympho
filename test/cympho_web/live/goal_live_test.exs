@@ -148,6 +148,31 @@ defmodule CymphoWeb.GoalLiveTest do
       assert linked_issue.goal_id == mission.id
       assert linked_issue.project_id == project.id
     end
+
+    test "a goal whose only signal is work in review says so on its row in Simple", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, goal} =
+        Goals.create_goal(%{title: "Review only goal", company_id: company.id})
+
+      # Recently updated, nothing blocked: neither "blocked" nor "Idle" applies.
+      for status <- [:todo, :in_review] do
+        {:ok, _issue} =
+          Issues.create_issue(%{
+            title: "Review only #{status}",
+            company_id: company.id,
+            goal_id: goal.id,
+            status: status
+          })
+      end
+
+      {:ok, view, _html} = live(conn, "/goals")
+
+      assert has_element?(view, "#goals-#{goal.id} .lr-st", "1 in review")
+      refute has_element?(view, ".ui-advanced-only #goals-#{goal.id}")
+      refute has_element?(view, "#goals-#{goal.id} .ui-advanced-only", "in review")
+    end
   end
 
   describe "Goals show" do

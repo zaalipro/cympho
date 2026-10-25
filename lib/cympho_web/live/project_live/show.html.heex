@@ -2,7 +2,7 @@
   page="project"
   kind={:deep}
   parent={{"/projects", "Projects"}}
-  current={@project.name}
+  current={if @editing?, do: "Edit project", else: @project.name}
   tray_class="split"
   data-ui-complex-page
 >
@@ -25,7 +25,9 @@
       </p>
       <div class="chips">
         <span :if={@project.status == :archived} class="tag">Archived</span>
-        <.pill href="#project-settings"><.r3_icon name="i-pencil" />Edit</.pill>
+        <.pill :if={!@editing?} href="#project-settings">
+          <.r3_icon name="i-pencil" />Edit
+        </.pill>
         <.pill navigate={~p"/issues/new?project_id=#{@project.id}"}>
           <.r3_icon name="i-plus" />New task in it
         </.pill>
