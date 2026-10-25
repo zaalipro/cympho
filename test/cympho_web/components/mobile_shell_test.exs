@@ -78,9 +78,9 @@ defmodule CymphoWeb.MobileShellTest do
     assert css =~ "bottom: calc(var(--mobile-nav-offset) - 104px)"
     assert r3 =~ ".cy-r3 .col{padding:0 6px 104px;"
 
-    assert issue_new =~ "sticky-above-mobile-nav"
-    assert issue_new =~ "sticky"
-    refute issue_new =~ "sticky bottom-0"
+    # v7 L1: New task's primary sits on the form pair's ink card, not a sticky bar.
+    refute issue_new =~ "sticky-above-mobile-nav"
+    assert issue_new =~ "<.form_pair"
 
     assert agent_new =~ "sticky-above-mobile-nav"
     assert agent_new =~ ~s(data-testid="new-agent-form-actions")

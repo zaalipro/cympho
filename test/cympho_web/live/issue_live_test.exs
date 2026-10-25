@@ -2,6 +2,7 @@ defmodule CymphoWeb.IssueLiveTest do
   use CymphoWeb.LiveCase, async: true
 
   import Phoenix.LiveViewTest
+  import CymphoWeb.R3PageHelpers
 
   alias Cympho.Issues
   alias Cympho.Comments
@@ -345,20 +346,27 @@ defmodule CymphoWeb.IssueLiveTest do
         |> get("/issues/new")
         |> html_response(200)
 
-      assert html =~ ~s(<title data-suffix=" · Cympho">New Issue · Cympho</title>)
+      assert html =~ ~s(<title data-suffix=" · Cympho">New task · Cympho</title>)
     end
 
-    # A sticky bar sticks only inside a block taller than itself and only to a
-    # real scroller: the form, not a wrapper of its own height, and no
-    # overflow-hidden card between it and #main-content (overflow-clip clips
-    # the corners without becoming the scroller).
-    test "the Create issue bar is a sticky child of the form, not trapped by its card" do
-      {:ok, _view, html} = live(conn(), "/issues/new")
-      doc = Floki.parse_document!(html)
+    # r3 (v7 L1): the form is a pair, the field cards beside the ink card whose
+    # one primary submits; the old sticky submit bar is gone.
+    test "renders the new task form as an r3 pair with one primary" do
+      {:ok, view, _html} = live(conn(), "/issues/new")
+      doc = main_doc(view)
 
-      assert [_bar] = Floki.find(doc, "form > .sticky-above-mobile-nav")
-      assert Floki.find(doc, "#main-content .overflow-hidden .sticky-above-mobile-nav") == []
-      assert [_card] = Floki.find(doc, "section.overflow-clip form")
+      assert_r3_page(doc,
+        page: "task-new",
+        h1: "New task",
+        kind: :deep,
+        parent: "Tasks",
+        primaries: 1
+      )
+
+      assert [_] = Floki.find(doc, "form#issue-form.next.fpair")
+      assert [_] = Floki.find(doc, "#issue-form .ink button.pw[type=submit]")
+      assert Floki.find(doc, ".sticky-above-mobile-nav") == []
+      assert [_] = Floki.find(doc, "details#issue-new-more")
     end
 
     test "creates authenticated company issues as CEO-owned todo work" do
@@ -422,7 +430,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn, "/issues/new")
 
-      assert html =~ "New issue"
+      assert html =~ "New task"
       assert html =~ "What should the team do?"
       assert html =~ ~s(placeholder="What outcome do you want?")
       assert html =~ "Options"
@@ -431,7 +439,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "0/6"
       assert html =~ "Outcome: Name the owner-visible result"
       assert html =~ "Add enough detail to make the brief ready."
-      assert html =~ "Create issue"
+      assert html =~ "Create task"
       queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
       assert Map.has_key?(queue_attrs, "disabled")
       refute Map.has_key?(queue_attrs, "checked")
@@ -547,7 +555,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ "Needs more detail"
       assert html =~ "Add enough detail to make the brief ready."
-      assert html =~ "Create issue"
+      assert html =~ "Create task"
       queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
       assert Map.has_key?(queue_attrs, "disabled")
       refute Map.has_key?(queue_attrs, "checked")
@@ -684,7 +692,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "5/6"
       assert html =~ "Evidence: Specify what proof should be inspected after the run."
       assert html =~ "Add enough detail to make the brief ready."
-      assert html =~ "Create issue"
+      assert html =~ "Create task"
 
       result =
         view
@@ -742,11 +750,11 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, html} = live(conn, "/issues/new")
 
-      assert html =~ "Add a CEO agent before this issue can run."
+      assert html =~ "Add a CEO agent before this task can run."
       assert html =~ "Add CEO agent"
       assert html =~ ~s(href="/agents/new")
       refute html =~ ~s(id="queue-dispatch-focus")
-      assert html =~ "Create issue"
+      assert html =~ "Create task"
 
       result =
         view
@@ -810,7 +818,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, view, html} = live(conn, "/issues/new")
 
       assert html =~ "Add enough detail to make the brief ready."
-      assert html =~ "Create issue"
+      assert html =~ "Create task"
 
       result =
         view
