@@ -117,11 +117,4 @@ defmodule CymphoWeb.LabelLive.Index do
   defp fetch_labels(company_id, cursor) do
     Labels.list_company_labels_page(company_id, after: cursor)
   end
-
-  defp text_color("#" <> hex) do
-    {:ok, <<r, g, b>>} = Base.decode16(String.upcase(hex))
-    if (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5, do: "#000000", else: "#FFFFFF"
-  end
-
-  defp text_color(_), do: "#FFFFFF"
 end
