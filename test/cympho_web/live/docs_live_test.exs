@@ -81,7 +81,7 @@ defmodule CymphoWeb.DocsLiveTest do
 
       # Open modal
       render_click(view, "open_search")
-      assert render(view) =~ "Quick Documentation Search"
+      assert render(view) =~ "Search across all 8 tracks"
 
       # Search for MCP
       render_change(view, "search", %{"query" => "mcp"})
@@ -110,7 +110,7 @@ defmodule CymphoWeb.DocsLiveTest do
       render_click(view, "open_search")
       render_change(view, "search", %{"query" => ""})
 
-      assert render(view) =~ "Quick Documentation Search"
+      assert render(view) =~ "Search across all 8 tracks"
     end
 
     test "unmatched query displays no matches found message", %{conn: conn} do
@@ -151,6 +151,39 @@ defmodule CymphoWeb.DocsLiveTest do
       assert html =~ "list_agents"
       assert html =~ "get_kanban_state"
       assert html =~ "search"
+    end
+  end
+
+  describe "Paper & Ink frame" do
+    test "renders in the root frame with the article title under the H1", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/docs/ai-agents/swarm-mode")
+      doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+      CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+        page: "docs",
+        h1: "Documentation",
+        kind: :root,
+        primaries: 0
+      )
+
+      assert CymphoWeb.R3PageHelpers.text(doc, "article h2.nt") == "Swarm Mode Orchestration"
+
+      assert Floki.find(
+               doc,
+               ~s(.dc-nav a[aria-current="page"][href="/docs/ai-agents/swarm-mode"])
+             ) != []
+
+      assert Floki.find(doc, "main") == []
+    end
+
+    test "the Topics pill opens the topic nav as a dialog and a topic closes it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/docs")
+
+      view |> element("button.dc-topics") |> render_click()
+      assert has_element?(view, ~s(#docs-topics-sheet [role="dialog"] .dc-nav))
+
+      render_patch(view, "/docs/workspaces/git-worktrees")
+      refute has_element?(view, "#docs-topics-sheet")
     end
   end
 
