@@ -1,211 +1,130 @@
-<div class="p-6 lg:p-8" data-ui-complex-page>
-  <div class="mx-auto max-w-5xl">
-    <.header>
-      <div class="min-w-0">
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Your decision
+<% pending? = @approval.status == :pending %>
+<% requester = @decision_packet.requested_by %>
+<% evidence = payload_entries(@approval.payload) %>
+
+<.page_frame
+  page="approval"
+  kind={:deep}
+  parent={{~p"/approvals", "Approval history"}}
+  current={humanize_type(@approval.type)}
+  from={@from}
+  tray_class="split"
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="ap-h">
+      <h1 class="h1 big" id="ap-h">{humanize_type(@approval.type)}</h1>
+      <p class="sub">
+        Requested by {requester}<span aria-hidden="true"> · </span>
+        <span class="nw">
+          {day(@approval.inserted_at)} <span class="mono">{clock(@approval.inserted_at)}</span>
+        </span>
+      </p>
+      <div class="chips">
+        <span class={["chip", pending? && "st-wait"]}>
+          <.status_word
+            kind={elem(status(@approval.status, @can_resolve_approvals), 0)}
+            word={elem(status(@approval.status, @can_resolve_approvals), 1)}
+          />
+        </span>
+      </div>
+      <.flash_line flash={@flash} />
+    </section>
+  </:head>
+
+  <%!-- The decision (v7 §2.6): the request, then what approving or denying does. --%>
+  <.next_step :if={pending?} id="ap-ns-" data-testid="approval-decision-packet">
+    <:problem>
+      <.problem_card title={"Decide on #{requester}'s request"} title_id="ap-ns-t">
+        <:eyebrow>Next step<span aria-hidden="true"> · </span>Approval</:eyebrow>
+        <p class="obj">
+          <b>{humanize_type(@approval.type)}</b><span :if={evidence != []}>
+            — {elem(hd(evidence), 0)}: {elem(hd(evidence), 1)}</span>
         </p>
-        <h1
-          class="mt-1 font-serif text-[clamp(24px,3.5vw,34px)] font-510 leading-[1.1] tracking-[-0.01em] text-text-primary"
-          title="An agent is asking for your go-ahead. Review what's below, then decide."
-        >
-          {humanize_type(@approval.type)}<span class="sr-only">
-            — an agent is asking for your go-ahead. Review what's below, then decide.</span>
-        </h1>
-      </div>
-      <:actions>
-        <.app_link
-          navigate={~p"/approvals"}
-          class="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-        >
-          <.icon name="hero-arrow-left-mini" class="h-4 w-4" />
-          <span>Approvals</span>
-        </.app_link>
-      </:actions>
-    </.header>
+        <p :if={!@can_resolve_approvals} class="obj">
+          Only owners, admins and board members can decide this.
+        </p>
+        <:foot>
+          <span class="who">
+            <span class="tile-ag sm" aria-hidden="true">{initials(requester)}</span>
+            <span>
+              Requested by
+              <b>{requester}</b><span aria-hidden="true"> · </span><span class="mono">{CymphoWeb.AgentLive.Parts.stamp(@approval.inserted_at)}</span>
+            </span>
+          </span>
+        </:foot>
+      </.problem_card>
+    </:problem>
+    <:resolution :if={@can_resolve_approvals}>
+      <.ink_card heading="Your decision" heading_id="ap-ns-i">
+        <.consequences rows={[
+          {:done, "After you approve: the linked work can continue."},
+          {:stopped, "After you deny: #{requester} is told to stop or revise."}
+        ]} />
+        <.ink_foot verb="approve">
+          <:secondary>
+            <.ghost_pill
+              phx-click="deny"
+              data-confirm="Deny this approval? The requesting agent will be told to stop or revise."
+            >
+              Deny
+            </.ghost_pill>
+          </:secondary>
+          <:primary>
+            <.primary_pill phx-click="approve">Approve</.primary_pill>
+          </:primary>
+        </.ink_foot>
+      </.ink_card>
+    </:resolution>
+  </.next_step>
 
-    <div
-      id="approval-decision-packet"
-      data-testid="approval-decision-packet"
-      class={[
-        "overflow-hidden rounded-xl border",
-        decision_packet_tone(@approval.status)
-      ]}
+  <.band_card id="ap-evidence-t" title="Evidence">
+    <.kv_list :if={evidence != []} class="wide">
+      <:item :for={{label, value} <- evidence} term={label}>{value}</:item>
+    </.kv_list>
+    <.quiet_empty :if={evidence == []} title="No payload was attached to this request." />
+    <details
+      :if={@approval.payload}
+      id="approval-payload-json"
+      class="earlier ui-advanced-only"
+      phx-mounted={JS.ignore_attributes("open")}
     >
-      <div class="px-5 py-4">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div class="min-w-0">
-            <%!-- The recommendation restated the linked-issue count on the row
-                 below it, the payload keys the Evidence list already names, and
-                 the approve/deny guidance next to the buttons. --%>
-            <h2 class="text-card-title text-text-primary" title={@decision_packet.recommendation}>
-              {@decision_packet.stance}<span class="sr-only">
-                — {@decision_packet.recommendation}</span>
-            </h2>
-          </div>
-          <span class={[
-            "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-510",
-            decision_packet_status_class(@approval.status)
-          ]}>
-            {@decision_packet.status_label}
-          </span>
-        </div>
+      <summary>Raw payload <.r3_icon name="i-chev-down" class="ico s14" /></summary>
+      <pre class="ap-raw"><%= Jason.encode!(@approval.payload, pretty: true) %></pre>
+    </details>
+  </.band_card>
 
-        <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-text-tertiary">
-          <span>
-            Requested by
-            <span class="font-510 text-text-secondary">{@decision_packet.requested_by}</span>
-          </span>
-          <span aria-hidden="true" class="text-text-quaternary">·</span>
-          <span>{@decision_packet.age}</span>
-          <span aria-hidden="true" class="text-text-quaternary">·</span>
-          <span>
-            {@decision_packet.linked_issue_count} linked {if @decision_packet.linked_issue_count ==
-                                                               1,
-                                                             do: "issue",
-                                                             else: "issues"}
-          </span>
-          <span :if={@approval.status != :pending} aria-hidden="true" class="text-text-quaternary">
-            ·
-          </span>
-          <span :if={@approval.status != :pending}>
-            Resolved by
-            <span class="font-510 text-text-secondary">{@decision_packet.resolved_by}</span>
-          </span>
-        </div>
-      </div>
-    </div>
+  <.band_card :if={@approval.issues != []} id="ap-tasks-t" title="Tasks waiting on this">
+    <ul class="rows">
+      <.list_row
+        :for={issue <- @approval.issues}
+        id={"ap-task-#{issue.id}"}
+        title={issue.title}
+        navigate={~p"/issues/#{issue.id}"}
+      >
+        <:meta>
+          <span :if={issue.identifier} class="mono">{issue.identifier}</span><span
+            :if={issue.identifier}
+            aria-hidden="true"
+          > · </span>{task_state(issue.status)}
+        </:meta>
+      </.list_row>
+    </ul>
+  </.band_card>
 
-    <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div class="space-y-6">
-        <div class="rounded-xl border border-border bg-panel p-5">
-          <%!-- The heading and status badge repeated the page title and the
-               decision packet badge; only the raw gate slug was new. --%>
-          <p class="text-eyebrow uppercase text-text-quaternary">Request</p>
-          <p class="mt-1 font-mono text-xs text-text-quaternary">{@approval.type}</p>
-
-          <div class="mt-5 grid gap-3 sm:grid-cols-2">
-            <div class={detail_stat_class()}>
-              <p class="text-eyebrow uppercase text-text-quaternary">Created</p>
-              <p class="mt-2 text-sm text-text-primary">
-                {Calendar.strftime(@approval.inserted_at, "%b %d, %Y %H:%M")}
-              </p>
-            </div>
-            <div class={detail_stat_class()}>
-              <p class="text-eyebrow uppercase text-text-quaternary">Resolution</p>
-              <p class="mt-2 text-sm text-text-primary">{@decision_packet.resolution}</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="rounded-xl border border-border bg-panel p-5">
-          <h3 class="text-card-title text-text-primary" title="What the agent submitted">
-            Evidence<span class="sr-only"> — what the agent submitted</span>
-          </h3>
-
-          <div
-            :if={payload_entries(@approval.payload) == []}
-            class="mt-4 rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-text-tertiary"
-          >
-            No payload was attached to this request.
-          </div>
-
-          <dl
-            :if={payload_entries(@approval.payload) != []}
-            class="mt-4 divide-y divide-border/70 rounded-lg border border-border bg-surface-1"
-          >
-            <div
-              :for={{label, value} <- payload_entries(@approval.payload)}
-              class="grid gap-1 px-4 py-3 sm:grid-cols-[160px_minmax(0,1fr)] sm:gap-4"
-            >
-              <dt class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary sm:pt-0.5">
-                {label}
-              </dt>
-              <dd class="min-w-0 break-words text-sm leading-6 text-text-primary">{value}</dd>
-            </div>
-          </dl>
-
-          <details
-            :if={@approval.payload}
-            id="approval-payload-json"
-            class="ui-advanced-only group mt-3"
-            phx-mounted={JS.ignore_attributes("open")}
-          >
-            <summary class="inline-flex cursor-pointer select-none items-center gap-1.5 text-xs font-510 text-text-tertiary transition-colors hover:text-text-primary [&::-webkit-details-marker]:hidden">
-              <span class="hero-chevron-right-mini h-3.5 w-3.5 transition-transform group-open:rotate-90">
-              </span>
-              Raw payload
-            </summary>
-            <pre class="mt-2 max-h-72 overflow-auto rounded-lg border border-border bg-surface p-3 text-xs text-text-tertiary"><%= Jason.encode!(@approval.payload, pretty: true) %></pre>
-          </details>
-        </div>
-
-        <%!-- With nothing linked this was a bordered box saying "No linked
-             issues" under a heading saying the same, while the row at the top
-             of the page already reads "0 linked issues". --%>
-        <div
-          :if={!Enum.empty?(@approval.issues)}
-          class="rounded-xl border border-border bg-panel p-5"
-        >
-          <h3 class="text-card-title text-text-primary">Issues waiting on this decision</h3>
-
-          <div class="mt-4 space-y-2">
-            <.app_link
-              :for={issue <- @approval.issues}
-              navigate={~p"/issues/#{issue.id}"}
-              class="block rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
-            >
-              <div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                <div class="min-w-0">
-                  <p class="truncate text-sm font-590 text-text-primary">{issue.title}</p>
-                  <p class="mt-1 text-xs text-text-tertiary">
-                    {if issue.identifier, do: issue.identifier <> " / ", else: ""}{issue.status}
-                  </p>
-                </div>
-                <.icon name="hero-arrow-right-mini" class="h-4 w-4 shrink-0 text-text-quaternary" />
-              </div>
-            </.app_link>
-          </div>
-        </div>
-      </div>
-
-      <aside class="space-y-6">
-        <div class="rounded-xl border border-border bg-panel p-5 lg:sticky lg:top-6">
-          <p class="text-eyebrow uppercase text-text-quaternary">Decision actions</p>
-          <%= if @approval.status == :pending and @can_resolve_approvals do %>
-            <div class="mt-4 grid gap-2">
-              <button
-                type="button"
-                phx-click="approve"
-                title="Approving unblocks the linked work immediately."
-                class="btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-590 text-white transition-colors hover:bg-emerald-700"
-              >
-                <.icon name="hero-check-mini" class="h-4 w-4" /> Approve
-              </button>
-              <button
-                type="button"
-                phx-click="deny"
-                data-confirm="Deny this approval? The requesting agent will be told to stop or revise."
-                title="Denying returns a stop signal to the requesting agent."
-                class="btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 text-sm font-590 text-red-300 transition-colors hover:bg-red-500/20"
-              >
-                <.icon name="hero-x-mark-mini" class="h-4 w-4" /> Deny
-              </button>
-            </div>
-          <% else %>
-            <p class="mt-3 text-sm leading-6 text-text-tertiary">
-              <%= if @approval.status == :pending do %>
-                Only company owners, admins, and board members can resolve this approval.
-              <% else %>
-                This approval is already resolved. It's kept here for the record.
-              <% end %>
-            </p>
-          <% end %>
-        </div>
-
-        <%!-- A "Payload keys" panel listed exactly the labels the Evidence list
-             already prints next to their values. --%>
-      </aside>
-    </div>
-  </div>
-</div>
+  <.band_card
+    id="ap-det-t"
+    title="Details"
+    class="aside"
+    data-testid={!pending? && "approval-decision-packet"}
+  >
+    <.kv_list>
+      <:item term="Type"><span class="mono">{@approval.type}</span></:item>
+      <:item term="Created">
+        {day(@approval.inserted_at)} <span class="mono">{clock(@approval.inserted_at)}</span>
+      </:item>
+      <:item :if={!pending?} term="Resolution">{@decision_packet.resolution}</:item>
+      <:item :if={!pending?} term="Resolved by">{@decision_packet.resolved_by}</:item>
+    </.kv_list>
+  </.band_card>
+</.page_frame>

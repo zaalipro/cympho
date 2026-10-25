@@ -1,318 +1,112 @@
-<div class="ember-aurora p-6 lg:p-8" data-ui-complex-page>
-  <div class="relative z-[1]">
-    <.header>
-      <div class="min-w-0">
-        <span class="ember-eyebrow">
-          Decision queue · {@approval_command.pending_count} pending
-        </span>
-        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-          Approvals
-        </h1>
-        <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-          Track agent-requested approvals, unblock pending work, and keep a decision trail.
-        </p>
-      </div>
-      <:actions>
-        <form phx-change="filter_status">
-          <.select_menu
-            name="status"
-            value={if @status_filter, do: to_string(@status_filter), else: ""}
-            options={[
-              {"All Statuses", ""},
-              {"Pending", "pending"},
-              {"Approved", "approved"},
-              {"Denied", "denied"},
-              {"Cancelled", "cancelled"}
-            ]}
-          />
-        </form>
-      </:actions>
-    </.header>
+<.page_frame page="approvals" title="Approval history" data-ui-complex-page>
+  <.flash_line flash={@flash} />
 
-    <div class="ui-simple-only stagger-children mt-6 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-        <span class="ui-simple-icon">
-          <span class="hero-clock-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Pending
-          </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-            {@approval_command.pending_count} waiting for a decision
-          </span>
-        </span>
-      </div>
-      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-        <span class="ui-simple-icon">
-          <span class="hero-link-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Linked issues
-          </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-            {@approval_command.linked_issue_count} connected
-          </span>
-        </span>
-      </div>
-    </div>
+  <div class="tbar">
+    <.segmented label="Status">
+      <:item
+        :for={lane <- @approval_command.lanes}
+        patch={lane.url}
+        current={lane.current?}
+      >
+        {lane.label} <span class="mono">{lane.count}</span>
+      </:item>
+    </.segmented>
+  </div>
 
-    <div
-      id="approval-command"
-      data-testid="approval-command"
-      class="ember-glass ui-advanced-only mt-6 overflow-hidden"
-    >
-      <div class="border-b border-border/70 px-5 py-4">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Decision queue
-            </p>
-            <h2 class="mt-1 font-serif text-[19px] font-510 text-text-primary">
-              {@approval_command.summary}
-            </h2>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <.app_link
-              :for={action <- @approval_command.actions}
-              navigate={action.url}
-              class={approval_action_class(action.tone)}
-            >
-              <.icon name={action.icon} class="h-4 w-4" />
-              <span>{action.label}</span>
-            </.app_link>
-          </div>
-        </div>
-      </div>
-
-      <%!-- No "Queue pressure" card: it repeated the Pending count two tiles to
-           its left. The oldest pending gate moves onto that tile, and the lane
-           sub-captions that just restated the label above are gone. --%>
-      <div class="px-5 py-4">
-        <div class="stagger-children grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <.link
-            :for={lane <- @approval_command.lanes}
-            patch={lane.url}
-            class={["ember-stat", approval_lane_class(lane)]}
-          >
-            <span class="text-eyebrow uppercase text-text-quaternary">{lane.label}</span>
-            <span class={approval_lane_count_class(lane)}>{lane.count}</span>
-            <span
-              :if={lane.status == :pending}
-              class="mt-1 block text-xs text-text-tertiary"
-            >
-              Oldest: {@approval_command.oldest_pending_label}
-            </span>
-          </.link>
-        </div>
-      </div>
-    </div>
-
-    <div
-      :if={all_clear_with_history?(@approval_command, @status_filter)}
-      class="mt-6 flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.05] px-4 py-3"
-    >
-      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-emerald-500/25 bg-emerald-500/10">
-        <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_10px_2px_rgba(52,211,153,0.45)]">
-        </span>
-      </span>
-      <p class="text-sm text-text-secondary">
-        <span class="font-590 text-text-primary">Nothing waiting on you.</span>
-        Every gate below is settled — the records are kept as a quiet ledger.
-      </p>
-    </div>
-
-    <div data-testid="approvals-responsive-queue" class="mt-6">
-      <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-        {queue_section_label(@status_filter)}
-      </p>
-      <hr class="ember-rule mt-2 border-0" />
-
-      <div id="approvals-list" phx-update="stream" class="mt-3 space-y-2">
-        <div id="approvals-empty" class="only:block hidden px-6 py-16 text-center">
-          <div class="mx-auto max-w-md">
-            <span class={[
-              "mx-auto flex h-10 w-10 items-center justify-center rounded-full border",
-              if(@status_filter in [nil, :pending],
-                do: "border-emerald-500/25 bg-emerald-500/10",
-                else: "border-border bg-surface"
-              )
-            ]}>
-              <span class={[
-                "h-2 w-2 rounded-full",
-                if(@status_filter in [nil, :pending],
-                  do: "bg-emerald-400 shadow-[0_0_12px_2px_rgba(52,211,153,0.45)]",
-                  else: "bg-text-quaternary"
-                )
-              ]}>
-              </span>
-            </span>
-            <p class="mt-4 font-serif text-lg font-510 text-text-primary">
-              {approval_empty_title(@status_filter)}
-            </p>
-            <p class="mt-1 text-sm leading-6 text-text-tertiary">
-              {approval_empty_detail(@status_filter)}
-            </p>
-            <div class="mt-5 flex flex-wrap justify-center gap-2">
-              <.link
-                :if={@status_filter}
-                patch={approval_filter_path(nil)}
-                class={approval_empty_action_class(:primary)}
-              >
+  <.band_card id="approvals-list-t" title="Approvals" data-testid="approvals-responsive-queue">
+    <div id="approvals-list" phx-update="stream" class="rows">
+      <div id="approvals-empty" class="only:block hidden">
+        <.quiet_empty title={approval_empty_title(@status_filter)}>
+          {approval_empty_detail(@status_filter)}
+          <:action>
+            <div class="ap-acts">
+              <.text_link :if={@status_filter} patch={approval_filter_path(nil)}>
                 Clear filter
-              </.link>
-              <.app_link
-                navigate={~p"/activity?filter_action=approval_created"}
-                class={approval_empty_action_class(:neutral)}
-              >
+              </.text_link>
+              <.text_link navigate={~p"/activity?filter_action=approval_created"}>
                 Activity
-              </.app_link>
+              </.text_link>
             </div>
-          </div>
-        </div>
-
-        <div
-          :for={{dom_id, approval} <- @streams.approvals}
-          id={dom_id}
-          data-testid={"approval-row-#{approval.id}"}
-          class={approval_card_class(approval.status)}
-        >
-          <%= if approval.status == :pending do %>
-            <div class="p-4 sm:p-5">
-              <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2.5">
-                    <h3 class="font-serif text-[17px] font-510 leading-6 text-text-primary">
-                      {humanize_type(approval.type)}
-                    </h3>
-                    <span class="rounded-full border border-brand/30 bg-brand/10 px-2 py-0.5 text-[11px] font-510 text-brand">
-                      Needs decision
-                    </span>
-                  </div>
-                  <p class="mt-1 text-sm leading-6 text-text-secondary">
-                    {approval_row_note(approval)}
-                  </p>
-                  <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-tertiary">
-                    <span>
-                      Requested by
-                      <span class="font-510 text-text-secondary">
-                        {if approval.requested_by, do: approval.requested_by.name, else: "unknown"}
-                      </span>
-                    </span>
-                    <span aria-hidden="true" class="text-text-quaternary">·</span>
-                    <span>{approval_age(approval.inserted_at)}</span>
-                    <span aria-hidden="true" class="ui-advanced-only text-text-quaternary">
-                      ·
-                    </span>
-                    <span class="ui-advanced-only">
-                      Created {Calendar.strftime(approval.inserted_at, "%b %d, %H:%M")}
-                    </span>
-                    <span aria-hidden="true" class="ui-advanced-only text-text-quaternary">
-                      ·
-                    </span>
-                    <span class="ui-advanced-only font-mono text-text-quaternary">
-                      {approval.type}
-                    </span>
-                  </div>
-                </div>
-
-                <div class="flex shrink-0 flex-wrap items-center gap-2 md:justify-end">
-                  <button
-                    :if={@can_resolve_approvals}
-                    type="button"
-                    phx-click="approve"
-                    phx-value-id={approval.id}
-                    data-testid={"approval-approve-#{approval.id}"}
-                    class="btn-press inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 text-sm font-590 text-emerald-300 transition-colors hover:bg-emerald-500/20"
-                  >
-                    <span class="hero-check-mini h-4 w-4"></span> Approve
-                  </button>
-                  <button
-                    :if={@can_resolve_approvals}
-                    type="button"
-                    phx-click="deny"
-                    phx-value-id={approval.id}
-                    data-testid={"approval-deny-#{approval.id}"}
-                    data-confirm="Deny this approval? The requesting agent will be told to stop or revise."
-                    class="btn-press inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-red-500/25 bg-red-500/10 px-3.5 text-sm font-590 text-red-300 transition-colors hover:bg-red-500/20"
-                  >
-                    <span class="hero-x-mark-mini h-4 w-4"></span> Deny
-                  </button>
-                  <.link
-                    navigate={~p"/approvals/#{approval.id}"}
-                    title="Inspect payload and linked work"
-                    class="inline-flex h-9 items-center text-xs font-510 text-text-tertiary underline decoration-border underline-offset-4 transition-colors hover:text-text-primary"
-                  >
-                    Details
-                  </.link>
-                </div>
-              </div>
-
-              <details
-                :if={approval.issues != []}
-                id={"approval-issues-#{approval.id}"}
-                class="group mt-3"
-                phx-mounted={JS.ignore_attributes("open")}
-              >
-                <summary class="inline-flex cursor-pointer select-none items-center gap-1.5 text-xs font-510 text-text-tertiary transition-colors hover:text-text-primary [&::-webkit-details-marker]:hidden">
-                  <span class="hero-chevron-right-mini h-3.5 w-3.5 transition-transform group-open:rotate-90">
-                  </span>
-                  Blocked work · {length(approval.issues)} linked {pluralize(
-                    length(approval.issues),
-                    "issue"
-                  )}
-                </summary>
-                <div class="mt-2 space-y-1.5 border-l border-border pl-4">
-                  <.app_link
-                    :for={issue <- approval.issues}
-                    navigate={~p"/issues/#{issue.id}"}
-                    class="block rounded-lg border border-border bg-surface px-3 py-2 transition-colors hover:border-border-hover hover:bg-subtle"
-                  >
-                    <span class="block truncate text-sm text-text-secondary">{issue.title}</span>
-                    <span class="mt-0.5 block text-[11px] text-text-quaternary">
-                      {if issue.identifier, do: issue.identifier <> " / ", else: ""}{issue.status}
-                    </span>
-                  </.app_link>
-                </div>
-              </details>
-            </div>
-          <% else %>
-            <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
-              <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 capitalize text-text-tertiary">
-                <span class="h-1.5 w-1.5 rounded-full bg-text-quaternary"></span>
-                {approval.status}
-              </span>
-              <span class="min-w-0 truncate text-sm text-text-secondary">
-                {humanize_type(approval.type)}
-              </span>
-              <span class="ui-advanced-only font-mono text-[11px] text-text-quaternary">
-                {approval.type}
-              </span>
-              <span class="text-xs text-text-quaternary">{approval_row_note(approval)}</span>
-              <span class="ml-auto flex items-center gap-3">
-                <span class="ui-advanced-only text-xs text-text-quaternary">
-                  {if approval.requested_by, do: approval.requested_by.name, else: "-"} · Created {Calendar.strftime(
-                    approval.inserted_at,
-                    "%b %d, %H:%M"
-                  )}
-                </span>
-                <.link
-                  navigate={~p"/approvals/#{approval.id}"}
-                  class={approval_row_action_class(approval.status)}
-                >
-                  {approval_row_action_label(approval.status)}
-                </.link>
-              </span>
-            </div>
-          <% end %>
-        </div>
+          </:action>
+        </.quiet_empty>
       </div>
+
+      <.list_row
+        :for={{dom_id, approval} <- @streams.approvals}
+        tag="div"
+        id={dom_id}
+        data-testid={"approval-row-#{approval.id}"}
+        icon="i-shield"
+        title={humanize_type(approval.type)}
+        navigate={~p"/approvals/#{approval.id}"}
+        status={approval_status(approval.status, @can_resolve_approvals)}
+      >
+        <:meta>
+          Requested by {requester_name(approval)}<span aria-hidden="true"> · </span><span class="mono">
+            {CymphoWeb.AgentLive.Parts.stamp(approval.inserted_at)}
+          </span><span :if={approval.issues != []}><span aria-hidden="true"> · </span>{linked_tasks(approval.issues)}</span>
+        </:meta>
+        <:trail>
+          <span class="ui-advanced-only mono">{approval.type}</span>
+        </:trail>
+        <:actions :if={approval.status == :pending and @can_resolve_approvals}>
+          <.pill
+            phx-click="approve"
+            phx-value-id={approval.id}
+            data-testid={"approval-approve-#{approval.id}"}
+          >
+            Approve
+          </.pill>
+          <button
+            type="button"
+            class="pl warn"
+            phx-click="deny"
+            phx-value-id={approval.id}
+            data-testid={"approval-deny-#{approval.id}"}
+            data-confirm="Deny this approval? The requesting agent will be told to stop or revise."
+          >
+            Deny
+          </button>
+        </:actions>
+        <:below :if={approval.issues != []}>
+          <details
+            id={"approval-issues-#{approval.id}"}
+            class="earlier"
+            phx-mounted={JS.ignore_attributes("open")}
+          >
+            <summary>
+              Tasks waiting on this <.r3_icon name="i-chev-down" class="ico s14" />
+            </summary>
+            <ul class="ap-tasks">
+              <li :for={issue <- approval.issues}>
+                <.link class="ul" navigate={~p"/issues/#{issue.id}"}>{issue.title}</.link>
+                <span :if={issue.identifier} class="mono">{issue.identifier}</span>
+              </li>
+            </ul>
+          </details>
+        </:below>
+      </.list_row>
     </div>
 
     <.infinite_scroll_footer
       id="approvals"
       has_more={@infinite_scroll[:approvals][:has_more?] || false}
     />
+  </.band_card>
+
+  <div class="ui-advanced-only">
+    <.band_card id="approval-command-t" title="Decision queue" data-testid="approval-command">
+      <div class="gl-sec">
+        <p class="gl-big">{@approval_command.summary}</p>
+        <p :if={@approval_command.pending_count > 0} class="gl-sub">
+          Oldest: {@approval_command.oldest_pending_label}
+        </p>
+        <div class="ap-acts">
+          <.text_link :for={action <- @approval_command.actions} navigate={action.url}>
+            {action.label}
+          </.text_link>
+        </div>
+      </div>
+    </.band_card>
   </div>
-</div>
+</.page_frame>
