@@ -450,6 +450,55 @@ defmodule CymphoWeb.AgentLiveTest do
       end
     end
 
+    @tag membership_role: "admin"
+    test "the Hire disclosure shows the defaults an untouched hire submits", %{
+      conn: conn,
+      current_company: company
+    } do
+      assert {:ok, _status} =
+               Cympho.Agrenting.save_company_config(company.id, %{
+                 "api_key" => "agrenting-test-key",
+                 "base_url" => "https://agrenting.example.test"
+               })
+
+      with_mock Cympho.Agrenting.Client, [:passthrough],
+        list_agents: fn _config, _filters -> {:ok, @remote_agents} end do
+        {:ok, view, _html} = live(conn, "/agents/remote")
+
+        shown =
+          view
+          |> main_doc()
+          |> Floki.find(~s(details[id="remote-hire-did:agr:writer-1"] [data-select-menu]))
+          |> Map.new(fn menu ->
+            [name] = Floki.attribute(menu, "select", "name")
+
+            {name,
+             {Floki.attribute(menu, "option[selected]", "value"),
+              text(menu, "[data-select-display]")}}
+          end)
+
+        # The old native selects showed their first option, which is what posts untouched;
+        # the styled triggers read "Select…" instead.
+        assert shown == %{
+                 "capability" => {["copy_writing"], "Copy Writing"},
+                 "role" => {["ceo"], "CEO"},
+                 "delivery_mode" => {["output"], "Output + artifacts"}
+               }
+
+        result =
+          view
+          |> form(~s(form[id="remote-hire-form-did:agr:writer-1"]))
+          |> render_submit()
+
+        assert {:error, {:live_redirect, %{to: "/agents/" <> _}}} = result
+        agent = Enum.find(Agents.list_agents_by_company(company.id), &(&1.name == "Copy Writer"))
+        assert agent.role == :ceo
+        assert agent.config["capability"] == "copy_writing"
+        assert agent.config["delivery_mode"] == "output"
+        assert agent.config["max_price"] == "12"
+      end
+    end
+
     test "does not show an API key echoed in an Agrenting error message", %{
       conn: conn,
       current_company: company
@@ -2862,6 +2911,26 @@ defmodule CymphoWeb.AgentLiveTest do
       assert Floki.find(doc, ~s([data-testid="new-agent-role-guide"])) == []
       assert Floki.find(doc, ~s([data-testid="new-agent-form-actions"])) == []
       refute render(view) =~ "ember-"
+    end
+
+    test "Role and Reports to show the values the form submits", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents/new")
+
+      shown =
+        view
+        |> main_doc()
+        |> Floki.find(~s([data-testid="new-agent-identity-section"] [data-select-menu]))
+        |> Map.new(fn menu ->
+          [name] = Floki.attribute(menu, "select", "name")
+
+          {name,
+           {Floki.attribute(menu, "option[selected]", "value"),
+            text(menu, "[data-select-display]")}}
+        end)
+
+      # Without a manager picked, the trigger read "Select…" while "" (no manager) posted.
+      assert shown["agent[role]"] == {["engineer"], "Engineer"}
+      assert shown["agent[parent_id]"] == {[""], "— No manager —"}
     end
 
     test "without a provider key the primary is disabled and the ink card says how to fix it",

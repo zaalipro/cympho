@@ -113,6 +113,7 @@
                   id={"remote-hire-#{agent["did"]}-capability"}
                   name="capability"
                   label="Capability"
+                  value={first_value(capability_select_options(agent))}
                   options={capability_select_options(agent)}
                 />
                 <.input
@@ -120,6 +121,7 @@
                   id={"remote-hire-#{agent["did"]}-role"}
                   name="role"
                   label="Cympho role"
+                  value={first_value(role_options())}
                   options={role_options()}
                 />
                 <.input
@@ -133,6 +135,7 @@
                   id={"remote-hire-#{agent["did"]}-delivery"}
                   name="delivery_mode"
                   label="Delivery"
+                  value={first_value(delivery_options())}
                   options={delivery_options()}
                 />
               </div>

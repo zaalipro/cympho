@@ -86,6 +86,7 @@
             field={@form[:parent_id]}
             type="select"
             label="Reports to"
+            value={@form[:parent_id].value || ""}
             options={@reports_to_options}
           />
         </div>

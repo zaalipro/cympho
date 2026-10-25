@@ -343,6 +343,12 @@ defmodule CymphoWeb.AgentLive.Remote do
     [{"Output + artifacts", "output"}, {"Push to repository", "push"}]
   end
 
+  @doc """
+  The value an untouched hire submits: a native select posts its first option, so
+  the styled select shows that option instead of its "Select…" placeholder.
+  """
+  def first_value([{_label, value} | _]), do: value
+
   def hired_remote_agent?(hired_dids, agent) do
     MapSet.member?(hired_dids || MapSet.new(), agent["did"])
   end

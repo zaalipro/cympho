@@ -60,6 +60,7 @@ defmodule CymphoWeb.PluginLive.FormHelpers do
             placeholder="Cympho.Plugins.CustomPlugin"
             required
             class="mono"
+            wrapper_class="full"
           />
           <.input
             id="plugin-capabilities"
@@ -68,6 +69,7 @@ defmodule CymphoWeb.PluginLive.FormHelpers do
             value={capabilities_value(@form[:capabilities].value)}
             placeholder="tool_access, issue_write"
             help="Separate them with commas."
+            wrapper_class="full"
           />
           <.input
             type="select"

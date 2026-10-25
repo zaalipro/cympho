@@ -12,7 +12,10 @@
         {length(@available_plugins)} catalog entries<span aria-hidden="true"> · </span>{Enum.count(
           @available_plugins,
           & &1.installable?
-        )} installable<span aria-hidden="true"> · </span>{map_size(@installed_plugins)} installed
+        )} installable<span aria-hidden="true"> · </span>{Enum.count(
+          @available_plugins,
+          &Map.has_key?(@installed_plugins, &1.identifier)
+        )} installed
       </p>
     </section>
   </:head>

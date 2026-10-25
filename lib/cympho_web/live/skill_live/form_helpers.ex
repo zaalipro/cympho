@@ -59,6 +59,7 @@ defmodule CymphoWeb.SkillLive.FormHelpers do
             placeholder="Cympho.Skills.CustomSkill"
             required
             class="mono"
+            wrapper_class="full"
           />
           <.input
             id="skill-capabilities"
@@ -67,6 +68,7 @@ defmodule CymphoWeb.SkillLive.FormHelpers do
             value={capabilities_value(@form[:manifest].value)}
             placeholder="repo_audit, test_plan"
             help="Separate them with commas."
+            wrapper_class="full"
           />
         </div>
       </.band_card>

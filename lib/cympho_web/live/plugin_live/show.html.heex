@@ -9,6 +9,7 @@
   <:head>
     <section class="head" aria-labelledby="pg-h">
       <h1 class="h1 big" id="pg-h">{@page_title}</h1>
+      <p :if={@plugin.description not in [nil, ""]} class="sub">{@plugin.description}</p>
       <div class="chips">
         <span :if={plugin_error?(@plugin)} class="chip">
           <.status_word kind={:stopped} word="Failing" />
@@ -40,9 +41,6 @@
     data-testid="plugin-simple-overview"
   >
     <.kv_list class="wide">
-      <:item :if={@plugin.description not in [nil, ""]} term="What it does">
-        {@plugin.description}
-      </:item>
       <:item term="Scope">{scope_label(@plugin)}</:item>
       <:item term="Permissions">{permissions_sentence(@plugin)}</:item>
     </.kv_list>

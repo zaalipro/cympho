@@ -462,6 +462,35 @@ defmodule CymphoWeb.PluginLiveTest do
                "read:issues"
              )
     end
+
+    test "the description is the head's line in both modes, said once", %{
+      conn: conn,
+      current_company: company
+    } do
+      plugin =
+        insert_plugin(company.id, %{
+          name: "Described",
+          description: "Posts release notes to the team channel."
+        })
+
+      {:ok, view, _html} = live(conn, "/plugins/#{plugin.id}")
+      doc = main_doc(view)
+
+      # Not mode-gated: Advanced lost it when it lived only in the Simple overview.
+      assert [sub] = Floki.find(doc, ".head > p.sub")
+      assert Floki.text(sub) =~ "Posts release notes to the team channel."
+      assert Floki.attribute(sub, "class") == ["sub"]
+
+      assert doc
+             |> Floki.text()
+             |> String.split("Posts release notes to the team channel.")
+             |> length() ==
+               2
+
+      bare = insert_plugin(company.id, %{name: "Bare"})
+      {:ok, view, _html} = live(conn, "/plugins/#{bare.id}")
+      assert Floki.find(main_doc(view), ".head .sub") == []
+    end
   end
 
   describe "PluginLive.New" do

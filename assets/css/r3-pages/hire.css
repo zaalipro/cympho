@@ -58,8 +58,11 @@
 .cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-strip{grid-template-columns:repeat(4,minmax(0,1fr))}
 .cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-next{margin:4px 4px 0;border-top:1px solid var(--hair)}
 .cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-next .lnk{align-self:flex-start;margin-left:-4px}
-/* the detail pages have no Next step above their aside: it starts on the first row */
-.cy-r3 :is([data-page="skill"],[data-page="plugin"]) .split>.aside{grid-row:1 / span 3}
+/* the detail pages have no Next step above their aside: beside the content it starts on the first row
+   (at 1180 px and below the split stacks and r3's grid-row:auto keeps Details after the content) */
+@media (min-width:1181px){
+  .cy-r3 :is([data-page="skill"],[data-page="plugin"]) .split>.aside{grid-row:1 / span 3}
+}
 .cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-desc{max-width:62ch;font-size:14px;line-height:21px;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
 .cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-caps{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px}
 .cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-pre{max-height:520px;overflow:auto;margin:4px 8px 8px;padding:12px 14px;border-radius:12px;background:var(--well);border:1px solid var(--band-line);font-size:12px;line-height:18px;color:var(--ink)}
@@ -73,6 +76,11 @@
 .cy-r3 .set-main[data-section="plugins"] .pl-flt{display:flex;flex-direction:column;gap:10px;width:100%}
 .cy-r3 .set-main[data-section="plugins"] .pl-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
 .cy-r3 .set-main[data-section="plugins"] .pl-can{padding:0 8px 10px}
+/* an open row menu rises above its own row's capability disclosure and the next rows (each .lr-acts and
+   .lr-below is z-index 1, so a later one would paint over the panel and take its clicks) */
+.cy-r3 .set-main[data-section="plugins"] .lrow .lr-acts:has(.cympho-menu[open]){z-index:3}
+/* the plugin page's description is its head line */
+.cy-r3 [data-page="plugin"] .head .sub{max-width:72ch;overflow-wrap:anywhere}
 /* the JSON disclosures inside a form band */
 .cy-r3 [data-page="plugin-form"] .tech{margin:4px 4px 0;border-top:1px solid var(--hair)}
 .cy-r3 [data-page="plugin-form"] .tech .flds{padding:4px 8px 12px}
@@ -105,5 +113,7 @@
   .cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
   .cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-strip>.cell:nth-child(3){border-left:0}
   .cy-r3 [data-page="marketplace"] .mk-grid{grid-template-columns:minmax(0,1fr)}
+  /* row actions wrap to the row's start on phones, so the menu opens from the kebab's start, not off-screen */
+  .cy-r3 .set-main[data-section="plugins"] .lrow .cympho-menu>.menu{left:0;right:auto}
   .cy-r3 [data-page="remote"] .rm-cap,.cy-r3 [data-page="skills"] .sk-co{flex:1 1 100%}
 }

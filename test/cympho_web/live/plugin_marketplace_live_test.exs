@@ -172,6 +172,31 @@ defmodule CymphoWeb.PluginMarketplaceLiveTest do
     end
   end
 
+  describe "head counts" do
+    test "installed counts the catalog entries this company installed, not its other plugins",
+         %{conn: conn, current_company: company} do
+      entry = Enum.find(Cympho.Plugins.Catalog.entries(), & &1.installable?)
+      assert {:ok, plugin} = Runtime.install_catalog_entry(entry, company.id)
+
+      {:ok, _custom} =
+        Skills.create_plugin(%{
+          identifier: "custom-not-in-catalog",
+          name: "Custom",
+          version: "1.0.0",
+          manifest: %{},
+          company_id: company.id
+        })
+
+      {:ok, view, _html} = live(conn, "/plugins/marketplace")
+
+      # One card says Installed, so the line says 1 (it said 2: every company plugin).
+      assert text(main_doc(view), ".head .sub") ==
+               "3 catalog entries · 1 installable · 1 installed"
+
+      assert :ok = Runtime.stop_plugin(plugin)
+    end
+  end
+
   describe "Remove on an installed entry" do
     test "managers can remove an installed catalog plugin from its card", %{
       conn: conn,
