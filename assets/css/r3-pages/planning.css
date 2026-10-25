@@ -5,3 +5,76 @@
      the light block and both identical dark copies, never here.
    - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
    - Shared components belong in r3.css, not here. */
+
+/* ================================================================
+   Shared by the planning pages (v7 §4.2): quiet lines, strips, swatches in meta lines
+   ================================================================ */
+/* a quiet line inside a card (an empty sub-list, a one-line summary) */
+.cy-r3 :is([data-page="projects"],[data-page="project"],[data-page="goals"],[data-page="launch"],[data-page="routines"]) .pn-line{padding:4px 12px 10px}
+/* long tokens (repository URLs, folder paths) wrap instead of widening a row on phones */
+.cy-r3 .pn-wrap{overflow-wrap:anywhere}
+/* a user's data colour at the start of a row's meta line (projects, labels) */
+.cy-r3 :is([data-page="projects"],[data-page="settings"]) .rm .sw{margin-right:6px;vertical-align:-1px}
+/* three- and four-cell strips: Tier A summaries and a goal's progress */
+.cy-r3 :is([data-page="projects"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.cy-r3 [data-page="goals"] .strip.s3{grid-template-columns:repeat(3,minmax(0,1fr))}
+/* project and goal pages have no Next step above their aside: it starts on the first row */
+.cy-r3 :is([data-page="project"],[data-page="goal"]) .split>.aside{grid-row:1 / span 3}
+
+/* ================================================================
+   New task (L1)
+   ================================================================ */
+.cy-r3 [data-page="task-new"] .tn-mode{padding:4px 12px 12px}
+.cy-r3 [data-page="task-new"] .tn-tpl{display:flex}
+
+/* ================================================================
+   Projects (L2-L5) and the colour picker
+   ================================================================ */
+.cy-r3 [data-page="project"] .h1 .sw{width:14px;height:14px;margin-right:12px;vertical-align:3px}
+.cy-r3 [data-page="project"] .pj-sub{max-width:72ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cy-r3 [data-page="project"] .pj-env{display:flex;flex-direction:column;align-items:flex-start;gap:10px;margin-top:4px;padding:12px 12px 8px;border-top:1px solid var(--hair)}
+.cy-r3 [data-page="project"] .pj-env .flds{width:100%}
+.cy-r3 :is([data-page="project-form"],[data-page="project"]) .flds>.swp{grid-column:1 / -1}
+.cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-r{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+/* the hook (app.js ColorSwatchPicker) rings the chosen swatch through its border colour */
+.cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-b{width:28px;height:28px;flex:none;border-radius:50%;border:2px solid transparent;box-shadow:0 0 0 1px var(--line);transition:transform .15s var(--press)}
+.cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-b:hover{transform:scale(1.08)}
+.cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-pv{width:20px;height:20px;margin-left:6px}
+.cy-r3 :is([data-page="project-form"],[data-page="project"]) .fld.swp input[data-hex-input]{width:120px;font-family:var(--mono)}
+
+/* ================================================================
+   Goals (L6-L9)
+   ================================================================ */
+.cy-r3 [data-page="goals"] .gl-link{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;padding:6px 0 4px}
+.cy-r3 [data-page="goals"] .gl-link .fld{flex:1 1 240px}
+.cy-r3 [data-page="goal"] .gl-desc{max-width:72ch;white-space:pre-wrap}
+.cy-r3 [data-page="goal"] .gl-gh{padding:6px 10px 0}
+
+/* ================================================================
+   Launch checklist (L11): each row's owner select, status buttons and blocked toggle
+   ================================================================ */
+.cy-r3 [data-page="launch"] .li-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:2px 0 4px}
+.cy-r3 [data-page="launch"] .li-sel{position:relative;display:inline-flex;min-width:240px}
+.cy-r3 [data-page="launch"] .li-sel select{-webkit-appearance:none;appearance:none;padding-right:36px;cursor:pointer}
+.cy-r3 [data-page="launch"] .li-sel .ico{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--ink-2);pointer-events:none}
+
+/* ================================================================
+   Repeating tasks (L12-L15)
+   ================================================================ */
+.cy-r3 [data-page="routine"] :is(.rt-st,.rt-last){display:inline-flex;align-items:center;gap:6px}
+.cy-r3 [data-page="routine"] .rt-cron{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;margin-top:4px;padding:12px 12px 8px;border-top:1px solid var(--hair)}
+.cy-r3 [data-page="routine"] .rt-cron .fld{flex:1 1 220px}
+
+/* ---------- phone ---------- */
+@media (max-width:640px){
+  .cy-r3 :is([data-page="projects"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cy-r3 :is([data-page="projects"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4>.cell:nth-child(3){border-left:0}
+  .cy-r3 [data-page="project"] .pj-sub{white-space:normal}
+  .cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-b{width:44px;height:44px}
+  .cy-r3 [data-page="launch"] :is(.li-own,.li-sel){width:100%;min-width:0}
+  .cy-r3 [data-page="launch"] .li-ctl>.pl{flex:1}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-b{transition:none}
+}
