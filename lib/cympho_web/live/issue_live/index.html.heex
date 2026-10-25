@@ -69,15 +69,30 @@
 
   <%!-- The Next step (S3): the company stopped at its limit comes first;
        otherwise the first decision opens inside its own group, and with none,
-       all clear (or agents off when nothing at all waits on the owner, D1). --%>
+       all clear (or agents off when nothing at all waits on the owner, D1).
+       A filtered list never claims all clear: the filter may hide a decision. --%>
   <NextStep.paused_step :if={@tasks_stopped?} spending={@spending} />
   <NextStep.server_off_step :if={
     !@tasks_stopped? and !@open_decision and !@owner_items? and !@orchestrator_enabled?
   } />
   <NextStep.all_clear
-    :if={!@tasks_stopped? and !@open_decision and (@owner_items? or @orchestrator_enabled?)}
+    :if={
+      !@tasks_stopped? and !@open_decision and !filters_active?(assigns) and
+        (@owner_items? or @orchestrator_enabled?)
+    }
     title="Nothing is waiting on you"
   />
+  <section
+    :if={@task_groups == [] and filters_active?(assigns)}
+    class="card"
+    aria-label="No matching tasks"
+  >
+    <.quiet_empty title="No tasks match these filters.">
+      <:action>
+        <button type="button" class="lnk" phx-click="clear_filters">Clear filters</button>
+      </:action>
+    </.quiet_empty>
+  </section>
 
   <section
     :for={group <- Enum.reject(@task_groups, & &1.closed?)}

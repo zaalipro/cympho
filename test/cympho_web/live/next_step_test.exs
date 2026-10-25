@@ -47,8 +47,13 @@ defmodule CymphoWeb.NextStepTest do
       assert text(doc, ".paper .eyebrow") == "All clear"
       assert text(doc, ".paper .nt") == "Nothing needs you"
 
-      assert text(doc, ".ink .ink-note") ==
-               "After you add it: Cympho gives it to an agent with the right role, or keeps it in Later if nobody is free."
+      # The heading says "After you add it" once; the effect row does not repeat it.
+      assert text(doc, ".ink .ink-h") == "After you add it"
+
+      assert text(doc, ".ink .conseq li") ==
+               "Cympho gives it to an agent with the right role, or keeps it in Later if nobody is free."
+
+      assert length(String.split(Floki.text(doc), "After you add it")) == 2
 
       assert [primary] = Floki.find(doc, ".pw")
       assert Floki.text(primary) =~ "New task"

@@ -48,6 +48,8 @@
 .cy-r3 [data-page="spending"] .cap input{flex:1;min-width:0;height:100%;border:0;background:transparent;outline:none;font:500 28px/1 var(--mono);letter-spacing:-.02em;color:var(--inv-ink-hi)}
 .cy-r3 [data-page="spending"] .cap input:disabled{color:var(--inv-ink-2);cursor:not-allowed}
 .cy-r3 [data-page="spending"] .ink-help{font-size:13px;line-height:18px;color:var(--inv-ink-2)}
+.cy-r3 [data-page="spending"] .cap:has(input[aria-invalid="true"]){border-color:var(--stopped)}
+.cy-r3 [data-page="spending"] .lim-f .err{display:flex;align-items:center;gap:6px;font-size:13px;line-height:18px;font-weight:500;color:var(--stopped)}
 .cy-r3 [data-page="spending"] .ink button.pd{cursor:pointer}
 .cy-r3 [data-page="spending"] .ink button.pw:disabled{opacity:.55;cursor:not-allowed}
 

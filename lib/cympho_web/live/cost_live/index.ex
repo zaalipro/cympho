@@ -24,6 +24,7 @@ defmodule CymphoWeb.CostLive.Index do
      |> assign(:company_id, company_id)
      |> assign(:days, 30)
      |> assign(:limit_input, nil)
+     |> assign(:limit_error, nil)
      |> assign_spending(company_id)
      |> assign_cost_data(company_id, 30)}
   end
@@ -58,17 +59,21 @@ defmodule CymphoWeb.CostLive.Index do
       {:ok, policy} ->
         {:noreply,
          socket
-         |> assign(:limit_input, nil)
+         |> assign(limit_input: nil, limit_error: nil)
          |> assign_spending(company_id)
          |> push_event("toast", %{
            message: "Limit changed to #{money(policy.budget_limit_usd)}.",
            type: "success"
          })}
 
+      # An amount the field can fix is flagged on the field itself (B12).
+      {:error, :invalid_limit} ->
+        {:noreply, assign(socket, limit_input: limit, limit_error: limit_error(:invalid_limit))}
+
       {:error, reason} ->
         {:noreply,
          socket
-         |> assign(:limit_input, limit)
+         |> assign(limit_input: limit, limit_error: nil)
          |> push_event("toast", %{message: limit_error(reason), type: "error"})}
     end
   end
@@ -486,6 +491,7 @@ defmodule CymphoWeb.CostLive.Index do
   attr :paused, :boolean, required: true
   attr :runtime_controls, :boolean, required: true
   attr :input, :string, default: nil
+  attr :error, :string, default: nil, doc: "the amount's error, tied to the field"
 
   # The Next step (build-spec §7): all clear below the warning line, decide at
   # 80%, raise at the limit; the resolution card holds the change form (B5).
@@ -589,10 +595,14 @@ defmodule CymphoWeb.CostLive.Index do
                     inputmode="decimal"
                     value={@value}
                     autocomplete="off"
-                    aria-describedby="lim-h"
+                    aria-invalid={@error && "true"}
+                    aria-describedby={if @error, do: "lim-h lim-e", else: "lim-h"}
                     disabled={!@can_change}
                   />
                 </div>
+                <p :if={@error} class="err" id="lim-e" role="alert">
+                  <.r3_icon name="i-alert" />{@error}
+                </p>
                 <p class="ink-help" id="lim-h">
                   <%= if @can_change do %>
                     Warns at {@spending.warn_percent}% of it.
@@ -735,8 +745,9 @@ defmodule CymphoWeb.CostLive.Index do
   defp set_label({:ok, %{inserted_at: same, updated_at: same}}), do: "set at setup"
   defp set_label(_policy), do: "last changed"
 
-  # "300" for the field, "300.5" stays "300.50".
-  defp amount_text(%Decimal{} = limit), do: limit |> money() |> String.trim_leading("$")
+  # "300" for the field, "300.5" stays "300.50"; no thousands separator, which the amount would not parse.
+  defp amount_text(%Decimal{} = limit),
+    do: limit |> money() |> String.trim_leading("$") |> String.replace(",", "")
 
   defp day(%DateTime{} = at), do: Calendar.strftime(at, "%a %-d %b")
 

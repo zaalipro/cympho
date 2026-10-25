@@ -9,6 +9,7 @@
     paused={@company_paused?}
     runtime_controls={@runtime_controls_allowed}
     input={@limit_input}
+    error={@limit_error}
   />
 
   <div :if={@spending && @agent_rows != []} class="money-g">

@@ -310,9 +310,10 @@ defmodule CymphoWeb.NextStep do
       </:problem>
       <:resolution>
         <.ink_card heading="After you add it">
-          <.ink_note>
-            After you add it: Cympho gives it to an agent with the right role, or keeps it in Later if nobody is free.
-          </.ink_note>
+          <.consequences rows={[
+            {:done,
+             "Cympho gives it to an agent with the right role, or keeps it in Later if nobody is free."}
+          ]} />
           <.ink_foot verb="add">
             <:primary>
               <.primary_pill href="/issues/new" data-quick-create-trigger>New task</.primary_pill>

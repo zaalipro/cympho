@@ -115,6 +115,38 @@ defmodule CymphoWeb.IssueLive.IndexR3Test do
       assert main |> Floki.find(".tid") |> Enum.map(&squish(Floki.text(&1))) == ["NW-8"]
     end
 
+    test "a search that matches nothing says so, never all clear, and clears back", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = live(conn, "/issues?search=zzzz")
+      main = main_doc(view)
+
+      # The owner still has decisions waiting; a filter only hides them.
+      assert Floki.find(main, ".next") == []
+      refute Floki.text(main) =~ "Nothing is waiting on you"
+
+      assert [empty] = Floki.find(main, "section[aria-label='No matching tasks']")
+      assert text(empty, ".gl-big") == "No tasks match these filters."
+
+      view
+      |> element("section[aria-label='No matching tasks'] button", "Clear filters")
+      |> render_click()
+
+      assert_patch(view, "/issues")
+      main = main_doc(view)
+      assert text(main, ".next .paper .nt") == "Decide who retries NW-10"
+      assert Floki.find(main, "section[aria-label='No matching tasks']") == []
+    end
+
+    test "a filtered list without a decision in it does not claim all clear", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/issues?search=NW-5")
+      main = main_doc(view)
+
+      assert main |> Floki.find(".tid") |> Enum.map(&squish(Floki.text(&1))) == ["NW-5"]
+      assert Floki.find(main, ".next") == []
+      assert Floki.find(main, "section[aria-label='No matching tasks']") == []
+    end
+
     test "reads only the tasks a group can list: done ones from the last 7 days, any cancelled",
          %{nw: nw} do
       _other = R3Fixtures.northwind!()

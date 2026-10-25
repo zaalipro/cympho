@@ -318,13 +318,59 @@ defmodule CymphoWeb.CostLiveTest do
       assert text(main_doc(view), ".next .hero .u") == "of $400 · last 30 days"
     end
 
-    test "an invalid amount is refused and the limit stays", %{conn: conn, nw: nw} do
+    test "an invalid amount is flagged on the field, not in a toast, and the limit stays", %{
+      conn: conn,
+      nw: nw
+    } do
       {:ok, view, _html} = live(conn, "/costs")
 
-      view |> element(".next form.ink") |> render_submit(%{"limit" => "-3"})
+      for bad <- ["abc", "-1", "0"] do
+        view |> element(".next form.ink") |> render_submit(%{"limit" => bad})
 
-      assert_push_event(view, "toast", %{message: "Enter an amount above $0.", type: "error"})
+        refute_push_event(view, "toast", %{type: "error"})
+        main = main_doc(view)
+        [input] = Floki.find(main, ".next form.ink input[name=limit]")
+        assert Floki.attribute(input, "value") == [bad]
+        assert Floki.attribute(input, "aria-invalid") == ["true"]
+        assert Floki.attribute(input, "aria-describedby") == ["lim-h lim-e"]
+        assert text(main, ".next form.ink p.err#lim-e") == "Enter an amount above $0."
+      end
+
       assert Decimal.equal?(Repo.get!(BudgetPolicy, nw.budget_policy.id).budget_limit_usd, 300)
+
+      # A good amount clears the flag.
+      view |> element(".next form.ink") |> render_submit(%{"limit" => "400"})
+      main = main_doc(view)
+      [input] = Floki.find(main, ".next form.ink input[name=limit]")
+      assert Floki.attribute(input, "aria-invalid") == []
+      assert Floki.attribute(input, "aria-describedby") == ["lim-h"]
+      assert Floki.find(main, "#lim-e") == []
+    end
+
+    test "amounts read with thousands separators; the field keeps plain digits", %{
+      conn: conn,
+      nw: nw
+    } do
+      {:ok, view, _html} = live(conn, "/costs")
+
+      view |> element(".next form.ink") |> render_submit(%{"limit" => "1000"})
+
+      assert_push_event(view, "toast", %{message: "Limit changed to $1,000.", type: "success"})
+      main = main_doc(view)
+      assert text(main, ".next .hero .u") == "of $1,000 · last 30 days"
+      assert Floki.attribute(Floki.find(main, "input[name=limit]"), "value") == ["1000"]
+
+      view |> element(".next form.ink") |> render_submit(%{"limit" => "1234.5"})
+
+      assert_push_event(view, "toast", %{message: "Limit changed to $1,234.50.", type: "success"})
+      main = main_doc(view)
+      assert text(main, ".next .hero .u") == "of $1,234.50 · last 30 days"
+      assert Floki.attribute(Floki.find(main, "input[name=limit]"), "value") == ["1234.50"]
+
+      assert Decimal.equal?(
+               Repo.get!(BudgetPolicy, nw.budget_policy.id).budget_limit_usd,
+               "1234.50"
+             )
     end
 
     test "a member who is not on the board sees the form disabled and cannot submit", %{nw: nw} do
