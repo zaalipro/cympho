@@ -38,6 +38,12 @@ defmodule CymphoWeb.Components.DatePicker do
   attr :placeholder, :string, default: nil
   attr :class, :any, default: nil
   attr :minute_step, :integer, default: 5
+
+  attr :label, :string,
+    default: nil,
+    doc: "names the trigger (the visible label points at the hidden native)"
+
+  attr :describedby, :string, default: nil, doc: "ids of the help and error lines"
   attr :rest, :global
 
   @doc "Calendar date picker → emits `YYYY-MM-DD`."
@@ -63,6 +69,12 @@ defmodule CymphoWeb.Components.DatePicker do
   attr :placeholder, :string, default: nil
   attr :class, :any, default: nil
   attr :minute_step, :integer, default: 5
+
+  attr :label, :string,
+    default: nil,
+    doc: "names the trigger (the visible label points at the hidden native)"
+
+  attr :describedby, :string, default: nil, doc: "ids of the help and error lines"
   attr :rest, :global
 
   @doc "24-hour time picker (hour:minute columns) → emits `HH:MM`."
@@ -88,6 +100,12 @@ defmodule CymphoWeb.Components.DatePicker do
   attr :placeholder, :string, default: nil
   attr :class, :any, default: nil
   attr :minute_step, :integer, default: 5
+
+  attr :label, :string,
+    default: nil,
+    doc: "names the trigger (the visible label points at the hidden native)"
+
+  attr :describedby, :string, default: nil, doc: "ids of the help and error lines"
   attr :rest, :global
 
   @doc "Combined calendar + 24-hour time → emits `YYYY-MM-DDTHH:MM` (UTC-naive)."
@@ -143,32 +161,28 @@ defmodule CymphoWeb.Components.DatePicker do
         type="button"
         data-picker-trigger
         disabled={@disabled}
+        aria-label={@label}
+        aria-describedby={@describedby}
+        aria-invalid={@invalid && "true"}
         aria-haspopup="dialog"
         aria-expanded="false"
-        class={[
-          "flex w-full items-center gap-2 h-9 px-2.5 rounded-input text-left",
-          "bg-surface border text-caption text-ink transition duration-150",
-          "focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed",
-          (@invalid && "border-error focus:ring-red-500/40 focus:border-error") ||
-            "border-hairline hover:border-hairline-strong focus:ring-primary/30 focus:border-primary focus:shadow-[0_0_16px_-4px_rgb(var(--color-primary-rgb)/0.35)]"
-        ]}
+        class="fld-sel"
       >
-        <span class={[@icon, "w-4 h-4 shrink-0 text-ink-tertiary"]} aria-hidden="true"></span>
-        <span data-picker-display class="min-w-0 flex-1 truncate text-ink-tertiary">
+        <span class={[@icon, "fld-ic"]} aria-hidden="true"></span>
+        <span data-picker-display class="sel-v text-ink-tertiary">
           {@placeholder}
         </span>
       </button>
 
       <%!-- Empty shells; the DatePicker hook builds the calendar / time UI in. --%>
+      <%!-- .sel-pop, not the r3 .menu: .menu sets display and left/right, which
+           would beat Tailwind's `hidden` and the hook's fixed position (app.js). --%>
       <div
         data-picker-popover
         role="dialog"
         aria-modal="false"
-        class={[
-          "hidden absolute left-0 top-full z-50 p-2",
-          "cympho-menu-panel rounded-lg bg-surface-2 border border-hairline shadow-elevated",
-          @popover_width
-        ]}
+        aria-label={@label}
+        class={["sel-pop hidden", @popover_width]}
       >
         <div :if={@mode != "time"} data-picker-calendar></div>
         <div

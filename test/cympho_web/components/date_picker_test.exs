@@ -64,9 +64,26 @@ defmodule CymphoWeb.Components.DatePickerTest do
   end
 
   describe "wrapper" do
-    test "invalid toggles the error border on the trigger" do
-      assert date(name: "d", invalid: true) =~ "border-error"
-      refute date(name: "d", invalid: false) =~ "border-error"
+    # v7 §3.1 B8: the r3 field marks an invalid trigger with aria-invalid (was a border class).
+    test "invalid marks the trigger" do
+      assert date(name: "d", invalid: true) =~ ~r/data-picker-trigger[^>]*aria-invalid="true"/
+      refute date(name: "d", invalid: false) =~ "aria-invalid"
+    end
+
+    test "the trigger is an r3 field, named and described; the popover starts hidden" do
+      doc =
+        date(name: "d", label: "Target date", describedby: "d-help") |> Floki.parse_fragment!()
+
+      [trigger] = Floki.find(doc, "button[data-picker-trigger]")
+      assert Floki.attribute(trigger, "class") == ["fld-sel"]
+      assert Floki.attribute(trigger, "aria-label") == ["Target date"]
+      assert Floki.attribute(trigger, "aria-describedby") == ["d-help"]
+
+      [pop] = Floki.find(doc, "[data-picker-popover]")
+      classes = pop |> Floki.attribute("class") |> hd() |> String.split()
+      assert "sel-pop" in classes
+      assert "hidden" in classes
+      refute "menu" in classes
     end
 
     test "id is stable and derived from name when absent" do

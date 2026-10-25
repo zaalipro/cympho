@@ -56,13 +56,11 @@ defmodule CymphoWeb.Components do
   attr :detailed_patch, :string, required: true
   attr :class, :any, default: nil
 
+  # r3: the segmented control (v7 §3.1 B11); `V` toggles it (app.js data-density-switch).
   def density_switch(assigns) do
     ~H"""
     <div
-      class={[
-        "inline-flex shrink-0 whitespace-nowrap rounded-xl border border-hairline bg-surface p-1",
-        @class
-      ]}
+      class={["seg dens", @class]}
       data-density-switch
       data-density={@density}
       role="group"
@@ -75,13 +73,8 @@ defmodule CymphoWeb.Components do
         role="button"
         aria-pressed={to_string(@density == "compact")}
         title="Compact rows (V)"
-        class={[
-          "inline-flex items-center rounded-lg px-2.5 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
-          density_tab_class(@density, "compact")
-        ]}
       >
-        <span class="hero-list-bullet-mini h-4 w-4"></span>
-        <span class="sr-only">Compact rows</span>
+        Compact
       </.link>
       <.link
         patch={@detailed_patch}
@@ -89,24 +82,11 @@ defmodule CymphoWeb.Components do
         role="button"
         aria-pressed={to_string(@density == "detailed")}
         title="Detailed rows (V)"
-        class={[
-          "inline-flex items-center rounded-lg px-2.5 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
-          density_tab_class(@density, "detailed")
-        ]}
       >
-        <span class="hero-rectangle-stack-mini h-4 w-4"></span>
-        <span class="sr-only">Detailed rows</span>
+        Detailed
       </.link>
     </div>
     """
-  end
-
-  defp density_tab_class(current, density) do
-    if current == density do
-      "bg-surface-2 text-text-primary shadow-card"
-    else
-      "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-    end
   end
 
   attr :current, :string, required: true, values: ~w(list board)
@@ -469,38 +449,27 @@ defmodule CymphoWeb.Components do
   attr :rest, :global
   slot :inner_block, required: true
 
+  # r3 (v7 §3.1 B10): a kebab button over the r3 menu panel. `details.cympho-menu`
+  # is what app.js closes on an item click, an outside click and a live navigation.
   def overflow_menu(assigns) do
     ~H"""
     <details
       id={@id}
-      class={["cympho-menu relative", @class]}
+      class={["cympho-menu", @class]}
       phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
     >
       <summary
-        class={[
-          "flex h-8 cursor-pointer list-none items-center justify-center rounded-md text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-primary",
-          if(@trigger_text, do: "gap-1.5 px-2.5 text-xs font-510", else: "w-8")
-        ]}
+        class={if @trigger_text, do: "pl kebab", else: "ib kebab"}
         aria-label={@label}
         title={@label}
         {@rest}
       >
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 5h.01M12 12h.01M12 19h.01"
-          />
-        </svg>
+        <CymphoWeb.Components.R3.r3_icon name="i-more" />
         <%!-- The kebab glyph is already the affordance; simple mode drops the
              word beside it. `label` still supplies the accessible name. --%>
         <span :if={@trigger_text} class="ui-advanced-only">{@trigger_text}</span>
       </summary>
-      <div class={[
-        "cympho-menu-panel absolute z-30 mt-2 min-w-44 rounded-xl border border-border bg-panel p-1 shadow-dialog",
-        menu_align(@align)
-      ]}>
+      <div class={["menu", @align == "left" && "al"]}>
         {render_slot(@inner_block)}
       </div>
     </details>
@@ -515,17 +484,7 @@ defmodule CymphoWeb.Components do
 
   def menu_item(%{navigate: navigate} = assigns) when is_binary(navigate) do
     ~H"""
-    <.link
-      navigate={@navigate}
-      class={[
-        "flex w-full items-center rounded-md px-2.5 py-2 text-left text-sm transition-colors",
-        if(@danger,
-          do: "text-red-300 hover:bg-red-500/10",
-          else: "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        )
-      ]}
-      {@rest}
-    >
+    <.link navigate={@navigate} class={@danger && "warn"} {@rest}>
       {render_slot(@inner_block)}
     </.link>
     """
@@ -533,17 +492,7 @@ defmodule CymphoWeb.Components do
 
   def menu_item(assigns) do
     ~H"""
-    <button
-      type={@type}
-      class={[
-        "flex w-full items-center rounded-md px-2.5 py-2 text-left text-sm transition-colors",
-        if(@danger,
-          do: "text-red-300 hover:bg-red-500/10",
-          else: "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        )
-      ]}
-      {@rest}
-    >
+    <button type={@type} class={@danger && "warn"} {@rest}>
       {render_slot(@inner_block)}
     </button>
     """
@@ -675,31 +624,33 @@ defmodule CymphoWeb.Components do
   attr :value, :any, default: nil
   attr :phx_change, :string, default: nil
   attr :id, :string, default: nil
+  attr :help, :string, default: nil, doc: "one line under the control, in aria-describedby"
+  attr :wrapper_class, :any, default: nil, doc: "\"full\" spans a .flds grid"
   # `autocomplete` is not one of Phoenix's default global attributes, but form
   # fields need it to stop browsers autofilling credentials into unrelated pairs
   # of text+password inputs.
   attr :rest, :global, include: ~w(autocomplete)
 
+  # r3 (v7 §3.1 B6): a .fld (label, control, help, error); r3.css styles the controls.
   def input(assigns) do
     assigns = assign(assigns, :errors, input_errors(assigns.field))
     assigns = assign(assigns, :error_id, input_error_id(assigns.field, assigns.name, assigns.id))
     assigns = assign(assigns, :has_errors, assigns.errors != [])
+    assigns = assign(assigns, :help_id, input_help_id(assigns.field, assigns.name, assigns.id))
+
+    assigns =
+      assign(
+        assigns,
+        :describedby,
+        describedby([assigns.help && assigns.help_id, assigns.has_errors && assigns.error_id])
+      )
 
     ~H"""
-    <div class="space-y-1.5">
-      <label
-        :if={@label && @type != "checkbox"}
-        for={input_id(@field, @id)}
-        class="block text-xs font-510 text-text-secondary"
-      >
-        {@label}
-      </label>
-      <%!-- A checkbox needs its own branch: the generic input below is styled
-           `w-full … px-3.5 py-2`, which stretched every checkbox into a
-           full-width box floating under a block label. Here the box stays 16px
-           and the label sits beside it, inside the same <label> so the text is
-           part of the hit target. --%>
-      <label :if={@type == "checkbox"} class="flex items-center gap-2">
+    <div class={["fld", @wrapper_class]}>
+      <label :if={@label && @type != "checkbox"} for={input_id(@field, @id)}>{@label}</label>
+      <%!-- A checkbox keeps its box and its words in one <label>, so the text is
+           part of the hit target; the hidden "false" posts when it is unchecked. --%>
+      <label :if={@type == "checkbox"} class="fld-ck">
         <input type="hidden" name={input_name(@field, @name)} value="false" />
         <input
           id={input_id(@field, @id)}
@@ -709,24 +660,19 @@ defmodule CymphoWeb.Components do
           checked={checked?(input_value(@field, @value))}
           required={@required}
           disabled={@disabled}
-          aria-describedby={@has_errors && @error_id}
-          aria-invalid={@has_errors}
-          class="h-4 w-4 shrink-0 rounded border-border bg-canvas text-brand focus:ring-2 focus:ring-brand/40"
+          aria-describedby={@describedby}
+          aria-invalid={@has_errors && "true"}
           {@rest}
         />
-        <span :if={@label} class="text-sm text-text-primary">{@label}</span>
+        <span :if={@label}>{@label}</span>
       </label>
       <textarea
         :if={@type == "textarea"}
         id={input_id(@field, @id)}
         name={input_name(@field, @name)}
         rows={@rows}
-        aria-describedby={@has_errors && @error_id}
-        aria-invalid={@has_errors}
-        class={[
-          "w-full bg-surface border rounded-xl px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 transition duration-150",
-          input_border_class(@errors)
-        ]}
+        aria-describedby={@describedby}
+        aria-invalid={@has_errors && "true"}
         {@rest}
       ><%= input_value(@field, @value) %></textarea>
       <.select_menu
@@ -737,6 +683,8 @@ defmodule CymphoWeb.Components do
         options={select_options(@options)}
         disabled={@disabled}
         invalid={@has_errors}
+        label={@label}
+        describedby={@describedby}
         {@rest}
       />
       <.date_picker
@@ -749,6 +697,8 @@ defmodule CymphoWeb.Components do
         invalid={@has_errors}
         min={@min}
         max={@max}
+        label={@label}
+        describedby={@describedby}
         {@rest}
       />
       <.time_picker
@@ -759,6 +709,8 @@ defmodule CymphoWeb.Components do
         disabled={@disabled}
         required={@required}
         invalid={@has_errors}
+        label={@label}
+        describedby={@describedby}
         {@rest}
       />
       <.datetime_picker
@@ -771,6 +723,8 @@ defmodule CymphoWeb.Components do
         invalid={@has_errors}
         min={@min}
         max={@max}
+        label={@label}
+        describedby={@describedby}
         {@rest}
       />
       <input
@@ -779,24 +733,18 @@ defmodule CymphoWeb.Components do
         type={@type}
         name={input_name(@field, @name)}
         value={input_value(@field, @value)}
+        step={@step}
+        min={@min}
+        max={@max}
         required={@required}
         disabled={@disabled}
-        aria-describedby={@has_errors && @error_id}
-        aria-invalid={@has_errors}
-        class={[
-          "w-full bg-surface border rounded-xl px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 transition duration-150",
-          input_border_class(@errors)
-        ]}
+        aria-describedby={@describedby}
+        aria-invalid={@has_errors && "true"}
         {@rest}
       />
-      <p
-        :if={@has_errors}
-        id={@error_id}
-        class="flex items-center gap-1 text-xs text-error"
-        aria-live="polite"
-      >
-        <span class="hero-exclamation-circle-mini h-3.5 w-3.5 shrink-0" aria-hidden="true"></span>
-        {Enum.at(@errors, 0)}
+      <p :if={@help} class="help" id={@help_id}>{@help}</p>
+      <p :if={@has_errors} class="err" id={@error_id} aria-live="polite">
+        <CymphoWeb.Components.R3.r3_icon name="i-alert" />{Enum.at(@errors, 0)}
       </p>
     </div>
     """
@@ -842,10 +790,10 @@ defmodule CymphoWeb.Components do
   """
   def select(assigns) do
     ~H"""
-    <div class="space-y-1.5">
+    <div class="fld">
       <%!-- The visible <label> cannot use for/id here: the control is a button,
            not the (aria-hidden) native select, so the name is passed down. --%>
-      <label class="block text-xs font-510 text-text-secondary">{@label}</label>
+      <label>{@label}</label>
       <.select_menu name={@name} value={@value} options={@options} label={@label} {@rest} />
     </div>
     """
@@ -864,6 +812,7 @@ defmodule CymphoWeb.Components do
     default: nil,
     doc: "names the control for assistive tech; without it the trigger announces only its value"
 
+  attr :describedby, :string, default: nil, doc: "ids of the help and error lines"
   attr :rest, :global
 
   @doc """
@@ -908,34 +857,22 @@ defmodule CymphoWeb.Components do
         disabled={@disabled}
         title={@label}
         aria-label={@label}
+        aria-describedby={@describedby}
+        aria-invalid={@invalid && "true"}
         aria-haspopup="listbox"
         aria-expanded="false"
-        class={[
-          "flex w-full items-center gap-2 h-9 px-2.5 rounded-input text-left",
-          "bg-surface border text-caption text-ink transition duration-150",
-          "focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed",
-          (@invalid && "border-error focus:ring-red-500/40 focus:border-error") ||
-            "border-hairline hover:border-hairline-strong focus:ring-primary/30 focus:border-primary focus:shadow-[0_0_16px_-4px_rgb(var(--color-primary-rgb)/0.35)]"
-        ]}
+        class="fld-sel"
       >
-        <span
-          data-select-display
-          class={["min-w-0 flex-1 truncate", is_nil(@selected_label) && "text-ink-tertiary"]}
-        >
+        <span data-select-display class={["sel-v", is_nil(@selected_label) && "text-ink-tertiary"]}>
           {@selected_label || @placeholder}
         </span>
-        <span class="hero-chevron-down-mini w-3.5 h-3.5 shrink-0 text-ink-tertiary transition-transform duration-200 [[aria-expanded=true]_&]:rotate-180" />
+        <CymphoWeb.Components.R3.r3_icon name="i-chev-down" class="ico s16 sel-chev" />
       </button>
 
-      <div
-        data-select-popover
-        role="listbox"
-        class={[
-          "hidden absolute left-0 top-full z-50 w-full min-w-[9rem]",
-          "cympho-menu-panel rounded-lg bg-surface-2 border border-hairline shadow-elevated overflow-hidden"
-        ]}
-      >
-        <ul data-select-list class="max-h-60 overflow-y-auto py-1">
+      <%!-- .sel-pop, not the r3 .menu: .menu sets display and left/right, which
+           would beat Tailwind's `hidden` and the JS's fixed position (app.js). --%>
+      <div data-select-popover role="listbox" class="sel-pop hidden">
+        <ul data-select-list>
           <li
             :for={{label, val} <- @options}
             data-select-option
@@ -944,18 +881,15 @@ defmodule CymphoWeb.Components do
             data-select-selected={to_string(val == @value)}
             role="option"
             aria-selected={to_string(val == @value)}
-            class={[
-              "flex items-center gap-2 mx-1 px-2.5 h-8 rounded-sm cursor-pointer select-none",
-              "text-caption text-ink transition-colors duration-100",
-              "hover:bg-surface-3 data-[select-active=true]:bg-surface-3",
-              "data-[select-selected=true]:bg-brand/[0.06]"
-            ]}
           >
-            <span class="min-w-0 flex-1 truncate">{label}</span>
-            <span
+            <span class="sel-v">{label}</span>
+            <svg
               data-select-check
-              class={["hero-check-mini w-4 h-4 shrink-0 text-primary", val != @value && "invisible"]}
-            />
+              class={["ico s16", val != @value && "invisible"]}
+              aria-hidden="true"
+            >
+              <use href="#i-check" />
+            </svg>
           </li>
         </ul>
       </div>
@@ -1053,15 +987,19 @@ defmodule CymphoWeb.Components do
   defp checked?("true"), do: true
   defp checked?(_), do: false
 
-  defp input_border_class([]),
-    do:
-      "border-border hover:border-hairline-strong focus:ring-brand/25 focus:border-brand focus:shadow-[0_0_16px_-4px_rgb(var(--color-primary-rgb)/0.35)]"
-
-  defp input_border_class(_),
-    do: "border-red-500/60 focus:ring-red-500/25 focus:border-error"
-
   defp input_error_id(_field, _name, id) when is_binary(id), do: "#{id}-error"
   defp input_error_id(field, name, _id), do: "input-error-#{input_name(field, name) || "unknown"}"
+
+  defp input_help_id(_field, _name, id) when is_binary(id), do: "#{id}-help"
+  defp input_help_id(%{id: id}, _name, _id) when is_binary(id), do: "#{id}-help"
+  defp input_help_id(field, name, _id), do: "input-help-#{input_name(field, name) || "unknown"}"
+
+  defp describedby(ids) do
+    case Enum.filter(ids, &is_binary/1) do
+      [] -> nil
+      ids -> Enum.join(ids, " ")
+    end
+  end
 
   defp input_id(%{id: id}, _name), do: id
   defp input_id(_field, id) when is_binary(id), do: id
@@ -1078,7 +1016,4 @@ defmodule CymphoWeb.Components do
   defp metric_tone("warning"), do: "text-amber-300"
   defp metric_tone("danger"), do: "text-brand"
   defp metric_tone(_), do: "text-text-primary"
-
-  defp menu_align("left"), do: "left-0"
-  defp menu_align(_), do: "right-0"
 end

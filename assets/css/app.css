@@ -17,6 +17,12 @@
 @import "r3-pages/money.css";
 @import "r3-pages/onboarding.css";
 @import "r3-pages/auth.css";
+@import "r3-pages/settings.css";
+@import "r3-pages/planning.css";
+@import "r3-pages/governance.css";
+@import "r3-pages/hire.css";
+@import "r3-pages/company.css";
+@import "r3-pages/ops.css";
 
 /* ============================================
    Cympho Design Tokens — Paper & Ink (r3)

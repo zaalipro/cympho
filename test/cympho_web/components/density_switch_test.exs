@@ -22,7 +22,15 @@ defmodule CymphoWeb.Components.DensitySwitchTest do
     assert html =~ ~s(aria-pressed="true")
     assert html =~ "title=\"Compact rows (V)\""
     assert html =~ "title=\"Detailed rows (V)\""
-    assert html =~ "focus-visible:ring-2"
+
+    # v7 §3.1 B11: the r3 segmented control with the two words.
+    doc = Floki.parse_fragment!(html)
+    assert [switch] = Floki.find(doc, "div.seg.dens[data-density-switch]")
+
+    assert switch |> Floki.find("a") |> Enum.map(&String.trim(Floki.text(&1))) == [
+             "Compact",
+             "Detailed"
+           ]
   end
 
   test "marks detailed as active when detailed density is selected" do

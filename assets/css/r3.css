@@ -692,3 +692,195 @@
   .cy-r3 .d,.cy-r3 .pw,.cy-r3 .pw .nub,.cy-r3 .pl,.cy-r3 .btn-new,.cy-r3 .lnk .ico,.cy-r3 .row,.cy-r3 .opt,.cy-r3 .skip,.cy-r3 .howto>summary.pw .nub,.cy-r3 .spend,.cy-r3 .tech>summary .ico{transition:none}
 }
 
+
+/* ================================================================
+   finish-redesign shared parts (v7 §3.2)
+   Fields, the form pair, list rows, tables, dialogs, menus, the select/date popovers, segmented buttons,
+   filter panels, flash lines, swatches. Appended after the phone block above, so every phone override these
+   parts need is written in this block's own phone section (a later rule of equal specificity would otherwise
+   undo the 16 px phone inputs). Onboarding's and the signed-out pages' scoped field rules win on every
+   property they set (equal or higher specificity, loaded later).
+   ================================================================ */
+
+/* fields (Onboarding's .fld): a label over a pill control, one help line, the error line.
+   Text controls only: the select/date natives are .sr-only and stay hidden */
+.cy-r3 .fld{display:flex;flex-direction:column;gap:6px;min-width:0}
+.cy-r3 .fld>label{font-size:12px;line-height:16px;font-weight:500;color:var(--ink-2)}
+.cy-r3 .fld input:not([type=checkbox],[type=radio],[type=hidden],.sr-only){width:100%;height:40px;padding:0 16px;border-radius:var(--r-pill);background:var(--field-bg);border:1px solid var(--field);font-size:14px;color:var(--ink)}
+.cy-r3 .fld textarea{width:100%;min-height:96px;padding:10px 16px;border-radius:var(--r-row);background:var(--field-bg);border:1px solid var(--field);font-size:14px;line-height:20px;color:var(--ink);resize:vertical}
+.cy-r3 .fld :is(input,textarea)::placeholder{color:var(--ink-2);opacity:1}
+.cy-r3 .fld :is(input,textarea):focus-visible{border-color:var(--ink)}
+.cy-r3 :is(.fld input,.fld textarea,.fld-sel)[aria-invalid="true"]{border-color:var(--stopped)}
+.cy-r3 .fld :is(input,textarea):disabled{opacity:.55;cursor:not-allowed}
+.cy-r3 .err:not(.flash-msg){display:flex;align-items:center;gap:6px;font-size:13px;line-height:18px;font-weight:500;color:var(--stopped)}
+/* a checkbox: the native box beside its words, one label, so the words are part of the target */
+.cy-r3 .fld-ck{display:flex;align-items:center;gap:10px;min-height:24px;font-size:14px;line-height:20px;color:var(--ink);cursor:pointer}
+.cy-r3 .fld-ck input[type=checkbox]{width:16px;height:16px;flex:none;margin:0;accent-color:var(--ink-hi)}
+/* the select and date triggers: the same box as a text field, a chevron or the picker's glyph */
+.cy-r3 .fld-sel{display:flex;align-items:center;gap:8px;width:100%;height:40px;padding:0 12px 0 16px;border-radius:var(--r-pill);background:var(--field-bg);border:1px solid var(--field);font-size:14px;line-height:20px;color:var(--ink);text-align:left;transition:border-color .18s var(--ease)}
+.cy-r3 .fld-sel:hover,.cy-r3 .fld-sel[aria-expanded="true"]{border-color:var(--ink-2)}
+.cy-r3 .fld-sel:disabled{opacity:.55;cursor:not-allowed}
+.cy-r3 .fld-sel .sel-v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cy-r3 .fld-sel .text-ink-tertiary{color:var(--ink-2)}
+.cy-r3 .fld-sel :is(.sel-chev,.fld-ic){flex:none;color:var(--ink-2);transition:transform .2s var(--ease)}
+.cy-r3 .fld-sel .fld-ic{width:16px;height:16px}
+.cy-r3 .fld-sel[aria-expanded="true"] .sel-chev{transform:rotate(180deg)}
+/* the field grid: two columns, a .full field spans them; padded only as a card's direct child
+   (Onboarding's own .flds sit in .paper cards and keep their place) */
+.cy-r3 .flds{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.cy-r3 .flds>.full{grid-column:1 / -1}
+.cy-r3 .card>.flds{padding:8px 12px 12px}
+/* fields on the resolution card read the inverse tokens */
+.cy-r3 .ink .fld :is(input:not([type=checkbox],[type=radio],[type=hidden],.sr-only),textarea,.fld-sel){background:var(--inv-field-bg);border-color:var(--inv-field);color:var(--inv-ink-hi)}
+.cy-r3 .ink .fld>label,.cy-r3 .ink .fld .help,.cy-r3 .ink .fld-sel .text-ink-tertiary{color:var(--inv-ink-2)}
+.cy-r3 .ink .fld :is(input,textarea)::placeholder{color:var(--inv-ink-2)}
+.cy-r3 .ink .fld-ck{color:var(--inv-ink)}
+.cy-r3 .ink .fld-ck input[type=checkbox]{accent-color:var(--inv-ink-hi)}
+
+/* the form pair (form_pair/1): the field cards beside the sticky resolution card */
+.cy-r3 .fpair{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);align-items:start}
+.cy-r3 .fp-main{display:flex;flex-direction:column;gap:16px;min-width:0}
+.cy-r3 .fpair>.ink{position:sticky;top:84px}
+/* the pair's resolution card is narrower than a Next step's: the ⌘↵ hint takes its own line, so the two pills stay together */
+.cy-r3 .fpair .ink-f .kh{flex-basis:100%}
+
+/* list rows (list_row/1): the title's link covers the row (.rt2::after); actions and the block below
+   are lifted above it */
+.cy-r3 .lrow{flex-wrap:wrap}
+.cy-r3 .lrow>.row-main{flex:1 1 240px}
+.cy-r3 .lrow .lr-st,.cy-r3 .lrow .lr-tr{flex:none;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .lrow .lr-st{display:inline-flex;align-items:center;gap:6px}
+.cy-r3 .lrow .lr-acts{position:relative;z-index:1;display:inline-flex;align-items:center;gap:6px;flex:none}
+.cy-r3 .lrow .lr-below{position:relative;z-index:1;flex-basis:100%;min-width:0}
+.cy-r3 .lrow:has(>.kt)>.lr-below{padding-left:48px}
+.cy-r3 .lrow:not(:has(>.kt))::before{left:12px}
+
+/* tables (Spending's .money): a band header row, 48 px rows, hairlines, hover; the wrapper scrolls only
+   when a column still cannot fit */
+.cy-r3 .tbl-w{min-width:0;overflow-x:auto}
+.cy-r3 .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;line-height:18px}
+.cy-r3 .tbl thead th{height:32px;padding:0 12px;background:var(--band);font-size:12px;line-height:16px;font-weight:500;color:var(--ink-2);text-align:left;white-space:nowrap}
+.cy-r3 .tbl thead th:first-child{border-radius:10px 0 0 10px}
+.cy-r3 .tbl thead th:last-child{border-radius:0 10px 10px 0}
+.cy-r3 .tbl tbody :is(th,td){height:48px;padding:0 12px;border-top:1px solid var(--hair);text-align:left;font-weight:400;color:var(--ink);vertical-align:middle}
+.cy-r3 .tbl tbody tr:first-child>*{border-top:0}
+.cy-r3 .tbl tbody tr:hover>*{background:var(--hover)}
+.cy-r3 .tbl tbody tr:hover>:first-child{border-radius:var(--r-row) 0 0 var(--r-row)}
+.cy-r3 .tbl tbody tr:hover>:last-child{border-radius:0 var(--r-row) var(--r-row) 0}
+.cy-r3 .tbl tbody tr:hover>*,.cy-r3 .tbl tbody tr:hover+tr>*{border-top-color:transparent}
+.cy-r3 .tbl .mono{font-size:12px;color:var(--ink-2)}
+
+/* the root layout's entrance wrapper keeps no transform once it has played: with app.css's fill `both`, Chrome
+   computes the end state as matrix(1,0,0,1,0,0), not none, and the wrapper then contains every position:fixed
+   descendant (the dialogs below, the select/date popovers app.js places), offsetting them by the rail's width */
+.cy-r3 .page-enter{animation-fill-mode:backwards}
+/* the wrapper is a z-index:1 stacking context: while a dialog is open it rises above the phone top bar (15) and
+   tab bar (20), so the scrim covers them and the bottom sheet is not drawn under the tab bar */
+.cy-r3 .page-enter:has(.dlg-w:not(.hidden)){z-index:30}
+
+/* dialogs (CoreComponents.modal/1): a paper dialog over the overlay; .hidden must win over display:grid */
+.cy-r3 .dlg-w{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:16px}
+.cy-r3 .dlg-w.hidden{display:none}
+.cy-r3 .dlg-s{position:absolute;inset:0;background:var(--color-overlay)}
+.cy-r3 .dlg{position:relative;display:flex;flex-direction:column;gap:14px;width:100%;max-width:560px;max-height:calc(100dvh - 32px);overflow-y:auto;padding:20px;background:var(--pop);border:1px solid var(--line);border-radius:var(--r-tray);box-shadow:var(--sh-pop);color:var(--ink)}
+.cy-r3 .dlg-h{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.cy-r3 .dlg-f{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;padding-top:14px;border-top:1px solid var(--hair)}
+
+/* icon buttons on wider screens (the phone .ib is in the phone block above): 32 px, quiet */
+@media (min-width:641px){
+  .cy-r3 .ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:32px;height:32px;padding:0 6px;border-radius:var(--r-pill);color:var(--ink);transition:background .18s var(--ease)}
+  .cy-r3 .ib:hover{background:var(--hover)}
+}
+
+/* overflow menus (overflow_menu/1): the r3 menu, sized to its items and opened from the kebab's end */
+.cy-r3 .cympho-menu{position:relative}
+.cy-r3 .ib.kebab{color:var(--ink-2)}
+.cy-r3 .cympho-menu[open]>.kebab{background:var(--hover);color:var(--ink)}
+.cy-r3 .cympho-menu>.menu{left:auto;right:0;width:max-content;min-width:176px;max-width:min(320px,calc(100vw - 32px))}
+.cy-r3 .cympho-menu>.menu.al{left:0;right:auto}
+.cy-r3 .menu .warn{color:var(--stopped)}
+
+/* the select and date popovers: the .menu look without display, left or right, which Tailwind's
+   hidden and the JS's fixed position (app.js positionPopover) must keep */
+.cy-r3 .sel-pop{position:absolute;top:100%;z-index:50;min-width:9rem;padding:6px;background:var(--pop);border:1px solid var(--line);border-radius:16px;box-shadow:var(--sh-pop);color:var(--ink)}
+.cy-r3 .sel-pop [data-select-list]{max-height:240px;overflow-y:auto}
+.cy-r3 .sel-pop [role=option]{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 10px;border-radius:10px;font-size:13px;line-height:18px;color:var(--ink);cursor:pointer;user-select:none}
+.cy-r3 .sel-pop [role=option]:hover,.cy-r3 .sel-pop [data-select-active="true"]{background:var(--hover)}
+.cy-r3 .sel-pop [data-select-selected="true"]{color:var(--ink-hi);font-weight:500}
+.cy-r3 .sel-pop [role=option] .sel-v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* segmented: buttons as well as links; aria-pressed lifts like aria-current (status buttons, tabs, density) */
+.cy-r3 .seg button{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 16px;border-radius:var(--r-pill);border:1px solid transparent;font-size:13px;font-weight:500;color:var(--ink-nav);transition:background .18s var(--ease),color .18s var(--ease)}
+.cy-r3 .seg button:hover{color:var(--ink);background:var(--page-hover)}
+.cy-r3 .seg :is(a,button):is([aria-current],[aria-pressed="true"]){background:var(--lift);color:var(--ink-hi);border-color:var(--lift-line);box-shadow:var(--sh-raise)}
+.cy-r3 .seg :is(a,button):is([aria-current],[aria-pressed="true"])::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.cy-r3 .seg.dens :is(a,button){padding:0 12px}
+
+/* a filter panel opened from a band header's end opens towards the start */
+.cy-r3 .card-h .flt-p{left:auto;right:0}
+
+/* shared bits promoted from page files (same values): warn/stop pills, the wide property list, the flash line */
+.cy-r3 .pl.warn{color:var(--stopped)}
+.cy-r3 .pl.stop{background:var(--stopped-bg);border-color:var(--stopped-line);color:var(--stopped)}
+.cy-r3 .pl.stop:hover{border-color:var(--stopped)}
+/* Onboarding's .kv.wide keeps its own type and gaps */
+.cy-r3 :where([data-page]:not([data-page="onboarding"])) .kv.wide{grid-template-columns:136px minmax(0,1fr);gap:14px 12px;padding:12px 12px 14px;font-size:14px;line-height:20px}
+.cy-r3 .flash-line{display:flex;flex-direction:column;gap:6px}
+.cy-r3 .flash-msg{align-self:flex-start;padding:8px 14px;border-radius:12px;background:var(--band);border:1px solid var(--band-line);font-size:14px;line-height:20px;color:var(--ink)}
+.cy-r3 .flash-msg.err{background:var(--stopped-bg);border-color:var(--stopped-line);color:var(--stopped)}
+
+/* option rows on paper (Onboarding's .paper .opt group): well rows, a field radio, the accent edge when chosen */
+.cy-r3 :is(.card,.paper) .opts legend:not(.sr){margin-bottom:4px;font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 :is(.card,.paper) .opt{background:var(--well);border-color:var(--band-line);color:var(--ink)}
+.cy-r3 :is(.card,.paper) .opt:hover{background:var(--hover);border-color:var(--btn-line-hover)}
+.cy-r3 :is(.card,.paper) .opt .on{background:var(--lift);border:1px solid var(--tile-line);color:var(--ink-nav)}
+.cy-r3 :is(.card,.paper) .opt .radio{border-color:var(--field)}
+.cy-r3 :is(.card,.paper) .opt-in:checked+.opt{border-color:var(--accent);background:var(--well)}
+.cy-r3 :is(.card,.paper) .opt-in:checked+.opt .on{border-color:transparent}
+.cy-r3 :is(.card,.paper) .opt .ot-n{color:var(--ink)}
+.cy-r3 :is(.card,.paper) .opt .ot-s{color:var(--ink-2)}
+
+/* the breadcrumb's last item ellipsizes, so a long record name cannot overflow 390 px */
+.cy-r3 .crumb,.cy-r3 .crumb ol{min-width:0}
+.cy-r3 .crumb li:first-child{flex:none}
+.cy-r3 .crumb .back{white-space:nowrap}
+.cy-r3 .crumb [aria-current]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* a user's data colour (label, project) as a decorative swatch next to its text */
+.cy-r3 .sw{display:inline-block;width:10px;height:10px;flex:none;border-radius:50%;box-shadow:inset 0 0 0 1px var(--line)}
+
+@media (prefers-reduced-motion:reduce){
+  .cy-r3 :is(.fld-sel,.fld-sel .sel-chev,.ib,.seg button){transition:none}
+}
+
+/* ---------- 1024: the form pair stacks ---------- */
+@media (max-width:1180px){
+  .cy-r3 .fpair{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 .fpair>.ink{position:static}
+}
+
+/* ---------- phone (390) for the parts above ---------- */
+@media (max-width:640px){
+  .cy-r3 :is(.fld input:not([type=checkbox],[type=radio],[type=hidden],.sr-only),.fld-sel){height:44px}
+  .cy-r3 :is(.fld input:not([type=checkbox],[type=radio],[type=hidden],.sr-only),.fld textarea,.fld-sel){font-size:16px}
+  .cy-r3 .fld-ck{min-height:44px}
+  .cy-r3 .flds{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 .fp-main{gap:10px}
+  .cy-r3 .lrow .lr-acts{flex-basis:100%;flex-wrap:wrap}
+  .cy-r3 .lrow:has(>.kt) .lr-acts{padding-left:46px}
+  .cy-r3 .lrow:has(>.kt)>.lr-below{padding-left:46px}
+  .cy-r3 .m-hide{display:none}
+  .cy-r3 .tbl tbody :is(th,td){height:52px;padding:0 6px}
+  .cy-r3 .tbl thead th{padding:0 6px}
+  .cy-r3 .dlg-w{place-items:end stretch;padding:0}
+  .cy-r3 .dlg{max-width:none;max-height:calc(100dvh - 24px);padding:18px 16px calc(18px + env(safe-area-inset-bottom, 0px));border-radius:24px 24px 0 0}
+  .cy-r3 .cympho-menu>.menu :is(a,button){min-height:44px;justify-content:center}
+  .cy-r3 .sel-pop [role=option]{min-height:44px}
+  .cy-r3 .seg button{flex:1;justify-content:center;height:44px;padding:0 8px}
+  .cy-r3 .seg.dens{width:auto}
+  .cy-r3 .flt-p{max-width:calc(100vw - 32px)}
+  .cy-r3 :where([data-page]:not([data-page="onboarding"])) .kv.wide{grid-template-columns:minmax(0,1fr);gap:2px 0}
+  .cy-r3 :where([data-page]:not([data-page="onboarding"])) .kv.wide dd{margin-bottom:10px}
+  /* on paper the legend is the section heading (r3.css hides it on the resolution card) */
+  .cy-r3 :is(.card,.paper) .opts legend:not(.sr){position:static;width:auto;height:auto;margin:0 0 4px;overflow:visible;clip:auto;white-space:normal}
+}
