@@ -10,6 +10,9 @@
     <section class="head" aria-labelledby="sk-h">
       <h1 class="h1 big" id="sk-h">{@skill.name}</h1>
       <div class="chips">
+        <span :if={CymphoWeb.SkillLive.Index.skill_manifest_gap?(@skill)} class="chip">
+          <.status_word kind={:stopped} word="Manifest gap" />
+        </span>
         <span :if={!@skill.enabled} class="tag">Off</span>
         <.pill phx-click="toggle_skill">
           {if @skill.enabled, do: "Turn off", else: "Turn on"}

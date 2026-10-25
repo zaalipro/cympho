@@ -138,6 +138,7 @@ defmodule CymphoWeb.SkillLiveTest do
 
       assert text(doc, ~s(.head .chips button.pl[phx-click="toggle_skill"])) == "Turn off"
       assert Floki.attribute(doc, ".head .chips a.pl", "href") == ["/skills/#{skill.id}/edit"]
+      assert Floki.find(doc, ".head .chip") == []
       assert text(doc, ".sk-desc") == "Audit a repository."
       assert text(doc, ".sk-caps .tag") == "repo_audit"
       assert [_] = Floki.find(doc, ".ui-advanced-only details#skill-manifest pre")
@@ -265,6 +266,27 @@ defmodule CymphoWeb.SkillLiveTest do
       flash = :sys.get_state(view.pid).socket.assigns.flash
       assert Phoenix.Flash.get(flash, :error) == "Choose a project from this company."
       assert {:error, :not_found} = Skills.get_skill_by_identifier(identifier, company.id)
+    end
+  end
+
+  describe "SkillLive.Show manifest gap" do
+    test "a skill whose manifest fails validation says so in its head", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, skill} =
+        Skills.create_skill(%{
+          identifier: "gap-skill-#{System.unique_integer([:positive])}",
+          name: "Gap Skill",
+          version: "1.0.0",
+          manifest: %{"name" => "Gap Skill"},
+          enabled: true,
+          company_id: company.id
+        })
+
+      {:ok, view, _html} = live(conn, "/skills/#{skill.id}")
+
+      assert text(main_doc(view), ".head .chip") == "Manifest gap"
     end
   end
 

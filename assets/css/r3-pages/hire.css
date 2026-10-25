@@ -10,13 +10,15 @@
    Shared by the hire pages (v7 §4.4): a band header's end, long tokens, a native select
    ================================================================ */
 /* a band header's end holding a tag and a meta word, or two pills */
-.cy-r3 :is([data-page="hire"],[data-page="skills"],[data-page="settings"],[data-page="marketplace"]) .hr-end{display:inline-flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.cy-r3 :is([data-page="hire"],.set-main[data-section="plugins"]) .hr-end{display:inline-flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
 /* identifiers, DIDs, module names and URLs wrap instead of widening a row on phones */
 .cy-r3 .hr-wrap{overflow-wrap:anywhere}
 /* a native <select> in an r3 field (AdapterConfigFields reads its options' data-*): the field box and a chevron */
 .cy-r3 .hr-sel{position:relative;display:flex}
 .cy-r3 .hr-sel select{-webkit-appearance:none;appearance:none;padding-right:36px;cursor:pointer}
 .cy-r3 .hr-sel .ico{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--ink-2);pointer-events:none}
+/* a quiet section's one pill keeps its own width (money.css does this for Settings only) */
+.cy-r3 :is([data-page="remote"],[data-page="skills"],[data-page="marketplace"],[data-page="skill"],[data-page="plugin"]) .gl-sec>.pl{align-self:flex-start;margin-top:6px}
 /* a status word inside text (a property value, a row line) */
 .cy-r3 .hr-st{display:inline-flex;align-items:center;gap:6px}
 
@@ -88,6 +90,18 @@
 }
 
 @media (max-width:640px){
+  /* the gated Hire's ghost names the key ("Add DASHSCOPE_API_KEY"): it takes its own line above the primary
+     instead of being pushed off the card's start by r3's no-wrap phone footer */
+  .cy-r3 [data-page="hire"] .ink-f{flex-wrap:wrap}
+  .cy-r3 [data-page="hire"] .ink-f .pd{flex:1 1 100%;justify-content:center}
+  /* a row's status and tag wrap under the title, aligned with it rather than with the tile
+     (the groundwork indents only the actions and the block below) */
+  .cy-r3 :is([data-page="remote"],[data-page="skills"],.set-main[data-section="plugins"]) .lrow:has(>.kt)>.lr-st{margin-left:46px}
+  .cy-r3 :is([data-page="remote"],[data-page="skills"],.set-main[data-section="plugins"]) .lrow:has(>.kt):not(:has(>.lr-st))>.lr-tr{margin-left:46px}
+  /* the Filter panel opens across the band (its chip may sit anywhere in the wrapped header) */
+  .cy-r3 .set-main[data-section="plugins"] .card-h{position:relative}
+  .cy-r3 .set-main[data-section="plugins"] .card-h .flt-d{position:static}
+  .cy-r3 .set-main[data-section="plugins"] .card-h .flt-p{left:6px;right:6px;min-width:0;max-width:none}
   .cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
   .cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-strip>.cell:nth-child(3){border-left:0}
   .cy-r3 [data-page="marketplace"] .mk-grid{grid-template-columns:minmax(0,1fr)}
