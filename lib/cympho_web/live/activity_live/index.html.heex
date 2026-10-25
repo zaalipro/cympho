@@ -89,7 +89,7 @@
           <% else %>
             Task removed
           <% end %>
-          <span aria-hidden="true"> · </span><span class="mono">{CymphoWeb.AgentLive.Parts.stamp(activity.inserted_at)}</span>
+          <span aria-hidden="true"> · </span><span class="nw">{Calendar.strftime(activity.inserted_at, "%a %-d %b")} <span class="mono">{Calendar.strftime(activity.inserted_at, "%H:%M")}</span></span>
         </:meta>
       </.list_row>
     </.infinite_scroll>

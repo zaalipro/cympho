@@ -50,7 +50,7 @@
 .cy-r3 .rv-packet{display:flex;flex-direction:column;gap:10px;padding:0 0 10px}
 .cy-r3 .rv-lists{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .cy-r3 .rv-lists ul{display:flex;flex-direction:column;gap:4px;margin-top:4px;padding-left:16px;list-style:disc;font-size:12px;line-height:18px;color:var(--ink-2)}
-.cy-r3 :is(.rv-strip,.org-strip,.srch-strip,.org-mstrip){grid-template-columns:repeat(4,minmax(0,1fr))}
+.cy-r3 :is(.rv-strip,.org-strip,.org-mstrip){grid-template-columns:repeat(4,minmax(0,1fr))}
 .cy-r3 .rv-oldest{padding:2px 12px 8px}
 
 /* ================================================================
@@ -59,6 +59,7 @@
 .cy-r3 [data-page="activity"] .flt-p{min-width:300px}
 .cy-r3 .act-f{width:100%}
 .cy-r3 [data-page="activity"] .rm .ul{overflow-wrap:anywhere}
+.cy-r3 [data-page="activity"] .rm .nw{white-space:nowrap}
 
 /* ================================================================
    Org chart (G5): health, staffing gaps, the reporting tree (a board of tiles)
@@ -115,8 +116,9 @@
 .cy-r3 [data-page="search"] .flt-p .earlier>summary .mono{font-size:12px}
 .cy-r3 [data-page="search"] .flt-p .earlier .flds{padding:4px 0 8px}
 .cy-r3 .srch-tabs{align-self:flex-start;max-width:100%}
-.cy-r3 .srch-strip a.cell{border-radius:10px}
-.cy-r3 .srch-strip a.cell:hover{background:var(--hover)}
+/* a task result's description, and its Advanced goal and labels: one quiet line each */
+.cy-r3 .srch-snip{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cy-r3 [data-page="search"] .lr-tr{display:inline-flex;align-items:center;gap:10px}
 
 /* ================================================================
    Compare companies (G7)
@@ -141,16 +143,21 @@
   .cy-r3 :is([data-page="approvals"] .tbar .seg,.srch-tabs){width:auto;overflow-x:auto;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,var(--mask) calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,var(--mask) calc(100% - 28px),transparent)}
   .cy-r3 :is([data-page="approvals"] .tbar .seg,.srch-tabs)::-webkit-scrollbar{display:none}
   .cy-r3 [data-page="approvals"] .tbar .seg a,.cy-r3 .srch-tabs button{flex:none;padding:0 14px}
-  .cy-r3 :is(.rv-strip,.org-strip,.srch-strip,.org-mstrip){grid-template-columns:repeat(2,minmax(0,1fr))}
-  .cy-r3 :is(.rv-strip,.org-strip,.srch-strip,.org-mstrip) .cell:nth-child(odd){border-left:0}
-  .cy-r3 :is(.rv-strip,.org-strip,.srch-strip,.org-mstrip) .cell:nth-child(n+3){border-top:1px solid var(--hair)}
+  .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip){grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip) .cell:nth-child(odd){border-left:0}
+  .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip) .cell:nth-child(n+3){border-top:1px solid var(--hair)}
   .cy-r3 :is([data-page="approvals"],[data-page="reviews"]) .lr-below>.earlier>summary{min-height:44px}
   /* a status word that wraps under a tiled row lines up with the title, as the actions do */
   .cy-r3 :is([data-page="approvals"],[data-page="reviews"],[data-page="org-chart"]) .lrow:has(>.kt)>.lr-st{margin-left:46px}
   .cy-r3 .srch{padding:8px}
   .cy-r3 .srch-f .search,.cy-r3 .srch-f .pl{height:44px}
   .cy-r3 .srch-f .search input{font-size:16px}
+  /* a result's priority and kind stay beside its title: the bars alone, the word for screen readers (Tasks' phone rule) */
+  .cy-r3 [data-page="search"] .lrow>.row-main{flex-basis:200px}
+  .cy-r3 [data-page="search"] .lr-tr .prio .pt{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .cy-r3 [data-page="activity"] .flt-p{min-width:0;width:min(320px,calc(100vw - 48px))}
+  /* the row is not a link, so its task link is the target: 44 px tall, the line does not move (r3.css .gl-sub .ul) */
+  .cy-r3 [data-page="activity"] .rm .ul{padding:15px 0}
   /* the tree becomes an indented list: 16 px per level, no connectors */
   .cy-r3 .org-scroll{padding:6px 4px 8px}
   .cy-r3 .org-tree,.cy-r3 .org-tree ul{flex-direction:column;align-items:stretch;padding:0}

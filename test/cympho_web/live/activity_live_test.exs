@@ -215,6 +215,49 @@ defmodule CymphoWeb.ActivityLiveTest do
     assert Floki.find(doc, "#activities-#{status.id} .kt.p") == []
   end
 
+  test "a title change names the old and the new title, as written", %{
+    conn: conn,
+    current_company: company
+  } do
+    {:ok, issue} = Cympho.Issues.create_issue(%{title: "Title probe", company_id: company.id})
+    Repo.delete_all(Activity)
+
+    renamed =
+      insert_activity(issue, %{
+        action: "title_changed",
+        metadata: %{"from" => "fix_login", "to" => "Fix the login"}
+      })
+
+    only_to = insert_activity(issue, %{action: "title_changed", metadata: %{"to" => "New name"}})
+
+    work =
+      insert_activity(issue, %{
+        action: "work_product_created",
+        metadata: %{"title" => "release_notes.md"}
+      })
+
+    {:ok, _view, html} = live(conn, "/activity")
+    doc = main_doc(html)
+
+    assert text(doc, "#activities-#{renamed.id} .rt") ==
+             "Title changed from “fix_login” to “Fix the login”"
+
+    assert text(doc, "#activities-#{only_to.id} .rt") == "Title changed to “New name”"
+    assert text(doc, "#activities-#{work.id} .rt") == "Work product created: release_notes.md"
+  end
+
+  # An audit row keeps its clock after a day, as the Audit log's rows do.
+  test "an event's time keeps the day and the clock", %{conn: conn, current_company: company} do
+    {:ok, issue} = Cympho.Issues.create_issue(%{title: "Clock probe", company_id: company.id})
+    Repo.delete_all(Activity)
+
+    old = insert_activity(issue, %{inserted_at: ~U[2026-01-02 14:05:00Z]})
+
+    {:ok, _view, html} = live(conn, "/activity")
+
+    assert text(main_doc(html), "#activities-#{old.id} .rm .nw") == "Fri 2 Jan 14:05"
+  end
+
   test "filtered empty command clears back to the activity feed", %{
     conn: conn,
     current_company: company

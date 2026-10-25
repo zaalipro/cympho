@@ -375,6 +375,43 @@ defmodule CymphoWeb.ApprovalLiveTest do
 
       assert Approvals.get_approval!(approval.id).status == :pending
     end
+
+    test "reads acronyms in capitals and names the resolver, not their email", %{
+      conn: conn,
+      current_company: company
+    } do
+      grant_resolver(conn, company)
+      resolver = Cympho.Users.get_user!(Plug.Conn.get_session(conn, :user_id))
+
+      {:ok, agent} =
+        Agents.create_agent(%{name: "Acronym Agent", role: :cto, company_id: company.id})
+
+      {:ok, approval} =
+        Approvals.create_approval(%{
+          type: "external_api_access",
+          requested_by_agent_id: agent.id,
+          payload: %{"amount_usd" => 40}
+        })
+
+      {:ok, list_view, _html} = live(conn, "/approvals")
+
+      assert text(main_doc(list_view), ~s([data-testid="approval-row-#{approval.id}"] .rt2)) ==
+               "External API access"
+
+      {:ok, view, html} = live(conn, "/approvals/#{approval.id}")
+      doc = main_doc(html)
+
+      assert texts(doc, "h1") == ["External API access"]
+      assert "Amount USD" in texts(doc, ~s(section[aria-labelledby="ap-evidence-t"] dt))
+
+      approved = view |> render_click(:approve) |> main_doc()
+      aside = ~s(section[aria-labelledby="ap-det-t"])
+
+      details =
+        Enum.zip(texts(approved, aside <> " dt"), texts(approved, aside <> " dd")) |> Map.new()
+
+      assert details["Resolved by"] == resolver.name
+    end
   end
 
   describe "Approval detail navigation" do

@@ -3,9 +3,11 @@ defmodule CymphoWeb.SearchLiveTest do
 
   import CymphoWeb.R3PageHelpers
 
+  alias Cympho.Agents
   alias Cympho.Companies
   alias Cympho.Goals
   alias Cympho.Issues
+  alias Cympho.Labels
   alias Cympho.Projects
 
   describe "Search page" do
@@ -129,6 +131,8 @@ defmodule CymphoWeb.SearchLiveTest do
       # Results are rows: a title link, the kind as a tag.
       doc = main_doc(html)
       assert texts(doc, "#search-results .lrow .lr-tr .tag") == ["Task", "Project", "Goal"]
+      # The overview does not repeat the tab counts (Argon IMP-4).
+      assert Floki.find(doc, "#search-command .strip") == []
       assert html =~ "#{needle} current issue"
       assert html =~ "#{needle} project"
       assert html =~ "#{needle} goal"
@@ -138,6 +142,69 @@ defmodule CymphoWeb.SearchLiveTest do
       {:ok, _view, issue_tab_html} = live(conn, "/search?q=#{needle}&tab=issues")
 
       assert issue_tab_html =~ "1 task match for &quot;#{needle}&quot;"
+    end
+
+    test "a task row keeps what the old card said: project, priority, description; goal and labels in Advanced",
+         %{conn: conn, current_company: company} do
+      unique = System.unique_integer([:positive])
+      needle = "rowfind#{unique}"
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Row project #{unique}",
+          prefix: unique_prefix(),
+          company_id: company.id
+        })
+
+      {:ok, goal} =
+        Goals.create_goal(%{
+          title: "Row goal #{unique}",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission
+        })
+
+      {:ok, label} = Labels.create_label(%{name: "Row label #{unique}", company_id: company.id})
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "#{needle} task",
+          description: "Why this task matched the search",
+          company_id: company.id,
+          project_id: project.id,
+          goal_id: goal.id,
+          priority: :high,
+          status: :in_progress
+        })
+
+      {:ok, _issue} = Issues.add_label_to_issue(issue, label)
+
+      {:ok, sleeper} =
+        Agents.create_agent(%{
+          name: "#{needle} sleeper",
+          role: :engineer,
+          status: :sleeping,
+          adapter: :process,
+          company_id: company.id
+        })
+
+      {:ok, _view, html} = live(conn, "/search?q=#{needle}")
+      doc = main_doc(html)
+      row = "#search-issue-#{issue.id}"
+
+      # The Task page's words for the state; the project after the assignee slot.
+      assert text(doc, row <> " .rm") =~ "Working · Row project #{unique}"
+      assert [description, _advanced] = texts(doc, row <> " .rm .srch-snip")
+      assert description == "Why this task matched the search"
+      # Priority as the Tasks list draws it (bars and the word, High and Critical only).
+      assert text(doc, row <> " .lr-tr .prio") == "High"
+
+      advanced = text(doc, row <> " .rm .ui-advanced-only")
+      assert advanced =~ "Goal: Row goal #{unique}"
+      assert advanced =~ "Labels: Row label #{unique}"
+
+      # The heartbeat skips a sleeping agent, so it does not read as Idle.
+      assert text(doc, "#search-agent-#{sleeper.id} .lr-st") == "Sleeping"
     end
 
     test "finds an issue by ticket identifier", %{conn: conn, current_company: company} do

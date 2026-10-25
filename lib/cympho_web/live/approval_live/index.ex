@@ -240,14 +240,23 @@ defmodule CymphoWeb.ApprovalLive.Index do
   defp approval_type_label(nil), do: "none"
   defp approval_type_label(approval), do: humanize_type(approval.type)
 
-  @doc "Human words for a gate slug: \"launch_gate\" -> \"Launch gate\"."
+  @doc """
+  Human words for a slug, acronyms in capitals: \"launch_gate\" -> \"Launch gate\",
+  \"external_api_access\" -> \"External API access\". The approval pages' titles and payload labels.
+  """
   def humanize_type(nil), do: "Approval"
 
   def humanize_type(type) when is_binary(type) do
     type
     |> String.replace(["_", "-"], " ")
     |> String.capitalize()
+    |> String.split(" ")
+    |> Enum.map_join(" ", &acronym/1)
   end
+
+  @acronyms ~w(api ceo cto id pr url usd)
+  defp acronym(word),
+    do: if(String.downcase(word) in @acronyms, do: String.upcase(word), else: word)
 
   defp format_status(nil), do: "All"
 

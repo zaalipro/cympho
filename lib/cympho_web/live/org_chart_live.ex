@@ -303,7 +303,7 @@ defmodule CymphoWeb.OrgChartLive do
   attr :node, :map, required: true
 
   def agent_card(assigns) do
-    assigns = assign(assigns, :status, Parts.status(assigns.node, false))
+    assigns = assign(assigns, :status, agent_status(assigns.node))
 
     ~H"""
     <span class="tile-ag" aria-hidden="true">{Parts.initials(@node.name)}</span>
@@ -317,6 +317,11 @@ defmodule CymphoWeb.OrgChartLive do
     </span>
     """
   end
+
+  # Parts.status/2 (frozen, shared with Team) reads :sleeping as Idle; the heartbeat
+  # skips a sleeping agent (agent_heartbeat.ex), so it is named, in Parts' shape for Offline.
+  defp agent_status(%{status: :sleeping}), do: {:idle, "Sleeping"}
+  defp agent_status(agent), do: Parts.status(agent, false)
 
   defp tree_count(nodes) when is_list(nodes) do
     Enum.reduce(nodes, 0, fn node, acc -> acc + 1 + tree_count(node.children) end)

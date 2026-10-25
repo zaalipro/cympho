@@ -353,36 +353,40 @@ defmodule CymphoWeb.ActivityLive.Index do
 
     case action do
       "title_changed" ->
-        with_suffix(label, detail(metadata, "to"), &"#{&1} to “#{&2}”")
+        with_suffix(
+          label,
+          change(quoted(metadata, "from"), quoted(metadata, "to")),
+          &"#{&1} #{&2}"
+        )
 
       changed when changed in ~w(status_changed priority_changed) ->
-        with_suffix(label, change(metadata), &"#{&1} #{&2}")
+        with_suffix(
+          label,
+          change(detail(metadata, "from"), detail(metadata, "to")),
+          &"#{&1} #{&2}"
+        )
 
       _ ->
         with_suffix(label, action_suffix(action, metadata), &"#{&1}: #{&2}")
     end
   end
 
-  defp change(metadata) do
-    case {detail(metadata, "from"), detail(metadata, "to")} do
-      {_from, nil} -> nil
-      {nil, to} -> "to #{to}"
-      {from, to} -> "from #{from} to #{to}"
-    end
-  end
+  defp change(_from, nil), do: nil
+  defp change(nil, to), do: "to #{to}"
+  defp change(from, to), do: "from #{from} to #{to}"
 
   defp action_suffix("cost_incurred", metadata), do: detail(metadata, "amount")
 
   defp action_suffix("budget_threshold_exceeded", metadata),
     do: detail(metadata, "threshold_type")
 
-  defp action_suffix("work_product_created", metadata), do: detail(metadata, "title")
+  defp action_suffix("work_product_created", metadata), do: written(metadata, "title")
   defp action_suffix(_action, _metadata), do: nil
 
   defp with_suffix(label, nil, _join), do: label
   defp with_suffix(label, suffix, join), do: join.(label, suffix)
 
-  # A printable metadata value, or nil (a nested map or list is not a sentence part).
+  # A printable metadata value in words, or nil (a nested map or list is not a sentence part).
   defp detail(metadata, key) do
     case metadata_value(metadata, key) do
       value when is_binary(value) and value != "" -> String.replace(value, "_", " ")
@@ -391,6 +395,16 @@ defmodule CymphoWeb.ActivityLive.Index do
       _ -> nil
     end
   end
+
+  # A name someone wrote (a title), kept as written: its underscores are the author's.
+  defp written(metadata, key) do
+    case metadata_value(metadata, key) do
+      value when is_binary(value) and value != "" -> value
+      _ -> nil
+    end
+  end
+
+  defp quoted(metadata, key), do: if(title = written(metadata, key), do: "“#{title}”")
 
   attr :issue, :map, required: true
 

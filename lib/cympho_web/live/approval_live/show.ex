@@ -2,6 +2,7 @@ defmodule CymphoWeb.ApprovalLive.Show do
   use CymphoWeb, :live_view
   alias Cympho.Approvals
   alias CymphoWeb.AgentLive.Parts
+  alias CymphoWeb.ApprovalLive.Index
   alias CymphoWeb.UserAuth
 
   @impl true
@@ -167,12 +168,7 @@ defmodule CymphoWeb.ApprovalLive.Show do
 
   def payload_entries(_payload), do: []
 
-  defp humanize_key(key) do
-    key
-    |> to_string()
-    |> String.replace(["_", "-"], " ")
-    |> String.capitalize()
-  end
+  defp humanize_key(key), do: key |> to_string() |> humanize_type()
 
   defp payload_value(value) when is_binary(value), do: value
   defp payload_value(value) when is_number(value) or is_boolean(value), do: to_string(value)
@@ -185,19 +181,15 @@ defmodule CymphoWeb.ApprovalLive.Show do
     end
   end
 
-  @doc "Human words for a gate slug: \"release_gate\" -> \"Release gate\"."
-  def humanize_type(nil), do: "Approval"
-
-  def humanize_type(type) when is_binary(type) do
-    type
-    |> String.replace(["_", "-"], " ")
-    |> String.capitalize()
-  end
+  defdelegate humanize_type(type), to: Index
 
   defp requested_by_label(%{requested_by: %{name: name}}) when is_binary(name) and name != "",
     do: name
 
   defp requested_by_label(_approval), do: "Unknown agent"
+
+  defp resolved_by_label(%{resolved_by: %{name: name}}) when is_binary(name) and name != "",
+    do: name
 
   defp resolved_by_label(%{resolved_by: %{email: email}}) when is_binary(email) and email != "",
     do: email

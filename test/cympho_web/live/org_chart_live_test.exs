@@ -51,6 +51,23 @@ defmodule CymphoWeb.OrgChartLiveTest do
     assert html =~ "Solo Engineer"
   end
 
+  # The heartbeat skips a sleeping agent (agent_heartbeat.ex), so "Idle" would say it takes work.
+  test "a sleeping agent's tile says Sleeping, not Idle", %{conn: conn, current_company: company} do
+    {:ok, _agent} =
+      Agents.create_agent(%{
+        name: "Dozing Engineer",
+        role: :engineer,
+        status: :sleeping,
+        adapter: :process,
+        company_id: company.id
+      })
+
+    {:ok, _view, html} = live(conn, "/org-chart")
+
+    assert text(main_doc(html), ~s(button.org-t[aria-label="Dozing Engineer details"] .org-s)) ==
+             "Sleeping"
+  end
+
   test "links demand gaps to a prefilled agent hire form", %{
     conn: conn,
     current_company: company

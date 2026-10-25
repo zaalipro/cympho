@@ -167,7 +167,6 @@ defmodule CymphoWeb.SearchLive.Index do
 
     %{
       active: String.trim(query) != "",
-      result_mix: result_mix,
       summary: search_command_summary(query, total_count, filters, top_result),
       top_result: top_result,
       actions: search_command_actions(socket, total_count, active_tab, top_result, result_mix)
@@ -177,12 +176,6 @@ defmodule CymphoWeb.SearchLive.Index do
   defp empty_search_command(filters) do
     %{
       active: false,
-      result_mix: [
-        %{key: :issues, label: "Tasks", count: 0, url: ~p"/search?tab=issues"},
-        %{key: :agents, label: "Agents", count: 0, url: ~p"/search?tab=agents"},
-        %{key: :projects, label: "Projects", count: 0, url: ~p"/search?tab=projects"},
-        %{key: :goals, label: "Goals", count: 0, url: ~p"/search?tab=goals"}
-      ],
       summary: search_command_summary("", 0, filters, nil),
       top_result: nil,
       actions: starter_search_actions()
@@ -467,13 +460,30 @@ defmodule CymphoWeb.SearchLive.Index do
   @task_states %{
     backlog: "Later",
     todo: "To do",
-    in_progress: "In progress",
+    in_progress: "Working",
     in_review: "In review",
     blocked: "Blocked",
     done: "Done",
     cancelled: "Cancelled"
   }
   defp task_state(status), do: Map.get(@task_states, status) || format_search_value(status)
+
+  # A task's goal and labels (Advanced, as their filters are): one line of plain text,
+  # so its ellipsis clips text and not boxes.
+  defp task_context(issue) do
+    goal = issue.goal && "Goal: #{issue.goal.title}"
+    labels = issue.labels != [] && "Labels: #{Enum.map_join(issue.labels, ", ", & &1.name)}"
+
+    case Enum.filter([goal, labels], & &1) do
+      [] -> nil
+      parts -> Enum.join(parts, " · ")
+    end
+  end
+
+  # Parts.status/2 (frozen, shared with Team) reads :sleeping as Idle; the heartbeat
+  # skips a sleeping agent (agent_heartbeat.ex), so it is named, in Parts' shape for Offline.
+  defp agent_status(%{status: :sleeping}), do: {:idle, "Sleeping"}
+  defp agent_status(agent), do: CymphoWeb.AgentLive.Parts.status(agent, false)
 
   defp agent_line(%{title: title}) when is_binary(title) and title != "", do: title
   defp agent_line(agent), do: Agent.role_label(agent.role)

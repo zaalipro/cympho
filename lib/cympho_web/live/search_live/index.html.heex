@@ -24,7 +24,7 @@
                 {"All", ""},
                 {"Later", "backlog"},
                 {"To do", "todo"},
-                {"In progress", "in_progress"},
+                {"Working", "in_progress"},
                 {"In review", "in_review"},
                 {"Done", "done"},
                 {"Blocked", "blocked"},
@@ -247,15 +247,25 @@
             :if={issue.identifier}
             aria-hidden="true"
           > · </span>{task_state(issue.status)}<span :if={issue.assignee}><span aria-hidden="true"> · </span>{issue.assignee.name}</span>
+          <span :if={issue.project}><span aria-hidden="true"> · </span>{issue.project.name}</span>
+          <span :if={snippet(issue.description)} class="srch-snip">
+            {snippet(issue.description)}
+          </span>
+          <span :if={task_context(issue)} class="srch-snip ui-advanced-only">
+            {task_context(issue)}
+          </span>
         </:meta>
-        <:trail><span class="tag">Task</span></:trail>
+        <:trail>
+          <CymphoWeb.IssueLive.Tasks.priority priority={issue.priority} />
+          <span class="tag">Task</span>
+        </:trail>
       </.list_row>
       <.list_row
         :for={agent <- tab_items(@results, @active_tab, :agents)}
         id={"search-agent-#{agent.id}"}
         title={agent.name}
         navigate={~p"/agents/#{agent.id}"}
-        status={CymphoWeb.AgentLive.Parts.status(agent, false)}
+        status={agent_status(agent)}
       >
         <:meta>{agent_line(agent)}</:meta>
         <:trail><span class="tag">Agent</span></:trail>
@@ -306,15 +316,6 @@
             {action.label}
           </.text_link>
         </div>
-      </div>
-      <div class="strip srch-strip">
-        <.link
-          :for={mix <- @search_command.result_mix}
-          patch={mix.url}
-          class="cell"
-        >
-          <span class="v mono">{mix.count}</span><span class="l">{mix.label}</span>
-        </.link>
       </div>
       <div class="gl-sec">
         <h3 class="gl-h">Top match</h3>
