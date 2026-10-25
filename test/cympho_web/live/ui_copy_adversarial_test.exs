@@ -158,8 +158,9 @@ defmodule CymphoWeb.UiCopyAdversarialTest do
     test "/workspaces keeps its humanized phrase", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/workspaces")
 
-      assert html =~ "Workspaces",
-             "Expected humanized phrase \"Workspaces\" missing from route /workspaces"
+      # v7 §1.2: the page is titled with its rail label, "Work files".
+      assert html =~ "Work files",
+             "Expected humanized phrase \"Work files\" missing from route /workspaces"
     end
 
     # /activity: governance track

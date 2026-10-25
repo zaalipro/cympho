@@ -1,5 +1,6 @@
 defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
   use CymphoWeb, :live_view
+  alias Cympho.Projects
   alias Cympho.Workspaces
 
   @bad_service_health ~w(degraded failing failed unhealthy error)
@@ -13,8 +14,9 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
 
       {:ok,
        socket
-       |> assign(:page_title, "Workspace: #{workspace.name}")
+       |> assign(:page_title, workspace.name)
        |> assign(:workspace, workspace)
+       |> assign(:project, company_project(workspace))
        |> assign(:execution_workspaces, execution_workspaces)
        |> assign(:runtime_services, runtime_services)
        |> assign(
@@ -34,6 +36,15 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     match?(%{id: ^company_id}, socket.assigns[:current_company])
   end
 
+  defp company_project(%{project_id: nil}), do: nil
+
+  defp company_project(%{company_id: company_id, project_id: project_id}) do
+    case Projects.get_company_project(company_id, project_id) do
+      {:ok, project} -> project
+      {:error, _} -> nil
+    end
+  end
+
   @impl true
   def handle_params(_params, _url, socket) do
     {:noreply, socket}
@@ -42,242 +53,184 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
   @impl true
   def render(assigns) do
     ~H"""
-    <.page size="wide" data-ui-complex-page>
-      <%!-- The subtitle named the three panels the page already shows. It stays
-           on hover and for screen readers. --%>
-      <.header>
-        <h1
-          class="flex items-center gap-2 text-headline text-text-primary"
-          title="Project workspace overview for execution lanes, previews, and reusable runtime services."
-        >
-          <span class="min-w-0 truncate">{@workspace.name}</span>
-          <span class="sr-only">
-            — project workspace overview for execution lanes, previews, and reusable runtime services.
-          </span>
-        </h1>
-        <:actions>
-          <.app_link
-            navigate={~p"/workspaces"}
-            class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-          >
-            <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Workspaces
-          </.app_link>
-        </:actions>
-      </.header>
-
-      <section
-        data-testid="project-workspace-command"
-        class="mb-5 overflow-hidden rounded-lg border border-border bg-panel shadow-card"
-      >
-        <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                Project workspace
-              </p>
-              <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{workspace_command_badge_class(@workspace_command.tone)}"}>
-                {@workspace_command.badge}
-              </span>
-              <span
-                :if={@workspace.is_primary}
-                class="rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[11px] font-510 text-brand"
-              >
-                Primary
-              </span>
-            </div>
-
-            <%!-- The detail sentence spelled out the same counts as the metric
-                 strip below and the same next step as the panel empty states. --%>
-            <h2 class="mt-2 text-lg font-590 text-text-primary" title={@workspace_command.detail}>
-              {@workspace_command.heading}<span class="sr-only">
-                — {@workspace_command.detail}</span>
-            </h2>
-
-            <div class="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
-              <span class="max-w-full truncate rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
-                {workspace_location(@workspace)}
-              </span>
-              <span
-                :if={workspace_ref(@workspace)}
-                class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary"
-              >
-                {workspace_ref(@workspace)}
-              </span>
-              <span
-                :if={@workspace.source_type}
-                class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary"
-              >
-                {@workspace.source_type}
-              </span>
-            </div>
+    <.page_frame
+      page="workfile"
+      kind={:deep}
+      parent={{~p"/workspaces", "Work files"}}
+      current={@workspace.name}
+      tray_class="split"
+      data-ui-complex-page
+    >
+      <:head>
+        <section class="head" aria-labelledby="wf-h">
+          <h1 class="h1 big" id="wf-h">{@workspace.name}</h1>
+          <p class="sub">
+            {if @project, do: "Folder for #{@project.name}", else: "Folder with no project"}<span aria-hidden="true"> · </span>added
+            <span class="mono">{CymphoWeb.AgentLive.Parts.stamp(@workspace.inserted_at)}</span>
+          </p>
+          <div id="workfile-chips" class="chips" phx-hook="CopyToClipboard">
+            <span class="chip">
+              <.status_word
+                kind={level_kind(@workspace_command.tone)}
+                word={@workspace_command.badge}
+              />
+            </span>
+            <.chip
+              :if={copy_path(@workspace)}
+              data-copy-text={copy_path(@workspace)}
+              data-copy-success-label="Copied"
+            >
+              Copy path
+            </.chip>
           </div>
+          <.flash_line flash={@flash} />
+        </section>
+      </:head>
 
-          <.app_link
-            navigate={@workspace_command.action_path}
-            class={"inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-590 transition-colors #{workspace_command_action_class(@workspace_command.tone)}"}
-          >
-            <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
+      <.band_card id="wf-cmd-t" title="Health" data-testid="project-workspace-command">
+        <:header_end :if={@workspace_command.action_path}>
+          <.text_link navigate={@workspace_command.action_path}>
             {@workspace_command.action_label}
-          </.app_link>
+          </.text_link>
+        </:header_end>
+        <div class="gl-sec">
+          <p class="gl-big">{@workspace_command.heading}</p>
+          <p class="gl-sub">{@workspace_command.detail}</p>
         </div>
+      </.band_card>
 
-        <div class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-4">
-          <.workspace_detail_metric
-            :for={metric <- @workspace_command.metrics}
-            label={metric.label}
-            value={metric.value}
-            tone={metric.tone}
-          />
-        </div>
-      </section>
-
-      <div class="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-        <section class="overflow-hidden rounded-lg border border-border bg-panel">
-          <div class="border-b border-border px-4 py-3">
-            <p
-              class="text-sm font-590 text-text-primary"
-              title="Open lanes are worktrees or isolated directories where agents can make changes."
-            >
-              Execution lanes<span class="sr-only">
-                — open lanes are worktrees or isolated directories where agents can make changes.</span>
-            </p>
-          </div>
-
-          <div :if={!Enum.empty?(@execution_workspaces)} class="divide-y divide-border">
-            <.app_link
-              :for={ew <- @execution_workspaces}
-              navigate={~p"/workspaces/#{@workspace.id}/exec/#{ew.id}"}
-              class="group block p-4 hover:bg-surface-hover"
-            >
-              <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <h3 class="truncate text-sm font-590 text-text-primary">{ew.name}</h3>
-                    <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{execution_status_badge_class(ew.status)}"}>
-                      {status_label(ew.status)}
-                    </span>
-                  </div>
-                  <p class="mt-1 truncate text-xs text-text-tertiary">
-                    {execution_detail(ew)}
-                  </p>
-                </div>
-
-                <div class="flex shrink-0 items-center gap-2 text-xs text-text-quaternary">
-                  <span :if={ew.mode} class="rounded-full border border-border bg-surface px-2 py-1">
-                    {ew.mode}
-                  </span>
-                  <span
-                    :if={ew.branch_name}
-                    class="rounded-full border border-border bg-surface px-2 py-1"
-                  >
-                    {ew.branch_name}
-                  </span>
-                  <.icon
-                    name="hero-arrow-right-mini"
-                    class="h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100"
-                  />
-                </div>
-              </div>
-            </.app_link>
-          </div>
-
-          <.empty_state
-            :if={Enum.empty?(@execution_workspaces)}
-            title="No execution lanes"
-            message="Assign an issue to an agent and one opens here."
+      <.band_card id="wf-runs-t" title="Runs in this folder">
+        <:header_end :if={@execution_workspaces != []}>
+          <span class="meta mono">{length(@execution_workspaces)}</span>
+        </:header_end>
+        <ul :if={@execution_workspaces != []} class="rows">
+          <.list_row
+            :for={ew <- @execution_workspaces}
+            id={"exec-#{ew.id}"}
+            title={ew.name}
+            navigate={~p"/workspaces/#{@workspace.id}/exec/#{ew.id}"}
+            status={exec_status(ew.status)}
           >
-            <:icon_slot>
-              <.icon name="hero-square-3-stack-3d-mini" class="h-5 w-5" />
-            </:icon_slot>
-          </.empty_state>
-        </section>
+            <:meta>
+              <.meta_parts items={[
+                {ew.branch_name, true},
+                {ew.mode, false},
+                {execution_detail(ew), true}
+              ]} />
+            </:meta>
+          </.list_row>
+        </ul>
+        <.quiet_empty :if={@execution_workspaces == []} title="No runs yet">
+          Assign a task to an agent and its run folder opens here.
+        </.quiet_empty>
+      </.band_card>
 
-        <section class="overflow-hidden rounded-lg border border-border bg-panel">
-          <div class="border-b border-border px-4 py-3">
-            <p
-              class="text-sm font-590 text-text-primary"
-              title="Running services with a port or URL can be inspected from previews."
-            >
-              Runtime services<span class="sr-only">
-                — running services with a port or URL can be inspected from previews.</span>
-            </p>
-          </div>
-
-          <div :if={!Enum.empty?(@runtime_services)} class="divide-y divide-border">
-            <div :for={svc <- @runtime_services} class="p-4">
-              <div class="flex min-w-0 items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <h3 class="truncate text-sm font-590 text-text-primary">{svc.service_name}</h3>
-                    <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{service_status_badge_class(svc)}"}>
-                      {status_label(svc.status)}
-                    </span>
-                  </div>
-                  <p class="mt-1 truncate text-xs text-text-tertiary">
-                    {service_detail(svc)}
-                  </p>
-                </div>
-
-                <div
-                  :if={preview_href(svc) || connection_string(svc)}
-                  id={"ws-svc-conn-#{svc.id}"}
-                  phx-hook="CopyToClipboard"
-                  class="flex shrink-0 items-center gap-2"
+      <.band_card id="wf-svc-t" title="Services">
+        <ul :if={@runtime_services != []} class="rows">
+          <.list_row
+            :for={svc <- @runtime_services}
+            id={"svc-#{svc.id}"}
+            title={svc.service_name}
+            status={service_status(svc)}
+          >
+            <:meta><span class="wf-loc">{service_detail(svc)}</span></:meta>
+            <:actions :if={preview_href(svc) || connection_string(svc)}>
+              <span id={"ws-svc-conn-#{svc.id}"} class="wf-acts" phx-hook="CopyToClipboard">
+                <button
+                  :if={connection_string(svc)}
+                  type="button"
+                  class="pl"
+                  data-copy-text={connection_string(svc)}
+                  data-copy-success-label="Copied"
                 >
-                  <button
-                    :if={connection_string(svc)}
-                    type="button"
-                    data-copy-text={connection_string(svc)}
-                    data-copy-success-label="Copied"
-                    class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-                  >
-                    <.icon name="hero-clipboard-document" class="h-3.5 w-3.5" /> Copy
-                  </button>
-                  <a
-                    :if={preview_href(svc)}
-                    href={preview_href(svc)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-                  >
-                    <.icon name="hero-arrow-top-right-on-square-mini" class="h-3.5 w-3.5" /> Preview
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
+                  Copy
+                </button>
+                <a
+                  :if={preview_href(svc)}
+                  class="pl"
+                  href={preview_href(svc)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Preview <.r3_icon name="i-external" class="ico s14" />
+                </a>
+              </span>
+            </:actions>
+          </.list_row>
+        </ul>
+        <.quiet_empty :if={@runtime_services == []} title="No services running">
+          Start a dev server in a run folder and it shows up here.
+        </.quiet_empty>
+      </.band_card>
 
-          <.empty_state
-            :if={Enum.empty?(@runtime_services)}
-            title="No runtime services"
-            message="Start a dev server in a lane and it shows up here."
-          >
-            <:icon_slot>
-              <.icon name="hero-bolt-mini" class="h-5 w-5" />
-            </:icon_slot>
-          </.empty_state>
-        </section>
-      </div>
-    </.page>
+      <.band_card id="wf-det-t" title="Details" class="aside">
+        <.kv_list>
+          <:item term="Project">{if @project, do: @project.name, else: "None"}</:item>
+          <:item :if={present?(@workspace.repo_url)} term="Repository">
+            <span class="mono wf-loc">{@workspace.repo_url}</span>
+          </:item>
+          <:item :if={workspace_ref(@workspace)} term="Ref">
+            <span class="mono">{workspace_ref(@workspace)}</span>
+          </:item>
+          <:item :if={present?(@workspace.cwd)} term="Path">
+            <span class="mono wf-loc">{@workspace.cwd}</span>
+          </:item>
+          <:item :if={@workspace.source_type} term="Source">{@workspace.source_type}</:item>
+          <:item :if={@workspace.is_primary} term="Primary">Yes</:item>
+        </.kv_list>
+      </.band_card>
+    </.page_frame>
     """
   end
 
-  attr :label, :string, required: true
-  attr :value, :integer, required: true
-  attr :tone, :atom, default: :neutral
+  attr :items, :list, required: true, doc: "[{text, mono?}]; nil texts are skipped"
 
-  def workspace_detail_metric(assigns) do
+  # A row's meta line: its parts joined by a quiet separator, identifiers in mono.
+  defp meta_parts(assigns) do
+    assigns = assign(assigns, :items, Enum.reject(assigns.items, &is_nil(elem(&1, 0))))
+
     ~H"""
-    <div class="border-r border-border px-4 py-3 last:border-r-0">
-      <p class="text-[10px] font-590 uppercase leading-3 tracking-[0.12em] text-text-quaternary">
-        {@label}
-      </p>
-      <p class={"mt-1 font-mono text-xl font-590 leading-none tabular-nums #{metric_text(@tone)}"}>
-        {@value}
-      </p>
-    </div>
+    <%= for {{text, mono?}, i} <- Enum.with_index(@items) do %>
+      <span :if={i > 0} aria-hidden="true"> · </span><span class={[mono? && "mono", mono? && "wf-loc"]}>{text}</span>
+    <% end %>
     """
   end
+
+  defp level_kind(:critical), do: :stopped
+  defp level_kind(:warning), do: :waiting
+  defp level_kind(:healthy), do: :done
+  defp level_kind(_tone), do: :idle
+
+  # A run folder's state: only running and failed carry a colour (v7 §1.5).
+  defp exec_status("running"), do: {:working, "Running"}
+
+  defp exec_status(status) when status in ["failed", "error"],
+    do: {:stopped, status_label(status)}
+
+  defp exec_status(status), do: {:idle, status_label(status)}
+
+  defp service_status(service) do
+    cond do
+      unhealthy_service?(service) ->
+        {:stopped, status_label(service.health_status || service.status)}
+
+      service.status == "running" ->
+        {:done, "Running"}
+
+      true ->
+        {:idle, status_label(service.status)}
+    end
+  end
+
+  defp copy_path(workspace) do
+    cond do
+      present?(workspace.cwd) -> workspace.cwd
+      present?(workspace.repo_url) -> workspace.repo_url
+      true -> nil
+    end
+  end
+
+  defp present?(value), do: is_binary(value) and value != ""
 
   defp workspace_command(_workspace, execution_workspaces, runtime_services) do
     metrics = workspace_metrics(execution_workspaces, runtime_services)
@@ -288,30 +241,9 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
       badge: workspace_badge(tone),
       heading: workspace_heading(tone),
       detail: workspace_detail(tone, metrics),
-      action_label: workspace_action_label(tone),
-      action_path: workspace_action_path(tone),
-      metrics: [
-        %{
-          label: "Open lanes",
-          value: metrics.open_execution_workspaces,
-          tone: count_tone(metrics.open_execution_workspaces, :ok)
-        },
-        %{
-          label: "Services",
-          value: metrics.running_services,
-          tone: count_tone(metrics.running_services, :ok)
-        },
-        %{
-          label: "Preview gaps",
-          value: metrics.previewless_services,
-          tone: count_tone(metrics.previewless_services, :warning)
-        },
-        %{
-          label: "Unhealthy",
-          value: metrics.unhealthy_services,
-          tone: count_tone(metrics.unhealthy_services, :critical)
-        }
-      ]
+      # An idle folder has nothing to inspect elsewhere; Back already leads to Work files.
+      action_label: if(tone != :idle, do: "Open Health"),
+      action_path: if(tone != :idle, do: "/operations")
     }
   end
 
@@ -362,71 +294,6 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     "No execution lane or runtime service is active. Assign work to an agent to create one."
   end
 
-  defp workspace_action_label(:critical), do: "Open operations"
-  defp workspace_action_label(:warning), do: "Open operations"
-  defp workspace_action_label(:healthy), do: "Open operations"
-  defp workspace_action_label(:idle), do: "All workspaces"
-
-  defp workspace_action_path(:idle), do: "/workspaces"
-  defp workspace_action_path(_tone), do: "/operations"
-
-  defp workspace_command_badge_class(:critical),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  defp workspace_command_badge_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp workspace_command_badge_class(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp workspace_command_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp workspace_command_action_class(:critical),
-    do: "border-red-500/25 bg-red-500/10 text-red-100 hover:bg-red-500/15"
-
-  defp workspace_command_action_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15"
-
-  defp workspace_command_action_class(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
-
-  defp workspace_command_action_class(_),
-    do:
-      "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-
-  defp execution_status_badge_class(status) when status in ["open", "running", "active"],
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp execution_status_badge_class(status) when status in ["failed", "error"],
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  defp execution_status_badge_class(status) when status in ["closed", "cleaned_up"],
-    do: "border-border bg-surface text-text-tertiary"
-
-  defp execution_status_badge_class(_status),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp service_status_badge_class(service) do
-    cond do
-      unhealthy_service?(service) ->
-        "border-red-500/25 bg-red-500/10 text-red-300"
-
-      service.status == "running" ->
-        "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-      true ->
-        "border-border bg-surface text-text-tertiary"
-    end
-  end
-
-  defp metric_text(:critical), do: "text-red-300"
-  defp metric_text(:warning), do: "text-amber-300"
-  defp metric_text(:ok), do: "text-emerald-300"
-  defp metric_text(_), do: "text-text-primary"
-
-  defp count_tone(0, _tone), do: :neutral
-  defp count_tone(_count, tone), do: tone
-
   defp unhealthy_service?(service) do
     service.status in ["failed", "error"] or service.health_status in @bad_service_health
   end
@@ -435,13 +302,6 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     do: not Cympho.Workspaces.PreviewUrl.previewable?(service)
 
   defp blank?(value), do: is_nil(value) or value == ""
-
-  defp workspace_location(%{cwd: cwd}) when is_binary(cwd) and cwd != "", do: cwd
-
-  defp workspace_location(%{repo_url: repo_url}) when is_binary(repo_url) and repo_url != "",
-    do: repo_url
-
-  defp workspace_location(_workspace), do: "No path or repository configured"
 
   defp workspace_ref(%{default_ref: ref}) when is_binary(ref) and ref != "", do: ref
   defp workspace_ref(%{repo_ref: ref}) when is_binary(ref) and ref != "", do: ref
@@ -464,7 +324,7 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     |> Enum.reject(&blank?/1)
     |> case do
       [] -> "No preview endpoint or provider metadata recorded"
-      parts -> Enum.join(parts, " | ")
+      parts -> Enum.join(parts, " · ")
     end
   end
 
