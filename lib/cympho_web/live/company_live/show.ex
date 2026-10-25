@@ -35,7 +35,9 @@ defmodule CymphoWeb.CompanyLive.Show do
     do: socket |> assign(:page_title, socket.assigns.company.name)
 
   defp apply_action(socket, nil, params), do: apply_action(socket, :show, params)
-  defp apply_action(socket, :edit, _params), do: socket |> assign(:page_title, "Edit Company")
+
+  defp apply_action(socket, :edit, _params),
+    do: socket |> assign(:page_title, socket.assigns.company.name)
 
   defp apply_action(socket, :manage_access, _params),
     do: socket |> assign(:page_title, "Manage Access")
@@ -165,7 +167,7 @@ defmodule CymphoWeb.CompanyLive.Show do
 
   defp company_manager?(_user_id, _company_id), do: false
 
-  def format_inserted_at(company), do: Calendar.strftime(company.inserted_at, "%Y-%m-%d %H:%M")
+  def format_inserted_at(company), do: Calendar.strftime(company.inserted_at, "%-d %b %Y")
   def role_label("owner"), do: "Owner"
   def role_label("admin"), do: "Admin"
   def role_label("member"), do: "Member"

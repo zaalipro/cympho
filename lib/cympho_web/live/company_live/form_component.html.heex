@@ -1,49 +1,44 @@
-<div class="ember-glass mt-2 p-5 sm:p-6" id="company-form-panel">
-  <div class="flex items-start justify-between gap-3">
-    <div class="min-w-0">
-      <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-        Company setup
-      </p>
-      <h2 class="mt-1 font-serif text-lg font-510 text-text-primary">{@title}</h2>
-    </div>
-    <.link
-      patch={@patch || ~p"/companies"}
-      class="shrink-0 rounded-lg px-3 py-2 text-sm font-510 text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary"
-    >
-      Cancel
-    </.link>
-  </div>
-
-  <.simple_form
-    for={@form}
+<div id="company-form-panel">
+  <.form_pair
     id="company-form"
+    for={@form}
     phx-target={@myself}
     phx-change="validate"
     phx-submit="save"
-    class="mt-5 space-y-4"
+    heading={if @action == :new, do: "After you create it", else: "After you save"}
+    verb={if @action == :new, do: "create", else: "save"}
   >
-    <.input
-      field={@form[:name]}
-      type="text"
-      label="Company Name"
-      placeholder="Acme Corp"
-      required
-    />
+    <.band_card id="cf-t" title={if @action == :new, do: "New company", else: "Company details"}>
+      <div class="flds">
+        <.input field={@form[:name]} type="text" label="Name" placeholder="Acme Corp" required />
+        <.input
+          field={@form[:slug]}
+          type="text"
+          label="Slug"
+          placeholder="acme-corp"
+          help="Lowercase letters, numbers and hyphens only."
+          required
+        />
+      </div>
+    </.band_card>
 
-    <.input
-      field={@form[:slug]}
-      type="text"
-      label="Slug"
-      placeholder="acme-corp"
-      required
-    />
-
-    <div class="text-xs text-text-tertiary">
-      Slug must contain only lowercase letters, numbers, and hyphens.
-    </div>
-
-    <:actions>
-      <.button variant="primary" class="cta-glow">Save Company</.button>
-    </:actions>
-  </.simple_form>
+    <:effect>
+      <.consequences
+        :if={@action == :new}
+        rows={[{:done, "You become its owner, and Cympho switches you to it."}]}
+      />
+      <.consequences
+        :if={@action != :new}
+        rows={[{:done, "The new name and slug show everywhere in Cympho."}]}
+      />
+    </:effect>
+    <:secondary>
+      <.ghost_pill navigate={@patch || ~p"/companies"}>Cancel</.ghost_pill>
+    </:secondary>
+    <:primary>
+      <.primary_pill type="submit" phx-disable-with="Saving…">
+        {if @action == :new, do: "Create company", else: "Save changes"}
+      </.primary_pill>
+    </:primary>
+  </.form_pair>
 </div>

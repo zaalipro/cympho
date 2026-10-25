@@ -2,6 +2,7 @@ defmodule CymphoWeb.CompanyLiveTest do
   use CymphoWeb.LiveCase, async: false
 
   import Phoenix.LiveViewTest
+  import CymphoWeb.R3PageHelpers
 
   alias Cympho.Companies
 
@@ -21,9 +22,25 @@ defmodule CymphoWeb.CompanyLiveTest do
       assert has_element?(view, "[data-testid='company-blueprint-strip']")
       assert has_element?(view, "[data-testid='company-fleet']")
       assert has_element?(view, "[data-ui-complex-page]")
-      assert has_element?(view, "a.ui-simple-only[href='/onboarding']", "Guided setup")
-      assert has_element?(view, "a.ui-advanced-only[href='/companies/new']", "New company")
-      assert has_element?(view, "a.ui-advanced-only[href='/companies/import']", "Import")
+      # v7 C5: New company and Import are the head's pills in both modes; the guided
+      # setup is the Advanced "Start company setup".
+      assert has_element?(view, ".head .chips a[href='/companies/new']", "New company")
+      assert has_element?(view, ".head .chips a[href='/companies/import']", "Import")
+
+      assert has_element?(
+               view,
+               ".head .chips .ui-advanced-only a[href='/onboarding']",
+               "Start company setup"
+             )
+
+      assert_r3_page(main_doc(view),
+        page: "companies",
+        h1: "Companies",
+        kind: :deep,
+        parent: "Settings",
+        primaries: 0
+      )
+
       assert html =~ "Launch autonomous companies from working blueprints"
       assert html =~ "Build from blueprint"
       assert html =~ "Import company"
@@ -31,7 +48,7 @@ defmodule CymphoWeb.CompanyLiveTest do
       assert html =~ "Blueprint catalog"
       assert html =~ "Default agents"
       assert html =~ "Capabilities"
-      assert html =~ "Company fleet"
+      assert html =~ "Your companies"
       assert html =~ company.name
       assert html =~ ~s(href="/onboarding")
       assert html =~ ~s(href="/companies/import")
@@ -62,11 +79,22 @@ defmodule CymphoWeb.CompanyLiveTest do
     end
 
     test "keeps the plain company form available for manual companies", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/companies/new")
+      {:ok, view, html} = live(conn, "/companies/new")
 
-      assert html =~ "New Company"
-      assert html =~ "Company Name"
-      assert html =~ "Save Company"
+      assert html =~ "New company"
+      assert has_element?(view, ~s(#company-form input[name="company[name]"]))
+      assert has_element?(view, ~s(#company-form input[name="company[slug]"]))
+      assert has_element?(view, "#company-form .ink button.pw[type='submit']", "Create company")
+      assert has_element?(view, ~s(#company-form .ink a.pd[href="/companies"]), "Cancel")
+      refute has_element?(view, ".head .chips a[href='/companies/new']")
+
+      assert_r3_page(main_doc(view),
+        page: "companies",
+        h1: "Companies",
+        kind: :deep,
+        parent: "Settings",
+        primaries: 1
+      )
     end
 
     test "manual company creation keeps the creator as an owner", %{conn: conn} do
@@ -150,6 +178,9 @@ defmodule CymphoWeb.CompanyLiveTest do
       refute html =~ "Pause Company"
       refute html =~ "Edit Company"
       refute html =~ ">Remove<"
+      refute has_element?(view, "[phx-click='show_pause_modal']")
+      refute has_element?(view, ~s(a[href="/companies/#{company.id}/edit"]))
+      refute has_element?(view, "[phx-click='delete_membership']")
 
       html = render_click(view, "pause_company")
       assert html =~ "You cannot control this company&#39;s runtime."
@@ -208,6 +239,62 @@ defmodule CymphoWeb.CompanyLiveTest do
       render_click(view, "pause_company")
 
       assert Companies.get_company!(company.id).status == "active"
+    end
+
+    # v7 C8: Show passed `patch={true}`, so Cancel rendered href="#" and went nowhere.
+    test "the edit form's Cancel returns to the company", %{conn: conn, current_company: company} do
+      [membership] = Companies.list_memberships(company.id)
+      {:ok, _} = Companies.update_membership(membership, %{role: "owner", is_board_member: true})
+
+      {:ok, view, _html} = live(conn, "/companies/#{company.id}/edit")
+
+      assert has_element?(
+               view,
+               ~s(#company-form .ink a[href="/companies/#{company.id}"]),
+               "Cancel"
+             )
+
+      refute has_element?(view, ~s(#company-form a[href="#"]))
+    end
+
+    # v7 §2.6: while editing, the edit pair is the page's only pair and Save its only primary.
+    test "a paused company's edit page shows the form, not the Resume step", %{
+      conn: conn,
+      current_company: company
+    } do
+      [membership] = Companies.list_memberships(company.id)
+      {:ok, _} = Companies.update_membership(membership, %{role: "owner", is_board_member: true})
+      {:ok, paused} = Companies.pause_company(company, "Budget review")
+
+      {:ok, view, _html} = live(conn, "/companies/#{paused.id}/edit")
+      doc = main_doc(view)
+
+      assert_r3_page(doc,
+        page: "company",
+        h1: paused.name,
+        kind: :deep,
+        parent: "Companies",
+        primaries: 1
+      )
+
+      assert text(doc, "#company-form .ink .pw") == "Save changes"
+      assert Floki.find(doc, ".next:not(form)") == []
+      assert text(doc, ".head .chips") =~ "Paused"
+
+      {:ok, show, _html} = live(conn, "/companies/#{paused.id}")
+      show_doc = main_doc(show)
+
+      assert_r3_page(show_doc,
+        page: "company",
+        h1: paused.name,
+        kind: :deep,
+        parent: "Companies",
+        primaries: 1
+      )
+
+      assert text(show_doc, ".next .paper .nt") == "Resume #{paused.name}"
+      assert text(show_doc, ".next .paper .obj") =~ "Budget review"
+      assert Floki.find(show_doc, ~s(.next .ink button.pw[phx-click="show_resume_modal"])) != []
     end
 
     test "an open company edit form honors manager demotion", %{

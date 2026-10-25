@@ -1,328 +1,153 @@
-<div class="ember-aurora px-4 py-6 sm:px-6 lg:px-8" data-ui-complex-page>
-  <div class="relative z-[1] mx-auto max-w-7xl space-y-6">
-    <.header>
-      <div class="min-w-0">
-        <span class="ember-eyebrow">Operating companies</span>
-        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-          {@page_title}
-        </h1>
-        <%!-- The launch console directly below repeats this sentence almost
-             word for word, so simple mode only needs it said once. --%>
-        <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-          Launch, import, and govern autonomous companies from working blueprints.
-        </p>
+<.page_frame
+  page="companies"
+  kind={:deep}
+  parent={{~p"/settings/company", "Settings"}}
+  current="Companies"
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="co-h">
+      <h1 class="h1 big" id="co-h">Companies</h1>
+      <div class="chips">
+        <.pill :if={@live_action != :new} patch={~p"/companies/new"}>
+          <.r3_icon name="i-plus" />New company
+        </.pill>
+        <.pill navigate={~p"/companies/import"}>Import</.pill>
+        <span class="ui-advanced-only">
+          <.pill navigate={~p"/onboarding"}>Start company setup</.pill>
+        </span>
       </div>
-      <:actions>
-        <.app_link
-          navigate={~p"/companies/import"}
-          class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
-        >
-          <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Import
-        </.app_link>
-        <.app_link
-          navigate={~p"/companies/new"}
-          class="ui-advanced-only inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-        >
-          <.icon name="hero-plus-mini" class="h-4 w-4" /> New company
-        </.app_link>
-        <.app_link
-          navigate={~p"/onboarding"}
-          class="ui-simple-only inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-        >
-          <.icon name="hero-sparkles-mini" class="h-4 w-4" /> Guided setup
-        </.app_link>
-      </:actions>
-    </.header>
+    </section>
+  </:head>
 
-    <div
-      :if={@flash["info"]}
-      class="rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
+  <.flash_line flash={@flash} />
+
+  <.live_component
+    :if={@live_action in [:new, :edit]}
+    module={CymphoWeb.CompanyLive.FormComponent}
+    id={@company.id || :new}
+    action={@live_action}
+    company={@company}
+    current_user={@current_user}
+    patch={~p"/companies"}
+  />
+
+  <.band_card id="companies-list-t" title="Your companies" data-testid="company-fleet">
+    <:header_end>
+      <span class="meta mono">{@launch_summary.total_companies}</span>
+    </:header_end>
+    <.infinite_scroll
+      id="companies"
+      has_more={@infinite_scroll[:companies][:has_more?] || false}
+      container_class="rows"
     >
-      {@flash["info"]}
-    </div>
+      <:empty>
+        <.quiet_empty title="No companies yet">
+          Launch one from a blueprint to create a working autonomous org.
+          <:action>
+            <.pill patch={~p"/companies/new"}>New company</.pill>
+          </:action>
+        </.quiet_empty>
+      </:empty>
 
-    <div
-      :if={@flash["error"]}
-      class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
-    >
-      {@flash["error"]}
-    </div>
-
-    <section
-      data-testid="company-launch-command"
-      class="ember-glass overflow-hidden"
-    >
-      <div class="grid gap-0 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
-        <div class="p-6 lg:p-8">
-          <div class="ui-advanced-only mb-4 inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-xs font-510 text-brand">
-            <.icon name="hero-building-office-2-mini" class="h-4 w-4" /> Company launch console
-          </div>
-          <h2 class="font-serif text-2xl font-510 text-text-primary">
-            Launch autonomous companies from working blueprints
-          </h2>
-          <p class="ui-advanced-only mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-            Create a complete operating company with a CEO, CTO, specialist agents, a mission goal,
-            project, and first work queue. Use import when you are restoring a portable company export.
-          </p>
-          <%!-- The import half of that sentence points at a button simple mode
-               hides, so the simple copy stops at what the visible button does. --%>
-          <p class="ui-simple-only mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-            Pick a blueprint and Cympho creates the team, the goal, and the first issues for you.
-          </p>
-
-          <div class="mt-6 flex flex-wrap gap-3">
-            <.app_link
-              navigate={~p"/onboarding"}
-              class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-5 py-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+      <.list_row
+        :for={{dom_id, company} <- @streams.companies}
+        tag="div"
+        id={dom_id}
+        title={company.name}
+        navigate={~p"/companies/#{company}"}
+      >
+        <:meta>
+          <span class="mono">{company.slug}</span><span :if={role_label(@roles[company.id])}><span aria-hidden="true"> · </span>{role_label(@roles[company.id])}</span><span :if={
+            members_label(@member_counts[company.id])
+          }><span aria-hidden="true"> · </span>{members_label(@member_counts[company.id])}</span>
+        </:meta>
+        <:trail :if={company.status == "paused"}><span class="tag">Paused</span></:trail>
+        <:actions :if={
+          can_manage_company?(@current_user, company) or
+            can_delete_company?(@current_user, company)
+        }>
+          <.overflow_menu id={"company-menu-#{company.id}"} label={"Actions for #{company.name}"}>
+            <.menu_item
+              :if={can_manage_company?(@current_user, company)}
+              navigate={~p"/companies/#{company}/export"}
             >
-              <.icon name="hero-sparkles-mini" class="h-4 w-4" /> Build from blueprint
-            </.app_link>
-            <.app_link
-              navigate={~p"/companies/import"}
-              class="ui-advanced-only inline-flex items-center gap-2 rounded-button border border-border bg-subtle px-5 py-3 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
+              Export
+            </.menu_item>
+            <.menu_item
+              :if={can_manage_company?(@current_user, company)}
+              navigate={~p"/companies/#{company}/edit"}
             >
-              <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Import company
-            </.app_link>
-          </div>
-        </div>
+              Edit
+            </.menu_item>
+            <.menu_item
+              :if={can_delete_company?(@current_user, company)}
+              danger
+              phx-click="delete_company"
+              phx-value-id={company.id}
+              aria-label={"Delete #{company.name}"}
+              data-confirm={"Delete #{company.name}? This removes the company workspace from the fleet and cannot be undone."}
+            >
+              Delete
+            </.menu_item>
+          </.overflow_menu>
+        </:actions>
+      </.list_row>
+    </.infinite_scroll>
+  </.band_card>
 
-        <div class="border-t border-border bg-subtle/60 p-6 lg:border-l lg:border-t-0 lg:p-8">
-          <div class="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <div class="text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                System Status
-              </div>
-              <div class="mt-1 text-sm font-510 text-text-primary">
-                {@launch_summary.launch_posture.label}
-              </div>
-            </div>
-            <span class={[
-              "inline-flex rounded-full border px-3 py-1 text-xs font-510",
-              posture_badge_class(@launch_summary.launch_posture.tone)
-            ]}>
-              {String.capitalize(to_string(@launch_summary.launch_posture.tone))}
-            </span>
-          </div>
-          <p class="text-xs leading-5 text-text-secondary">
-            {@launch_summary.launch_posture.detail}
-          </p>
-
-          <div class="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-3">
-            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
-              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-                {@launch_summary.total_companies}
-              </div>
-              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                Companies
-              </div>
-            </div>
-            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
-              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-                {@launch_summary.blueprint_count}
-              </div>
-              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                Blueprints
-              </div>
-            </div>
-            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
-              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-                {@launch_summary.active_companies}
-              </div>
-              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                Active
-              </div>
-            </div>
-            <%!-- Totals summed across the whole blueprint catalog, not across
-                 your companies — trivia until you are comparing blueprints. --%>
-            <div class="ui-advanced-only ember-stat rounded-lg border border-border bg-surface p-4">
-              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-                {@launch_summary.default_agent_count}
-              </div>
-              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                Default agents
-              </div>
-            </div>
-            <div class="ui-advanced-only ember-stat rounded-lg border border-border bg-surface p-4">
-              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-                {@launch_summary.capability_count}
-              </div>
-              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                Capabilities
-              </div>
-            </div>
-            <div class="ui-advanced-only ember-stat rounded-lg border border-border bg-surface p-4">
-              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-                {@launch_summary.seed_issue_count}
-              </div>
-              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                Seed issues
-              </div>
-            </div>
-          </div>
-        </div>
+  <%!-- Advanced: the blueprint launch console and catalog, in one band. --%>
+  <.band_card
+    id="co-launch-t"
+    title="Launch from a blueprint"
+    class="ui-advanced-only"
+    data-testid="company-launch-command"
+  >
+    <:header_end>
+      <span class="meta co-st">
+        <.status_word
+          kind={posture_status(@launch_summary.launch_posture.tone)}
+          word={@launch_summary.launch_posture.label}
+        />
+      </span>
+    </:header_end>
+    <div class="gl-sec">
+      <p class="gl-big">Launch autonomous companies from working blueprints</p>
+      <p class="gl-sub">{@launch_summary.launch_posture.detail}</p>
+    </div>
+    <div class="strip s4">
+      <div class="cell">
+        <span class="v mono">{@launch_summary.total_companies}</span><span class="l">Companies</span>
       </div>
-    </section>
-
-    <section
-      data-testid="company-blueprint-strip"
-      class="rounded-xl border border-border bg-surface p-6"
-    >
-      <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <%!-- Both panels used to print a sentence describing themselves above
-               content that already demonstrates it. Kept on hover and for
-               screen readers, as in issue_digest's panel_heading. --%>
-          <h3
-            class="font-serif text-xl font-510 text-text-primary"
-            title="Each blueprint creates a real org chart, project, mission goal, and starting queue."
-          >
-            Blueprint catalog<span class="sr-only">
-              — Each blueprint creates a real org chart, project, mission goal, and starting queue.</span>
-          </h3>
-        </div>
-        <.app_link
-          navigate={~p"/onboarding"}
-          class="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-subtle px-3 py-2 text-xs font-510 text-text-primary hover:border-brand/40 hover:text-brand"
-        >
-          View all {@launch_summary.blueprint_count}
-          <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
-        </.app_link>
+      <div class="cell">
+        <span class="v mono">{@launch_summary.blueprint_count}</span><span class="l">Blueprints</span>
       </div>
-
-      <div class="stagger-children grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <.app_link
-          :for={blueprint <- @featured_blueprints}
-          navigate={~p"/onboarding"}
-          class="group flex min-h-[150px] flex-col justify-between rounded-lg border border-border bg-subtle p-4 text-left transition-colors hover:border-brand/40 hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
-        >
-          <div>
-            <div class="text-sm font-510 text-text-primary group-hover:text-brand">
-              {blueprint.name}
-            </div>
-            <p class="mt-2 line-clamp-3 text-xs leading-5 text-text-secondary">
-              {blueprint.description}
-            </p>
-          </div>
-          <div class="mt-4 flex items-center justify-between gap-3 text-xs text-text-tertiary">
-            <span>
-              {blueprint.default_agent_count} agents · {blueprint.seed_issue_count} issues
-            </span>
-            <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
-          </div>
-        </.app_link>
+      <div class="cell">
+        <span class="v mono">{@launch_summary.default_agent_count}</span><span class="l">Default agents</span>
       </div>
-    </section>
-
-    <section data-testid="company-fleet" class="rounded-xl border border-border bg-surface p-6">
-      <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h3
-            class="font-serif text-xl font-510 text-text-primary"
-            title="Open a company to manage members, pause or resume autonomy, export backups, or tune governance."
-          >
-            Company fleet<span class="sr-only">
-              — Open a company to manage members, pause or resume autonomy, export backups, or tune governance.</span>
-          </h3>
-        </div>
+      <div class="cell">
+        <span class="v mono">{@launch_summary.capability_count}</span><span class="l">Capabilities</span>
       </div>
-
-      <div id="companies-grid" phx-update="stream" class="grid gap-3 lg:grid-cols-2">
-        <div
-          id="companies-empty"
-          class="only:block hidden rounded-lg border border-border bg-subtle p-8 text-center text-sm text-text-secondary"
-        >
-          No companies yet. Launch one from a blueprint to create a working autonomous org.
-        </div>
-
-        <article
-          :for={{dom_id, company} <- @streams.companies}
-          id={dom_id}
-          class="rounded-lg border border-border bg-subtle p-5 transition-colors hover:border-border-hover hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
-        >
-          <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <.app_link
-                  navigate={~p"/companies/#{company}"}
-                  class="truncate text-base font-510 text-text-primary hover:text-brand"
-                >
-                  {company.name}
-                </.app_link>
-                <span class={[
-                  "rounded-full border px-2 py-0.5 text-[11px] font-510 uppercase tracking-wider",
-                  if(company.status == "active",
-                    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300",
-                    else: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-                  )
-                ]}>
-                  {company.status}
-                </span>
-              </div>
-              <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
-                <code class="rounded bg-black/20 px-2 py-1">{company.slug}</code>
-                <span>Created {format_inserted_at(company)}</span>
-              </div>
-              <p
-                :if={company.description}
-                class="mt-3 line-clamp-2 text-sm leading-6 text-text-secondary"
-              >
-                {company.description}
-              </p>
-            </div>
-
-            <%!-- Export / Edit / Delete printed on every row said the same three
-                 words once per company. The icons carry it; the verb stays as
-                 the accessible name and the hover tooltip. --%>
-            <div class="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-              <.app_link
-                :if={can_manage_company?(@current_user, company)}
-                navigate={~p"/companies/#{company}/export"}
-                title={"Export #{company.name}"}
-                aria-label={"Export #{company.name}"}
-                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface p-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
-              >
-                <.icon name="hero-arrow-down-tray-mini" class="h-4 w-4" />
-              </.app_link>
-              <.app_link
-                :if={can_manage_company?(@current_user, company)}
-                navigate={~p"/companies/#{company}/edit"}
-                title={"Edit #{company.name}"}
-                aria-label={"Edit #{company.name}"}
-                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface p-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
-              >
-                <.icon name="hero-pencil-square-mini" class="h-4 w-4" />
-              </.app_link>
-              <button
-                :if={can_delete_company?(@current_user, company)}
-                phx-click="delete_company"
-                phx-value-id={company.id}
-                title={"Delete #{company.name}"}
-                aria-label={"Delete #{company.name}"}
-                class="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 p-2 text-xs font-510 text-red-300 hover:bg-red-500/15"
-                data-confirm={"Delete #{company.name}? This removes the company workspace from the fleet and cannot be undone."}
-              >
-                <.icon name="hero-trash-mini" class="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </article>
-      </div>
-
-      <.infinite_scroll_footer
-        id="companies"
-        has_more={@infinite_scroll[:companies][:has_more?] || false}
-      />
-    </section>
-
-    <.live_component
-      :if={@live_action in [:new, :edit]}
-      module={CymphoWeb.CompanyLive.FormComponent}
-      id={@company.id || :new}
-      title={@page_title}
-      action={@live_action}
-      company={@company}
-      current_user={@current_user}
-      patch={@live_action == :edit}
-    />
-  </div>
-</div>
+    </div>
+    <p class="gh co-gh">Blueprint catalog</p>
+    <ul class="rows" data-testid="company-blueprint-strip">
+      <.list_row
+        :for={blueprint <- @featured_blueprints}
+        id={"blueprint-#{blueprint.key}"}
+        title={blueprint.name}
+        navigate={~p"/onboarding"}
+      >
+        <:meta>
+          {blueprint.default_agent_count} agents<span aria-hidden="true"> · </span>{blueprint.seed_issue_count} starting tasks
+        </:meta>
+      </.list_row>
+    </ul>
+    <div class="cf">
+      <.text_link navigate={~p"/onboarding"}>Build from blueprint</.text_link>
+      <.text_link navigate={~p"/companies/import"}>Import company</.text_link>
+      <.text_link navigate={~p"/onboarding"}>
+        View all {@launch_summary.blueprint_count}
+      </.text_link>
+    </div>
+  </.band_card>
+</.page_frame>
