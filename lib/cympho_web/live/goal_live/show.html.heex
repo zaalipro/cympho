@@ -1,137 +1,79 @@
-<.page size="content">
-  <.header title={@goal.title}>
-    <:actions>
-      <.app_link
-        navigate={~p"/goals"}
-        class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-      >
-        Back
-      </.app_link>
-      <.app_link
-        navigate={~p"/goals/#{@goal.id}/edit"}
-        class="cta-glow inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-on-primary hover:bg-primary-hover transition-colors"
-      >
-        <.icon name="hero-pencil-square-mini" class="w-3.5 h-3.5" /> Edit
-      </.app_link>
-    </:actions>
-  </.header>
+<.page_frame
+  page="goal"
+  kind={:deep}
+  parent={{"/goals", "Goals"}}
+  current={@goal.title}
+  tray_class="split"
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="g-h">
+      <h1 class="h1 big" id="g-h">{@goal.title}</h1>
+      <p :if={@goal.description not in [nil, ""]} class="sub gl-desc">{@goal.description}</p>
+      <div class="chips">
+        <span :if={@goal.status != "active"} class="tag">{String.capitalize(@goal.status)}</span>
+        <CymphoWeb.IssueLive.Tasks.priority priority={priority_atom(@goal.priority)} />
+        <.pill navigate={~p"/goals/#{@goal.id}/edit"}><.r3_icon name="i-pencil" />Edit</.pill>
+      </div>
+    </section>
+  </:head>
+
+  <.flash_line flash={@flash} />
 
   <% summary = goal_summary(@status_counts) %>
-
-  <.panel class="mb-5 p-5">
-    <div class="flex flex-wrap items-center gap-2 mb-4">
-      <.badge variant="status" value={to_string(@goal.status)} />
-      <.badge variant="priority" value={to_string(@goal.priority)} />
-    </div>
-
-    <div :if={summary.total > 0}>
-      <div class="mb-1.5 flex items-center justify-between text-caption text-ink-tertiary">
-        <span class="font-510 text-text-secondary">{summary.percent}% complete</span>
-        <span class="tabular-nums">{summary.done}/{summary.total} issues done</span>
-      </div>
-      <div class="h-2 overflow-hidden rounded-full bg-surface-2">
-        <div
-          class="progress-spring h-full rounded-full bg-emerald-400"
-          style={progress_width(summary.percent)}
-        >
-        </div>
-      </div>
-    </div>
-
-    <div
-      :if={summary.total == 0}
-      class="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5 text-caption font-510 text-amber-200/90"
-    >
-      <span class="hero-link-mini h-4 w-4 shrink-0"></span>
-      No issues linked yet — link work so this goal can start showing progress.
-    </div>
-
-    <hr class="ember-rule my-4" />
-
-    <p
-      :if={@goal.description not in [nil, ""]}
-      class="text-body text-ink-muted whitespace-pre-wrap leading-relaxed"
-    >
-      {@goal.description}
-    </p>
-    <p :if={@goal.description in [nil, ""]} class="text-caption text-ink-tertiary italic">
-      No description.
-    </p>
-  </.panel>
-
-  <%!-- Only statuses that actually have work: a six-cell strip where five read 0
-       repeats the "0/6 issues done" line above it without adding anything. --%>
-  <% present_statuses =
-    Enum.filter(
-      [:backlog, :todo, :in_progress, :in_review, :done, :blocked],
-      &(Map.get(@status_counts, &1, 0) > 0)
-    ) %>
-
-  <div
-    :if={present_statuses != []}
-    class="grid grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-2 mb-5"
-  >
-    <div
-      :for={status <- present_statuses}
-      class="ember-stat bg-surface-1 border border-hairline rounded-md px-3 py-2.5"
-    >
-      <div class="text-eyebrow text-ink-tertiary uppercase">{status_label(status)}</div>
-      <div class="text-card-title mt-0.5 text-ink">{Map.get(@status_counts, status, 0)}</div>
-    </div>
-  </div>
-
   <% {recent, earlier} = Enum.split_with(@issues, &recent_issue?/1) %>
 
-  <.panel>
-    <div class="p-5">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="text-card-title text-ink">Linked work</h2>
-        <span class="text-caption text-ink-tertiary">{length(@issues)} shown</span>
+  <.band_card :if={summary.total > 0} id="goal-progress-t" title="Progress">
+    <:header_end>
+      <span class="meta">{summary.percent}% complete</span>
+    </:header_end>
+    <div class="strip s4">
+      <div class="cell">
+        <span class="v mono">{summary.done}</span><span class="l">Done</span>
       </div>
-      <hr class="ember-rule mb-4" />
-
-      <div
-        :if={Enum.empty?(@issues)}
-        class="border border-dashed border-hairline rounded-md px-4 py-8 text-center"
-      >
-        <p class="text-body text-ink-muted">Nothing linked yet — and that's fine.</p>
-        <p class="mt-1 text-caption text-ink-tertiary">
-          Link an issue to this goal and its progress will show up here.
-        </p>
+      <div class="cell">
+        <span class="v mono">{summary.open}</span><span class="l">Open</span>
       </div>
-
-      <div :if={!Enum.empty?(@issues)} class="space-y-4">
-        <div :if={recent != []}>
-          <p class="mb-2 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Moved this week
-          </p>
-          <ul class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40">
-            <li :for={issue <- recent}>
-              <.issue_row issue={issue} />
-            </li>
-          </ul>
-        </div>
-
-        <div :if={earlier != []}>
-          <p class="mb-2 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Earlier
-          </p>
-          <ul class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40">
-            <li :for={issue <- earlier}>
-              <.issue_row issue={issue} />
-            </li>
-          </ul>
-        </div>
+      <div class="cell">
+        <span class="v mono">{summary.in_review}</span><span class="l">In review</span>
+      </div>
+      <div class="cell">
+        <span class="v mono">{summary.blocked}</span><span class="l">Blocked</span>
       </div>
     </div>
-  </.panel>
+  </.band_card>
 
-  <p class="mt-5 text-caption text-ink-tertiary">
-    <span :if={@goal.target_date}>
-      <span class="hero-flag-mini -mt-0.5 mr-1 inline-block h-3.5 w-3.5 text-ink-tertiary" />
-      Target {Calendar.strftime(@goal.target_date, "%b %-d, %Y")}
-      <span class="mx-1.5">·</span>
-    </span>
-    Created {Calendar.strftime(@goal.inserted_at, "%b %-d, %Y")}
-  </p>
-</.page>
+  <.band_card id="goal-work-t" title="Linked work">
+    <:header_end :if={@issues != []}>
+      <span class="meta"><span class="mono">{length(@issues)}</span> shown</span>
+    </:header_end>
+    <.quiet_empty :if={@issues == []} title="Nothing linked yet">
+      Link a task to this goal and its progress shows here.
+    </.quiet_empty>
+    <p :if={recent != []} class="gh gl-gh">Moved this week</p>
+    <ul :if={recent != []} class="rows">
+      <.goal_issue_row :for={issue <- recent} issue={issue} />
+    </ul>
+    <p :if={earlier != []} class="gh gl-gh">Earlier</p>
+    <ul :if={earlier != []} class="rows">
+      <.goal_issue_row :for={issue <- earlier} issue={issue} />
+    </ul>
+  </.band_card>
+
+  <.band_card id="goal-details-t" title="Details" class="aside">
+    <.kv_list class="wide">
+      <:item term="Type">{goal_type_label(@goal.goal_type)}</:item>
+      <:item term="Priority">{String.capitalize(@goal.priority)}</:item>
+      <:item term="Target">
+        <span :if={@goal.target_date}>
+          {Calendar.strftime(@goal.target_date, "%a %-d %b %Y")}
+        </span>
+        <span :if={!@goal.target_date}>No target date</span>
+      </:item>
+      <:item term="Created">
+        {Calendar.strftime(@goal.inserted_at, "%a %-d %b")}
+        <span class="mono">{Calendar.strftime(@goal.inserted_at, "%H:%M")}</span>
+      </:item>
+    </.kv_list>
+  </.band_card>
+</.page_frame>

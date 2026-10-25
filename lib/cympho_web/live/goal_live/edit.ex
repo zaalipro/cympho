@@ -3,7 +3,7 @@ defmodule CymphoWeb.GoalLive.Edit do
   alias Cympho.Goals
   alias CymphoWeb.GoalLive.FormHelpers
 
-  import CymphoWeb.GoalLive.FormHelpers, only: [field_hint: 1]
+  import CymphoWeb.GoalLive.FormHelpers, only: [goal_form: 1]
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -13,7 +13,7 @@ defmodule CymphoWeb.GoalLive.Edit do
 
         socket =
           socket
-          |> assign(goal: goal, form: to_form(changeset))
+          |> assign(goal: goal, form: to_form(changeset), page_title: "Edit #{goal.title}")
           |> FormHelpers.assign_context_options(current_goal_id: goal.id)
 
         {:ok, socket}

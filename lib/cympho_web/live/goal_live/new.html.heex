@@ -1,182 +1,25 @@
-<.page size="wide" data-ui-complex-page>
-  <.header
-    title="New goal"
-    subtitle="Define an outcome the company is working toward. Issues link back to a goal."
-  >
-    <:actions>
-      <.app_link
-        navigate={~p"/goals"}
-        class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-      >
-        Cancel
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <.form
-    for={@form}
-    phx-submit="save"
-    class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
-  >
-    <section class="ember-glass overflow-hidden">
-      <div class="border-b border-border px-5 py-4">
-        <div class="flex items-center gap-1.5">
-          <h2 class="text-lg font-590 text-text-primary">Anchor work to an outcome</h2>
-          <.field_hint text="Create a goal with enough hierarchy and project context that new issues can inherit the right strategic target." />
-        </div>
-        <hr class="ember-rule mt-4" />
-      </div>
-
-      <div class="space-y-6 p-5">
-        <%!-- The section eyebrows ("Outcome brief" over Title/Success criteria)
-             restated the fields below them; their help now rides a ? marker. --%>
-        <section class="space-y-4">
-          <div class="flex justify-end">
-            <.field_hint text="Write this like the owner-visible result agents should optimize for." />
-          </div>
-
-          <.input field={@form[:title]} label="Title" required placeholder="Ship Q3 launch" />
-          <.input
-            field={@form[:description]}
-            label="Success criteria"
-            type="textarea"
-            rows={5}
-            placeholder="Why this goal matters, what must be true when it is done, and what evidence should prove it."
-          />
-        </section>
-
-        <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
-          <div class="flex justify-end">
-            <.field_hint text="Missions sit at the top. Initiatives and milestones can sit under an active parent goal and inherit its project when left blank." />
-          </div>
-
-          <div class="grid gap-4 md:grid-cols-3">
-            <.input
-              type="select"
-              field={@form[:goal_type]}
-              label="Goal type"
-              value={@form[:goal_type].value || :mission}
-              options={@goal_type_options}
-            />
-            <.input
-              type="select"
-              field={@form[:parent_id]}
-              label="Parent goal"
-              value={@form[:parent_id].value || ""}
-              options={@parent_goal_options}
-            />
-            <.input
-              type="select"
-              field={@form[:project_id]}
-              label="Project context"
-              value={@form[:project_id].value || ""}
-              options={@project_options}
-            />
-          </div>
-        </section>
-
-        <section class="space-y-4">
-          <div class="flex justify-end">
-            <.field_hint text="Set priority and target timing so the board and agents can triage work correctly." />
-          </div>
-
-          <div class="grid gap-4 sm:grid-cols-3">
-            <.input
-              type="select"
-              field={@form[:status]}
-              label="Status"
-              value={@form[:status].value || "active"}
-              options={[
-                {"Active", "active"},
-                {"Completed", "completed"},
-                {"Cancelled", "cancelled"}
-              ]}
-            />
-            <.input
-              type="select"
-              field={@form[:priority]}
-              label="Priority"
-              value={@form[:priority].value || "medium"}
-              options={[
-                {"Critical", "critical"},
-                {"High", "high"},
-                {"Medium", "medium"},
-                {"Low", "low"}
-              ]}
-            />
-            <.input field={@form[:target_date]} type="date" label="Target date" />
-          </div>
-        </section>
-      </div>
+<.page_frame
+  page="goal-form"
+  kind={:deep}
+  parent={{"/goals", "Goals"}}
+  current="New goal"
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="gf-h">
+      <h1 class="h1 big" id="gf-h">New goal</h1>
+      <p class="sub">An outcome the company works toward. Tasks link back to it.</p>
     </section>
+  </:head>
 
-    <aside class="ui-advanced-only space-y-4">
-      <%!-- Steps 1 and 2 restated the form sections they sit next to. Worth
-           keeping for a first goal, not worth a column of prose every visit. --%>
-      <details
-        id="goal-setup-checklist"
-        data-testid="goal-setup-checklist"
-        class="rounded-xl border border-border bg-panel p-4 shadow-card"
-        phx-mounted={JS.ignore_attributes("open")}
-      >
-        <summary class="cursor-pointer list-none text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary [&::-webkit-details-marker]:hidden">
-          Setup checklist
-        </summary>
-        <div class="mt-4 space-y-3">
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
-              1
-            </span>
-            <div>
-              <p class="text-sm font-590 text-text-primary">Name the outcome</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                The title should describe the result, not the task list.
-              </p>
-            </div>
-          </div>
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
-              2
-            </span>
-            <div>
-              <p class="text-sm font-590 text-text-primary">Place it in the hierarchy</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Parent goals keep initiatives and milestones tied to mission context.
-              </p>
-            </div>
-          </div>
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
-              3
-            </span>
-            <div>
-              <p class="text-sm font-590 text-text-primary">Link work after save</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Attach issues from the goal board so agents inherit the target.
-              </p>
-            </div>
-          </div>
-        </div>
-      </details>
-    </aside>
+  <.flash_line flash={@flash} />
 
-    <div data-ui-simple-full-span class="border-t border-border pt-4 lg:col-span-2">
-      <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-        <.app_link
-          navigate={~p"/goals"}
-          class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-        >
-          Cancel
-        </.app_link>
-        <.button type="submit" variant="primary" class="cta-glow min-h-[40px] w-full sm:w-auto">
-          Create goal
-        </.button>
-      </div>
-      <%!-- Was a "Create behavior" prose panel beside the form. One sentence
-           under the button that triggers it is where people actually read it. --%>
-      <p class="mt-2 text-xs leading-5 text-text-tertiary sm:text-right">
-        Root goals become missions. A child goal with no project context inherits its parent's.
-      </p>
-    </div>
-  </.form>
-</.page>
+  <.goal_form
+    form={@form}
+    goal_type_options={@goal_type_options}
+    parent_goal_options={@parent_goal_options}
+    project_options={@project_options}
+    submit="Create goal"
+    cancel={~p"/goals"}
+  />
+</.page_frame>

@@ -2,6 +2,7 @@ defmodule CymphoWeb.GoalLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Issues
   alias Cympho.Goals
+  alias Cympho.Projects
 
   @impl true
   def mount(_params, _session, socket) do
@@ -68,19 +69,19 @@ defmodule CymphoWeb.GoalLive.Index do
              {:ok, _issue} <- Issues.update_issue(issue, attrs) do
           socket =
             socket
-            |> put_flash(:info, "Linked #{issue.identifier || "issue"} to #{goal.title}.")
+            |> put_flash(:info, "Linked #{issue.identifier || "task"} to #{goal.title}.")
             |> assign_goal_overview()
 
           {:noreply, reset_stream(socket, :goals, &fetch_goals(socket, &1))}
         else
           {:error, :not_found} ->
-            {:noreply, put_flash(socket, :error, "Issue or goal not found.")}
+            {:noreply, put_flash(socket, :error, "Task or goal not found.")}
 
           {:error, :inactive_goal} ->
             {:noreply, put_flash(socket, :error, "Choose an active goal.")}
 
           {:error, _changeset} ->
-            {:noreply, put_flash(socket, :error, "Could not link issue to goal.")}
+            {:noreply, put_flash(socket, :error, "Could not link task to goal.")}
         end
 
       _ ->
@@ -109,6 +110,7 @@ defmodule CymphoWeb.GoalLive.Index do
         socket
         |> assign(:alignment_summary, alignment_summary)
         |> assign(:goal_work_health, goal_work_health)
+        |> assign(:project_names, project_names(company_id))
         |> assign(:goal_link_targets, goal_link_targets(goals))
         |> assign(:goal_command, build_goal_command(alignment_summary, goal_work_health, goals))
 
@@ -116,9 +118,17 @@ defmodule CymphoWeb.GoalLive.Index do
         socket
         |> assign(:alignment_summary, Goals.empty_alignment_summary())
         |> assign(:goal_work_health, %{})
+        |> assign(:project_names, %{})
         |> assign(:goal_link_targets, [])
         |> assign(:goal_command, empty_goal_command())
     end
+  end
+
+  # The row's meta line names each goal's project.
+  defp project_names(company_id) do
+    company_id
+    |> Projects.list_projects_by_company()
+    |> Map.new(&{&1.id, &1.name})
   end
 
   defp empty_goal_command do
@@ -166,7 +176,7 @@ defmodule CymphoWeb.GoalLive.Index do
             badge: "Unlinked work",
             heading: "Link floating work to strategy",
             detail: "#{risk_issue.title} is active without a goal. Link it to one, or cancel it.",
-            action_label: "Open unlinked issue",
+            action_label: "Open unlinked task",
             action_path: "/issues/#{risk_issue.id}",
             focus_label: issue_focus_label(risk_issue),
             focus_detail:
@@ -181,7 +191,7 @@ defmodule CymphoWeb.GoalLive.Index do
             badge: "Goal blocked",
             heading: "A goal is stuck",
             detail:
-              "#{goal.title} has #{health.blocked} blocked linked issue#{plural_suffix(health.blocked)} stopping progress.",
+              "#{goal.title} has #{health.blocked} blocked linked task#{plural_suffix(health.blocked)} stopping progress.",
             action_label: "Open blocked goal",
             action_path: "/goals/#{goal.id}",
             focus_label: goal.title,
@@ -196,7 +206,7 @@ defmodule CymphoWeb.GoalLive.Index do
             badge: "Evidence ready",
             heading: "Review goal evidence",
             detail:
-              "#{goal.title} has #{health.in_review} issue#{plural_suffix(health.in_review)} waiting for review before progress can count.",
+              "#{goal.title} has #{health.in_review} task#{plural_suffix(health.in_review)} waiting for review before progress can count.",
             action_label: "Open review goal",
             action_path: "/goals/#{goal.id}",
             focus_label: goal.title,
@@ -211,11 +221,11 @@ defmodule CymphoWeb.GoalLive.Index do
             badge: "Idle goal",
             heading: "Start the idle goal",
             detail:
-              "#{goal.title} is active, but no open issue is moving it forward. Create or link execution work.",
+              "#{goal.title} is active, but no open task is moving it forward. Create or link one.",
             action_label: "Open idle goal",
             action_path: "/goals/#{goal.id}",
             focus_label: goal.title,
-            focus_detail: "#{health.done}/#{health.total} linked issues done"
+            focus_detail: "#{health.done}/#{health.total} linked tasks done"
           }
 
         summary.total_open == 0 ->
@@ -223,8 +233,8 @@ defmodule CymphoWeb.GoalLive.Index do
             tone: :empty,
             badge: "No open work",
             heading: "Nothing in flight",
-            detail: "Your goals are set, but no one is working toward them yet. Create an issue.",
-            action_label: "Create issue",
+            detail: "Your goals are set, but no one is working toward them yet. Create a task.",
+            action_label: "Create task",
             action_path: "/issues/new",
             focus_label: "No active work",
             focus_detail:
@@ -237,7 +247,7 @@ defmodule CymphoWeb.GoalLive.Index do
             badge: "On track",
             heading: "Work is tied to your goals",
             detail: "#{summary.aligned_percent}% of open work is linked to a goal.",
-            action_label: "Create issue",
+            action_label: "Create task",
             action_path: "/issues/new",
             focus_label: "#{summary.mission_aligned}/#{summary.total_open} goal-linked",
             focus_detail:
@@ -327,7 +337,7 @@ defmodule CymphoWeb.GoalLive.Index do
     do: "Set a mission so new work has something to aim at."
 
   def alignment_status_detail(:empty),
-    do: "Set a mission and link issues as work starts."
+    do: "Set a mission and link tasks as work starts."
 
   def alignment_status_detail(_status), do: "Check the goal links before starting more work."
 
@@ -336,12 +346,17 @@ defmodule CymphoWeb.GoalLive.Index do
   def goal_type_label(:milestone), do: "Milestone"
   def goal_type_label(_type), do: "Goal"
 
-  def progress_width(percent) when is_integer(percent), do: "width: #{max(min(percent, 100), 0)}%"
-  def progress_width(_percent), do: "width: 0%"
+  @doc "The row's status: blocked linked work, then work that has not moved in a week."
+  def goal_status(%{status: "active"}, %{blocked: n}) when n > 0, do: {:stopped, "#{n} blocked"}
 
-  # Quiets zeroed counts so real numbers carry the accent, not empty ones.
-  def count_color(0, _color), do: "text-text-quaternary"
-  def count_color(_count, color), do: color
+  def goal_status(%{status: "active"}, health) do
+    case goal_idle_days(health) do
+      nil -> nil
+      days -> {:waiting, "Idle #{days} days"}
+    end
+  end
+
+  def goal_status(_goal, _health), do: nil
 
   # Staleness signal: a goal with open work that has not moved in a week.
   defp goal_idle_days(%{last_activity_at: %DateTime{} = at, open: open}) when open > 0 do
@@ -355,37 +370,4 @@ defmodule CymphoWeb.GoalLive.Index do
 
   defp plural_suffix(1), do: ""
   defp plural_suffix(_), do: "s"
-
-  defp goal_command_badge_class(:attention),
-    do: "border-amber-400/25 bg-amber-400/10 text-amber-300"
-
-  defp goal_command_badge_class(:danger),
-    do: "border-red-400/25 bg-red-400/10 text-red-300"
-
-  defp goal_command_badge_class(:review),
-    do: "border-cyan-400/25 bg-cyan-400/10 text-cyan-300"
-
-  defp goal_command_badge_class(:idle),
-    do: "border-blue-400/25 bg-blue-400/10 text-blue-300"
-
-  defp goal_command_badge_class(:ok),
-    do: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300"
-
-  defp goal_command_badge_class(_),
-    do: "border-border bg-surface-1 text-text-tertiary"
-
-  defp goal_command_action_class(:danger),
-    do: "border-red-400/25 bg-red-400/10 text-red-300 hover:bg-red-400/15"
-
-  defp goal_command_action_class(:review),
-    do: "border-cyan-400/25 bg-cyan-400/10 text-cyan-300 hover:bg-cyan-400/15"
-
-  defp goal_command_action_class(:idle),
-    do: "border-blue-400/25 bg-blue-400/10 text-blue-300 hover:bg-blue-400/15"
-
-  defp goal_command_action_class(:ok),
-    do: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/15"
-
-  defp goal_command_action_class(_),
-    do: "border-amber-400/25 bg-amber-400/10 text-amber-300 hover:bg-amber-400/15"
 end

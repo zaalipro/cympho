@@ -59,10 +59,6 @@ defmodule CymphoWeb.GoalLive.Show do
     |> Map.new()
   end
 
-  def status_label(:in_progress), do: "In progress"
-  def status_label(:in_review), do: "In review"
-  def status_label(s), do: s |> to_string() |> String.capitalize()
-
   @doc "Rolls the raw status counts into a single on-track glance."
   def goal_summary(status_counts) do
     total = status_counts |> Map.values() |> Enum.sum()
@@ -79,20 +75,6 @@ defmodule CymphoWeb.GoalLive.Show do
       percent: if(total > 0, do: round(done / total * 100), else: 0)
     }
   end
-
-  # Row-level status reads as a colored dot: every row in a young goal carries the
-  # same word, so the pill was six repetitions of "Todo" instead of a signal.
-  def status_dot_class(:todo), do: "bg-accent"
-  def status_dot_class(:in_progress), do: "bg-brand"
-  def status_dot_class(:in_review), do: "bg-violet-300"
-  def status_dot_class(:done), do: "bg-emerald-400"
-  def status_dot_class(:blocked), do: "bg-red-400"
-  def status_dot_class(_status), do: "bg-text-quaternary"
-
-  def progress_width(percent) when is_integer(percent),
-    do: "width: #{max(min(percent, 100), 0)}%"
-
-  def progress_width(_percent), do: "width: 0%"
 
   # True when an issue moved in the last week — powers the "what moved" grouping.
   def recent_issue?(%{updated_at: %DateTime{} = at}),
@@ -111,32 +93,36 @@ defmodule CymphoWeb.GoalLive.Show do
 
   attr :issue, :map, required: true
 
-  def issue_row(assigns) do
+  @doc "A linked task as a row: its status word, ID and when it last moved."
+  def goal_issue_row(assigns) do
     ~H"""
-    <.app_link
+    <.list_row
+      id={"goal-task-#{@issue.id}"}
+      title={@issue.title}
       navigate={~p"/issues/#{@issue.id}"}
-      class="group flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-surface-2 hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
+      status={CymphoWeb.IssueLive.MyIssues.status_state(@issue.status)}
     >
-      <span
-        role="img"
-        aria-label={status_label(@issue.status)}
-        title={status_label(@issue.status)}
-        class={["h-2 w-2 shrink-0 rounded-full", status_dot_class(@issue.status)]}
-      >
-      </span>
-      <span :if={@issue.identifier} class="font-mono text-caption text-ink-tertiary shrink-0">
-        {@issue.identifier}
-      </span>
-      <span class="flex-1 truncate text-body text-ink-muted group-hover:text-ink">
-        {@issue.title}
-      </span>
-      <span :if={moved_label(@issue.updated_at)} class="shrink-0 text-caption text-ink-tertiary">
-        {moved_label(@issue.updated_at)}
-      </span>
-      <.badge variant="priority" value={to_string(@issue.priority)} />
-    </.app_link>
+      <:meta>
+        <span :if={@issue.identifier} class="mono">{@issue.identifier}</span><span
+          :if={@issue.identifier && moved_label(@issue.updated_at)}
+          aria-hidden="true"
+        > · </span><span :if={moved_label(@issue.updated_at)}>Moved {moved_label(
+          @issue.updated_at
+        )}</span>
+      </:meta>
+    </.list_row>
     """
   end
+
+  def goal_type_label(:mission), do: "Mission"
+  def goal_type_label(:initiative), do: "Initiative"
+  def goal_type_label(:milestone), do: "Milestone"
+  def goal_type_label(_type), do: "Goal"
+
+  # Tasks' priority bars take the issue atoms; a goal stores the word.
+  def priority_atom("critical"), do: :critical
+  def priority_atom("high"), do: :high
+  def priority_atom(_priority), do: :medium
 
   defp get_scoped_goal(socket, id) do
     with {:ok, goal} <- Goals.get_goal(id),

@@ -2,6 +2,7 @@ defmodule CymphoWeb.GoalLiveTest do
   use CymphoWeb.LiveCase, async: true
 
   import Ecto.Query
+  import CymphoWeb.R3PageHelpers
 
   alias Cympho.Goals
   alias Cympho.Issues
@@ -47,12 +48,15 @@ defmodule CymphoWeb.GoalLiveTest do
 
   describe "Goals index" do
     test "defaults to compact density", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/goals")
+      {:ok, view, html} = live(conn, "/goals")
 
-      assert html =~ "Goals"
+      # r3 (v7 L6): one list card; the density switch and the goal overview are Advanced.
+      assert_r3_page(main_doc(view), page: "goals", h1: "Goals", kind: :root, primaries: 0)
+      assert has_element?(view, "#goals-list-t", "Goals")
+      assert has_element?(view, ".card-h .ui-advanced-only [data-density-switch]")
       assert html =~ "Compact"
       assert html =~ "Detailed"
-      assert html =~ "Goals Overview"
+      assert has_element?(view, ".ui-advanced-only #goal-overview-t", "Goals overview")
       refute html =~ "Mission alignment"
     end
 
@@ -98,19 +102,28 @@ defmodule CymphoWeb.GoalLiveTest do
 
       {:ok, view, html} = live(conn, "/goals?density=detailed")
 
-      assert html =~ "Goals Overview"
+      assert html =~ "Goals overview"
       assert html =~ "Link floating work to strategy"
-      assert html =~ "Open unlinked issue"
+      assert html =~ "Open unlinked task"
       assert html =~ "Attach"
       assert html =~ "Needs link"
       assert html =~ "Blocked goals"
-      assert html =~ "Mission alignment"
+      assert has_element?(view, ".ui-advanced-only #goal-alignment-t", "Mission alignment")
       assert html =~ "75% of open work is goal-linked"
-      assert html =~ "Highest-risk floating work"
+      assert has_element?(view, ".ui-advanced-only #goal-risk-t", "Highest-risk floating work")
       assert html =~ "Goal page floating issue"
-      assert html =~ "Goal page mission"
-      assert html =~ "1/4 linked issues"
-      assert html =~ "25% complete"
+
+      assert has_element?(
+               view,
+               "[id^='goals-'] a.rt2[href='/goals/#{mission.id}']",
+               "Goal page mission"
+             )
+
+      assert has_element?(view, "[id^='goals-'] .rm", "1/4 tasks")
+      assert has_element?(view, "[id^='goals-'] .lr-st", "1 blocked")
+      assert has_element?(view, "[id^='goals-'] .lr-tr", "25%")
+      assert has_element?(view, "#goal-menu-#{mission.id} button[phx-click='delete_goal']")
+      assert has_element?(view, "#goal-menu-#{mission.id} a[href='/goals/#{mission.id}/edit']")
 
       html =
         view
@@ -118,9 +131,9 @@ defmodule CymphoWeb.GoalLiveTest do
         |> render_submit(%{"issue_id" => floating.id, "goal_id" => mission.id})
 
       assert html =~ "100% of open work is goal-linked"
-      assert html =~ "No open unlinked issues in this company."
-      assert html =~ "1/5 linked issues"
-      assert html =~ "20% complete"
+      assert html =~ "No open unlinked tasks in this company."
+      assert has_element?(view, "[id^='goals-'] .rm", "1/5 tasks")
+      assert has_element?(view, "[id^='goals-'] .lr-tr", "20%")
 
       {:ok, linked_issue} = Issues.get_issue(floating.id)
       assert linked_issue.goal_id == mission.id
@@ -150,13 +163,24 @@ defmodule CymphoWeb.GoalLiveTest do
           })
       end
 
-      {:ok, _view, html} = live(conn, "/goals/#{goal.id}")
+      {:ok, view, html} = live(conn, "/goals/#{goal.id}")
 
+      # r3 (v7 L8): a deep page; progress is one strip, linked tasks are rows.
+      assert_r3_page(main_doc(view),
+        page: "goal",
+        h1: "Show page mission",
+        kind: :deep,
+        parent: "Goals",
+        primaries: 0
+      )
+
+      assert has_element?(view, "#goal-progress-t", "Progress")
+      assert html =~ "50% complete"
       assert html =~ "Linked work"
-      assert html =~ "% complete"
       assert html =~ "Moved this week"
       assert html =~ "Show page todo"
-      assert html =~ "2 shown"
+      assert has_element?(view, "#goal-work-t + .meta", "2 shown")
+      assert has_element?(view, "a[href='/goals/#{goal.id}/edit']", "Edit")
     end
 
     test "shows a reassuring empty state when nothing is linked", %{
@@ -172,8 +196,9 @@ defmodule CymphoWeb.GoalLiveTest do
 
       {:ok, _view, html} = live(conn, "/goals/#{goal.id}")
 
-      assert html =~ "No issues linked yet"
+      # One quiet line, not a progress panel and a list both saying it is empty.
       assert html =~ "Nothing linked yet"
+      refute html =~ "% complete"
     end
 
     test "does not expose a legacy cross-company issue linked to the goal", %{
@@ -202,7 +227,6 @@ defmodule CymphoWeb.GoalLiveTest do
       {:ok, _view, html} = live(conn, "/goals/#{goal.id}")
 
       refute html =~ foreign_issue.title
-      assert html =~ "No issues linked yet"
       assert html =~ "Nothing linked yet"
     end
   end
@@ -211,21 +235,26 @@ defmodule CymphoWeb.GoalLiveTest do
     test "renders the alignment planning form", %{conn: conn} do
       {:ok, view, html} = live(conn, "/goals/new")
 
-      # The section eyebrows restated the fields under them and each carried a
-      # help paragraph; the help is now a ? marker's title/aria-label.
+      # r3 (v7 L7): a form pair; the ? hints and the setup checklist are gone.
+      assert_r3_page(main_doc(view),
+        page: "goal-form",
+        h1: "New goal",
+        kind: :deep,
+        parent: "Goals",
+        primaries: 1
+      )
+
       refute html =~ "Goal alignment plan"
       refute html =~ "Strategy hierarchy"
       refute html =~ "Outcome brief"
-      assert html =~ "Anchor work to an outcome"
-      assert html =~ "Write this like the owner-visible result agents should optimize for."
-      assert html =~ "Missions sit at the top."
-      assert html =~ "Goal type"
+      refute html =~ "Setup checklist"
+      assert has_element?(view, "form#goal-form.fpair[phx-submit='save']")
+      assert has_element?(view, "#goal-form .ink button.pw[type='submit']", "Create goal")
+      assert html =~ "Missions sit at the top; an initiative with no parent becomes a mission."
+      assert html =~ "Where it fits"
       assert html =~ "Parent goal"
-      assert html =~ "Project context"
-      assert html =~ "Setup checklist"
-      assert html =~ "Root goals become missions"
-      # The aside was the only panel on this page with no mode gate at all.
-      assert has_element?(view, "aside.ui-advanced-only [data-testid='goal-setup-checklist']")
+      assert html =~ "New tasks can be linked to it."
+      refute has_element?(view, "[data-testid='goal-setup-checklist']")
     end
 
     test "renders current-company project and parent choices", %{conn: conn} do
@@ -371,15 +400,23 @@ defmodule CymphoWeb.GoalLiveTest do
     test "renders hierarchy and project controls", %{conn: conn} do
       {:ok, goal} = create_goal(%{title: "Editable mission", goal_type: :mission})
 
-      {:ok, _view, html} = live(conn, "/goals/#{goal.id}/edit")
+      {:ok, view, html} = live(conn, "/goals/#{goal.id}/edit")
+
+      assert_r3_page(main_doc(view),
+        page: "goal-form",
+        h1: "Edit Editable mission",
+        kind: :deep,
+        parent: "Goals",
+        primaries: 1
+      )
 
       refute html =~ "Goal alignment plan"
-      assert html =~ "Maintain the strategic target"
-      assert html =~ "Move this goal carefully."
-      assert html =~ "Goal type"
+      refute html =~ "Maintenance checklist"
+      assert has_element?(view, ".crumb [aria-current]", "Edit goal")
+      assert has_element?(view, "#goal-form .ink button.pw[type='submit']", "Save goal")
+      assert has_element?(view, "#goal-form .ink a[href='/goals/#{goal.id}']", "Cancel")
       assert html =~ "Parent goal"
-      assert html =~ "Project context"
-      assert html =~ "Maintenance checklist"
+      assert html =~ "No project context"
     end
 
     test "updates hierarchy and project context", %{conn: conn} do

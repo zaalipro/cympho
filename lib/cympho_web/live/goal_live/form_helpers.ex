@@ -1,23 +1,99 @@
 defmodule CymphoWeb.GoalLive.FormHelpers do
   @moduledoc false
 
-  use Phoenix.Component
+  use CymphoWeb, :html
 
   alias Cympho.{Goals, Projects}
 
-  attr :text, :string, required: true
+  attr :form, :any, required: true
+  attr :goal_type_options, :list, required: true
+  attr :parent_goal_options, :list, required: true
+  attr :project_options, :list, required: true
+  attr :submit, :string, required: true, doc: "\"Create goal\" | \"Save goal\""
+  attr :cancel, :string, required: true, doc: "where Cancel goes"
 
-  @doc "Collapses a form section's help paragraph into a hoverable `?` marker."
-  def field_hint(assigns) do
+  @doc "The goal form shared by New and Edit (v7 L7/L9): two field cards and the ink card."
+  def goal_form(assigns) do
     ~H"""
-    <span
-      role="img"
-      aria-label={@text}
-      title={@text}
-      class="inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-[11px] font-590 text-text-quaternary"
-    >
-      ?
-    </span>
+    <.form_pair id="goal-form" for={@form} phx-submit="save" heading="After you save" verb="save">
+      <.band_card id="gf-goal-t" title="Goal">
+        <div class="flds">
+          <.input
+            field={@form[:title]}
+            label="Title"
+            required
+            placeholder="Ship Q3 launch"
+            wrapper_class="full"
+          />
+          <.input
+            field={@form[:description]}
+            label="Success criteria"
+            type="textarea"
+            rows={5}
+            placeholder="What must be true when it is done, and what proves it."
+            wrapper_class="full"
+          />
+        </div>
+      </.band_card>
+
+      <.band_card id="gf-fit-t" title="Where it fits">
+        <div class="flds">
+          <.input
+            type="select"
+            field={@form[:goal_type]}
+            label="Type"
+            value={@form[:goal_type].value || :mission}
+            options={@goal_type_options}
+            help="Missions sit at the top; an initiative with no parent becomes a mission."
+          />
+          <.input
+            type="select"
+            field={@form[:parent_id]}
+            label="Parent goal"
+            value={@form[:parent_id].value || ""}
+            options={@parent_goal_options}
+          />
+          <.input
+            type="select"
+            field={@form[:project_id]}
+            label="Project"
+            value={@form[:project_id].value || ""}
+            options={@project_options}
+            help="Left empty, a child goal uses its parent's project."
+          />
+          <.input
+            type="select"
+            field={@form[:status]}
+            label="Status"
+            value={@form[:status].value || "active"}
+            options={[{"Active", "active"}, {"Completed", "completed"}, {"Cancelled", "cancelled"}]}
+          />
+          <.input
+            type="select"
+            field={@form[:priority]}
+            label="Priority"
+            value={@form[:priority].value || "medium"}
+            options={[
+              {"Critical", "critical"},
+              {"High", "high"},
+              {"Medium", "medium"},
+              {"Low", "low"}
+            ]}
+          />
+          <.input field={@form[:target_date]} type="date" label="Target date" />
+        </div>
+      </.band_card>
+
+      <:effect>
+        <.consequences rows={[{:done, "New tasks can be linked to it."}]} />
+      </:effect>
+      <:secondary>
+        <.ghost_pill navigate={@cancel}>Cancel</.ghost_pill>
+      </:secondary>
+      <:primary>
+        <.primary_pill type="submit" phx-disable-with="Saving…">{@submit}</.primary_pill>
+      </:primary>
+    </.form_pair>
     """
   end
 

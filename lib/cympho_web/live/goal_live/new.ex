@@ -4,7 +4,7 @@ defmodule CymphoWeb.GoalLive.New do
   alias Cympho.Goals.Goal
   alias CymphoWeb.GoalLive.FormHelpers
 
-  import CymphoWeb.GoalLive.FormHelpers, only: [field_hint: 1]
+  import CymphoWeb.GoalLive.FormHelpers, only: [goal_form: 1]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -12,7 +12,7 @@ defmodule CymphoWeb.GoalLive.New do
 
     socket =
       socket
-      |> assign(form: to_form(changeset))
+      |> assign(page_title: "New goal", form: to_form(changeset))
       |> FormHelpers.assign_context_options()
 
     {:ok, socket}
