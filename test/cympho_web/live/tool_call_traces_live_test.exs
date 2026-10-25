@@ -1,6 +1,8 @@
 defmodule CymphoWeb.ToolCallTracesLiveTest do
   use CymphoWeb.LiveCase, async: true
 
+  import CymphoWeb.R3PageHelpers
+
   alias Cympho.Repo
   alias Cympho.Issues
   alias Cympho.ToolCallTraces
@@ -37,12 +39,63 @@ defmodule CymphoWeb.ToolCallTracesLiveTest do
 
   test "shows the empty state when there are no traces", %{conn: conn} do
     {:ok, _view, html} = live(conn, "/tool-call-traces")
-    assert html =~ "Trace command"
-    assert html =~ "No traces yet"
+    doc = main_doc(html)
+
+    # r3 (v7 O2): a root page under Team; its one header control checks the chain.
+    assert_r3_page(doc, page: "steps", h1: "Step log", kind: :root, primaries: 0)
+    assert texts(doc, ".ctx-end button[phx-click='verify_integrity']") == ["Check the chain"]
+
+    # The trace command is a band: its heading, and the chain's state as a word.
+    assert text(doc, "#trace-command .h2") == "Audit chain"
+    assert text(doc, "#trace-command .card-h .st-w") == "Integrity not checked"
     assert html =~ "Launch runtime to capture tool evidence"
-    assert html =~ "No tool evidence captured yet"
-    assert html =~ "Launch runtime from Operations"
+
+    # The empty table keeps its in-stream row, with a quiet line inside.
+    assert text(doc, "#traces-tbody #traces-empty .gl-big") == "No tool evidence captured yet"
+    assert html =~ "Launch runtime from Health"
     assert html =~ ~s(href="/operations#runtime-launch-checklist")
+  end
+
+  test "the filters sit behind one Filter chip and exports in the Steps header", %{
+    conn: conn,
+    current_company: company
+  } do
+    seed_traces(company, 2)
+    {:ok, view, html} = live(conn, "/tool-call-traces")
+    doc = main_doc(html)
+
+    for name <- ~w(tool_name status agent_id issue_id run_id) do
+      assert Floki.find(doc, ~s(details#trace-filter form#trace-filters [name="filter[#{name}]"])) !=
+               [],
+             "filter[#{name}] is not in the Filter panel"
+    end
+
+    assert has_element?(
+             view,
+             "section#traces-table button.pl[phx-click='export_json']",
+             "Export JSON"
+           )
+
+    assert has_element?(
+             view,
+             "section#traces-table button.pl[phx-click='export_csv']",
+             "Export CSV"
+           )
+
+    # Once generated, each export is a native download anchor in its place.
+    html = view |> element("button[phx-click='export_json']") |> render_click()
+    doc = main_doc(html)
+    [href] = Floki.attribute(doc, "section#traces-table a.pl[download]", "href")
+    assert String.starts_with?(href, "data:application/json")
+    refute has_element?(view, "button[phx-click='export_json']")
+
+    # A set filter is counted on the chip.
+    html =
+      view
+      |> form("#trace-filters", %{"filter" => %{"tool_name" => "marker_001"}})
+      |> render_change()
+
+    assert text(main_doc(html), "#trace-filter summary .mono") == "1"
   end
 
   test "filtered empty state explains how to recover", %{conn: conn, current_company: company} do
@@ -76,8 +129,7 @@ defmodule CymphoWeb.ToolCallTracesLiveTest do
 
     {:ok, _view, html} = live(conn, "/tool-call-traces")
 
-    assert html =~ "Trace command"
-    assert html =~ "Tool failures"
+    assert html =~ "Audit chain"
     assert html =~ "Inspect failed tool calls"
     assert html =~ "1 tool call ended in error"
     assert html =~ ~s(href="#trace-filters")
@@ -111,11 +163,23 @@ defmodule CymphoWeb.ToolCallTracesLiveTest do
 
     {:ok, view, _html} = live(conn, "/tool-call-traces")
 
+    # Each row's sequence number is a real button (keyboard), as well as the row click.
+    assert has_element?(
+             view,
+             "#traces-tbody button.ul[phx-click='select_trace'][phx-value-id='#{trace.id}']"
+           )
+
+    assert text(main_doc(view), "#traces-tbody tr[phx-value-id='#{trace.id}'] .st-w") == "Failed"
+
     html =
       view
       |> element("tr[phx-value-id='#{trace.id}']")
       |> render_click()
 
+    doc = main_doc(html)
+    # The selected row is marked, and its details open in an aside band beside the table.
+    assert Floki.attribute(doc, "tr[phx-value-id='#{trace.id}']", "aria-current") == ["true"]
+    assert text(doc, "#trace-det-t") == "Step details"
     assert html =~ "Failure recovery"
     assert html =~ "The shell call failed"
     assert html =~ ~s(href="/issues/#{issue.id}")
@@ -143,15 +207,15 @@ defmodule CymphoWeb.ToolCallTracesLiveTest do
 
     {:ok, view, html} = live(conn, "/tool-call-traces")
 
-    assert html =~ "Integrity unchecked"
+    assert html =~ "Integrity not checked"
     assert html =~ "Verify the audit chain"
 
     html =
       view
-      |> element("button[phx-click='verify_integrity']", "Verify integrity")
+      |> element("button[phx-click='verify_integrity']", "Check the chain")
       |> render_click()
 
-    assert html =~ "Trace chain healthy"
+    assert text(main_doc(html), "#trace-command .card-h .st-w") == "Chain integrity verified"
     assert html =~ "Tool evidence is audit-ready"
   end
 
@@ -178,7 +242,7 @@ defmodule CymphoWeb.ToolCallTracesLiveTest do
 
     html =
       view
-      |> element("button[phx-click='verify_integrity']", "Verify integrity")
+      |> element("button[phx-click='verify_integrity']", "Check the chain")
       |> render_click()
 
     assert html =~ "Content hash mismatch at sequence 1"
