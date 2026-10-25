@@ -1,11 +1,167 @@
 defmodule CymphoWeb.PluginLive.FormHelpers do
   @moduledoc false
 
-  import Phoenix.Component, only: [assign: 3]
+  use CymphoWeb, :html
 
   alias Cympho.Projects
 
   @default_entrypoint "Cympho.Plugins.CustomPlugin"
+
+  attr :form, :any, required: true
+  attr :project_options, :list, required: true
+  attr :heading, :string, required: true, doc: "\"After you create it\" | \"After you save\""
+  attr :effect, :list, required: true, doc: "consequence rows for the ink card"
+  attr :submit, :string, required: true, doc: "\"Create plugin\" | \"Save plugin\""
+  attr :cancel, :string, required: true, doc: "where Cancel goes"
+
+  @doc """
+  The plugin form shared by New and Edit (v7 H8/H11): today's fields and names in
+  three field cards beside the ink card; the manifest and settings JSON stay in
+  their closed disclosures (ids kept).
+  """
+  def plugin_form(assigns) do
+    ~H"""
+    <.form_pair
+      id="plugin-form"
+      for={@form}
+      phx-change="validate"
+      phx-submit="save"
+      heading={@heading}
+      verb="save"
+    >
+      <.band_card id="pf-plugin-t" title="Plugin">
+        <div class="flds">
+          <.input field={@form[:name]} label="Name" required placeholder="Repository Guard" />
+          <.input
+            field={@form[:identifier]}
+            label="Identifier"
+            required
+            placeholder="repo_guard"
+            class="mono"
+          />
+          <.input
+            type="textarea"
+            field={@form[:description]}
+            label="Operator brief"
+            rows={4}
+            placeholder="What the plugin can do, what evidence it returns, and when agents should use it."
+            wrapper_class="full"
+          />
+        </div>
+      </.band_card>
+
+      <.band_card id="pf-run-t" title="Runtime manifest">
+        <div class="flds">
+          <.input
+            id="plugin-entrypoint"
+            name="plugin[entrypoint]"
+            label="Entrypoint"
+            value={manifest_entrypoint(@form[:manifest].value)}
+            placeholder="Cympho.Plugins.CustomPlugin"
+            required
+            class="mono"
+          />
+          <.input
+            id="plugin-capabilities"
+            name="plugin[capabilities]"
+            label="Capabilities"
+            value={capabilities_value(@form[:capabilities].value)}
+            placeholder="tool_access, issue_write"
+            help="Separate them with commas."
+          />
+          <.input
+            type="select"
+            field={@form[:status]}
+            label="Status"
+            value={@form[:status].value || "installed"}
+            options={[
+              {"Installed", "installed"},
+              {"Active", "active"},
+              {"Disabled", "disabled"},
+              {"Error", "error"}
+            ]}
+          />
+          <.input
+            type="select"
+            field={@form[:enabled]}
+            label="Availability"
+            value={to_string(if is_nil(@form[:enabled].value), do: true, else: @form[:enabled].value)}
+            options={[{"Enabled", "true"}, {"Disabled", "false"}]}
+          />
+        </div>
+        <details id="plugin-manifest-json" class="tech" phx-mounted={JS.ignore_attributes("open")}>
+          <summary>
+            <span class="gl-h">Advanced manifest JSON</span> <.r3_icon name="i-chev-down" />
+          </summary>
+          <div class="flds">
+            <.input
+              type="textarea"
+              id="plugin-manifest-json-field"
+              name="plugin[manifest_json]"
+              label="Manifest JSON"
+              value={json_value(@form[:manifest].value)}
+              rows={7}
+              spellcheck="false"
+              required
+              help="Keep custom host service metadata here."
+              class="mono"
+              wrapper_class="full"
+            />
+          </div>
+        </details>
+      </.band_card>
+
+      <.band_card id="pf-scope-t" title="Scope and settings">
+        <div class="flds">
+          <.input
+            field={@form[:version]}
+            label="Version"
+            value={@form[:version].value || "0.1.0"}
+            required
+            class="mono"
+          />
+          <.input field={@form[:author]} label="Author" placeholder="Cympho Labs" />
+          <.input
+            type="select"
+            field={@form[:project_id]}
+            label="Project scope"
+            value={@form[:project_id].value || ""}
+            options={@project_options}
+          />
+        </div>
+        <details id="plugin-runtime-json" class="tech" phx-mounted={JS.ignore_attributes("open")}>
+          <summary>
+            <span class="gl-h">Runtime settings JSON</span> <.r3_icon name="i-chev-down" />
+          </summary>
+          <div class="flds">
+            <.input
+              type="textarea"
+              id="plugin-settings-json-field"
+              name="plugin[settings_json]"
+              label="Settings JSON"
+              value={json_value(@form[:settings].value)}
+              rows={5}
+              spellcheck="false"
+              help="Optional per-plugin settings saved with the installation."
+              class="mono"
+              wrapper_class="full"
+            />
+          </div>
+        </details>
+      </.band_card>
+
+      <:effect>
+        <.consequences rows={@effect} />
+      </:effect>
+      <:secondary>
+        <.ghost_pill navigate={@cancel}>Cancel</.ghost_pill>
+      </:secondary>
+      <:primary>
+        <.primary_pill type="submit" phx-disable-with="Saving…">{@submit}</.primary_pill>
+      </:primary>
+    </.form_pair>
+    """
+  end
 
   def default_plugin(company_id) do
     %Cympho.Skills.Plugin{

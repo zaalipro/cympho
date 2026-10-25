@@ -61,3 +61,35 @@
 .cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-desc{max-width:62ch;font-size:14px;line-height:21px;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
 .cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-caps{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px}
 .cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-pre{max-height:520px;overflow:auto;margin:4px 8px 8px;padding:12px 14px;border-radius:12px;background:var(--well);border:1px solid var(--band-line);font-size:12px;line-height:18px;color:var(--ink)}
+
+/* ================================================================
+   Plugins (H7-H12): the Settings section, the forms, the detail page, the catalog
+   ================================================================ */
+/* the list band's header holds Filter, Catalog and New plugin: it wraps instead of overflowing */
+.cy-r3 .set-main[data-section="plugins"] .card-h{flex-wrap:wrap}
+.cy-r3 .set-main[data-section="plugins"] .card-h .hr-end{margin-left:auto}
+.cy-r3 .set-main[data-section="plugins"] .pl-flt{display:flex;flex-direction:column;gap:10px;width:100%}
+.cy-r3 .set-main[data-section="plugins"] .pl-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.cy-r3 .set-main[data-section="plugins"] .pl-can{padding:0 8px 10px}
+/* the JSON disclosures inside a form band */
+.cy-r3 [data-page="plugin-form"] .tech{margin:4px 4px 0;border-top:1px solid var(--hair)}
+.cy-r3 [data-page="plugin-form"] .tech .flds{padding:4px 8px 12px}
+/* the catalog: a grid of cards (v7 P1 exception) */
+.cy-r3 [data-page="marketplace"] .mk-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.cy-r3 [data-page="marketplace"] .mk-card{display:flex;flex-direction:column;gap:8px;padding:14px 16px 12px}
+.cy-r3 [data-page="marketplace"] .mk-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.cy-r3 [data-page="marketplace"] .mk-h .tag{flex:none}
+.cy-r3 [data-page="marketplace"] .mk-mod{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 [data-page="marketplace"] .mk-act{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;padding-top:10px;border-top:1px solid var(--hair);font-size:13px;color:var(--ink)}
+.cy-r3 [data-page="marketplace"] .sk-caps{display:flex;flex-wrap:wrap;gap:6px}
+
+@media (max-width:1180px){
+  .cy-r3 [data-page="marketplace"] .mk-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+@media (max-width:640px){
+  .cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-strip>.cell:nth-child(3){border-left:0}
+  .cy-r3 [data-page="marketplace"] .mk-grid{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 [data-page="remote"] .rm-cap,.cy-r3 [data-page="skills"] .sk-co{flex:1 1 100%}
+}

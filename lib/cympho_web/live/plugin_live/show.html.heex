@@ -1,149 +1,104 @@
-<div class="p-6 lg:p-8 max-w-5xl mx-auto w-full min-w-0" data-ui-complex-page>
-  <.header
-    title={@page_title}
-    subtitle={@plugin.description || "Plugin details and configuration."}
-  >
-    <:actions>
-      <.app_link
-        navigate={~p"/plugins"}
-        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-      >
-        Back
-      </.app_link>
-      <.app_link
-        :if={@can_manage_plugins}
-        navigate={~p"/plugins/#{@plugin.id}/edit"}
-        class="ui-advanced-only rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-      >
-        Edit
-      </.app_link>
-      <button
-        :if={@can_manage_plugins}
-        type="button"
-        phx-click="toggle_plugin"
-        data-confirm={"#{if @plugin.enabled, do: "Disable", else: "Enable"} #{@plugin.name}?"}
-        class="ui-advanced-only cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-      >
-        {if @plugin.enabled, do: "Disable", else: "Enable"}
-      </button>
-    </:actions>
-  </.header>
+<.page_frame
+  page="plugin"
+  kind={:deep}
+  parent={{"/plugins", "Plugins"}}
+  current={@page_title}
+  tray_class="split"
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="pg-h">
+      <h1 class="h1 big" id="pg-h">{@page_title}</h1>
+      <div class="chips">
+        <span :if={plugin_error?(@plugin)} class="chip">
+          <.status_word kind={:stopped} word="Failing" />
+        </span>
+        <span :if={!@plugin.enabled} class="tag">Off</span>
+        <span :if={@can_manage_plugins} class="ui-advanced-only">
+          <.pill
+            phx-click="toggle_plugin"
+            data-confirm={"#{toggle_label(@plugin)} #{@plugin.name}?"}
+          >
+            {toggle_label(@plugin)}
+          </.pill>
+        </span>
+        <span :if={@can_manage_plugins} class="ui-advanced-only">
+          <.pill navigate={~p"/plugins/#{@plugin.id}/edit"}>
+            <.r3_icon name="i-pencil" />Edit
+          </.pill>
+        </span>
+      </div>
+    </section>
+  </:head>
 
-  <section
+  <.flash_line flash={@flash} />
+
+  <.band_card
+    id="pg-over-t"
+    title="Overview"
+    class="ui-simple-only"
     data-testid="plugin-simple-overview"
-    class="ui-simple-only rounded-xl border border-border bg-surface p-5"
   >
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div class="min-w-0">
-        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Plugin overview
-        </p>
-        <h2 class="mt-1 break-words text-base font-590 text-text-primary">{@plugin.name}</h2>
-      </div>
-      <span class={[
-        "inline-flex w-fit shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-510",
-        if(@plugin.enabled,
-          do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300",
-          else: "border-border bg-panel text-text-tertiary"
-        )
-      ]}>
-        {if @plugin.enabled, do: "Enabled", else: "Disabled"}
-      </span>
-    </div>
+    <.kv_list class="wide">
+      <:item :if={@plugin.description not in [nil, ""]} term="What it does">
+        {@plugin.description}
+      </:item>
+      <:item term="Scope">{scope_label(@plugin)}</:item>
+      <:item term="Permissions">{permissions_sentence(@plugin)}</:item>
+    </.kv_list>
+  </.band_card>
 
-    <dl class="mt-4 grid min-w-0 gap-4 border-t border-border pt-4 sm:grid-cols-2">
-      <div class="min-w-0">
-        <dt class="text-xs text-text-quaternary">Scope</dt>
-        <dd class="mt-1 break-words text-sm text-text-secondary">
-          {(@plugin.company && @plugin.company.name) || "Global"} / {(@plugin.project &&
-                                                                        @plugin.project.name) ||
-            "All projects"}
-        </dd>
-      </div>
-      <div class="min-w-0">
-        <dt class="text-xs text-text-quaternary">Permissions</dt>
-        <dd class="mt-1 text-sm leading-5 text-text-secondary">
-          <%= if Enum.empty?(@plugin.capabilities || []) do %>
-            No host access is declared.
-          <% else %>
-            This plugin can {CymphoWeb.PluginLive.Index.humanized_capabilities(
-              @plugin.capabilities
-            )}.
-          <% end %>
-        </dd>
-      </div>
-    </dl>
+  <section class="card ui-advanced-only" data-testid="plugin-advanced-detail">
+    <details
+      id="plugin-manifest"
+      class="tech"
+      open={@live_action == :settings}
+      data-open={to_string(@live_action == :settings)}
+      phx-hook="ServerOpen"
+      phx-mounted={JS.ignore_attributes("open")}
+    >
+      <summary>
+        <span class="h2">{if @live_action == :settings, do: "Settings", else: "Manifest"}</span>
+        <.r3_icon name="i-chev-down" />
+      </summary>
+      <pre class="mono sk-pre"><%= Jason.encode!(if(@live_action == :settings, do: @plugin.settings || %{}, else: @plugin.manifest || %{}), pretty: true) %></pre>
+    </details>
   </section>
 
-  <div
-    data-testid="plugin-advanced-detail"
-    class="ui-advanced-only grid grid-cols-1 gap-4 lg:grid-cols-3"
-  >
-    <section class="rounded-xl border border-border bg-surface p-5 lg:col-span-2">
-      <%!-- The pretty-printed blob repeated the name, identifier, version,
-           author, and permissions the Details and Permissions panels beside it
-           already show in plain rows. --%>
-      <details id="plugin-manifest" class="group" phx-mounted={JS.ignore_attributes("open")}>
-        <summary class="flex cursor-pointer list-none items-center gap-1.5 text-sm font-590 text-text-primary [&::-webkit-details-marker]:hidden">
-          <span class="hero-chevron-right-mini h-3.5 w-3.5 transition-transform group-open:rotate-90">
-          </span>
-          {if @live_action == :settings, do: "Settings", else: "Manifest"}
-        </summary>
-        <pre class="mt-4 max-h-[520px] overflow-auto rounded-lg border border-border bg-panel p-4 text-xs leading-5 text-text-secondary"><%= Jason.encode!(if(@live_action == :settings, do: @plugin.settings || %{}, else: @plugin.manifest || %{}), pretty: true) %></pre>
-      </details>
-    </section>
+  <.band_card id="pg-perm-t" title="Permissions" class="ui-advanced-only">
+    <div class="gl-sec">
+      <p class="gl-sub">{permissions_sentence(@plugin)}</p>
+      <p :if={(@plugin.capabilities || []) != []} class="sk-caps">
+        <span :for={capability <- @plugin.capabilities || []} class="tag mono">{capability}</span>
+      </p>
+    </div>
+  </.band_card>
 
-    <aside class="space-y-4">
-      <section class="rounded-xl border border-border bg-surface p-5">
-        <h2 class="mb-4 text-sm font-590 text-text-primary">Details</h2>
-        <dl class="space-y-3 text-sm">
-          <div>
-            <dt class="text-xs text-text-quaternary">Identifier</dt>
-            <dd class="mt-1 break-all text-text-secondary">{@plugin.identifier}</dd>
-          </div>
-          <div>
-            <dt class="text-xs text-text-quaternary">Version</dt>
-            <dd class="mt-1 text-text-secondary">v{@plugin.version}</dd>
-          </div>
-          <div>
-            <dt class="text-xs text-text-quaternary">Status</dt>
-            <dd class="mt-1 text-text-secondary">{@plugin.status}</dd>
-          </div>
-          <div>
-            <dt class="text-xs text-text-quaternary">Author</dt>
-            <dd class="mt-1 text-text-secondary">{@plugin.author || "-"}</dd>
-          </div>
-          <div>
-            <dt class="text-xs text-text-quaternary">Scope</dt>
-            <dd class="mt-1 text-text-secondary">
-              {(@plugin.company && @plugin.company.name) || "Global"} / {(@plugin.project &&
-                                                                            @plugin.project.name) ||
-                "All projects"}
-            </dd>
-          </div>
-        </dl>
-      </section>
+  <.band_card id="pg-det-t" title="Details" class="aside ui-advanced-only">
+    <.kv_list>
+      <:item term="Identifier"><span class="mono hr-wrap">{@plugin.identifier}</span></:item>
+      <:item term="Version"><span class="mono">v{@plugin.version}</span></:item>
+      <:item term="Status">{status_label(@plugin.status)}</:item>
+      <:item :if={@plugin.author} term="Author">{@plugin.author}</:item>
+      <:item term="Scope">{scope_label(@plugin)}</:item>
+    </.kv_list>
+  </.band_card>
 
-      <section class="rounded-xl border border-border bg-surface p-5">
-        <h2 class="mb-1 text-sm font-590 text-text-primary">Permissions</h2>
-        <p
-          :if={not Enum.empty?(@plugin.capabilities || [])}
-          class="mb-3 text-sm leading-5 text-text-tertiary"
-        >
-          This plugin can {CymphoWeb.PluginLive.Index.humanized_capabilities(@plugin.capabilities)}.
-        </p>
-        <div class="ui-advanced-only flex flex-wrap gap-2">
-          <span
-            :for={capability <- @plugin.capabilities || []}
-            class="rounded-md border border-border bg-panel px-2 py-1 text-xs text-text-secondary"
+  <section :if={@can_manage_plugins} class="card ui-advanced-only" aria-label="Delete this plugin">
+    <ul class="rows">
+      <.list_row id="pg-delete" title="Delete this plugin">
+        <:meta>Its worker stops and agents lose its tools.</:meta>
+        <:actions>
+          <button
+            type="button"
+            class="pl warn"
+            phx-click="delete"
+            data-confirm="Delete this plugin?"
           >
-            {capability}
-          </span>
-        </div>
-        <span :if={Enum.empty?(@plugin.capabilities || [])} class="text-sm text-text-tertiary">
-          No permissions declared. This plugin cannot access host services yet.
-        </span>
-      </section>
-    </aside>
-  </div>
-</div>
+            Delete
+          </button>
+        </:actions>
+      </.list_row>
+    </ul>
+  </section>
+</.page_frame>

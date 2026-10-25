@@ -17,7 +17,7 @@ defmodule CymphoWeb.PluginLive.New do
 
       {:ok,
        socket
-       |> assign(:page_title, "New Plugin")
+       |> assign(:page_title, "New plugin")
        |> assign(:plugin, plugin)
        |> FormHelpers.assign_context_options()
        |> assign_form(changeset)}
