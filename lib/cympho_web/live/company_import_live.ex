@@ -8,7 +8,7 @@ defmodule CymphoWeb.CompanyImportLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:page_title, "Import Company")
+     |> assign(:page_title, "Import a company")
      |> reset_transfer_assigns()}
   end
 
@@ -274,549 +274,348 @@ defmodule CymphoWeb.CompanyImportLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div
+    <.page_frame
       id="company-import-transfer"
       phx-hook="CompanyImportTransfer"
       data-base-path="/companies/import/transfers"
       data-transfer-id={@transfer_id}
-      class="ember-aurora p-4 sm:p-6 lg:p-8"
+      page="import"
+      kind={:deep}
+      parent={{~p"/companies", "Companies"}}
+      current="Import"
+      data-ui-complex-page
     >
-      <div class="relative z-[1] mx-auto max-w-6xl">
-        <.header>
-          <div class="min-w-0">
-            <span class="ember-eyebrow">Portability</span>
-            <h1 class="ember-ink mt-4 font-serif text-[clamp(28px,4vw,42px)] font-510 leading-[1.08] tracking-[-0.02em]">
-              Import Company
-            </h1>
-            <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-              Restore a portable company export into this instance.
-            </p>
-          </div>
-          <:actions>
-            <.app_link
-              navigate={~p"/companies"}
-              class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-            >
-              Back to Companies
-            </.app_link>
-          </:actions>
-        </.header>
-
-        <section
-          data-testid="company-import-command"
-          class="mb-6 ember-glass overflow-hidden"
-        >
-          <div class="grid gap-0 lg:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
-            <div class="p-6 lg:p-8">
-              <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-xs font-510 text-brand">
-                <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Company portability
-              </div>
-              <h2 class="font-serif text-2xl font-510 text-text-primary">
-                {import_command_title(@step, @preview_plan, @import_result)}
-              </h2>
-              <p class="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-                {import_command_summary(
-                  @step,
-                  @import_result,
-                  @preview_plan
-                )}
-              </p>
-            </div>
-
-            <div class="border-t border-border bg-subtle/60 p-6 lg:border-l lg:border-t-0 lg:p-8">
-              <div class="grid grid-cols-2 gap-3">
-                <div
-                  :for={
-                    metric <-
-                      import_command_metrics(
-                        @step,
-                        @import_result,
-                        @preview_plan
-                      )
-                  }
-                  class="min-w-0 overflow-hidden rounded-lg border border-border bg-surface p-4"
-                >
-                  <div class="truncate text-lg font-510 text-text-primary">{metric.value}</div>
-                  <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                    {metric.label}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+      <:head>
+        <section class="head" aria-labelledby="im-h">
+          <h1 class="h1 big" id="im-h">Import a company</h1>
+          <p class="sub">Restore a portable company export into this instance.</p>
         </section>
+      </:head>
 
-        {render_step(assigns)}
-      </div>
-    </div>
+      <.flash_line flash={@flash} />
+
+      {render_step(assigns)}
+    </.page_frame>
     """
   end
 
   defp render_step(%{step: step} = assigns) when step in [:upload, :uploading] do
     ~H"""
-    <div class="space-y-6">
-      <div class="rounded-xl border border-border bg-surface p-4 sm:p-6">
-        <h3 class="mb-2 font-serif text-lg font-510 text-text-primary">Upload export file</h3>
-        <p class="mb-6 max-w-2xl text-sm leading-6 text-text-secondary">
-          Choose a Cympho JSON export. Large files upload in verified 4 MiB parts, so an interrupted transfer can continue after you select the same file again.
-        </p>
+    <.band_card id="im-file-t" title="Choose a file" data-testid="company-import-command">
+      <p class="gl-sub im-line">
+        Choose a Cympho JSON export. Large files upload in verified 4 MiB parts, so an interrupted transfer can continue after you select the same file again.
+      </p>
 
-        <fieldset class="mb-6">
-          <legend class="text-sm font-510 text-text-primary">
-            If the company slug already exists
-          </legend>
-          <div class="mt-3 flex flex-col gap-3 sm:flex-row sm:gap-6">
-            <label class="flex items-center gap-2 text-sm text-text-secondary">
-              <input
-                data-transfer-strategy
-                type="radio"
-                name="import_slug_strategy"
-                value="suffix"
-                checked={@slug_strategy == :suffix}
-                class="h-4 w-4 text-brand"
-              /> Create a safe <code>-copy</code>
-              slug
-            </label>
-            <label class="flex items-center gap-2 text-sm text-text-secondary">
-              <input
-                data-transfer-strategy
-                type="radio"
-                name="import_slug_strategy"
-                value="fail"
-                checked={@slug_strategy == :fail}
-                class="h-4 w-4 text-brand"
-              /> Stop without importing
-            </label>
-          </div>
-          <p class="mt-2 text-xs text-text-tertiary">
-            Keep the same choice when resuming an interrupted transfer.
-          </p>
-        </fieldset>
-
-        <div
-          id="import-dropzone"
-          data-transfer-dropzone
-          class="rounded-xl border-2 border-dashed border-border bg-subtle/50 p-8 text-center transition-colors focus-within:border-brand/60"
-        >
-          <span class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand/10 text-brand">
-            <.icon name="hero-document-arrow-up-mini" class="h-6 w-6" />
-          </span>
-          <label for="company-import-file" class="text-sm font-510 text-text-primary">
-            Choose a company export
-          </label>
-          <p id="company-import-file-help" class="mt-2 text-xs leading-5 text-text-tertiary">
-            JSON only, up to 50 MB. The browser reads one part at a time and never stores an API token.
-          </p>
+      <fieldset class="opts im-opts">
+        <legend>If the company slug already exists</legend>
+        <div class="opt-w">
           <input
-            id="company-import-file"
-            data-transfer-file
-            type="file"
-            accept=".json,application/json"
-            aria-describedby="company-import-file-help company-import-status"
-            class="mx-auto mt-5 block max-w-full text-sm text-text-secondary file:mr-4 file:cursor-pointer file:rounded-button file:border-0 file:bg-brand file:px-5 file:py-3 file:text-sm file:font-510 file:text-on-primary hover:file:bg-accent"
+            class="opt-in"
+            data-transfer-strategy
+            type="radio"
+            id="import-slug-suffix"
+            name="import_slug_strategy"
+            value="suffix"
+            checked={@slug_strategy == :suffix}
           />
+          <label class="opt" for="import-slug-suffix">
+            <span class="on" aria-hidden="true">1</span><span class="ot">Create a safe <span class="mono">-copy</span> slug</span><span
+              class="radio"
+              aria-hidden="true"
+            ></span>
+          </label>
         </div>
+        <div class="opt-w">
+          <input
+            class="opt-in"
+            data-transfer-strategy
+            type="radio"
+            id="import-slug-fail"
+            name="import_slug_strategy"
+            value="fail"
+            checked={@slug_strategy == :fail}
+          />
+          <label class="opt" for="import-slug-fail">
+            <span class="on" aria-hidden="true">2</span><span class="ot">Stop without importing</span><span
+              class="radio"
+              aria-hidden="true"
+            ></span>
+          </label>
+        </div>
+        <p class="help">Keep the same choice when resuming an interrupted transfer.</p>
+      </fieldset>
 
+      <div id="import-dropzone" data-transfer-dropzone class="im-drop">
+        <label for="company-import-file" class="im-drop-l">Choose a company export</label>
+        <p id="company-import-file-help" class="help">
+          JSON only, up to 50 MB. The browser reads one part at a time and never stores an API token.
+        </p>
+        <input
+          id="company-import-file"
+          data-transfer-file
+          type="file"
+          accept=".json,application/json"
+          aria-describedby="company-import-file-help company-import-status"
+        />
+      </div>
+
+      <%!-- app.js shows this (removes `hidden`) and fills it; no display rule may sit on it. --%>
+      <div
+        id="company-import-progress"
+        data-transfer-progress
+        phx-update="ignore"
+        class="hidden im-prog"
+      >
+        <div class="im-prog-h">
+          <span data-transfer-filename class="im-fn"></span>
+          <span data-transfer-percent class="mono">0%</span>
+        </div>
         <div
-          id="company-import-progress"
-          data-transfer-progress
-          phx-update="ignore"
-          class="mt-5 hidden rounded-lg border border-border bg-subtle p-4"
+          class="im-bar"
+          role="progressbar"
+          aria-label="Company import upload"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+          data-transfer-progressbar
         >
-          <div class="flex items-center justify-between gap-4 text-sm">
-            <span data-transfer-filename class="min-w-0 truncate font-510 text-text-primary"></span>
-            <span data-transfer-percent class="shrink-0 tabular-nums text-text-secondary">0%</span>
-          </div>
-          <div
-            class="mt-3 h-2 overflow-hidden rounded-full bg-surface"
-            role="progressbar"
-            aria-label="Company import upload"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow="0"
-            data-transfer-progressbar
+          <div data-transfer-progressfill class="im-fill"></div>
+        </div>
+        <div class="im-prog-f">
+          <p
+            id="company-import-status"
+            data-transfer-status
+            role="status"
+            aria-live="polite"
+            class="help"
           >
-            <div
-              data-transfer-progressfill
-              class="h-full w-full origin-left scale-x-0 bg-brand transition-transform"
-            >
-            </div>
-          </div>
-          <div class="mt-3 flex items-center justify-between gap-4">
-            <p
-              id="company-import-status"
-              data-transfer-status
-              role="status"
-              aria-live="polite"
-              class="text-xs text-text-secondary"
-            >
-              Preparing file…
-            </p>
-            <button
-              type="button"
-              data-transfer-cancel
-              class="rounded-lg border border-border px-3 py-1.5 text-xs font-510 text-text-secondary hover:text-text-primary"
-            >
-              Pause
-            </button>
-          </div>
-        </div>
-
-        <div
-          :if={@validation_errors != []}
-          data-testid="company-import-errors"
-          role="alert"
-          class="mt-6 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-red-400"
-        >
-          <h4 class="mb-2 font-510">Import could not continue</h4>
-          <ul class="list-disc space-y-1 pl-5 text-sm">
-            <li :for={error <- @validation_errors}>{error}</li>
-          </ul>
+            Preparing file…
+          </p>
+          <button type="button" data-transfer-cancel class="pl">Pause</button>
         </div>
       </div>
 
-      <div class="rounded-xl border border-blue-500/20 bg-blue-500/10 p-4 text-sm text-blue-400">
-        <strong>Safe to retry:</strong>
-        Re-selecting the same file declares the same content manifest and uploads only missing parts.
+      <div
+        :if={@validation_errors != []}
+        data-testid="company-import-errors"
+        role="alert"
+        class="im-err"
+      >
+        <p class="err"><.r3_icon name="i-alert" />Import could not continue</p>
+        <ul>
+          <li :for={error <- @validation_errors}>{error}</li>
+        </ul>
       </div>
-    </div>
+
+      <p class="gl-sub im-line">
+        Safe to retry. Re-selecting the same file declares the same content manifest and uploads only missing parts.
+      </p>
+    </.band_card>
     """
   end
 
   defp render_step(%{step: :preview, preview_plan: %{} = _preview_plan} = assigns) do
     ~H"""
-    <div class="space-y-6">
-      <div
-        data-testid="company-import-preview"
-        class="rounded-xl border border-border bg-surface p-4 sm:p-6"
-      >
-        <h3 class="font-serif text-lg font-510 text-text-primary mb-4">Preview Import</h3>
-
-        <div
-          :if={@validation_errors != []}
-          role="alert"
-          class="mb-6 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400"
+    <.next_step id="im-ns-" data-testid="company-import-preview">
+      <:problem>
+        <.problem_card
+          title={import_command_title(:preview, @preview_plan, @import_result)}
+          title_id="im-ns-t"
         >
-          <p :for={error <- @validation_errors}>{error}</p>
-        </div>
-
-        <div class="bg-subtle border border-border rounded-lg p-6 mb-6">
-          <div class="flex items-center gap-4 mb-4">
-            <div class="w-16 h-16 bg-brand/10 rounded-lg flex items-center justify-center">
-              <svg class="w-8 h-8 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-                />
-              </svg>
+          <:eyebrow>Next step<span aria-hidden="true"> · </span>Import</:eyebrow>
+          <p class="obj">{import_command_summary(:preview, @import_result, @preview_plan)}</p>
+          <div class="strip s3" data-testid="company-import-command">
+            <div class="cell">
+              <span class="v mono">{total_import_records(@preview_plan)}</span><span class="l">Records</span>
             </div>
-            <div class="min-w-0">
-              <h4 class="break-words text-xl font-510 text-text-primary">
-                {@preview_plan.company.name}
-              </h4>
-              <div class="text-text-secondary text-sm">
-                <code class="break-all rounded bg-black/20 px-2 py-1">
-                  {@preview_plan.company.source_slug}
-                </code>
-                <span class="ml-2">Version {@preview_plan.version}</span>
-              </div>
+            <div class="cell">
+              <span class="v mono">{import_secret_count(@import_result, @preview_plan)}</span><span class="l">Secrets to restore</span>
+            </div>
+            <div class="cell">
+              <span class="v mono">{length(@preview_plan.warnings)}</span><span class="l">Warnings</span>
             </div>
           </div>
-
-          <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <div class="text-center">
-              <div class="text-2xl font-510 text-brand">
-                {@preview_plan.inventory.projects}
-              </div>
-              <div class="text-xs text-text-secondary mt-1">Projects</div>
-            </div>
-            <div class="text-center">
-              <div class="text-2xl font-510 text-brand">
-                {@preview_plan.inventory.agents}
-              </div>
-              <div class="text-xs text-text-secondary mt-1">Agents</div>
-            </div>
-            <div class="text-center">
-              <div class="text-2xl font-510 text-brand">
-                {@preview_plan.inventory.issues}
-              </div>
-              <div class="text-xs text-text-secondary mt-1">Issues</div>
-            </div>
-            <div class="text-center">
-              <div class="text-2xl font-510 text-brand">
-                {@preview_plan.inventory.goals}
-              </div>
-              <div class="text-xs text-text-secondary mt-1">Goals</div>
-            </div>
-            <div class="text-center">
-              <div class="text-2xl font-510 text-brand">{@preview_plan.inventory.users}</div>
-              <div class="text-xs text-text-secondary mt-1">Users</div>
-            </div>
-            <div class="text-center">
-              <div class="text-2xl font-510 text-brand">
-                {@preview_plan.inventory.memberships}
-              </div>
-              <div class="text-xs text-text-secondary mt-1">Memberships</div>
-            </div>
-            <div class="text-center">
-              <div class="text-2xl font-510 text-brand">{@preview_plan.inventory.comments}</div>
-              <div class="text-xs text-text-secondary mt-1">Comments</div>
-            </div>
-            <div class="text-center">
-              <div class="text-2xl font-510 text-brand">{@preview_plan.inventory.labels}</div>
-              <div class="text-xs text-text-secondary mt-1">Labels</div>
-            </div>
+          <div :if={@validation_errors != []} role="alert" class="im-err">
+            <p :for={error <- @validation_errors} class="err">
+              <.r3_icon name="i-alert" />{error}
+            </p>
           </div>
-        </div>
+        </.problem_card>
+      </:problem>
+      <:resolution>
+        <.ink_card heading="After you start it" heading_id="im-ns-i">
+          <.consequences rows={import_consequences(@preview_plan)} />
+          <.ink_foot verb="import">
+            <:secondary>
+              <.ghost_pill phx-click="reset">Choose another file</.ghost_pill>
+            </:secondary>
+            <:primary>
+              <.primary_pill
+                phx-click="start_import"
+                phx-disable-with="Starting import…"
+                disabled={!@preview_plan.ready? or @validation_errors != []}
+              >
+                Start import
+              </.primary_pill>
+            </:primary>
+          </.ink_foot>
+        </.ink_card>
+      </:resolution>
+    </.next_step>
 
-        <div
-          data-testid="company-import-target-plan"
-          class="mb-6 rounded-lg border border-border bg-subtle p-4"
+    <.band_card
+      id="im-target-t"
+      title="Target company plan"
+      data-testid="company-import-target-plan"
+    >
+      <.kv_list class="wide">
+        <:item term="Company">{@preview_plan.company.name}</:item>
+        <:item term="Version"><span class="mono">{@preview_plan.version}</span></:item>
+        <:item term="Slug">
+          <span class="mono im-tok">{@preview_plan.target.requested_slug}</span>
+          <span aria-hidden="true">→</span><span class="sr">becomes</span>
+          <span class="mono im-tok">{@preview_plan.target.slug}</span>
+        </:item>
+        <:item term="If it exists">
+          {if @slug_strategy == :fail,
+            do: "Stop without importing if the slug already exists.",
+            else: "Create a safe -copy slug if the requested slug already exists."}
+        </:item>
+        <:item term="Records">
+          <span class="mono">{@preview_plan.inventory.package_records}</span>
+          package records<span aria-hidden="true"> · </span>
+          <span class="mono">
+            {@preview_plan.inventory.planned_writes}
+          </span>
+          planned writes
+        </:item>
+        <:item term="Contents">{inventory_line(@preview_plan.inventory)}</:item>
+      </.kv_list>
+    </.band_card>
+
+    <.band_card id="im-secrets-t" title="Secrets to restore">
+      <:header_end>
+        <span class="meta mono">{Enum.count(@preview_plan.secret_restore_requirements)}</span>
+      </:header_end>
+      <p class="gl-sub im-line">
+        Secret values are not in the export. These entries are queued for restore after import.
+      </p>
+      <.quiet_empty
+        :if={@preview_plan.secret_restore_requirements == []}
+        title="No active secrets are listed in this export."
+      />
+      <ul :if={@preview_plan.secret_restore_requirements != []} class="rows">
+        <.list_row
+          :for={{secret, n} <- Enum.with_index(@preview_plan.secret_restore_requirements)}
+          id={"im-secret-#{n}"}
+          title={export_field(secret, :key)}
+          icon="i-shield"
         >
-          <h4 class="text-sm font-510 text-text-primary">Target company plan</h4>
-          <p class="mt-2 text-sm text-text-secondary">
-            Requested <code class="break-all">{@preview_plan.target.requested_slug}</code>
-            <span class="mx-1">→</span>
-            <code class="break-all font-510 text-text-primary">{@preview_plan.target.slug}</code>
-          </p>
-          <p class="mt-2 text-xs text-text-tertiary">
-            {@preview_plan.inventory.package_records} package records · {@preview_plan.inventory.planned_writes} planned writes
-          </p>
-        </div>
+          <:meta>{format_scope(export_field(secret, :scope))} scope</:meta>
+        </.list_row>
+      </ul>
+    </.band_card>
 
-        <div class="mb-6 rounded-lg border border-border bg-subtle p-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h4 class="text-sm font-510 text-text-primary">Secret restore manifest</h4>
-              <p class="mt-1 text-xs text-text-secondary">
-                Secret values are absent from the export. These entries will be queued for restore after import.
-              </p>
-            </div>
-            <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-xs font-510 text-amber-200">
-              {Enum.count(@preview_plan.secret_restore_requirements)} keys
-            </span>
-          </div>
-
-          <div
-            :if={@preview_plan.secret_restore_requirements == []}
-            class="text-sm text-text-tertiary"
-          >
-            No active secrets are listed in this export.
-          </div>
-
-          <div
-            :if={@preview_plan.secret_restore_requirements != []}
-            class="divide-y divide-border"
-          >
-            <div
-              :for={secret <- @preview_plan.secret_restore_requirements}
-              class="flex flex-col gap-1 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div class="break-all text-sm font-510 text-text-primary">
-                {export_field(secret, :key)}
-              </div>
-              <div class="text-xs text-text-secondary">
-                {format_scope(export_field(secret, :scope))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          :if={@preview_plan.warnings != []}
-          data-testid="company-import-warnings"
-          class="mb-6 rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-amber-200"
-        >
-          <h4 class="text-sm font-510">Preview warnings</h4>
-          <ul class="mt-2 list-disc space-y-1 pl-5 text-sm">
-            <li :for={warning <- @preview_plan.warnings}>{warning.message}</li>
-          </ul>
-        </div>
-
-        <div class="mb-6 rounded-lg border border-border bg-subtle p-4">
-          <h4 class="text-sm font-510 text-text-primary">Slug collision policy</h4>
-          <p class="mt-2 text-sm text-text-secondary">
-            {if @slug_strategy == :fail,
-              do: "Stop without importing if the slug already exists.",
-              else: "Create a safe -copy slug if the requested slug already exists."}
-          </p>
-        </div>
-
-        <div class="flex gap-3">
-          <button
-            phx-click="start_import"
-            phx-disable-with="Starting Import…"
-            disabled={!@preview_plan.ready? or @validation_errors != []}
-            class={[
-              "font-510 text-sm px-6 py-3 rounded-button transition-colors inline-flex items-center gap-2",
-              (@preview_plan.ready? and @validation_errors == []) &&
-                "bg-brand hover:bg-accent text-on-primary",
-              (!@preview_plan.ready? or @validation_errors != []) &&
-                "cursor-not-allowed bg-subtle text-text-tertiary"
-            ]}
-          >
-            <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Start Import
-          </button>
-
-          <button
-            phx-click="reset"
-            class="bg-surface hover:bg-surface border border-border text-text-primary font-510 text-sm px-6 py-3 rounded-lg transition-colors"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-
-      <div class="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 rounded-xl p-4 text-sm">
-        <strong>Important:</strong>
-        This will create a new company with all the data from the export file. Make sure you have reviewed the contents before proceeding.
-      </div>
-    </div>
+    <.band_card
+      :if={@preview_plan.warnings != []}
+      id="im-warn-t"
+      title="Warnings"
+      data-testid="company-import-warnings"
+    >
+      <ul class="rows">
+        <.list_row
+          :for={{warning, n} <- Enum.with_index(@preview_plan.warnings)}
+          id={"im-warning-#{n}"}
+          title={warning.message}
+          icon="i-alert"
+          kind={:problem}
+        />
+      </ul>
+    </.band_card>
     """
   end
 
   defp render_step(%{step: :importing} = assigns) do
     ~H"""
-    <div
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
-      class="rounded-xl border border-border bg-surface p-6 text-center sm:p-12"
-    >
-      <svg
-        class="animate-spin h-16 w-16 mx-auto text-brand mb-6"
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        viewBox="0 0 24 24"
-      >
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
-        </circle>
-        <path
-          class="opacity-75"
-          fill="currentColor"
-          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-        >
-        </path>
-      </svg>
-
-      <h3 class="font-serif text-xl font-510 text-text-primary mb-2">Importing Company Data</h3>
-      <p class="text-text-secondary">{@progress || "Please wait..."}</p>
-    </div>
+    <.band_card id="im-run-t" title={import_command_title(:importing, @preview_plan, @import_result)}>
+      <div class="gl-sec" role="status" aria-live="polite" aria-busy="true">
+        <.now_capsule state={:working}>
+          Importing…<:sub>{@progress || "Please wait…"}</:sub>
+        </.now_capsule>
+        <p class="gl-sub">{import_command_summary(:importing, @import_result, @preview_plan)}</p>
+      </div>
+    </.band_card>
     """
   end
 
   defp render_step(%{step: :complete, import_result: _import_result} = assigns) do
     ~H"""
-    <div class="space-y-6">
-      <div class={result_container_class(@import_result)}>
-        <div class={result_icon_class(@import_result)}>
-          <.icon name={result_icon(@import_result)} class={result_svg_class(@import_result)} />
-        </div>
-
-        <h3 class="font-serif text-2xl font-510 text-text-primary mb-2">
-          {result_title(@import_result)}
-        </h3>
-
-        <p class="text-text-secondary mb-6">
-          {result_message(@import_result)}
-        </p>
-
-        <div
-          :if={import_success?(@import_result)}
-          class="bg-subtle border border-border rounded-lg p-4 inline-block"
-        >
-          <.link
-            href={imported_company_path(@import_result)}
-            class="text-brand hover:text-accent font-510"
-          >
-            View imported company
-          </.link>
-        </div>
-
-        <div
-          :if={import_success?(@import_result) and restore_receipt_available?(@import_result)}
-          data-testid="import-secret-restore"
-          class="mx-auto mt-6 w-full max-w-3xl rounded-lg border border-border bg-subtle p-5 text-left"
-        >
-          <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h4 class="text-sm font-510 text-text-primary">Secret restore queue</h4>
-              <p class="mt-1 text-xs leading-5 text-text-secondary">
-                Imported companies start without secret values. Add these credentials before assigning runtime work.
-              </p>
-            </div>
-            <span class="inline-flex w-fit items-center gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-xs font-510 text-amber-200">
-              <.icon name="hero-key-mini" class="h-4 w-4" />
-              {Enum.count(secrets_to_restore(@import_result))} keys
-            </span>
-          </div>
-
-          <div :if={secrets_to_restore(@import_result) == []} class="text-sm text-text-tertiary">
-            No secret values need to be restored for this import.
-          </div>
-
-          <div :if={secrets_to_restore(@import_result) != []} class="divide-y divide-border">
-            <div
-              :for={secret <- secrets_to_restore(@import_result)}
-              class="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div class="min-w-0">
-                <div class="truncate text-sm font-510 text-text-primary">
-                  {export_field(secret, :key)}
-                </div>
-                <div class="mt-1 text-xs text-text-secondary">
-                  {format_scope(export_field(secret, :scope))} scope / {restore_status_label(
-                    export_field(secret, :restore_status)
-                  )}
-                </div>
-              </div>
-              <.link
-                href={restore_secret_path(secret, @import_result)}
-                class="inline-flex w-fit items-center gap-2 rounded-button border border-border bg-surface px-3 py-2 text-xs font-510 text-text-primary hover:border-brand/40 hover:text-brand"
-              >
-                <.icon name="hero-key-mini" class="h-4 w-4" /> Add value
-              </.link>
-            </div>
-          </div>
-        </div>
-
-        <div
-          :if={completed_resume?(@import_result) and not restore_receipt_available?(@import_result)}
-          data-testid="import-secret-restore-unavailable"
-          class="mx-auto mt-6 w-full max-w-3xl rounded-lg border border-amber-500/25 bg-amber-500/10 p-5 text-left"
-        >
-          <h4 class="text-sm font-510 text-amber-200">Secret checklist unavailable</h4>
-          <p class="mt-1 text-xs leading-5 text-text-secondary">
-            This completion receipt does not include a persisted secret restore checklist. Open the imported company and review Secrets before dispatching runtime work.
+    <.next_step id="im-ns-">
+      <:problem>
+        <.problem_card title={result_title(@import_result)} title_id="im-ns-t">
+          <:eyebrow>{result_eyebrow(@import_result)}</:eyebrow>
+          <p class="obj">{result_message(@import_result)}</p>
+          <p :if={import_error?(@import_result)} class="err" role="alert">
+            <.r3_icon name="i-alert" />{import_error_message(@import_result)}
           </p>
-        </div>
+          <:foot>
+            <.text_link
+              :if={import_success?(@import_result)}
+              href={imported_company_path(@import_result)}
+            >
+              View imported company
+            </.text_link>
+            <button type="button" class="pl" phx-click="reset">Import another</button>
+          </:foot>
+        </.problem_card>
+      </:problem>
+    </.next_step>
 
-        <div
-          :if={import_error?(@import_result)}
-          class="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg p-4 max-w-md mx-auto"
+    <.band_card
+      :if={import_success?(@import_result) and restore_receipt_available?(@import_result)}
+      id="im-restore-t"
+      title="Secrets to restore"
+      data-testid="import-secret-restore"
+    >
+      <:header_end>
+        <span class="meta mono">{Enum.count(secrets_to_restore(@import_result))}</span>
+      </:header_end>
+      <p class="gl-sub im-line">
+        Imported companies start without secret values. Add these before assigning work.
+      </p>
+      <.quiet_empty
+        :if={secrets_to_restore(@import_result) == []}
+        title="No secret values need to be restored for this import."
+      />
+      <ul :if={secrets_to_restore(@import_result) != []} class="rows">
+        <.list_row
+          :for={{secret, n} <- Enum.with_index(secrets_to_restore(@import_result))}
+          id={"im-restore-#{n}"}
+          title={export_field(secret, :key)}
+          icon="i-shield"
         >
-          {import_error_message(@import_result)}
-        </div>
-      </div>
+          <:meta>
+            {format_scope(export_field(secret, :scope))} scope<span aria-hidden="true"> · </span>{restore_status_label(
+              export_field(secret, :restore_status)
+            )}
+          </:meta>
+          <:actions>
+            <.pill href={restore_secret_path(secret, @import_result)}>Add value</.pill>
+          </:actions>
+        </.list_row>
+      </ul>
+    </.band_card>
 
-      <div class="flex flex-wrap justify-center gap-3">
-        <button
-          phx-click="reset"
-          class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-6 py-3 rounded-button transition-colors"
-        >
-          Import Another
-        </button>
-
-        <.app_link
-          navigate={~p"/companies"}
-          class="bg-surface hover:bg-surface border border-border text-text-primary font-510 text-sm px-6 py-3 rounded-lg transition-colors"
-        >
-          Back to Companies
-        </.app_link>
-      </div>
-    </div>
+    <.band_card
+      :if={completed_resume?(@import_result) and not restore_receipt_available?(@import_result)}
+      id="im-restore-na-t"
+      title="Secret checklist unavailable"
+      data-testid="import-secret-restore-unavailable"
+    >
+      <p class="gl-sub im-line">
+        This completion receipt does not include a persisted secret restore checklist. Open the imported company and review Secrets before dispatching runtime work.
+      </p>
+    </.band_card>
     """
   end
 
@@ -835,27 +634,14 @@ defmodule CymphoWeb.CompanyImportLive do
   defp import_error?({:error, _}), do: true
   defp import_error?(_), do: false
 
-  defp result_container_class({:ok, _}),
-    do: "bg-surface border border-border rounded-xl p-6 text-center sm:p-12"
-
-  defp result_container_class({:error, _}),
-    do: "bg-surface border border-red-500/20 rounded-xl p-6 text-center sm:p-12"
-
-  defp result_icon_class({:ok, _}),
-    do: "w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center bg-success/10"
-
-  defp result_icon_class({:error, _}),
-    do: "w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center bg-brand/10"
-
-  defp result_svg_class({:ok, _}), do: "w-10 h-10 text-success"
-  defp result_svg_class({:error, _}), do: "w-10 h-10 text-brand"
-
-  defp result_icon({:ok, _}), do: "hero-check-mini"
-  defp result_icon({:error, _}), do: "hero-x-mark-mini"
-
   defp result_title({:ok, %{already_completed: true}}), do: "Import already complete"
-  defp result_title({:ok, _}), do: "Import Successful!"
-  defp result_title({:error, _}), do: "Import Failed"
+  defp result_title({:ok, %{company: %{name: name}}}) when is_binary(name), do: "Imported #{name}"
+  defp result_title({:ok, _}), do: "Import complete"
+  defp result_title({:error, _}), do: "Import failed"
+
+  defp result_eyebrow({:ok, %{secrets_to_restore: [_ | _]}}), do: "Next step · Restore secrets"
+  defp result_eyebrow({:ok, _}), do: "All clear · Import"
+  defp result_eyebrow(_result), do: "Next step · Import"
 
   defp result_message({:ok, %{already_completed: true}}) do
     "This exact export was imported earlier. No data was imported a second time."
@@ -887,33 +673,12 @@ defmodule CymphoWeb.CompanyImportLive do
   defp import_error_message({:error, msg}), do: msg
   defp import_error_message(_), do: nil
 
-  defp import_command_title(:upload, _preview_plan, _result),
-    do: "Import a portable company export"
-
-  defp import_command_title(:uploading, _preview_plan, _result),
-    do: "Verifying and uploading your export"
-
   defp import_command_title(:preview, preview_plan, _result) do
     "Preview #{company_name(preview_plan)} before import"
   end
 
   defp import_command_title(:importing, preview_plan, _result) do
     "Importing #{company_name(preview_plan)}"
-  end
-
-  defp import_command_title(:complete, _preview_plan, {:ok, _result}), do: "Import complete"
-
-  defp import_command_title(:complete, _preview_plan, {:error, _result}),
-    do: "Import needs attention"
-
-  defp import_command_title(_step, _preview_plan, _result), do: "Company import"
-
-  defp import_command_summary(:upload, _result, _preview_plan) do
-    "Select a Cympho export JSON. Verified resumable parts keep retries fast and secret values remain empty until an owner restores them."
-  end
-
-  defp import_command_summary(:uploading, _result, _preview_plan) do
-    "The browser is hashing and sending one bounded part at a time. You can cancel now or resume later by selecting the same file."
   end
 
   defp import_command_summary(:preview, _result, preview_plan) do
@@ -924,32 +689,34 @@ defmodule CymphoWeb.CompanyImportLive do
     "Creating the company, remapping scoped records, and preparing the secret restore queue."
   end
 
-  defp import_command_summary(:complete, {:ok, _result}, _preview_plan) do
-    "The imported company is available. Restore queued secret values before dispatching runtime work."
+  defp import_consequences(preview_plan) do
+    secrets = Enum.count(preview_plan.secret_restore_requirements)
+
+    created =
+      {:done,
+       "Creates #{company_name(preview_plan)} as a new company at #{preview_plan.target.slug || "a new slug"}."}
+
+    if secrets > 0,
+      do: [
+        created,
+        {:waiting, "#{secrets} secret values to restore afterwards; they are not in the file."}
+      ],
+      else: [created]
   end
 
-  defp import_command_summary(:complete, {:error, _result}, _preview_plan) do
-    "The import did not finish. Review the error below and try again."
-  end
-
-  defp import_command_summary(_step, _result, _preview_plan),
-    do: "Prepare a company import."
-
-  defp import_command_metrics(step, result, preview_plan) do
+  defp inventory_line(inventory) do
     [
-      %{label: "Stage", value: step_label(step)},
-      %{label: "Records", value: total_import_records(preview_plan)},
-      %{label: "Secrets", value: import_secret_count(result, preview_plan)},
-      %{label: "Slug", value: slug_preview(result, preview_plan)}
+      {inventory.projects, "projects"},
+      {inventory.agents, "agents"},
+      {inventory.issues, "tasks"},
+      {inventory.goals, "goals"},
+      {inventory.users, "users"},
+      {inventory.memberships, "memberships"},
+      {inventory.comments, "comments"},
+      {inventory.labels, "labels"}
     ]
+    |> Enum.map_join(" · ", fn {count, word} -> "#{count || 0} #{word}" end)
   end
-
-  defp step_label(:upload), do: "Upload"
-  defp step_label(:uploading), do: "Transfer"
-  defp step_label(:preview), do: "Preview"
-  defp step_label(:importing), do: "Running"
-  defp step_label(:complete), do: "Complete"
-  defp step_label(_), do: "Import"
 
   defp company_name(%{company: %{name: name}}) when is_binary(name), do: name
   defp company_name(_preview_plan), do: "the company"
@@ -965,12 +732,6 @@ defmodule CymphoWeb.CompanyImportLive do
     do: Enum.count(requirements)
 
   defp import_secret_count(_result, _preview_plan), do: 0
-
-  defp slug_preview({:ok, %{company: %{slug: slug}}}, _preview_plan) when is_binary(slug),
-    do: slug
-
-  defp slug_preview(_result, %{target: %{slug: slug}}) when is_binary(slug), do: slug
-  defp slug_preview(_result, _preview_plan), do: "Not loaded"
 
   defp secrets_to_restore({:ok, %{secrets_to_restore: secrets}}) when is_list(secrets),
     do: secrets

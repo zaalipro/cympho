@@ -57,192 +57,123 @@ defmodule CymphoWeb.CompanyExportLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="ember-aurora px-4 py-6 sm:px-6 lg:px-8">
-      <div class="relative z-[1] mx-auto max-w-7xl space-y-6">
-        <.header>
-          <div class="min-w-0">
-            <span class="ember-eyebrow">Portability</span>
-            <h1 class="ember-ink mt-4 font-serif text-[clamp(28px,4vw,42px)] font-510 leading-[1.08] tracking-[-0.02em]">
-              Export {@company.name}
-            </h1>
-            <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-              Move this operating company into another Cympho instance.
+    <.page_frame
+      page="export"
+      kind={:deep}
+      parent={{~p"/companies/#{@company}", @company.name}}
+      current="Export"
+      data-ui-complex-page
+    >
+      <:head>
+        <section class="head" aria-labelledby="ex-h">
+          <h1 class="h1 big" id="ex-h">Export {@company.name}</h1>
+          <p class="sub">Move this company into another Cympho instance.</p>
+        </section>
+      </:head>
+
+      <.flash_line flash={@flash} />
+
+      <% exported? = @download_ready && @export_data %>
+      <.next_step id="ex-ns-" data-testid="company-export-command">
+        <:problem>
+          <.problem_card title={"Export #{@company.name}"} title_id="ex-ns-t">
+            <:eyebrow>Next step<span aria-hidden="true"> · </span>Export</:eyebrow>
+            <p :if={!exported?} class="obj">
+              Move the company graph, work queues, agents, goals, labels, memberships, and task history into another Cympho instance. Secret values stay out of the file; only a restore checklist is included.
             </p>
-          </div>
-          <:actions>
-            <.app_link
-              navigate={~p"/companies/#{@company}"}
-              class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-            >
-              Back to Company
-            </.app_link>
-          </:actions>
-        </.header>
-
-        <section
-          data-testid="company-export-command"
-          class="ember-glass overflow-hidden"
-        >
-          <div class="grid gap-0 lg:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
-            <div class="p-6 lg:p-8">
-              <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-xs font-510 text-brand">
-                <.icon name="hero-arrow-down-tray-mini" class="h-4 w-4" /> Company portability
-              </div>
-              <h2 class="font-serif text-2xl font-510 text-text-primary">
-                Generate a portable operating export
-              </h2>
-              <p class="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-                Move the company graph, work queues, agents, goals, labels, memberships, and issue history into another Cympho instance. Secret values stay out of the file; only a restore checklist is included.
-              </p>
-
-              <div class="mt-6 flex flex-wrap items-center gap-3">
-                <button
-                  :if={!@loading}
-                  phx-click="generate_export"
-                  class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-5 py-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-                >
-                  <.icon name="hero-arrow-path-mini" class="h-4 w-4" />
-                  {if @download_ready, do: "Regenerate export", else: "Generate export"}
-                </button>
-
-                <div
-                  :if={@loading}
-                  class="inline-flex items-center gap-2 rounded-button border border-border bg-subtle px-5 py-3 text-sm font-510 text-text-secondary"
-                >
-                  <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />
-                  Generating export...
-                </div>
-
+            <p :if={exported?} class="obj">
+              Exported
+              <span class="mono">{@export_data.exported_at}</span><span aria-hidden="true"> · </span>version
+              <span class="mono">{@export_data.version}</span>
+            </p>
+          </.problem_card>
+        </:problem>
+        <:resolution>
+          <.ink_card
+            heading={if exported?, do: "After you download it", else: "After you generate it"}
+            heading_id="ex-ns-i"
+          >
+            <.consequences
+              :if={!exported?}
+              rows={[
+                {:done, "Cympho builds one JSON file here; nothing leaves until you download it."}
+              ]}
+            />
+            <.consequences
+              :if={exported?}
+              rows={[
+                {:done, "The file is saved on this device. Secret values are not in it."}
+              ]}
+            />
+            <.ink_note :if={@loading}>Generating export…</.ink_note>
+            <.ink_note>
+              The file still contains company work content, comments, and operating metadata. Store it with the same care as a production backup.
+            </.ink_note>
+            <.ink_foot :if={!@loading} verb={if exported?, do: "download", else: "generate"}>
+              <:secondary :if={exported?}>
+                <.ghost_pill phx-click="generate_export">Regenerate export</.ghost_pill>
+              </:secondary>
+              <:primary>
+                <%!-- A native anchor: <.link> refuses data: hrefs (v7 §2.3). --%>
                 <a
-                  :if={@download_ready && @export_data}
+                  :if={exported?}
+                  class="pw"
                   download={"#{@company.slug}-export-#{Date.utc_today()}.json"}
                   href={download_href(@export_data)}
-                  class="inline-flex items-center gap-2 rounded-button border border-emerald-500/25 bg-emerald-500/10 px-5 py-3 text-sm font-510 text-emerald-300 transition-colors hover:bg-emerald-500/15"
                 >
-                  <.icon name="hero-arrow-down-tray-mini" class="h-4 w-4" /> Download JSON
+                  Download JSON<span class="nub"><.r3_icon name="i-arrow-right" /></span>
                 </a>
-              </div>
+                <.primary_pill :if={!exported?} phx-click="generate_export">
+                  Generate export
+                </.primary_pill>
+              </:primary>
+            </.ink_foot>
+          </.ink_card>
+        </:resolution>
+      </.next_step>
 
-              <div :if={@download_ready && @export_data} class="mt-4 text-xs text-text-tertiary">
-                Exported {@export_data.exported_at} / Version {@export_data.version}
-              </div>
-            </div>
+      <.band_card :if={exported?} id="ex-inventory-t" title="What is in the file">
+        <.kv_list class="wide">
+          <:item :for={metric <- export_metrics(@export_data)} term={metric.label}>
+            <span class="mono">{metric.value}</span>
+          </:item>
+        </.kv_list>
+      </.band_card>
 
-            <div class="border-t border-border bg-subtle/60 p-6 lg:border-l lg:border-t-0 lg:p-8">
-              <div class="text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                Safety Status
-              </div>
-              <div class="mt-4 space-y-4">
-                <div class="flex items-start gap-3">
-                  <span class="mt-0.5 rounded-md bg-emerald-500/10 p-2 text-emerald-300">
-                    <.icon name="hero-shield-check-mini" class="h-4 w-4" />
-                  </span>
-                  <div>
-                    <div class="text-sm font-510 text-text-primary">Secret values scrubbed</div>
-                    <p class="mt-1 text-xs leading-5 text-text-secondary">
-                      Encrypted payloads, hashes, and provider keys are not serialized.
-                    </p>
-                  </div>
-                </div>
-                <div class="flex items-start gap-3">
-                  <span class="mt-0.5 rounded-md bg-amber-500/10 p-2 text-amber-200">
-                    <.icon name="hero-key-mini" class="h-4 w-4" />
-                  </span>
-                  <div>
-                    <div class="text-sm font-510 text-text-primary">
-                      {Enum.count(active_secret_manifest(@export_data, @secret_manifest))} restore entries
-                    </div>
-                    <p class="mt-1 text-xs leading-5 text-text-secondary">
-                      Operators get the keys and scopes they must re-enter after import.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          :if={@download_ready && @export_data}
-          class="rounded-xl border border-border bg-surface p-6 lg:p-8"
-        >
-          <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h3 class="font-serif text-xl font-510 text-text-primary">Export inventory</h3>
-              <p class="mt-1 text-sm text-text-secondary">
-                This is the portable company footprint that will be recreated on import.
-              </p>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
-            <div
-              :for={metric <- export_metrics(@export_data)}
-              class="ember-stat rounded-lg border border-border bg-subtle p-4"
-            >
-              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
-                {metric.value}
-              </div>
-              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                {metric.label}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          data-testid="secret-restore-manifest"
-          class="rounded-xl border border-border bg-surface p-6 lg:p-8"
-        >
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h3 class="font-serif text-xl font-510 text-text-primary">Secret restore checklist</h3>
-              <p class="mt-1 text-sm text-text-secondary">
-                The export records secret names and scopes only. Values must be supplied again in the destination company.
-              </p>
-            </div>
-            <span class="inline-flex w-fit items-center gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-xs font-510 text-amber-200">
-              <.icon name="hero-key-mini" class="h-4 w-4" />
-              {Enum.count(active_secret_manifest(@export_data, @secret_manifest))} keys
-            </span>
-          </div>
-
-          <div
-            :if={active_secret_manifest(@export_data, @secret_manifest) == []}
-            class="mt-5 rounded-lg border border-border bg-subtle p-5 text-sm text-text-secondary"
+      <.band_card
+        id="ex-secrets-t"
+        title="Secrets to restore"
+        data-testid="secret-restore-manifest"
+      >
+        <:header_end>
+          <span class="meta mono">
+            {Enum.count(active_secret_manifest(@export_data, @secret_manifest))}
+          </span>
+        </:header_end>
+        <p class="gl-sub ex-line">
+          The file names each secret and its scope only. Values must be entered again in the destination company.
+        </p>
+        <.quiet_empty
+          :if={active_secret_manifest(@export_data, @secret_manifest) == []}
+          title="No active secrets are recorded for this company."
+        />
+        <ul :if={active_secret_manifest(@export_data, @secret_manifest) != []} class="rows">
+          <.list_row
+            :for={
+              {secret, n} <- Enum.with_index(active_secret_manifest(@export_data, @secret_manifest))
+            }
+            id={"ex-secret-#{n}"}
+            title={secret.key}
+            icon="i-shield"
           >
-            No active secrets are recorded for this company.
-          </div>
-
-          <div
-            :if={active_secret_manifest(@export_data, @secret_manifest) != []}
-            class="mt-5 overflow-hidden rounded-lg border border-border"
-          >
-            <div
-              :for={secret <- active_secret_manifest(@export_data, @secret_manifest)}
-              class="flex flex-col gap-3 border-b border-border bg-subtle/60 p-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div class="min-w-0">
-                <div class="truncate text-sm font-510 text-text-primary">{secret.key}</div>
-                <div class="mt-1 text-xs text-text-secondary">
-                  {format_scope(secret.scope)} scope{if secret.scope_id,
-                    do: " / scoped target preserved",
-                    else: ""}
-                </div>
-              </div>
-              <div class="text-left text-xs text-text-tertiary sm:max-w-md sm:text-right">
-                {secret.description || "No description provided"}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <div class="rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-200">
-          <strong>Storage note:</strong>
-          The file still contains company work content, comments, and operating metadata. Store it with the same care as a production backup.
-        </div>
-      </div>
-    </div>
+            <:meta>
+              {format_scope(secret.scope)} scope<span :if={secret.scope_id}><span aria-hidden="true"> · </span>scoped target kept</span><span aria-hidden="true"> · </span>{secret.description ||
+                "No description"}
+            </:meta>
+          </.list_row>
+        </ul>
+      </.band_card>
+    </.page_frame>
     """
   end
 
@@ -260,7 +191,7 @@ defmodule CymphoWeb.CompanyExportLive do
     [
       %{label: "Projects", value: export_count(export_data, :projects)},
       %{label: "Agents", value: export_count(export_data, :agents)},
-      %{label: "Issues", value: export_count(export_data, :issues)},
+      %{label: "Tasks", value: export_count(export_data, :issues)},
       %{label: "Goals", value: export_count(export_data, :goals)},
       %{label: "Labels", value: export_count(export_data, :labels)},
       %{label: "Members", value: export_count(export_data, :memberships)}

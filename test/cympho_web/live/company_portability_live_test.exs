@@ -2,6 +2,7 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
   use CymphoWeb.LiveCase, async: true
 
   import Phoenix.LiveViewTest
+  import CymphoWeb.R3PageHelpers
 
   alias Cympho.Companies
   alias Cympho.Projects
@@ -32,8 +33,8 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
 
     assert has_element?(view, "[data-testid='company-export-command']")
     assert has_element?(view, "[data-testid='secret-restore-manifest']")
-    assert html =~ "Generate a portable operating export"
-    assert html =~ "Secret restore checklist"
+    assert html =~ "Secret values stay out of the file"
+    assert html =~ "Secrets to restore"
     assert html =~ "PROJECT_TOKEN"
     refute html =~ "hidden-portability-token"
 
@@ -43,10 +44,54 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
 
     html = render(view)
 
-    assert html =~ "Export inventory"
+    assert html =~ "What is in the file"
     assert html =~ "Download JSON"
     assert html =~ "PROJECT_TOKEN"
     refute html =~ "hidden-portability-token"
+  end
+
+  # v7 C9: the download is the page's one primary, a native anchor (the `download`
+  # event is a no-op and <.link> refuses data: hrefs).
+  test "export page leads with the export step and downloads through a native anchor" do
+    conn = authenticated_conn(%{is_board_member: true})
+    company = current_company()
+
+    {:ok, view, _html} = live(conn, "/companies/#{company.id}/export")
+    doc = main_doc(view)
+
+    assert_r3_page(doc,
+      page: "export",
+      h1: "Export #{company.name}",
+      kind: :deep,
+      parent: company.name,
+      primaries: 1
+    )
+
+    assert Floki.find(doc, ~s(.next[data-testid="company-export-command"])) != []
+    assert text(doc, ".next .paper .nt") == "Export #{company.name}"
+    assert text(doc, ".next .ink button.pw") == "Generate export"
+
+    view |> element(".next .ink button.pw") |> render_click()
+    doc = main_doc(view)
+
+    assert_r3_page(doc,
+      page: "export",
+      h1: "Export #{company.name}",
+      kind: :deep,
+      parent: company.name,
+      primaries: 1
+    )
+
+    assert [download] = Floki.find(doc, ".next .ink a.pw")
+
+    assert Floki.attribute(download, "download") == [
+             "#{company.slug}-export-#{Date.utc_today()}.json"
+           ]
+
+    assert [href] = Floki.attribute(download, "href")
+    assert String.starts_with?(href, "data:application/json")
+    assert text(doc, ~s(.next .ink button.pd[phx-click="generate_export"])) == "Regenerate export"
+    assert text(doc, ".next .paper .obj") =~ "Exported"
   end
 
   test "export rejects a company the current board member cannot access" do
@@ -80,6 +125,19 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
     assert html =~ "Keep the same choice when resuming"
     refute html =~ "authorization"
     refute html =~ "Bearer"
+
+    assert_r3_page(main_doc(view),
+      page: "import",
+      h1: "Import a company",
+      kind: :deep,
+      parent: "Companies",
+      primaries: 0
+    )
+
+    assert has_element?(
+             view,
+             ~s(.frame#company-import-transfer[data-base-path="/companies/import/transfers"])
+           )
   end
 
   test "import transfer events keep only an id and preview/result plans in LiveView" do
@@ -126,8 +184,16 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
     assert html =~ "PROJECT_TOKEN"
     refute html =~ "never-import-this-value"
 
+    assert_r3_page(main_doc(view),
+      page: "import",
+      h1: "Import a company",
+      kind: :deep,
+      parent: "Companies",
+      primaries: 1
+    )
+
     view
-    |> element("button", "Start Import")
+    |> element(".next .ink button.pw", "Start import")
     |> render_click()
 
     assert_push_event(view, "company-import:apply", %{
@@ -163,8 +229,8 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
         }
       })
 
-    assert html =~ "Import complete"
-    assert html =~ "Secret restore queue"
+    assert html =~ "Imported #{company.name}"
+    assert html =~ "Secrets to restore"
     assert html =~ "PROJECT_TOKEN"
     assert html =~ "Add value"
     refute html =~ "never-import-this-value"
@@ -256,9 +322,16 @@ defmodule CymphoWeb.CompanyPortabilityLiveTest do
     assert html =~ "Import already complete"
     assert html =~ "No data was imported a second time"
 
-    assert html =~ "Secret restore queue"
+    assert html =~ "Secrets to restore"
     assert html =~ "RESUMED_TOKEN"
-    assert html =~ "1 keys"
+
+    assert has_element?(
+             view,
+             "[data-testid='import-secret-restore'] .card-h .meta",
+             "1"
+           )
+
+    assert has_element?(view, "[data-testid='import-secret-restore'] .lrow", "RESUMED_TOKEN")
 
     assert_switch_path(
       link_href(html, "a", "View imported company"),
