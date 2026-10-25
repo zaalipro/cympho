@@ -11,11 +11,13 @@ defmodule CymphoWeb.GoalLive.FormHelpers do
   attr :project_options, :list, required: true
   attr :submit, :string, required: true, doc: "\"Create goal\" | \"Save goal\""
   attr :cancel, :string, required: true, doc: "where Cancel goes"
+  attr :heading, :string, default: "After you save", doc: "New: \"After you create it\""
+  attr :verb, :string, default: "save", doc: "the ⌘↵ hint: \"create\" on New"
 
   @doc "The goal form shared by New and Edit (v7 L7/L9): two field cards and the ink card."
   def goal_form(assigns) do
     ~H"""
-    <.form_pair id="goal-form" for={@form} phx-submit="save" heading="After you save" verb="save">
+    <.form_pair id="goal-form" for={@form} phx-submit="save" heading={@heading} verb={@verb}>
       <.band_card id="gf-goal-t" title="Goal">
         <div class="flds">
           <.input

@@ -149,6 +149,9 @@ defmodule CymphoWeb.ProjectLive.Index do
   def overview_status_detail(:empty),
     do: "Create a project to group repos, environments, and workstreams."
 
+  def active_goal_label(1), do: "1 active goal"
+  def active_goal_label(count), do: "#{count} active goals"
+
   def workstream_summary(%{open_issues: open_issues, active_projects: active_projects}) do
     "#{open_issues} open #{plural(open_issues, "task")} across #{active_projects} active #{plural(active_projects, "project")}"
   end

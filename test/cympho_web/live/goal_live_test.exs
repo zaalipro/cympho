@@ -50,10 +50,12 @@ defmodule CymphoWeb.GoalLiveTest do
     test "defaults to compact density", %{conn: conn} do
       {:ok, view, html} = live(conn, "/goals")
 
-      # r3 (v7 L6): one list card; the density switch and the goal overview are Advanced.
+      # r3 (v7 L6): one list card; the goal overview is Advanced. The density switch
+      # stays in both modes: Detailed holds the floating-work Attach form.
       assert_r3_page(main_doc(view), page: "goals", h1: "Goals", kind: :root, primaries: 0)
       assert has_element?(view, "#goals-list-t", "Goals")
-      assert has_element?(view, ".card-h .ui-advanced-only [data-density-switch]")
+      assert has_element?(view, ".card-h [data-density-switch]")
+      refute has_element?(view, ".ui-advanced-only [data-density-switch]")
       assert html =~ "Compact"
       assert html =~ "Detailed"
       assert has_element?(view, ".ui-advanced-only #goal-overview-t", "Goals overview")
@@ -108,10 +110,17 @@ defmodule CymphoWeb.GoalLiveTest do
       assert html =~ "Attach"
       assert html =~ "Needs link"
       assert html =~ "Blocked goals"
-      assert has_element?(view, ".ui-advanced-only #goal-alignment-t", "Mission alignment")
+      # Detailed density shows alignment and the Attach form in Simple mode too, as before.
+      assert has_element?(view, "#goal-alignment-t", "Mission alignment")
+      refute has_element?(view, ".ui-advanced-only #goal-alignment-t")
       assert html =~ "75% of open work is goal-linked"
-      assert has_element?(view, ".ui-advanced-only #goal-risk-t", "Highest-risk floating work")
+      assert has_element?(view, "#goal-risk-t", "Highest-risk floating work")
+      refute has_element?(view, ".ui-advanced-only #goal-risk-t")
+      refute has_element?(view, ".ui-advanced-only form[phx-submit='link_issue_to_goal']")
       assert html =~ "Goal page floating issue"
+      assert has_element?(view, "#goal-risk-#{floating.id} .lr-tr .prio", "Critical")
+      # A High or Critical goal keeps its priority on the row.
+      assert has_element?(view, "[id^='goals-'] .lr-tr .prio", "High")
 
       assert has_element?(
                view,
@@ -183,6 +192,39 @@ defmodule CymphoWeb.GoalLiveTest do
       assert has_element?(view, "a[href='/goals/#{goal.id}/edit']", "Edit")
     end
 
+    test "linked tasks keep their High and Critical priority", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, goal} =
+        Goals.create_goal(%{
+          title: "Priority mission",
+          company_id: company.id,
+          goal_type: :mission
+        })
+
+      {:ok, urgent} =
+        Issues.create_issue(%{
+          title: "Urgent linked",
+          company_id: company.id,
+          goal_id: goal.id,
+          priority: :critical
+        })
+
+      {:ok, quiet} =
+        Issues.create_issue(%{
+          title: "Quiet linked",
+          company_id: company.id,
+          goal_id: goal.id,
+          priority: :low
+        })
+
+      {:ok, view, _html} = live(conn, "/goals/#{goal.id}")
+
+      assert has_element?(view, "#goal-task-#{urgent.id} .lr-tr .prio", "Critical")
+      refute has_element?(view, "#goal-task-#{quiet.id} .prio")
+    end
+
     test "shows a reassuring empty state when nothing is linked", %{
       conn: conn,
       current_company: company
@@ -250,6 +292,8 @@ defmodule CymphoWeb.GoalLiveTest do
       refute html =~ "Setup checklist"
       assert has_element?(view, "form#goal-form.fpair[phx-submit='save']")
       assert has_element?(view, "#goal-form .ink button.pw[type='submit']", "Create goal")
+      assert has_element?(view, "#goal-form .ink-h", "After you create it")
+      assert has_element?(view, "#goal-form .ink .kh", "to create")
       assert html =~ "Missions sit at the top; an initiative with no parent becomes a mission."
       assert html =~ "Where it fits"
       assert html =~ "Parent goal"
@@ -414,6 +458,7 @@ defmodule CymphoWeb.GoalLiveTest do
       refute html =~ "Maintenance checklist"
       assert has_element?(view, ".crumb [aria-current]", "Edit goal")
       assert has_element?(view, "#goal-form .ink button.pw[type='submit']", "Save goal")
+      assert has_element?(view, "#goal-form .ink-h", "After you save")
       assert has_element?(view, "#goal-form .ink a[href='/goals/#{goal.id}']", "Cancel")
       assert html =~ "Parent goal"
       assert html =~ "No project context"

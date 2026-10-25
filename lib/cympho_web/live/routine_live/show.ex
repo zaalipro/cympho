@@ -130,6 +130,18 @@ defmodule CymphoWeb.RoutineLive.Show do
   def last_run([run | _]), do: run
   def last_run(_), do: nil
 
+  attr :at, :any, required: true
+
+  @doc "A run's full date and clock for the history table (the compact stamp drops the clock after a day)."
+  def run_time(assigns) do
+    ~H"""
+    <span :if={@at}>
+      {Calendar.strftime(@at, "%a %-d %b %Y")}
+      <span class="mono">{Calendar.strftime(@at, "%H:%M")}</span>
+    </span>
+    """
+  end
+
   @doc "Only-loud-when-needed health signal for the routine header."
   def show_alert(routine, triggers, runs) do
     cond do

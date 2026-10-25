@@ -371,7 +371,8 @@ defmodule CymphoWeb.RoutineLive.Index do
 
   @doc "Only a repeating task that needs a person carries a status word."
   def routine_status(%{status: :archived}), do: nil
-  def routine_status(%{has_recent_failure: true}), do: {:stopped, "Last run failed"}
+  # has_recent_failure is any failed run in the last day, not the latest run's outcome.
+  def routine_status(%{has_recent_failure: true}), do: {:stopped, "Failed recently"}
   def routine_status(%{has_stale_run: true}), do: {:waiting, "Run stuck"}
 
   def routine_status(%{status: :active} = routine) do

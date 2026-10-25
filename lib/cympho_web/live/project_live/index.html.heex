@@ -51,8 +51,16 @@
               No code repo yet
             </span>
             <span aria-hidden="true"> · </span>{health.open} open
+            <span :if={health.active_goals > 0}>
+              <span aria-hidden="true"> · </span>{active_goal_label(health.active_goals)}
+            </span>
           </:meta>
-          <:trail :if={project.status == :archived}><span class="tag">Archived</span></:trail>
+          <:trail :if={project.status == :archived or health.total > 0}>
+            <span :if={project.status == :archived} class="tag">Archived</span>
+            <span :if={health.total > 0}>
+              <span class="mono">{health.progress_percent}%</span> done
+            </span>
+          </:trail>
           <:actions>
             <.pill navigate={~p"/issues?project_id=#{project.id}"}>Tasks</.pill>
             <button

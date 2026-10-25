@@ -3,7 +3,8 @@ defmodule CymphoWeb.RoutineLiveTest do
 
   import Phoenix.LiveViewTest
   import CymphoWeb.R3PageHelpers
-  alias Cympho.{Agents, Projects, RoutineTriggers, Routines}
+  alias Cympho.{Agents, Projects, Repo, RoutineTriggers, Routines}
+  alias Cympho.RoutineTriggers.RoutineRun
 
   test "routine form params fail closed when no company is assigned" do
     socket = %{assigns: %{current_company: nil}}
@@ -35,6 +36,18 @@ defmodule CymphoWeb.RoutineLiveTest do
     |> Map.put_new(:company_id, current_company_id())
     |> Map.put_new(:prefix, "R#{alpha_suffix(unique)}")
     |> Projects.create_project()
+  end
+
+  defp insert_run(routine_id, status, triggered_at, completed_at) do
+    %RoutineRun{}
+    |> RoutineRun.changeset(%{
+      routine_id: routine_id,
+      status: status,
+      trigger_type: "manual",
+      triggered_at: triggered_at,
+      completed_at: completed_at
+    })
+    |> Repo.insert!()
   end
 
   defp alpha_suffix(number), do: alpha_suffix(number, "")
@@ -105,6 +118,21 @@ defmodule CymphoWeb.RoutineLiveTest do
                view,
                "[data-testid='routine-next-action'] a[href='/routines/#{routine.id}']"
              )
+    end
+
+    test "a failure in the last day reads Failed recently, even after a later success", %{
+      conn: conn
+    } do
+      {:ok, routine} = create_routine(%{name: "Retried Routine"})
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      insert_run(routine.id, "failed", DateTime.add(now, -7200), DateTime.add(now, -7100))
+      insert_run(routine.id, "completed", DateTime.add(now, -3600), DateTime.add(now, -3500))
+
+      {:ok, view, html} = live(conn, "/routines")
+
+      # has_recent_failure is any failure in the window, not the latest run's outcome.
+      assert has_element?(view, "#routine-#{routine.id} .lr-st", "Failed recently")
+      refute html =~ "Last run failed"
     end
 
     test "lists routines with status badges", %{conn: conn} do
@@ -299,6 +327,38 @@ defmodule CymphoWeb.RoutineLiveTest do
       assert Enum.any?(triggers, &(&1.type == "schedule" and &1.cron_expression == "0 9 * * *"))
     end
 
+    test "run history keeps each run's full date and time", %{conn: conn} do
+      {:ok, routine} = create_routine(%{name: "Old Runs"})
+      triggered = ~U[2026-03-04 09:15:00Z]
+      completed = ~U[2026-03-04 09:47:00Z]
+      run = insert_run(routine.id, "completed", triggered, completed)
+
+      {:ok, view, _html} = live(conn, "/routines/#{routine.id}")
+
+      # Older than a day, the compact stamp drops the clock; the table keeps it.
+      assert has_element?(view, "#routine-run-#{run.id}", "Wed 4 Mar 2026")
+      assert has_element?(view, "#routine-run-#{run.id} .mono", "09:15")
+      assert has_element?(view, "#routine-run-#{run.id} .mono", "09:47")
+    end
+
+    test "a paused schedule does not offer a second schedule", %{conn: conn} do
+      {:ok, routine} = create_routine(%{name: "Paused Schedule"})
+
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
+      {:ok, _trigger} = RoutineTriggers.disable_trigger(trigger)
+
+      {:ok, view, _html} = live(conn, "/routines/#{routine.id}")
+
+      # As before the restyle: any schedule, on or off, hides the add-schedule form.
+      refute has_element?(view, "form[phx-submit='create_schedule_trigger']")
+      assert render(view) =~ "Triggers paused"
+    end
+
     test "invalid cron flashes an error", %{conn: conn} do
       {:ok, routine} = create_routine(%{name: "Bad Cron"})
 
@@ -372,6 +432,8 @@ defmodule CymphoWeb.RoutineLiveTest do
 
       assert has_element?(view, "form#routine-form.fpair[phx-submit='save']")
       assert has_element?(view, "#routine-form .ink button.pw[type='submit']", "Create")
+      assert has_element?(view, "#routine-form .ink-h", "After you create it")
+      assert has_element?(view, "#routine-form .ink .kh", "to create")
       assert html =~ "What it does"
       assert html =~ "Default owner"
       assert html =~ "Project"
@@ -535,6 +597,7 @@ defmodule CymphoWeb.RoutineLiveTest do
 
       assert has_element?(view, ".crumb [aria-current]", "Edit repeating task")
       assert has_element?(view, "#routine-form .ink button.pw[type='submit']", "Save")
+      assert has_element?(view, "#routine-form .ink-h", "After you save")
       assert has_element?(view, "#routine-form .ink a[href='/routines/#{routine.id}']", "Cancel")
       assert html =~ "Default owner"
       assert html =~ "No project context"

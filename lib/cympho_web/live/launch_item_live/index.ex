@@ -309,9 +309,17 @@ defmodule CymphoWeb.LaunchItemLive.Index do
   def status_label("in_progress"), do: "In progress"
   def status_label("completed"), do: "Completed"
 
+  # A member reads as their name; the email is added only when two members share
+  # a name (or replaces a blank one), so the owner select fits a phone row.
   def owner_options(company_members) do
-    Enum.map(company_members, fn membership ->
-      {member_label(membership.user), membership.user.id}
+    users = Enum.map(company_members, & &1.user)
+    shared = users |> Enum.frequencies_by(&owner_name/1) |> Map.filter(fn {_, n} -> n > 1 end)
+
+    Enum.map(users, fn user ->
+      label =
+        if Map.has_key?(shared, owner_name(user)), do: member_label(user), else: owner_name(user)
+
+      {label, user.id}
     end)
   end
 

@@ -93,7 +93,7 @@ defmodule CymphoWeb.GoalLive.Show do
 
   attr :issue, :map, required: true
 
-  @doc "A linked task as a row: its status word, ID and when it last moved."
+  @doc "A linked task as a row: its status word, ID, when it last moved and a High/Critical priority."
   def goal_issue_row(assigns) do
     ~H"""
     <.list_row
@@ -110,6 +110,9 @@ defmodule CymphoWeb.GoalLive.Show do
           @issue.updated_at
         )}</span>
       </:meta>
+      <:trail :if={@issue.priority in [:high, :critical]}>
+        <CymphoWeb.IssueLive.Tasks.priority priority={@issue.priority} />
+      </:trail>
     </.list_row>
     """
   end

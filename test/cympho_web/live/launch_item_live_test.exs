@@ -159,6 +159,48 @@ defmodule CymphoWeb.LaunchItemLiveTest do
     refute unblocked_item.is_blocked
   end
 
+  test "owner choices read the member's name; the email only tells two of one name apart", %{
+    conn: conn,
+    current_company: company,
+    owner_a: owner_a
+  } do
+    unique = System.unique_integer([:positive])
+
+    twins =
+      for n <- 1..2 do
+        {:ok, twin} =
+          Users.create_user(%{
+            email: "launch-ui-twin-#{n}-#{unique}@example.com",
+            name: "Sam Twin #{unique}",
+            password: "password1234"
+          })
+
+        {:ok, _membership} =
+          Companies.create_membership(%{
+            user_id: twin.id,
+            company_id: company.id,
+            role: "member",
+            is_board_member: false
+          })
+
+        twin
+      end
+
+    {:ok, view, _html} = live(conn, "/launch-items")
+
+    owner_option = "#launch-item-create-form option[value='#{owner_a.id}']"
+    assert has_element?(view, owner_option, owner_a.name)
+    refute has_element?(view, owner_option, owner_a.email)
+
+    for twin <- twins do
+      assert has_element?(
+               view,
+               "#launch-item-create-form option[value='#{twin.id}']",
+               "#{twin.name} · #{twin.email}"
+             )
+    end
+  end
+
   test "shows validation errors when creation fails", %{conn: conn, owner_a: owner_a} do
     {:ok, view, _html} = live(conn, "/launch-items")
 

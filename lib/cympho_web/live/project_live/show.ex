@@ -20,8 +20,14 @@ defmodule CymphoWeb.ProjectLive.Show do
   end
 
   @impl true
-  def handle_params(%{"id" => id}, _url, socket) do
-    {:noreply, apply_action(socket, socket.assigns.live_action, id)}
+  def handle_params(%{"id" => id}, url, socket) do
+    # The router gives /edit no live_action (router.ex), so the path tells them apart.
+    editing? = url |> URI.parse() |> Map.get(:path, "") |> String.ends_with?("/edit")
+
+    {:noreply,
+     socket
+     |> assign(:editing?, editing?)
+     |> apply_action(socket.assigns.live_action, id)}
   end
 
   defp apply_action(socket, nil, id), do: apply_action(socket, :show, id)
@@ -165,6 +171,7 @@ defmodule CymphoWeb.ProjectLive.Show do
     |> assign(:goal_progress, goal_progress)
     |> assign(:project_workspaces, project_workspaces)
     |> assign(:secrets, secrets)
+    |> assign(:project_health, health)
     |> assign(
       :project_command,
       project_command(project, health, goal_progress, project_workspaces)

@@ -12,11 +12,13 @@ defmodule CymphoWeb.RoutineLive.FormHelpers do
   attr :effect, :string, required: true, doc: "what saving does, one sentence"
   attr :submit, :string, required: true
   attr :cancel, :string, required: true, doc: "where Cancel goes"
+  attr :heading, :string, default: "After you save", doc: "New: \"After you create it\""
+  attr :verb, :string, default: "save", doc: "the ⌘↵ hint: \"create\" on New"
 
   @doc "The repeating-task form shared by New and Edit (v7 L13/L15)."
   def routine_form(assigns) do
     ~H"""
-    <.form_pair id="routine-form" for={@form} phx-submit="save" heading="After you save" verb="save">
+    <.form_pair id="routine-form" for={@form} phx-submit="save" heading={@heading} verb={@verb}>
       <.band_card id="rf-what-t" title="What it does">
         <div class="flds">
           <.input

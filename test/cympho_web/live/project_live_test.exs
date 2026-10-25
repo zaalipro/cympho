@@ -66,6 +66,9 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert has_element?(view, "#projects-#{project.id} a.rt2[href='/projects/#{project.id}']")
       assert has_element?(view, "#projects-#{project.id} .lr-st", "1 blocked")
       assert has_element?(view, "#projects-#{project.id} .rm", "3 open")
+      # The card's health values stay on the row: active goals and completion.
+      assert has_element?(view, "#projects-#{project.id} .rm", "1 active goal")
+      assert has_element?(view, "#projects-#{project.id} .lr-tr", "25% done")
       assert html =~ "No repository configured"
 
       assert has_element?(
@@ -281,6 +284,10 @@ defmodule CymphoWeb.ProjectLiveTest do
       )
 
       assert has_element?(view, "[data-testid='project-command']")
+      # The command's metrics stay Advanced, as before: open, done %, review, blocked.
+      assert has_element?(view, "[data-testid='project-command'] .ui-advanced-only .strip")
+      assert has_element?(view, "[data-testid='project-health-strip'] .cell", "Open")
+      assert has_element?(view, "[data-testid='project-health-strip'] .cell", "0%")
       assert has_element?(view, "[data-testid='project-readiness'].ui-advanced-only")
       assert has_element?(view, "[data-testid='project-goals']")
       refute html =~ "Project Overview"
@@ -315,9 +322,13 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert has_element?(view, "form#project-settings.fpair")
       refute html =~ "/projects/#{project.id}/edit"
 
-      {:ok, _edit_view, edit_html} = live(conn, "/projects/#{project.id}/edit")
+      # Only /edit moves focus (and so the scroll) to the settings form on mount.
+      refute has_element?(view, "form#project-settings[phx-mounted]")
+
+      {:ok, edit_view, edit_html} = live(conn, "/projects/#{project.id}/edit")
       assert edit_html =~ "Project settings"
       assert edit_html =~ "Save changes"
+      assert has_element?(edit_view, "form#project-settings[phx-mounted*='focus_first']")
 
       view
       |> form("form[phx-submit='save']", %{
@@ -369,6 +380,41 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert Projects.list_projects_by_company(other_company.id) == []
     end
 
+    test "recent tasks carry High and Critical priority, and nothing for the rest", %{
+      conn: conn
+    } do
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Priority Project",
+          prefix: "PRI",
+          company_id: company.id
+        })
+
+      {:ok, urgent} =
+        Issues.create_issue(%{
+          title: "Urgent fix",
+          company_id: company.id,
+          project_id: project.id,
+          priority: :critical
+        })
+
+      {:ok, routine} =
+        Issues.create_issue(%{
+          title: "Routine tidy",
+          company_id: company.id,
+          project_id: project.id,
+          priority: :low
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/projects/#{project.id}")
+
+      assert has_element?(view, "#pj-task-#{urgent.id} .lr-tr .prio", "Critical")
+      refute has_element?(view, "#pj-task-#{routine.id} .prio")
+    end
+
     test "adds project environment variables from the show page", %{conn: conn} do
       {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
 
@@ -397,6 +443,14 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert secret.scope == "project"
       assert render(view) =~ "GITHUB_TOKEN"
     end
+  end
+
+  test "keyboard focus on a colour swatch draws the focus ring" do
+    css = File.read!("assets/css/r3-pages/planning.css")
+
+    # The swatch's own hairline box-shadow outranks r3's global :focus-visible ring.
+    assert css =~
+             ~r/\.swp-b:focus-visible\{box-shadow:0 0 0 2px var\(--focus-gap\),0 0 0 4px var\(--focus-ring\)\}/
   end
 
   defp live_session_conn(conn, user, company) do

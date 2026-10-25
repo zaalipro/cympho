@@ -1,5 +1,6 @@
 <% alert = show_alert(@routine, @triggers, @runs) %>
 <% last = last_run(@runs) %>
+<% scheduled? = Enum.any?(@triggers, &(&1.type == "schedule")) %>
 <.page_frame
   page="routine"
   kind={:deep}
@@ -25,7 +26,8 @@
 
   <.flash_line flash={@flash} />
 
-  <.next_step :if={alert == :trigger_gap} id="rt-ns-">
+  <%!-- Any schedule, on or off, hides the add-schedule form (as before the restyle). --%>
+  <.next_step :if={alert == :trigger_gap and not scheduled?} id="rt-ns-">
     <:problem>
       <.problem_card title="Give it a schedule" title_id="rt-ns-t">
         <:eyebrow>Next step<span aria-hidden="true"> · </span>Repeating task</:eyebrow>
@@ -96,7 +98,7 @@
       </:item>
     </.kv_list>
     <form
-      :if={alert != :trigger_gap and Enum.all?(@triggers, &(&1.type != "schedule"))}
+      :if={alert != :trigger_gap and not scheduled?}
       id="schedule-trigger"
       phx-submit="create_schedule_trigger"
       class="rt-cron"
@@ -156,10 +158,8 @@
               </span>
             </td>
             <td class="m-hide">{routine_label(run.trigger_type)}</td>
-            <td><span :if={run.triggered_at} class="mono">{stamp(run.triggered_at)}</span></td>
-            <td class="m-hide">
-              <span :if={run.completed_at} class="mono">{stamp(run.completed_at)}</span>
-            </td>
+            <td><.run_time at={run.triggered_at} /></td>
+            <td class="m-hide"><.run_time at={run.completed_at} /></td>
             <td>
               <.link :if={run.issue_id} class="lnk" navigate={~p"/issues/#{run.issue_id}"}>
                 Task

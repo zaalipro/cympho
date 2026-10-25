@@ -6,14 +6,13 @@
   <.flash_line flash={@flash} />
 
   <.band_card id="goals-list-t" title="Goals">
+    <%!-- In both modes: Detailed holds the Attach form for floating work. --%>
     <:header_end>
-      <span class="ui-advanced-only">
-        <.density_switch
-          density={@digest_density}
-          compact_patch={goal_index_url("compact")}
-          detailed_patch={goal_index_url("detailed")}
-        />
-      </span>
+      <.density_switch
+        density={@digest_density}
+        compact_patch={goal_index_url("compact")}
+        detailed_patch={goal_index_url("detailed")}
+      />
     </:header_end>
     <.infinite_scroll
       id="goals"
@@ -56,6 +55,9 @@
               {String.capitalize(goal.status)}
             </span>
             <span :if={health.total > 0} class="mono">{health.progress_percent}%</span>
+            <CymphoWeb.IssueLive.Tasks.priority priority={
+              CymphoWeb.GoalLive.Show.priority_atom(goal.priority)
+            } />
           </:trail>
           <:actions>
             <.overflow_menu id={"goal-menu-#{goal.id}"} label={"Actions for #{goal.title}"}>
@@ -73,6 +75,71 @@
         </.list_row>
       <% end %>
     </.infinite_scroll>
+  </.band_card>
+
+  <%!-- Detailed density, in both modes: the problem rows (with Attach) first. --%>
+  <.band_card
+    :if={@digest_density == "detailed"}
+    id="goal-risk-t"
+    title="Highest-risk floating work"
+  >
+    <.quiet_empty
+      :if={@alignment_summary.risk_issues == []}
+      title="No open unlinked tasks in this company."
+    />
+    <ul :if={@alignment_summary.risk_issues != []} class="rows">
+      <.list_row
+        :for={issue <- @alignment_summary.risk_issues}
+        id={"goal-risk-#{issue.id}"}
+        title={issue.title}
+        navigate={~p"/issues/#{issue.id}"}
+        icon="i-alert"
+        kind={:problem}
+      >
+        <:meta>
+          {issue.project_name || "No project"}<span aria-hidden="true"> · </span>{issue.assignee_name ||
+            "Unassigned"}
+        </:meta>
+        <:trail :if={issue.priority in [:high, :critical]}>
+          <CymphoWeb.IssueLive.Tasks.priority priority={issue.priority} />
+        </:trail>
+        <:below>
+          <form :if={@goal_link_targets != []} phx-submit="link_issue_to_goal" class="gl-link">
+            <input type="hidden" name="issue_id" value={issue.id} />
+            <.input
+              type="select"
+              id={"goal-link-#{issue.id}"}
+              name="goal_id"
+              label="Link to goal"
+              value={hd(@goal_link_targets).id}
+              options={Enum.map(@goal_link_targets, &{&1.label, &1.id})}
+            />
+            <.pill type="submit">Attach</.pill>
+          </form>
+          <p :if={@goal_link_targets == []} class="help">
+            Create an active goal before linking this work.
+          </p>
+        </:below>
+      </.list_row>
+    </ul>
+  </.band_card>
+
+  <.band_card :if={@digest_density == "detailed"} id="goal-alignment-t" title="Mission alignment">
+    <div class="gl-sec">
+      <p class="gl-big">{@alignment_summary.aligned_percent}% of open work is goal-linked</p>
+      <p class="gl-sub">{alignment_status_detail(@alignment_summary.status)}</p>
+    </div>
+    <div class="strip s3">
+      <div class="cell">
+        <span class="v mono">{@alignment_summary.active_missions}</span><span class="l">Missions</span>
+      </div>
+      <div class="cell">
+        <span class="v mono">{@alignment_summary.active_goals}</span><span class="l">Active goals</span>
+      </div>
+      <div class="cell">
+        <span class="v mono">{@alignment_summary.floating}</span><span class="l">Floating</span>
+      </div>
+    </div>
   </.band_card>
 
   <.band_card
@@ -104,74 +171,5 @@
         <span class="v mono">{@goal_command.review_goal_count}</span><span class="l">Review goals</span>
       </div>
     </div>
-  </.band_card>
-
-  <.band_card
-    :if={@digest_density == "detailed"}
-    id="goal-alignment-t"
-    title="Mission alignment"
-    class="ui-advanced-only"
-  >
-    <div class="gl-sec">
-      <p class="gl-big">{@alignment_summary.aligned_percent}% of open work is goal-linked</p>
-      <p class="gl-sub">{alignment_status_detail(@alignment_summary.status)}</p>
-    </div>
-    <div class="strip s3">
-      <div class="cell">
-        <span class="v mono">{@alignment_summary.active_missions}</span><span class="l">Missions</span>
-      </div>
-      <div class="cell">
-        <span class="v mono">{@alignment_summary.active_goals}</span><span class="l">Active goals</span>
-      </div>
-      <div class="cell">
-        <span class="v mono">{@alignment_summary.floating}</span><span class="l">Floating</span>
-      </div>
-    </div>
-  </.band_card>
-
-  <.band_card
-    :if={@digest_density == "detailed"}
-    id="goal-risk-t"
-    title="Highest-risk floating work"
-    class="ui-advanced-only"
-  >
-    <.quiet_empty
-      :if={@alignment_summary.risk_issues == []}
-      title="No open unlinked tasks in this company."
-    />
-    <ul :if={@alignment_summary.risk_issues != []} class="rows">
-      <.list_row
-        :for={issue <- @alignment_summary.risk_issues}
-        id={"goal-risk-#{issue.id}"}
-        title={issue.title}
-        navigate={~p"/issues/#{issue.id}"}
-        icon="i-alert"
-        kind={:problem}
-      >
-        <:meta>
-          {issue.project_name || "No project"}<span aria-hidden="true"> · </span>{issue.assignee_name ||
-            "Unassigned"}<span aria-hidden="true"> · </span>{String.capitalize(
-            to_string(issue.priority)
-          )}
-        </:meta>
-        <:below>
-          <form :if={@goal_link_targets != []} phx-submit="link_issue_to_goal" class="gl-link">
-            <input type="hidden" name="issue_id" value={issue.id} />
-            <.input
-              type="select"
-              id={"goal-link-#{issue.id}"}
-              name="goal_id"
-              label="Link to goal"
-              value={hd(@goal_link_targets).id}
-              options={Enum.map(@goal_link_targets, &{&1.label, &1.id})}
-            />
-            <.pill type="submit">Attach</.pill>
-          </form>
-          <p :if={@goal_link_targets == []} class="help">
-            Create an active goal before linking this work.
-          </p>
-        </:below>
-      </.list_row>
-    </ul>
   </.band_card>
 </.page_frame>

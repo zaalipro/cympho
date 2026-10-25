@@ -16,8 +16,12 @@
 /* a user's data colour at the start of a row's meta line (projects, labels) */
 .cy-r3 :is([data-page="projects"],[data-section="labels"]) .rm .sw{margin-right:6px;vertical-align:-1px}
 /* three- and four-cell strips: Tier A summaries and a goal's progress */
-.cy-r3 :is([data-page="projects"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.cy-r3 :is([data-page="projects"],[data-page="project"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4{grid-template-columns:repeat(4,minmax(0,1fr))}
 .cy-r3 [data-page="goals"] .strip.s3{grid-template-columns:repeat(3,minmax(0,1fr))}
+/* a row's trail (tag, %, priority bars) keeps a gap between its parts */
+.cy-r3 :is([data-page="projects"],[data-page="project"],[data-page="goals"],[data-page="goal"]) .lrow>.lr-tr{display:inline-flex;align-items:center;gap:10px}
+/* a task row's High/Critical bars sit before its status word, so the status words stay in one column */
+.cy-r3 :is([data-page="project"],[data-page="goal"]) .lrow>.lr-st{order:1}
 /* project and goal pages have no Next step above their aside: it starts on the first row
    (two columns only; at 1180 and below r3.css puts the aside back in the flow) */
 @media (min-width:1181px){
@@ -42,6 +46,8 @@
 /* the hook (app.js ColorSwatchPicker) rings the chosen swatch through its border colour */
 .cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-b{width:28px;height:28px;flex:none;border-radius:50%;border:2px solid transparent;box-shadow:0 0 0 1px var(--line);transition:transform .15s var(--press)}
 .cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-b:hover{transform:scale(1.08)}
+/* the hairline above outranks r3's global :focus-visible ring, so the ring is restated here */
+.cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-b:focus-visible{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
 .cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-pv{width:20px;height:20px;margin-left:6px}
 .cy-r3 :is([data-page="project-form"],[data-page="project"]) .fld.swp input[data-hex-input]{width:120px;font-family:var(--mono)}
 
@@ -73,12 +79,19 @@
   /* a row's status stays at its end and its title wraps, instead of the status dropping under
      some titles and not others (list_row's 240 px title basis is wider than a phone row allows) */
   .cy-r3 :is([data-page="projects"],[data-page="project"],[data-page="goals"],[data-page="goal"],[data-page="launch"],[data-page="routines"],[data-section="labels"]) .lrow>.row-main{flex-basis:0}
-  .cy-r3 :is([data-page="projects"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .cy-r3 :is([data-page="projects"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4>.cell:nth-child(3){border-left:0}
+  .cy-r3 :is([data-page="projects"],[data-page="project"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cy-r3 :is([data-page="projects"],[data-page="project"],[data-page="goals"],[data-page="goal"],[data-page="routines"]) .strip.s4>.cell:nth-child(3){border-left:0}
+  /* a goal row's only action is its ⋯ menu: it sits beside the title and the status and % wrap
+     under it, instead of the menu taking a line of its own */
+  .cy-r3 [data-page="goals"] .lrow:has(>.lr-acts)>.row-main{flex-basis:calc(100% - 56px)}
+  .cy-r3 [data-page="goals"] .lrow .lr-acts{flex-basis:auto;order:1}
+  .cy-r3 [data-page="goals"] .lrow:has(>.lr-acts)>:is(.lr-st,.lr-tr){order:2}
   .cy-r3 [data-page="project"] .pj-sub{white-space:normal}
   .cy-r3 :is([data-page="project-form"],[data-page="project"]) .swp-b{width:44px;height:44px}
   .cy-r3 [data-page="launch"] :is(.li-own,.li-sel){width:100%;min-width:0}
   .cy-r3 [data-page="launch"] .li-ctl>.pl{flex:1}
+  /* each status sizes to its words (the pressed one carries a dot), so "In progress" never wraps */
+  .cy-r3 [data-page="launch"] .li-ctl .seg button{flex:1 1 auto;white-space:nowrap}
 }
 
 @media (prefers-reduced-motion:reduce){

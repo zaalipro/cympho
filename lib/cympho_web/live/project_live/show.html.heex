@@ -43,6 +43,22 @@
         {@project_command.action_label}
       </.text_link>
     </div>
+    <div class="ui-advanced-only" data-testid="project-health-strip">
+      <div class="strip s4">
+        <div class="cell">
+          <span class="v mono">{@project_health.open}</span><span class="l">Open</span>
+        </div>
+        <div class="cell">
+          <span class="v mono">{@project_health.progress_percent}%</span><span class="l">Done</span>
+        </div>
+        <div class="cell">
+          <span class="v mono">{@project_health.in_review}</span><span class="l">In review</span>
+        </div>
+        <div class="cell">
+          <span class="v mono">{@project_health.blocked}</span><span class="l">Blocked</span>
+        </div>
+      </div>
+    </div>
   </.band_card>
 
   <.band_card id="pj-tasks-t" title="Recent tasks">
@@ -58,6 +74,9 @@
         status={CymphoWeb.IssueLive.MyIssues.status_state(issue.status)}
       >
         <:meta :if={issue.identifier}><span class="mono">{issue.identifier}</span></:meta>
+        <:trail :if={issue.priority in [:high, :critical]}>
+          <CymphoWeb.IssueLive.Tasks.priority priority={issue.priority} />
+        </:trail>
       </.list_row>
     </ul>
     <.quiet_empty :if={@issues == []} title="No tasks in this project yet">
@@ -116,10 +135,13 @@
     </.kv_list>
   </.band_card>
 
+  <%!-- /projects/:id/edit is this page (owner decision O1): there, focusing the
+       form's first field brings it into view. --%>
   <.form_pair
     id="project-settings"
     for={@form}
     phx-submit="save"
+    phx-mounted={@editing? && JS.focus_first()}
     heading="After you save"
     verb="save"
   >
