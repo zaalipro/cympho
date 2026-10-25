@@ -2,6 +2,7 @@ defmodule CymphoWeb.OrgChartLive do
   use CymphoWeb, :live_view
   alias Cympho.{Agents, OrgHealth}
   alias Cympho.Agents.Agent
+  alias CymphoWeb.AgentLive.Parts
 
   @impl true
   def mount(_params, _session, socket) do
@@ -11,7 +12,7 @@ defmodule CymphoWeb.OrgChartLive do
 
     {:ok,
      socket
-     |> assign(:page_title, "Org Chart")
+     |> assign(:page_title, "Org chart")
      |> assign(:org_chart, load_org_chart(socket))
      |> assign(:org_health, load_org_health(socket))
      |> assign(:selected_agent_id, nil)
@@ -73,425 +74,181 @@ defmodule CymphoWeb.OrgChartLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div
+    <.page_frame
+      page="org-chart"
+      title="Org chart"
       id="org-chart-page"
-      class="ember-aurora min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8"
       phx-hook="OrgChartExport"
+      data-ui-complex-page
     >
-      <div class="relative z-[1] mx-auto max-w-7xl">
-        <.header>
-          <span class="ember-eyebrow">Reporting lines</span>
-          <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-            Org
-          </h1>
-          <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-            Autonomous reporting lines from CEO to CTO and execution agents.
-          </p>
-          <:actions>
-            <.button
-              phx-click="export_svg"
-              class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-            >
-              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                />
-              </svg>
-              Export SVG
-            </.button>
-            <.button
-              phx-click="toggle_company_stats"
-              class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-            >
-              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                />
-              </svg>
-              Company Stats
-            </.button>
-            <.app_link
-              navigate={~p"/agents"}
-              class="inline-flex items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-            >
-              Agents
-            </.app_link>
-            <.app_link
-              navigate={~p"/agents/new"}
-              class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
-            >
-              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-              New Agent
-            </.app_link>
-          </:actions>
-        </.header>
+      <:header_end>
+        <.pill navigate={~p"/agents/new"}><.r3_icon name="i-plus" />Hire</.pill>
+      </:header_end>
 
-        <%!-- No "Org health" tile here: the Org Health panel directly below
-             states the same level with its own badge. --%>
-        <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <div class="ember-stat cympho-panel px-4 py-3">
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Company agents
-            </p>
-            <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
-              {tree_count(@org_chart)}
-            </p>
+      <%!-- Problems first (v7 P7): the health of the org, then who is missing, then the tree. --%>
+      <.band_card id="org-health-t" title="Org health" data-testid="org-health">
+        <:header_end>
+          <span class="org-lvl">
+            <.status_word kind={level_kind(@org_health.level)} word={@org_health.label} />
+          </span>
+        </:header_end>
+        <p class="gl-sub org-sum">{@org_health.summary}</p>
+        <div class="strip org-strip">
+          <div class="cell">
+            <span class="v mono">{@org_health.metrics.missing_roles}</span><span class="l">Role gaps</span>
           </div>
-          <div class="ember-stat cympho-panel px-4 py-3">
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Root leaders
-            </p>
-            <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
-              {length(@org_chart)}
-            </p>
+          <div class="cell">
+            <span class="v mono">{@org_health.metrics.role_demand_gaps}</span><span class="l">Demand gaps</span>
           </div>
-          <div class="ember-stat cympho-panel px-4 py-3">
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Depth
-            </p>
-            <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
-              {tree_depth(@org_chart)}
-            </p>
+          <div class="cell">
+            <span class="v mono">
+              {@org_health.metrics.detached_agents + @org_health.metrics.overloaded_managers}
+            </span>
+            <span class="l">Reporting gaps</span>
+          </div>
+          <div class="cell">
+            <span class="v mono">
+              {@org_health.metrics.inactive_agents + @org_health.metrics.degraded_agents}
+            </span>
+            <span class="l">Unhealthy</span>
           </div>
         </div>
-
-        <section
-          data-testid="org-health"
-          class="ember-glass mb-5 px-5 py-4"
-        >
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <h2 class="text-sm font-590 text-text-primary">Org Health</h2>
-                <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{org_health_badge(@org_health.level)}"}>
-                  {@org_health.label}
-                </span>
-              </div>
-              <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
-                {@org_health.summary}
-              </p>
-            </div>
-
-            <div class="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[420px] sm:grid-cols-5">
-              <.org_health_metric
-                label="Role gaps"
-                value={@org_health.metrics.missing_roles}
-                tone={if @org_health.metrics.missing_roles > 0, do: :critical, else: :ok}
-              />
-              <.org_health_metric
-                label="Demand gaps"
-                value={@org_health.metrics.role_demand_gaps}
-                tone={if @org_health.metrics.role_demand_gaps > 0, do: :warning, else: :ok}
-              />
-              <.org_health_metric
-                label="Detached"
-                value={@org_health.metrics.detached_agents}
-                tone={if @org_health.metrics.detached_agents > 0, do: :critical, else: :ok}
-              />
-              <.org_health_metric
-                label="Over span"
-                value={@org_health.metrics.overloaded_managers}
-                tone={if @org_health.metrics.overloaded_managers > 0, do: :warning, else: :ok}
-              />
-              <.org_health_metric
-                label="Unhealthy"
-                value={@org_health.metrics.inactive_agents + @org_health.metrics.degraded_agents}
-                tone={
-                  if @org_health.metrics.inactive_agents + @org_health.metrics.degraded_agents > 0,
-                    do: :warning,
-                    else: :ok
-                }
-              />
-            </div>
-          </div>
-
-          <div
-            :if={@org_health.recommendations != []}
-            class="mt-4 grid gap-2 lg:grid-cols-2"
+        <ul :if={@org_health.recommendations != []} class="rows">
+          <.list_row
+            :for={{recommendation, index} <- Enum.with_index(@org_health.recommendations)}
+            id={"org-rec-#{index}"}
+            icon="i-alert"
+            kind={if recommendation.severity == :critical, do: :problem, else: :question}
+            title={recommendation.label}
           >
-            <div
-              :for={recommendation <- @org_health.recommendations}
-              class={"rounded-md border px-3 py-2 #{org_recommendation_class(recommendation.severity)}"}
-            >
-              <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
-                {recommendation.label}
-              </p>
-              <p class="mt-1 text-xs leading-5">{recommendation.detail}</p>
-            </div>
-          </div>
+            <:meta>{recommendation.detail}</:meta>
+          </.list_row>
+        </ul>
+      </.band_card>
 
-          <div
-            :if={@org_health.role_demand_gaps != []}
-            id="org-demand-staffing"
-            data-testid="org-demand-staffing"
-            class="mt-4 divide-y divide-border overflow-hidden rounded-md border border-border bg-surface/50"
+      <.band_card
+        :if={@org_health.role_demand_gaps != []}
+        id="org-staff-t"
+        title="Work without a role"
+        section_id="org-demand-staffing"
+        data-testid="org-demand-staffing"
+      >
+        <ul class="rows">
+          <.list_row
+            :for={gap <- @org_health.role_demand_gaps}
+            id={"org-gap-#{gap.role}"}
+            icon="i-team"
+            title={gap.label}
           >
-            <div
-              :for={gap <- @org_health.role_demand_gaps}
-              class="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <p class="text-sm font-590 text-text-primary">{gap.label}</p>
-                  <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 text-amber-200">
-                    {gap.open_issues} open {plural_noun(gap.open_issues, "issue")}
-                  </span>
-                  <span
-                    :if={gap.suggested_parent}
-                    class="rounded-full border border-border bg-panel px-2 py-0.5 text-[10px] font-510 text-text-tertiary"
-                  >
-                    Reports to {gap.suggested_parent.name}
-                  </span>
-                </div>
-                <div
-                  :if={gap.examples != []}
-                  class="mt-1 flex max-w-2xl flex-wrap gap-1.5"
-                >
-                  <.app_link
-                    :for={example <- gap.examples}
-                    navigate={~p"/issues/#{example.id}"}
-                    class="max-w-full truncate rounded-md border border-border bg-panel px-2 py-1 text-[11px] text-text-tertiary transition hover:border-brand/40 hover:text-brand"
-                    title={issue_example_label(example)}
-                  >
-                    {issue_example_label(example)}
-                  </.app_link>
-                </div>
-              </div>
-
-              <.app_link
-                navigate={~p"/agents/new?#{new_agent_query_for_gap(gap)}"}
-                class="inline-flex shrink-0 items-center justify-center rounded-md border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition hover:border-brand/50 hover:bg-brand/15"
-              >
+            <:meta>
+              {gap.open_issues} open {plural_noun(gap.open_issues, "task")}<span :if={
+                gap.suggested_parent
+              }><span aria-hidden="true"> · </span>Reports to {gap.suggested_parent.name}</span>
+            </:meta>
+            <:actions>
+              <.pill navigate={~p"/agents/new?#{new_agent_query_for_gap(gap)}"}>
                 Hire {gap.label}
-              </.app_link>
-            </div>
-          </div>
-        </section>
-
-        <div
-          :if={Enum.empty?(@org_chart)}
-          class="cympho-panel flex min-h-[360px] flex-col items-center justify-center px-6 py-16 text-center"
-        >
-          <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-surface text-text-tertiary">
-            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 6v4m0 0H8m4 0h4M6 18h12M6 18a2 2 0 100-4 2 2 0 000 4zm12 0a2 2 0 100-4 2 2 0 000 4zM12 6a2 2 0 100-4 2 2 0 000 4z"
-              />
-            </svg>
-          </div>
-          <p class="text-sm font-510 text-text-primary">No reporting lines yet</p>
-          <p class="mt-1 max-w-md text-sm text-text-tertiary">
-            Start the company or create agents to build the CEO, CTO, and engineering tree.
-          </p>
-        </div>
-
-        <div :if={not Enum.empty?(@org_chart)} class="cympho-panel overflow-hidden">
-          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-3">
-            <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Reporting tree
-            </h2>
-            <div class="flex flex-wrap items-center gap-3 text-[11px] text-text-quaternary">
-              <span class="inline-flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--working)">
-                </span>
-                Running
-              </span>
-              <span class="inline-flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--idle)"></span>
-                Idle
-              </span>
-              <span class="inline-flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--waiting)">
-                </span>
-                Paused
-              </span>
-              <span class="inline-flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--stopped)">
-                </span>
-                Needs attention
-              </span>
-              <span class="hidden sm:inline">· Click a card for stats</span>
-            </div>
-          </div>
-          <div id="org-chart-export-area" class="overflow-x-auto px-5 py-8">
-            <.render_tree nodes={@org_chart} level={0} />
-          </div>
-        </div>
-        
-    <!-- Agent Stats Panel -->
-        <.modal
-          :if={@selected_agent_id}
-          id="agent-stats-modal"
-          on_cancel={JS.push("close_agent_panel")}
-          show={true}
-        >
-          <.header>
-            Agent Statistics
-            <:actions>
-              <.button phx-click="close_agent_panel">Close</.button>
+              </.pill>
             </:actions>
-          </.header>
-
-          <div class="space-y-4">
-            <div class="grid grid-cols-2 gap-4">
-              <div class="cympho-panel px-4 py-3">
-                <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
-                  Direct Reports
-                </p>
-                <p class="mt-1 text-2xl font-590 text-text-primary">
-                  {@selected_agent_stats && @selected_agent_stats.direct_reports}
-                </p>
-              </div>
-              <div class="cympho-panel px-4 py-3">
-                <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
-                  Total Issues
-                </p>
-                <p class="mt-1 text-2xl font-590 text-text-primary">
-                  {@selected_agent_stats && @selected_agent_stats.total_issues}
-                </p>
-              </div>
-              <div class="cympho-panel px-4 py-3">
-                <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
-                  Completed This Week
-                </p>
-                <p class="mt-1 text-2xl font-590 text-text-primary">
-                  {@selected_agent_stats && @selected_agent_stats.completed_this_week}
-                </p>
-              </div>
-              <div class="cympho-panel px-4 py-3">
-                <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
-                  Blocked Issues
-                </p>
-                <p class="mt-1 text-2xl font-590 text-text-primary">
-                  {@selected_agent_stats && @selected_agent_stats.blocked_count}
-                </p>
-              </div>
-            </div>
-
-            <div
-              :if={@selected_agent_stats && @selected_agent_stats.budget_status}
-              class="cympho-panel px-4 py-3"
-            >
-              <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary mb-2">
-                Budget Status
+            <:below :if={gap.examples != []}>
+              <p class="org-ex">
+                <.example_link :for={example <- gap.examples} example={example} />
               </p>
-              <div class="flex items-center justify-between">
-                <div>
-                  <p class="text-sm text-text-secondary">
-                    Spent: {@selected_agent_stats.budget_status.spent} / {@selected_agent_stats.budget_status.limit}
-                  </p>
-                  <p class="text-xs text-text-tertiary mt-1">
-                    Remaining: {@selected_agent_stats.budget_status.remaining}
-                  </p>
-                </div>
-                <div class="text-right">
-                  <p class="text-lg font-590 text-text-primary">
-                    {Decimal.round(@selected_agent_stats.budget_status.percentage, 1)}%
-                  </p>
-                </div>
-              </div>
-            </div>
+            </:below>
+          </.list_row>
+        </ul>
+      </.band_card>
 
-            <div class="flex justify-center pt-2">
-              <.link
-                navigate={"/agents/#{@selected_agent_id}"}
-                class="text-sm text-brand hover:text-brand-hover font-510"
-              >
-                View Full Profile →
-              </.link>
-            </div>
+      <.band_card id="org-tree-t" title="Who reports to whom">
+        <:header_end>
+          <span class="org-end">
+            <span :if={@org_chart != []} class="meta mono">{tree_count(@org_chart)} agents</span>
+            <span class="ui-advanced-only">
+              <.pill phx-click="export_svg">Export SVG</.pill>
+            </span>
+            <span class="ui-advanced-only">
+              <.pill phx-click="toggle_company_stats">Company stats</.pill>
+            </span>
+          </span>
+        </:header_end>
+        <.quiet_empty :if={@org_chart == []} title="No reporting lines yet">
+          Start the company or hire agents to build the CEO, CTO and engineering tree.
+        </.quiet_empty>
+        <div :if={@org_chart != []} id="org-chart-export-area" class="org-scroll">
+          <.render_tree nodes={@org_chart} level={0} />
+        </div>
+      </.band_card>
+
+      <.modal
+        :if={@selected_agent_id}
+        id="agent-stats-modal"
+        title="Agent statistics"
+        on_cancel={JS.push("close_agent_panel")}
+        show={true}
+      >
+        <div class="strip org-mstrip">
+          <div class="cell">
+            <span class="v mono">
+              {@selected_agent_stats && @selected_agent_stats.direct_reports}
+            </span>
+            <span class="l">Direct reports</span>
           </div>
-        </.modal>
-        
-    <!-- Company Stats Panel -->
-        <.modal
-          :if={@show_company_stats}
-          id="company-stats-modal"
-          on_cancel={JS.push("toggle_company_stats")}
-          show={true}
-        >
-          <.header>
-            Company-wide Agent Statistics
-            <:actions>
-              <.button phx-click="toggle_company_stats">Close</.button>
-            </:actions>
-          </.header>
-
-          <div class="space-y-4">
-            <div class="cympho-panel px-4 py-3">
-              <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
-                Total Agents
-              </p>
-              <p class="mt-1 text-2xl font-590 text-text-primary">
-                {@company_stats && @company_stats.total}
-              </p>
-            </div>
-
-            <div class="cympho-panel px-4 py-3">
-              <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary mb-3">
-                By Role
-              </p>
-              <div class="space-y-2">
-                <.stat_row label="CEO" count={@company_stats && @company_stats.by_role[:ceo]} />
-                <.stat_row label="CTO" count={@company_stats && @company_stats.by_role[:cto]} />
-                <.stat_row
-                  label="Engineer"
-                  count={@company_stats && @company_stats.by_role[:engineer]}
-                />
-                <.stat_row
-                  label="Product Manager"
-                  count={@company_stats && @company_stats.by_role[:product_manager]}
-                />
-                <.stat_row
-                  label="Designer"
-                  count={@company_stats && @company_stats.by_role[:designer]}
-                />
-              </div>
-            </div>
-
-            <div class="cympho-panel px-4 py-3">
-              <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary mb-3">
-                By Status
-              </p>
-              <div class="space-y-2">
-                <.stat_row label="Idle" count={@company_stats && @company_stats.by_status[:idle]} />
-                <.stat_row
-                  label="Running"
-                  count={@company_stats && @company_stats.by_status[:running]}
-                />
-                <.stat_row label="Error" count={@company_stats && @company_stats.by_status[:error]} />
-                <.stat_row label="Paused" count={@company_stats && @company_stats.by_status[:paused]} />
-              </div>
-            </div>
-
-            <div class="cympho-panel px-4 py-3">
-              <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
-                Idle Ratio
-              </p>
-              <p class="mt-1 text-2xl font-590 text-text-primary">
-                {@company_stats && @company_stats.idle_ratio}%
-              </p>
-            </div>
+          <div class="cell">
+            <span class="v mono">{@selected_agent_stats && @selected_agent_stats.total_issues}</span><span class="l">Tasks</span>
           </div>
-        </.modal>
-      </div>
-    </div>
+          <div class="cell">
+            <span class="v mono">
+              {@selected_agent_stats && @selected_agent_stats.completed_this_week}
+            </span>
+            <span class="l">Done this week</span>
+          </div>
+          <div class="cell">
+            <span class="v mono">{@selected_agent_stats && @selected_agent_stats.blocked_count}</span><span class="l">Blocked</span>
+          </div>
+        </div>
+        <p :if={@selected_agent_stats && @selected_agent_stats.budget_status} class="lim-line">
+          Spent <b class="mono">{@selected_agent_stats.budget_status.spent}</b>
+          of
+          <span class="mono">{@selected_agent_stats.budget_status.limit}</span><span aria-hidden="true"> · </span><span class="mono">{@selected_agent_stats.budget_status.remaining}</span>
+          left<span aria-hidden="true"> · </span>
+          <span class="mono">
+            {Decimal.round(@selected_agent_stats.budget_status.percentage, 1)}%
+          </span>
+        </p>
+        <:footer>
+          <.text_link navigate={"/agents/#{@selected_agent_id}"}>View full profile</.text_link>
+        </:footer>
+      </.modal>
+
+      <.modal
+        :if={@show_company_stats}
+        id="company-stats-modal"
+        title="Company agent stats"
+        on_cancel={JS.push("toggle_company_stats")}
+        show={true}
+      >
+        <.kv_list class="wide">
+          <:item term="Agents">
+            <span class="mono">{@company_stats && @company_stats.total}</span>
+          </:item>
+          <:item term="Idle ratio">
+            <span class="mono">{@company_stats && @company_stats.idle_ratio}%</span>
+          </:item>
+        </.kv_list>
+        <h3 class="gl-h">By role</h3>
+        <.kv_list class="wide">
+          <:item :for={{label, role} <- stat_roles()} term={label}>
+            <span class="mono">{stat_count(@company_stats, :by_role, role)}</span>
+          </:item>
+        </.kv_list>
+        <h3 class="gl-h">By status</h3>
+        <.kv_list class="wide">
+          <:item :for={{label, status} <- stat_statuses()} term={label}>
+            <span class="mono">{stat_count(@company_stats, :by_status, status)}</span>
+          </:item>
+        </.kv_list>
+      </.modal>
+    </.page_frame>
     """
   end
 
@@ -518,123 +275,46 @@ defmodule CymphoWeb.OrgChartLive do
   attr :nodes, :list, required: true
   attr :level, :integer, default: 0
 
+  @doc """
+  The reporting tree as nested lists: a horizontal tree with connectors on wider
+  screens, an indented list on phones (governance.css). Each agent is a button
+  (keyboard and screen readers open its statistics).
+  """
   def render_tree(assigns) do
     ~H"""
-    <div class="flex min-w-max flex-col items-center">
-      <div class="flex justify-center gap-4 lg:gap-6">
-        <%= for node <- @nodes do %>
-          <div class="flex flex-col items-center">
-            <%!-- A bare phx-click div is mouse-only: no role, no tab stop, no key
-                 handler, so keyboard and screen-reader users could not open any
-                 agent from this chart. button semantics give all three for free. --%>
-            <button
-              type="button"
-              phx-click="select_agent"
-              phx-value-agent_id={node.id}
-              title={"#{node.name} details"}
-              aria-label={"#{node.name} details"}
-              class="cursor-pointer rounded-xl transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-            >
-              <.agent_card node={node} />
-            </button>
-            <%= if not Enum.empty?(node.children) do %>
-              <div class="h-5 w-px bg-border"></div>
-              <div class="mb-5 h-px w-full min-w-24 bg-border"></div>
-              <div>
-                <.render_tree nodes={node.children} level={@level + 1} />
-              </div>
-            <% end %>
-          </div>
-        <% end %>
-      </div>
-    </div>
+    <ul class={@level == 0 && "org-tree"}>
+      <li :for={node <- @nodes}>
+        <button
+          type="button"
+          class="org-t"
+          phx-click="select_agent"
+          phx-value-agent_id={node.id}
+          title={"#{node.name} details"}
+          aria-label={"#{node.name} details"}
+        >
+          <.agent_card node={node} />
+        </button>
+        <.render_tree :if={node.children != []} nodes={node.children} level={@level + 1} />
+      </li>
+    </ul>
     """
   end
 
   attr :node, :map, required: true
 
   def agent_card(assigns) do
+    assigns = assign(assigns, :status, Parts.status(assigns.node, false))
+
     ~H"""
-    <div class={[
-      "card-lift block w-56 rounded-xl border bg-surface px-4 py-3 hover:bg-surface-hover",
-      if(@node.status == :error,
-        do: "border-red-500/30 hover:border-red-400/50",
-        else: "border-border hover:border-border-hover"
-      )
-    ]}>
-      <div class="flex items-start gap-3">
-        <div class={"flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-serif text-xs font-590 #{role_avatar_class(@node.role)}"}>
-          {initials(@node.name)}
-        </div>
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2">
-            <h3 class="truncate text-sm font-590 text-text-primary">{@node.name}</h3>
-            <span
-              class={[
-                "h-1.5 w-1.5 shrink-0 rounded-full",
-                @node.status == :running && "cympho-pulse-dot"
-              ]}
-              style={"background-color: #{status_color(@node.status)}"}
-              title={status_title(@node.status)}
-            >
-            </span>
-          </div>
-          <%!-- The title clips in a 224px card, so the full string stays
-               reachable on hover. --%>
-          <p
-            class="mt-0.5 truncate text-xs text-text-tertiary"
-            title={@node.title || role_label(@node.role)}
-          >
-            {@node.title || role_label(@node.role)}
-          </p>
-        </div>
-      </div>
-
-      <%!-- The legend above the tree already says a card opens its stats, and
-           every card carried the same "Details →" hint. The wrapper's title and
-           aria-label keep the affordance without printing it seven times. --%>
-      <div class="mt-3 flex items-center gap-3 border-t border-border pt-2.5 text-xs">
-        <span class="truncate text-text-quaternary">
-          <%= if @node.children == [] do %>
-            <%!-- Leaves without a distinct title already show the role above. --%>
-            {leaf_footer_label(@node)}
-          <% else %>
-            {length(@node.children)} direct {plural_noun(length(@node.children), "report")}
-          <% end %>
-        </span>
-      </div>
-    </div>
-    """
-  end
-
-  attr :label, :string, required: true
-  attr :count, :integer, default: nil
-
-  def stat_row(assigns) do
-    ~H"""
-    <div class="flex items-center justify-between text-sm">
-      <span class="text-text-secondary">{@label}</span>
-      <span class="font-590 text-text-primary">
-        {@count || 0}
+    <span class="tile-ag" aria-hidden="true">{Parts.initials(@node.name)}</span>
+    <span class="org-m">
+      <span class="org-n">{@node.name}</span>
+      <span class="org-r">{@node.title || role_label(@node.role)}</span>
+      <span class="org-s"><.status_word kind={elem(@status, 0)} word={elem(@status, 1)} /></span>
+      <span :if={@node.children != []} class="org-c">
+        {length(@node.children)} direct {plural_noun(length(@node.children), "report")}
       </span>
-    </div>
-    """
-  end
-
-  attr :label, :string, required: true
-  attr :value, :integer, required: true
-  attr :tone, :atom, default: :ok
-
-  def org_health_metric(assigns) do
-    ~H"""
-    <div class="bg-surface px-3 py-2 text-center">
-      <p class={"font-mono text-[18px] font-590 leading-none #{org_metric_text(@tone)}"}>
-        {@value}
-      </p>
-      <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
-        {@label}
-      </p>
-    </div>
+    </span>
     """
   end
 
@@ -642,76 +322,38 @@ defmodule CymphoWeb.OrgChartLive do
     Enum.reduce(nodes, 0, fn node, acc -> acc + 1 + tree_count(node.children) end)
   end
 
-  defp tree_depth([]), do: 0
-
-  defp tree_depth(nodes) when is_list(nodes) do
-    nodes
-    |> Enum.map(fn node -> 1 + tree_depth(node.children) end)
-    |> Enum.max()
-  end
-
-  defp initials(name) when is_binary(name) do
-    name
-    |> String.split(~r/\s+/, trim: true)
-    |> Enum.take(2)
-    |> Enum.map(&String.first/1)
-    |> Enum.join()
-    |> String.upcase()
-  end
-
-  defp initials(_), do: "?"
-
-  defp role_avatar_class(role), do: CymphoWeb.Format.role_avatar_class(role)
-
-  def role_color(:ceo), do: "#9A7CA8"
-  def role_color(:cto), do: "#5db8a6"
-  def role_color(:engineer), do: "#5db872"
-  def role_color(:release_engineer), do: "#7cbf78"
-  def role_color(:qa_engineer), do: "#7fd3c8"
-  def role_color(:product_manager), do: "#e8a55a"
-  def role_color(:designer), do: "#A96B83"
-  def role_color(:researcher), do: "#9b8cff"
-  def role_color(:marketer), do: "#f59e72"
-  def role_color(:content_strategist), do: "#d477b8"
-  def role_color(:sales_development), do: "#f3c464"
-  def role_color(:customer_support), do: "#6abf8f"
-
   def role_label(role), do: Agent.role_label(role)
 
-  # nil when the footer would repeat the line printed under the agent name.
-  defp leaf_footer_label(node) do
-    label = role_label(node.role)
-    heading = node.title || label
+  attr :example, :map, required: true
 
-    if String.downcase(label) == String.downcase(heading), do: nil, else: label
+  # One line, so the underline ends with the label (a formatted multi-line link renders a trailing space).
+  defp example_link(assigns) do
+    assigns = assign(assigns, :label, issue_example_label(assigns.example))
+
+    ~H"""
+    <.link class="ul" navigate={~p"/issues/#{@example.id}"} title={@label}>{@label}</.link>
+    """
   end
 
-  def status_title(status) do
-    status |> to_string() |> String.replace("_", " ") |> String.capitalize()
-  end
+  defp level_kind(:critical), do: :stopped
+  defp level_kind(:warning), do: :waiting
+  defp level_kind(:healthy), do: :done
+  defp level_kind(_level), do: :idle
 
-  # The r3 status hues (app.css / themes.css), so the dots read in Light and Dark.
-  def status_color(status) when status in [:running, :active], do: "var(--working)"
-  def status_color(status) when status in [:sleeping, :paused], do: "var(--waiting)"
-  def status_color(status) when status in [:error, :pending_approval], do: "var(--stopped)"
-  def status_color(_status), do: "var(--idle)"
+  defp stat_roles,
+    do: [
+      {"CEO", :ceo},
+      {"CTO", :cto},
+      {"Engineer", :engineer},
+      {"Product manager", :product_manager},
+      {"Designer", :designer}
+    ]
 
-  defp org_health_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
-  defp org_health_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  defp org_health_badge(:healthy), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  defp org_health_badge(_), do: "border-border bg-surface text-text-tertiary"
+  defp stat_statuses,
+    do: [{"Idle", :idle}, {"Running", :running}, {"Error", :error}, {"Paused", :paused}]
 
-  defp org_metric_text(:critical), do: "text-red-300"
-  defp org_metric_text(:warning), do: "text-amber-300"
-  defp org_metric_text(:ok), do: "text-emerald-300"
-  defp org_metric_text(_), do: "text-text-primary"
-
-  defp org_recommendation_class(:critical), do: "border-red-500/20 bg-red-500/10 text-red-100"
-
-  defp org_recommendation_class(:warning),
-    do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
-
-  defp org_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
+  defp stat_count(nil, _group, _key), do: 0
+  defp stat_count(stats, group, key), do: get_in(stats, [group, key]) || 0
 
   defp new_agent_query_for_gap(gap) do
     %{
