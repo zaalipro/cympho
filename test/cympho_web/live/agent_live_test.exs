@@ -3249,6 +3249,28 @@ defmodule CymphoWeb.AgentLiveTest do
       wait_until(fn -> assert setup_name(view) == ["Ada Lovelace"] end)
     end
 
+    test "once the kept edit is saved, the form follows live updates again", %{
+      conn: conn,
+      nw: nw
+    } do
+      ada = nw.agents["Ada"]
+      {:ok, view, _html} = live(conn, "/agents/#{ada.id}?tab=configuration")
+
+      setup_form =
+        form(view, "form[phx-submit='config_save']", %{"agent" => %{"name" => "Ada Byron"}})
+
+      render_change(setup_form)
+      {:ok, paused} = Agents.pause_agent(ada, "Breaker")
+      wait_until(fn -> assert r3_text(r3_doc(view), ".agent-h .sp") =~ "Paused" end)
+      assert setup_name(view) == ["Ada Byron"]
+
+      render_submit(setup_form)
+      assert Repo.get!(Agent, ada.id).name == "Ada Byron"
+
+      {:ok, _} = Agents.update_agent(Repo.get!(Agent, paused.id), %{name: "Ada Lovelace"})
+      wait_until(fn -> assert setup_name(view) == ["Ada Lovelace"] end)
+    end
+
     test "the Next step resumes Mira, with the reason as Cympho stored it", %{
       conn: conn,
       nw: nw

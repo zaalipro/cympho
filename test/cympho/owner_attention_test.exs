@@ -828,6 +828,26 @@ defmodule Cympho.OwnerAttentionTest do
              )
     end
 
+    test "a resume forgets the person's pause, so a later automatic pause is listed", context do
+      paused? = fn ->
+        Enum.any?(
+          OwnerAttention.list_items(context.company.id, context.user),
+          &(&1.kind == :agent_paused)
+        )
+      end
+
+      {:ok, paused} =
+        Agents.pause_agent(context.agent, "Agent paused", paused_by_user_id: context.user.id)
+
+      refute paused?.()
+
+      {:ok, resumed} = Agents.resume_agent(paused)
+      assert resumed.paused_by_user_id == nil
+
+      {:ok, _paused} = Agents.pause_agent(resumed, "No-progress circuit breaker")
+      assert paused?.()
+    end
+
     test "pausing and resuming notify, and resuming clears the row", context do
       company_id = context.company.id
       :ok = OwnerAttention.subscribe(company_id)
