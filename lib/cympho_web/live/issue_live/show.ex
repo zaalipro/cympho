@@ -1251,7 +1251,7 @@ defmodule CymphoWeb.IssueLive.Show do
       socket.assigns.issue.id == updated_issue.id ->
         case get_scoped_issue(socket, updated_issue.id) do
           {:ok, issue} ->
-            news? = others_comment?(socket, updated_issue)
+            news? = others_update?(socket, updated_issue)
 
             socket =
               socket
@@ -1785,21 +1785,11 @@ defmodule CymphoWeb.IssueLive.Show do
   defp toast_if(socket, false, _toast), do: socket
 
   # An {:issue_updated, issue} broadcast names the signed-in user who made the
-  # change (Issues.with_actor/1): theirs, from any tab, is no news to them.
+  # change (Issues.with_actor/1), a {:comment_created, issue} one the user who
+  # wrote the comment: theirs, from any tab, is no news to them.
   defp others_update?(socket, %{actor_user_id: actor}) do
     me = socket.assigns[:current_user] && to_string(socket.assigns.current_user.id)
     is_nil(actor) or actor != me
-  end
-
-  # A {:comment_created, issue} broadcast is about the newest comment on its
-  # issue (microsecond timestamps): the signed-in user's own is no news to them.
-  defp others_comment?(socket, %{comments: comments}) do
-    me = socket.assigns[:current_user] && to_string(socket.assigns.current_user.id)
-
-    case Enum.max_by(comments, & &1.inserted_at, DateTime, fn -> nil end) do
-      %{author_type: "user", author_id: ^me} -> false
-      _ -> true
-    end
   end
 
   defp get_scoped_agent(socket, id) do

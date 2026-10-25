@@ -70,7 +70,8 @@ defmodule Cympho.Issues.Issue do
     field :lineage, :map
 
     # Who made the change an {:issue_updated, issue} broadcast is about, when a
-    # signed-in user did (Cympho.Issues.with_actor/1). Never stored.
+    # signed-in user did (Cympho.Issues.with_actor/1), or wrote the comment a
+    # {:comment_created, issue} one is about (Cympho.Comments). Never stored.
     field :actor_user_id, :binary_id, virtual: true
 
     belongs_to :project, Project

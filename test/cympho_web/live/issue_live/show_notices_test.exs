@@ -9,6 +9,7 @@ defmodule CymphoWeb.IssueLive.ShowNoticesTest do
   import Phoenix.LiveViewTest
 
   alias Cympho.{Comments, Issues, R3Fixtures, Repo}
+  alias Cympho.Comments.Comment
   alias Cympho.Issues.Issue
 
   @comment "New comment added"
@@ -29,6 +30,19 @@ defmodule CymphoWeb.IssueLive.ShowNoticesTest do
   # A broadcast sent before this call is already in the page's mailbox; render/1
   # pings the page, so it has handled it and every toast it pushed has reached the test.
   defp settle(view), do: render(view)
+
+  # A comment stored without its broadcast, which Comments.publish_comment_effects/1
+  # sends later: another comment can land in between.
+  defp insert_comment!(issue, author_type, author_id, body, at) do
+    Repo.insert!(%Comment{
+      issue_id: issue.id,
+      author_type: author_type,
+      author_id: author_id,
+      body: body,
+      inserted_at: at,
+      updated_at: at
+    })
+  end
 
   defp session_conn(user, company) do
     Phoenix.ConnTest.build_conn()
@@ -162,6 +176,50 @@ defmodule CymphoWeb.IssueLive.ShowNoticesTest do
 
       settle(view)
       assert_push_event(view, "toast", %{message: @updated})
+    end
+  end
+
+  describe "a comment's broadcast sent after a newer comment landed" do
+    test "an agent's comment is still announced after the owner's newer reply", %{
+      conn: conn,
+      nw: nw
+    } do
+      issue = nw.issues["NW-6"]
+      {:ok, view} = open(conn, nw, "NW-6")
+      now = DateTime.utc_now()
+
+      agent_comment =
+        insert_comment!(issue, "agent", issue.assignee_id, "Webhook handler is wired.", now)
+
+      insert_comment!(issue, "user", nw.user.id, "On it.", DateTime.add(now, 1, :second))
+      :ok = Comments.publish_comment_effects(agent_comment)
+
+      settle(view)
+      assert_push_event(view, "toast", %{message: @comment})
+    end
+
+    test "the owner's reply pushes no notice after an agent's newer comment", %{
+      conn: conn,
+      nw: nw
+    } do
+      issue = nw.issues["NW-6"]
+      {:ok, view} = open(conn, nw, "NW-6")
+      now = DateTime.utc_now()
+
+      own_comment = insert_comment!(issue, "user", nw.user.id, "On it.", now)
+
+      insert_comment!(
+        issue,
+        "agent",
+        issue.assignee_id,
+        "Webhook handler is wired.",
+        DateTime.add(now, 1, :second)
+      )
+
+      :ok = Comments.publish_comment_effects(own_comment)
+
+      settle(view)
+      refute_push_event(view, "toast", %{message: @comment})
     end
   end
 end
