@@ -176,6 +176,39 @@ defmodule CymphoWeb.InboxLiveTest do
       assert has_element?(view, "button[phx-click='approve_review']")
     end
 
+    # B15: the badge draws "99+" itself; Inbox's own refresh must not cap the
+    # count the next nav_badges push reads.
+    test "a Needs you change keeps a count over 99 uncapped", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{name: "Busy Inbox Agent", role: :engineer, company_id: company.id})
+
+      blocked = fn title ->
+        {:ok, _issue} =
+          Issues.create_issue(%{
+            title: title,
+            status: :blocked,
+            company_id: company.id,
+            assignee_id: agent.id
+          })
+      end
+
+      for n <- 1..100, do: blocked.("Blocked #{n}")
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/inbox")
+      assert :sys.get_state(view.pid).socket.assigns.inbox_badge_count == 100
+
+      blocked.("Blocked 101")
+
+      wait_until(fn ->
+        render(view)
+        assert :sys.get_state(view.pid).socket.assigns.inbox_badge_count == 101
+        assert :sys.get_state(view.pid).socket.assigns.nav_inbox_count == 101
+      end)
+    end
+
     test "final_review_required enqueue live-refreshes Needs you and badge", %{conn: conn} do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
 

@@ -251,6 +251,7 @@ const Toast = {
     const {message, type} = this._queue.shift();
     const container = document.getElementById("toast-container");
     if (!container) return;
+    this._clearStickyBar(container);
     const el = document.createElement("div");
     el.className = `toast toast-${type}`;
     el.textContent = message;
@@ -258,6 +259,21 @@ const Toast = {
     requestAnimationFrame(() => el.classList.add("toast-visible"));
     const id = setTimeout(() => this._dismiss(el), this._DISMISS_MS);
     this._activeToasts.push({el, id});
+  },
+
+  // Phones: the toast band sits just above the tab bar (app.css). A bottom action bar stuck
+  // there (.sticky-above-mobile-nav: New task's, the Advanced comment box) owns that band,
+  // so the toast rises above the bar instead of covering it (C3).
+  _clearStickyBar(container) {
+    container.style.bottom = "";
+    if (!window.matchMedia("(max-width: 640px)").matches) return;
+    const band = container.getBoundingClientRect().bottom;
+    document.querySelectorAll(".sticky-above-mobile-nav").forEach((bar) => {
+      const r = bar.getBoundingClientRect();
+      if (r.height > 0 && r.top < band && r.bottom > band - 48) {
+        container.style.bottom = `${window.innerHeight - r.top + 4}px`;
+      }
+    });
   },
 
   _dismiss(el) {

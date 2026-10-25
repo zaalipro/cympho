@@ -318,6 +318,12 @@
     max-width: none;
     padding: 8px 14px;
   }
+
+  /* One toast at a time, the newest, as Material's snackbar: a stack grew up over the Next step's
+     primary ("Send answer", "Change limit"). Above a stuck bottom action bar the Toast hook lifts it (app.js). */
+  .safe-area-toast .toast:not(:last-child) {
+    display: none;
+  }
 }
 
 .safe-area-dialog {

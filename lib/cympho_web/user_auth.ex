@@ -404,8 +404,9 @@ defmodule CymphoWeb.UserAuth do
 
   # Nav badge = Simple "Needs you" membership (OwnerAttention), not agent unreads.
   # Cheap unresolved_count keeps parity with list_items after issue-level dedup.
+  # Uncapped: the badge draws "99+" and speaks the full count (nav_rail.ex, app.js; B15).
   defp owner_inbox_badge_count(company_id, user) do
-    min(99, Cympho.OwnerAttention.unresolved_count(company_id, user))
+    Cympho.OwnerAttention.unresolved_count(company_id, user)
   end
 
   defp approval_badge_event?({event, _payload})

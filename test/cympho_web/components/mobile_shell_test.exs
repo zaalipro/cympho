@@ -162,13 +162,22 @@ defmodule CymphoWeb.MobileShellTest do
     assert phone =~ "bottom: calc(var(--mobile-nav-offset) + 4px);"
     assert phone =~ "padding: 8px 14px;"
 
+    # Up to five toasts stacked up from the band over the Next step's primary
+    # ("Send answer", "Change limit"): a phone shows only the newest, one at a
+    # time, as Material's snackbar does.
+    assert phone =~ ".safe-area-toast .toast:not(:last-child) {\n    display: none;\n  }"
+
     [toast] = Regex.run(~r/\n\.toast \{[^}]*\}/, css)
     assert toast =~ "pointer-events: none;"
   end
 
-  # C8: four equal shares of the phone row were narrower than "Created by me".
-  test "Mine's tabs take their own widths on phones" do
-    assert phone_css("assets/css/r3-pages/work.css") =~
-             ~s|.cy-r3 [data-page="mine"] .seg a{flex:auto}|
+  # C8: four equal shares of the phone row were narrower than "Created by me";
+  # `flex:auto` still let a tab shrink under its label, so it wrapped at 320 px.
+  test "Mine's tabs never shrink under their labels on phones; a narrow row scrolls" do
+    phone = phone_css("assets/css/r3-pages/work.css")
+
+    assert phone =~ ~s|.cy-r3 [data-page="mine"] .seg{overflow-x:auto;scrollbar-width:none}|
+    assert phone =~ ~s|.cy-r3 [data-page="mine"] .seg a{flex:1 0 auto;white-space:nowrap}|
+    refute phone =~ ~s|.cy-r3 [data-page="mine"] .seg a{flex:auto}|
   end
 end
