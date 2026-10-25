@@ -5,3 +5,171 @@
      the light block and both identical dark copies, never here.
    - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
    - Shared components belong in r3.css, not here. */
+
+/* ================================================================
+   1. Shared by the company pages: 3/4-cell strips (2×2 on phones), a quiet line in a card,
+      a status word in a band header, the form pair's effect stack
+   ================================================================ */
+.cy-r3 :is([data-page="budgets"],[data-page="companies"]) .strip.s4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.cy-r3 [data-page="import"] .strip.s3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.cy-r3 [data-page="import"] .paper .strip{margin:4px -8px 0;padding-top:8px;border-top:1px solid var(--hair)}
+.cy-r3 :is([data-page="export"],[data-page="import"]) :is(.ex-line,.im-line){padding:4px 12px 2px}
+.cy-r3 :is([data-page="budgets"],[data-page="companies"]) :is(.bg-st,.co-st){display:inline-flex;align-items:center;gap:6px}
+.cy-r3 :is([data-page="budgets"],[data-page="companies"]) .gl-sec>.lnk{align-self:flex-start;margin-left:-4px}
+
+/* ================================================================
+   2. Spending limit (/budgets, /budgets/:id, the limit form)
+   ================================================================ */
+.cy-r3 [data-page="budgets"] .lrow .lr-tr{white-space:nowrap}
+.cy-r3 [data-page="budgets"] .lrow .lr-tr .tag{margin-left:6px}
+/* the form's company-wide scope stands where the scope id field would be */
+.cy-r3 [data-page="budget-form"] .bf-scope{justify-content:center;gap:2px;padding:8px 16px;border-radius:var(--r-row);background:var(--well);border:1px solid var(--band-line)}
+.cy-r3 [data-page="budget-form"] .bf-scope .gl-big{font-size:14px;line-height:20px}
+.cy-r3 [data-page="budget-form"] .bf-effect{display:flex;flex-direction:column;gap:10px}
+/* the detail page has no Next step above its band unless the limit was hit: the aside sits on the band's row */
+.cy-r3 [data-page="budget"] .split>.aside{grid-row:auto}
+.cy-r3 [data-page="budget"] .lim{padding:8px 12px 10px}
+
+/* ================================================================
+   3. Companies (/companies, /companies/:id, export, import)
+   ================================================================ */
+.cy-r3 [data-page="companies"] .co-gh{margin:12px 6px 0}
+.cy-r3 [data-page="company"] .tbl tbody th{font-weight:500}
+.cy-r3 [data-page="company"] .cs-email{overflow-wrap:anywhere}
+.cy-r3 [data-page="company"] .cs-board{margin-left:8px}
+.cy-r3 [data-page="company"] .cs-act{text-align:right}
+.cy-r3 [data-page="company"] .dlg form{display:block}
+
+/* import: the slug choice, the dashed drop field, the progress line app.js shows (no display rule on .im-prog:
+   its `hidden` class is toggled by the CompanyImportTransfer hook), the error block */
+.cy-r3 [data-page="import"] .im-opts{padding:8px 12px 4px}
+.cy-r3 [data-page="import"] .im-drop{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin:8px 12px;padding:16px;border-radius:var(--r-row);border:1px dashed var(--field);background:var(--well);transition:border-color .18s var(--ease)}
+.cy-r3 [data-page="import"] .im-drop:focus-within{border-color:var(--ink)}
+.cy-r3 [data-page="import"] .im-drop-l{font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="import"] .im-drop input[type=file]{max-width:100%;margin-top:6px;font-size:13px;color:var(--ink-2)}
+.cy-r3 [data-page="import"] .im-drop input[type=file]::file-selector-button{height:32px;margin-right:12px;padding:0 14px;border-radius:var(--r-pill);background:var(--btn-bg);border:1px solid var(--btn-line);box-shadow:var(--sh-chip);font:500 13px/1 var(--sans);color:var(--ink);cursor:pointer}
+.cy-r3 [data-page="import"] .im-prog{margin:8px 12px;padding:12px 14px;border-radius:var(--r-row);background:var(--band);border:1px solid var(--band-line)}
+.cy-r3 [data-page="import"] :is(.im-prog-h,.im-prog-f){display:flex;align-items:center;justify-content:space-between;gap:12px}
+.cy-r3 [data-page="import"] .im-prog-h{font-size:13px;line-height:18px;color:var(--ink-2)}
+.cy-r3 [data-page="import"] .im-fn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="import"] .im-bar{height:6px;margin:10px 0;border-radius:3px;background:var(--tick);overflow:hidden}
+.cy-r3 [data-page="import"] .im-fill{width:100%;height:100%;transform-origin:left;transform:scaleX(0);background:var(--ink);transition:transform .2s var(--ease)}
+.cy-r3 [data-page="import"] .im-err{display:flex;flex-direction:column;gap:4px;margin:8px 12px;padding:10px 14px;border-radius:var(--r-row);background:var(--stopped-bg);border:1px solid var(--stopped-line);color:var(--stopped);font-size:13px;line-height:18px}
+.cy-r3 [data-page="import"] .paper .im-err{margin:0}
+.cy-r3 [data-page="import"] .im-err ul{padding-left:18px;list-style:disc}
+.cy-r3 [data-page="import"] .im-tok{overflow-wrap:anywhere}
+
+/* ================================================================
+   4. Documentation (/docs*): topic nav (the Settings nav's look) · article · "On this page" from 1280 px
+   ================================================================ */
+.cy-r3 [data-page="docs"] .dc{display:grid;grid-template-columns:232px minmax(0,1fr) 200px;gap:16px;align-items:start}
+.cy-r3 [data-page="docs"] .dc-topics{display:none}
+.cy-r3 [data-page="docs"] .dc-side{display:flex;flex-direction:column;gap:14px;min-width:0}
+.cy-r3 [data-page="docs"] .dc>.dc-side{position:sticky;top:76px;max-height:calc(100dvh - 96px);overflow-y:auto;padding:4px 2px 8px 0;scrollbar-width:thin}
+.cy-r3 [data-page="docs"] .dc-find{width:100%;font-size:13px;cursor:pointer}
+.cy-r3 [data-page="docs"] .dc-find:hover{border-color:var(--ink-2);color:var(--ink)}
+.cy-r3 [data-page="docs"] .dc-g{padding:0 10px 4px;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 [data-page="docs"] .dc-nav{display:flex;flex-direction:column;gap:14px}
+.cy-r3 [data-page="docs"] :is(.dc-nav,.dc-toc) ul{display:flex;flex-direction:column;gap:1px}
+.cy-r3 [data-page="docs"] .dc-nav a{display:flex;align-items:center;gap:8px;min-height:34px;padding:6px 10px;border-radius:10px;border:1px solid transparent;font-size:13px;line-height:18px;color:var(--ink-nav);transition:background .18s var(--ease),color .18s var(--ease)}
+.cy-r3 [data-page="docs"] .dc-nav a:hover{background:var(--tray-hover);color:var(--ink)}
+.cy-r3 [data-page="docs"] .dc-nav a[aria-current]{background:var(--lift);border-color:var(--lift-line);box-shadow:var(--sh-raise);color:var(--ink-hi);font-weight:500}
+.cy-r3 [data-page="docs"] .dc-nav a[aria-current]::after{content:"";width:6px;height:6px;flex:none;margin-left:auto;border-radius:50%;background:var(--accent)}
+.cy-r3 [data-page="docs"] .dc-toc{position:sticky;top:76px;display:flex;flex-direction:column;gap:6px;padding:4px 0}
+.cy-r3 [data-page="docs"] :is(.dc-toc,.dc-mtoc) ul a{display:block;padding:5px 10px;border-radius:8px;font-size:13px;line-height:18px;color:var(--ink-2);transition:background .18s var(--ease),color .18s var(--ease)}
+.cy-r3 [data-page="docs"] :is(.dc-toc,.dc-mtoc) ul a:hover{background:var(--tray-hover);color:var(--ink)}
+.cy-r3 [data-page="docs"] :is(.dc-toc,.dc-mtoc) ul a.l3{padding-left:22px}
+.cy-r3 [data-page="docs"] .dc-toc>.lnk{align-self:flex-start;margin:6px 0 0 6px}
+
+/* the article: its title is the page's H2, prose 16/25 like a thread message */
+.cy-r3 [data-page="docs"] .dc-art{padding:20px 28px 24px}
+.cy-r3 [data-page="docs"] .dc-meta{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 12px}
+.cy-r3 [data-page="docs"] .dc-crumb{display:flex;flex-wrap:wrap;align-items:center;gap:0 6px;min-width:0;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 [data-page="docs"] .dc-crumb a{display:inline-flex;align-items:center;min-height:24px;color:var(--ink-2)}
+.cy-r3 [data-page="docs"] .dc-crumb a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.cy-r3 [data-page="docs"] .dc-crumb [aria-current]{color:var(--ink)}
+.cy-r3 [data-page="docs"] .dc-art .nt{margin-top:14px}
+.cy-r3 [data-page="docs"] .dc-sum{margin-top:6px;max-width:62ch;font-size:16px;line-height:24px;color:var(--ink-2)}
+.cy-r3 [data-page="docs"] .dc-mtoc{margin-top:16px;border-radius:12px;background:var(--band)}
+.cy-r3 [data-page="docs"] .dc-mtoc>summary{font-size:13px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="docs"] .dc-mtoc>summary .mono{margin-left:4px;font-weight:400;color:var(--ink-2)}
+.cy-r3 [data-page="docs"] .dc-mtoc ul{padding:0 6px 8px}
+.cy-r3 [data-page="docs"] .docs-content{margin-top:20px;max-width:70ch;font-size:16px;line-height:25px;color:var(--ink)}
+.cy-r3 [data-page="docs"] .docs-content>*+*{margin-top:14px}
+.cy-r3 [data-page="docs"] .docs-content :is(h2,h3){scroll-margin-top:84px;color:var(--ink-hi);font-weight:500}
+.cy-r3 [data-page="docs"] .docs-content h2{margin-top:32px;padding-bottom:8px;border-bottom:1px solid var(--hair);font-size:20px;line-height:26px;letter-spacing:-.01em}
+.cy-r3 [data-page="docs"] .docs-content h3{margin-top:24px;font-size:16px;line-height:22px}
+.cy-r3 [data-page="docs"] .docs-content :is(ul,ol){padding-left:22px}
+.cy-r3 [data-page="docs"] .docs-content ul{list-style:disc}
+.cy-r3 [data-page="docs"] .docs-content ol{list-style:decimal}
+.cy-r3 [data-page="docs"] .docs-content li+li{margin-top:6px}
+.cy-r3 [data-page="docs"] .docs-content a{color:var(--ink);text-decoration:underline;text-decoration-thickness:1px;text-decoration-color:var(--underline);text-underline-offset:3px}
+.cy-r3 [data-page="docs"] .docs-content a:hover{text-decoration-color:var(--ink)}
+.cy-r3 [data-page="docs"] .docs-content strong{font-weight:600}
+.cy-r3 [data-page="docs"] .docs-content pre{overflow-x:auto;padding:14px 16px;border-radius:12px;background:var(--band);border:1px solid var(--band-line);font:13px/20px var(--mono);color:var(--ink)}
+.cy-r3 [data-page="docs"] .docs-content :not(pre)>code{padding:1px 6px;border-radius:6px;background:var(--band);border:1px solid var(--band-line);font:13px/20px var(--mono);overflow-wrap:anywhere}
+.cy-r3 [data-page="docs"] .docs-content table{display:block;max-width:100%;overflow-x:auto;border-collapse:separate;border-spacing:0;font-size:14px;line-height:20px}
+.cy-r3 [data-page="docs"] .docs-content th{padding:8px 12px;background:var(--band);font-size:12px;line-height:16px;font-weight:500;color:var(--ink-2);text-align:left;white-space:nowrap}
+.cy-r3 [data-page="docs"] .docs-content td{padding:10px 12px;border-top:1px solid var(--hair);vertical-align:top}
+.cy-r3 [data-page="docs"] .docs-content hr{margin:28px 0;border:0;border-top:1px solid var(--hair)}
+.cy-r3 [data-page="docs"] .docs-content blockquote{padding:10px 14px;border-radius:12px;background:var(--band);color:var(--ink-2)}
+.cy-r3 [data-page="docs"] .dc-pn{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;margin-top:28px;padding-top:14px;border-top:1px solid var(--hair)}
+.cy-r3 [data-page="docs"] .dc-pn .lnk{gap:6px;max-width:100%}
+.cy-r3 [data-page="docs"] .dc-pn-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400;color:var(--ink-2)}
+.cy-r3 [data-page="docs"] .dc-call{display:flex;align-items:flex-start;gap:12px;margin:16px 0;padding:12px 14px}
+.cy-r3 [data-page="docs"] .dc-call-b{min-width:0;font-size:14px;line-height:21px;color:var(--ink-2)}
+.cy-r3 [data-page="docs"] .dc-call-t{font-weight:500;color:var(--ink)}
+
+/* the search dialog (CoreComponents.modal) */
+.cy-r3 [data-page="docs"] .dc-search{display:flex;flex-direction:column;gap:12px;min-width:0}
+.cy-r3 [data-page="docs"] .dc-try{display:flex;flex-direction:column;gap:10px;padding:4px 2px}
+.cy-r3 [data-page="docs"] .dc-hits{display:flex;flex-direction:column;gap:2px;max-height:min(50dvh,420px);overflow-y:auto}
+.cy-r3 [data-page="docs"] .dc-hit{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:var(--r-row);border:1px solid transparent;transition:background .18s var(--ease)}
+.cy-r3 [data-page="docs"] .dc-hit:hover{background:var(--hover)}
+.cy-r3 [data-page="docs"] .dc-hit[aria-current]{background:var(--lift);border-color:var(--lift-line);box-shadow:var(--sh-raise)}
+.cy-r3 [data-page="docs"] .dc-hit-t{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="docs"] .dc-hit-t .tag{flex:none;text-transform:capitalize}
+.cy-r3 [data-page="docs"] .dc-hit-s{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:17px;color:var(--ink-2)}
+.cy-r3 [data-page="docs"] .dc-keys{display:inline-flex;align-items:center;gap:4px;margin-right:auto;font-size:12px;color:var(--ink-2)}
+
+@media (prefers-reduced-motion:reduce){
+  .cy-r3 [data-page="import"] :is(.im-fill,.im-drop),.cy-r3 [data-page="docs"] :is(.dc-nav a,.dc-hit,.dc-toc a,.dc-mtoc a){transition:none}
+}
+
+/* ---------- docs: the "On this page" rail only from 1280 px; below it the disclosure under the title ---------- */
+@media (min-width:1280px){
+  .cy-r3 [data-page="docs"] .dc-mtoc{display:none}
+}
+@media (max-width:1279px){
+  .cy-r3 [data-page="docs"] .dc{grid-template-columns:232px minmax(0,1fr)}
+  .cy-r3 [data-page="docs"] .dc-toc{display:none}
+}
+
+/* ---------- 1024 ---------- */
+@media (max-width:1180px){
+  .cy-r3 [data-page="docs"] .dc-art{padding:18px 20px 20px}
+}
+
+/* ---------- below 1024 the topic nav becomes the Topics sheet ---------- */
+@media (max-width:1023px){
+  .cy-r3 [data-page="docs"] .dc{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 [data-page="docs"] .dc>.dc-side{display:none}
+  .cy-r3 [data-page="docs"] .dc-topics{display:inline-flex}
+}
+
+/* ---------- phone (390) ---------- */
+@media (max-width:640px){
+  .cy-r3 :is([data-page="budgets"],[data-page="companies"]) .strip.s4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cy-r3 :is([data-page="budgets"],[data-page="companies"]) .strip.s4 .cell:nth-child(3){border-left:0}
+  .cy-r3 :is([data-page="budgets"],[data-page="companies"]) .strip.s4 .cell:nth-child(n+3){border-top:1px solid var(--hair)}
+  .cy-r3 [data-page="budgets"] .lrow .lr-tr{white-space:normal}
+  .cy-r3 [data-page="budgets"] .lrow>.lr-tr,.cy-r3 [data-page="companies"] .lrow>.lr-tr{flex-basis:100%}
+  .cy-r3 [data-page="import"] .strip.s3 .v{font-size:20px}
+  .cy-r3 [data-page="import"] .im-drop input[type=file]{font-size:16px}
+  .cy-r3 [data-page="import"] .im-drop input[type=file]::file-selector-button{height:44px;font-size:16px}
+  .cy-r3 [data-page="docs"] .dc-art{padding:16px 14px 18px}
+  .cy-r3 [data-page="docs"] .dc-crumb a{min-height:44px}
+  .cy-r3 [data-page="docs"] .dc-nav a,.cy-r3 [data-page="docs"] .dc-mtoc ul a{min-height:44px;display:flex;align-items:center}
+  .cy-r3 [data-page="docs"] .docs-content{font-size:15px;line-height:24px}
+  .cy-r3 [data-page="docs"] .dc-keys{display:none}
+}
