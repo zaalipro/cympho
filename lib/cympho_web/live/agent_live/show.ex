@@ -80,8 +80,7 @@ defmodule CymphoWeb.AgentLive.Show do
           socket
           |> assign(:page_title, agent.name)
           |> assign(:current_tab, tab)
-          # The page's own patches (tabs, files, runs) leave the origin's Back link standing.
-          |> assign(:from, UserAuth.safe_from(params["from"]) || socket.assigns.from)
+          |> assign(:from, UserAuth.safe_from(params["from"]))
           |> assign_agent(agent)
           |> maybe_select_file(file)
           |> maybe_select_run(run_id)
@@ -102,7 +101,7 @@ defmodule CymphoWeb.AgentLive.Show do
     {:noreply,
      socket
      |> assign(:current_tab, tab)
-     |> push_patch(to: ~p"/agents/#{socket.assigns.agent.id}?tab=#{tab}")}
+     |> push_patch(to: agent_path(socket.assigns.agent.id, socket.assigns.from, tab: tab))}
   end
 
   # ── Configuration tab — edit form ──────────────────────────────────────
@@ -493,7 +492,11 @@ defmodule CymphoWeb.AgentLive.Show do
 
     {:noreply,
      push_patch(socket,
-       to: ~p"/agents/#{socket.assigns.agent.id}?tab=instructions&file=#{file}"
+       to:
+         agent_path(socket.assigns.agent.id, socket.assigns.from,
+           tab: "instructions",
+           file: file
+         )
      )}
   end
 
@@ -522,7 +525,9 @@ defmodule CymphoWeb.AgentLive.Show do
               |> maybe_select_file(name)
 
             {:noreply,
-             push_patch(socket, to: ~p"/agents/#{agent.id}?tab=instructions&file=#{name}")}
+             push_patch(socket,
+               to: agent_path(agent.id, socket.assigns.from, tab: "instructions", file: name)
+             )}
 
           {:error, _changeset} ->
             {:noreply, put_flash(socket, :error, "Could not create file.")}
@@ -590,7 +595,9 @@ defmodule CymphoWeb.AgentLive.Show do
     socket = maybe_select_run(socket, run_id)
 
     {:noreply,
-     push_patch(socket, to: ~p"/agents/#{socket.assigns.agent.id}?tab=runs&run_id=#{run_id}")}
+     push_patch(socket,
+       to: agent_path(socket.assigns.agent.id, socket.assigns.from, tab: "runs", run_id: run_id)
+     )}
   end
 
   # ── Top action bar ────────────────────────────────────────────────────
@@ -879,7 +886,11 @@ defmodule CymphoWeb.AgentLive.Show do
       overview_runs:
         Enum.map(
           runs,
-          &Parts.run_row(&1, run_title(&1), "/agents/#{agent.id}?tab=runs&run_id=#{&1.id}")
+          &Parts.run_row(
+            &1,
+            run_title(&1),
+            agent_path(agent.id, socket.assigns.from, tab: "runs", run_id: &1.id)
+          )
         ),
       runs_issue: runs_issue,
       earlier_spend: earlier_spend(company_id, agent.id, runs_issue, runs)
@@ -925,20 +936,20 @@ defmodule CymphoWeb.AgentLive.Show do
 
   @doc false
   # How it runs: when the runtime cannot run on its own, its one fix in Setup.
-  def readiness_fix(%{status: :spending_limit}, agent),
+  def readiness_fix(%{status: :spending_limit}, agent, from),
     do: %{
       label: "Set billing in Setup",
-      path: "/agents/#{agent.id}?tab=configuration#agent-billing"
+      path: agent_path(agent.id, from, tab: "configuration") <> "#agent-billing"
     }
 
-  def readiness_fix(%{status: status}, agent)
+  def readiness_fix(%{status: status}, agent, from)
       when status in [:command_not_found, :missing_config],
       do: %{
         label: "Fix in Setup",
-        path: "/agents/#{agent.id}?tab=configuration#agent-runtime-profile"
+        path: agent_path(agent.id, from, tab: "configuration") <> "#agent-runtime-profile"
       }
 
-  def readiness_fix(_readiness, _agent), do: nil
+  def readiness_fix(_readiness, _agent, _from), do: nil
 
   def pill_class(:working), do: "k-work"
   def pill_class(:waiting), do: "k-wait"
@@ -1105,6 +1116,14 @@ defmodule CymphoWeb.AgentLive.Show do
 
   defp parse_tab(tab) when tab in @valid_tabs, do: tab
   defp parse_tab(_), do: "dashboard"
+
+  # The page's own links (tabs, files, runs) carry the validated origin, so its
+  # "Back to …" stays through them, a reload and the browser's Back.
+  defp agent_path(agent_id, nil, []), do: ~p"/agents/#{agent_id}"
+  defp agent_path(agent_id, nil, query), do: ~p"/agents/#{agent_id}?#{query}"
+
+  defp agent_path(agent_id, {path, _label}, query),
+    do: ~p"/agents/#{agent_id}?#{query ++ [from: path]}"
 
   defp file_list(%Agent{} = agent) do
     InstructionFiles.list_for_agent(agent)

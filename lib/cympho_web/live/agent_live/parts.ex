@@ -229,6 +229,7 @@ defmodule CymphoWeb.AgentLive.Parts do
 
   attr :agent, :map, required: true
   attr :reason, :string, default: nil, doc: "the latest failure as Cympho stored it"
+  attr :history, :string, required: true, doc: "the History tab's path, with the page's ?from="
 
   @doc "An agent stopped in error (no owner item exists for it): a fresh heartbeat."
   def retry_pair(assigns) do
@@ -253,7 +254,7 @@ defmodule CymphoWeb.AgentLive.Parts do
           <.consequences rows={[{:idle, "#{@agent.name} picks up its assigned To do work, if any."}]} />
           <.ink_foot verb="retry">
             <:secondary>
-              <.ghost_pill patch={"/agents/#{@agent.id}?tab=runs"}>Open History</.ghost_pill>
+              <.ghost_pill patch={@history}>Open History</.ghost_pill>
             </:secondary>
             <:primary>
               <.primary_pill phx-click="run_heartbeat">Retry with heartbeat</.primary_pill>

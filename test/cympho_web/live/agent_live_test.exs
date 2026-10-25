@@ -3108,6 +3108,71 @@ defmodule CymphoWeb.AgentLiveTest do
       assert Floki.find(r3_doc(view), ".ctx .ret") == []
     end
 
+    test "the page's own links carry the origin, so Back to Home survives a reload", %{
+      conn: conn,
+      nw: nw
+    } do
+      mira = nw.agents["Mira"]
+      base = "/agents/#{mira.id}"
+      run = nw.runs[7]
+      {:ok, view, _html} = live(conn, base <> "?from=/")
+      doc = r3_doc(view)
+
+      assert Floki.attribute(doc, ".agent-h .seg a", "href") == [
+               base <> "?from=%2F",
+               base <> "?tab=configuration&from=%2F",
+               base <> "?tab=runs&from=%2F"
+             ]
+
+      # Every in-page link: the tabs, Setup, History and the run rows.
+      patches = Floki.attribute(doc, ~s(a[data-phx-link="patch"]), "href")
+      assert length(patches) > 3
+      assert Enum.all?(patches, &(&1 =~ "from=%2F"))
+
+      render_click(view, "set_tab", %{"tab" => "instructions"})
+      assert_patch(view, base <> "?tab=instructions&from=%2F")
+
+      render_click(view, "select_file", %{"file" => "AGENTS.md"})
+      assert_patch(view, base <> "?tab=instructions&file=AGENTS.md&from=%2F")
+
+      render_click(view, "select_run", %{"run_id" => run.id})
+      assert_patch(view, base <> "?tab=runs&run_id=#{run.id}&from=%2F")
+
+      # A reload is a fresh mount of the patched URL.
+      {:ok, view, _html} = live(conn, base <> "?tab=runs&run_id=#{run.id}&from=%2F")
+      assert r3_text(r3_doc(view), ".ctx .ret") == "Back to Home"
+
+      # The retry's Open History keeps it too.
+      {:ok, broken} =
+        Agents.create_agent(%{
+          company_id: nw.company.id,
+          name: "Broken",
+          role: :engineer,
+          status: :error
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{broken.id}?from=/")
+
+      assert Floki.attribute(r3_doc(view), ~s(.next a.pd[data-phx-link="patch"]), "href") == [
+               "/agents/#{broken.id}?tab=runs&from=%2F"
+             ]
+
+      # Absent or refused, the links carry none.
+      for query <- ["", "?from=" <> URI.encode_www_form("//evil.example/x")] do
+        {:ok, view, _html} = live(conn, base <> query)
+
+        assert Floki.attribute(r3_doc(view), ".agent-h .seg a", "href") == [
+                 base,
+                 base <> "?tab=configuration",
+                 base <> "?tab=runs"
+               ]
+
+        render_click(view, "set_tab", %{"tab" => "configuration"})
+        assert_patch(view, base <> "?tab=configuration")
+        assert Floki.find(r3_doc(view), ".ctx .ret") == []
+      end
+    end
+
     test "Pause here is the owner's: it reads Paused and is no Inbox problem", %{
       conn: conn,
       nw: nw
