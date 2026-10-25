@@ -3,6 +3,8 @@ defmodule CymphoWeb.RoutineLive.Edit do
   alias Cympho.Routines
   alias CymphoWeb.RoutineLive.FormHelpers
 
+  import CymphoWeb.RoutineLive.FormHelpers, only: [routine_form: 1]
+
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     case get_scoped_routine(socket, id) do
@@ -15,7 +17,7 @@ defmodule CymphoWeb.RoutineLive.Edit do
             routine: routine,
             changeset: changeset,
             form: to_form(changeset),
-            page_title: "Edit Routine"
+            page_title: "Edit #{routine.name}"
           )
           |> FormHelpers.assign_context_options()
 

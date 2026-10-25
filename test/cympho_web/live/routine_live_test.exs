@@ -2,6 +2,7 @@ defmodule CymphoWeb.RoutineLiveTest do
   use CymphoWeb.LiveCase, async: true
 
   import Phoenix.LiveViewTest
+  import CymphoWeb.R3PageHelpers
   alias Cympho.{Agents, Projects, RoutineTriggers, Routines}
 
   test "routine form params fail closed when no company is assigned" do
@@ -49,12 +50,27 @@ defmodule CymphoWeb.RoutineLiveTest do
     test "renders the routines page", %{conn: conn} do
       {:ok, _routine} = create_routine(%{name: "Rendered Routine"})
 
-      {:ok, _view, html} = live(conn, "/routines")
-      assert html =~ "Routines"
-      assert html =~ "Automated Routines"
+      {:ok, view, html} = live(conn, "/routines")
+
+      # r3 (v7 L12): one list card; the overview and the health card are Advanced.
+      assert_r3_page(main_doc(view),
+        page: "routines",
+        h1: "Repeating tasks",
+        kind: :root,
+        primaries: 0
+      )
+
+      assert has_element?(view, "#routines-list-t", "Repeating tasks")
+
+      assert has_element?(
+               view,
+               ".ui-advanced-only[data-testid='routine-command'] #routine-overview-t"
+             )
+
+      assert has_element?(view, ".card-h .ui-advanced-only [data-density-switch]")
       assert html =~ "Compact"
       assert html =~ "Detailed"
-      refute html =~ "Routine Health"
+      refute has_element?(view, "[data-testid='routine-health']")
     end
 
     test "shows a single empty state when no routines exist", %{conn: conn} do
@@ -63,9 +79,9 @@ defmodule CymphoWeb.RoutineLiveTest do
       # with nothing to run only the list empty state and the header CTA remain.
       refute has_element?(view, "[data-testid='routine-command']")
       refute has_element?(view, "[data-testid='routine-health']")
-      assert html =~ "No routines yet"
-      assert html =~ "Create the first routine to schedule autonomous work."
-      assert html =~ "New Routine"
+      assert html =~ "No repeating tasks yet"
+      assert html =~ "Set one up to file a task on a schedule."
+      assert has_element?(view, ".ctx-end a[href='/routines/new']", "New repeating task")
     end
 
     test "shows routine health diagnostics", %{conn: conn} do
@@ -74,10 +90,11 @@ defmodule CymphoWeb.RoutineLiveTest do
       {:ok, view, html} = live(conn, "/routines?density=detailed")
       assert has_element?(view, "[data-testid='routine-command']")
       assert has_element?(view, "[data-testid='routine-next-action']")
-      assert html =~ "Add trigger to routine"
+      assert html =~ "Give a repeating task a schedule"
       assert html =~ "Triggerless Routine"
-      assert html =~ "Open routine"
-      assert has_element?(view, "[data-testid='routine-health']")
+      assert html =~ "Open it"
+      assert has_element?(view, "#routine-#{routine.id} .lr-st", "Needs a trigger")
+      assert has_element?(view, ".ui-advanced-only[data-testid='routine-health']")
       assert html =~ "Needs attention"
       assert html =~ "Trigger gaps"
       assert html =~ "Add triggers"
@@ -93,9 +110,12 @@ defmodule CymphoWeb.RoutineLiveTest do
     test "lists routines with status badges", %{conn: conn} do
       {:ok, _routine} = create_routine(%{name: "Test Routine Alpha"})
 
-      {:ok, _view, html} = live(conn, "/routines")
-      assert html =~ "Test Routine Alpha"
-      assert html =~ "Active"
+      {:ok, view, _html} = live(conn, "/routines")
+
+      # Lifecycle defaults print nowhere: an active row carries no status tag.
+      assert has_element?(view, "[id^='routine-'] a.rt2", "Test Routine Alpha")
+      refute has_element?(view, "[id^='routine-'] .lr-tr .tag")
+      assert has_element?(view, "[id^='routine-'] button[phx-click='pause_routine']")
     end
 
     test "scopes routine list to the current company", %{conn: conn, current_company: company} do
@@ -172,8 +192,8 @@ defmodule CymphoWeb.RoutineLiveTest do
       |> element("#routine-#{routine.id} button[phx-click='pause_routine']")
       |> render_click()
 
-      html = render(view)
-      assert html =~ "Paused"
+      assert has_element?(view, "#routine-#{routine.id} .lr-tr .tag", "Paused")
+      assert has_element?(view, "#routine-#{routine.id} button[phx-click='resume_routine']")
     end
 
     test "resumes a paused routine", %{conn: conn} do
@@ -186,8 +206,8 @@ defmodule CymphoWeb.RoutineLiveTest do
       |> element("#routine-#{routine.id} button[phx-click='resume_routine']")
       |> render_click()
 
-      html = render(view)
-      assert html =~ "Active"
+      refute has_element?(view, "#routine-#{routine.id} .lr-tr .tag", "Paused")
+      assert has_element?(view, "#routine-#{routine.id} button[phx-click='pause_routine']")
     end
 
     @tag membership_role: "admin"
@@ -196,12 +216,17 @@ defmodule CymphoWeb.RoutineLiveTest do
 
       {:ok, view, _html} = live(conn, "/routines")
 
+      assert has_element?(
+               view,
+               "#routine-menu-#{routine.id} button[phx-click='delete_routine']",
+               "Archive"
+             )
+
       view
       |> element("#routine-#{routine.id} button[phx-click='delete_routine']")
       |> render_click()
 
-      html = render(view)
-      assert html =~ "Archived"
+      assert has_element?(view, "#routine-#{routine.id} .lr-tr .tag", "Archived")
     end
 
     test "links to new routine page", %{conn: conn} do
@@ -221,25 +246,39 @@ defmodule CymphoWeb.RoutineLiveTest do
     test "renders routine details", %{conn: conn} do
       {:ok, routine} = create_routine(%{name: "Show Routine", description: "A desc"})
 
-      {:ok, _view, html} = live(conn, "/routines/#{routine.id}")
-      assert html =~ "Show Routine"
+      {:ok, view, html} = live(conn, "/routines/#{routine.id}")
+
+      # r3 (v7 L14): a deep page; an active routine prints no status tag.
+      assert_r3_page(main_doc(view),
+        page: "routine",
+        h1: "Show Routine",
+        kind: :deep,
+        parent: "Repeating tasks",
+        primaries: 1
+      )
+
       assert html =~ "A desc"
-      assert html =~ "Active"
+      refute has_element?(view, ".head .chips .tag")
     end
 
     test "shows run history section", %{conn: conn} do
       {:ok, routine} = create_routine(%{name: "History Routine"})
 
-      {:ok, _view, html} = live(conn, "/routines/#{routine.id}")
-      assert html =~ "Run History"
+      {:ok, view, _html} = live(conn, "/routines/#{routine.id}")
+      assert has_element?(view, "#routine-runs-t", "Run history")
     end
 
     test "shows empty state for runs", %{conn: conn} do
       {:ok, routine} = create_routine(%{name: "No Runs"})
 
-      {:ok, _view, html} = live(conn, "/routines/#{routine.id}")
+      {:ok, view, html} = live(conn, "/routines/#{routine.id}")
       assert html =~ "No runs yet"
-      assert html =~ "Add trigger"
+      # No schedule: the Next step is the schedule form, the page's one primary.
+      assert has_element?(
+               view,
+               ".next .ink[aria-label='Add a schedule'] button.pw",
+               "Add schedule"
+             )
     end
 
     test "renders a cron field and creates a schedule trigger", %{conn: conn} do
@@ -321,14 +360,24 @@ defmodule CymphoWeb.RoutineLiveTest do
     end
 
     test "renders the new routine form", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/routines/new")
-      assert html =~ "New Routine"
-      assert html =~ "Create Routine"
-      assert html =~ "Routine launch plan"
-      assert html =~ "Setup checklist"
+      {:ok, view, html} = live(conn, "/routines/new")
+
+      assert_r3_page(main_doc(view),
+        page: "routine-form",
+        h1: "New repeating task",
+        kind: :deep,
+        parent: "Repeating tasks",
+        primaries: 1
+      )
+
+      assert has_element?(view, "form#routine-form.fpair[phx-submit='save']")
+      assert has_element?(view, "#routine-form .ink button.pw[type='submit']", "Create")
+      assert html =~ "What it does"
       assert html =~ "Default owner"
-      assert html =~ "Project context"
-      assert html =~ "Run policy"
+      assert html =~ "Project"
+      assert has_element?(view, ".ui-advanced-only #rf-run-t", "How it runs")
+      refute html =~ "Setup checklist"
+      refute html =~ "Routine launch plan"
     end
 
     test "renders current-company owner and project choices", %{conn: conn} do
@@ -474,12 +523,21 @@ defmodule CymphoWeb.RoutineLiveTest do
     test "renders the edit form with existing values", %{conn: conn} do
       {:ok, routine} = create_routine(%{name: "Edit Me"})
 
-      {:ok, _view, html} = live(conn, "/routines/#{routine.id}/edit")
-      assert html =~ "Edit Routine"
-      assert html =~ "Save Changes"
-      assert html =~ "Maintain the recurring work packet"
+      {:ok, view, html} = live(conn, "/routines/#{routine.id}/edit")
+
+      assert_r3_page(main_doc(view),
+        page: "routine-form",
+        h1: "Edit Edit Me",
+        kind: :deep,
+        parent: "Repeating tasks",
+        primaries: 1
+      )
+
+      assert has_element?(view, ".crumb [aria-current]", "Edit repeating task")
+      assert has_element?(view, "#routine-form .ink button.pw[type='submit']", "Save")
+      assert has_element?(view, "#routine-form .ink a[href='/routines/#{routine.id}']", "Cancel")
       assert html =~ "Default owner"
-      assert html =~ "Project context"
+      assert html =~ "No project context"
     end
 
     test "updates routine and redirects to show", %{conn: conn} do
