@@ -17,4 +17,15 @@
       </.simple_form>
     </div>
   </.panel>
+
+  <%!-- The rail's account menu has the other Sign out; on a phone the rail is
+       hidden, and this page is reached from Settings (the top bar's gear). --%>
+  <.panel class="max-w-xl overflow-hidden">
+    <div class="flex flex-wrap items-center justify-between gap-3 p-5">
+      <p class="text-body-sm text-text-tertiary">
+        Signed in as <span class="text-text-primary">{@user.email}</span>
+      </p>
+      <.link href={~p"/logout"} method="delete" class="pl">Sign out</.link>
+    </div>
+  </.panel>
 </.settings_layout>

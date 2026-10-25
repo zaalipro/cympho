@@ -299,9 +299,36 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Toasts sit at the bottom, clear of the context header's controls (the Inbox filter, "Back to …"; C3).
+   On phones they span the screen 4 px above the floating tab bar, one at a time (the Toast hook, app.js). */
 .safe-area-toast {
-  top: calc(1rem + env(safe-area-inset-top, 0px));
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
   right: calc(1rem + env(safe-area-inset-right, 0px));
+}
+
+/* While a toast shows, the page's scroller ends above it: the Toast hook sets --toast-lane to the
+   toasts' height from the screen's bottom edge, so a toast never covers a button at the fold (C3). */
+.cy-r3 .col {
+  margin-bottom: var(--toast-lane, 0px);
+}
+
+@media (max-width: 640px) {
+  .safe-area-toast {
+    left: calc(8px + env(safe-area-inset-left, 0px));
+    right: calc(8px + env(safe-area-inset-right, 0px));
+    bottom: calc(var(--mobile-nav-offset) + 4px);
+  }
+
+  .safe-area-toast .toast {
+    max-width: none;
+    padding: 8px 14px;
+  }
+
+  /* The lane takes the tab bar's strip too, so a stuck bottom bar (New task's, the Advanced comment
+     box) sits on the scroller's edge, above the toast: -104px undoes .col's phone padding (r3.css). */
+  .cy-r3:has(#toast-container > .toast) .sticky-above-mobile-nav {
+    bottom: -104px;
+  }
 }
 
 .safe-area-dialog {
@@ -936,8 +963,9 @@ html[data-theme="dark"] .badge-error { background: rgba(239,68,68,0.15); color: 
    Toast Notifications
    ============================================ */
 
+/* A toast only shows text, so a tap goes through it to whatever it overlaps (C3). */
 .toast {
-  pointer-events: auto;
+  pointer-events: none;
   padding: 10px 16px;
   border-radius: 12px;
   font-size: 13px;

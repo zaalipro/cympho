@@ -200,7 +200,7 @@ defmodule Cympho.OrgHealth do
         roles -> "missing #{Enum.map_join(roles, ", ", &role_label/1)} coverage"
       end
 
-    "#{role_text}; #{metrics.detached_agents} detached #{plural(metrics.detached_agents, "agent")} need reassignment."
+    "#{role_text}; #{metrics.detached_agents} detached #{plural(metrics.detached_agents, "agent")} #{verb(metrics.detached_agents, "needs", "need")} reassignment."
   end
 
   defp summary(:warning, metrics, _missing_roles) do
@@ -269,7 +269,7 @@ defmodule Cympho.OrgHealth do
       severity: :critical,
       label: "Reattach reports",
       detail:
-        "#{length(agents)} #{plural(length(agents), "agent")} reference a missing or inactive manager; assign them to an active reporting line."
+        "#{length(agents)} #{plural(length(agents), "agent")} #{verb(length(agents), "references", "reference")} a missing or inactive manager; assign them to an active reporting line."
     }
   end
 
@@ -280,7 +280,7 @@ defmodule Cympho.OrgHealth do
       severity: :warning,
       label: "Split manager span",
       detail:
-        "#{length(agents)} #{plural(length(agents), "manager")} exceed #{@max_direct_reports} direct reports; add leads or redistribute reports."
+        "#{length(agents)} #{plural(length(agents), "manager")} #{verb(length(agents), "exceeds", "exceed")} #{@max_direct_reports} direct reports; add leads or redistribute reports."
     }
   end
 
@@ -291,7 +291,7 @@ defmodule Cympho.OrgHealth do
       severity: :warning,
       label: "Restore inactive agents",
       detail:
-        "#{length(agents)} #{plural(length(agents), "agent")} are paused, offline, or errored inside the active org."
+        "#{length(agents)} #{plural(length(agents), "agent")} #{verb(length(agents), "is", "are")} paused, offline, or errored inside the active org."
     }
   end
 
@@ -302,7 +302,7 @@ defmodule Cympho.OrgHealth do
       severity: :warning,
       label: "Repair adapter health",
       detail:
-        "#{length(agents)} #{plural(length(agents), "agent")} have degraded or unavailable adapter health."
+        "#{length(agents)} #{plural(length(agents), "agent")} #{verb(length(agents), "has", "have")} degraded or unavailable adapter health."
     }
   end
 
@@ -420,4 +420,7 @@ defmodule Cympho.OrgHealth do
 
   defp plural(1, singular), do: singular
   defp plural(_count, singular), do: singular <> "s"
+
+  defp verb(1, singular, _plural), do: singular
+  defp verb(_count, _singular, plural), do: plural
 end

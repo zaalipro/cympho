@@ -154,6 +154,12 @@
 .cy-r3 .col{min-width:0;display:flex;flex-direction:column;padding:12px 12px 0 2px;overflow-x:hidden;overflow-y:auto;scroll-padding-top:76px}
 .cy-r3 .frame{display:block;background:var(--frame);border-radius:var(--r-frame);padding:0 10px 10px;box-shadow:var(--sh-frame)}
 .cy-r3 .ctx{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:12px;min-height:64px;padding:12px 10px 10px 14px;background:var(--frame);border-radius:var(--r-frame) var(--r-frame) 0 0}
+/* Stuck, the header sits on the scroller's content edge, under .col's 12 px top padding (w3c/csswg-drafts#3352), and
+   its corners are rounded: scrolled content showed in the strip above it and in its corners (C3). Two layers under its
+   content redraw the frame's top at every scroll position: the page gutter above it, then the frame's rounded edge */
+.cy-r3 .ctx[data-ctx]::before,.cy-r3 .ctx[data-ctx]::after{content:"";position:absolute;z-index:-1;left:-10px;right:-10px;pointer-events:none}
+.cy-r3 .ctx[data-ctx]::before{top:-12px;height:calc(12px + var(--r-frame));background:var(--page)}
+.cy-r3 .ctx[data-ctx]::after{top:0;bottom:0;border-radius:var(--r-frame) var(--r-frame) 0 0;background:var(--frame)}
 .cy-r3 .ctx-title{display:flex;align-items:baseline;gap:12px;min-width:0}
 .cy-r3 .h1{font-size:24px;line-height:30px;font-weight:500;letter-spacing:-.015em;color:var(--ink-hi)}
 .cy-r3 .h1-aside{font-size:24px;line-height:30px;font-weight:400;letter-spacing:-.015em;color:var(--ink-2)}
@@ -593,6 +599,11 @@
   .cy-r3 .ctx{min-height:58px;padding:8px 2px 8px 10px;border-radius:24px 24px 0 0}
   /* root pages carry the top bar, so their context header scrolls away with the page */
   .cy-r3 .ctx[data-ctx="root"]{position:static}
+  /* the stuck header's layers follow the phone frame (6 px padding, 24 px corners); a root header never sticks */
+  .cy-r3 .ctx[data-ctx]::before,.cy-r3 .ctx[data-ctx]::after{left:-6px;right:-6px}
+  .cy-r3 .ctx[data-ctx]::before{height:36px}
+  .cy-r3 .ctx[data-ctx]::after{border-radius:24px 24px 0 0}
+  .cy-r3 .ctx[data-ctx="root"]::before,.cy-r3 .ctx[data-ctx="root"]::after{content:none}
   .cy-r3 .howto{align-items:stretch;width:100%}
   .cy-r3 .howto>p{text-align:left}
   .cy-r3 .h1,.cy-r3 .h1-aside{font-size:22px;line-height:28px}
@@ -610,6 +621,8 @@
   .cy-r3 .chip{height:44px}
   /* a search capsule in the page (Tasks' toolbar, Onboarding's templates) is a 44 px target; the rail's is hidden here */
   .cy-r3 .search{height:44px}
+  /* iOS zooms into a field whose text is under 16 px when it takes focus (B13): every field is 16 px on phones */
+  .cy-r3 :is(input,textarea,select),.cy-r3 .search input,.cy-r3 .composer textarea{font-size:16px}
   .cy-r3 .pf a{min-height:44px;min-width:44px;justify-content:center}
   .cy-r3 .now-t .ul,.cy-r3 .sub .ul{padding:15px 9px;margin:0 -9px}
   .cy-r3 .gl-sub .ul{padding:15px 0}

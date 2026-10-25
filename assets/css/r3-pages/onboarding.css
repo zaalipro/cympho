@@ -157,6 +157,8 @@
   .cy-r3 [data-page="onboarding"] .flds{grid-template-columns:minmax(0,1fr)}
   .cy-r3 [data-page="onboarding"] .lead li{padding:8px 10px;gap:10px}
   .cy-r3 [data-page="onboarding"] .fld input,.cy-r3 [data-page="onboarding"] .fld .inp{height:44px}
+  /* 16 px so iOS does not zoom into a focused field (B13; r3.css covers the shared fields) */
+  .cy-r3 [data-page="onboarding"] :is(.fld input,.fld input.mono,.fld textarea,.ob-role select,.ob-role input){font-size:16px}
   /* an input inside a 44 px capsule fills it, edge included, so the target is the capsule */
   .cy-r3 [data-page="onboarding"] :is(.fld .inp,.search) input{height:calc(100% + 2px);margin:-1px 0}
   .cy-r3 [data-page="onboarding"] .rd li{grid-template-columns:14px minmax(0,1fr);row-gap:0}
