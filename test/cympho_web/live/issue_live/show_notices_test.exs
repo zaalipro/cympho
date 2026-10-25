@@ -8,7 +8,8 @@ defmodule CymphoWeb.IssueLive.ShowNoticesTest do
 
   import Phoenix.LiveViewTest
 
-  alias Cympho.{Comments, Issues, R3Fixtures}
+  alias Cympho.{Comments, Issues, R3Fixtures, Repo}
+  alias Cympho.Issues.Issue
 
   @comment "New comment added"
   @updated "Issue updated by another user"
@@ -64,6 +65,31 @@ defmodule CymphoWeb.IssueLive.ShowNoticesTest do
       refute_push_event(view, "toast", %{message: @updated})
       assert render(view) =~ "On it."
     end
+
+    test "the same owner's change in another tab pushes no notice there", %{conn: conn, nw: nw} do
+      {:ok, first} = open(conn, nw, "NW-6")
+      {:ok, second} = open(conn, nw, "NW-6")
+
+      render_hook(second, "combobox_priority", %{"selected" => "low"})
+
+      html = settle(first)
+      refute_push_event(first, "toast", %{message: @updated})
+      assert html =~ "Low"
+    end
+
+    test "an answer sent from the Inbox pushes no notice on the open task", %{conn: conn, nw: nw} do
+      {:ok, task} = open(conn, nw, "NW-6")
+      {:ok, inbox, _html} = live(conn, "/inbox?kind=question")
+
+      inbox
+      |> form("#ns-answer", %{"response" => "Email the customer first"})
+      |> render_submit()
+
+      html = settle(task)
+      refute_push_event(task, "toast", %{message: @comment})
+      refute_push_event(task, "toast", %{message: @updated})
+      assert html =~ "Email the customer first"
+    end
   end
 
   describe "someone else's change" do
@@ -93,6 +119,49 @@ defmodule CymphoWeb.IssueLive.ShowNoticesTest do
       html = settle(view)
       assert_push_event(view, "toast", %{message: @updated})
       assert html =~ "Low"
+    end
+
+    test "another signed-in user's change is still announced", %{conn: conn, nw: nw} do
+      issue = nw.issues["NW-6"]
+      {:ok, view} = open(conn, nw, "NW-6")
+
+      Issues.put_actor_user_id(Ecto.UUID.generate())
+      {:ok, _issue} = Issues.update_issue(Issues.get_issue!(issue.id), %{priority: :low})
+
+      settle(view)
+      assert_push_event(view, "toast", %{message: @updated})
+    end
+
+    test "a change the page already shows when its broadcast arrives is still announced", %{
+      conn: conn,
+      nw: nw
+    } do
+      issue = nw.issues["NW-6"]
+      {:ok, view} = open(conn, nw, "NW-6")
+
+      # Someone else's write lands; its broadcast follows a moment later.
+      {:ok, changed} =
+        Issues.get_issue!(issue.id)
+        |> Issue.changeset(%{priority: :low})
+        |> Ecto.Changeset.optimistic_lock(:lock_version)
+        |> Repo.update()
+
+      # Meanwhile the page reloads the task for the owner's own reply.
+      view
+      |> form("form.composer", %{"comment" => %{"body" => "On it."}})
+      |> render_submit()
+
+      settle(view)
+      refute_push_event(view, "toast", %{message: @updated})
+
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "company:#{nw.company.id}:issues",
+        {:issue_updated, changed}
+      )
+
+      settle(view)
+      assert_push_event(view, "toast", %{message: @updated})
     end
   end
 end

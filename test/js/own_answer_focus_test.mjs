@@ -55,6 +55,18 @@ test("clicking the own row again when it is already chosen (no change) still mov
   assert.equal(textarea.focused, 1);
 });
 
+// A mouse click on the row's text, pencil icon or dot is dispatched on that child
+// first, then the label clicks its radio (HTML label activation, as measured with real
+// mouse clicks in Chromium): the radio's click moves the caret.
+test("a click on the label's text or icon moves the caret through the radio click that follows", () => {
+  const {radio, textarea} = row({own: true, checked: true});
+  const textSpan = {classList: {contains: () => false}};
+  fire("click", textSpan);
+  assert.equal(textarea.focused, 0);
+  fire("click", radio);
+  assert.equal(textarea.focused, 1);
+});
+
 test("a numbered option keeps the focus on its radio", () => {
   const own = row({own: true, checked: false});
   const numbered = row({own: false, checked: true});
