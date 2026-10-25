@@ -1,6 +1,7 @@
 defmodule CymphoWeb.OperationsLiveTest do
   use CymphoWeb.LiveCase, async: true
 
+  import CymphoWeb.R3PageHelpers
   import Ecto.Query, warn: false
   import Phoenix.LiveViewTest
 
@@ -71,15 +72,20 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, view, html} = live(conn, "/operations")
 
-      assert html =~ "Operations"
-      assert html =~ "2xl:grid-cols-[minmax(0,1fr)_360px]"
-      assert html =~ "Operations Doctor"
+      # r3 (v7 O1): a root page under Team, titled with its rail label; one band per section.
+      doc = main_doc(html)
+      assert_r3_page(doc, page: "health", h1: "Health", kind: :root)
+      assert length(Floki.find(doc, ".pw")) <= 1
+      assert Floki.find(doc, ".ink .pw") == Floki.find(doc, ".pw")
+      assert Floki.find(doc, "section#runtime-services.card .card-h h2") != []
+      assert Floki.find(doc, "section#runtime-capacity.card.ui-advanced-only") != []
+      assert html =~ "Operations doctor"
       assert html =~ ~s(data-testid="operations-doctor-next-fix")
       assert html =~ "How this is diagnosed"
       assert html =~ "Why this matters"
       assert html =~ "Autonomous dispatch is off"
       assert html =~ "Local concurrency needs attention"
-      assert html =~ "Runtime Services"
+      assert html =~ "Runtime services"
       assert html =~ "Runtime capacity"
       assert html =~ ~s(data-testid="repo-delivery-capacity")
       assert html =~ "Repo delivery lane"
@@ -112,7 +118,9 @@ defmodule CymphoWeb.OperationsLiveTest do
       refute html =~ "Runtime will take up to"
       refute html =~ "Dispatch can start up to"
 
-      assert html =~ "max-h-[760px]"
+      # The launch preview's candidates scroll inside their card, never the page.
+      assert Floki.find(main_doc(html), "#runtime-launch-checklist") != []
+      assert Floki.find(main_doc(html), "ul.rows.op-scroll") != []
       assert html =~ "1 candidate"
       assert html =~ "1 focused"
       refute html =~ "1 ready"
@@ -697,7 +705,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       parent_identifier = parent_issue.identifier || String.slice(parent_issue.id, 0, 8)
 
-      assert html =~ "Delegated Work Queue"
+      assert html =~ "Delegated work queue"
       assert html =~ "3 open"
       assert html =~ "2 runnable"
       assert html =~ "1 setup blocked"
@@ -866,7 +874,7 @@ defmodule CymphoWeb.OperationsLiveTest do
       parent_identifier = parent_issue.identifier || String.slice(parent_issue.id, 0, 8)
       swarm_events = SwarmEvents.list_for_parent(parent_issue.id)
 
-      assert html =~ "Delegated Work Queue"
+      assert html =~ "Delegated work queue"
       assert html =~ "3 open"
       assert html =~ "Run swarm queue"
       assert html =~ "Open swarm queue"
@@ -1193,7 +1201,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, _view, html} = live(conn, "/operations")
 
-      assert html =~ "CEO Outcome Monitor"
+      assert html =~ "CEO outcome monitor"
       assert html =~ "CEO flow verification"
       assert html =~ ~s(data-testid="ceo-flow-verifier")
       assert html =~ "Needs attention"
@@ -1204,8 +1212,9 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ ~s(data-testid="ceo-outcome-health-strip")
       assert html =~ ~s(data-testid="ceo-outcome-metrics")
       assert html =~ ~s(data-testid="ceo-outcome-row")
-      assert html =~ "lg:grid-cols-[minmax(0,1fr)_auto]"
-      assert html =~ "2xl:grid-cols-7"
+      # Each outcome is a list row: its outcome is a word with a shape, not a coloured pill.
+      assert Floki.find(main_doc(html), "[data-testid='ceo-outcome-row'].lrow .lr-st") != []
+      assert length(Floki.find(main_doc(html), "[data-testid='ceo-outcome-metrics'] dt")) == 7
       assert html =~ "Recent CEO turns produced"
       assert html =~ "2 owner updates"
       assert html =~ "Owner updates"
@@ -1242,9 +1251,8 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "missing_action_block"
       assert html =~ "Runtime preflight failed"
       assert html =~ "OPENAI_API_KEY not set"
-      assert html =~ "Recent Runtime Failures"
+      assert html =~ "Recent failures"
       assert html =~ ~s(id="runtime-failures")
-      refute element_attrs(html, "#operations-side-rail")["class"] =~ "ui-advanced-only"
       refute element_attrs(html, "#runtime-failures")["class"] =~ "ui-advanced-only"
       assert html =~ "Focused relaunch"
       assert html =~ "Fix and relaunch"
@@ -1318,7 +1326,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, view, html} = live(conn, "/operations")
 
-      assert html =~ "Owner Signoff Queue"
+      assert html =~ "Owner signoff queue"
       assert html =~ "1 waiting"
       assert html =~ "Owner accepts from operations"
       assert html =~ "Accept and close"
@@ -1402,7 +1410,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, view, html} = live(conn, "/operations")
 
-      assert html =~ "Owner Signoff Queue"
+      assert html =~ "Owner signoff queue"
       assert html =~ "1 waiting"
       assert html =~ "Owner requests revision from operations"
       assert html =~ "Request revision"
@@ -1491,7 +1499,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, _view, html} = live(conn, "/operations")
 
-      assert html =~ "CEO Outcome Monitor"
+      assert html =~ "CEO outcome monitor"
       assert html =~ "1 owner acceptance"
       assert html =~ "Owner accepted"
       assert html =~ "Owner acceptance"
@@ -1558,7 +1566,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, _view, html} = live(conn, "/operations")
 
-      assert html =~ "CEO Outcome Monitor"
+      assert html =~ "CEO outcome monitor"
       assert html =~ "1 owner revision"
       assert html =~ "Owner revision"
       assert html =~ "Owner reopened CEO verification"
@@ -1745,7 +1753,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, _view, html} = live(conn, "/operations")
 
-      assert html =~ "Prompt Drift Radar"
+      assert html =~ "Prompt drift radar"
       assert html =~ "How this is diagnosed"
       assert html =~ "Risky Prompt Agent"
       assert html =~ "Guardrail risk"
@@ -1781,7 +1789,7 @@ defmodule CymphoWeb.OperationsLiveTest do
         |> element("button[phx-value-agent-id='#{agent.id}']", "Preview patches")
         |> render_click()
 
-      assert html =~ "Prompt Patch Preview"
+      assert html =~ "Prompt patch preview"
       assert html =~ "Review the exact additive text"
       assert html =~ "Owner-readable memory"
       assert html =~ "After every meaningful action"
@@ -1795,7 +1803,7 @@ defmodule CymphoWeb.OperationsLiveTest do
         |> element("button[phx-value-agent-id='#{agent.id}']", "Apply patches")
         |> render_click()
 
-      refute html =~ "Prompt Patch Preview"
+      refute html =~ "Prompt patch preview"
       refute html =~ "Preview patches"
       assert html =~ "Prompt tuning receipt"
       assert html =~ "v1 rollback point recorded"
@@ -1864,7 +1872,7 @@ defmodule CymphoWeb.OperationsLiveTest do
         |> element("button[phx-value-scope='watchlist']", "Preview all safe patches")
         |> render_click()
 
-      assert html =~ "Prompt Patch Preview"
+      assert html =~ "Prompt patch preview"
       assert html =~ "Bulk Prompt Agent A"
       assert html =~ "Bulk Prompt Agent B"
       assert html =~ "Apply all patches"
@@ -1874,7 +1882,7 @@ defmodule CymphoWeb.OperationsLiveTest do
         |> element("button[phx-value-scope='watchlist']", "Apply all patches")
         |> render_click()
 
-      assert html =~ "Prompt Drift Radar"
+      assert html =~ "Prompt drift radar"
       assert html =~ "Prompt tuning receipt"
       assert html =~ "Bulk Prompt Agent A"
       assert html =~ "Bulk Prompt Agent B"
@@ -1945,7 +1953,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, view, html} = live(conn, "/operations")
 
-      assert html =~ "Review Nudges"
+      assert html =~ "Review nudges"
       assert html =~ "Active queue"
       assert html =~ "Needs owner-visible evidence"
       assert html =~ "Evidence Owner"
@@ -2001,7 +2009,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, view, html} = live(conn, "/operations")
 
-      assert html =~ "Pending Tasks"
+      assert html =~ "Pending tasks"
       assert html =~ "Old comment wake"
       assert html =~ "Backlog Owner"
       assert html =~ "Clear stale wakes"
@@ -2104,12 +2112,12 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       {:ok, view, html} = live(conn, "/operations")
 
-      assert html =~ "Prompt Contract Health"
+      assert html =~ "Prompt contract health"
       assert html =~ "Contract and memory failures by agent"
       assert html =~ "Repair queue"
       assert html =~ "Start here"
       assert html =~ "Top repairs"
-      assert html =~ "max-h-[520px]"
+      assert Floki.find(main_doc(html), "#prompt-contract-health ul.rows.op-scroll") != []
       assert html =~ "Active gaps"
       assert html =~ "Thin contract delivery"
       assert html =~ "Contract QA Agent"
@@ -2264,7 +2272,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       assert view
              |> element("button", "Refresh")
-             |> render_click() =~ "Runtime Services"
+             |> render_click() =~ "Runtime services"
     end
   end
 

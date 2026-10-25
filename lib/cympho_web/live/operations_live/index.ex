@@ -551,7 +551,7 @@ defmodule CymphoWeb.OperationsLive.Index do
       )
 
     socket
-    |> assign(:page_title, "Operations")
+    |> assign(:page_title, "Health")
     |> assign(:delegated_parent_issue_id, parent_issue_id)
     |> assign_swarm_events(parent_issue_id)
     |> assign(:snapshot, snapshot)
@@ -739,27 +739,6 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp swarm_metadata_atom_key("queued_count"), do: :queued_count
   defp swarm_metadata_atom_key("failed_count"), do: :failed_count
   defp swarm_metadata_atom_key(_key), do: nil
-
-  defp swarm_event_dot_class("success"), do: "h-2 w-2 rounded-full bg-emerald-300"
-  defp swarm_event_dot_class("warning"), do: "h-2 w-2 rounded-full bg-amber-300"
-  defp swarm_event_dot_class("error"), do: "h-2 w-2 rounded-full bg-red-300"
-  defp swarm_event_dot_class(_status), do: "h-2 w-2 rounded-full bg-sky-300"
-
-  defp swarm_event_badge_class("success"),
-    do:
-      "shrink-0 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-590 uppercase text-emerald-300"
-
-  defp swarm_event_badge_class("warning"),
-    do:
-      "shrink-0 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-590 uppercase text-amber-200"
-
-  defp swarm_event_badge_class("error"),
-    do:
-      "shrink-0 rounded-full border border-red-500/25 bg-red-500/10 px-2 py-0.5 text-[10px] font-590 uppercase text-red-300"
-
-  defp swarm_event_badge_class(_status),
-    do:
-      "shrink-0 rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-590 uppercase text-sky-200"
 
   defp prompt_watchlist_agents(nil), do: []
 
@@ -961,75 +940,138 @@ defmodule CymphoWeb.OperationsLive.Index do
     end
   end
 
+  attr :priority, :atom, required: true
   attr :label, :string, required: true
-  attr :hint, :string, default: nil
-  attr :class, :string, default: nil
 
-  defp chapter_heading(assigns) do
+  # Task's priority bars (v7 §1.5) beside the word.
+  defp pri(assigns) do
+    assigns = assign(assigns, :on, priority_bars(assigns.priority))
+
     ~H"""
-    <div class={["flex items-center gap-3 pt-1", @class]}>
-      <p class="shrink-0 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-        {@label}
-      </p>
-      <hr class="ember-rule min-w-0 flex-1" />
-      <p :if={@hint} class="shrink-0 text-[11px] leading-4 text-text-quaternary">{@hint}</p>
-    </div>
+    <span class="op-pri">
+      <span class="pri" aria-hidden="true"><i :for={n <- 1..4} class={n <= @on && "on"}></i></span>{@label}
+    </span>
     """
   end
 
-  attr :label, :string, required: true
-  attr :value, :integer, required: true
-  attr :tone, :atom, default: :idle
+  defp priority_bars(:critical), do: 4
+  defp priority_bars(:high), do: 3
+  defp priority_bars(:medium), do: 2
+  defp priority_bars(_priority), do: 1
 
-  defp pulse_stat(assigns) do
-    ~H"""
-    <div class="ember-stat min-w-[76px] bg-surface/60 px-4 py-2.5">
-      <div class="flex items-center gap-1.5">
-        <span class={["h-1.5 w-1.5 shrink-0 rounded-full", pulse_stat_dot_class(@tone, @value)]}>
-        </span>
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          {@label}
-        </p>
-      </div>
-      <p class={[
-        "mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums",
-        pulse_stat_value_class(@tone, @value)
-      ]}>
-        {@value}
-      </p>
-    </div>
-    """
-  end
+  ## Tones as status shapes (v7 §1.5): each runtime domain keeps its own
+  ## mapping, so a word like :running reads as it did in its old colour.
 
-  defp pulse_stat_dot_class(_tone, value) when value <= 0, do: "bg-text-quaternary/40"
-  defp pulse_stat_dot_class(:running, _value), do: "animate-pulse bg-emerald-400"
-  defp pulse_stat_dot_class(:waiting, _value), do: "animate-pulse bg-amber-400"
-  defp pulse_stat_dot_class(:stale, _value), do: "animate-pulse bg-brand"
-  defp pulse_stat_dot_class(_tone, _value), do: "bg-text-quaternary/40"
+  defp capsule_state(:autonomous), do: :working
+  defp capsule_state(:degraded), do: :waiting
+  defp capsule_state(_status), do: :idle
 
-  defp pulse_stat_value_class(_tone, value) when value <= 0, do: "text-text-quaternary"
-  defp pulse_stat_value_class(:running, _value), do: "text-emerald-300"
-  defp pulse_stat_value_class(:waiting, _value), do: "text-amber-300"
-  defp pulse_stat_value_class(:stale, _value), do: "text-brand"
-  defp pulse_stat_value_class(_tone, _value), do: "text-text-primary"
+  defp row_kind(:danger), do: :problem
+  defp row_kind(:attention), do: :question
+  defp row_kind(_tone), do: :neutral
 
-  attr :label, :string, required: true
-  attr :value, :any, required: true
-  attr :detail, :string, default: nil
-  attr :value_class, :string, default: "text-text-secondary"
-  attr :class, :string, default: nil
+  # The tinted well under a launch step or delivery lane: only problems tint.
+  defp well_tone(:stopped), do: "p"
+  defp well_tone(:waiting), do: "w"
+  defp well_tone(_kind), do: nil
 
-  defp quiet_stat(assigns) do
-    ~H"""
-    <div class={["min-w-0", @class]}>
-      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">{@label}</p>
-      <p class={["mt-1.5 font-mono text-[15px] font-590 leading-none tabular-nums", @value_class]}>
-        {@value}
-      </p>
-      <p :if={@detail} class="mt-1.5 truncate text-[11px] text-text-quaternary">{@detail}</p>
-    </div>
-    """
-  end
+  defp enablement_kind(:ready), do: :done
+  defp enablement_kind(:running), do: :working
+  defp enablement_kind(:blocked), do: :waiting
+  defp enablement_kind(_status), do: :idle
+
+  defp launch_plan_kind(:danger), do: :stopped
+  defp launch_plan_kind(:attention), do: :waiting
+  defp launch_plan_kind(:success), do: :done
+  defp launch_plan_kind(_tone), do: :idle
+
+  defp preflight_kind(:ready), do: :done
+  defp preflight_kind(:attention), do: :waiting
+  defp preflight_kind(:blocked), do: :stopped
+  defp preflight_kind(_status), do: :idle
+
+  defp readiness_kind(:ok), do: :done
+  defp readiness_kind(:attention), do: :waiting
+  defp readiness_kind(:blocked), do: :stopped
+  defp readiness_kind(_status), do: :idle
+
+  defp brief_kind(:ready), do: :done
+  defp brief_kind(:draft), do: :waiting
+  defp brief_kind(:thin), do: :stopped
+  defp brief_kind(_status), do: :idle
+
+  defp ceo_flow_kind(stage) when stage in [:setup, :blocked], do: :stopped
+
+  defp ceo_flow_kind(stage) when stage in [:attention, :delegated_work, :owner_signoff],
+    do: :waiting
+
+  defp ceo_flow_kind(:running), do: :working
+  defp ceo_flow_kind(:observed), do: :done
+  defp ceo_flow_kind(_stage), do: :idle
+
+  defp ceo_step_kind(:complete), do: :done
+  defp ceo_step_kind(:active), do: :working
+  defp ceo_step_kind(:attention), do: :waiting
+  defp ceo_step_kind(:blocked), do: :stopped
+  defp ceo_step_kind(_state), do: :idle
+
+  defp nudge_kind(:queued), do: :waiting
+  defp nudge_kind(:running), do: :working
+  defp nudge_kind(:stale), do: :stopped
+  defp nudge_kind(:cleared), do: :done
+  defp nudge_kind(_lifecycle), do: :idle
+
+  defp contract_kind(:missing), do: :stopped
+  defp contract_kind(:attention), do: :waiting
+  defp contract_kind(_status), do: :idle
+
+  defp prompt_kind(:ready), do: :done
+  defp prompt_kind(status) when status in [:needs_tuning, :regressed], do: :waiting
+  defp prompt_kind(status) when status in [:guardrail_risk, :eval_gap], do: :stopped
+  defp prompt_kind(_status), do: :idle
+
+  defp ceo_outcome_kind(outcome)
+       when outcome in [:owner_update, :owner_accepted, :handoff, :decomposition, :governance],
+       do: :done
+
+  defp ceo_outcome_kind(outcome) when outcome in [:owner_revision, :blocked, :silent],
+    do: :waiting
+
+  defp ceo_outcome_kind(:running), do: :working
+  defp ceo_outcome_kind(:failed), do: :stopped
+  defp ceo_outcome_kind(_outcome), do: :idle
+
+  defp receipt_kind(:ok), do: :done
+  defp receipt_kind(:attention), do: :waiting
+  defp receipt_kind(_status), do: :idle
+
+  defp doctor_kind(:critical), do: :stopped
+  defp doctor_kind(:warning), do: :waiting
+  defp doctor_kind(:ok), do: :done
+  defp doctor_kind(_level), do: :idle
+
+  defp service_kind(:running), do: :done
+  defp service_kind(:not_running), do: :stopped
+  defp service_kind(_status), do: :idle
+
+  defp capacity_kind(:safe), do: :done
+  defp capacity_kind(:watch), do: :waiting
+  defp capacity_kind(:high), do: :stopped
+  defp capacity_kind(_level), do: :idle
+
+  defp repo_delivery_kind(:ready), do: :done
+  defp repo_delivery_kind(status) when status in [:text_only, :missing], do: :waiting
+  defp repo_delivery_kind(_status), do: :idle
+
+  defp health_kind(:healthy), do: :done
+  defp health_kind(:degraded), do: :waiting
+  defp health_kind(:unavailable), do: :stopped
+  defp health_kind(_status), do: :idle
+
+  defp swarm_kind("success"), do: :done
+  defp swarm_kind("warning"), do: :waiting
+  defp swarm_kind("error"), do: :stopped
+  defp swarm_kind(_status), do: :idle
 
   defp now_waiting_count(wake_queue, review_nudges) do
     Map.get(wake_queue.counts, :pending_comments, 0) +
@@ -1040,20 +1082,6 @@ defmodule CymphoWeb.OperationsLive.Index do
     Map.get(capacity, :stale_checked_out_issues, 0) +
       Map.get(wake_queue.counts, :stale_comments, 0)
   end
-
-  defp status_badge_class(:running),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp status_badge_class(:boot_task),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-
-  defp status_badge_class(:disabled),
-    do: "border-border bg-surface text-text-tertiary"
-
-  defp status_badge_class(:not_running),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp status_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   # Two subheads replace the per-card "Core launch"/"Optional automation" pill,
   # which carried no information a card-level grouping cannot.
@@ -1072,54 +1100,6 @@ defmodule CymphoWeb.OperationsLive.Index do
     ]
     |> Enum.reject(&(&1.services == []))
   end
-
-  defp capacity_badge_class(:safe), do: "border-green-500/25 bg-green-500/10 text-green-400"
-  defp capacity_badge_class(:watch), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-300"
-  defp capacity_badge_class(:high), do: "border-brand/25 bg-brand/10 text-brand"
-  defp capacity_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp repo_delivery_card_class(:ready), do: "border-emerald-500/20 bg-emerald-500/[0.04]"
-  defp repo_delivery_card_class(:text_only), do: "border-brand/25 bg-brand/[0.06]"
-  defp repo_delivery_card_class(:missing), do: "border-amber-500/25 bg-amber-500/[0.06]"
-  defp repo_delivery_card_class(_), do: "border-border bg-surface/50"
-
-  defp repo_delivery_badge_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp repo_delivery_badge_class(:text_only), do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp repo_delivery_badge_class(:missing),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp repo_delivery_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp repo_delivery_action_class(:ready),
-    do:
-      "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-
-  defp repo_delivery_action_class(:text_only),
-    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
-
-  defp repo_delivery_action_class(:missing),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
-
-  defp repo_delivery_action_class(_),
-    do:
-      "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-
-  defp action_class(:ok), do: "border-border bg-surface"
-  defp action_class(:attention), do: "border-border bg-surface"
-  defp action_class(:danger), do: "border-border bg-surface"
-  defp action_class(_), do: "border-border bg-surface"
-
-  defp action_badge_class(:ok),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp action_badge_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp action_badge_class(:danger), do: "border-brand/25 bg-brand/10 text-brand"
-  defp action_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   defp simple_action_queue(
          delegated_work,
@@ -1148,12 +1128,11 @@ defmodule CymphoWeb.OperationsLive.Index do
     %{
       key: "cleanup",
       tone: :danger,
-      icon: "hero-no-symbol-mini",
+      icon: "i-halt",
       eyebrow: "Runtime",
       title: "Recover stale runtime state",
       detail:
         "#{count} active or stale #{plural_noun(count, "slot")} must be released before launch.",
-      count_label: "#{count} held",
       action_label: "Recover",
       action_event: "recover_stale_runs",
       action_path: nil
@@ -1166,11 +1145,10 @@ defmodule CymphoWeb.OperationsLive.Index do
     %{
       key: "delegated",
       tone: :attention,
-      icon: "hero-play-mini",
+      icon: "i-tasks",
       eyebrow: "Delegated",
       title: "#{count} runnable delegated #{plural_noun(count, "item")}",
       detail: simple_delegated_runnable_detail(delegated_work),
-      count_label: "#{count} runnable",
       action_label: "Focus queue",
       action_event: "prioritize_delegated_work",
       action_path: nil
@@ -1181,11 +1159,10 @@ defmodule CymphoWeb.OperationsLive.Index do
     %{
       key: "delegated",
       tone: :danger,
-      icon: "hero-wrench-screwdriver-mini",
+      icon: "i-settings",
       eyebrow: "Delegated",
       title: "#{count} setup #{plural_noun(count, "blocker")}",
       detail: "Something in the setup is blocking these from running.",
-      count_label: "#{count} blocked",
       action_label: "Fix setup",
       action_event: nil,
       action_path: simple_visible_ops_path("#runtime-launch-checklist")
@@ -1196,11 +1173,10 @@ defmodule CymphoWeb.OperationsLive.Index do
     %{
       key: "delegated",
       tone: :attention,
-      icon: "hero-list-bullet-mini",
+      icon: "i-tasks",
       eyebrow: "Delegated",
       title: "#{count} delegated #{plural_noun(count, "item")} open",
       detail: "Work your agents handed to each other — check what's stuck or waiting.",
-      count_label: "#{count} open",
       action_label: "Open queue",
       action_event: nil,
       action_path: simple_visible_ops_path("#delegated-work-queue")
@@ -1222,11 +1198,10 @@ defmodule CymphoWeb.OperationsLive.Index do
     %{
       key: "owner-signoff",
       tone: :attention,
-      icon: "hero-check-circle-mini",
+      icon: "i-check",
       eyebrow: "Owner",
       title: "#{count} CEO #{plural_noun(count, "update")} waiting",
       detail: "Your CEO wants a decision — accept, or ask for another pass.",
-      count_label: "#{count} waiting",
       action_label: "Review",
       action_event: nil,
       action_path: simple_visible_ops_path("#owner-signoff-queue")
@@ -1239,11 +1214,10 @@ defmodule CymphoWeb.OperationsLive.Index do
     %{
       key: "ceo-receipts",
       tone: :attention,
-      icon: "hero-sparkles-mini",
+      icon: "i-doc-check",
       eyebrow: "CEO",
       title: "#{count} receipt #{plural_noun(count, "gap")}",
       detail: "Some CEO updates are missing proof of what actually happened.",
-      count_label: "#{count} gaps",
       action_label: "Inspect",
       action_event: nil,
       action_path: simple_visible_ops_path("#ceo-outcome-monitor")
@@ -1264,11 +1238,10 @@ defmodule CymphoWeb.OperationsLive.Index do
     %{
       key: "launch",
       tone: tone,
-      icon: "hero-bolt-mini",
+      icon: "i-term",
       eyebrow: "Launch",
       title: label,
       detail: summary,
-      count_label: nil,
       action_label: "Open",
       action_event: nil,
       action_path: simple_visible_ops_path(target_path || "#runtime-launch-checklist")
@@ -1281,11 +1254,10 @@ defmodule CymphoWeb.OperationsLive.Index do
     %{
       key: "steady",
       tone: :ok,
-      icon: "hero-check-circle-mini",
+      icon: "i-check",
       eyebrow: "Steady",
       title: "No urgent operations",
       detail: "Nothing needs you — everything is either running or done.",
-      count_label: nil,
       action_label: "Details",
       action_event: nil,
       action_path: simple_visible_ops_path("#runtime-launch-checklist")
@@ -1326,6 +1298,19 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp simple_operations_target_label("Open launch checklist"), do: "See the steps"
   defp simple_operations_target_label(label), do: label
 
+  # The Next step shows in both modes. An anchor with a page of its own goes to
+  # that page; any other anchor stays an in-page jump (sending it to
+  # /operations would only reload the page it is on).
+  defp next_step_path(target) do
+    case simple_visible_ops_path(target) do
+      "/operations" when is_binary(target) ->
+        if anchor_path?(target), do: target, else: "/operations"
+
+      path ->
+        path
+    end
+  end
+
   # Simple mode hides advanced-only Operations anchors. Send the owner to a
   # page they can actually see.
   defp simple_visible_ops_path("#runtime-launch-checklist"), do: "/settings/adapters"
@@ -1335,100 +1320,6 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp simple_visible_ops_path("#" <> _), do: "/operations"
   defp simple_visible_ops_path(path) when is_binary(path), do: path
   defp simple_visible_ops_path(_), do: "/operations"
-
-  defp simple_action_row_class(:danger), do: "border-brand/25 bg-brand/[0.07]"
-  defp simple_action_row_class(:attention), do: "border-amber-500/25 bg-amber-500/[0.06]"
-  defp simple_action_row_class(:brand), do: "border-sky-500/25 bg-sky-500/[0.06]"
-  defp simple_action_row_class(:success), do: "border-emerald-500/20 bg-emerald-500/[0.05]"
-  defp simple_action_row_class(:ok), do: "border-emerald-500/20 bg-emerald-500/[0.05]"
-  defp simple_action_row_class(_), do: "border-border bg-surface/60"
-
-  defp doctor_badge_class(:critical),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp doctor_badge_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp doctor_badge_class(:info),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-
-  defp doctor_badge_class(:ok),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp doctor_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp doctor_card_class(:critical), do: "border-border border-l-2 border-l-brand/70 bg-surface"
-
-  defp doctor_card_class(:warning),
-    do: "border-border border-l-2 border-l-amber-500/70 bg-surface"
-
-  defp doctor_card_class(:info), do: "border-border border-l-2 border-l-blue-500/70 bg-surface"
-  defp doctor_card_class(:ok), do: "border-border border-l-2 border-l-emerald-500/70 bg-surface"
-  defp doctor_card_class(_), do: "border-border bg-surface"
-
-  defp action_left_bar(:ok), do: "border-l-emerald-500/70"
-  defp action_left_bar(:attention), do: "border-l-amber-500/70"
-  defp action_left_bar(:danger), do: "border-l-brand/70"
-  defp action_left_bar(_), do: "border-l-brand/70"
-
-  defp mode_text_class(:autonomous), do: "text-green-300"
-  defp mode_text_class(:review), do: "text-sky-300"
-  defp mode_text_class(:degraded), do: "text-amber-300"
-  defp mode_text_class(_), do: "text-text-tertiary"
-
-  defp mode_dot_class(:autonomous), do: "bg-green-400"
-  defp mode_dot_class(:review), do: "bg-sky-400"
-  defp mode_dot_class(:degraded), do: "bg-amber-400"
-  defp mode_dot_class(_), do: "bg-gray-500"
-
-  defp mode_pulse_color(:autonomous), do: "rgba(93, 184, 114, 0.55)"
-  defp mode_pulse_color(:review), do: "rgba(93, 184, 166, 0.55)"
-  defp mode_pulse_color(:degraded), do: "rgba(232, 165, 90, 0.55)"
-  defp mode_pulse_color(_), do: "rgba(176, 169, 156, 0.45)"
-
-  defp enablement_badge_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp enablement_badge_class(:running), do: "border-green-500/25 bg-green-500/10 text-green-400"
-  defp enablement_badge_class(:blocked), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  defp enablement_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp launch_plan_card_class(:danger), do: "border-brand/25 bg-brand/[0.06]"
-  defp launch_plan_card_class(:attention), do: "border-amber-500/25 bg-amber-500/[0.06]"
-  defp launch_plan_card_class(:brand), do: "border-sky-500/25 bg-sky-500/[0.06]"
-  defp launch_plan_card_class(:success), do: "border-emerald-500/25 bg-emerald-500/[0.06]"
-  defp launch_plan_card_class(_), do: "border-border bg-surface/50"
-
-  defp launch_plan_badge_class(:danger), do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp launch_plan_badge_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp launch_plan_badge_class(:brand), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
-
-  defp launch_plan_badge_class(:success),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp launch_plan_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp launch_plan_step_class(:active), do: "border-sky-500/25 bg-sky-500/[0.06]"
-  defp launch_plan_step_class(:pending), do: "border-border bg-canvas/60"
-  defp launch_plan_step_class(_), do: "border-border bg-canvas/60"
-
-  defp launch_priority_class(:critical), do: "border-brand/25 bg-brand/10 text-brand"
-  defp launch_priority_class(:high), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  defp launch_priority_class(:medium), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-  defp launch_priority_class(:low), do: "border-border bg-surface text-text-tertiary"
-  defp launch_priority_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp launch_order_class(:first_poll),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp launch_order_class(:operator_focus),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-
-  defp launch_order_class(:later), do: "border-border bg-panel text-text-tertiary"
-  defp launch_order_class(_), do: "border-border bg-panel text-text-tertiary"
 
   defp launch_preview_summary(%{status: :review}, launch_preview) do
     focused_count = Map.get(launch_preview, :focused_count, 0)
@@ -1529,127 +1420,10 @@ defmodule CymphoWeb.OperationsLive.Index do
 
   defp delegated_work_setup_action_label(_work), do: "Review setup"
 
-  defp delegated_work_setup_action_class(%{setup_blocked?: true}) do
-    "rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1.5 text-[11px] font-510 text-brand transition hover:bg-brand/15"
-  end
-
-  defp delegated_work_setup_action_class(_work) do
-    "rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] font-510 text-amber-200 transition hover:bg-amber-500/15"
-  end
-
   defp present?(value), do: value not in [nil, ""]
-
-  defp preflight_badge_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp preflight_badge_class(:review_mode),
-    do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
-
-  defp preflight_badge_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp preflight_badge_class(:blocked), do: "border-brand/25 bg-brand/10 text-brand"
-  defp preflight_badge_class(_), do: "border-border bg-panel text-text-tertiary"
-
-  defp preflight_icon_class(:ready), do: "hero-check-circle-mini"
-  defp preflight_icon_class(:review_mode), do: "hero-eye-mini"
-  defp preflight_icon_class(:attention), do: "hero-exclamation-triangle-mini"
-  defp preflight_icon_class(:blocked), do: "hero-no-symbol-mini"
-  defp preflight_icon_class(_), do: "hero-question-mark-circle-mini"
-
-  defp owner_brief_readiness_badge_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp owner_brief_readiness_badge_class(:draft),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp owner_brief_readiness_badge_class(:thin),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp owner_brief_readiness_badge_class(_),
-    do: "border-border bg-panel text-text-tertiary"
-
-  defp readiness_dot_class(:ok), do: "h-1.5 w-1.5 rounded-full bg-emerald-400"
-  defp readiness_dot_class(:info), do: "h-1.5 w-1.5 rounded-full bg-sky-400"
-  defp readiness_dot_class(:attention), do: "h-1.5 w-1.5 rounded-full bg-amber-400"
-  defp readiness_dot_class(:blocked), do: "h-1.5 w-1.5 rounded-full bg-brand"
-  defp readiness_dot_class(_), do: "h-1.5 w-1.5 rounded-full bg-text-quaternary"
-
-  defp nudge_badge_class(:queued), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-  defp nudge_badge_class(:running), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-  defp nudge_badge_class(:stale), do: "border-brand/25 bg-brand/10 text-brand"
-  defp nudge_badge_class(:cleared), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  defp nudge_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp contract_badge_class(:missing),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp contract_badge_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp contract_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp contract_queue_card_class(:missing), do: "border-brand/35 bg-brand/[0.07]"
-
-  defp contract_queue_card_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/[0.06]"
-
-  defp contract_queue_card_class(_), do: "border-border bg-surface"
-
-  defp prompt_status_badge_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp prompt_status_badge_class(:needs_tuning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp prompt_status_badge_class(:guardrail_risk),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp prompt_status_badge_class(:eval_gap),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp prompt_status_badge_class(:regressed),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-
-  defp prompt_status_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp prompt_card_class(:guardrail_risk),
-    do: "border-border border-l-2 border-l-brand/70 bg-surface"
-
-  defp prompt_card_class(:eval_gap), do: "border-border border-l-2 border-l-brand/70 bg-surface"
-
-  defp prompt_card_class(:regressed),
-    do: "border-border border-l-2 border-l-blue-500/70 bg-surface"
-
-  defp prompt_card_class(:needs_tuning),
-    do: "border-border border-l-2 border-l-amber-500/70 bg-surface"
-
-  defp prompt_card_class(:ready),
-    do: "border-border border-l-2 border-l-emerald-500/70 bg-surface"
-
-  defp prompt_card_class(_), do: "border-border bg-surface"
-
-  defp prompt_gap_class(:attention), do: "bg-brand/10 text-brand"
-  defp prompt_gap_class(:weak), do: "bg-amber-500/10 text-amber-200"
-  defp prompt_gap_class(_), do: "bg-canvas text-text-tertiary"
-
-  defp prompt_patch_class(:primary), do: "bg-brand/15 text-brand"
-  defp prompt_patch_class(:danger), do: "bg-brand/10 text-brand"
-  defp prompt_patch_class(_), do: "bg-surface text-text-tertiary"
 
   defp anchor_path?(path) when is_binary(path), do: String.starts_with?(path, "#")
   defp anchor_path?(_), do: false
-
-  defp health_status_badge_class(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp health_status_badge_class(:degraded),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp health_status_badge_class(:unavailable),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp health_status_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   defp health_status_label(:healthy), do: "Healthy"
   defp health_status_label(:degraded), do: "Degraded"
@@ -1673,90 +1447,40 @@ defmodule CymphoWeb.OperationsLive.Index do
       %{
         label: "Owner updates",
         value: Map.get(counts, :owner_updates, 0),
-        detail: "CEO status notes",
-        value_class: "text-emerald-300"
+        detail: "CEO status notes"
       },
       %{
         label: "Acceptances",
         value: Map.get(counts, :owner_acceptances, 0),
-        detail: "Owner signoffs",
-        value_class: "text-teal-300"
+        detail: "Owner signoffs"
       },
       %{
         label: "Handoffs",
         value: Map.get(counts, :handoffs, 0),
-        detail: "Delegated next steps",
-        value_class: "text-sky-300"
+        detail: "Delegated next steps"
       },
       %{
         label: "Splits",
         value: Map.get(counts, :decompositions, 0),
-        detail: "Child issue plans",
-        value_class: "text-brand"
+        detail: "Child issue plans"
       },
       %{
         label: "Decisions",
         value: Map.get(counts, :governance, 0),
-        detail: "Governance moves",
-        value_class: "text-violet-300"
+        detail: "Governance moves"
       },
       %{
         label: "Active",
         value: Map.get(counts, :running, 0),
-        detail: "CEO runs in flight",
-        value_class: "text-sky-300"
+        detail: "CEO runs in flight"
       },
       %{
         label: "Attention",
         value: Map.get(counts, :attention, 0),
-        detail: "Failed or thin turns",
-        value_class: "text-amber-300"
+        detail: "Failed or thin turns"
       }
     ]
   end
-
-  defp ceo_outcome_badge_class(:owner_update),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp ceo_outcome_badge_class(:owner_accepted),
-    do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
-
-  defp ceo_outcome_badge_class(:owner_revision),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp ceo_outcome_badge_class(:handoff),
-    do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
-
-  defp ceo_outcome_badge_class(:decomposition),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp ceo_outcome_badge_class(:governance),
-    do: "border-violet-500/25 bg-violet-500/10 text-violet-300"
-
-  defp ceo_outcome_badge_class(:blocked),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp ceo_outcome_badge_class(:running),
-    do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
-
-  defp ceo_outcome_badge_class(:silent),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp ceo_outcome_badge_class(:failed),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  defp ceo_outcome_badge_class(:comment),
-    do: "border-border bg-surface text-text-tertiary"
-
-  defp ceo_outcome_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp ceo_receipt_badge_class(:ok),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp ceo_receipt_badge_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp ceo_receipt_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   defp repairable_ceo_outcome?(%{outcome: outcome}) when outcome in [:silent, :failed], do: true
   defp repairable_ceo_outcome?(%{receipt: %{status: :attention}}), do: true
@@ -1775,51 +1499,6 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp ceo_outcome_repair_detail(_outcome) do
     "Fix the feedback above, then restart runtime focused on this issue."
   end
-
-  defp ceo_flow_badge_class(:setup), do: "border-brand/25 bg-brand/10 text-brand"
-  defp ceo_flow_badge_class(:blocked), do: "border-brand/25 bg-brand/10 text-brand"
-  defp ceo_flow_badge_class(:attention), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  defp ceo_flow_badge_class(:owner_signoff), do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
-  defp ceo_flow_badge_class(:running), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
-  defp ceo_flow_badge_class(:launch_ready), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
-
-  defp ceo_flow_badge_class(:delegated_work),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp ceo_flow_badge_class(:observed),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp ceo_flow_badge_class(:needs_issue), do: "border-border bg-surface text-text-tertiary"
-  defp ceo_flow_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp ceo_flow_action_class(:danger),
-    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
-
-  defp ceo_flow_action_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
-
-  defp ceo_flow_action_class(:brand),
-    do: "border-sky-500/25 bg-sky-500/10 text-sky-200 hover:bg-sky-500/15"
-
-  defp ceo_flow_action_class(:success),
-    do: "border-teal-500/25 bg-teal-500/10 text-teal-200 hover:bg-teal-500/15"
-
-  defp ceo_flow_action_class(_),
-    do: "border-border bg-surface text-text-secondary hover:bg-surface-hover"
-
-  defp ceo_flow_step_class(:complete), do: "border-emerald-500/25 bg-emerald-500/[0.06]"
-  defp ceo_flow_step_class(:active), do: "border-sky-500/25 bg-sky-500/[0.06]"
-  defp ceo_flow_step_class(:attention), do: "border-amber-500/25 bg-amber-500/[0.06]"
-  defp ceo_flow_step_class(:blocked), do: "border-brand/25 bg-brand/[0.07]"
-  defp ceo_flow_step_class(:missing), do: "border-border bg-surface/45"
-  defp ceo_flow_step_class(_), do: "border-border bg-surface/45"
-
-  defp ceo_flow_step_value_class(:complete), do: "text-emerald-300"
-  defp ceo_flow_step_value_class(:active), do: "text-sky-300"
-  defp ceo_flow_step_value_class(:attention), do: "text-amber-300"
-  defp ceo_flow_step_value_class(:blocked), do: "text-brand"
-  defp ceo_flow_step_value_class(:missing), do: "text-text-quaternary"
-  defp ceo_flow_step_value_class(_), do: "text-text-tertiary"
 
   defp role_label(role), do: Agent.role_label(role)
 
