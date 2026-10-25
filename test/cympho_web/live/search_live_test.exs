@@ -207,6 +207,44 @@ defmodule CymphoWeb.SearchLiveTest do
       assert text(doc, "#search-agent-#{sleeper.id} .lr-st") == "Sleeping"
     end
 
+    test "a goal row keeps what the old card said: type, priority and the description that matched",
+         %{conn: conn, current_company: company} do
+      unique = System.unique_integer([:positive])
+      needle = "goalfind#{unique}"
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Goal project #{unique}",
+          prefix: unique_prefix(),
+          company_id: company.id
+        })
+
+      # The needle is only in the description: the snippet is what explains the match.
+      {:ok, goal} =
+        Goals.create_goal(%{
+          title: "Improve retention #{unique}",
+          description: "Keep #{needle} customers past their first month",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission,
+          priority: "critical"
+        })
+
+      for tab <- ["all", "goals"] do
+        {:ok, _view, html} = live(conn, "/search?q=#{needle}&tab=#{tab}")
+        doc = main_doc(html)
+        row = "#search-goal-#{goal.id}"
+
+        assert text(doc, row <> " .rm") =~ "Mission · Active · Goal project #{unique}"
+
+        assert text(doc, row <> " .rm .srch-snip") ==
+                 "Keep #{needle} customers past their first month"
+
+        # Priority as the Tasks and Goals lists draw it (bars and the word, High and Critical only).
+        assert text(doc, row <> " .lr-tr .prio") == "Critical"
+      end
+    end
+
     test "finds an issue by ticket identifier", %{conn: conn, current_company: company} do
       {:ok, project} =
         Projects.create_project(%{

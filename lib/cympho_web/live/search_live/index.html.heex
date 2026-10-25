@@ -290,9 +290,17 @@
         navigate={~p"/goals/#{goal.id}"}
       >
         <:meta>
-          {format_search_value(goal.status)}<span :if={goal.project}><span aria-hidden="true"> · </span>{goal.project.name}</span>
+          {format_search_value(goal.goal_type)}<span aria-hidden="true"> · </span>{format_search_value(
+            goal.status
+          )}<span :if={goal.project}><span aria-hidden="true"> · </span>{goal.project.name}</span>
+          <span :if={snippet(goal.description)} class="srch-snip">
+            {snippet(goal.description)}
+          </span>
         </:meta>
-        <:trail><span class="tag">Goal</span></:trail>
+        <:trail>
+          <CymphoWeb.IssueLive.Tasks.priority priority={goal_priority(goal.priority)} />
+          <span class="tag">Goal</span>
+        </:trail>
       </.list_row>
     </ul>
 

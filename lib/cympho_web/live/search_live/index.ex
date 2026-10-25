@@ -166,7 +166,6 @@ defmodule CymphoWeb.SearchLive.Index do
     result_mix = result_mix(socket, results)
 
     %{
-      active: String.trim(query) != "",
       summary: search_command_summary(query, total_count, filters, top_result),
       top_result: top_result,
       actions: search_command_actions(socket, total_count, active_tab, top_result, result_mix)
@@ -175,7 +174,6 @@ defmodule CymphoWeb.SearchLive.Index do
 
   defp empty_search_command(filters) do
     %{
-      active: false,
       summary: search_command_summary("", 0, filters, nil),
       top_result: nil,
       actions: starter_search_actions()
@@ -479,6 +477,11 @@ defmodule CymphoWeb.SearchLive.Index do
       parts -> Enum.join(parts, " · ")
     end
   end
+
+  # A goal's priority is a string; Tasks.priority/1 draws the High and Critical atoms only.
+  defp goal_priority("critical"), do: :critical
+  defp goal_priority("high"), do: :high
+  defp goal_priority(_priority), do: nil
 
   # Parts.status/2 (frozen, shared with Team) reads :sleeping as Idle; the heartbeat
   # skips a sleeping agent (agent_heartbeat.ex), so it is named, in Parts' shape for Offline.

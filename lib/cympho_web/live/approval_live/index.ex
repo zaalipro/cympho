@@ -131,9 +131,7 @@ defmodule CymphoWeb.ApprovalLive.Index do
     oldest_pending = oldest_pending(approvals)
 
     %{
-      counts: counts,
       pending_count: pending,
-      resolved_count: resolved,
       oldest_pending_label: approval_type_label(oldest_pending),
       summary: approval_command_summary(pending, resolved, oldest_pending, active_status),
       lanes: approval_lanes(counts, active_status),
@@ -143,9 +141,7 @@ defmodule CymphoWeb.ApprovalLive.Index do
 
   defp empty_approval_command do
     %{
-      counts: %{},
       pending_count: 0,
-      resolved_count: 0,
       oldest_pending_label: approval_type_label(nil),
       summary: "No approvals queued.",
       lanes: approval_lanes(%{}, nil),

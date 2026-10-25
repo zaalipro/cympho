@@ -278,13 +278,15 @@ defmodule CymphoWeb.OrgChartLive do
   @doc """
   The reporting tree as nested lists: a horizontal tree with connectors on wider
   screens, an indented list on phones (governance.css). Each agent is a button
-  (keyboard and screen readers open its statistics).
+  (keyboard and screen readers open its statistics), keyed by the agent so a
+  patch that adds or reorders agents keeps focus on the same one.
   """
   def render_tree(assigns) do
     ~H"""
     <ul class={@level == 0 && "org-tree"}>
-      <li :for={node <- @nodes}>
+      <li :for={node <- @nodes} id={"org-node-#{node.id}"}>
         <button
+          id={"org-agent-#{node.id}"}
           type="button"
           class="org-t"
           phx-click="select_agent"

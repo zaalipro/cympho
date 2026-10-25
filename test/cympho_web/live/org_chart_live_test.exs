@@ -68,6 +68,39 @@ defmodule CymphoWeb.OrgChartLiveTest do
              "Sleeping"
   end
 
+  # morphdom matches an element without an id by position: a hire or a reorder would hand
+  # the focused tile (and its place) to another agent. An id from the agent keeps each one.
+  test "each tile in the tree is keyed by its agent", %{conn: conn, current_company: company} do
+    {:ok, manager} =
+      Agents.create_agent(%{
+        name: "Keyed Manager",
+        role: :cto,
+        status: :idle,
+        adapter: :process,
+        company_id: company.id
+      })
+
+    {:ok, report} =
+      Agents.create_agent(%{
+        name: "Keyed Report",
+        role: :engineer,
+        status: :idle,
+        adapter: :process,
+        company_id: company.id,
+        parent_id: manager.id
+      })
+
+    {:ok, _view, html} = live(conn, "/org-chart")
+    doc = main_doc(html)
+
+    for agent <- [manager, report] do
+      assert Floki.find(doc, ~s(li#org-node-#{agent.id} > button#org-agent-#{agent.id}.org-t)) !=
+               []
+    end
+
+    assert Floki.find(doc, ~s(li#org-node-#{manager.id} li#org-node-#{report.id})) != []
+  end
+
   test "links demand gaps to a prefilled agent hire form", %{
     conn: conn,
     current_company: company

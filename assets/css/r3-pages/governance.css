@@ -93,9 +93,9 @@
 .cy-r3 .org-s{display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;line-height:16px;color:var(--ink-nav)}
 .cy-r3 .org-c{font-size:12px;line-height:16px;color:var(--ink-2)}
 /* the two statistics dialogs */
-.cy-r3 .dlg :is(.strip,.kv){margin:0}
-.cy-r3 .dlg .gl-h{padding:0 12px}
-.cy-r3 .dlg .lim-line{padding:0 12px;font-size:13px;line-height:19px}
+.cy-r3 [data-page="org-chart"] .dlg :is(.strip,.kv){margin:0}
+.cy-r3 [data-page="org-chart"] .dlg .gl-h{padding:0 12px}
+.cy-r3 [data-page="org-chart"] .dlg .lim-line{padding:0 12px;font-size:13px;line-height:19px}
 
 /* ================================================================
    Search (G6)
@@ -116,7 +116,7 @@
 .cy-r3 [data-page="search"] .flt-p .earlier>summary .mono{font-size:12px}
 .cy-r3 [data-page="search"] .flt-p .earlier .flds{padding:4px 0 8px}
 .cy-r3 .srch-tabs{align-self:flex-start;max-width:100%}
-/* a task result's description, and its Advanced goal and labels: one quiet line each */
+/* a task or goal result's description, and a task's Advanced goal and labels: one quiet line each */
 .cy-r3 .srch-snip{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cy-r3 [data-page="search"] .lr-tr{display:inline-flex;align-items:center;gap:10px}
 
@@ -147,6 +147,9 @@
   .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip) .cell:nth-child(odd){border-left:0}
   .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip) .cell:nth-child(n+3){border-top:1px solid var(--hair)}
   .cy-r3 :is([data-page="approvals"],[data-page="reviews"]) .lr-below>.earlier>summary{min-height:44px}
+  /* a task waiting on an approval is a 44 px target (18 px line + 13 px each side), one per line */
+  .cy-r3 .ap-tasks{gap:0}
+  .cy-r3 .ap-tasks .ul{padding:13px 0}
   /* a status word that wraps under a tiled row lines up with the title, as the actions do */
   .cy-r3 :is([data-page="approvals"],[data-page="reviews"],[data-page="org-chart"]) .lrow:has(>.kt)>.lr-st{margin-left:46px}
   .cy-r3 .srch{padding:8px}
