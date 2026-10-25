@@ -1,97 +1,25 @@
 <.settings_layout active={:proxies}>
-  <.header title={@page_title}>
-    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Reusable company proxy profiles for routing agent traffic and checking it works.
-    </p>
-    <p class="ui-simple-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Send agent traffic out through a specific network.
-    </p>
-    <:actions>
-      <button
-        :if={@can_manage_proxies}
-        type="button"
-        phx-click="show_create_form"
-        class="inline-flex items-center justify-center gap-2 rounded-lg border border-brand/25 bg-brand/15 px-3 py-2 text-sm font-510 text-brand transition hover:bg-brand/20"
-      >
-        <.icon name="hero-plus" class="h-4 w-4" /> Add proxy
-      </button>
-    </:actions>
-  </.header>
+  <.flash_line flash={@flash} />
+  <p :if={@proxy_action_error} class="err" role="alert" data-testid="proxy-action-error">
+    <.r3_icon name="i-alert" />{@proxy_action_error}
+  </p>
 
-  <div
-    :if={@proxy_action_error}
-    data-testid="proxy-action-error"
-    class="mb-4 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200"
-  >
-    {@proxy_action_error}
-  </div>
-
-  <% stats = profile_stats(@proxy_profiles) %>
-  <%!-- Four tiles reading 0 tell you nothing the empty state below doesn't. --%>
-  <section :if={stats.total > 0} class="mb-4 rounded-lg border border-border bg-panel p-4">
-    <div class="grid gap-3 sm:grid-cols-4">
-      <div class="rounded-md border border-border bg-canvas px-3 py-2">
-        <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-          Profiles
-        </p>
-        <p class="mt-1 font-mono text-lg font-590 text-text-primary">{stats.total}</p>
-      </div>
-      <div class="rounded-md border border-border bg-canvas px-3 py-2">
-        <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-          Online
-        </p>
-        <p class="mt-1 font-mono text-lg font-590 text-emerald-300">{stats.online}</p>
-      </div>
-      <div class="rounded-md border border-border bg-canvas px-3 py-2">
-        <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-          Offline
-        </p>
-        <p class="mt-1 font-mono text-lg font-590 text-red-300">{stats.offline}</p>
-      </div>
-      <div class="rounded-md border border-border bg-canvas px-3 py-2">
-        <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-          Untested
-        </p>
-        <p class="mt-1 font-mono text-lg font-590 text-text-secondary">{stats.untested}</p>
-      </div>
-    </div>
-  </section>
-
-  <section
-    :if={!@can_manage_proxies}
-    data-testid="proxy-profiles-read-only"
-    class="rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
-  >
-    Proxy profiles can contain private routing credentials. Ask a company admin or board member to manage them.
-  </section>
-
-  <section
+  <%!-- Chrome treats any text input preceding a password as the username of a
+       login form, so every text field ahead of the password below opts out. --%>
+  <.form_pair
     :if={@show_form and @can_manage_proxies}
+    id="proxy-profile-form"
+    for={@form}
+    phx-submit="save"
+    heading={if @form_mode == :edit, do: "After you save", else: "After you add it"}
+    verb={if @form_mode == :edit, do: "save", else: "add"}
     data-testid="proxy-profile-form"
-    class="mb-4 rounded-lg border border-border bg-panel p-4"
   >
-    <div class="mb-4 flex items-start justify-between gap-3">
-      <div>
-        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          {if @form_mode == :edit, do: "Edit proxy", else: "New proxy"}
-        </p>
-        <h2 class="mt-1 text-base font-590 text-text-primary">
-          {if @form_mode == :edit, do: @selected_proxy.name, else: "Add a reusable proxy"}
-        </h2>
-      </div>
-      <button
-        type="button"
-        phx-click="hide_form"
-        class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover"
-      >
-        Cancel
-      </button>
-    </div>
-
-    <%!-- Chrome treats any text input preceding a password as the username of a
-         login form, so every text field ahead of the password below opts out. --%>
-    <.simple_form for={@form} phx-submit="save" class="space-y-4">
-      <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
+    <.band_card
+      id="pf-t"
+      title={if @form_mode == :edit, do: "Edit #{@selected_proxy.name}", else: "New proxy"}
+    >
+      <div class="flds">
         <.input
           field={@form[:name]}
           label="Profile name"
@@ -104,16 +32,13 @@
           label="Type"
           options={proxy_type_options()}
         />
-      </div>
-
-      <.input
-        field={@form[:proxy_url]}
-        label="Proxy URL"
-        placeholder="socks5://user:password@proxy.example.com:1080"
-        autocomplete="off"
-      />
-
-      <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
+        <.input
+          field={@form[:proxy_url]}
+          label="Proxy URL"
+          placeholder="socks5://user:password@proxy.example.com:1080"
+          autocomplete="off"
+          wrapper_class="full"
+        />
         <.input
           field={@form[:host]}
           label="Host"
@@ -121,9 +46,6 @@
           autocomplete="off"
         />
         <.input field={@form[:port]} type="number" label="Port" placeholder="1080" />
-      </div>
-
-      <div class="grid gap-4 lg:grid-cols-2">
         <.input
           field={@form[:username]}
           label="Username"
@@ -141,117 +63,110 @@
               else: "optional"
           }
         />
+        <.input
+          field={@form[:description]}
+          type="textarea"
+          rows={2}
+          label="Description"
+          placeholder="Region, provider, or expected use."
+          wrapper_class="full"
+        />
       </div>
+    </.band_card>
+    <:effect>
+      <.ink_note>
+        {if @form_mode == :edit,
+          do: "Updates the profile; a blank password keeps the current one.",
+          else:
+            "Saves it for this company. Nothing connects until you test it or pick it for a swarm."}
+      </.ink_note>
+    </:effect>
+    <:secondary>
+      <.ghost_pill phx-click="hide_form">Cancel</.ghost_pill>
+    </:secondary>
+    <:primary>
+      <.primary_pill type="submit" phx-disable-with="Saving…">
+        {if @form_mode == :edit, do: "Save proxy", else: "Create proxy"}
+      </.primary_pill>
+    </:primary>
+  </.form_pair>
 
-      <.input
-        field={@form[:description]}
-        type="textarea"
-        rows={2}
-        label="Description"
-        placeholder="Region, provider, or expected use."
-      />
+  <% stats = profile_stats(@proxy_profiles) %>
+  <.band_card id="px-t" title="Network proxies">
+    <:header_end>
+      <span :if={stats.total > 0} class="meta">
+        {stats.total} {if stats.total == 1, do: "profile", else: "profiles"}<span :if={
+          stats.online > 0
+        }><span aria-hidden="true"> · </span>{stats.online} online</span>
+      </span>
+      <%!-- While the list is empty its quiet line carries the one Add control. --%>
+      <.pill
+        :if={@can_manage_proxies and !@show_form and stats.total > 0}
+        phx-click="show_create_form"
+      >
+        <.r3_icon name="i-plus" />Add proxy
+      </.pill>
+    </:header_end>
 
-      <:actions>
-        <.button type="submit" variant="primary">
-          {if @form_mode == :edit, do: "Save proxy", else: "Create proxy"}
-        </.button>
-      </:actions>
-    </.simple_form>
-  </section>
-
-  <div
-    :if={@proxy_profiles == []}
-    class="rounded-lg border border-border bg-panel px-4 py-10 text-center"
-  >
-    <p class="text-sm font-590 text-text-primary">No proxy profiles yet</p>
-    <p class="ui-advanced-only mt-1 text-sm text-text-tertiary">
-      Add HTTP, HTTPS, SOCKS4, or SOCKS5 profiles here, then choose random or selected proxies from the swarm panel.
-    </p>
-    <p class="ui-simple-only mt-1 text-sm text-text-tertiary">
-      Most teams never need one. Add one if agent traffic has to leave through a specific network.
-    </p>
-  </div>
-
-  <div class="grid gap-3 xl:grid-cols-2">
-    <article
-      :for={proxy <- @proxy_profiles}
-      data-testid={"proxy-profile-#{proxy.id}"}
-      class="rounded-lg border border-border bg-panel p-4"
-    >
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <h2 class="break-words text-base font-590 text-text-primary">{proxy.name}</h2>
-            <span class={[
-              "rounded-full border px-2 py-0.5 text-[11px] font-510",
-              status_class(proxy.last_status)
-            ]}>
-              {status_label(proxy.last_status)}
-            </span>
-          </div>
-          <p class="mt-1 break-words font-mono text-xs text-text-tertiary">
-            {proxy.proxy_type}://{proxy.host}:{proxy.port}
-          </p>
-          <p :if={proxy.description} class="mt-2 text-sm leading-5 text-text-secondary">
-            {proxy.description}
-          </p>
-        </div>
-
-        <div :if={@can_manage_proxies} class="flex shrink-0 gap-2">
+    <ul :if={@proxy_profiles != []} class="rows">
+      <.list_row
+        :for={proxy <- @proxy_profiles}
+        id={"proxy-#{proxy.id}"}
+        data-testid={"proxy-profile-#{proxy.id}"}
+        icon="i-external"
+        kind={if proxy.last_status == "offline", do: :problem, else: :neutral}
+        title={proxy.name}
+        status={proxy_status(proxy.last_status)}
+      >
+        <:meta>
+          <span class="mono">{proxy.proxy_type}://{proxy.host}:{proxy.port}</span><span :if={
+            ping_label(proxy)
+          }><span aria-hidden="true"> · </span><span class="mono">{ping_label(proxy)}</span></span><span :if={
+            proxy.last_checked_at
+          }><span aria-hidden="true"> · </span>checked {checked_label(proxy)}</span><span :if={
+            proxy.username || has_password?(proxy)
+          }><span aria-hidden="true"> · </span>Has credentials</span>
+        </:meta>
+        <:actions :if={@can_manage_proxies}>
+          <.pill phx-click="test" phx-value-id={proxy.id}>Test</.pill>
+          <.pill phx-click="show_edit_form" phx-value-id={proxy.id}>Edit</.pill>
           <button
             type="button"
-            phx-click="test"
-            phx-value-id={proxy.id}
-            class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Test
-          </button>
-          <button
-            type="button"
-            phx-click="show_edit_form"
-            phx-value-id={proxy.id}
-            class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
+            class="pl warn"
             phx-click="delete"
             phx-value-id={proxy.id}
             data-confirm="Remove this proxy profile?"
-            class="rounded-md border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-xs font-510 text-red-300 hover:bg-red-500/15"
           >
             Remove
           </button>
-        </div>
-      </div>
+        </:actions>
+        <:below :if={proxy.description || proxy.last_error}>
+          <p :if={proxy.description} class="rm">{proxy.description}</p>
+          <p :if={proxy.last_error} class="err">
+            <.r3_icon name="i-alert" />{proxy.last_error}
+          </p>
+        </:below>
+      </.list_row>
+    </ul>
 
-      <dl class="mt-3 grid gap-2 sm:grid-cols-3">
-        <div class="rounded-md border border-border bg-canvas px-3 py-2">
-          <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-            Ping
-          </dt>
-          <dd class="mt-1 font-mono text-sm text-text-primary">{ping_label(proxy)}</dd>
-        </div>
-        <div class="rounded-md border border-border bg-canvas px-3 py-2">
-          <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-            Checked
-          </dt>
-          <dd class="mt-1 text-sm text-text-secondary">{checked_label(proxy)}</dd>
-        </div>
-        <div class="rounded-md border border-border bg-canvas px-3 py-2">
-          <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-            Auth
-          </dt>
-          <dd class="mt-1 text-sm text-text-secondary">
-            {if proxy.username || has_password?(proxy), do: "Configured", else: "None"}
-          </dd>
-        </div>
-      </dl>
+    <.quiet_empty :if={@proxy_profiles == []} title="No proxy profiles yet">
+      <span class="ui-advanced-only">
+        Add HTTP, HTTPS, SOCKS4, or SOCKS5 profiles here, then choose random or selected proxies from the swarm panel.
+      </span>
+      <span class="ui-simple-only">
+        Most teams never need one. Add one if agent traffic has to leave through a specific network.
+      </span>
+      <:action>
+        <.pill :if={@can_manage_proxies and !@show_form} phx-click="show_create_form">
+          <.r3_icon name="i-plus" />Add proxy
+        </.pill>
+      </:action>
+    </.quiet_empty>
 
-      <p :if={proxy.last_error} class="mt-3 text-xs leading-5 text-red-200">
-        {proxy.last_error}
-      </p>
-    </article>
-  </div>
+    <p :if={!@can_manage_proxies} class="cfoot" data-testid="proxy-profiles-read-only">
+      <span>
+        Proxy profiles can contain private routing credentials. Ask a company admin or board member to manage them.
+      </span>
+    </p>
+  </.band_card>
 </.settings_layout>
