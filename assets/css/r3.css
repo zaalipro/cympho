@@ -913,6 +913,8 @@
 /* a disabled pill reads as unavailable: dashed and quiet, as the disabled primary and fields do */
 .cy-r3 .pl:disabled{background:transparent;border-style:dashed;box-shadow:none;color:var(--ink-2);cursor:not-allowed;opacity:.55}
 .cy-r3 .ink .pd:disabled{background:transparent;border-style:dashed;border-color:var(--inv-dash);color:var(--inv-ink-2);cursor:not-allowed}
+/* a disabled primary does not answer ⌘↵ (app.js nextStepPrimary/0), so its hint goes too */
+.cy-r3 .ink-f:has(>.pw:disabled) .kh{display:none}
 /* a text link on the resolution card reads the inverse ink */
 .cy-r3 .ink .lnk{color:var(--inv-ink-hi)}
 

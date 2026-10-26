@@ -76,7 +76,10 @@
 @media (max-width:640px){
   /* a row's status stays at its end and its title wraps, instead of the status dropping under
      some titles and not others (list_row's 240 px title basis is wider than a phone row allows) */
-  .cy-r3 :is([data-page="projects"],[data-page="project"],[data-page="goals"],[data-page="goal"],[data-page="launch"],[data-page="routines"],[data-section="labels"]) .lrow>.row-main{flex-basis:0}
+  .cy-r3 :is([data-page="project"],[data-page="goals"],[data-page="goal"],[data-page="launch"],[data-page="routines"],[data-section="labels"]) .lrow>.row-main{flex-basis:0}
+  /* a project's meta line is long and its status and trail are two parts: the title and meta take the
+     row's width and the status and trail go on the line under them, on every row */
+  .cy-r3 [data-page="projects"] .lrow>.row-main{flex-basis:100%}
   /* a goal row's only action is its ⋯ menu: it sits beside the title and the status and % wrap
      under it, instead of the menu taking a line of its own */
   .cy-r3 [data-page="goals"] .lrow:has(>.lr-acts)>.row-main{flex-basis:calc(100% - 56px)}

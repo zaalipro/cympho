@@ -155,6 +155,7 @@
   .cy-r3 .srch{padding:8px}
   .cy-r3 .srch-f .search,.cy-r3 .srch-f .pl{height:44px}
   .cy-r3 .srch-f .search input{font-size:16px}
+  .cy-r3 .srch-recent .lnk{min-width:44px;justify-content:center}
   /* a result's priority and kind stay beside its title: the bars alone, the word for screen readers (Tasks' phone rule) */
   .cy-r3 [data-page="search"] .lrow>.row-main{flex-basis:200px}
   .cy-r3 [data-page="search"] .lr-tr .prio .pt{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}

@@ -362,8 +362,16 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       assert text(doc, ".head .sub") == "Write the onboarding email"
       assert text(doc, ".gl-big") == "No work folder yet"
 
-      # Without a repository the folder cannot be created yet; the pill says so by being disabled.
+      # Without a repository the folder cannot be created yet; the pill says so by being disabled,
+      # and the way forward is the project's settings, where the repository is added.
       assert has_element?(view, "button.pl[phx-click='create_workspace'][disabled]")
+
+      assert has_element?(
+               view,
+               ".gl-sec a.lnk[href='/projects/#{project.id}/edit']",
+               "Add a repository"
+             )
+
       refute has_element?(view, "[phx-click='delete_workspace']")
       refute has_element?(view, "form[phx-submit='write_prompt']")
     end

@@ -59,7 +59,7 @@
           placeholder={
             if repo_token_present?(@agrenting_status),
               do: "Leave blank to keep current token",
-              else: "Optional token for push delivery"
+              else: "Optional push token"
           }
           help="Optional. Use this when remote agents need to push work products back to a repository."
           autocomplete="off"

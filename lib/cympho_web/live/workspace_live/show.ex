@@ -85,6 +85,12 @@ defmodule CymphoWeb.WorkspaceLive.Show do
             else:
               "Add a repository to #{if @project, do: @project.name, else: "the task's project"} first; the folder is copied from it."}
           <:action>
+            <.text_link
+              :if={is_nil(@repo_url) && @project}
+              navigate={~p"/projects/#{@project.id}/edit"}
+            >
+              Add a repository
+            </.text_link>
             <.pill phx-click="create_workspace" disabled={is_nil(@repo_url)}>
               Create work folder
             </.pill>

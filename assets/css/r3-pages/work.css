@@ -153,6 +153,8 @@
   .cy-r3 .tbar .chip{height:44px}
   .cy-r3 .tbar .chip.flt{min-width:44px;padding:0 12px;justify-content:center}
   .cy-r3 .tbar .fl-t{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  /* a toolbar whose only control is Filter (Activity, Step log) has the room: the chip keeps its word */
+  .cy-r3 .tbar>.flt-d:only-child .fl-t{position:static;width:auto;height:auto;margin:0;overflow:visible;clip:auto;white-space:nowrap}
   .cy-r3 .flt-p{min-width:min(300px,calc(100vw - 48px))}
   .cy-r3 [data-page="tasks"] .paper .task-tile,.cy-r3 [data-page="tasks"] .paper .rb{display:none}
   .cy-r3 [data-page="tasks"] .opts legend{position:static;width:auto;height:auto;margin:0 0 8px;overflow:visible;clip:auto;white-space:normal;font-size:16px;line-height:22px}
