@@ -27,8 +27,9 @@ defmodule CymphoWeb.SimpleModeCopyTest do
       assert html =~ "No spending limit yet"
       assert html =~ "provider spend has a hard stop"
       assert html =~ "Set one so the team can&#39;t overspend."
-      assert html =~ "Spending limits"
-      assert html =~ "Limits"
+      # v7 C1: the paired "Spending limits"/"Limits" eyebrow is gone; the list's
+      # band says "Limits" in both modes, under the H1 "Spending limit".
+      assert html =~ ~s(<h2 class="h2" id="budgets-list-t">Limits</h2>)
       # Empty state DOM stays present for the stream (CSS shows it when empty).
       assert html =~ ~s(id="budget-empty")
       assert html =~ ~s(href="/budgets/new")

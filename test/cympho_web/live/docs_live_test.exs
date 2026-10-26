@@ -81,7 +81,7 @@ defmodule CymphoWeb.DocsLiveTest do
 
       # Open modal
       render_click(view, "open_search")
-      assert render(view) =~ "Quick Documentation Search"
+      assert render(view) =~ "Search across all 8 tracks"
 
       # Search for MCP
       render_change(view, "search", %{"query" => "mcp"})
@@ -110,7 +110,7 @@ defmodule CymphoWeb.DocsLiveTest do
       render_click(view, "open_search")
       render_change(view, "search", %{"query" => ""})
 
-      assert render(view) =~ "Quick Documentation Search"
+      assert render(view) =~ "Search across all 8 tracks"
     end
 
     test "unmatched query displays no matches found message", %{conn: conn} do
@@ -151,6 +151,75 @@ defmodule CymphoWeb.DocsLiveTest do
       assert html =~ "list_agents"
       assert html =~ "get_kanban_state"
       assert html =~ "search"
+    end
+  end
+
+  describe "Paper & Ink frame" do
+    test "renders in the root frame with the article title under the H1", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/docs/ai-agents/swarm-mode")
+      doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+      CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+        page: "docs",
+        h1: "Documentation",
+        kind: :root,
+        primaries: 0
+      )
+
+      assert CymphoWeb.R3PageHelpers.text(doc, "article h2.nt") == "Swarm Mode Orchestration"
+
+      assert Floki.find(
+               doc,
+               ~s(.dc-nav a[aria-current="page"][href="/docs/ai-agents/swarm-mode"])
+             ) != []
+
+      assert Floki.find(doc, "main") == []
+    end
+
+    test "the Topics pill opens the topic nav as a dialog and a topic closes it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/docs")
+
+      view |> element("button.dc-topics") |> render_click()
+      assert has_element?(view, ~s(#docs-topics-sheet [role="dialog"] .dc-nav))
+
+      render_patch(view, "/docs/workspaces/git-worktrees")
+      refute has_element?(view, "#docs-topics-sheet")
+    end
+
+    # The sheet renders after the article, so the keyboard needs to be moved into it; Escape
+    # closes it as it closes the search dialog, but not while the search is open on top of it.
+    test "the Topics sheet takes focus and closes on Escape", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/docs")
+
+      view |> element("button#docs-topics-btn.dc-topics") |> render_click()
+
+      keys = ~s(#docs-topics-sheet [phx-window-keydown][phx-key="Escape"])
+      assert has_element?(view, ~s(#docs-topics-sheet [phx-mounted*="focus_first"]))
+      assert has_element?(view, keys)
+
+      render_click(view, "open_search")
+      refute has_element?(view, keys)
+      render_click(view, "close_search")
+
+      view |> element(keys) |> render_keydown(%{"key" => "Escape"})
+      refute has_element?(view, "#docs-topics-sheet")
+    end
+
+    # `autofocus` does nothing on a field a patch inserts, so the search dialog opened with the
+    # keyboard still on its trigger; the trigger keeps its place to get it back on close.
+    test "the search dialog takes focus and gives it back", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/docs")
+
+      assert has_element?(view, ~s(.dc-side button.dc-find[phx-click*="push_focus"]))
+      view |> element(".dc-side:not(.m) button.dc-find") |> render_click()
+
+      assert has_element?(view, ~s(#docs-search-input[phx-mounted*="focus"]))
+      assert has_element?(view, ~s(#docs-search-modal [phx-click*="pop_focus"]))
+
+      assert has_element?(
+               view,
+               ~s(#docs-search-modal [phx-window-keydown*="pop_focus"][phx-key="Escape"])
+             )
     end
   end
 

@@ -15,6 +15,7 @@ defmodule CymphoWeb.CompanyLive.Index do
      |> assign(:blueprints, blueprints)
      |> assign(:launch_summary, launch_summary(blueprints, user_id))
      |> assign(:featured_blueprints, Enum.take(blueprints, 5))
+     |> assign_memberships()
      |> init_stream(:companies, &fetch_companies(user_id, &1))}
   end
 
@@ -35,7 +36,7 @@ defmodule CymphoWeb.CompanyLive.Index do
 
   defp apply_action(socket, :new, _params) do
     socket
-    |> assign(:page_title, "New Company")
+    |> assign(:page_title, "New company")
     |> assign(:company, %Companies.Company{})
   end
 
@@ -58,6 +59,7 @@ defmodule CymphoWeb.CompanyLive.Index do
       {:noreply,
        socket
        |> refresh_launch_summary()
+       |> assign_memberships()
        |> reset_stream(:companies, &fetch_companies(user_id, &1))
        |> put_flash(:info, "Company deleted successfully")}
     else
@@ -74,9 +76,28 @@ defmodule CymphoWeb.CompanyLive.Index do
     Companies.list_companies_for_user_page(user_id, after: cursor)
   end
 
-  def format_inserted_at(company) do
-    Calendar.strftime(company.inserted_at, "%Y-%m-%d %H:%M")
+  # The viewer's role in each of their companies and each company's member count
+  # (one query each), for the rows' meta line.
+  defp assign_memberships(socket) do
+    memberships = Companies.list_memberships_for_user(socket.assigns.current_user.id)
+
+    socket
+    |> assign(:roles, Map.new(memberships, &{&1.company_id, &1.role}))
+    |> assign(
+      :member_counts,
+      Companies.count_memberships_by_company(Enum.map(memberships, & &1.company_id))
+    )
   end
+
+  def role_label("owner"), do: "Owner"
+  def role_label("admin"), do: "Admin"
+  def role_label("member"), do: "Member"
+  def role_label("viewer"), do: "Viewer"
+  def role_label(_role), do: nil
+
+  def members_label(1), do: "1 member"
+  def members_label(count) when is_integer(count), do: "#{count} members"
+  def members_label(_count), do: nil
 
   defp launch_summary(blueprints, user_id) do
     companies = Companies.list_companies_for_user(user_id)
@@ -85,8 +106,6 @@ defmodule CymphoWeb.CompanyLive.Index do
 
     %{
       total_companies: length(companies),
-      active_companies: active_count,
-      paused_companies: paused_count,
       blueprint_count: length(blueprints),
       default_agent_count: Enum.reduce(blueprints, 0, &(&1.default_agent_count + &2)),
       capability_count:
@@ -94,7 +113,6 @@ defmodule CymphoWeb.CompanyLive.Index do
         |> Enum.flat_map(& &1.capability_tags)
         |> Enum.uniq()
         |> length(),
-      seed_issue_count: Enum.reduce(blueprints, 0, &(&1.seed_issue_count + &2)),
       launch_posture: launch_posture(length(companies), active_count, paused_count)
     }
   end
@@ -159,14 +177,8 @@ defmodule CymphoWeb.CompanyLive.Index do
   defp pluralize(1, singular, _plural), do: singular
   defp pluralize(_count, _singular, plural), do: plural
 
-  defp posture_badge_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp posture_badge_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-
-  defp posture_badge_class(:attention),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp posture_badge_class(_tone), do: "border-border bg-surface text-text-tertiary"
+  def posture_status(:ready), do: :done
+  def posture_status(:warning), do: :waiting
+  def posture_status(:attention), do: :waiting
+  def posture_status(_tone), do: :idle
 end

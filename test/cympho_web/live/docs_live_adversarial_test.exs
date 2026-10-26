@@ -157,7 +157,7 @@ defmodule CymphoWeb.DocsLiveAdversarialTest do
       render_click(view, "open_search")
 
       html1 = render_change(view, "search", %{"query" => ""})
-      assert html1 =~ "Quick Documentation Search"
+      assert html1 =~ "Search across all 8 tracks"
 
       html2 = render_change(view, "search", %{"query" => "    "})
       assert html2 =~ "No documentation matches found"
@@ -197,7 +197,7 @@ defmodule CymphoWeb.DocsLiveAdversarialTest do
 
       # Shortcut "/" opens search
       render_keydown(view, "search_keydown", %{"key" => "/"})
-      assert render(view) =~ "Quick Documentation Search"
+      assert render(view) =~ "Search across all 8 tracks"
 
       # Arrow keys and navigation
       render_change(view, "search", %{"query" => "agent"})

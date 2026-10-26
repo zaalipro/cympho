@@ -1,10 +1,12 @@
 defmodule CymphoWeb.BudgetLive.FormComponent do
   use CymphoWeb, :live_component
 
+  alias Cympho.Agents
   alias Cympho.Budgets
   alias Cympho.CompanyRBAC
   alias Cympho.Companies
   alias Cympho.Finances
+  alias Cympho.Projects
 
   @impl true
   def update(%{budget: budget} = assigns, socket) do
@@ -100,8 +102,32 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
   end
 
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
-    assign(socket, :form, to_form(changeset))
+    form = to_form(changeset)
+    budget = socket.assigns.budget
+
+    socket
+    |> assign(:form, form)
+    |> assign(
+      :scope_name,
+      scope_name(
+        selected_scope_type(form, budget),
+        budget.company_id,
+        scoped_scope_id_value(form, budget)
+      )
+    )
   end
+
+  # The project or agent the id field points at, from this company only: the field's help line.
+  defp scope_name("project", company_id, id) when is_binary(id),
+    do: record_name(Projects.get_company_project(company_id, id))
+
+  defp scope_name("agent", company_id, id) when is_binary(id),
+    do: record_name(Agents.get_company_agent(company_id, id))
+
+  defp scope_name(_scope_type, _company_id, _id), do: nil
+
+  defp record_name({:ok, %{name: name}}), do: name
+  defp record_name(_), do: nil
 
   defp selected_scope_type(form, budget) do
     form
@@ -185,13 +211,13 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
   defp format_budget_window_date(%DateTime{} = value) do
     value
     |> DateTime.to_date()
-    |> Calendar.strftime("%b %-d, %Y")
+    |> Calendar.strftime("%-d %b %Y")
   end
 
   defp format_budget_window_date(%NaiveDateTime{} = value) do
     value
     |> NaiveDateTime.to_date()
-    |> Calendar.strftime("%b %-d, %Y")
+    |> Calendar.strftime("%-d %b %Y")
   end
 
   defp format_budget_window_date(value) when is_binary(value) do
