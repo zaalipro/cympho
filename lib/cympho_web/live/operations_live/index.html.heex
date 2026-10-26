@@ -6,7 +6,7 @@
   <.flash_line flash={@flash} />
 
   <%!-- Tier S (v7 O1): the one fix, the state, what to do, what went wrong. --%>
-  <% action = List.first(@next_actions) %>
+  <% action = next_step_action(@next_actions) %>
   <% next_path = action && next_step_path(Map.get(action, :target_path)) %>
   <%!-- No target (the steady fallback) means nothing to do: no Next step. An in-page
        jump only lands on Advanced sections, so Simple does not see that Next step. --%>
@@ -19,6 +19,11 @@
     </:problem>
     <:resolution>
       <.ink_card heading="Do this next" heading_id="op-ns-i">
+        <.ink_note>
+          {if anchor_path?(next_path),
+            do: "Jumps to the fix further down this page.",
+            else: "Opens the page where you fix it."}
+        </.ink_note>
         <.ink_foot>
           <:primary>
             <.primary_pill :if={anchor_path?(next_path)} href={next_path}>
@@ -547,7 +552,12 @@
       </p>
     </div>
 
-    <ul :if={@launch_preview.candidates != []} class="rows op-scroll">
+    <ul
+      :if={@launch_preview.candidates != []}
+      class="rows op-scroll"
+      tabindex="0"
+      aria-label="Launch candidates"
+    >
       <.list_row
         :for={candidate <- @launch_preview.candidates}
         id={"op-candidate-#{candidate.id}"}
@@ -1687,7 +1697,7 @@
         <p class="op-gh">
           <span class="gh">By agent</span><span class="meta">{@contract_failures.summary}</span>
         </p>
-        <ul class="rows op-scroll op-scroll-s">
+        <ul class="rows op-scroll op-scroll-s" tabindex="0" aria-label="Contract gaps by agent">
           <.list_row
             :for={{group, index} <- Enum.with_index(@contract_failures.by_agent)}
             id={"op-contract-agent-#{index}"}
@@ -1726,7 +1736,7 @@
         <p class="op-gh">
           <span class="gh">Active gaps</span><span class="meta">Newest open work first</span>
         </p>
-        <ul class="rows op-scroll op-scroll-s">
+        <ul class="rows op-scroll op-scroll-s" tabindex="0" aria-label="Active contract gaps">
           <.list_row
             :for={{entry, index} <- Enum.with_index(@contract_failures.entries)}
             id={"op-contract-gap-#{index}"}

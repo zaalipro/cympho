@@ -1298,6 +1298,11 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp simple_operations_target_label("Open launch checklist"), do: "See the steps"
   defp simple_operations_target_label(label), do: label
 
+  # Problems first: the snapshot lists actions in a fixed order, so the Next step is
+  # the first :danger action, else the first one.
+  defp next_step_action(actions),
+    do: Enum.find(actions, &(&1.tone == :danger)) || List.first(actions)
+
   # An anchor with a page of its own goes to that page; any other anchor stays an
   # in-page jump (sending it to /operations would only reload the page it is on).
   # Every such jump lands on an Advanced-only section, so the template hides that

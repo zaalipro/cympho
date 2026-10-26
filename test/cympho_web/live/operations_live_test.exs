@@ -2117,7 +2117,14 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "Repair queue"
       assert html =~ "Start here"
       assert html =~ "Top repairs"
-      assert Floki.find(main_doc(html), "#prompt-contract-health ul.rows.op-scroll") != []
+      # The two capped lists scroll inside the card, so each is a named keyboard stop.
+      assert main_doc(html)
+             |> Floki.attribute(
+               "#prompt-contract-health ul.rows.op-scroll[tabindex='0']",
+               "aria-label"
+             )
+             |> Enum.sort() == ["Active contract gaps", "Contract gaps by agent"]
+
       assert html =~ "Active gaps"
       assert html =~ "Thin contract delivery"
       assert html =~ "Contract QA Agent"
@@ -2341,6 +2348,7 @@ defmodule CymphoWeb.OperationsLiveTest do
       [hire_path] = Floki.attribute(doc, "section.next .ink a.pw", "href")
       assert String.starts_with?(hire_path, "/agents/new?")
       assert Floki.attribute(doc, "section.next", "data-ui-advanced-only") == []
+      assert text(doc, "section.next .ink .ink-note") == "Opens the page where you fix it."
 
       # With a repo engineer the first fix is the prompt radar, a section only Advanced shows:
       # in Simple the jump would land nowhere, so the whole Next step is Advanced-only.
@@ -2358,6 +2366,50 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert Floki.attribute(doc, "section.next .ink a.pw", "href") == ["#prompt-drift-radar"]
       assert Floki.attribute(doc, "section.next", "data-ui-advanced-only") != []
       assert Floki.find(doc, "section#prompt-drift-radar.ui-advanced-only") != []
+    end
+
+    test "the Next step leads with the first problem, not the first item in the list", %{
+      conn: conn
+    } do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn, %{role: "admin"})
+      conn = live_session_conn(conn, user, company)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Slot Holding CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          max_concurrent_jobs: 1,
+          company_id: company.id
+        })
+
+      # A checkout older than the recovery threshold is a problem ("Recover stale checked-out work").
+      {:ok, _issue} =
+        Issues.create_issue(%{
+          title: "Stale checkout holds CEO slot",
+          status: :in_progress,
+          priority: :critical,
+          company_id: company.id,
+          assignee_id: agent.id,
+          checked_out_at: DateTime.add(DateTime.utc_now(), -3 * 60 * 60, :second)
+        })
+
+      # The snapshot's list is a fixed order, not a severity order: a watch item comes first here.
+      actions = Cympho.RuntimeOperations.snapshot(company.id).next_actions
+      assert hd(actions).tone != :danger
+      problem = Enum.find(actions, &(&1.tone == :danger))
+      assert problem.target_path == "#runtime-capacity"
+
+      {:ok, _view, html} = live(conn, "/operations")
+      doc = main_doc(html)
+
+      assert text(doc, "section.next .paper h2.nt") == problem.title
+      assert Floki.attribute(doc, "section.next .ink a.pw", "href") == ["#runtime-capacity"]
+      # The resolution card says what its one button does.
+      assert text(doc, "section.next .ink .ink-note") ==
+               "Jumps to the fix further down this page."
     end
 
     test "refreshes the console snapshot", %{conn: conn} do

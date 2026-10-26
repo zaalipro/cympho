@@ -170,7 +170,8 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
         <.kv_list>
           <:item term="Project">{if @project, do: @project.name, else: "None"}</:item>
           <:item :if={present?(@workspace.repo_url)} term="Repository">
-            <span class="mono wf-loc">{@workspace.repo_url}</span>
+            <%!-- A URL wraps after a slash ("github.com/ northwind-demo/"), not inside a name. --%>
+            <span class="mono wf-loc" phx-no-format><span :for={part <- Regex.split(~r{(?<=/)(?!/)}, @workspace.repo_url)}>{part}<wbr /></span></span>
           </:item>
           <:item :if={workspace_ref(@workspace)} term="Ref">
             <span class="mono">{workspace_ref(@workspace)}</span>

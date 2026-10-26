@@ -61,7 +61,7 @@
 .cy-r3 .st-det{position:sticky;top:76px;min-width:0}
 .cy-r3 .st-row{cursor:pointer}
 .cy-r3 .tbl tbody tr[aria-current]>*{background:var(--hover)}
-.cy-r3 .st-row .ul{display:inline-flex;align-items:center;min-height:24px;font-size:13px;color:var(--ink)}
+.cy-r3 .st-row .ul{display:inline-flex;align-items:center;min-width:24px;min-height:24px;font-size:13px;color:var(--ink)}
 .cy-r3 .st-tool{display:block;font-weight:500;color:var(--ink)}
 .cy-r3 .st-sub{display:block;font-size:12px;line-height:16px;color:var(--ink-2)}
 .cy-r3 #traces-empty td{height:auto;padding:4px 0}
@@ -94,6 +94,8 @@
 .cy-r3 code:is(.st-well,.op-code){white-space:normal}
 .cy-r3 .op-inline{display:inline-block;align-self:flex-start;max-width:100%;padding:4px 8px}
 .cy-r3 .op-hint{padding:0}
+/* an inline link in a 16 px help line reaches the 24 px target height without moving the line */
+.cy-r3 [data-page="health"] .help .ul{padding:5px 0}
 .cy-r3 .op-foot{padding:6px 12px 8px;font-size:12px;line-height:16px;color:var(--ink-2)}
 .cy-r3 .op-gh{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 12px}
 .cy-r3 .op-gh .gh{min-height:24px;padding:0}
@@ -111,8 +113,9 @@
 .cy-r3 .op-cell-l{display:inline-flex;align-items:center;gap:6px}
 .cy-r3 .op-cell-d{font-size:12px;line-height:16px;color:var(--ink-2)}
 .cy-r3 .op-v-word{font-size:16px;line-height:34px}
-/* a long list scrolls inside its card, never the page */
-.cy-r3 .op-scroll{max-height:760px;overflow-y:auto}
+/* a long list scrolls inside its card, never the page; a shade on its bottom edge says more rows
+   are below (the card-coloured cover scrolls with the rows and hides the shade at the end) */
+.cy-r3 .op-scroll{max-height:760px;overflow-y:auto;background:linear-gradient(transparent,var(--card) 70%) center bottom / 100% 40px no-repeat local,linear-gradient(transparent,var(--line)) center bottom / 100% 12px no-repeat scroll}
 .cy-r3 .op-scroll>*{flex-shrink:0}
 .cy-r3 .op-scroll-s{max-height:520px}
 .cy-r3 .op-checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px}

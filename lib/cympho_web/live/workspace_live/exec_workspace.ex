@@ -133,8 +133,8 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
             </:actions>
           </.list_row>
         </ul>
+        <%!-- Why a service matters is the Health band's line above; this one only says none runs. --%>
         <.quiet_empty :if={@runtime_services == []} title="No services running">
-          Start a service from this run so you can open its preview before approving.
           <:action>
             <.pill navigate="/operations#runtime-launch-checklist">Start service</.pill>
           </:action>
@@ -366,6 +366,8 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
     [
       service.url,
       service_port(service),
+      # a bad report is already the row's status word
+      if(service.health_status not in @bad_service_health, do: service.health_status),
       service.provider,
       service.cwd
     ]

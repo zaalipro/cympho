@@ -30,14 +30,21 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       assert has_element?(view, "[data-testid='workspace-command']")
       assert has_element?(view, "[data-testid='workspace-list']")
 
-      # The runtime checklist link sits in the list band's header.
+      # The runtime checklist link sits in the list band's header, Advanced-only as before:
+      # it lands on a Health section that Simple mode hides.
       assert Floki.attribute(doc, "#workspace-list .card-h a.lnk", "href") == [
                "/operations#runtime-launch-checklist"
              ]
 
+      assert Floki.find(doc, "#workspace-list .card-h .ui-advanced-only > a.lnk") != []
+
       # The command is one line in the list band: its state is a word, not a coloured pill.
       assert text(doc, "#workspace-list .card-h .wf-st") == "Watch"
       assert html =~ "Expose previews"
+
+      # Each recommendation carries its own count, so the company's count sentence is not
+      # printed above them a second time.
+      refute text(doc, "[data-testid='workspace-command']") =~ "need review"
 
       # One row per folder: the title opens it, the state is a word.
       assert Floki.attribute(doc, "#workspace-#{workspace.id} a.rt2", "href") == [
@@ -104,7 +111,8 @@ defmodule CymphoWeb.WorkspaceLiveTest do
 
       workspace =
         create_project_workspace(company, project, "Runtime Workspace", %{
-          cwd: "/tmp/cympho-demo/runtime"
+          cwd: "/tmp/cympho-demo/runtime",
+          repo_url: "https://github.com/northwind-demo/invoicing-app"
         })
 
       execution_workspace = create_execution_workspace(company, project, workspace)
@@ -155,6 +163,24 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       assert details =~ "Workspace Project"
       assert details =~ "main"
       assert details =~ "/tmp/cympho-demo/runtime"
+
+      # A long repository URL wraps after a slash, never inside a name ("no/rthwind").
+      assert details =~ "https://github.com/northwind-demo/invoicing-app"
+      assert length(Floki.find(doc, ".aside .wf-loc wbr")) == 4
+    end
+
+    test "a running service says how its health check went", %{
+      conn: conn,
+      current_company: company
+    } do
+      project = create_project(company, "Workspace Project")
+      workspace = create_project_workspace(company, project, "Runtime Workspace")
+      execution_workspace = create_execution_workspace(company, project, workspace)
+      services = health_services(execution_workspace)
+
+      {:ok, _view, html} = live(conn, "/workspaces/#{workspace.id}")
+
+      assert_service_health(main_doc(html), services)
     end
 
     test "an unhealthy service keeps its lifecycle beside its health", %{
@@ -288,6 +314,21 @@ defmodule CymphoWeb.WorkspaceLiveTest do
 
       assert_service_states(main_doc(html), running, stopped)
     end
+
+    test "a running service says how its health check went", %{
+      conn: conn,
+      current_company: company
+    } do
+      project = create_project(company, "Workspace Project")
+      workspace = create_project_workspace(company, project, "Runtime Workspace")
+      execution_workspace = create_execution_workspace(company, project, workspace)
+      services = health_services(execution_workspace)
+
+      {:ok, _view, html} =
+        live(conn, "/workspaces/#{workspace.id}/exec/#{execution_workspace.id}")
+
+      assert_service_health(main_doc(html), services)
+    end
   end
 
   describe "Issue work files" do
@@ -325,6 +366,35 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       assert has_element?(view, "button.pl[phx-click='create_workspace'][disabled]")
       refute has_element?(view, "[phx-click='delete_workspace']")
       refute has_element?(view, "form[phx-submit='write_prompt']")
+    end
+
+    test "the brief form writes PROMPT.md into the task's folder", %{
+      conn: conn,
+      current_company: company
+    } do
+      project = create_project(company, "Folder Project")
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Write the onboarding email",
+          company_id: company.id,
+          project_id: project.id
+        })
+
+      # The folder exists on disk (create_workspace would clone a repository, so it is made here).
+      folder = Cympho.Workspace.workspace_path(issue)
+      File.mkdir_p!(folder)
+      on_exit(fn -> File.rm_rf!(folder) end)
+
+      {:ok, view, _html} = live(conn, "/workspace/#{issue.id}")
+
+      html =
+        view
+        |> form("#iw-prompt", %{"prompt" => "Ship the welcome email."})
+        |> render_submit()
+
+      assert File.read!(Path.join(folder, "PROMPT.md")) == "Ship the welcome email."
+      assert text(main_doc(html), ".flash-msg") == "Prompt file written successfully"
     end
   end
 
@@ -405,6 +475,38 @@ defmodule CymphoWeb.WorkspaceLiveTest do
     assert text(doc, "#svc-#{stopped.id} .lr-tr .tag") == "Stopped"
     refute text(doc, "#svc-#{running.id} .rm") =~ "unhealthy"
     refute text(doc, "#svc-#{stopped.id} .rm") =~ "unhealthy"
+  end
+
+  # Three running services: one reports healthy, one unknown, one has not reported yet.
+  defp health_services(execution_workspace) do
+    for {name, port, health} <- [
+          {"Web", 4331, "healthy"},
+          {"Api", 4332, "unknown"},
+          {"Jobs", nil, nil}
+        ] do
+      {:ok, service} =
+        Workspaces.create_runtime_service(execution_workspace, %{service_name: name})
+
+      {:ok, service} =
+        if port,
+          do: Workspaces.issue_service_preview(service, port, %{health_status: health}),
+          else: Workspaces.mark_service_running(service)
+
+      {health, service}
+    end
+  end
+
+  # A good or unknown report is not a problem, so the status word stays "Running";
+  # the report itself is part of the row's meta line, and a service with none says nothing.
+  defp assert_service_health(doc, services) do
+    for {health, service} <- services do
+      assert text(doc, "#svc-#{service.id} .lr-st") == "Running"
+      meta = text(doc, "#svc-#{service.id} .rm")
+
+      if health,
+        do: assert(meta =~ health),
+        else: refute(meta =~ ~r/healthy|unknown/)
+    end
   end
 
   defp unique_slug, do: "other-co-#{System.unique_integer([:positive])}"

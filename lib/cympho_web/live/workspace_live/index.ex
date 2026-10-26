@@ -51,14 +51,22 @@ defmodule CymphoWeb.WorkspaceLive.Index do
                 word={@workspace_command.badge}
               />
             </span>
-            <.text_link navigate="/operations#runtime-launch-checklist">Runtime checklist</.text_link>
+            <%!-- Lands on a Health section that Simple hides, so Simple does not see it either. --%>
+            <span class="ui-advanced-only">
+              <.text_link navigate="/operations#runtime-launch-checklist">
+                Runtime checklist
+              </.text_link>
+            </span>
           </span>
         </:header_end>
 
         <div :if={@workspace_command} class="gl-sec" data-testid="workspace-command">
           <div data-testid="workspace-health">
             <p class="gl-big">{@workspace_command.heading}</p>
-            <p class="gl-sub">{@workspace_command.detail}</p>
+            <%!-- Every count in the summary has a recommendation below that carries it. --%>
+            <p :if={@workspace_health.recommendations == []} class="gl-sub">
+              {@workspace_command.detail}
+            </p>
           </div>
           <ul :if={@workspace_health.recommendations != []} class="wf-recs">
             <li :for={rec <- @workspace_health.recommendations}>
