@@ -158,7 +158,8 @@ defmodule CymphoWeb.ToolCallTracesLiveTest do
         tool_arguments: %{"cmd" => "mix test"},
         error_message: "command failed",
         status: "error",
-        actor_type: "system"
+        actor_type: "system",
+        occurred_at: ~U[2025-03-04 05:06:07Z]
       })
 
     {:ok, view, _html} = live(conn, "/tool-call-traces")
@@ -180,6 +181,10 @@ defmodule CymphoWeb.ToolCallTracesLiveTest do
     # The selected row is marked, and its details open in an aside band beside the table.
     assert Floki.attribute(doc, "tr[phx-value-id='#{trace.id}']", "aria-current") == ["true"]
     assert text(doc, "#trace-det-t") == "Step details"
+
+    # An audit record keeps its full moment: year, seconds and the zone, machine-readable too.
+    assert text(doc, ".st-det time") == "Tue 4 Mar 2025 05:06:07 UTC"
+    assert Floki.attribute(doc, ".st-det time", "datetime") == ["2025-03-04T05:06:07Z"]
     assert html =~ "Failure recovery"
     assert html =~ "The shell call failed"
     assert html =~ ~s(href="/issues/#{issue.id}")

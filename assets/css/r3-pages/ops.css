@@ -22,7 +22,10 @@
 /* a quiet empty state's one pill keeps its own width; a disabled pill reads as unavailable
    (no r3 rule for either yet: candidates for r3.css, see the ops build notes) */
 .cy-r3 :is([data-page="health"],[data-page="steps"],[data-page="workfiles"],[data-page="workfile"],[data-page="exec"],[data-page="issue-workfile"]) .gl-sec>:is(.pl,.st-x){align-self:flex-start}
-.cy-r3 :is([data-page="health"],[data-page="steps"],[data-page="workfiles"],[data-page="workfile"],[data-page="exec"],[data-page="issue-workfile"]) .pl:disabled{background:transparent;border-style:dashed;box-shadow:none;color:var(--ink-2);cursor:not-allowed}
+.cy-r3 :is([data-page="health"],[data-page="steps"],[data-page="workfiles"],[data-page="workfile"],[data-page="exec"],[data-page="issue-workfile"]) .pl:disabled{background:transparent;border-style:dashed;box-shadow:none;color:var(--ink-2);cursor:not-allowed;opacity:.55}
+/* r3.css's ring (.cy-r3 :focus-visible) loses to a control's own resting shadow at equal specificity
+   (a pill, the primary, a chip, the pressed density option), so these pages restate it (an r3.css candidate) */
+.cy-r3 :is([data-page="health"],[data-page="steps"],[data-page="workfiles"],[data-page="workfile"],[data-page="exec"],[data-page="issue-workfile"]) :is(.pl,.pw,.chip,.seg a):focus-visible{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
 
 /* ================================================================
    Work files (O3), a folder (O4), a run's folder (O5), a task's work files (O6)
@@ -173,6 +176,14 @@
   .cy-r3 .st-row .ul{min-height:44px;min-width:44px}
   .cy-r3 .op-more>summary{min-height:44px}
   .cy-r3 .op-scroll,.cy-r3 .op-scroll-s{max-height:none}
+  /* an inline link in a help line is a 44 px target, as r3.css does for .gl-sub links */
+  .cy-r3 [data-page="health"] .help .ul{padding:15px 0}
+  /* a run's crumb holds two record names and left the run's a stub ("n…"): the H1 right below names
+     the run, so the crumb keeps only the way back, its folder's name ellipsized if it is long */
+  .cy-r3 [data-page="exec"] .crumb li:last-child,.cy-r3 [data-page="exec"] .crumb .sep{display:none}
+  .cy-r3 [data-page="exec"] .crumb li:first-child{flex:0 1 auto;min-width:0}
+  .cy-r3 [data-page="exec"] .crumb .back{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;line-height:44px}
+  .cy-r3 [data-page="exec"] .crumb .back .ico{margin-right:4px;vertical-align:-3px}
 }
 
 /* app.css gives every link and button inside an Advanced block of an r3 page a 28 px (44 px under 1024)

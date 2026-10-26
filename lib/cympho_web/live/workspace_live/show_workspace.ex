@@ -133,6 +133,9 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
             title={svc.service_name}
             status={service_status(svc)}
           >
+            <:trail :if={service_lifecycle(svc)}>
+              <span class="tag">{service_lifecycle(svc)}</span>
+            </:trail>
             <:meta><span class="wf-loc">{service_detail(svc)}</span></:meta>
             <:actions :if={preview_href(svc) || connection_string(svc)}>
               <span id={"ws-svc-conn-#{svc.id}"} class="wf-acts" phx-hook="CopyToClipboard">
@@ -209,10 +212,15 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
 
   defp exec_status(status), do: {:idle, status_label(status)}
 
+  # A bad health report is the row's word; the lifecycle it came with stays beside it
+  # (a stopped service keeps its last health, so the word alone would hide the stop).
   defp service_status(service) do
     cond do
-      unhealthy_service?(service) ->
-        {:stopped, status_label(service.health_status || service.status)}
+      service.health_status in @bad_service_health ->
+        {:stopped, status_label(service.health_status)}
+
+      service.status in ["failed", "error"] ->
+        {:stopped, status_label(service.status)}
 
       service.status == "running" ->
         {:done, "Running"}
@@ -220,6 +228,10 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
       true ->
         {:idle, status_label(service.status)}
     end
+  end
+
+  defp service_lifecycle(service) do
+    if service.health_status in @bad_service_health, do: status_label(service.status)
   end
 
   defp copy_path(workspace) do
@@ -318,7 +330,8 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     [
       service.url,
       service_port(service),
-      service.health_status,
+      # a bad report is already the row's status word
+      if(service.health_status not in @bad_service_health, do: service.health_status),
       service.provider
     ]
     |> Enum.reject(&blank?/1)

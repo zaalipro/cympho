@@ -103,6 +103,9 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
             title={svc.service_name}
             status={service_status(svc)}
           >
+            <:trail :if={service_lifecycle(svc)}>
+              <span class="tag">{service_lifecycle(svc)}</span>
+            </:trail>
             <:meta>
               <span class="wf-loc">{service_detail(svc)}</span><span :if={svc.command}><span aria-hidden="true"> · </span><span class="mono wf-loc">{svc.command}</span></span>
             </:meta>
@@ -232,10 +235,15 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
   defp level_kind(:healthy), do: :done
   defp level_kind(_tone), do: :idle
 
+  # A bad health report is the row's word; the lifecycle it came with stays beside it
+  # (a stopped service keeps its last health, so the word alone would hide the stop).
   defp service_status(service) do
     cond do
-      unhealthy_service?(service) ->
-        {:stopped, status_label(service.health_status || service.status)}
+      service.health_status in @bad_service_health ->
+        {:stopped, status_label(service.health_status)}
+
+      service.status in ["failed", "error"] ->
+        {:stopped, status_label(service.status)}
 
       service.status == "running" ->
         {:done, "Running"}
@@ -243,6 +251,10 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
       true ->
         {:idle, status_label(service.status)}
     end
+  end
+
+  defp service_lifecycle(service) do
+    if service.health_status in @bad_service_health, do: status_label(service.status)
   end
 
   defp lease_status("active"), do: {:done, "Active"}

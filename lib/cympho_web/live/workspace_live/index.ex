@@ -87,6 +87,10 @@ defmodule CymphoWeb.WorkspaceLive.Index do
               ]} />
             </:meta>
             <:trail :if={item.workspace.is_primary}><span class="tag">Primary</span></:trail>
+            <%!-- Repair / Inspect alone do not say what is wrong with this folder. --%>
+            <:below :if={item.level in [:critical, :warning]}>
+              <p class="gl-sub">{item.summary}</p>
+            </:below>
           </.list_row>
         </ul>
 

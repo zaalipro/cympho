@@ -2264,6 +2264,102 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert "memory_summary" in wake.metadata["blocker_keys"]
     end
 
+    test "a failure tied to a task still opens its exact run", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      conn = live_session_conn(conn, user, company)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Failing Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Ship the failing change",
+          status: :todo,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      task_run =
+        Repo.insert!(%Run{
+          company_id: company.id,
+          agent_id: agent.id,
+          issue_id: issue.id,
+          adapter: "process",
+          status: "failed",
+          error_reason: "provider timeout"
+        })
+
+      bare_run =
+        Repo.insert!(%Run{
+          company_id: company.id,
+          agent_id: agent.id,
+          adapter: "process",
+          status: "failed",
+          error_reason: "provider timeout"
+        })
+
+      {:ok, _view, html} = live(conn, "/operations")
+      doc = main_doc(html)
+      run_path = "/agents/#{agent.id}?tab=runs&run_id="
+
+      # With a task, the row opens the task and an Open run pill opens this run's logs.
+      assert Floki.attribute(doc, "#op-fail-#{task_run.id} a.rt2", "href") == [
+               "/issues/#{issue.id}"
+             ]
+
+      assert Floki.attribute(doc, "#op-fail-#{task_run.id} .lr-acts a.pl", "href") == [
+               run_path <> task_run.id
+             ]
+
+      assert text(doc, "#op-fail-#{task_run.id} .lr-acts a.pl") == "Open run"
+
+      # Without a task the row itself opens the run, so there is no second link to it.
+      assert Floki.attribute(doc, "#op-fail-#{bare_run.id} a.rt2", "href") == [
+               run_path <> bare_run.id
+             ]
+
+      assert Floki.find(doc, "#op-fail-#{bare_run.id} .lr-acts") == []
+    end
+
+    test "the Next step hides in Simple mode when its target is a section Simple hides", %{
+      conn: conn
+    } do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn, %{role: "admin"})
+      conn = live_session_conn(conn, user, company)
+
+      # A fresh company's first fix is a page of its own (hire a repo engineer): both modes see it.
+      {:ok, _view, html} = live(conn, "/operations")
+      doc = main_doc(html)
+      [hire_path] = Floki.attribute(doc, "section.next .ink a.pw", "href")
+      assert String.starts_with?(hire_path, "/agents/new?")
+      assert Floki.attribute(doc, "section.next", "data-ui-advanced-only") == []
+
+      # With a repo engineer the first fix is the prompt radar, a section only Advanced shows:
+      # in Simple the jump would land nowhere, so the whole Next step is Advanced-only.
+      {:ok, _agent} =
+        Agents.create_agent(%{
+          name: "Repo Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          company_id: company.id
+        })
+
+      {:ok, _view, html} = live(conn, "/operations")
+      doc = main_doc(html)
+      assert Floki.attribute(doc, "section.next .ink a.pw", "href") == ["#prompt-drift-radar"]
+      assert Floki.attribute(doc, "section.next", "data-ui-advanced-only") != []
+      assert Floki.find(doc, "section#prompt-drift-radar.ui-advanced-only") != []
+    end
+
     test "refreshes the console snapshot", %{conn: conn} do
       {conn, user, company} = ConnCase.register_and_log_in_user(conn)
       conn = live_session_conn(conn, user, company)
@@ -2398,6 +2494,36 @@ defmodule CymphoWeb.OperationsAdmissionLiveTest do
       refute html =~ "node limit"
       refute html =~ "sampler"
       refute html =~ "CYMPHO_RUNTIME"
+    end
+  end
+
+  test "a steady runtime draws no Next step and still renders", %{conn: conn} do
+    {conn, user, company} = ConnCase.register_and_log_in_user(conn, %{role: "admin"})
+
+    conn =
+      conn
+      |> Plug.Test.init_test_session(%{})
+      |> Plug.Conn.put_session("user_id", user.id)
+      |> Plug.Conn.put_session("company_id", company.id)
+
+    # RuntimeOperations' fallback when nothing needs doing: an action with no target.
+    steady = %{
+      tone: :ok,
+      title: "Runtime surface looks steady",
+      body: "No immediate runtime action is required."
+    }
+
+    with_mock Cympho.RuntimeOperations, [:passthrough],
+      snapshot: fn company_id, opts ->
+        %{passthrough([company_id, opts]) | next_actions: [steady]}
+      end do
+      {:ok, _view, html} = live(conn, "/operations")
+      doc = Floki.parse_document!(html)
+
+      assert Floki.find(doc, "section.next") == []
+      assert Floki.find(doc, ".pw") == []
+      assert Floki.find(doc, "#operations-simple-state") != []
+      assert html =~ "Runtime surface looks steady"
     end
   end
 

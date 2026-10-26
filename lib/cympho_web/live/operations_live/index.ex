@@ -1298,9 +1298,12 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp simple_operations_target_label("Open launch checklist"), do: "See the steps"
   defp simple_operations_target_label(label), do: label
 
-  # The Next step shows in both modes. An anchor with a page of its own goes to
-  # that page; any other anchor stays an in-page jump (sending it to
-  # /operations would only reload the page it is on).
+  # An anchor with a page of its own goes to that page; any other anchor stays an
+  # in-page jump (sending it to /operations would only reload the page it is on).
+  # Every such jump lands on an Advanced-only section, so the template hides that
+  # Next step in Simple mode. An action without a target has nothing to press.
+  defp next_step_path(nil), do: nil
+
   defp next_step_path(target) do
     case simple_visible_ops_path(target) do
       "/operations" when is_binary(target) ->

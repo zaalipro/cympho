@@ -49,6 +49,38 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       assert html =~ workspace.name
     end
 
+    test "a folder that needs a look says why under its row", %{
+      conn: conn,
+      current_company: company
+    } do
+      project = create_project(company, "Workspace Project")
+      stale = create_project_workspace(company, project, "Stale Workspace")
+      idle = create_project_workspace(company, project, "Idle Workspace", %{is_primary: false})
+      five_hours_ago = DateTime.add(DateTime.utc_now(), -5 * 60 * 60, :second)
+
+      {:ok, _lane} =
+        Workspaces.create_execution_workspace(%{
+          name: "Forgotten Lane",
+          status: "open",
+          company_id: company.id,
+          project_id: project.id,
+          project_workspace_id: stale.id,
+          opened_at: five_hours_ago,
+          last_used_at: five_hours_ago
+        })
+
+      {:ok, _view, html} = live(conn, "/workspaces")
+      doc = main_doc(html)
+
+      # Its only problem is a stale run folder: the row's state word asks for a look, the line below says why.
+      assert text(doc, "#workspace-#{stale.id} .lr-st") == "Inspect"
+      assert text(doc, "#workspace-#{stale.id} .lr-below") =~ "1 stale execution workspace(s)"
+
+      # A folder with nothing wrong has no line below: its state word says it all.
+      assert text(doc, "#workspace-#{idle.id} .lr-st") == "Idle"
+      assert Floki.find(doc, "#workspace-#{idle.id} .lr-below") == []
+    end
+
     test "an empty company sees one quiet line and a New project pill", %{conn: conn} do
       {:ok, view, html} = live(conn, "/workspaces")
       doc = main_doc(html)
@@ -123,6 +155,20 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       assert details =~ "Workspace Project"
       assert details =~ "main"
       assert details =~ "/tmp/cympho-demo/runtime"
+    end
+
+    test "an unhealthy service keeps its lifecycle beside its health", %{
+      conn: conn,
+      current_company: company
+    } do
+      project = create_project(company, "Workspace Project")
+      workspace = create_project_workspace(company, project, "Runtime Workspace")
+      execution_workspace = create_execution_workspace(company, project, workspace)
+      {running, stopped} = unhealthy_services(execution_workspace)
+
+      {:ok, _view, html} = live(conn, "/workspaces/#{workspace.id}")
+
+      assert_service_states(main_doc(html), running, stopped)
     end
 
     test "a folder from another company is refused", %{conn: conn} do
@@ -227,6 +273,21 @@ defmodule CymphoWeb.WorkspaceLiveTest do
              ) ==
                ["/tmp/cympho-runtime"]
     end
+
+    test "an unhealthy service keeps its lifecycle beside its health", %{
+      conn: conn,
+      current_company: company
+    } do
+      project = create_project(company, "Workspace Project")
+      workspace = create_project_workspace(company, project, "Runtime Workspace")
+      execution_workspace = create_execution_workspace(company, project, workspace)
+      {running, stopped} = unhealthy_services(execution_workspace)
+
+      {:ok, _view, html} =
+        live(conn, "/workspaces/#{workspace.id}/exec/#{execution_workspace.id}")
+
+      assert_service_states(main_doc(html), running, stopped)
+    end
   end
 
   describe "Issue work files" do
@@ -313,6 +374,37 @@ defmodule CymphoWeb.WorkspaceLiveTest do
       })
 
     execution_workspace
+  end
+
+  # Two services that both report unhealthy: one still running, one stopped afterwards
+  # (stop_service/1 keeps health_status, so only the lifecycle tells them apart).
+  defp unhealthy_services(execution_workspace) do
+    {:ok, running} =
+      Workspaces.create_runtime_service(execution_workspace, %{service_name: "Web"})
+
+    {:ok, running} =
+      Workspaces.issue_service_preview(running, 4329, %{health_status: "unhealthy"})
+
+    {:ok, stopped} =
+      Workspaces.create_runtime_service(execution_workspace, %{service_name: "Worker"})
+
+    {:ok, stopped} =
+      Workspaces.issue_service_preview(stopped, 4330, %{health_status: "unhealthy"})
+
+    {:ok, stopped} = Workspaces.stop_service(stopped)
+    assert stopped.health_status == "unhealthy"
+
+    {running, stopped}
+  end
+
+  # Health is the row's status word (the problem); the lifecycle stays beside it as a tag, said once.
+  defp assert_service_states(doc, running, stopped) do
+    assert text(doc, "#svc-#{running.id} .lr-st") == "Unhealthy"
+    assert text(doc, "#svc-#{running.id} .lr-tr .tag") == "Running"
+    assert text(doc, "#svc-#{stopped.id} .lr-st") == "Unhealthy"
+    assert text(doc, "#svc-#{stopped.id} .lr-tr .tag") == "Stopped"
+    refute text(doc, "#svc-#{running.id} .rm") =~ "unhealthy"
+    refute text(doc, "#svc-#{stopped.id} .rm") =~ "unhealthy"
   end
 
   defp unique_slug, do: "other-co-#{System.unique_integer([:positive])}"

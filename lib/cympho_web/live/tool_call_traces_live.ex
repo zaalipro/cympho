@@ -663,9 +663,14 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                 />
               </span>
             </:item>
+            <%!-- An audit record: the full moment, year and zone included. --%>
             <:item term="When">
-              {Calendar.strftime(@selected_trace.occurred_at, "%a %-d %b")}
-              <span class="mono">{Calendar.strftime(@selected_trace.occurred_at, "%H:%M:%S")}</span>
+              <time datetime={DateTime.to_iso8601(@selected_trace.occurred_at)}>
+                {Calendar.strftime(@selected_trace.occurred_at, "%a %-d %b %Y")}
+                <span class="mono">
+                  {Calendar.strftime(@selected_trace.occurred_at, "%H:%M:%S")} UTC
+                </span>
+              </time>
             </:item>
             <:item term="Actor">
               {String.capitalize(to_string(@selected_trace.actor_type))}<span :if={

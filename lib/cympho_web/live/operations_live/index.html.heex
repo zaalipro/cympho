@@ -8,14 +8,16 @@
   <%!-- Tier S (v7 O1): the one fix, the state, what to do, what went wrong. --%>
   <% action = List.first(@next_actions) %>
   <% next_path = action && next_step_path(Map.get(action, :target_path)) %>
-  <.next_step :if={action} id="op-ns-">
+  <%!-- No target (the steady fallback) means nothing to do: no Next step. An in-page
+       jump only lands on Advanced sections, so Simple does not see that Next step. --%>
+  <.next_step :if={next_path} id="op-ns-" data-ui-advanced-only={anchor_path?(next_path)}>
     <:problem>
       <.problem_card title={simple_operations_title(action.title)} title_id="op-ns-t">
         <:eyebrow>Next step<span aria-hidden="true"> · </span>Health</:eyebrow>
         <p class="obj">{simple_operations_body(action.title, action.body)}</p>
       </.problem_card>
     </:problem>
-    <:resolution :if={next_path}>
+    <:resolution>
       <.ink_card heading="Do this next" heading_id="op-ns-i">
         <.ink_foot>
           <:primary>
@@ -142,6 +144,12 @@
             failure.completed_at || failure.inserted_at
           )}
         </:meta>
+        <%!-- The row opens the task when there is one; this run's logs stay one click away. --%>
+        <:actions :if={failure.agent && failure.issue}>
+          <.pill navigate={~p"/agents/#{failure.agent.id}?tab=runs&run_id=#{failure.id}"}>
+            Open run
+          </.pill>
+        </:actions>
         <:below :if={failure.hint || failure.focused_command}>
           <p :if={failure.hint} class="gl-sub op-hint">{failure.hint}</p>
           <details
