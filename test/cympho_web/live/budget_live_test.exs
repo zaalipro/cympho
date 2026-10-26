@@ -483,6 +483,49 @@ defmodule CymphoWeb.BudgetLiveTest do
              ]
     end
 
+    # Render r2: the Project ID field showed only a UUID. The field stays (owner decision C-D5);
+    # its help names the project the id points at, looked up in this company only.
+    test "the project id field names its project, from this company only" do
+      {conn, company} = board_conn()
+
+      {:ok, project} =
+        Cympho.Projects.create_project(%{
+          name: "Invoicing app",
+          prefix: "INV",
+          company_id: company.id
+        })
+
+      budget =
+        insert_runtime_budget(company,
+          name: "Project cap",
+          scope_type: "project",
+          scope_id: project.id
+        )
+
+      {:ok, view, _html} = live(conn, "/budgets/#{budget.id}/edit")
+      help = "#budget_scope_id-help"
+      assert text(main_doc(view), help) == "Invoicing app"
+
+      {:ok, other} =
+        Cympho.Companies.create_company(%{
+          name: "Elsewhere",
+          slug: "elsewhere-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, foreign} =
+        Cympho.Projects.create_project(%{
+          name: "Foreign app",
+          prefix: "FOR",
+          company_id: other.id
+        })
+
+      view |> form("#budget-form", budget: %{scope_id: foreign.id}) |> render_change()
+      assert Floki.find(main_doc(view), help) == []
+
+      view |> form("#budget-form", budget: %{scope_id: "not-a-uuid"}) |> render_change()
+      assert Floki.find(main_doc(view), help) == []
+    end
+
     # Review r1: the period was editable in both modes before the restyle.
     test "the period stays visible and editable in Simple mode" do
       {conn, company} = board_conn()

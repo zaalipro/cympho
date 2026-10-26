@@ -48,6 +48,7 @@
             label={scope_id_label(scope_type)}
             value={scoped_scope_id_value(@form, @budget)}
             placeholder={scope_id_placeholder(scope_type)}
+            help={@scope_name}
           />
         <% end %>
         <.input field={@form[:limit_amount]} type="number" label="Amount" step="0.01" required />

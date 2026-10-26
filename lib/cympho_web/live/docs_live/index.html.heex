@@ -3,6 +3,7 @@
     <%!-- Below 1024 px the topic nav hides; this opens it as a sheet. --%>
     <button
       type="button"
+      id="docs-topics-btn"
       class="pl dc-topics"
       phx-click="toggle_mobile_sidebar"
       aria-expanded={to_string(@mobile_sidebar_open)}
@@ -57,14 +58,22 @@
     id="docs-topics-sheet"
     show
     title="Topics"
-    on_cancel={JS.push("close_mobile_sidebar")}
+    on_cancel={close_topics()}
   >
-    <.sidebar
-      topics={@topics}
-      active_topic_slug={@active_topic_slug}
-      active_section_slug={@active_section_slug}
-      mobile={true}
-    />
+    <%!-- The sheet renders after the article, so opening it moves the keyboard in. Escape closes it,
+         as it closes the search dialog, except while that dialog is open on top of it. --%>
+    <div
+      phx-mounted={JS.focus_first()}
+      phx-window-keydown={!@search_open && close_topics()}
+      phx-key="Escape"
+    >
+      <.sidebar
+        topics={@topics}
+        active_topic_slug={@active_topic_slug}
+        active_section_slug={@active_section_slug}
+        mobile={true}
+      />
+    </div>
   </.modal>
 
   <.search_modal

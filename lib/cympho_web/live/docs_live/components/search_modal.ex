@@ -22,10 +22,17 @@ defmodule CymphoWeb.DocsLive.Components.SearchModal do
       id="docs-search-modal"
       show
       title="Search the documentation"
-      on_cancel={JS.push("close_search")}
+      on_cancel={JS.push("close_search") |> JS.pop_focus()}
     >
       <div class="dc-search" phx-window-keydown="search_keydown">
-        <form phx-change="search" phx-submit="search_submit">
+        <%!-- search_keydown closes on Escape; this returns the keyboard to the trigger --%>
+        <form
+          phx-change="search"
+          phx-submit="search_submit"
+          phx-window-keydown={JS.pop_focus()}
+          phx-key="Escape"
+        >
+          <%!-- `autofocus` is ignored on a field a patch inserts --%>
           <.search_capsule
             id="docs-search-input"
             label="Search the documentation"
@@ -33,6 +40,7 @@ defmodule CymphoWeb.DocsLive.Components.SearchModal do
             value={@query}
             placeholder="Guides, concepts, MCP tools and APIs"
             autofocus
+            phx-mounted={JS.focus()}
             phx-debounce="100"
           />
         </form>

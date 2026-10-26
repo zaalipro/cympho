@@ -7,6 +7,8 @@ defmodule CymphoWeb.DocsLive.Components.SidebarComponent do
 
   import CymphoWeb.Components.R3, only: [r3_icon: 1]
 
+  alias Phoenix.LiveView.JS
+
   attr :topics, :list, required: true
   attr :active_topic_slug, :string, required: true
   attr :active_section_slug, :string, required: true
@@ -15,7 +17,12 @@ defmodule CymphoWeb.DocsLive.Components.SidebarComponent do
   def sidebar(assigns) do
     ~H"""
     <div class={["dc-side", @mobile && "m"]}>
-      <button type="button" class="search dc-find" phx-click="open_search">
+      <%!-- the search dialog gives the keyboard back to this button when it closes --%>
+      <button
+        type="button"
+        class="search dc-find"
+        phx-click={JS.push_focus() |> JS.push("open_search")}
+      >
         <.r3_icon name="i-search" /><span>Search docs</span>
       </button>
 

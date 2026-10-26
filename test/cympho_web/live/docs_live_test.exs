@@ -185,6 +185,42 @@ defmodule CymphoWeb.DocsLiveTest do
       render_patch(view, "/docs/workspaces/git-worktrees")
       refute has_element?(view, "#docs-topics-sheet")
     end
+
+    # The sheet renders after the article, so the keyboard needs to be moved into it; Escape
+    # closes it as it closes the search dialog, but not while the search is open on top of it.
+    test "the Topics sheet takes focus and closes on Escape", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/docs")
+
+      view |> element("button#docs-topics-btn.dc-topics") |> render_click()
+
+      keys = ~s(#docs-topics-sheet [phx-window-keydown][phx-key="Escape"])
+      assert has_element?(view, ~s(#docs-topics-sheet [phx-mounted*="focus_first"]))
+      assert has_element?(view, keys)
+
+      render_click(view, "open_search")
+      refute has_element?(view, keys)
+      render_click(view, "close_search")
+
+      view |> element(keys) |> render_keydown(%{"key" => "Escape"})
+      refute has_element?(view, "#docs-topics-sheet")
+    end
+
+    # `autofocus` does nothing on a field a patch inserts, so the search dialog opened with the
+    # keyboard still on its trigger; the trigger keeps its place to get it back on close.
+    test "the search dialog takes focus and gives it back", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/docs")
+
+      assert has_element?(view, ~s(.dc-side button.dc-find[phx-click*="push_focus"]))
+      view |> element(".dc-side:not(.m) button.dc-find") |> render_click()
+
+      assert has_element?(view, ~s(#docs-search-input[phx-mounted*="focus"]))
+      assert has_element?(view, ~s(#docs-search-modal [phx-click*="pop_focus"]))
+
+      assert has_element?(
+               view,
+               ~s(#docs-search-modal [phx-window-keydown*="pop_focus"][phx-key="Escape"])
+             )
+    end
   end
 
   describe "App shell navigation integration" do

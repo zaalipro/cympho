@@ -4,12 +4,14 @@
   page="company"
   kind={:deep}
   parent={{~p"/companies", "Companies"}}
-  current={@company.name}
+  current={if editing?, do: "Edit company", else: @company.name}
   data-ui-complex-page
 >
   <:head>
     <section class="head" aria-labelledby="cs-h">
-      <h1 class="h1 big" id="cs-h">{@company.name}</h1>
+      <h1 class="h1 big" id="cs-h">
+        {if editing?, do: "Edit #{@company.name}", else: @company.name}
+      </h1>
       <p class="sub">
         <span class="mono">{@company.slug}</span><span aria-hidden="true"> · </span><span class="nw">Created {format_inserted_at(@company)}</span>
       </p>

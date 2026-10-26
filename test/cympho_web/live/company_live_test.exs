@@ -329,6 +329,30 @@ defmodule CymphoWeb.CompanyLiveTest do
       refute has_element?(view, ~s(.head .chips a[href="/companies/#{company.id}/edit"]))
     end
 
+    # Render r2: the edit page did not say it was one. Its H1, tab title and crumb now do, as on
+    # /budgets/:id/edit (spec P4: H1 "Edit <name>", crumb "Edit …", page_title = H1).
+    test "the edit page names itself in the H1, the breadcrumb and the tab title", %{
+      conn: conn,
+      current_company: company
+    } do
+      [membership] = Companies.list_memberships(company.id)
+      {:ok, _} = Companies.update_membership(membership, %{role: "owner", is_board_member: true})
+
+      {:ok, view, _html} = live(conn, "/companies/#{company.id}/edit")
+      doc = main_doc(view)
+
+      assert text(doc, ".crumb [aria-current]") == "Edit company"
+      assert texts(doc, "h1") == ["Edit #{company.name}"]
+      assert page_title(view) =~ "Edit #{company.name}"
+
+      {:ok, show, _html} = live(conn, "/companies/#{company.id}")
+
+      assert text(main_doc(show), ".crumb [aria-current]") == company.name
+      assert texts(main_doc(show), "h1") == [company.name]
+      assert page_title(show) =~ company.name
+      refute page_title(show) =~ "Edit"
+    end
+
     # v7 §2.6: while editing, the edit pair is the page's only pair and Save its only primary.
     test "a paused company's edit page shows the form, not the Resume step", %{
       conn: conn,
@@ -343,7 +367,7 @@ defmodule CymphoWeb.CompanyLiveTest do
 
       assert_r3_page(doc,
         page: "company",
-        h1: paused.name,
+        h1: "Edit #{paused.name}",
         kind: :deep,
         parent: "Companies",
         primaries: 1

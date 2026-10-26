@@ -173,13 +173,16 @@
   /* a company row's only action is its menu: the tag and the kebab stay beside the name, not on lines of their own */
   .cy-r3 [data-page="companies"] .lrow>.row-main{flex-basis:0}
   .cy-r3 [data-page="companies"] .lrow .lr-acts{flex-basis:auto}
-  /* the parent crumb is the company's name: the phone crumb keeps only it (the Back), the H1 says "Export" */
-  .cy-r3 [data-page="export"] .crumb li+li,.cy-r3 [data-page="export"] .crumb .sep{display:none}
+  /* a record's phone crumb has ~60-80 px beside its Back pill, so its name would show as "Northwin…";
+     it keeps only the Back pill, and the H1 right under it names the page in full ("Invoicing app", "Edit …", "Export") */
+  .cy-r3 :is([data-page="budget"],[data-page="company"],[data-page="export"]) .crumb li+li,
+  .cy-r3 :is([data-page="budget"],[data-page="company"],[data-page="export"]) .crumb .sep{display:none}
   .cy-r3 [data-page="import"] .strip.s3 .v{font-size:20px}
   .cy-r3 [data-page="import"] .im-drop input[type=file]{font-size:16px}
   .cy-r3 [data-page="import"] .im-drop input[type=file]::file-selector-button{height:44px;font-size:16px}
   .cy-r3 [data-page="docs"] .dc-art{padding:16px 14px 18px}
-  .cy-r3 [data-page="docs"] .dc-crumb a{min-height:44px;min-width:44px}
+  /* 44 px targets drawn at the text's own width: the padding is taken back by the margin, so "Docs" keeps its gap */
+  .cy-r3 [data-page="docs"] .dc-crumb a{justify-content:center;min-height:44px;min-width:44px;padding:0 8px;margin:0 -8px}
   .cy-r3 [data-page="docs"] .dc-nav a,.cy-r3 [data-page="docs"] .dc-mtoc ul a{min-height:44px;display:flex;align-items:center}
   .cy-r3 [data-page="docs"] .docs-content{font-size:15px;line-height:24px}
   .cy-r3 [data-page="docs"] .dc-keys{display:none}

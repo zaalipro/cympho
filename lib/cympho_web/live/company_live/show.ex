@@ -37,7 +37,7 @@ defmodule CymphoWeb.CompanyLive.Show do
   defp apply_action(socket, nil, params), do: apply_action(socket, :show, params)
 
   defp apply_action(socket, :edit, _params),
-    do: socket |> assign(:page_title, socket.assigns.company.name)
+    do: socket |> assign(:page_title, "Edit #{socket.assigns.company.name}")
 
   defp apply_action(socket, :manage_access, _params),
     do: socket |> assign(:page_title, "Manage Access")
