@@ -20,7 +20,7 @@ defmodule CymphoWeb.ProxyLiveTest do
 
       {:ok, view, html} = live(conn, "/settings/proxies")
 
-      assert html =~ "Proxy Profiles"
+      assert html =~ "Network proxies"
       assert html =~ "company admin or board member"
       assert html =~ ~s(data-testid="proxy-profiles-read-only")
       refute html =~ "Add proxy"
@@ -40,7 +40,7 @@ defmodule CymphoWeb.ProxyLiveTest do
 
       {:ok, view, html} = live(conn, "/settings/proxies")
 
-      assert html =~ "Proxy Profiles"
+      assert html =~ "Network proxies"
       assert html =~ "Add proxy"
       assert html =~ "No proxy profiles yet"
 
@@ -53,7 +53,7 @@ defmodule CymphoWeb.ProxyLiveTest do
       assert html =~ "Proxy URL"
 
       view
-      |> form(~s([data-testid="proxy-profile-form"] form), %{
+      |> form(~s(form[data-testid="proxy-profile-form"]), %{
         "proxy_profile" => %{
           "name" => "browser-egress",
           "proxy_url" => "socks5://user:pass@127.0.0.1:1080",
@@ -95,6 +95,79 @@ defmodule CymphoWeb.ProxyLiveTest do
       |> render_click()
 
       assert {:error, :not_found} = Proxies.get_company_proxy_profile(company.id, profile.id)
+    end
+
+    # v7 S8: one Network proxies band of rows; the form opens as a pair above it.
+    test "lists profiles as rows and opens the form as a pair", %{conn: _conn} do
+      conn = authenticated_conn(%{role: "owner", is_board_member: true})
+      company = current_company()
+
+      {:ok, online} =
+        Proxies.create_proxy_profile(%{
+          company_id: company.id,
+          name: "eu-egress",
+          proxy_type: "socks5",
+          host: "proxy-eu.example.net",
+          port: 1080
+        })
+
+      {:ok, _untested} =
+        Proxies.create_proxy_profile(%{
+          company_id: company.id,
+          name: "us-backup",
+          proxy_type: "http",
+          host: "proxy-us.example.net",
+          port: 3128
+        })
+
+      {:ok, view, _html} = live(conn, "/settings/proxies")
+      doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+      CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+        page: "settings",
+        h1: "Settings",
+        kind: :root,
+        primaries: 0
+      )
+
+      assert CymphoWeb.R3PageHelpers.text(doc, "section[aria-labelledby=px-t] .card-h .meta") ==
+               "2 profiles"
+
+      assert [row] = Floki.find(doc, ~s(.lrow[data-testid="proxy-profile-#{online.id}"]))
+      assert CymphoWeb.R3PageHelpers.text(row, ".rt") == "eu-egress"
+      assert CymphoWeb.R3PageHelpers.text(row, ".lr-st") == "Not checked"
+
+      assert CymphoWeb.R3PageHelpers.text(row, ".rm .mono") ==
+               "socks5://proxy-eu.example.net:1080"
+
+      assert Floki.find(
+               row,
+               ~s(.lr-acts button.pl.warn[phx-click=delete][data-confirm="Remove this proxy profile?"])
+             ) != []
+
+      view |> element(".card-h button[phx-click=show_create_form]") |> render_click()
+      doc = CymphoWeb.R3PageHelpers.main_doc(view)
+
+      CymphoWeb.R3PageHelpers.assert_r3_page(doc,
+        page: "settings",
+        h1: "Settings",
+        kind: :root,
+        primaries: 1
+      )
+
+      assert CymphoWeb.R3PageHelpers.text(
+               doc,
+               ~s(form[data-testid="proxy-profile-form"] .ink .pw)
+             ) ==
+               "Create proxy"
+
+      assert Floki.find(
+               doc,
+               ~s(input[name="proxy_profile[password]"][autocomplete="new-password"])
+             ) !=
+               []
+
+      refute has_element?(view, ".card-h button[phx-click=show_create_form]")
     end
 
     test "a board flag does not make a viewer writable", %{conn: _conn} do

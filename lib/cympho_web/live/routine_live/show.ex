@@ -2,7 +2,9 @@ defmodule CymphoWeb.RoutineLive.Show do
   use CymphoWeb, :live_view
 
   import CymphoWeb.RoutineLive.FormHelpers,
-    only: [schedule_summary: 1, next_run: 1, routine_run_dot: 1]
+    only: [schedule_summary: 1, next_run: 1, raw_cron: 1, run_state: 1]
+
+  import CymphoWeb.AgentLive.Parts, only: [stamp: 1]
 
   alias Cympho.Routines
   alias Cympho.RoutineTriggers
@@ -123,21 +125,26 @@ defmodule CymphoWeb.RoutineLive.Show do
     |> String.capitalize()
   end
 
-  def run_status_class("completed"),
-    do: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
-
-  def run_status_class("running"), do: "border-amber-500/20 bg-amber-500/10 text-amber-300"
-  def run_status_class("pending"), do: "border-amber-500/20 bg-amber-500/10 text-amber-300"
-  def run_status_class("failed"), do: "border-rose-500/25 bg-rose-500/10 text-rose-300"
-  def run_status_class(_), do: "border-border bg-panel text-text-tertiary"
-
-  def format_datetime(nil), do: "-"
-  def format_datetime(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M")
-
   @doc "Most recent run, or nil (runs arrive newest-first from list_runs/2)."
   def last_run([]), do: nil
   def last_run([run | _]), do: run
   def last_run(_), do: nil
+
+  attr :at, :any, required: true
+  attr :since, :any, default: nil, doc: "an earlier time: on the same day only the clock shows"
+
+  @doc "A run's full date and clock for the history table (the compact stamp drops the clock after a day)."
+  def run_time(assigns) do
+    ~H"""
+    <span :if={@at}>
+      <span :if={!same_day?(@at, @since)}>{Calendar.strftime(@at, "%a %-d %b %Y")}</span>
+      <span class="mono">{Calendar.strftime(@at, "%H:%M")}</span>
+    </span>
+    """
+  end
+
+  defp same_day?(at, %DateTime{} = since), do: DateTime.to_date(at) == DateTime.to_date(since)
+  defp same_day?(_at, _since), do: false
 
   @doc "Only-loud-when-needed health signal for the routine header."
   def show_alert(routine, triggers, runs) do
@@ -150,14 +157,10 @@ defmodule CymphoWeb.RoutineLive.Show do
 
   defp no_enabled_trigger?(triggers), do: Enum.all?(triggers, &(&1.enabled == false))
 
-  def show_alert_class(:failed), do: "border-rose-500/25 bg-rose-500/[0.05]"
-  def show_alert_class(:trigger_gap), do: "border-amber-500/25 bg-amber-500/[0.05]"
-  def show_alert_class(_), do: "border-border bg-surface"
-
   def show_alert_note(:failed), do: "The last run failed — inspect it before the next trigger."
 
   def show_alert_note(:trigger_gap),
-    do: "This routine is active but has no enabled trigger, so it cannot run on its own yet."
+    do: "It is on, but has no schedule or other trigger, so it cannot run on its own yet."
 
   def show_alert_note(_), do: nil
 

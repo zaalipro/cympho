@@ -295,7 +295,9 @@ defmodule Cympho.GovernanceRisk do
   end
 
   defp approval_summary(:warning, "pending", approve, _deny, missing, _deadline) do
-    "#{missing} board #{plural(missing, "member")} still need to vote; #{approve} approve #{plural(approve, "vote")} recorded."
+    verb = if missing == 1, do: "needs", else: "need"
+
+    "#{missing} board #{plural(missing, "member")} still #{verb} to vote; #{approve} approve #{plural(approve, "vote")} recorded."
   end
 
   defp approval_summary(:healthy, "pending", approve, _deny, _missing, _deadline) do

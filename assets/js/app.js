@@ -1044,12 +1044,16 @@ const ColorSwatchPicker = {
     this.input.addEventListener('input', this.onInput);
     this._refresh();
   },
+  // A LiveView patch re-renders the swatches; the pressed state follows the field again.
+  updated() {
+    if (this.input) this._refresh();
+  },
+  // The chosen swatch is pressed (aria-pressed); r3 CSS draws its ring with tokens.
   _refresh() {
     const v = (this.input.value || '').toLowerCase().trim();
     if (this.preview && /^#[0-9a-f]{6}$/.test(v)) this.preview.style.backgroundColor = v;
     this.swatches.forEach((s) => {
-      const active = s.dataset.hex.toLowerCase() === v;
-      s.style.borderColor = active ? 'white' : 'rgba(255,255,255,0.15)';
+      s.setAttribute('aria-pressed', s.dataset.hex.toLowerCase() === v ? 'true' : 'false');
     });
   }
 };

@@ -7,13 +7,7 @@
     </.segmented>
   </:header_end>
 
-  <p
-    :if={@flash["error"]}
-    role="alert"
-    class="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
-  >
-    {@flash["error"]}
-  </p>
+  <.flash_line flash={@flash} />
   <CymphoWeb.Live.ReviewChanges.reason_form review_changes={@review_changes} />
 
   <%!-- The Next step: the chosen item (`item`) or the first in the owner's

@@ -71,10 +71,21 @@ defmodule CymphoWeb.Components.SettingsLayoutTest do
     refute html =~ ~r|<a[^>]*href="/settings/appearance"[^>]*aria-current="page"|
   end
 
+  # v7 §3.1 B12: a settings section renders inside the r3 root frame titled "Settings".
   test "the section nav is labelled and sits in the settings frame" do
     doc = Floki.parse_fragment!(render_settings(:profile))
 
     assert doc |> Floki.find("nav.snav") |> Floki.attribute("aria-label") == ["Settings sections"]
-    assert Floki.find(doc, ".lframe.set-page[data-ui-complex-page] .set .set-main") != []
+
+    assert Floki.find(
+             doc,
+             ~s(.frame[data-page="settings"][data-ui-complex-page] .tray.set-page .set .set-main)
+           ) != []
+
+    assert doc |> Floki.find("h1.h1") |> Enum.map(&Floki.text/1) == ["Settings"]
+
+    assert doc |> Floki.find(".set.picked .set-main") |> Floki.attribute("data-section") == [
+             "profile"
+           ]
   end
 end

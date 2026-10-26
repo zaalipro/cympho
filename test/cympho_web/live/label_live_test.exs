@@ -1,6 +1,8 @@
 defmodule CymphoWeb.LabelLiveTest do
   use CymphoWeb.LiveCase, async: true
 
+  import CymphoWeb.R3PageHelpers
+
   alias Cympho.Companies
   alias Cympho.Labels
 
@@ -18,11 +20,40 @@ defmodule CymphoWeb.LabelLiveTest do
 
   describe "LabelLive.Index" do
     test "mounts and renders the labels page", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/labels")
+      {:ok, view, html} = live(conn, "/labels")
 
-      assert html =~ "Labels"
-      assert html =~ "Color-code work so the board reads at a glance."
-      assert html =~ "Create a label"
+      # r3 (v7 L10): a Settings section; the always-present form is its one pair.
+      assert_r3_page(main_doc(view), page: "settings", h1: "Settings", kind: :root, primaries: 1)
+      assert has_element?(view, ".set-main[data-section='labels']")
+      assert has_element?(view, ".snav a[aria-current='page'][href='/labels']")
+      assert has_element?(view, "form#label-form.fpair[phx-submit='create_label']")
+      assert has_element?(view, "#label-form .ink button.pw[type='submit']", "Add label")
+      assert html =~ "New label"
+      assert has_element?(view, "#labels-list-t", "Labels")
+      refute has_element?(view, "#label-form button[phx-click='cancel_edit']")
+    end
+
+    test "editing turns the form into the edit pair with a Cancel", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, label} =
+        Labels.create_label(%{name: "Edit Pair", color: "#123456", company_id: company.id})
+
+      {:ok, view, _html} = live(conn, "/labels")
+
+      view
+      |> element("#labels-#{label.id} button[phx-click='edit_label']")
+      |> render_click()
+
+      assert has_element?(view, "form#label-form[phx-submit='update_label']")
+      assert has_element?(view, "#label-form .ink button.pw[type='submit']", "Save label")
+      assert has_element?(view, "#label-form .ink button[phx-click='cancel_edit']", "Cancel")
+      assert has_element?(view, "#lf-card-t", "Edit label")
+
+      view |> element("#label-form button[phx-click='cancel_edit']") |> render_click()
+
+      assert has_element?(view, "form#label-form[phx-submit='create_label']")
     end
 
     test "renders an existing company label in the stream", %{
@@ -105,7 +136,7 @@ defmodule CymphoWeb.LabelLiveTest do
       html = render_click(view, "edit_label", %{"id" => label.id})
 
       assert html =~ "Label not found"
-      refute html =~ "Editing: Keep Away #{unique}"
+      refute html =~ "Keep Away #{unique}"
 
       assert {:ok, still} = Labels.get_label(label.id)
       assert still.name == "Keep Away #{unique}"

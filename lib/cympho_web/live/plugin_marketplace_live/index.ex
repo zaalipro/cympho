@@ -12,11 +12,11 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
 
     {:ok,
      socket
-     |> assign(:page_title, "Plugin Catalog")
+     |> assign(:page_title, "Plugin catalog")
      |> assign(:company_id, company_id)
      |> assign(:can_manage_plugins, can_manage_plugins?(socket))
      |> assign(:available_plugins, Catalog.entries())
-     |> assign(:installed_identifiers, installed_identifiers(company_id))
+     |> assign(:installed_plugins, installed_plugins(company_id))
      |> assign(:search_query, "")}
   end
 
@@ -52,7 +52,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
                 {:noreply,
                  socket
                  |> put_flash(:info, "#{available_plugin.name} installed successfully")
-                 |> assign(:installed_identifiers, installed_identifiers(company_id))}
+                 |> assign(:installed_plugins, installed_plugins(company_id))}
 
               {:error, reason} ->
                 error_msg = extract_error_message(reason)
@@ -73,7 +73,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
               {:noreply,
                socket
                |> put_flash(:info, "Plugin uninstalled successfully")
-               |> assign(:installed_identifiers, installed_identifiers(socket.assigns.company_id))}
+               |> assign(:installed_plugins, installed_plugins(socket.assigns.company_id))}
 
             {:error, _} ->
               {:noreply, put_flash(socket, :error, "Failed to uninstall plugin")}
@@ -93,11 +93,12 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
     end
   end
 
-  defp installed_identifiers(nil), do: []
+  # identifier => plugin id, so an installed card can offer Remove (uninstall by id)
+  defp installed_plugins(nil), do: %{}
 
-  defp installed_identifiers(company_id) do
+  defp installed_plugins(company_id) do
     Skills.list_plugins(company_id: company_id)
-    |> Enum.map(& &1.identifier)
+    |> Map.new(&{&1.identifier, &1.id})
   end
 
   defp install_plugin(available_plugin, company_id) do
@@ -122,7 +123,9 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
         String.downcase(p.description) =~ String.downcase(search_query)
     end)
     |> Enum.map(fn p ->
-      Map.put(p, :is_installed, p.identifier in installed)
+      p
+      |> Map.put(:is_installed, Map.has_key?(installed, p.identifier))
+      |> Map.put(:installed_id, Map.get(installed, p.identifier))
     end)
   end
 

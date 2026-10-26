@@ -5,6 +5,8 @@ defmodule CymphoWeb.PluginLiveTest do
   alias Cympho.Repo
   alias Cympho.Skills.Plugin
 
+  import CymphoWeb.R3PageHelpers
+
   setup %{conn: conn, current_company: company} = context do
     user_id = Plug.Conn.get_session(conn, :user_id)
     membership = Companies.get_membership(user_id, company.id)
@@ -49,6 +51,59 @@ defmodule CymphoWeb.PluginLiveTest do
       assert html =~ "Browse marketplace"
       assert html =~ "New plugin"
       refute html =~ "Clear filters"
+
+      # r3 (v7 H7): a Settings section; the empty state sits in the Plugins band.
+      doc = main_doc(html)
+      assert_r3_page(doc, page: "settings", h1: "Settings", kind: :root, primaries: 0)
+      assert text(doc, ~s(.snav a[aria-current="page"])) == "Plugins"
+      assert text(doc, ".set-main[data-section=plugins] .card-h .h2") =~ "Plugins"
+      assert [_] = Floki.find(doc, ~s(#plugins-list [data-testid="plugins-empty"].gl-sec))
+      # No plugins yet: the health band would only repeat the empty state.
+      refute html =~ ~s(data-testid="plugin-health")
+    end
+
+    test "rows link to the plugin, carry Turn off/on and a menu, and explain capabilities", %{
+      conn: conn,
+      current_company: company
+    } do
+      plugin =
+        insert_plugin(company.id, %{
+          name: "Row Plugin",
+          enabled: false,
+          status: "disabled",
+          capabilities: ["read:issues"]
+        })
+
+      {:ok, view, _html} = live(conn, "/plugins")
+      doc = main_doc(view)
+      row = ~s(#plugins-list .lrow[id="plugins-#{plugin.id}"])
+
+      assert Floki.attribute(doc, "#{row} a.rt2", "href") == ["/plugins/#{plugin.id}"]
+      assert text(doc, "#{row} .rm") == "#{plugin.identifier} · v1.0.0 · 1 capability"
+      assert text(doc, "#{row} .lr-tr .tag") == "Off"
+
+      assert Floki.attribute(
+               doc,
+               ~s(#{row} .lr-acts button.pl[phx-click="toggle_plugin"]),
+               "data-confirm"
+             ) ==
+               ["Turn on Row Plugin?"]
+
+      assert Floki.attribute(
+               doc,
+               ~s(#{row} details.cympho-menu[id="plugin-menu-#{plugin.id}"] .menu a),
+               "href"
+             ) ==
+               ["/plugins/#{plugin.id}/settings", "/plugins/#{plugin.id}/edit"]
+
+      assert [_] =
+               Floki.find(
+                 doc,
+                 ~s(#{row} .menu button.warn[phx-click="delete"][data-confirm="Delete this plugin?"])
+               )
+
+      assert text(doc, ~s(#{row} .lr-below details[id="plugin-capabilities-#{plugin.id}"])) =~
+               "This plugin can: read issues."
     end
 
     test "mounts and lists plugins for the current company", %{
@@ -139,9 +194,14 @@ defmodule CymphoWeb.PluginLiveTest do
 
       {:ok, view, html} = live(conn, "/plugins")
 
-      assert has_element?(view, "[data-testid='plugin-health']")
-      assert has_element?(view, "[data-testid='plugin-next-action']")
-      assert html =~ "Plugin Health"
+      assert has_element?(view, "[data-testid='plugin-health'].ui-advanced-only")
+
+      assert has_element?(
+               view,
+               "[data-testid='plugin-health'] [data-testid='plugin-next-action']"
+             )
+
+      assert html =~ "Plugin health"
       assert html =~ "Watch"
       assert html =~ "Capability gaps"
       assert html =~ "Scope capabilities"
@@ -306,9 +366,67 @@ defmodule CymphoWeb.PluginLiveTest do
 
       {:ok, view, _html} = live(conn, "/plugins/#{plugin.id}")
 
-      assert has_element?(view, "a.ui-advanced-only[href='/plugins/#{plugin.id}/edit']")
-      assert has_element?(view, "button.ui-advanced-only[phx-click='toggle_plugin']")
+      assert has_element?(view, ".head .ui-advanced-only a[href='/plugins/#{plugin.id}/edit']")
+      assert has_element?(view, ".head .ui-advanced-only button[phx-click='toggle_plugin']")
       assert has_element?(view, "button[phx-click='toggle_plugin'][data-confirm]")
+
+      # r3 (v7 H9): a deep page under Plugins; Delete sits last, for managers.
+      doc = main_doc(view)
+
+      assert_r3_page(doc,
+        page: "plugin",
+        h1: "Advanced Controls",
+        kind: :deep,
+        parent: "Plugins",
+        primaries: 0
+      )
+
+      assert Floki.attribute(
+               doc,
+               ~s(.tray > .card:last-child button.pl.warn[phx-click="delete"]),
+               "data-confirm"
+             ) ==
+               ["Delete this plugin?"]
+    end
+
+    test "the settings view opens the settings JSON under the plugin's name", %{
+      conn: conn,
+      current_company: company
+    } do
+      plugin = insert_plugin(company.id, %{name: "Configured", settings: %{"mode" => "review"}})
+
+      {:ok, view, _html} = live(conn, "/plugins/#{plugin.id}/settings")
+      doc = main_doc(view)
+
+      assert_r3_page(doc,
+        page: "plugin",
+        h1: "Configured settings",
+        kind: :deep,
+        parent: "Plugins"
+      )
+
+      assert page_title(view) =~ "Configured settings"
+      assert [details] = Floki.find(doc, "details#plugin-manifest[open][data-open=true]")
+      assert Floki.find(details, "summary") |> Floki.text() =~ "Settings"
+      assert Floki.find(details, "pre") |> Floki.text() =~ "review"
+
+      {:ok, view, _html} = live(conn, "/plugins/#{plugin.id}")
+      assert [details] = Floki.find(main_doc(view), "details#plugin-manifest[data-open=false]")
+      assert Floki.attribute(details, "open") == []
+    end
+
+    @tag regular_member: true
+    test "members see no Delete, Edit or toggle on the plugin page", %{
+      conn: conn,
+      current_company: company
+    } do
+      plugin = insert_plugin(company.id, %{name: "Read Only"})
+
+      {:ok, view, _html} = live(conn, "/plugins/#{plugin.id}")
+
+      refute has_element?(view, "button[phx-click='delete']")
+      refute has_element?(view, "button[phx-click='toggle_plugin']")
+      refute has_element?(view, "a[href='/plugins/#{plugin.id}/edit']")
     end
 
     test "shows a plain-language Simple overview and scopes raw metadata to Advanced mode", %{
@@ -326,7 +444,8 @@ defmodule CymphoWeb.PluginLiveTest do
       {:ok, view, _html} = live(conn, "/plugins/#{plugin.id}")
 
       assert has_element?(view, "[data-testid='plugin-simple-overview'].ui-simple-only")
-      assert has_element?(view, "[data-testid='plugin-simple-overview']", "Enabled")
+      # r3 (v7 §1.5): the lifecycle default is not printed; only Off is (as a head tag).
+      refute has_element?(view, ".head .tag", "Off")
       assert has_element?(view, "[data-testid='plugin-simple-overview']", company.name)
 
       assert has_element?(
@@ -343,18 +462,68 @@ defmodule CymphoWeb.PluginLiveTest do
                "read:issues"
              )
     end
+
+    test "the description is the head's line in both modes, said once", %{
+      conn: conn,
+      current_company: company
+    } do
+      plugin =
+        insert_plugin(company.id, %{
+          name: "Described",
+          description: "Posts release notes to the team channel."
+        })
+
+      {:ok, view, _html} = live(conn, "/plugins/#{plugin.id}")
+      doc = main_doc(view)
+
+      # Not mode-gated: Advanced lost it when it lived only in the Simple overview.
+      assert [sub] = Floki.find(doc, ".head > p.sub")
+      assert Floki.text(sub) =~ "Posts release notes to the team channel."
+      assert Floki.attribute(sub, "class") == ["sub"]
+
+      assert doc
+             |> Floki.text()
+             |> String.split("Posts release notes to the team channel.")
+             |> length() ==
+               2
+
+      bare = insert_plugin(company.id, %{name: "Bare"})
+      {:ok, view, _html} = live(conn, "/plugins/#{bare.id}")
+      assert Floki.find(main_doc(view), ".head .sub") == []
+    end
   end
 
   describe "PluginLive.New" do
     test "mounts the new-plugin form", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/plugins/new")
+      {:ok, view, html} = live(conn, "/plugins/new")
 
-      assert html =~ "New Plugin"
-      assert html =~ "Plugin launch plan"
+      assert html =~ "New plugin"
       assert html =~ "Runtime manifest"
       assert html =~ "Project scope"
       assert html =~ "Advanced manifest JSON"
-      assert html =~ ~s(data-testid="plugin-setup-checklist")
+      # r3 (v7 H8): three field cards beside the ink card; the checklist went.
+      refute html =~ ~s(data-testid="plugin-setup-checklist")
+
+      doc = main_doc(view)
+
+      assert_r3_page(doc,
+        page: "plugin-form",
+        h1: "New plugin",
+        kind: :deep,
+        parent: "Plugins",
+        primaries: 1
+      )
+
+      assert texts(doc, "#plugin-form .fp-main .card-h .h2") == [
+               "Plugin",
+               "Runtime manifest",
+               "Scope and settings"
+             ]
+
+      assert [_] = Floki.find(doc, "#plugin-form details#plugin-manifest-json.tech")
+      assert [_] = Floki.find(doc, "#plugin-form details#plugin-runtime-json.tech")
+      assert text(doc, "#plugin-form .ink .pw[type=submit]") == "Create plugin"
+      assert Floki.attribute(doc, "#plugin-form .ink a.pd", "href") == ["/plugins"]
     end
 
     test "submitting a guided form creates a company-scoped plugin and redirects to its show page",
@@ -418,9 +587,21 @@ defmodule CymphoWeb.PluginLiveTest do
       {:ok, _view, html} = live(conn, "/plugins/#{plugin.id}/edit")
 
       assert html =~ "Original"
-      assert html =~ "Plugin capability plan"
       assert html =~ "Advanced manifest JSON"
-      assert html =~ ~s(data-testid="plugin-setup-checklist")
+      refute html =~ ~s(data-testid="plugin-setup-checklist")
+
+      doc = main_doc(html)
+
+      assert_r3_page(doc,
+        page: "plugin-form",
+        h1: "Edit Original",
+        kind: :deep,
+        parent: "Plugins",
+        primaries: 1
+      )
+
+      assert text(doc, "#plugin-form .ink .pw[type=submit]") == "Save plugin"
+      assert Floki.attribute(doc, "#plugin-form .ink a.pd", "href") == ["/plugins/#{plugin.id}"]
     end
 
     test "submitting a valid edit form updates manifest, capabilities, and redirects",

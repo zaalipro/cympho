@@ -8,6 +8,64 @@ defmodule CymphoWeb.SettingsLive.IntegrationsTest do
   alias Cympho.Authentication
   alias Cympho.Secrets
 
+  import CymphoWeb.R3PageHelpers
+
+  # v7 S4: the Agrenting form is the section's pair; MCP is one Advanced band.
+  describe "r3 section" do
+    test "renders the connection form as a pair with one primary", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/settings/integrations")
+      doc = main_doc(view)
+
+      assert_r3_page(doc, page: "settings", h1: "Settings", kind: :root, primaries: 1)
+      assert text(doc, "form#agrenting-form .fp-main .card-h h2") == "Integrations"
+      assert text(doc, "form#agrenting-form .ink .pw") == "Save connection"
+      assert text(doc, "form#agrenting-form .card-h .st") == "Not connected"
+
+      assert [test_button] =
+               Floki.find(doc, "form#agrenting-form .ink button[phx-click=test_agrenting]")
+
+      assert Floki.attribute(test_button, "disabled") != []
+
+      assert Floki.find(
+               doc,
+               "form#agrenting-form input[name='agrenting[api_key]'][type=password][autocomplete=off]"
+             ) != []
+
+      assert Floki.find(doc, ".ui-advanced-only input[name='agrenting[base_url]']") != []
+      assert Floki.find(doc, ".ui-advanced-only input[name='agrenting[repo_access_token]']") != []
+
+      assert Floki.find(doc, "section[aria-labelledby=rh-t] a.lnk[href='/agents/remote']") != []
+
+      assert [mcp] = Floki.find(doc, ".ui-advanced-only section[data-testid=mcp-command]")
+      assert Floki.find(mcp, "details#mcp-intake.earlier:not([open])") != []
+      assert Floki.find(mcp, "details#mcp-tool-catalog") != []
+      assert Floki.find(mcp, "form[phx-submit=create_mcp_key] button.pl[type=submit]") != []
+
+      refute render(view) =~ ~r/ember-|cta-glow|font-serif/
+    end
+
+    @tag membership_role: "admin"
+    test "a saved connection shows Disconnect as a warning pill and the test result as a word",
+         %{conn: conn, current_company: company} do
+      assert {:ok, _status} =
+               Agrenting.save_company_config(company.id, %{
+                 "api_key" => "ap_test_key",
+                 "base_url" => "https://agrenting.example.test"
+               })
+
+      {:ok, view, _html} = live(conn, "/settings/integrations")
+
+      assert has_element?(view, "form#agrenting-form .card-h .st", "Connected")
+
+      assert has_element?(
+               view,
+               ~s(form#agrenting-form .card-h button.pl.warn[phx-click=disconnect_agrenting][data-confirm="Disconnect Agrenting for this company?"])
+             )
+
+      refute render(view) =~ "ap_test_key"
+    end
+  end
+
   describe "Agrenting integration" do
     test "renders disconnected setup state", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/settings/integrations")
@@ -22,11 +80,9 @@ defmodule CymphoWeb.SettingsLive.IntegrationsTest do
       assert html =~ "Scoped API key"
       assert html =~ "CEO routing"
       assert html =~ "Tool catalog"
-      assert html =~ "The shortest path from external AI client to CEO-owned work."
       assert html =~ "CEO intake recipe"
       assert html =~ "Copy recipe"
       assert html =~ ~s(data-testid="mcp-tool-catalog")
-      assert html =~ "Expand when you need the full company-scoped tool catalog."
       assert html =~ ~s(&quot;assigned_role&quot;: &quot;ceo&quot;)
       assert html =~ "No agents"
       assert html =~ "Agrenting"

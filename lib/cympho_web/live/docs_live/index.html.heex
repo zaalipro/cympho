@@ -1,284 +1,85 @@
-<div class="min-h-screen bg-canvas text-ink flex flex-col" id="doc-top">
-  <!-- Mobile Header Bar -->
-  <header class="lg:hidden flex items-center justify-between px-4 py-3 border-b border-hairline bg-surface-1">
+<.page_frame page="docs" title="Documentation" data-ui-complex-page>
+  <:header_end>
+    <%!-- Below 1024 px the topic nav hides; this opens it as a sheet. --%>
     <button
       type="button"
+      id="docs-topics-btn"
+      class="pl dc-topics"
       phx-click="toggle_mobile_sidebar"
-      class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-hairline bg-surface-2 text-xs font-510 text-ink-muted hover:text-ink"
-      aria-label="Open Topics Menu"
+      aria-expanded={to_string(@mobile_sidebar_open)}
     >
-      <svg class="w-4 h-4 text-ink-subtle" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M4 6h16M4 12h16M4 18h16"
-        />
-      </svg>
-      <span>Topics</span>
+      Topics
     </button>
+  </:header_end>
 
-    <div class="flex items-center gap-2">
-      <button
-        type="button"
-        phx-click="open_search"
-        class="p-2 rounded-lg border border-hairline bg-surface-2 text-ink-subtle hover:text-ink"
-        aria-label="Search Documentation"
-      >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-          />
-        </svg>
-      </button>
-    </div>
-  </header>
-  
-<!-- Mobile Sidebar Drawer -->
-  <div :if={@mobile_sidebar_open} class="fixed inset-0 z-50 lg:hidden">
-    <div
-      class="fixed inset-0 bg-black/60 backdrop-blur-sm"
-      phx-click="close_mobile_sidebar"
-      aria-hidden="true"
-    >
-    </div>
-    <div class="fixed inset-y-0 left-0 w-72 max-w-full bg-surface-1 shadow-2xl flex flex-col z-10 border-r border-hairline">
-      <div class="p-4 border-b border-hairline flex items-center justify-between">
-        <span class="font-serif text-sm font-510 text-ink">Documentation Topics</span>
-        <button
-          type="button"
-          phx-click="close_mobile_sidebar"
-          class="p-1 rounded-md text-ink-subtle hover:text-ink"
-          aria-label="Close menu"
-        >
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
-      </div>
-      <div class="flex-1 overflow-y-auto">
-        <.sidebar
-          topics={@topics}
-          active_topic_slug={@active_topic_slug}
-          active_section_slug={@active_section_slug}
-          mobile={true}
-        />
-      </div>
-    </div>
-  </div>
-  
-<!-- Desktop & Main Container -->
-  <div class="flex-1 flex max-w-7xl w-full mx-auto">
-    <!-- Desktop Sidebar Sub-Nav -->
-    <div class="hidden lg:block shrink-0">
-      <div class="sticky top-0 h-screen">
-        <.sidebar
-          topics={@topics}
-          active_topic_slug={@active_topic_slug}
-          active_section_slug={@active_section_slug}
-          mobile={false}
-        />
-      </div>
-    </div>
-    
-<!-- Main Content Pane -->
-    <main class="flex-1 min-w-0 px-4 py-8 sm:px-8 lg:px-12 max-w-4xl">
-      <!-- Breadcrumbs & Meta Top Bar -->
-      <div class="flex flex-wrap items-center justify-between gap-3 pb-6 mb-6 border-b border-hairline text-xs text-ink-subtle">
-        <nav aria-label="Breadcrumb" class="flex items-center gap-1.5 flex-wrap">
-          <.link patch={~p"/docs"} class="hover:text-ink transition-colors">
-            Docs
-          </.link>
-          <span>/</span>
-          <.link patch={~p"/docs/#{@active_topic_slug}"} class="hover:text-ink transition-colors">
-            {String.replace(@active_topic_slug, "-", " ") |> String.capitalize()}
-          </.link>
-          <span>/</span>
-          <span class="text-ink font-510 truncate">
-            {@active_doc.title}
-          </span>
+  <div class="dc">
+    <.sidebar
+      topics={@topics}
+      active_topic_slug={@active_topic_slug}
+      active_section_slug={@active_section_slug}
+    />
+
+    <article class="card dc-art" id="doc-top" aria-labelledby="doc-title">
+      <div class="dc-meta">
+        <nav aria-label="Breadcrumb" class="dc-crumb">
+          <.link patch={~p"/docs"}>Docs</.link><span aria-hidden="true">›</span><.link patch={
+            ~p"/docs/#{@active_topic_slug}"
+          }>{String.replace(@active_topic_slug, "-", " ") |> String.capitalize()}</.link><span aria-hidden="true">›</span><span aria-current="page">{@active_doc.title}</span>
         </nav>
-
-        <div class="flex items-center gap-3">
-          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-2 border border-hairline text-[11px] text-ink-tertiary">
-            <svg class="w-3 h-3 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            <span>{@active_doc.reading_time_minutes} min read</span>
-          </span>
-          <span class="text-[11px] text-ink-tertiary">
-            Updated {@active_doc.last_updated}
-          </span>
-        </div>
+        <span class="meta">
+          <span class="mono">{@active_doc.reading_time_minutes}</span>
+          min read<span aria-hidden="true"> · </span>Updated {@active_doc.last_updated}
+        </span>
       </div>
-      
-<!-- Article Header -->
-      <article class="space-y-6">
-        <header class="space-y-3">
-          <h1 class="font-serif text-3xl sm:text-4xl font-510 tracking-tight text-ink">
-            {@active_doc.title}
-          </h1>
-          <p class="text-base sm:text-lg text-ink-muted leading-relaxed font-normal">
-            {@active_doc.summary}
-          </p>
-        </header>
-        
-<!-- Mobile Table of Contents Dropdown -->
-        <.mobile_toc anchors={@active_doc.anchors} />
-        
-<!-- Rendered Document Body -->
-        <div class="docs-content max-w-none text-[15px] leading-relaxed text-ink-muted mt-8">
-          {@active_doc.html_content}
-        </div>
-        
-<!-- Sequential Pagination: Prev / Next Navigation Cards -->
-        <div class="pt-10 mt-12 border-t border-hairline grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <%= if @active_doc.prev_doc do %>
-              <.link
-                patch={@active_doc.prev_doc.path}
-                class="group flex flex-col p-4 rounded-xl border border-hairline bg-surface-1 hover:bg-surface-2 hover:border-hairline-strong transition-all h-full"
-              >
-                <span class="text-[11px] font-510 uppercase tracking-wider text-ink-tertiary group-hover:text-brand flex items-center gap-1">
-                  <span>←</span>
-                  <span>Previous</span>
-                </span>
-                <span class="mt-1 font-serif text-[15px] font-510 text-ink group-hover:text-ink transition-colors">
-                  {@active_doc.prev_doc.title}
-                </span>
-              </.link>
-            <% end %>
-          </div>
 
-          <div>
-            <%= if @active_doc.next_doc do %>
-              <.link
-                patch={@active_doc.next_doc.path}
-                class="group flex flex-col items-end text-right p-4 rounded-xl border border-hairline bg-surface-1 hover:bg-surface-2 hover:border-hairline-strong transition-all h-full"
-              >
-                <span class="text-[11px] font-510 uppercase tracking-wider text-ink-tertiary group-hover:text-brand flex items-center gap-1">
-                  <span>Next</span>
-                  <span>→</span>
-                </span>
-                <span class="mt-1 font-serif text-[15px] font-510 text-ink group-hover:text-ink transition-colors">
-                  {@active_doc.next_doc.title}
-                </span>
-              </.link>
-            <% end %>
-          </div>
-        </div>
-      </article>
-    </main>
-    
-<!-- Desktop Right-Hand "On This Page" Table of Contents -->
+      <h2 class="nt" id="doc-title">{@active_doc.title}</h2>
+      <p class="dc-sum">{@active_doc.summary}</p>
+
+      <.mobile_toc anchors={@active_doc.anchors} />
+
+      <div class="docs-content">{@active_doc.html_content}</div>
+
+      <nav class="dc-pn" aria-label="Pages">
+        <.text_link :if={@active_doc.prev_doc} patch={@active_doc.prev_doc.path} arrow={false}>
+          <.r3_icon name="i-arrow-left" /><span>Previous</span><span aria-hidden="true">·</span><span class="dc-pn-t">{@active_doc.prev_doc.title}</span>
+        </.text_link>
+        <span :if={!@active_doc.prev_doc}></span>
+        <.text_link :if={@active_doc.next_doc} patch={@active_doc.next_doc.path}>
+          <span>Next</span><span aria-hidden="true">·</span><span class="dc-pn-t">{@active_doc.next_doc.title}</span>
+        </.text_link>
+      </nav>
+    </article>
+
     <.toc anchors={@active_doc.anchors} />
   </div>
-  
-<!-- Global Instant Search Modal -->
+
+  <.modal
+    :if={@mobile_sidebar_open}
+    id="docs-topics-sheet"
+    show
+    title="Topics"
+    on_cancel={close_topics()}
+  >
+    <%!-- The sheet renders after the article, so opening it moves the keyboard in. Escape closes it,
+         as it closes the search dialog, except while that dialog is open on top of it. --%>
+    <div
+      phx-mounted={JS.focus_first()}
+      phx-window-keydown={!@search_open && close_topics()}
+      phx-key="Escape"
+    >
+      <.sidebar
+        topics={@topics}
+        active_topic_slug={@active_topic_slug}
+        active_section_slug={@active_section_slug}
+        mobile={true}
+      />
+    </div>
+  </.modal>
+
   <.search_modal
     open={@search_open}
     query={@search_query}
     results={@search_results}
     selected_index={@selected_index}
   />
-
-  <style>
-    .docs-content h2 {
-      font-family: var(--font-serif, serif);
-      font-size: 1.35rem;
-      font-weight: 510;
-      color: var(--color-ink, #FAF9F5);
-      margin-top: 2.25rem;
-      margin-bottom: 0.75rem;
-      scroll-margin-top: 5rem;
-      border-bottom: 1px solid var(--color-hairline, #3A3733);
-      padding-bottom: 0.5rem;
-    }
-    .docs-content h3 {
-      font-family: var(--font-serif, serif);
-      font-size: 1.1rem;
-      font-weight: 510;
-      color: var(--color-ink, #FAF9F5);
-      margin-top: 1.75rem;
-      margin-bottom: 0.5rem;
-      scroll-margin-top: 5rem;
-    }
-    .docs-content p {
-      margin-bottom: 1.15rem;
-      line-height: 1.7;
-      color: var(--color-ink-muted, #E5E1D8);
-    }
-    .docs-content ul, .docs-content ol {
-      margin-bottom: 1.25rem;
-      padding-left: 1.4rem;
-      color: var(--color-ink-muted, #E5E1D8);
-    }
-    .docs-content ul {
-      list-style-type: disc;
-    }
-    .docs-content ol {
-      list-style-type: decimal;
-    }
-    .docs-content li {
-      margin-bottom: 0.4rem;
-      line-height: 1.6;
-    }
-    .docs-content pre {
-      background: var(--color-surface-2, #2D2C2A);
-      border: 1px solid var(--color-hairline, #3A3733);
-      border-radius: 0.75rem;
-      padding: 1rem 1.25rem;
-      margin: 1.5rem 0;
-      overflow-x: auto;
-      font-family: var(--font-mono, monospace);
-      font-size: 0.8125rem;
-      line-height: 1.6;
-    }
-    .docs-content code:not(pre code) {
-      background: var(--color-surface-2, #2D2C2A);
-      border: 1px solid var(--color-hairline, #3A3733);
-      border-radius: 0.375rem;
-      padding: 0.15rem 0.35rem;
-      font-family: var(--font-mono, monospace);
-      font-size: 0.8125rem;
-      color: var(--color-ink, #FAF9F5);
-    }
-    .docs-content table {
-      width: 100%;
-      margin: 1.5rem 0;
-      border-collapse: collapse;
-      font-size: 0.875rem;
-    }
-    .docs-content th {
-      text-align: left;
-      padding: 0.6rem 0.8rem;
-      border-bottom: 1px solid var(--color-hairline-strong, #4A453F);
-      color: var(--color-ink, #FAF9F5);
-      font-weight: 590;
-      background: var(--color-surface-1, #262624);
-    }
-    .docs-content td {
-      padding: 0.6rem 0.8rem;
-      border-bottom: 1px solid var(--color-hairline, #3A3733);
-      color: var(--color-ink-muted, #E5E1D8);
-    }
-    .docs-content hr {
-      border: 0;
-      border-top: 1px solid var(--color-hairline, #3A3733);
-      margin: 2rem 0;
-    }
-  </style>
-</div>
+</.page_frame>

@@ -1,0 +1,155 @@
+/* r3 page CSS: settings. Owned by the settings track (v7 spec §4); no other track edits this file.
+   - Every selector starts with .cy-r3; scope page-only rules with .cy-r3 [data-page="…"]
+     (data-page sits on the page frame rendered by page_frame/1).
+   - No colour literal: use the tokens (app.css :root, themes.css). A new colour token goes into
+     the light block and both identical dark copies, never here.
+   - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
+   - Shared components belong in r3.css, not here. */
+
+/* Settings sections render in the r3 frame (SettingsLayout, v7 §3.1 B12): money.css's .set-page .snav{top:8px},
+   written for the old frame without a sticky header, would slide the section nav under the context header */
+.cy-r3 [data-page="settings"] .set-page .snav{top:76px}
+/* "All settings": only phones, where money.css hides the section nav on a section page (shown in §5);
+   the Company page's own sections (?section=) carry it too */
+.cy-r3 [data-page="settings"] .set-bk{display:none}
+
+/* ================================================================
+   1. Shared by the settings sections and their deep pages (v7 §4.1)
+   ================================================================ */
+
+/* a band header's end controls (a count, a status word, a pill) cluster at the end */
+.cy-r3 [data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]) .card-h>h2,.cy-r3 [data-page="adapter"] .card-h>h2{margin-right:auto}
+/* a status word beside a band title, on a row or after a field: glyph + word, the word in --ink-2 */
+.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .st{display:inline-flex;align-items:center;gap:6px;font-size:13px;line-height:18px;color:var(--ink-2)}
+/* a section's one-line purpose or summary inside its band, aligned with the band title */
+.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) :is(.in-l,.rc-l,.sf-l,.hl-m,.cfg-ro){padding:6px 12px 4px;max-width:72ch}
+.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .card>.err{padding:8px 12px 0}
+.cy-r3 [data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"])>.err{padding:0 4px}
+/* the Advanced summary cards (policy coverage, audit summary): heading, detail, focus tags, one link */
+.cy-r3 [data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]) .cmd{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:10px 12px 8px}
+.cy-r3 [data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]) .cmd .lnk{margin-left:-4px}
+.cy-r3 [data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]) .cmd-f{display:flex;flex-wrap:wrap;gap:6px}
+.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .card .strip .v{font-size:22px;line-height:28px}
+.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .card .strip .v.mono{font-size:20px}
+/* long tokens (keys, URLs, module names, hashes) wrap instead of widening the page */
+.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"],[data-page="policy"],[data-page="policy-form"]) :is(.rt,.rt2,.rm,.mono,.tag,.gl-sub,.kv dd){overflow-wrap:anywhere}
+.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .tag.mono{height:auto;min-height:22px;font-size:12px}
+/* checkbox rows: a 32 px hit area on desktop (r3.css gives 24, and 44 on phones) */
+.cy-r3 :is([data-page="adapter"],[data-page="policy-form"]) .fld-ck{min-height:32px}
+
+/* ================================================================
+   2. Sections
+   ================================================================ */
+
+/* Alerts: a channel's inline form (a field and its pill) and its action line; tile and switch stay at the top */
+.cy-r3 .set-main[data-section="notifications"] .srow{align-items:flex-start}
+.cy-r3 .set-main[data-section="notifications"] .srow .end{min-height:40px}
+.cy-r3 .set-main[data-section="notifications"] .ch-f{display:flex;align-items:flex-end;gap:8px;margin-top:10px;max-width:520px}
+.cy-r3 .set-main[data-section="notifications"] .ch-f .fld{flex:1}
+.cy-r3 .set-main[data-section="notifications"] .ch-a{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px}
+
+/* Integrations: the setup steps carry a detail line; routes as tags; the recipe and the one-time key */
+.cy-r3 .set-main[data-section="integrations"] .in-r{padding:2px 12px 10px}
+.cy-r3 .set-main[data-section="integrations"] .in-b{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:6px 12px 10px}
+.cy-r3 .set-main[data-section="integrations"] .in-b .in-l{padding:0}
+.cy-r3 .set-main[data-section="integrations"] .in-b .lnk{margin-left:-4px}
+.cy-r3 .set-main[data-section="integrations"] .step{min-height:52px}
+.cy-r3 .set-main[data-section="integrations"] .step-t{display:flex;flex-direction:column;gap:2px;min-width:0;color:var(--ink)}
+.cy-r3 .set-main[data-section="integrations"] .step:not(:last-child)::before{height:32px}
+.cy-r3 .set-main[data-section="integrations"] .in-tags{display:flex;flex-wrap:wrap;gap:6px;padding:4px 12px 8px}
+.cy-r3 .set-main[data-section="integrations"] .earlier{margin-top:6px}
+.cy-r3 .set-main[data-section="integrations"] .earlier>summary .mono{color:var(--ink)}
+.cy-r3 .set-main[data-section="integrations"] .in-d{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:4px 8px 12px}
+.cy-r3 .set-main[data-section="integrations"] .in-d .in-l{padding:0}
+.cy-r3 [data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]) :is(pre.code,pre.pay){width:100%;max-height:240px;overflow:auto;margin:0;padding:10px 12px;border-radius:var(--r-row);background:var(--well);border:1px solid var(--band-line);font:12px/18px var(--mono);color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+.cy-r3 .set-main[data-section="integrations"] .in-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:4px 8px 12px}
+.cy-r3 .set-main[data-section="integrations"] .in-tools li{display:flex;flex-direction:column;gap:2px;min-width:0;padding:8px 10px;border-radius:var(--r-row);background:var(--well);border:1px solid var(--band-line)}
+.cy-r3 .set-main[data-section="integrations"] .in-tools .mono{font-size:12px;color:var(--ink)}
+.cy-r3 .set-main[data-section="integrations"] .in-k{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:8px 12px 12px}
+.cy-r3 .set-main[data-section="integrations"] .in-k .flds{width:100%}
+.cy-r3 .set-main[data-section="integrations"] .in-key{display:flex;flex-direction:column;gap:6px;margin:0 12px 12px;padding:12px;border-radius:var(--r-row);background:var(--waiting-bg);border:1px solid var(--waiting-line)}
+.cy-r3 .set-main[data-section="integrations"] .in-key .in-l{padding:0}
+.cy-r3 .set-main[data-section="integrations"] .in-key code{display:block;padding:8px 10px;border-radius:8px;background:var(--well);border:1px solid var(--band-line);font-size:12px;line-height:18px;color:var(--ink);overflow-wrap:anywhere}
+
+/* How agents run: the readiness summary and its links above the runtime rows */
+.cy-r3 .set-main[data-section="adapters"] .ad-sum{display:flex;flex-direction:column;gap:4px;padding:8px 12px 4px}
+.cy-r3 .set-main[data-section="adapters"] .ad-acts{display:flex;flex-wrap:wrap;gap:4px 12px;margin-left:-4px}
+.cy-r3 .set-main[data-section="adapters"] .ad-sum .strip{margin:6px -12px 0}
+
+/* Keys and secrets: a key reads as an identifier */
+.cy-r3 .set-main[data-section="secrets"] #secrets-list .rt{font-family:var(--mono);font-size:13px}
+.cy-r3 .set-main[data-section="secrets"] .lrow .rm .tag{height:18px;padding:0 7px}
+
+/* Audit log: the filter panel holds a two-column field grid; payloads open as code */
+.cy-r3 .set-main[data-section="audit"] .au-flds{width:min(520px,calc(100vw - 80px))}
+.cy-r3 .set-main[data-section="audit"] .flt-p>.pl{align-self:flex-start}
+.cy-r3 .set-main[data-section="audit"] .lr-below .earlier{margin:0;border-top:0}
+.cy-r3 .set-main[data-section="audit"] .lr-below .earlier>summary{display:inline-flex;min-height:28px;margin-left:-6px;padding:0 6px;font-size:12px}
+.cy-r3 .set-main[data-section="audit"] .lr-below .earlier>summary .ico{margin-left:4px}
+.cy-r3 .set-main[data-section="audit"] pre.pay{margin:4px 0 6px}
+
+/* ================================================================
+   3. Deep pages: a runtime (adapter), a review step (policy), its form (policy-form)
+   ================================================================ */
+.cy-r3 [data-page="adapter"] .cfoot{display:flex;margin:4px 4px 2px;padding:10px 8px 4px;border-top:1px solid var(--hair);font-size:13px;color:var(--ink-2)}
+.cy-r3 [data-page="adapter"] .head .sub .mono{color:var(--ink)}
+.cy-r3 [data-page="adapter"] .gl-sec .pl,.cy-r3 [data-page="policy"] .gl-sec .pl{align-self:flex-start;margin-top:6px}
+
+/* a review step's stages: the r3 step list, type word then participant, gates at the end */
+.cy-r3 [data-page="policy"] .step{min-height:48px}
+.cy-r3 [data-page="policy"] .step:not(:last-child)::before{top:35px;height:26px}
+.cy-r3 [data-page="policy"] .step-t{color:var(--ink)}
+.cy-r3 [data-page="policy"] .step-t .mono{margin:0 0 0 8px;font-size:13px}
+.cy-r3 [data-page="policy"] .chk.mono{font-size:12px}
+.cy-r3 [data-page="policy"] .nop{margin-left:8px;font-size:13px;color:var(--stopped)}
+.cy-r3 [data-page="policy"] .step-g{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+
+/* the review-step form: one block per stage, its three gates in a row */
+.cy-r3 [data-page="policy-form"] .stg-l{padding:6px 12px 2px}
+.cy-r3 [data-page="policy-form"] .stg{display:flex;flex-direction:column;gap:6px;margin:6px 4px 0;padding:8px 8px 12px;border-top:1px solid var(--hair)}
+.cy-r3 [data-page="policy-form"] .stg>.help{padding:0 6px}
+.cy-r3 [data-page="policy-form"] .stg>.flds{padding:4px 6px 0}
+.cy-r3 [data-page="policy-form"] .cks{display:flex;flex-wrap:wrap;gap:4px 20px;padding:4px 6px 0}
+/* the gate hints stay in aria-describedby (and the title), not on the page */
+.cy-r3 [data-page="policy-form"] .cks .help{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.cy-r3 [data-page="policy-form"] .tech>summary .ico{margin-left:auto}
+
+/* ================================================================
+   4. 1024
+   ================================================================ */
+@media (max-width:1180px){
+  .cy-r3 .set-main[data-section="integrations"] .in-tools{grid-template-columns:minmax(0,1fr)}
+}
+
+/* ================================================================
+   5. phone (390)
+   ================================================================ */
+@media (max-width:640px){
+  .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .card .strip .v{font-size:18px;line-height:24px}
+  .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .card .strip .v.mono{font-size:17px}
+  /* a row's status and its actions share one line under the title (r3.css puts the actions on their own line
+     and indents the status under a tile) */
+  .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .lrow>.lr-st+.lr-acts{flex-basis:auto;margin-left:auto;padding-left:0}
+  /* actions on a line of their own (no status word) sit at the row's end, as they do beside a status word */
+  .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .lrow .lr-acts{justify-content:flex-end}
+  /* the section nav is hidden here (money.css): a way back to Settings' list, above the section */
+  .cy-r3 [data-page="settings"] .set-bk{display:inline-flex;align-self:flex-start;padding:0 16px 0 10px}
+  /* Profile › Signed in: Sign out stays beside the email (money.css stacks .end under the words) */
+  .cy-r3 .set-main[data-section="profile"] .srow{flex-wrap:nowrap}
+  .cy-r3 .set-main[data-section="profile"] .srow .end{width:auto;padding-left:0}
+  .cy-r3 .set-main[data-section="notifications"] .ch-f{max-width:none}
+  /* the switch keeps its place beside the channel instead of wrapping under it (money.css stacks .end) */
+  .cy-r3 .set-main[data-section="notifications"] .srow{flex-wrap:nowrap}
+  .cy-r3 .set-main[data-section="notifications"] .srow .end{width:auto;padding-left:0;min-height:44px}
+  /* the Detail switch: money.css's 34 px .set-page .seg buttons outrank r3.css's 44 px phone rule */
+  .cy-r3 .set-main[data-section="appearance"] .seg button{height:44px}
+  .cy-r3 .set-main[data-section="notifications"] .ch-f .pl{height:44px}
+  .cy-r3 .set-main[data-section="audit"] .au-flds{width:calc(100vw - 72px)}
+  .cy-r3 .set-main[data-section="audit"] .lr-below .earlier>summary{min-height:44px}
+  .cy-r3 [data-page="policy"] .step{grid-template-columns:22px minmax(0,1fr);padding:6px 0}
+  .cy-r3 [data-page="policy"] .step-g{grid-column:2;justify-content:flex-start}
+  .cy-r3 [data-page="policy"] .step:not(:last-child)::before{display:none}
+  .cy-r3 [data-page="policy-form"] .cks{flex-direction:column;gap:0}
+  /* the 32 px desktop rule above outranks r3.css's 44 px phone floor */
+  .cy-r3 :is([data-page="adapter"],[data-page="policy-form"]) .fld-ck{min-height:44px}
+}

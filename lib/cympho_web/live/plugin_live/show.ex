@@ -50,8 +50,23 @@ defmodule CymphoWeb.PluginLive.Show do
 
   defp apply_action(socket, :settings, _params) do
     socket
-    |> assign(:page_title, "Settings: #{socket.assigns.plugin.name}")
+    |> assign(:page_title, "#{socket.assigns.plugin.name} settings")
   end
+
+  defdelegate toggle_label(plugin), to: CymphoWeb.PluginLive.Index
+  defdelegate plugin_error?(plugin), to: CymphoWeb.PluginLive.Index
+  defdelegate status_label(status), to: CymphoWeb.PluginLive.Index
+
+  defp scope_label(plugin) do
+    company = (plugin.company && plugin.company.name) || "Global"
+    project = (plugin.project && plugin.project.name) || "All projects"
+    "#{company} / #{project}"
+  end
+
+  defp permissions_sentence(%{capabilities: capabilities}) when capabilities not in [nil, []],
+    do: "This plugin can #{CymphoWeb.PluginLive.Index.humanized_capabilities(capabilities)}."
+
+  defp permissions_sentence(_plugin), do: "No host access is declared."
 
   @impl true
   def handle_event("toggle_plugin", _params, socket) do

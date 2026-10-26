@@ -1,6 +1,8 @@
 defmodule CymphoWeb.ActivityLiveTest do
   use CymphoWeb.LiveCase, async: true
 
+  import CymphoWeb.R3PageHelpers
+
   alias Cympho.Repo
   alias Cympho.Activities.Activity
 
@@ -48,6 +50,12 @@ defmodule CymphoWeb.ActivityLiveTest do
 
   test "shows the empty state when there are no activities", %{conn: conn} do
     {:ok, _view, html} = live(conn, "/activity")
+    doc = main_doc(html)
+    # r3 (v7 G4): a root page under Home; the filters sit behind one Filter chip.
+    assert_r3_page(doc, page: "activity", h1: "Activity", kind: :root, primaries: 0)
+    assert Floki.find(doc, ~s(details#activity-filter select[name="filter_action"])) != []
+    assert Floki.find(doc, ~s(details#activity-filter select[name="filter_actor_type"])) != []
+    assert Floki.find(doc, ~s(section#activity-feed #activity-list.rows)) != []
     assert html =~ ~s(data-testid="activity-command")
     assert html =~ "No company activity has been captured yet"
     assert html =~ "Audit lanes"
@@ -157,6 +165,15 @@ defmodule CymphoWeb.ActivityLiveTest do
     {:ok, view, html} = live(conn, "/activity")
     row = fn activity -> view |> element("#activities-#{activity.id}") |> render() end
 
+    # Each event is a row: the sentence, then who · task · when.
+    doc = main_doc(html)
+    assert text(doc, "#activities-#{by_member.id} .rt") =~ "Status changed"
+    assert text(doc, "#activities-#{by_member.id} .rm") =~ "Maya Chen · Named actors"
+
+    assert Floki.attribute(doc, "#activities-#{by_member.id} .rm a.ul", "href") == [
+             "/issues/#{issue.id}"
+           ]
+
     assert row.(by_member) =~ "Maya Chen"
     refute html =~ "User #{String.slice(member.id, 0, 8)}"
     assert row.(by_agent) =~ "Ravi"
@@ -164,6 +181,81 @@ defmodule CymphoWeb.ActivityLiveTest do
     # Only the company's own members are named.
     refute html =~ "Olga Outsider"
     assert row.(by_outsider) =~ "User #{String.slice(outsider.id, 0, 8)}"
+  end
+
+  test "each row reads as a sentence from the event's own detail", %{
+    conn: conn,
+    current_company: company
+  } do
+    {:ok, issue} = Cympho.Issues.create_issue(%{title: "Sentence probe", company_id: company.id})
+    Repo.delete_all(Activity)
+
+    status =
+      insert_activity(issue, %{
+        action: "status_changed",
+        metadata: %{"from" => "todo", "to" => "in_progress"}
+      })
+
+    cost = insert_activity(issue, %{action: "cost_incurred", metadata: %{"amount" => "1.25"}})
+
+    # A nested value is not a sentence part: the row keeps the action's label.
+    nested =
+      insert_activity(issue, %{action: "status_changed", metadata: %{"to" => %{"x" => 1}}})
+
+    failed = insert_activity(issue, %{action: "heartbeat_failed"})
+
+    {:ok, _view, html} = live(conn, "/activity")
+    doc = main_doc(html)
+
+    assert text(doc, "#activities-#{status.id} .rt") == "Status changed from todo to in progress"
+    assert text(doc, "#activities-#{cost.id} .rt") == "Cost incurred: 1.25"
+    assert text(doc, "#activities-#{nested.id} .rt") == "Status changed"
+    # A failure is a problem row.
+    assert Floki.find(doc, "#activities-#{failed.id} .kt.p") != []
+    assert Floki.find(doc, "#activities-#{status.id} .kt.p") == []
+  end
+
+  test "a title change names the old and the new title, as written", %{
+    conn: conn,
+    current_company: company
+  } do
+    {:ok, issue} = Cympho.Issues.create_issue(%{title: "Title probe", company_id: company.id})
+    Repo.delete_all(Activity)
+
+    renamed =
+      insert_activity(issue, %{
+        action: "title_changed",
+        metadata: %{"from" => "fix_login", "to" => "Fix the login"}
+      })
+
+    only_to = insert_activity(issue, %{action: "title_changed", metadata: %{"to" => "New name"}})
+
+    work =
+      insert_activity(issue, %{
+        action: "work_product_created",
+        metadata: %{"title" => "release_notes.md"}
+      })
+
+    {:ok, _view, html} = live(conn, "/activity")
+    doc = main_doc(html)
+
+    assert text(doc, "#activities-#{renamed.id} .rt") ==
+             "Title changed from “fix_login” to “Fix the login”"
+
+    assert text(doc, "#activities-#{only_to.id} .rt") == "Title changed to “New name”"
+    assert text(doc, "#activities-#{work.id} .rt") == "Work product created: release_notes.md"
+  end
+
+  # An audit row keeps its clock after a day, as the Audit log's rows do.
+  test "an event's time keeps the day and the clock", %{conn: conn, current_company: company} do
+    {:ok, issue} = Cympho.Issues.create_issue(%{title: "Clock probe", company_id: company.id})
+    Repo.delete_all(Activity)
+
+    old = insert_activity(issue, %{inserted_at: ~U[2026-01-02 14:05:00Z]})
+
+    {:ok, _view, html} = live(conn, "/activity")
+
+    assert text(main_doc(html), "#activities-#{old.id} .rm .nw") == "Fri 2 Jan 14:05"
   end
 
   test "filtered empty command clears back to the activity feed", %{
@@ -175,6 +267,8 @@ defmodule CymphoWeb.ActivityLiveTest do
 
     {:ok, _view, html} = live(conn, "/activity?filter_actor_type=user")
 
+    # The Filter chip counts the filters in use.
+    assert text(main_doc(html), "#activity-filter summary .mono") == "1"
     assert html =~ "No matching activity in this view"
     assert html =~ "Clear filters"
     assert html =~ ~s(href="/activity")

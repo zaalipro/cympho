@@ -108,6 +108,15 @@ defmodule CymphoWeb.TeamRailLiveTest do
     assert Floki.attribute(see_all, "href") == ["/agents"]
   end
 
+  # The heartbeat skips a sleeping agent (agent_heartbeat.ex), so "Idle" would say it takes work.
+  test "a sleeping agent reads Sleeping, not Idle", %{conn: conn, company: company} do
+    agent!(company, "Nia", :sleeping)
+
+    {:ok, _view, html} = live_isolated(conn, TeamRailLive, session: session(conn, company.id))
+
+    assert %{word: "Sleeping", pin: false} = html |> rows() |> Enum.find(&(&1.name == "Nia"))
+  end
+
   test "the for-you chips add up to the Inbox count", %{conn: conn, company: company} do
     {:ok, _view, html} = live_isolated(conn, TeamRailLive, session: session(conn, company.id))
 

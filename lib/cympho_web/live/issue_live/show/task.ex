@@ -939,7 +939,8 @@ defmodule CymphoWeb.IssueLive.Show.Task do
   defp agent_word(:error), do: "Stopped"
   defp agent_word(:paused), do: "Paused"
   defp agent_word(:offline), do: "Offline"
-  defp agent_word(_idle_or_sleeping), do: "Idle"
+  defp agent_word(:sleeping), do: "Sleeping"
+  defp agent_word(_idle), do: "Idle"
 
   ## ── Thread ───────────────────────────────────────────────────
 

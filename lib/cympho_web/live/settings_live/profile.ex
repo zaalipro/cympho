@@ -54,4 +54,15 @@ defmodule CymphoWeb.SettingsLive.Profile do
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
     assign(socket, :form, to_form(changeset))
   end
+
+  # "Maya Chen" → "MC", as the rail's account menu shows it.
+  defp initials(name) when is_binary(name) and name != "" do
+    name
+    |> String.split()
+    |> Enum.map_join(&String.first/1)
+    |> String.slice(0, 2)
+    |> String.upcase()
+  end
+
+  defp initials(_name), do: "?"
 end

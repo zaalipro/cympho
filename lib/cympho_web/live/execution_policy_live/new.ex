@@ -15,7 +15,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.New do
       assign(socket,
         changeset: changeset,
         form: to_form(changeset),
-        page_title: "New Execution Policy",
+        page_title: "New review step",
         stage_configs_text: nil
       )
 

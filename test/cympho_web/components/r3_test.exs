@@ -516,8 +516,367 @@ defmodule CymphoWeb.Components.R3Test do
       html = doc(render_component(&r3_sprite/1, %{}))
 
       for id <-
-            ~w(i-home i-inbox i-tasks i-team i-spend i-settings i-search i-plus i-chev-down i-chev-updown g-work g-wait g-stop g-done g-idle) do
+            ~w(i-home i-inbox i-tasks i-team i-spend i-settings i-search i-plus i-chev-down i-chev-updown g-work g-wait g-stop g-done g-idle i-x i-more) do
         assert Floki.find(html, "symbol##{id}") != [], "missing #{id}"
+      end
+    end
+  end
+
+  # v7 §3.1 A1–A5: the finish-redesign shared parts.
+  describe "form_pair" do
+    defp pair(extra \\ %{}) do
+      assigns = Map.merge(%{secondary: true}, extra)
+
+      doc(~H"""
+      <.form_pair
+        id="project-form"
+        for={%{}}
+        heading="After you create it"
+        verb="create"
+        phx-change="validate"
+        phx-submit="save"
+      >
+        <.band_card id="pf-t" title="Details">
+          <p class="field-marker">fields</p>
+        </.band_card>
+        <:effect>
+          <.ink_note>Tasks can be filed under it right away.</.ink_note>
+        </:effect>
+        <:secondary :if={@secondary}>
+          <.ghost_pill navigate="/projects">Cancel</.ghost_pill>
+        </:secondary>
+        <:primary>
+          <.primary_pill type="submit">Create project</.primary_pill>
+        </:primary>
+      </.form_pair>
+      """)
+    end
+
+    test "renders one form.next.fpair whose fields sit in .fp-main" do
+      html = pair()
+
+      assert [form] = Floki.find(html, "form.next.fpair#project-form")
+      assert attr_of(form, "phx-change") == "validate"
+      assert attr_of(form, "phx-submit") == "save"
+      assert Floki.find(form, ".fp-main .field-marker") != []
+    end
+
+    test "holds exactly one primary, inside the ink card, as the submit button" do
+      html = pair()
+
+      assert [pw] = Floki.find(html, ".pw")
+      assert Floki.find(html, ".ink .pw") == [pw]
+      assert attr_of(pw, "type") == "submit"
+    end
+
+    test "labels the ink card by its heading and keeps the secondary before the primary" do
+      html = pair()
+
+      assert [ink] = Floki.find(html, "article.ink")
+      assert attr_of(ink, "aria-labelledby") == "project-form-h"
+      assert Floki.text(Floki.find(ink, "h3#project-form-h")) == "After you create it"
+      assert Floki.text(Floki.find(ink, ".kh")) =~ "to create"
+
+      foot = ink |> Floki.find(".ink-f") |> hd() |> elements() |> Enum.map(&attr_of(&1, "class"))
+      assert Enum.find_index(foot, &(&1 == "pd")) < Enum.find_index(foot, &(&1 == "pw"))
+    end
+
+    test "renders without a secondary" do
+      html = pair(%{secondary: false})
+
+      assert Floki.find(html, ".pd") == []
+      assert [_] = Floki.find(html, ".ink .pw")
+    end
+  end
+
+  describe "list_row" do
+    defp list_row_doc(assigns) do
+      doc(~H"""
+      <ul class="rows">
+        <.list_row
+          id={@id}
+          title="Invoicing app"
+          navigate={@navigate}
+          icon={@icon}
+          kind={@kind}
+          status={@status}
+          tag={@tag}
+          data-testid="project-row"
+        >
+          <:meta>NW<span aria-hidden="true"> · </span>3 open</:meta>
+          <:trail :if={@trail}>62%</:trail>
+          <:actions :if={@actions}>
+            <.pill navigate="/issues">Tasks</.pill>
+          </:actions>
+          <:below :if={@below}>
+            <details
+              class="earlier"
+              id="row-payload-1"
+              phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+            >
+              <summary>Payload</summary>
+            </details>
+          </:below>
+        </.list_row>
+      </ul>
+      """)
+    end
+
+    defp row_assigns(extra) do
+      Map.merge(
+        %{
+          id: "project-1",
+          navigate: "/projects/1",
+          icon: nil,
+          kind: :neutral,
+          status: nil,
+          tag: "li",
+          trail: false,
+          actions: false,
+          below: false
+        },
+        Map.new(extra)
+      )
+    end
+
+    test "the title links to the record and covers the row" do
+      html = list_row_doc(row_assigns([]))
+
+      assert [row] = Floki.find(html, "li#project-1.row.lrow")
+      assert attr_of(row, "data-testid") == "project-row"
+      assert [link] = Floki.find(row, ".row-main a.rt2")
+      assert attr_of(link, "href") == "/projects/1"
+      assert String.trim(Floki.text(link)) == "Invoicing app"
+      assert Floki.text(Floki.find(row, ".rm")) =~ "3 open"
+    end
+
+    test "without a link the title is plain text" do
+      html = list_row_doc(row_assigns(navigate: nil))
+
+      assert Floki.find(html, "a.rt2") == []
+      assert String.trim(Floki.text(Floki.find(html, ".row-main span.rt"))) == "Invoicing app"
+    end
+
+    test "renders as a div for streams" do
+      html = list_row_doc(row_assigns(tag: "div"))
+
+      assert [_] = Floki.find(html, "div#project-1.lrow")
+      assert Floki.find(html, "li.lrow") == []
+    end
+
+    test "a status renders its glyph and word; the tile takes the row kind" do
+      html =
+        list_row_doc(row_assigns(status: {:stopped, "2 blocked"}, icon: "i-stop", kind: :problem))
+
+      assert [st] = Floki.find(html, ".lr-st")
+      assert Floki.text(st) =~ "2 blocked"
+      assert Floki.find(st, "svg.g.c-stop") != []
+      assert classes(hd(Floki.find(html, ".kt"))) == ["kt", "p"]
+      assert Floki.find(html, ".kt use[href='#i-stop']") != []
+    end
+
+    test "trail, actions and below render only when given" do
+      bare = list_row_doc(row_assigns([]))
+
+      assert Floki.find(bare, ".lr-st") == []
+      assert Floki.find(bare, ".lr-tr") == []
+      assert Floki.find(bare, ".lr-acts") == []
+      assert Floki.find(bare, ".lr-below") == []
+      assert Floki.find(bare, ".kt") == []
+
+      full = list_row_doc(row_assigns(trail: true, actions: true, below: true))
+
+      assert String.trim(Floki.text(Floki.find(full, ".lr-tr"))) == "62%"
+      assert Floki.find(full, ".lr-acts a.pl[href='/issues']") != []
+      assert Floki.find(full, ".lr-below details#row-payload-1") != []
+    end
+  end
+
+  describe "filter_menu" do
+    test "is a keyed disclosure that keeps its open state and shows the active count" do
+      assigns = %{}
+
+      html =
+        doc(~H"""
+        <.filter_menu id="audit-filter" active={2}>
+          <p class="filter-fields">fields</p>
+        </.filter_menu>
+        """)
+
+      assert [details] = Floki.find(html, "details#audit-filter.flt-d")
+      assert attr_of(details, "phx-mounted") =~ "ignore_attrs"
+      assert [summary] = Floki.find(details, "summary.chip.flt")
+      assert Floki.find(summary, "use[href='#i-filter']") != []
+      assert Floki.text(Floki.find(summary, ".fl-t")) == "Filter"
+      assert Floki.text(Floki.find(summary, ".mono")) == "2"
+      assert Floki.find(details, ".flt-p .filter-fields") != []
+    end
+
+    test "shows no count when nothing is filtered" do
+      assigns = %{}
+
+      html =
+        doc(~H"""
+        <.filter_menu id="trace-filter" label="Filters">
+          <p>fields</p>
+        </.filter_menu>
+        """)
+
+      assert Floki.text(Floki.find(html, ".fl-t")) == "Filters"
+      assert Floki.find(html, "summary .mono") == []
+    end
+  end
+
+  describe "flash_line" do
+    defp flash(map), do: doc(render_component(&flash_line/1, flash: map))
+
+    test "renders the info and the error line" do
+      html = flash(%{"info" => "Profile updated.", "error" => "Could not save."})
+
+      assert [_] = Floki.find(html, "div.flash-line")
+      assert [info] = Floki.find(html, "p.flash-msg[role='status']")
+      assert Floki.text(info) == "Profile updated."
+      assert [err] = Floki.find(html, "p.flash-msg.err[role='alert']")
+      assert Floki.text(err) == "Could not save."
+    end
+
+    test "renders only the line that is set" do
+      html = flash(%{"info" => "Saved."})
+
+      assert Floki.find(html, "p.flash-msg[role='status']") != []
+      assert Floki.find(html, "p.err") == []
+    end
+
+    test "renders nothing without a flash" do
+      assert Floki.find(flash(%{}), ".flash-line") == []
+    end
+  end
+
+  describe "ids and testids on r3 containers" do
+    test "band_card puts section_id and global attributes on the section; the heading keeps id" do
+      assigns = %{}
+
+      html =
+        doc(~H"""
+        <.band_card
+          id="blocked-t"
+          title="Blocked"
+          section_id="blocked-work-view"
+          data-testid="blocked-band"
+          aria-label="Blocked launch items"
+        >
+          <p>rows</p>
+        </.band_card>
+        """)
+
+      assert [section] = Floki.find(html, "section#blocked-work-view.card")
+      assert attr_of(section, "data-testid") == "blocked-band"
+      assert attr_of(section, "aria-label") == "Blocked launch items"
+      assert attr_of(section, "aria-labelledby") == "blocked-t"
+      assert [_] = Floki.find(section, "h2#blocked-t")
+    end
+
+    test "band_card renders no section id by default" do
+      assigns = %{}
+      html = doc(~H|<.band_card id="ny-t" title="Needs you"></.band_card>|)
+
+      assert attr_of(hd(Floki.find(html, "section")), "id") == nil
+    end
+
+    test "quiet_empty and next_step forward global attributes to their root" do
+      assigns = %{}
+
+      html =
+        doc(~H"""
+        <div>
+          <.quiet_empty title="No skills yet" data-testid="skills-empty">Add one.</.quiet_empty>
+          <.next_step id="ex-" data-testid="company-export-command">
+            <:problem>
+              <.problem_card title="Export Northwind" title_id="ex-t">
+                <:eyebrow>Next step · Export</:eyebrow>
+              </.problem_card>
+            </:problem>
+          </.next_step>
+        </div>
+        """)
+
+      assert [_] = Floki.find(html, ".gl-sec[data-testid='skills-empty']")
+      assert [section] = Floki.find(html, "section.next[data-testid='company-export-command']")
+      assert attr_of(section, "aria-labelledby") == "ex-t"
+    end
+  end
+
+  describe "CymphoWeb.R3PageHelpers" do
+    import CymphoWeb.R3PageHelpers
+
+    defp helper_page(primary?) do
+      assigns = %{primary?: primary?}
+
+      rendered_to_string(~H"""
+      <.page_frame
+        page="goal"
+        kind={:deep}
+        parent={{"/goals", "Goals"}}
+        current="Launch the marketing site"
+        data-ui-complex-page
+      >
+        <:head>
+          <section class="head">
+            <h1 class="h1 big">Launch the marketing site</h1>
+          </section>
+        </:head>
+        <.next_step :if={@primary?} id="g-">
+          <:problem>
+            <.problem_card title="Decide" title_id="g-t">
+              <:eyebrow>Next step</:eyebrow>
+            </.problem_card>
+          </:problem>
+          <:resolution>
+            <.ink_card heading="After you decide" heading_id="g-i">
+              <.ink_foot>
+                <:primary>
+                  <.primary_pill>Decide</.primary_pill>
+                </:primary>
+              </.ink_foot>
+            </.ink_card>
+          </:resolution>
+        </.next_step>
+      </.page_frame>
+      """)
+    end
+
+    test "assert_r3_page checks the frame, the one H1, the parent crumb and the primaries" do
+      doc = main_doc(helper_page(true))
+
+      assert_r3_page(doc,
+        page: "goal",
+        h1: "Launch the marketing site",
+        kind: :deep,
+        parent: "Goals",
+        primaries: 1
+      )
+
+      assert text(doc, ".crumb [aria-current]") == "Launch the marketing site"
+
+      assert texts(doc, ".crumb a.back, .crumb [aria-current]") == [
+               "Goals",
+               "Launch the marketing site"
+             ]
+
+      assert_r3_page(main_doc(helper_page(false)),
+        page: "goal",
+        h1: "Launch the marketing site",
+        kind: :deep,
+        parent: "Goals",
+        primaries: 0
+      )
+    end
+
+    test "assert_r3_page fails on a wrong H1" do
+      doc = main_doc(helper_page(false))
+
+      assert_raise ExUnit.AssertionError, fn ->
+        assert_r3_page(doc, page: "goal", h1: "Goals", kind: :deep, parent: "Goals", primaries: 0)
       end
     end
   end

@@ -2,6 +2,7 @@ defmodule CymphoWeb.ProjectLiveTest do
   use CymphoWeb.LiveCase, async: true
 
   import Phoenix.LiveViewTest
+  import CymphoWeb.R3PageHelpers
 
   alias Cympho.Goals
   alias Cympho.Issues
@@ -50,19 +51,58 @@ defmodule CymphoWeb.ProjectLiveTest do
       end
 
       conn = live_session_conn(conn, user, company)
-      {:ok, _view, html} = live(conn, "/projects")
+      {:ok, view, html} = live(conn, "/projects")
 
-      assert html =~ "Workstream health"
-      assert html =~ "3 open issues across 2 active projects"
+      # r3 (v7 L2): one list card of rows; the overview tiles and the workstream
+      # panel are one Advanced strip.
+      assert_r3_page(main_doc(view), page: "projects", h1: "Projects", kind: :root, primaries: 0)
+      assert has_element?(view, "#projects-list-t", "Projects")
+      assert has_element?(view, ".ui-advanced-only #project-health-t", "Workstream health")
+      assert html =~ "3 open tasks across 2 active projects"
       # The "Project queue signals" panel restated Blocked/Review/No Repo from the
       # stat strip next to it; the strip is the single home for those counts now.
       refute html =~ "Project queue signals"
-      assert html =~ "No Repo"
-      assert html =~ "Flow Project"
+      assert html =~ "No repo"
+      assert has_element?(view, "#projects-#{project.id} a.rt2[href='/projects/#{project.id}']")
+      assert has_element?(view, "#projects-#{project.id} .lr-st", "1 blocked")
+      assert has_element?(view, "#projects-#{project.id} .rm", "3 open")
+      # The card's health values stay on the row: active goals and completion.
+      assert has_element?(view, "#projects-#{project.id} .rm", "1 active goal")
+      assert has_element?(view, "#projects-#{project.id} .lr-tr", "25% done")
       assert html =~ "No repository configured"
-      assert html =~ "1 active goal"
-      assert html =~ "25% complete"
-      assert html =~ ~s(href="/issues?project_id=#{project.id}")
+
+      assert has_element?(
+               view,
+               "#projects-#{project.id} .lr-acts a[href='/issues?project_id=#{project.id}']"
+             )
+
+      refute html =~ "ember-"
+    end
+
+    test "a row keeps the exact completed count beside the percentage", %{conn: conn} do
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, project} =
+        Projects.create_project(%{name: "Counted Project", prefix: "CNT", company_id: company.id})
+
+      # 1 done + 1 cancelled reads "50% done", exactly like 50 done + 50 cancelled;
+      # the count tells them apart (Advanced, like the old card's Done tile).
+      for status <- [:done, :cancelled] do
+        {:ok, _issue} =
+          Issues.create_issue(%{
+            title: "Counted #{status}",
+            company_id: company.id,
+            project_id: project.id,
+            status: status
+          })
+      end
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/projects")
+
+      assert has_element?(view, "#projects-#{project.id} .lr-tr", "50% done")
+      assert has_element?(view, "#projects-#{project.id} .lr-tr .ui-advanced-only", "1/2 tasks")
+      assert has_element?(view, "#projects-#{project.id} .rm", "0 open")
     end
 
     test "does not archive a project from another company", %{conn: conn} do
@@ -119,35 +159,26 @@ defmodule CymphoWeb.ProjectLiveTest do
 
       {:ok, view, html} = live(conn, "/projects/new")
 
-      assert html =~ "New project"
-      # The section eyebrows restated the fields under them and each carried a
-      # help paragraph; the help is now a ? marker's title/aria-label.
+      # r3 (v7 L3): a form pair; the Advanced setup checklist and the ? hints are gone.
+      assert_r3_page(main_doc(view),
+        page: "project-form",
+        h1: "New project",
+        kind: :deep,
+        parent: "Projects",
+        primaries: 1
+      )
+
       refute html =~ "Project launch plan"
       refute html =~ "Operating boundary"
       refute html =~ "Workspace posture"
-      assert html =~ "Create the workstream overview"
-
-      assert html =~
-               "Describe what belongs in this project so intake and handoffs do not blur together."
-
-      assert html =~ "Prefixes become issue IDs."
-      assert html =~ "Keep active work visible and give the sidebar a stable visual marker."
-      assert html =~ "Setup checklist"
-      # "Create behavior" was a prose panel; it is one sentence under the button now.
+      refute html =~ "Setup checklist"
       refute html =~ "Create behavior"
-      assert html =~ "Creates an active workstream."
+      assert html =~ "Becomes the task ID prefix, like ACME-12."
+      assert html =~ "Tasks can be filed under it right away."
       assert has_element?(view, "[data-ui-complex-page]")
-      assert has_element?(view, "form[data-ui-simple-single-column]")
-
-      assert has_element?(
-               view,
-               "[data-testid='project-identifier-fields'][data-ui-simple-single-column]"
-             )
-
-      assert has_element?(
-               view,
-               "[data-testid='project-create-actions'][data-ui-simple-full-span]"
-             )
+      assert has_element?(view, "form#project-form.fpair")
+      assert has_element?(view, "[data-testid='project-identifier-fields']")
+      assert has_element?(view, "#project-form .ink button.pw[type='submit']", "Create project")
 
       assert has_element?(view, "input[name='project[name]']")
       assert has_element?(view, "input[name='project[prefix]']")
@@ -166,7 +197,7 @@ defmodule CymphoWeb.ProjectLiveTest do
                "[data-testid='project-workspace-posture'].ui-advanced-only select[name='project[status]']"
              )
 
-      assert has_element?(view, "[data-testid='project-setup-rail'].ui-advanced-only")
+      refute has_element?(view, "[data-testid='project-setup-rail']")
 
       result =
         view
@@ -269,14 +300,24 @@ defmodule CymphoWeb.ProjectLiveTest do
       conn = live_session_conn(conn, user, company)
       {:ok, view, html} = live(conn, "/projects/#{project.id}")
 
+      # r3 (v7 L4): a deep page with the settings form as its one pair.
+      assert_r3_page(main_doc(view),
+        page: "project",
+        h1: "AILogic",
+        kind: :deep,
+        parent: "Projects",
+        primaries: 1
+      )
+
       assert has_element?(view, "[data-testid='project-command']")
-      assert has_element?(view, "[data-testid='project-readiness']")
+      # The command's metrics stay Advanced, as before: open, done %, review, blocked.
+      assert has_element?(view, "[data-testid='project-command'] .ui-advanced-only .strip")
+      assert has_element?(view, "[data-testid='project-health-strip'] .cell", "Open")
+      assert has_element?(view, "[data-testid='project-health-strip'] .cell", "0%")
+      assert has_element?(view, "[data-testid='project-readiness'].ui-advanced-only")
       assert has_element?(view, "[data-testid='project-goals']")
-      assert html =~ "Project Overview"
+      refute html =~ "Project Overview"
       assert html =~ "Project work is moving through execution"
-      # "Execution readiness" / "Mission control" were jargon for "Setup" and the
-      # goals list; the readiness sentence now rides a ? tooltip.
-      assert html =~ "The minimum context agents need before they can execute safely."
       refute html =~ "Execution readiness"
       refute html =~ "Mission control"
       assert html =~ "AILogic Workspace"
@@ -284,8 +325,17 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert html =~ "Ship autonomous project command"
       assert html =~ "Project settings"
       assert html =~ "Environment variables"
-      assert html =~ "Work queue"
+      assert html =~ "Recent tasks"
+      assert html =~ "Implement project command center"
       assert html =~ "Save changes"
+      assert has_element?(view, "a[href='#project-settings']", "Edit")
+
+      assert has_element?(
+               view,
+               "a[href='/issues/new?project_id=#{project.id}']",
+               "New task in it"
+             )
+
       assert has_element?(view, "[data-testid='project-status-field'].ui-advanced-only")
 
       assert has_element?(
@@ -295,13 +345,22 @@ defmodule CymphoWeb.ProjectLiveTest do
 
       assert has_element?(view, "[data-testid='project-color-field'].ui-advanced-only")
       assert has_element?(view, "[data-testid='project-environment-variables'].ui-advanced-only")
-      assert has_element?(view, "#project-settings[data-ui-simple-single-column]")
-      assert has_element?(view, "#project-settings [data-ui-simple-single-column]")
+      assert has_element?(view, "form#project-settings.fpair")
       refute html =~ "/projects/#{project.id}/edit"
 
-      {:ok, _edit_view, edit_html} = live(conn, "/projects/#{project.id}/edit")
+      # Only /edit moves focus (and so the scroll) to the settings form on mount.
+      refute has_element?(view, "form#project-settings[phx-mounted]")
+
+      {:ok, edit_view, edit_html} = live(conn, "/projects/#{project.id}/edit")
       assert edit_html =~ "Project settings"
       assert edit_html =~ "Save changes"
+      assert has_element?(edit_view, "form#project-settings[phx-mounted*='focus_first']")
+      # /edit lands on the form with the head scrolled away: the sticky crumb and the
+      # tab title say "Edit", and the head's Edit pill (a jump to this form) goes.
+      assert has_element?(view, ".crumb [aria-current='page']", project.name)
+      assert has_element?(edit_view, ".crumb [aria-current='page']", "Edit project")
+      assert page_title(edit_view) =~ "Edit #{project.name}"
+      refute has_element?(edit_view, "a[href='#project-settings']")
 
       view
       |> form("form[phx-submit='save']", %{
@@ -353,6 +412,41 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert Projects.list_projects_by_company(other_company.id) == []
     end
 
+    test "recent tasks carry High and Critical priority, and nothing for the rest", %{
+      conn: conn
+    } do
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Priority Project",
+          prefix: "PRI",
+          company_id: company.id
+        })
+
+      {:ok, urgent} =
+        Issues.create_issue(%{
+          title: "Urgent fix",
+          company_id: company.id,
+          project_id: project.id,
+          priority: :critical
+        })
+
+      {:ok, routine} =
+        Issues.create_issue(%{
+          title: "Routine tidy",
+          company_id: company.id,
+          project_id: project.id,
+          priority: :low
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, view, _html} = live(conn, "/projects/#{project.id}")
+
+      assert has_element?(view, "#pj-task-#{urgent.id} .lr-tr .prio", "Critical")
+      refute has_element?(view, "#pj-task-#{routine.id} .prio")
+    end
+
     test "adds project environment variables from the show page", %{conn: conn} do
       {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
 
@@ -381,6 +475,31 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert secret.scope == "project"
       assert render(view) =~ "GITHUB_TOKEN"
     end
+  end
+
+  test "the chosen colour swatch is pressed, ringed with tokens rather than an inline colour" do
+    field = Phoenix.Component.to_form(%{"color" => "#5DB8A6"}, as: :project)[:color]
+
+    doc =
+      (&CymphoWeb.Components.ColorSwatchPicker.color_swatch_picker/1)
+      |> Phoenix.LiveViewTest.render_component(field: field)
+      |> Floki.parse_fragment!()
+
+    assert Floki.attribute(doc, ~s(.swp-b[aria-pressed="true"]), "title") == ["Teal"]
+    assert length(Floki.find(doc, ~s(.swp-b[aria-pressed="false"]))) == 7
+
+    css = File.read!("assets/css/r3-pages/planning.css")
+
+    assert css =~
+             ~s|.swp-b[aria-pressed="true"]{border-color:var(--card);box-shadow:0 0 0 2px var(--ink)}|
+  end
+
+  test "keyboard focus on a colour swatch draws the focus ring" do
+    css = File.read!("assets/css/r3-pages/planning.css")
+
+    # The swatch's own hairline box-shadow outranks r3's global :focus-visible ring.
+    assert css =~
+             ~r/\.swp-b:focus-visible\{box-shadow:0 0 0 2px var\(--focus-gap\),0 0 0 4px var\(--focus-ring\)\}/
   end
 
   defp live_session_conn(conn, user, company) do

@@ -11,7 +11,7 @@ defmodule CymphoWeb.ApprovalLive.Index do
 
     {:ok,
      assign(socket,
-       page_title: "Approvals",
+       page_title: "Approval history",
        status_filter: nil,
        can_resolve_approvals: can_resolve_approvals?(socket),
        approval_command: empty_approval_command(),
@@ -131,10 +131,7 @@ defmodule CymphoWeb.ApprovalLive.Index do
     oldest_pending = oldest_pending(approvals)
 
     %{
-      counts: counts,
       pending_count: pending,
-      resolved_count: resolved,
-      linked_issue_count: linked_issue_count(approvals),
       oldest_pending_label: approval_type_label(oldest_pending),
       summary: approval_command_summary(pending, resolved, oldest_pending, active_status),
       lanes: approval_lanes(counts, active_status),
@@ -144,26 +141,13 @@ defmodule CymphoWeb.ApprovalLive.Index do
 
   defp empty_approval_command do
     %{
-      counts: %{},
       pending_count: 0,
-      resolved_count: 0,
-      linked_issue_count: 0,
       oldest_pending_label: approval_type_label(nil),
       summary: "No approvals queued.",
       lanes: approval_lanes(%{}, nil),
       actions: [
-        %{
-          label: "All approvals",
-          url: ~p"/approvals",
-          tone: :primary,
-          icon: "hero-queue-list-mini"
-        },
-        %{
-          label: "Activity",
-          url: ~p"/activity?filter_action=approval_created",
-          tone: :neutral,
-          icon: "hero-clock-mini"
-        }
+        %{label: "All approvals", url: ~p"/approvals"},
+        %{label: "Activity", url: ~p"/activity?filter_action=approval_created"}
       ]
     }
   end
@@ -181,14 +165,6 @@ defmodule CymphoWeb.ApprovalLive.Index do
     Enum.reduce(approvals, base, fn approval, acc ->
       Map.update(acc, approval.status, 1, &(&1 + 1))
     end)
-  end
-
-  defp linked_issue_count(approvals) do
-    approvals
-    |> Enum.flat_map(& &1.issues)
-    |> Enum.map(& &1.id)
-    |> Enum.uniq()
-    |> length()
   end
 
   defp oldest_pending(approvals) do
@@ -211,49 +187,31 @@ defmodule CymphoWeb.ApprovalLive.Index do
     "Filtered to #{format_status(active_status)} approvals."
   end
 
+  # The Status segments: All, then one per status with its count (v7 G1).
   defp approval_lanes(counts, active_status) do
     [
-      approval_lane(:pending, "Pending", counts, active_status),
-      approval_lane(:approved, "Approved", counts, active_status),
-      approval_lane(:denied, "Denied", counts, active_status),
-      approval_lane(:cancelled, "Cancelled", counts, active_status)
+      approval_lane(nil, "All", counts |> Map.values() |> Enum.sum(), active_status),
+      approval_lane(:pending, "Waiting", Map.get(counts, :pending, 0), active_status),
+      approval_lane(:approved, "Approved", Map.get(counts, :approved, 0), active_status),
+      approval_lane(:denied, "Denied", Map.get(counts, :denied, 0), active_status),
+      approval_lane(:cancelled, "Cancelled", Map.get(counts, :cancelled, 0), active_status)
     ]
   end
 
-  defp approval_lane(status, label, counts, active_status) do
-    count = Map.get(counts, status, 0)
-
+  defp approval_lane(status, label, count, active_status) do
     %{
-      status: status,
       label: label,
       count: count,
       url: approval_filter_path(status),
-      active?: status == active_status
+      current?: status == active_status
     }
   end
 
   defp approval_command_actions(pending, active_status) do
     [
-      pending > 0 &&
-        %{
-          label: "Review pending",
-          url: approval_filter_path(:pending),
-          tone: :primary,
-          icon: "hero-bolt-mini"
-        },
-      active_status &&
-        %{
-          label: "Clear filter",
-          url: approval_filter_path(nil),
-          tone: :neutral,
-          icon: "hero-x-mark-mini"
-        },
-      %{
-        label: "Activity",
-        url: ~p"/activity?filter_action=approval_created",
-        tone: :neutral,
-        icon: "hero-clock-mini"
-      }
+      pending > 0 && %{label: "Review pending", url: approval_filter_path(:pending)},
+      active_status && %{label: "Clear filter", url: approval_filter_path(nil)},
+      %{label: "Activity", url: ~p"/activity?filter_action=approval_created"}
     ]
     |> Enum.reject(&(&1 in [nil, false]))
   end
@@ -278,30 +236,23 @@ defmodule CymphoWeb.ApprovalLive.Index do
   defp approval_type_label(nil), do: "none"
   defp approval_type_label(approval), do: humanize_type(approval.type)
 
-  @doc "Human words for a gate slug: \"launch_gate\" -> \"Launch gate\"."
+  @doc """
+  Human words for a slug, acronyms in capitals: \"launch_gate\" -> \"Launch gate\",
+  \"external_api_access\" -> \"External API access\". The approval pages' titles and payload labels.
+  """
   def humanize_type(nil), do: "Approval"
 
   def humanize_type(type) when is_binary(type) do
     type
     |> String.replace(["_", "-"], " ")
     |> String.capitalize()
+    |> String.split(" ")
+    |> Enum.map_join(" ", &acronym/1)
   end
 
-  def approval_age(%DateTime{} = inserted_at) do
-    seconds = DateTime.diff(DateTime.utc_now(), inserted_at, :second)
-
-    cond do
-      seconds < 60 -> "just now"
-      seconds < 3600 -> "waiting #{div(seconds, 60)}m"
-      seconds < 86_400 -> "waiting #{div(seconds, 3600)}h"
-      true -> "waiting #{div(seconds, 86_400)}d"
-    end
-  end
-
-  def approval_age(_), do: nil
-
-  def queue_section_label(nil), do: "Decision queue"
-  def queue_section_label(status), do: "#{format_status(status)} approvals"
+  @acronyms ~w(api ceo cto id pr url usd)
+  defp acronym(word),
+    do: if(String.downcase(word) in @acronyms, do: String.upcase(word), else: word)
 
   defp format_status(nil), do: "All"
 
@@ -315,63 +266,23 @@ defmodule CymphoWeb.ApprovalLive.Index do
   defp pluralize(1, word), do: word
   defp pluralize(_count, word), do: word <> "s"
 
-  def approval_action_class(:primary) do
-    "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
-  end
+  @doc """
+  An approval's state as a word and its shape (v7 §1.5): pending reads
+  "Waiting for you" only for someone who can resolve it.
+  """
+  def approval_status(:pending, true), do: {:waiting, "Waiting for you"}
+  def approval_status(:pending, _can_resolve), do: {:waiting, "Waiting for a decision"}
+  def approval_status(:approved, _can_resolve), do: {:done, "Approved"}
+  def approval_status(:denied, _can_resolve), do: {:stopped, "Denied"}
+  def approval_status(:cancelled, _can_resolve), do: {:idle, "Cancelled"}
+  def approval_status(status, _can_resolve), do: {:idle, format_status(status)}
 
-  def approval_action_class(_tone) do
-    "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-  end
+  def requester_name(%{requested_by: %{name: name}}) when is_binary(name) and name != "",
+    do: name
 
-  def approval_lane_class(%{active?: true}) do
-    "rounded-lg border border-primary/35 bg-primary/10 px-4 py-3 transition-colors"
-  end
+  def requester_name(_approval), do: "unknown"
 
-  def approval_lane_class(%{count: count}) when count > 0 do
-    "rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
-  end
-
-  def approval_lane_class(_lane) do
-    "rounded-lg border border-border bg-surface/60 px-4 py-3 transition-colors hover:bg-surface-hover"
-  end
-
-  def approval_lane_count_class(%{active?: true}),
-    do: "mt-3 font-mono text-2xl font-590 text-primary"
-
-  def approval_lane_count_class(%{count: count}) when count > 0,
-    do: "mt-3 font-mono text-2xl font-590 text-text-primary"
-
-  def approval_lane_count_class(_lane),
-    do: "mt-3 font-mono text-2xl font-590 text-text-quaternary"
-
-  def approval_row_note(%{status: :pending, issues: issues}) do
-    issue_count = length(issues)
-
-    if issue_count > 0 do
-      "Blocks #{issue_count} linked #{pluralize(issue_count, "issue")}"
-    else
-      "Decision needed before the agent proceeds"
-    end
-  end
-
-  def approval_row_note(%{status: status}) do
-    "#{format_status(status)} decision record"
-  end
-
-  def approval_row_action_label(:pending), do: "Review decision"
-  def approval_row_action_label(_status), do: "View record"
-
-  def approval_row_action_class(_status) do
-    "inline-flex shrink-0 items-center text-xs font-510 text-text-tertiary underline decoration-border underline-offset-4 transition-colors hover:text-text-primary"
-  end
-
-  def approval_card_class(:pending) do
-    "rounded-xl border border-brand/30 bg-surface-1 shadow-[inset_2px_0_0_0_var(--color-primary)] transition-colors hover:border-brand/45"
-  end
-
-  def approval_card_class(_status) do
-    "rounded-lg border border-border/70 bg-surface-1/60 transition-colors hover:border-border-hover hover:bg-subtle"
-  end
+  def linked_tasks(issues), do: "#{length(issues)} linked #{pluralize(length(issues), "task")}"
 
   def approval_empty_title(nil), do: "Nothing waiting on you"
 
@@ -385,23 +296,5 @@ defmodule CymphoWeb.ApprovalLive.Index do
 
   def approval_empty_detail(_status) do
     "Clear the filter to see everything, or check Activity if you expected something here."
-  end
-
-  def approval_empty_action_class(:primary) do
-    "inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-on-primary transition-colors hover:bg-primary-hover"
-  end
-
-  def approval_empty_action_class(_tone) do
-    "inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-  end
-
-  @doc """
-  Whether to show the calm "nothing waiting on you" strip above a queue
-  that still holds resolved history: no pending work, no active filter,
-  but at least one settled record below.
-  """
-  def all_clear_with_history?(command, status_filter) do
-    is_nil(status_filter) && command.pending_count == 0 &&
-      Enum.any?(command.counts, fn {status, count} -> status != :pending && count > 0 end)
   end
 end

@@ -16,6 +16,7 @@ defmodule CymphoWeb.PluginLive.Index do
      socket
      |> assign(:companies, companies)
      |> assign(:can_manage_plugins, can_manage_plugins?(socket))
+     |> assign(:default_company_id, default_company_id)
      |> assign(:selected_company_id, default_company_id)
      |> assign(:selected_status, nil)
      |> assign(:plugin_health, Plugins.health_summary(default_company_id))
@@ -225,23 +226,8 @@ defmodule CymphoWeb.PluginLive.Index do
   def plugin_error?(%{status: "error"}), do: true
   def plugin_error?(_plugin), do: false
 
-  attr :enabled, :boolean, required: true
-
-  def plugin_state(assigns) do
-    ~H"""
-    <span class={[
-      "inline-flex items-center gap-1.5 text-xs font-510",
-      (@enabled && "text-text-tertiary") || "text-text-quaternary"
-    ]}>
-      <span class={[
-        "h-1.5 w-1.5 rounded-full",
-        (@enabled && "bg-emerald-400/80") || "bg-text-quaternary/60"
-      ]}>
-      </span>
-      {(@enabled && "Enabled") || "Disabled"}
-    </span>
-    """
-  end
+  def toggle_label(%{enabled: true}), do: "Turn off"
+  def toggle_label(_plugin), do: "Turn on"
 
   def humanize_capability(capability) do
     capability
@@ -259,71 +245,15 @@ defmodule CymphoWeb.PluginLive.Index do
 
   def humanized_capabilities(_capabilities), do: ""
 
-  def company_name(%{company: %{name: name}}) when is_binary(name), do: name
-  def company_name(_), do: "Global"
-
-  def project_name(%{project: %{name: name}}) when is_binary(name), do: name
-  def project_name(_), do: "All projects"
-
   def capability_count(capabilities) when is_list(capabilities), do: length(capabilities)
   def capability_count(_), do: 0
 
-  attr :label, :string, required: true
-  attr :value, :integer, required: true
-  attr :tone, :atom, default: :neutral
-
-  def plugin_health_metric(assigns) do
-    ~H"""
-    <div class="bg-surface/70 px-3 py-2 text-center">
-      <p class={"font-mono text-[18px] font-590 leading-none #{plugin_metric_text(@tone)}"}>
-        {@value}
-      </p>
-      <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
-        {@label}
-      </p>
-    </div>
-    """
+  def capability_label(capabilities) do
+    case capability_count(capabilities) do
+      1 -> "1 capability"
+      count -> "#{count} capabilities"
+    end
   end
-
-  def plugin_health_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
-  def plugin_health_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  def plugin_health_badge(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  def plugin_health_badge(:empty), do: "border-border bg-surface text-text-tertiary"
-  def plugin_health_badge(_), do: "border-border bg-surface text-text-tertiary"
-
-  def plugin_metric_text(:critical), do: "text-red-300"
-  def plugin_metric_text(:warning), do: "text-amber-300"
-  def plugin_metric_text(:ok), do: "text-emerald-300"
-  def plugin_metric_text(_), do: "text-text-primary"
-
-  def plugin_recommendation_class(:critical), do: "border-red-500/20 bg-red-500/10 text-red-100"
-
-  def plugin_recommendation_class(:warning),
-    do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
-
-  def plugin_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
-
-  def plugin_posture_label(:empty), do: "Setup status"
-  def plugin_posture_label(_level), do: "Runtime status"
-
-  def plugin_posture_text(:empty) do
-    "No extensions are installed yet. Add one plugin, scope its capabilities, then watch worker logs and webhooks here."
-  end
-
-  def plugin_posture_text(_level) do
-    "Supervision, capability scope, webhooks, and recent plugin logs are quiet."
-  end
-
-  def plugin_next_action_class(:critical), do: "border-red-500/25 bg-red-500/10 text-red-100"
-  def plugin_next_action_class(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-100"
-
-  def plugin_next_action_class(:ok),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
-
-  def plugin_next_action_class(_), do: "border-border bg-surface text-text-secondary"
 
   def plugin_next_action_path(%{key: :install_first_plugin}), do: "/plugins/marketplace"
   def plugin_next_action_path(%{key: :review_marketplace}), do: "/plugins/marketplace"
@@ -342,10 +272,12 @@ defmodule CymphoWeb.PluginLive.Index do
     company_filtered? or status not in [nil, ""]
   end
 
-  def plugin_empty_icon(company_id, status, default_company_id \\ nil) do
-    if plugin_filters_active?(company_id, status, default_company_id),
-      do: "hero-funnel-mini",
-      else: "hero-puzzle-piece-mini"
+  @doc "How many filters differ from the default view (the Filter chip's count)."
+  def plugin_filter_count(company_id, status, default_company_id) do
+    company =
+      if is_binary(company_id) and company_id not in ["", default_company_id], do: 1, else: 0
+
+    company + if(status in [nil, ""], do: 0, else: 1)
   end
 
   def plugin_empty_title(company_id, status, default_company_id \\ nil) do
@@ -360,13 +292,5 @@ defmodule CymphoWeb.PluginLive.Index do
     else
       "Install one tightly scoped extension, verify its manifest and capability boundary, then watch health and webhook evidence here."
     end
-  end
-
-  def plugin_empty_action_class(:primary) do
-    "inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-on-primary transition-colors hover:bg-primary-hover"
-  end
-
-  def plugin_empty_action_class(_tone) do
-    "inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
   end
 end

@@ -103,39 +103,39 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
     )
   end
 
-  def status_badge("pending"), do: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
-  def status_badge("approved"), do: "bg-green-500/10 text-green-500 border-green-500/20"
-  def status_badge("denied"), do: "bg-brand/10 text-brand border-brand/20"
-  def status_badge("cancelled"), do: "bg-gray-500/10 text-gray-500 border-gray-500/20"
-  def status_badge("expired"), do: "bg-gray-500/10 text-gray-500 border-gray-500/20"
+  # A word plus a shape (v7 §1.5) for the approval, the risk level, a signal and a vote.
+  def status("pending"), do: {:waiting, "Waiting for votes"}
+  def status("approved"), do: {:done, "Approved"}
+  def status("denied"), do: {:stopped, "Denied"}
+  def status("cancelled"), do: {:idle, "Cancelled"}
+  def status("expired"), do: {:idle, "Expired"}
+  def status(other), do: {:idle, other |> to_string() |> String.capitalize()}
 
-  def risk_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
-  def risk_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def risk_badge(:healthy), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  def risk_badge(:resolved), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-  def risk_badge(_), do: "border-border bg-surface text-text-tertiary"
+  def risk_kind(:critical), do: :stopped
+  def risk_kind(:warning), do: :waiting
+  def risk_kind(level) when level in [:healthy, :resolved], do: :done
+  def risk_kind(_level), do: :idle
 
-  def signal_class(:danger), do: "border-red-500/20 bg-red-500/10 text-red-100"
-  def signal_class(:attention), do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
-  def signal_class(:ok), do: "border-emerald-500/20 bg-emerald-500/10 text-emerald-100"
-  def signal_class(_), do: "border-border bg-surface text-text-secondary"
+  def signal_status(:danger), do: {:stopped, "Problem"}
+  def signal_status(:attention), do: {:waiting, "Watch"}
+  def signal_status(:ok), do: {:done, "OK"}
+  def signal_status(_tone), do: {:idle, "Not checked"}
 
-  def category_label("agent_hire"), do: "Agent Hire"
-  def category_label("agent_termination"), do: "Agent Termination"
-  def category_label("agent_promotion"), do: "Agent Promotion"
-  def category_label("budget_increase"), do: "Budget Increase"
-  def category_label("policy_change"), do: "Policy Change"
-  def category_label("security_exception"), do: "Security Exception"
-  def category_label("principal_permission"), do: "Principal Permission"
-  def category_label("strategic_initiative"), do: "Strategic Initiative"
+  def vote_status("approve"), do: {:done, "Approved"}
+  def vote_status("deny"), do: {:stopped, "Denied"}
+  def vote_status("abstain"), do: {:idle, "Abstained"}
+  def vote_status(other), do: {:idle, other |> to_string() |> String.capitalize()}
+
+  def category_label("agent_hire"), do: "Agent hire"
+  def category_label("agent_termination"), do: "Agent termination"
+  def category_label("agent_promotion"), do: "Agent promotion"
+  def category_label("budget_increase"), do: "Budget increase"
+  def category_label("policy_change"), do: "Policy change"
+  def category_label("security_exception"), do: "Security exception"
+  def category_label("principal_permission"), do: "Principal permission"
+  def category_label("strategic_initiative"), do: "Strategic initiative"
   def category_label(_), do: "Other"
 
-  def format_datetime(datetime) when not is_nil(datetime) do
-    datetime
-    |> DateTime.to_string()
-    |> String.replace("Z", "")
-    |> String.slice(0, 19)
-  end
-
-  def format_datetime(_), do: "N/A"
+  defp day(at), do: Calendar.strftime(at, "%a %-d %b")
+  defp clock(at), do: Calendar.strftime(at, "%H:%M")
 end

@@ -90,6 +90,8 @@
             <.icon_action phx-click="pause_agent" icon="hero-pause-mini" label="Pause agent" />
           <% end %>
         </div>
+        <%!-- v7 §1.7: the handlers' messages (Setup saves, instruction patches) under the header --%>
+        <.flash_line flash={@flash} />
       </div>
     </section>
   </:head>

@@ -284,6 +284,20 @@ defmodule CymphoWeb.SettingsLive.CompanyTest do
                "A runtime without prices can't run while a spending limit is on."
     end
 
+    # Phones hide the section list once a row opened a section (money.css); this pill, shown only there
+    # (settings.css), leads back to the list, as every other Settings section's does.
+    test "an opened section leads back to the settings list; the list itself has no back pill", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = live(conn, "/settings/company?section=members")
+      assert [link] = Floki.find(main_doc(view), ".set.picked .set-main > a.pl.set-bk")
+      assert Floki.attribute(link, "href") == ["/settings/company"]
+      assert link |> Floki.text() |> String.trim() == "All settings"
+
+      {:ok, view, _html} = live(conn, "/settings/company")
+      assert Floki.find(main_doc(view), ".set-bk") == []
+    end
+
     test "Members lists the people of this company and links where they are managed", %{
       conn: conn,
       nw: nw

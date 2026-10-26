@@ -1,8 +1,12 @@
 defmodule CymphoWeb.BudgetLive.Show do
   use CymphoWeb, :live_view
 
+  import CymphoWeb.BudgetLive.Index, only: [budget_status: 1, period_label: 1]
+
+  alias Cympho.Agents
   alias Cympho.Budgets
   alias Cympho.Finances
+  alias Cympho.Projects
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -14,6 +18,7 @@ defmodule CymphoWeb.BudgetLive.Show do
          socket
          |> assign(:page_title, budget.name)
          |> assign(:budget, enrich_budget_spend(budget))
+         |> assign(:scope_text, scope_text(budget))
          |> assign(:budget_policy, policy)}
 
       {:error, :not_found} ->
@@ -49,7 +54,7 @@ defmodule CymphoWeb.BudgetLive.Show do
 
   defp apply_action(socket, :edit, _params) do
     socket
-    |> assign(:page_title, "Edit Budget")
+    |> assign(:page_title, "Edit #{socket.assigns.budget.name}")
   end
 
   def format_decimal(decimal) do
@@ -70,41 +75,13 @@ defmodule CymphoWeb.BudgetLive.Show do
     Budgets.Budget.available_amount(budget)
   end
 
-  def progress_percentage(budget) do
-    pct = Budgets.Budget.utilization_percentage(budget)
+  @doc "What is left of the limit, or how far spend went past it: {amount, word}."
+  def left_parts(budget) do
+    available = available_amount(budget)
 
-    pct
-    |> Decimal.to_string(:normal)
-    |> String.replace("%", "")
-    |> Float.parse()
-    |> elem(0)
-  end
-
-  def progress_color(budget) do
-    pct = Budgets.Budget.utilization_percentage(budget)
-    pct_value = Decimal.to_float(pct)
-
-    cond do
-      pct_value >= 100 -> "bg-brand"
-      pct_value >= budget.threshold_alert_percentage -> "bg-amber-500"
-      true -> "bg-green-500"
-    end
-  end
-
-  def status_badge(budget) do
-    cond do
-      budget.status == "exhausted" ->
-        {"bg-brand/10 text-brand border-brand/20", "Exhausted"}
-
-      budget.status == "cancelled" ->
-        {"bg-gray-500/10 text-gray-400 border-gray-500/20", "Cancelled"}
-
-      Budgets.Budget.at_threshold?(budget) ->
-        {"bg-amber-500/10 text-amber-400 border-amber-500/20", "Threshold"}
-
-      true ->
-        {"bg-green-500/10 text-green-400 border-green-500/20", "Active"}
-    end
+    if Decimal.negative?(available),
+      do: {format_currency(Decimal.abs(available), budget.currency), "over"},
+      else: {format_currency(available, budget.currency), "left"}
   end
 
   def scope_label(budget) do
@@ -116,6 +93,24 @@ defmodule CymphoWeb.BudgetLive.Show do
       _ -> "Unknown"
     end
   end
+
+  @doc "The scope with its project or agent name, looked up in the budget's company."
+  def scope_text(budget) do
+    case scope_record(budget) do
+      {:ok, %{name: name}} -> "#{scope_label(budget)} #{name}"
+      _ -> scope_label(budget)
+    end
+  end
+
+  defp scope_record(%{scope_type: "project", company_id: company_id, scope_id: id})
+       when is_binary(id),
+       do: Projects.get_company_project(company_id, id)
+
+  defp scope_record(%{scope_type: "agent", company_id: company_id, scope_id: id})
+       when is_binary(id),
+       do: Agents.get_company_agent(company_id, id)
+
+  defp scope_record(_budget), do: :none
 
   def boolean_label(true), do: "Yes"
   def boolean_label(false), do: "No"
@@ -135,12 +130,6 @@ defmodule CymphoWeb.BudgetLive.Show do
            not Decimal.lt?(budget.spent_amount, budget.limit_amount))
 
     hard_stop? and exhausted?
-  end
-
-  def format_datetime(nil), do: "Not set"
-
-  def format_datetime(datetime) do
-    Calendar.strftime(datetime, "%Y-%m-%d %H:%M")
   end
 
   defp format_percentage(percentage) do

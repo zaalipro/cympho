@@ -1,31 +1,39 @@
 <.settings_layout active={:profile}>
-  <.header title="Profile" subtitle="Your name and email, as they appear across Cympho." />
+  <.flash_line flash={@flash} />
 
-  <.panel class="max-w-xl overflow-hidden">
-    <%!-- The card header printed the name and email that the two inputs below
-         already show, prefilled with the same values. --%>
-    <div class="p-5">
-      <p class="mb-4 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-        Edit your details
-      </p>
-      <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-4">
+  <.form_pair
+    id="profile-form"
+    for={@form}
+    phx-change="validate"
+    phx-submit="save"
+    heading="After you save"
+    verb="save"
+  >
+    <.band_card id="pr-t" title="Profile">
+      <div class="flds">
         <.input field={@form[:name]} label="Name" required />
         <.input field={@form[:email]} type="email" label="Email" required />
-        <:actions>
-          <.button type="submit" phx-disable-with="Saving…">Save changes</.button>
-        </:actions>
-      </.simple_form>
-    </div>
-  </.panel>
+      </div>
+    </.band_card>
+    <:effect>
+      <.ink_note>Your name and email change everywhere in Cympho.</.ink_note>
+    </:effect>
+    <:primary>
+      <.primary_pill type="submit" phx-disable-with="Saving…">Save changes</.primary_pill>
+    </:primary>
+  </.form_pair>
 
   <%!-- The rail's account menu has the other Sign out; on a phone the rail is
        hidden, and this page is reached from Settings (the top bar's gear). --%>
-  <.panel class="max-w-xl overflow-hidden">
-    <div class="flex flex-wrap items-center justify-between gap-3 p-5">
-      <p class="text-body-sm text-text-tertiary">
-        Signed in as <span class="text-text-primary">{@user.email}</span>
-      </p>
-      <.link href={~p"/logout"} method="delete" class="pl">Sign out</.link>
-    </div>
-  </.panel>
+  <.band_card id="si-t" title="Signed in">
+    <ul class="srows">
+      <li class="srow">
+        <span class="av" aria-hidden="true">{initials(@user.name)}</span>
+        <span class="row-main"><span class="rt">{@user.email}</span></span>
+        <span class="end">
+          <.link href={~p"/logout"} method="delete" class="pl">Sign out</.link>
+        </span>
+      </li>
+    </ul>
+  </.band_card>
 </.settings_layout>

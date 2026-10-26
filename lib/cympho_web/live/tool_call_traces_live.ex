@@ -10,7 +10,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
     socket =
       socket
-      |> assign(:page_title, "Tool Call Traces")
+      |> assign(:page_title, "Step log")
       |> assign(:company_id, company_id)
       |> assign(:infinite_scroll, %{})
       |> assign(:filters, %{
@@ -237,25 +237,19 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
     end
   end
 
-  def status_color("success"), do: "text-green-400"
-  def status_color("error"), do: "text-brand"
-  def status_color("pending"), do: "text-yellow-400"
-  def status_color("timeout"), do: "text-orange-400"
-  def status_color(_), do: "text-gray-400"
+  # Trace states as a word plus a shape (v7 §1.5).
+  defp trace_status("success"), do: {:done, "OK"}
+  defp trace_status("error"), do: {:stopped, "Failed"}
+  defp trace_status("timeout"), do: {:stopped, "Timed out"}
+  defp trace_status("pending"), do: {:idle, "Pending"}
+  defp trace_status(status), do: {:idle, String.capitalize(to_string(status))}
 
-  def status_icon("success"), do: "✓"
-  def status_icon("error"), do: "✗"
-  def status_icon("pending"), do: "⏳"
-  def status_icon("timeout"), do: "⏱"
-  def status_icon(_), do: "?"
+  defp integrity_kind(:ok), do: :done
+  defp integrity_kind(:unknown), do: :idle
+  defp integrity_kind(_status), do: :stopped
 
-  def integrity_status_color(:ok), do: "text-green-400"
-  def integrity_status_color(:unknown), do: "text-gray-400"
-  def integrity_status_color({:error, _}), do: "text-brand"
-
-  def integrity_status_color(status)
-      when is_tuple(status) and elem(status, 0) == :error,
-      do: "text-brand"
+  defp active_filter_count(filters),
+    do: Enum.count(filters, fn {_key, value} -> value not in [nil, ""] end)
 
   def integrity_status_label(:ok), do: "Chain integrity verified"
   def integrity_status_label(:unknown), do: "Integrity not checked"
@@ -276,12 +270,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   defp build_trace_command(%{integrity_status: integrity_status, statistics: statistics})
        when is_tuple(integrity_status) and elem(integrity_status, 0) == :error do
     %{
-      tone: :critical,
-      badge: "Chain broken",
       title: "Stop trusting trace exports until integrity is repaired",
       summary: integrity_failure_summary(integrity_status),
-      action_label: "Verify again",
-      action_event: "verify_integrity",
+      # The chain check is the page's header control; the band repeats no button.
+      action_label: nil,
       action_path: nil,
       metrics: trace_command_metrics(statistics)
     }
@@ -289,13 +281,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
   defp build_trace_command(%{statistics: %{error_calls: errors} = statistics}) when errors > 0 do
     %{
-      tone: :critical,
-      badge: "Tool failures",
       title: "Inspect failed tool calls",
       summary:
         "#{pluralize(errors, "tool call")} ended in error. Filter the trace list, open the failing row, and compare arguments to the tool result.",
       action_label: "Filter failures",
-      action_event: nil,
       action_path: "#trace-filters",
       metrics: trace_command_metrics(statistics)
     }
@@ -304,13 +293,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   defp build_trace_command(%{statistics: %{pending_calls: pending} = statistics})
        when pending > 0 do
     %{
-      tone: :warning,
-      badge: "Pending tools",
       title: "Check unfinished tool calls",
       summary:
         "#{pluralize(pending, "tool call")} are still pending or timed out. Filter pending traces before relaunching the same issue.",
       action_label: "Review pending",
-      action_event: nil,
       action_path: "#trace-filters",
       metrics: trace_command_metrics(statistics)
     }
@@ -318,12 +304,9 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
   defp build_trace_command(%{statistics: %{total_calls: 0} = statistics}) do
     %{
-      tone: :attention,
-      badge: "No traces yet",
       title: "Launch runtime to capture tool evidence",
       summary: "Nothing recorded yet. Tool calls appear here as soon as agents start working.",
-      action_label: "Open operations",
-      action_event: nil,
+      action_label: "Open Health",
       action_path: "/operations#runtime-launch-checklist",
       metrics: trace_command_metrics(statistics)
     }
@@ -331,13 +314,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
   defp build_trace_command(%{integrity_status: :unknown, statistics: statistics}) do
     %{
-      tone: :attention,
-      badge: "Integrity unchecked",
       title: "Verify the audit chain",
       summary:
         "Trace capture is available, but the chain has not been checked in this session. Verify before exporting evidence.",
-      action_label: "Verify integrity",
-      action_event: "verify_integrity",
+      action_label: nil,
       action_path: nil,
       metrics: trace_command_metrics(statistics)
     }
@@ -345,13 +325,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
   defp build_trace_command(%{statistics: statistics}) do
     %{
-      tone: :ready,
-      badge: "Trace chain healthy",
       title: "Tool evidence is audit-ready",
       summary:
         "All current tool calls are successful and the trace chain is ready for export or issue-level review.",
       action_label: "Review traces",
-      action_event: nil,
       action_path: "#traces-table",
       metrics: trace_command_metrics(statistics)
     }
@@ -377,30 +354,6 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
       %{label: "Pending", value: to_string(statistics.pending_calls)}
     ]
   end
-
-  defp trace_command_badge_class(:critical),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  defp trace_command_badge_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-
-  defp trace_command_badge_class(:attention),
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp trace_command_badge_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp trace_command_action_class(:critical),
-    do: "border-red-500/25 bg-red-500/10 text-red-200 hover:bg-red-500/15"
-
-  defp trace_command_action_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15"
-
-  defp trace_command_action_class(:attention),
-    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
-
-  defp trace_command_action_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
 
   defp trace_recovery(%{status: status} = trace) when status in ["error", "timeout", "pending"] do
     %{
@@ -436,10 +389,6 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   defp pluralize(1, singular), do: "1 #{singular}"
   defp pluralize(count, singular), do: "#{count} #{singular}s"
 
-  def format_datetime(datetime) do
-    DateTime.to_string(datetime)
-  end
-
   def format_json(map) when is_map(map) do
     map
     |> Jason.encode!(pretty: true)
@@ -450,565 +399,324 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="ember-aurora p-6 lg:p-8 w-full min-w-0" data-ui-complex-page>
-      <div class="relative z-[1] mx-auto max-w-6xl">
-        <.header>
-          <div class="min-w-0">
-            <span class="ember-eyebrow">Runtime evidence</span>
-            <h1 class="ember-ink mt-4 font-serif text-[clamp(26px,4vw,40px)] font-510 leading-[1.08] tracking-[-0.02em]">
-              Tool Call Traces
-            </h1>
-            <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-              Browse and verify immutable tool-call chains.
-            </p>
-          </div>
-        </.header>
+    <.page_frame page="steps" title="Step log" data-ui-complex-page>
+      <:header_end>
+        <.pill phx-click="verify_integrity">
+          <.r3_icon name="i-shield" />Check the chain
+        </.pill>
+      </:header_end>
 
-        <section
-          id="trace-command"
-          data-testid="trace-command"
-          class="mb-6 ember-glass overflow-hidden"
-        >
-          <div class="border-b border-white/10 bg-gradient-to-b from-surface-2/50 to-transparent px-5 py-4">
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                    Trace command
-                  </p>
-                  <span class={[
-                    "rounded-full border px-2 py-0.5 text-[11px] font-510",
-                    trace_command_badge_class(@trace_command.tone)
-                  ]}>
-                    {@trace_command.badge}
-                  </span>
-                </div>
-                <h2 class="mt-2 text-lg font-590 tracking-tight text-text-primary">
-                  {@trace_command.title}
-                </h2>
-                <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
-                  {@trace_command.summary}
-                </p>
-              </div>
+      <.flash_line flash={@flash} />
 
-              <button
-                :if={@trace_command.action_event}
-                type="button"
-                phx-click={@trace_command.action_event}
-                class={[
-                  "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
-                  trace_command_action_class(@trace_command.tone)
-                ]}
-              >
-                <span class="hero-shield-check-mini h-4 w-4"></span>
-                {@trace_command.action_label}
-              </button>
-
-              <a
-                :if={@trace_command.action_path}
-                href={@trace_command.action_path}
-                class={[
-                  "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
-                  trace_command_action_class(@trace_command.tone)
-                ]}
-              >
-                <span class="hero-arrow-right-mini h-4 w-4"></span>
-                {@trace_command.action_label}
-              </a>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
-            <div :for={metric <- @trace_command.metrics} class="bg-surface px-4 py-3">
-              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                {metric.label}
-              </p>
-              <p class="mt-1 font-mono text-sm font-590 text-text-primary">{metric.value}</p>
-            </div>
-          </div>
-        </section>
-
-        <%!-- Audit tooling: the four export buttons are download icons that keep
-             their label as the accessible name, and the chain check already has
-             a primary button in the command strip above. --%>
-        <div class="ui-advanced-only mb-6 flex flex-wrap gap-4 items-center justify-between">
-          <div class="flex gap-2">
-            <button
-              type="button"
-              class="cta-glow rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-              phx-click="verify_integrity"
-            >
-              Verify Integrity
-            </button>
-
-            <button
-              :if={!@export_data_json}
-              type="button"
-              title="Export JSON"
-              aria-label="Export JSON"
-              class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-button px-3 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-              phx-click="export_json"
-            >
-              <span class="hero-arrow-down-tray-mini h-4 w-4"></span> JSON
-            </button>
-
-            <a
-              :if={@export_data_json}
-              download={"tool-traces-#{Date.utc_today()}.json"}
-              href={"data:application/json;charset=utf-8,#{URI.encode(@export_data_json)}"}
-              title="Download JSON"
-              aria-label="Download JSON"
-              class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-success/20 bg-success/10 px-3 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
-            >
-              <span class="hero-arrow-down-tray-mini h-4 w-4"></span> JSON
-            </a>
-
-            <button
-              :if={!@export_data_csv}
-              type="button"
-              title="Export CSV"
-              aria-label="Export CSV"
-              class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-button px-3 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-              phx-click="export_csv"
-            >
-              <span class="hero-arrow-down-tray-mini h-4 w-4"></span> CSV
-            </button>
-
-            <a
-              :if={@export_data_csv}
-              download={"tool-traces-#{Date.utc_today()}.csv"}
-              href={"data:text/csv;charset=utf-8,#{URI.encode(@export_data_csv)}"}
-              title="Download CSV"
-              aria-label="Download CSV"
-              class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-success/20 bg-success/10 px-3 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
-            >
-              <span class="hero-arrow-down-tray-mini h-4 w-4"></span> CSV
-            </a>
-          </div>
-
-          <div class={"text-sm font-510 " <> integrity_status_color(@integrity_status)}>
-            {integrity_status_label(@integrity_status)}
+      <.band_card
+        id="trace-command-t"
+        title="Audit chain"
+        section_id="trace-command"
+        data-testid="trace-command"
+      >
+        <:header_end>
+          <span class="st-w">
+            <.status_word
+              kind={integrity_kind(@integrity_status)}
+              word={integrity_status_label(@integrity_status)}
+            />
+          </span>
+        </:header_end>
+        <div class="gl-sec">
+          <p class="gl-big">{@trace_command.title}</p>
+          <p class="gl-sub">{@trace_command.summary}</p>
+          <.text_link :if={@trace_command.action_path} href={@trace_command.action_path}>
+            {@trace_command.action_label}
+          </.text_link>
+        </div>
+        <div class="strip s4">
+          <div :for={metric <- @trace_command.metrics} class="cell">
+            <span class="v mono">{metric.value}</span><span class="l">{metric.label}</span>
           </div>
         </div>
+      </.band_card>
 
-        <form
-          id="trace-filters"
-          phx-change="filter"
-          phx-submit="filter"
-          class="mb-6 scroll-mt-6 bg-surface border border-border rounded-xl p-4"
-        >
-          <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
-            <div>
-              <label class="block text-xs font-510 text-text-secondary mb-1.5">Tool Name</label>
-              <input
-                type="text"
+      <div class="tbar">
+        <.filter_menu id="trace-filter" active={active_filter_count(@filters)}>
+          <form id="trace-filters" class="st-f" phx-change="filter" phx-submit="filter">
+            <div class="flds">
+              <.input
+                id="trace-filter-tool"
                 name="filter[tool_name]"
                 value={@filters.tool_name}
-                placeholder="Filter by tool name..."
-                class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+                label="Tool"
+                placeholder="read_file"
+                autocomplete="off"
               />
-            </div>
-
-            <div>
-              <label class="block text-xs font-510 text-text-secondary mb-1.5">Status</label>
-              <.select_menu
-                label="Status"
+              <.input
+                type="select"
+                id="trace-filter-status"
                 name="filter[status]"
                 value={@filters.status || ""}
+                label="Status"
                 options={[
-                  {"All Statuses", ""},
-                  {"Success", "success"},
-                  {"Error", "error"},
+                  {"All statuses", ""},
+                  {"OK", "success"},
+                  {"Failed", "error"},
                   {"Pending", "pending"},
-                  {"Timeout", "timeout"}
+                  {"Timed out", "timeout"}
                 ]}
               />
-            </div>
-
-            <div>
-              <label class="block text-xs font-510 text-text-secondary mb-1.5">Agent</label>
-              <.select_menu
-                label="Agent"
+              <.input
+                type="select"
+                id="trace-filter-agent"
                 name="filter[agent_id]"
                 value={@filters.agent_id || ""}
-                options={[{"All Agents", ""} | Enum.map(@agents, &{&1.name, &1.id})]}
+                label="Agent"
+                options={[{"All agents", ""} | Enum.map(@agents, &{&1.name, &1.id})]}
               />
-            </div>
-
-            <div>
-              <label class="block text-xs font-510 text-text-secondary mb-1.5">Issue ID</label>
-              <input
-                type="text"
+              <.input
+                id="trace-filter-issue"
                 name="filter[issue_id]"
                 value={@filters.issue_id}
-                placeholder="Filter by issue ID..."
-                class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+                label="Task ID"
+                autocomplete="off"
               />
-            </div>
-
-            <div>
-              <label class="block text-xs font-510 text-text-secondary mb-1.5">Run ID</label>
-              <input
-                type="text"
+              <.input
+                id="trace-filter-run"
                 name="filter[run_id]"
                 value={Map.get(@filters, :run_id, "")}
-                placeholder="Filter by run ID..."
-                class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+                label="Run ID"
+                wrapper_class="full"
+                autocomplete="off"
               />
             </div>
-          </div>
+          </form>
+          <button :if={filters_active?(@filters)} type="button" class="lnk" phx-click="clear_filters">
+            Clear filters
+          </button>
+        </.filter_menu>
+      </div>
 
-          <%!-- Filters apply on change like every other filter bar, so there is
-               no Apply button and Clear is an icon. --%>
-          <div class="flex gap-2">
-            <button
-              type="button"
-              title="Clear Filters"
-              aria-label="Clear Filters"
-              class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-button text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-              phx-click="clear_filters"
-            >
-              <span class="hero-x-mark-mini h-4 w-4"></span>
-            </button>
-          </div>
-        </form>
+      <div class={["st-split", @selected_trace && "st-open"]}>
+        <.band_card id="traces-t" title="Steps" section_id="traces-table">
+          <:header_end>
+            <span class="st-x">
+              <.pill :if={!@export_data_json} phx-click="export_json">Export JSON</.pill>
+              <a
+                :if={@export_data_json}
+                class="pl"
+                download={"tool-traces-#{Date.utc_today()}.json"}
+                href={"data:application/json;charset=utf-8,#{URI.encode(@export_data_json)}"}
+              >
+                Download JSON
+              </a>
+              <.pill :if={!@export_data_csv} phx-click="export_csv">Export CSV</.pill>
+              <a
+                :if={@export_data_csv}
+                class="pl"
+                download={"tool-traces-#{Date.utc_today()}.csv"}
+                href={"data:text/csv;charset=utf-8,#{URI.encode(@export_data_csv)}"}
+              >
+                Download CSV
+              </a>
+            </span>
+          </:header_end>
 
-        <%!-- Total/Success/Errors/Pending already sit in the Trace command
-             strip; the big-card copy of the same four numbers is gone. --%>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
-          <div class="lg:col-span-2 min-w-0">
-            <div
-              id="traces-table"
-              class="scroll-mt-6 bg-surface border border-border rounded-xl overflow-hidden"
-            >
-              <div class="px-4 py-3 border-b border-border">
-                <h2 class="text-sm font-590 text-text-primary">Traces</h2>
-              </div>
-
-              <div class="overflow-x-auto">
-                <table class="w-full">
-                  <thead class="bg-subtle">
-                    <tr>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                        Seq
-                      </th>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                        Tool
-                      </th>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                        Actor
-                      </th>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th class="hidden px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider md:table-cell">
-                        Time
-                      </th>
-                      <th class="hidden px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider md:table-cell">
-                        Chain Hash
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody id="traces-tbody" phx-update="stream" class="divide-y divide-border">
-                    <tr id="traces-empty" class="only:table-row hidden">
-                      <td colspan="6" class="p-8 text-center">
-                        <div class="mx-auto max-w-md">
-                          <p class="text-sm font-590 text-text-primary">
-                            {if filters_active?(@filters),
-                              do: "No traces match these filters",
-                              else: "No tool evidence captured yet"}
-                          </p>
-                          <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                            {if filters_active?(@filters),
-                              do:
-                                "Clear filters to return to the full trace chain, or open Operations if you expected runtime activity.",
-                              else: "Launch runtime from Operations and every tool call lands here."}
-                          </p>
-                          <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
-                            <button
-                              :if={filters_active?(@filters)}
-                              type="button"
-                              phx-click="clear_filters"
-                              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-                            >
-                              Clear filters
-                            </button>
-                            <a
-                              href="/operations#runtime-launch-checklist"
-                              class="inline-flex items-center gap-1.5 rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-xs font-510 text-brand transition-colors hover:bg-brand/15"
-                            >
-                              Open Operations
-                            </a>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                    <tr
-                      :for={{dom_id, trace} <- @streams.traces}
-                      id={dom_id}
-                      class={
-                        if @selected_trace && @selected_trace.id == trace.id,
-                          do: "bg-brand/10 cursor-pointer",
-                          else: "hover:bg-subtle cursor-pointer"
-                      }
+          <div class="tbl-w">
+            <table class="tbl" id="traces-tbl">
+              <thead>
+                <tr>
+                  <th scope="col">Seq</th>
+                  <th scope="col">Tool</th>
+                  <th scope="col" class="m-hide">Actor</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" class="m-hide">Time</th>
+                  <th scope="col" class="m-hide">Chain hash</th>
+                </tr>
+              </thead>
+              <tbody id="traces-tbody" phx-update="stream">
+                <tr id="traces-empty" class="only:table-row hidden">
+                  <td colspan="6">
+                    <.quiet_empty title={
+                      if filters_active?(@filters),
+                        do: "No traces match these filters",
+                        else: "No tool evidence captured yet"
+                    }>
+                      {if filters_active?(@filters),
+                        do:
+                          "Clear filters to return to the full trace chain, or open Health if you expected runtime activity.",
+                        else: "Launch runtime from Health and every tool call lands here."}
+                      <:action>
+                        <span class="st-x">
+                          <.pill :if={filters_active?(@filters)} phx-click="clear_filters">
+                            Clear filters
+                          </.pill>
+                          <.text_link href="/operations#runtime-launch-checklist">
+                            Open Health
+                          </.text_link>
+                        </span>
+                      </:action>
+                    </.quiet_empty>
+                  </td>
+                </tr>
+                <tr
+                  :for={{dom_id, trace} <- @streams.traces}
+                  id={dom_id}
+                  class="st-row"
+                  aria-current={@selected_trace && @selected_trace.id == trace.id && "true"}
+                  phx-click="select_trace"
+                  phx-value-id={trace.id}
+                >
+                  <td>
+                    <button
+                      type="button"
+                      class="ul mono"
                       phx-click="select_trace"
                       phx-value-id={trace.id}
+                      aria-label={"Open step #{trace.sequence_number}"}
                     >
-                      <td class="px-4 py-3 whitespace-nowrap text-sm text-text-primary">
-                        {trace.sequence_number}
-                      </td>
-                      <td class="px-4 py-3 text-sm text-text-primary">
-                        <div class="font-medium">{trace.tool_name}</div>
-                        <div class="text-xs text-text-secondary">{trace.trace_type}</div>
-                      </td>
-                      <td class="px-4 py-3 text-sm text-text-secondary">
-                        <div class="flex items-center gap-1">
-                          <span class="text-xs capitalize">{trace.actor_type}</span>
-                          <%= if trace.actor_type == "agent" && trace.agent do %>
-                            <span class="text-xs text-text-tertiary">({trace.agent.name})</span>
-                          <% end %>
-                        </div>
-                      </td>
-                      <td class={"px-4 py-3 whitespace-nowrap text-sm " <> status_color(trace.status)}>
-                        <span class="inline-flex items-center">
-                          <span class="mr-1">{status_icon(trace.status)}</span>
-                          {String.capitalize(trace.status)}
-                        </span>
-                      </td>
-                      <td class="hidden px-4 py-3 whitespace-nowrap text-sm text-text-secondary md:table-cell">
-                        {format_datetime(trace.occurred_at)}
-                      </td>
-                      <td class="hidden px-4 py-3 text-xs text-text-secondary font-mono md:table-cell">
-                        {String.slice(trace.chain_hash, 0..7)}...
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                      {trace.sequence_number}
+                    </button>
+                  </td>
+                  <td>
+                    <span class="st-tool">{trace.tool_name}</span>
+                    <span class="st-sub">{trace.trace_type}</span>
+                  </td>
+                  <td class="m-hide">
+                    {String.capitalize(to_string(trace.actor_type))}<span
+                      :if={trace.actor_type == "agent" && trace.agent}
+                      class="st-sub"
+                    >{trace.agent.name}</span>
+                  </td>
+                  <td>
+                    <span class="st-w">
+                      <.status_word
+                        kind={elem(trace_status(trace.status), 0)}
+                        word={elem(trace_status(trace.status), 1)}
+                      />
+                    </span>
+                  </td>
+                  <td class="m-hide">
+                    <span class="mono">{CymphoWeb.AgentLive.Parts.stamp(trace.occurred_at)}</span>
+                  </td>
+                  <td class="m-hide">
+                    <span class="mono">{String.slice(trace.chain_hash, 0..7)}…</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <.infinite_scroll_footer
+            id="traces"
+            has_more={@infinite_scroll[:traces][:has_more?] || false}
+          />
+        </.band_card>
+
+        <.band_card :if={@selected_trace} id="trace-det-t" title="Step details" class="st-det">
+          <:header_end>
+            <.pill phx-click="close_trace_details" aria-label="Close step details">Close</.pill>
+          </:header_end>
+
+          <% recovery = trace_recovery(@selected_trace) %>
+          <div :if={recovery} id={"trace-recovery-#{@selected_trace.id}"} class="st-rec">
+            <p class="st-rec-h">
+              <.status_word
+                kind={elem(trace_status(@selected_trace.status), 0)}
+                word={recovery.title}
+              />
+            </p>
+            <p class="gl-sub">{recovery.summary}</p>
+            <p class="st-x">
+              <.text_link :if={recovery.issue_path} href={recovery.issue_path}>
+                Open task
+              </.text_link>
+              <.text_link href={recovery.operations_path}>Open runtime failures</.text_link>
+            </p>
+            <div
+              :if={recovery.focused_command}
+              id={"trace-focused-command-#{@selected_trace.id}"}
+              class="st-cmd"
+              phx-hook="CopyToClipboard"
+            >
+              <div class="st-cmd-h">
+                <span class="gh">Focused relaunch</span>
+                <button
+                  type="button"
+                  class="pl"
+                  data-copy-text={recovery.focused_command}
+                  data-copy-label="Copy command"
+                >
+                  Copy command
+                </button>
               </div>
+              <code class="st-well mono">{recovery.focused_command}</code>
             </div>
-            <.infinite_scroll_footer
-              id="traces"
-              has_more={@infinite_scroll[:traces][:has_more?] || false}
-            />
           </div>
 
-          <%= if @selected_trace do %>
-            <div class="lg:col-span-1">
-              <div class="bg-surface border border-border rounded-xl sticky top-4">
-                <div class="px-4 py-3 border-b border-border flex items-center justify-between">
-                  <h2 class="text-sm font-590 text-text-primary">Trace Details</h2>
-                  <button
-                    type="button"
-                    class="p-1 hover:bg-surface-hover rounded"
-                    phx-click="close_trace_details"
-                    aria-label="Close trace details"
-                    title="Close trace details"
-                  >
-                    <svg
-                      class="w-5 h-5 text-text-secondary"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                  </button>
-                </div>
+          <.kv_list>
+            <:item term="Sequence">
+              <span class="mono">{@selected_trace.sequence_number}</span>
+            </:item>
+            <:item term="Tool">{@selected_trace.tool_name}</:item>
+            <:item term="Type">{@selected_trace.trace_type}</:item>
+            <:item term="Status">
+              <span class="st-w">
+                <.status_word
+                  kind={elem(trace_status(@selected_trace.status), 0)}
+                  word={elem(trace_status(@selected_trace.status), 1)}
+                />
+              </span>
+            </:item>
+            <%!-- An audit record: the full moment, year and zone included. --%>
+            <:item term="When">
+              <time datetime={DateTime.to_iso8601(@selected_trace.occurred_at)}>
+                {Calendar.strftime(@selected_trace.occurred_at, "%a %-d %b %Y")}
+                <span class="mono">
+                  {Calendar.strftime(@selected_trace.occurred_at, "%H:%M:%S")} UTC
+                </span>
+              </time>
+            </:item>
+            <:item term="Actor">
+              {String.capitalize(to_string(@selected_trace.actor_type))}<span :if={
+                @selected_trace.actor_type == "agent" && @selected_trace.agent
+              }> · {@selected_trace.agent.name}</span>
+            </:item>
+            <:item term="Actor ID">
+              <span class="mono st-hash">{@selected_trace.actor_id}</span>
+            </:item>
+            <:item :if={@selected_trace.agent_id} term="Agent ID">
+              <span class="mono st-hash">{@selected_trace.agent_id}</span>
+            </:item>
+            <:item :if={@selected_trace.issue_id} term="Task ID">
+              <span class="mono st-hash">{@selected_trace.issue_id}</span>
+            </:item>
+            <:item :if={@selected_trace.run_id} term="Run ID">
+              <span class="mono st-hash">{@selected_trace.run_id}</span>
+            </:item>
+            <:item term="Content hash">
+              <span class="mono st-hash">{@selected_trace.content_hash}</span>
+            </:item>
+            <:item term="Previous hash">
+              <span class="mono st-hash">
+                {@selected_trace.prev_hash || "None (genesis trace)"}
+              </span>
+            </:item>
+            <:item term="Chain hash">
+              <span class="mono st-hash">{@selected_trace.chain_hash}</span>
+            </:item>
+          </.kv_list>
 
-                <div class="p-4 space-y-4">
-                  <% recovery = trace_recovery(@selected_trace) %>
-                  <div
-                    :if={recovery}
-                    id={"trace-recovery-#{@selected_trace.id}"}
-                    class="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-3"
-                  >
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                      <p class="text-xs font-590 uppercase tracking-[0.12em] text-amber-200">
-                        {recovery.title}
-                      </p>
-                      <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-510 text-amber-200">
-                        {String.capitalize(@selected_trace.status)}
-                      </span>
-                    </div>
-                    <p class="mt-2 text-xs leading-5 text-text-tertiary">
-                      {recovery.summary}
-                    </p>
-                    <div class="mt-3 flex flex-wrap gap-2">
-                      <a
-                        :if={recovery.issue_path}
-                        href={recovery.issue_path}
-                        class="inline-flex items-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
-                      >
-                        Open issue
-                      </a>
-                      <a
-                        href={recovery.operations_path}
-                        class="inline-flex items-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
-                      >
-                        Open runtime failures
-                      </a>
-                    </div>
-                    <div
-                      :if={recovery.focused_command}
-                      id={"trace-focused-command-#{@selected_trace.id}"}
-                      phx-hook="CopyToClipboard"
-                      class="mt-3 rounded-md border border-border bg-canvas px-3 py-2"
-                    >
-                      <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <span class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                          Focused relaunch
-                        </span>
-                        <button
-                          type="button"
-                          data-copy-text={recovery.focused_command}
-                          data-copy-label="Copy command"
-                          class="rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                        >
-                          Copy command
-                        </button>
-                      </div>
-                      <code class="block whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-text-secondary">
-                        {recovery.focused_command}
-                      </code>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Sequence Number</div>
-                    <div class="text-sm font-mono text-text-primary">
-                      {@selected_trace.sequence_number}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Tool Name</div>
-                    <div class="text-sm font-medium text-text-primary">
-                      {@selected_trace.tool_name}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Trace Type</div>
-                    <div class="text-sm text-text-primary">{@selected_trace.trace_type}</div>
-                  </div>
-
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Status</div>
-                    <div class={"text-sm font-medium " <> status_color(@selected_trace.status)}>
-                      <span class="inline-flex items-center">
-                        <span class="mr-1">{status_icon(@selected_trace.status)}</span>
-                        {String.capitalize(@selected_trace.status)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Occurred At</div>
-                    <div class="text-sm text-text-primary">
-                      {format_datetime(@selected_trace.occurred_at)}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Content Hash</div>
-                    <div class="text-xs font-mono text-text-secondary break-all">
-                      {@selected_trace.content_hash}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Previous Hash</div>
-                    <div class="text-xs font-mono text-text-secondary break-all">
-                      {@selected_trace.prev_hash || "None (genesis trace)"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Chain Hash</div>
-                    <div class="text-xs font-mono text-text-secondary break-all">
-                      {@selected_trace.chain_hash}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Actor Type</div>
-                    <div class="text-sm text-text-primary capitalize">
-                      {@selected_trace.actor_type}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Actor ID</div>
-                    <div class="text-sm font-mono text-text-primary">{@selected_trace.actor_id}</div>
-                  </div>
-
-                  <%= if @selected_trace.actor_type == "agent" && @selected_trace.agent do %>
-                    <div>
-                      <div class="text-xs text-text-secondary mb-1">Agent Name</div>
-                      <div class="text-sm text-text-primary">{@selected_trace.agent.name}</div>
-                    </div>
-                  <% end %>
-
-                  <%= if @selected_trace.agent_id do %>
-                    <div>
-                      <div class="text-xs text-text-secondary mb-1">Original Agent ID</div>
-                      <div class="text-sm font-mono text-text-primary">
-                        {@selected_trace.agent_id}
-                      </div>
-                    </div>
-                  <% end %>
-
-                  <%= if @selected_trace.issue_id do %>
-                    <div>
-                      <div class="text-xs text-text-secondary mb-1">Issue ID</div>
-                      <div class="text-sm font-mono text-text-primary">
-                        {@selected_trace.issue_id}
-                      </div>
-                    </div>
-                  <% end %>
-
-                  <%= if @selected_trace.run_id do %>
-                    <div>
-                      <div class="text-xs text-text-secondary mb-1">Run ID</div>
-                      <div class="text-sm font-mono text-text-primary">
-                        {@selected_trace.run_id}
-                      </div>
-                    </div>
-                  <% end %>
-
-                  <%= if @selected_trace.tool_arguments != %{} do %>
-                    <div>
-                      <div class="text-xs text-text-secondary mb-2">Tool Arguments</div>
-                      <pre class="bg-black/[0.3] rounded p-3 text-xs text-text-secondary overflow-x-auto"><%= format_json(@selected_trace.tool_arguments) %></pre>
-                    </div>
-                  <% end %>
-
-                  <%= if @selected_trace.tool_result do %>
-                    <div>
-                      <div class="text-xs text-text-secondary mb-2">Tool Result</div>
-                      <pre class="bg-black/[0.3] rounded p-3 text-xs text-text-secondary overflow-x-auto max-h-40 overflow-y-auto"><%= @selected_trace.tool_result %></pre>
-                    </div>
-                  <% end %>
-
-                  <%= if @selected_trace.error_message do %>
-                    <div>
-                      <div class="text-xs text-text-secondary mb-2">Error Message</div>
-                      <pre class="bg-red-500/10 border border-red-500/30 rounded p-3 text-xs text-red-400 overflow-x-auto"><%= @selected_trace.error_message %></pre>
-                    </div>
-                  <% end %>
-                </div>
-              </div>
-            </div>
-          <% end %>
-        </div>
+          <div :if={@selected_trace.tool_arguments != %{}} class="st-blk">
+            <p class="gh">Arguments</p>
+            <pre class="st-well mono"><%= format_json(@selected_trace.tool_arguments) %></pre>
+          </div>
+          <div :if={@selected_trace.tool_result} class="st-blk">
+            <p class="gh">Result</p>
+            <pre class="st-well mono st-tall"><%= @selected_trace.tool_result %></pre>
+          </div>
+          <div :if={@selected_trace.error_message} class="st-blk">
+            <p class="gh">Error</p>
+            <pre class="st-well mono st-err"><%= @selected_trace.error_message %></pre>
+          </div>
+        </.band_card>
       </div>
-    </div>
+    </.page_frame>
     """
   end
 end

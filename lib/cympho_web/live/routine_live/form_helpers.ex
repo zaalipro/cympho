@@ -1,10 +1,116 @@
 defmodule CymphoWeb.RoutineLive.FormHelpers do
   @moduledoc false
 
-  import Phoenix.Component, only: [assign: 3]
+  use CymphoWeb, :html
 
   alias Cympho.{Agents, Projects}
   alias Cympho.Agents.Agent
+
+  attr :form, :any, required: true
+  attr :agent_options, :list, required: true
+  attr :project_options, :list, required: true
+  attr :effect, :string, required: true, doc: "what saving does, one sentence"
+  attr :submit, :string, required: true
+  attr :cancel, :string, required: true, doc: "where Cancel goes"
+  attr :heading, :string, default: "After you save", doc: "New: \"After you create it\""
+  attr :verb, :string, default: "save", doc: "the ⌘↵ hint: \"create\" on New"
+
+  @doc "The repeating-task form shared by New and Edit (v7 L13/L15)."
+  def routine_form(assigns) do
+    ~H"""
+    <.form_pair id="routine-form" for={@form} phx-submit="save" heading={@heading} verb={@verb}>
+      <.band_card id="rf-what-t" title="What it does">
+        <div class="flds">
+          <.input
+            field={@form[:name]}
+            label="Name"
+            required
+            placeholder="Weekly release readiness"
+            wrapper_class="full"
+          />
+          <.input
+            field={@form[:description]}
+            label="Run brief"
+            type="textarea"
+            rows={5}
+            placeholder="What each run should check, and what it should report back."
+            help="Each run files a task with this brief."
+            wrapper_class="full"
+          />
+          <.input
+            type="select"
+            field={@form[:agent_id]}
+            label="Default owner"
+            value={@form[:agent_id].value || ""}
+            options={@agent_options}
+          />
+          <.input
+            type="select"
+            field={@form[:project_id]}
+            label="Project"
+            value={@form[:project_id].value || ""}
+            options={@project_options}
+          />
+          <.input
+            type="select"
+            field={@form[:priority]}
+            label="Priority"
+            value={@form[:priority].value || :medium}
+            options={[
+              {"Critical", "critical"},
+              {"High", "high"},
+              {"Medium", "medium"},
+              {"Low", "low"}
+            ]}
+          />
+        </div>
+      </.band_card>
+
+      <.band_card id="rf-run-t" title="How it runs" class="ui-advanced-only">
+        <div class="flds">
+          <.input
+            type="select"
+            field={@form[:concurrency_policy]}
+            label="When a run is still going"
+            value={@form[:concurrency_policy].value || :coalesce_if_active}
+            options={[
+              {"Combine overlapping runs", "coalesce_if_active"},
+              {"Skip if active", "skip_if_active"},
+              {"Always enqueue", "always_enqueue"}
+            ]}
+          />
+          <.input
+            type="select"
+            field={@form[:catch_up_policy]}
+            label="Missed run handling"
+            value={@form[:catch_up_policy].value || :skip_missed}
+            options={[
+              {"Skip missed", "skip_missed"},
+              {"Enqueue missed with cap", "enqueue_missed_with_cap"}
+            ]}
+          />
+          <.input
+            type="number"
+            field={@form[:catch_up_cap]}
+            label="Maximum missed runs"
+            value={@form[:catch_up_cap].value || 5}
+            min="1"
+          />
+        </div>
+      </.band_card>
+
+      <:effect>
+        <.consequences rows={[{:done, @effect}]} />
+      </:effect>
+      <:secondary>
+        <.ghost_pill navigate={@cancel}>Cancel</.ghost_pill>
+      </:secondary>
+      <:primary>
+        <.primary_pill type="submit" phx-disable-with="Saving…">{@submit}</.primary_pill>
+      </:primary>
+    </.form_pair>
+    """
+  end
 
   def assign_context_options(socket) do
     company_id = current_company_id(socket)
@@ -227,10 +333,18 @@ defmodule CymphoWeb.RoutineLive.FormHelpers do
   defp cron_day("6"), do: "Saturday"
   defp cron_day(_), do: nil
 
-  @doc "Quiet outcome-dot class for a run status (red only on failure)."
-  def routine_run_dot("completed"), do: "bg-emerald-400/70"
-  def routine_run_dot("failed"), do: "bg-rose-500"
-  def routine_run_dot("running"), do: "bg-amber-400/80"
-  def routine_run_dot("pending"), do: "bg-amber-400/60"
-  def routine_run_dot(_), do: "bg-text-quaternary/40"
+  @doc "A run's status as a glyph kind and a word (v7 §1.5)."
+  def run_state(status) when status in ["running", :running], do: {:working, "Working"}
+
+  def run_state(status) when status in ["completed", "succeeded", "success", :completed],
+    do: {:done, "Finished"}
+
+  def run_state(status) when status in ["failed", "error", :failed], do: {:stopped, "Failed"}
+  def run_state(status) when status in ["timed_out", :timed_out], do: {:stopped, "Timed out"}
+
+  def run_state(status) when status in ["pending", "queued", :pending],
+    do: {:idle, "Waiting to start"}
+
+  def run_state(status),
+    do: {:idle, status |> to_string() |> String.replace("_", " ") |> String.capitalize()}
 end

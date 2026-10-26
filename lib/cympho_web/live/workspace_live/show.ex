@@ -28,7 +28,7 @@ defmodule CymphoWeb.WorkspaceLive.Show do
 
         {:ok,
          socket
-         |> assign(:page_title, "Workspace: #{issue.id}")
+         |> assign(:page_title, "Work files for #{task_label(issue)}")
          |> assign(:issue, issue)
          |> assign(:workspace_path, workspace_path)
          |> assign(:workspace_exists, workspace_exists)
@@ -55,7 +55,7 @@ defmodule CymphoWeb.WorkspaceLive.Show do
 
   defp apply_action(socket, :show, _params) do
     socket
-    |> assign(:page_title, "Workspace: #{socket.assigns.issue.id}")
+    |> assign(:page_title, "Work files for #{task_label(socket.assigns.issue)}")
   end
 
   defp apply_action(socket, nil, params), do: apply_action(socket, :show, params)
@@ -63,150 +63,95 @@ defmodule CymphoWeb.WorkspaceLive.Show do
   @impl true
   def render(assigns) do
     ~H"""
-    <.page size="wide">
-      <.header
-        title="Issue Workspace"
-        subtitle="Repository state, prompt material, and local execution directory for this issue."
-      >
-        <:actions>
-          <.app_link
-            navigate={~p"/issues/#{@issue.id}"}
-            class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Back to Issue
-          </.app_link>
-        </:actions>
-      </.header>
+    <.page_frame
+      page="issue-workfile"
+      kind={:deep}
+      parent={{~p"/issues/#{@issue.id}", task_label(@issue)}}
+      current="Work files"
+      data-ui-complex-page
+    >
+      <:head>
+        <section class="head" aria-labelledby="iw-h">
+          <h1 class="h1 big" id="iw-h">Work files for {task_label(@issue)}</h1>
+          <p class="sub">{@issue.title}</p>
+          <.flash_line flash={@flash} />
+        </section>
+      </:head>
 
-      <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <.panel class="overflow-hidden">
-          <div class="border-b border-border px-5 py-4">
-            <div class="flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
-              <span class="font-mono">{@issue.identifier || String.slice(@issue.id, 0, 8)}</span>
-              <span class="h-1 w-1 rounded-full bg-border-strong"></span>
-              <span class="capitalize">{String.replace(to_string(@issue.status), "_", " ")}</span>
-              <span class="h-1 w-1 rounded-full bg-border-strong"></span>
-              <span class="capitalize">{@issue.priority}</span>
-            </div>
-            <h2 class="mt-2 text-lg font-590 leading-6 text-text-primary">{@issue.title}</h2>
-            <p
-              :if={@issue.description not in [nil, ""]}
-              class="mt-2 max-w-3xl text-sm leading-6 text-text-secondary"
+      <.band_card :if={!@workspace_exists} id="iw-t" title="Work folder">
+        <.quiet_empty title="No work folder yet">
+          {if @repo_url,
+            do: "Creates a local copy of #{@repo_url} on a branch for this task.",
+            else:
+              "Add a repository to #{if @project, do: @project.name, else: "the task's project"} first; the folder is copied from it."}
+          <:action>
+            <.text_link
+              :if={is_nil(@repo_url) && @project}
+              navigate={~p"/projects/#{@project.id}/edit"}
             >
-              {@issue.description}
-            </p>
+              Add a repository
+            </.text_link>
+            <.pill phx-click="create_workspace" disabled={is_nil(@repo_url)}>
+              Create work folder
+            </.pill>
+          </:action>
+        </.quiet_empty>
+      </.band_card>
+
+      <.band_card :if={@workspace_exists} id="iw-t" title="Work folder">
+        <.kv_list class="wide">
+          <:item term="Path"><span class="mono iw-path">{@workspace_path}</span></:item>
+          <:item term="Repository">
+            <span class={["iw-path", @repo_url && "mono"]}>
+              {@repo_url || "No repository configured for this project."}
+            </span>
+          </:item>
+          <:item term="Size">
+            <span class="mono">{format_workspace_size(@workspace_path)}</span>
+          </:item>
+        </.kv_list>
+      </.band_card>
+
+      <.band_card :if={@workspace_exists} id="iw-prompt-t" title="Brief for the agent">
+        <form id="iw-prompt" class="iw-form" phx-submit="write_prompt">
+          <.input
+            id="iw-prompt-body"
+            name="prompt"
+            value=""
+            label="PROMPT.md"
+            type="textarea"
+            rows={6}
+            placeholder="Write a short execution brief to PROMPT.md"
+          />
+          <div class="iw-f">
+            <p class="help">Saves PROMPT.md in the folder, replacing the one there.</p>
+            <.pill type="submit">Write PROMPT.md</.pill>
           </div>
+        </form>
+      </.band_card>
 
-          <div class="grid gap-px bg-border md:grid-cols-3">
-            <div class="bg-panel px-5 py-4">
-              <p class="text-xs font-510 uppercase tracking-wide text-text-tertiary">Workspace</p>
-              <p class="mt-2 text-sm font-510 text-text-primary">
-                {if @workspace_exists, do: "Ready", else: "Not created"}
-              </p>
-            </div>
-            <div class="bg-panel px-5 py-4">
-              <p class="text-xs font-510 uppercase tracking-wide text-text-tertiary">Project</p>
-              <p class="mt-2 truncate text-sm font-510 text-text-primary">
-                {if @project, do: @project.name, else: "No project"}
-              </p>
-            </div>
-            <div class="bg-panel px-5 py-4">
-              <p class="text-xs font-510 uppercase tracking-wide text-text-tertiary">Assignee</p>
-              <p class="mt-2 truncate text-sm font-510 text-text-primary">
-                {if @issue.assignee, do: @issue.assignee.name, else: "Unassigned"}
-              </p>
-            </div>
-          </div>
-
-          <div class="space-y-4 p-5">
-            <div>
-              <p class="mb-2 text-xs font-510 uppercase tracking-wide text-text-tertiary">Path</p>
-              <code class="block overflow-x-auto rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-secondary">
-                {@workspace_path}
-              </code>
-            </div>
-
-            <div>
-              <p class="mb-2 text-xs font-510 uppercase tracking-wide text-text-tertiary">
-                Repository
-              </p>
-              <p class="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-secondary">
-                {@repo_url || "No repository configured for this project."}
-              </p>
-            </div>
-
-            <.simple_form
-              :if={@workspace_exists}
-              for={%{}}
-              as={:prompt}
-              phx-submit="write_prompt"
-              class="space-y-3"
-            >
-              <.input
-                name="prompt"
-                value=""
-                label="Prompt File"
-                type="textarea"
-                rows={6}
-                placeholder="Write a short execution brief to PROMPT.md"
-              />
-              <:actions>
-                <div class="flex justify-end">
-                  <.button type="submit" variant="secondary">Write PROMPT.md</.button>
-                </div>
-              </:actions>
-            </.simple_form>
-          </div>
-        </.panel>
-
-        <div class="space-y-4">
-          <.panel class="p-5">
-            <h3 class="text-sm font-590 text-text-primary">Workspace Controls</h3>
-            <p class="mt-2 text-sm leading-6 text-text-secondary">
-              Create the local directory once a repository is configured. Removing it clears the local issue workspace.
-            </p>
-            <div class="mt-4 flex flex-col gap-2">
-              <.button
-                :if={!@workspace_exists}
+      <div :if={@workspace_exists} class="card">
+        <ul class="rows">
+          <.list_row id="iw-delete" title="Delete work folder">
+            <:meta>Removes the local folder for this task. The repository is not touched.</:meta>
+            <:actions>
+              <button
                 type="button"
-                variant="primary"
-                phx-click="create_workspace"
-                disabled={is_nil(@repo_url)}
-              >
-                Create Workspace
-              </.button>
-              <.button
-                :if={@workspace_exists}
-                type="button"
-                variant="secondary"
+                class="pl warn"
                 phx-click="delete_workspace"
                 data-confirm="Delete this local workspace directory?"
               >
-                Delete Workspace
-              </.button>
-            </div>
-          </.panel>
-
-          <.panel class="p-5">
-            <h3 class="text-sm font-590 text-text-primary">Details</h3>
-            <dl class="mt-4 space-y-3 text-sm">
-              <div class="flex justify-between gap-4">
-                <dt class="text-text-tertiary">Size</dt>
-                <dd class="text-text-secondary">
-                  {if @workspace_exists, do: format_workspace_size(@workspace_path), else: "N/A"}
-                </dd>
-              </div>
-              <div class="flex justify-between gap-4">
-                <dt class="text-text-tertiary">Issue ID</dt>
-                <dd class="font-mono text-xs text-text-secondary">{String.slice(@issue.id, 0, 8)}</dd>
-              </div>
-            </dl>
-          </.panel>
-        </div>
+                Delete
+              </button>
+            </:actions>
+          </.list_row>
+        </ul>
       </div>
-    </.page>
+    </.page_frame>
     """
   end
+
+  defp task_label(issue), do: issue.identifier || String.slice(issue.id, 0, 8)
 
   @impl true
   def handle_event("create_workspace", _params, socket) do

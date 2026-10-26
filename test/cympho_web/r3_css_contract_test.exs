@@ -115,10 +115,12 @@ defmodule CymphoWeb.R3CssContractTest do
     end
   end
 
-  test "the six page CSS files exist and are imported by app.css" do
+  # The 13 page files: the seven of the first redesign and the six the v7 tracks own.
+  test "the page CSS files exist and are imported by app.css" do
     app = File.read!(@app_css)
 
-    for page <- ~w(home task agents work money onboarding) do
+    for page <-
+          ~w(home task agents work money onboarding auth settings planning governance hire company ops) do
       assert File.exists?("assets/css/r3-pages/#{page}.css")
       assert app =~ ~s|@import "r3-pages/#{page}.css";|
     end

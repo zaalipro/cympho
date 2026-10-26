@@ -1,245 +1,179 @@
-<div class="ember-aurora p-6 lg:p-8">
-  <div class="relative z-[1] mx-auto max-w-6xl">
-    <.header>
-      <div class="min-w-0">
-        <span class="ember-eyebrow">Company Profile</span>
-        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-          {@company.name}
-        </h1>
-        <p class="mt-2 flex flex-wrap items-center gap-2 text-sm text-text-tertiary">
-          <code class="rounded bg-black/20 px-2 py-0.5 text-text-secondary">{@company.slug}</code>
-          <span class="text-text-quaternary">·</span>
-          <span>Created {format_inserted_at(@company)}</span>
+<% paused? = @company.status == "paused" %>
+<% editing? = @can_manage? && @live_action == :edit %>
+<.page_frame
+  page="company"
+  kind={:deep}
+  parent={{~p"/companies", "Companies"}}
+  current={if editing?, do: "Edit company", else: @company.name}
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="cs-h">
+      <h1 class="h1 big" id="cs-h">
+        {if editing?, do: "Edit #{@company.name}", else: @company.name}
+      </h1>
+      <p class="sub">
+        <span class="mono">{@company.slug}</span><span aria-hidden="true"> · </span><span class="nw">Created {format_inserted_at(@company)}</span>
+      </p>
+      <div class="chips">
+        <span :if={paused?} class="chip"><.status_word kind={:stopped} word="Paused" /></span>
+        <span :if={@company.status == "archived"} class="tag">Archived</span>
+        <.pill :if={@can_manage?} navigate={~p"/companies/#{@company}/export"}>Export</.pill>
+        <.pill :if={@can_manage? && !editing?} navigate={~p"/companies/#{@company}/edit"}>
+          <.r3_icon name="i-pencil" />Edit
+        </.pill>
+        <span :if={@can_manage?} class="ui-advanced-only">
+          <.pill navigate={~p"/companies/import"}>Import</.pill>
+        </span>
+      </div>
+    </section>
+  </:head>
+
+  <.flash_line flash={@flash} />
+
+  <%!-- While editing, the edit pair is the page's only pair (v7 §2.6). --%>
+  <.live_component
+    :if={editing?}
+    module={CymphoWeb.CompanyLive.FormComponent}
+    id={@company.id}
+    action={@live_action}
+    company={@company}
+    current_user={@current_user}
+    patch={~p"/companies/#{@company.id}"}
+  />
+
+  <%!-- Everyone who can open the company sees why it is paused; only managers get Resume
+       (the lone card is the approval page's pattern for someone who cannot decide). --%>
+  <.next_step :if={paused? && !editing?} id="cs-ns-">
+    <:problem>
+      <.problem_card title={"Resume #{@company.name}"} title_id="cs-ns-t">
+        <:eyebrow>Next step<span aria-hidden="true"> · </span>Company paused</:eyebrow>
+        <p class="obj">{@company.paused_reason || "Agents are paused for this company."}</p>
+        <p :if={!@can_manage?} class="obj">
+          Only owners, admins and board members can resume it.
         </p>
-      </div>
-      <:actions>
-        <button
-          :if={@can_manage? && @company.status == "active"}
-          phx-click="show_pause_modal"
-          class="inline-flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-2 text-sm font-510 text-amber-200 transition-colors hover:bg-amber-500/15"
-        >
-          <.icon name="hero-pause-mini" class="h-4 w-4" /> Pause Company
-        </button>
-        <button
-          :if={@can_manage? && @company.status == "paused"}
-          phx-click="show_resume_modal"
-          class="inline-flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-4 py-2 text-sm font-510 text-emerald-300 transition-colors hover:bg-emerald-500/15"
-        >
-          <.icon name="hero-play-mini" class="h-4 w-4" /> Resume Company
-        </button>
+      </.problem_card>
+    </:problem>
+    <:resolution :if={@can_manage?}>
+      <.ink_card heading="After you resume it" heading_id="cs-ns-i">
+        <.consequences rows={[{:done, "Agents pick up work again and new runs can start."}]} />
+        <.ink_foot verb="resume">
+          <:primary>
+            <.primary_pill phx-click="show_resume_modal">Resume</.primary_pill>
+          </:primary>
+        </.ink_foot>
+      </.ink_card>
+    </:resolution>
+  </.next_step>
 
-        <.app_link
-          :if={@can_manage?}
-          navigate={~p"/companies/#{@company}/export"}
-          class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-        >
-          <.icon name="hero-arrow-down-tray-mini" class="h-4 w-4" /> Export
-        </.app_link>
-
-        <.app_link
-          :if={@can_manage?}
-          navigate={~p"/companies/import"}
-          class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
-        >
-          <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Import
-        </.app_link>
-
-        <.app_link
-          :if={@can_manage?}
-          navigate={~p"/companies/#{@company}/edit"}
-          class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
-        >
-          <.icon name="hero-pencil-square-mini" class="h-4 w-4" /> Edit Company
-        </.app_link>
-
-        <.app_link
-          navigate={~p"/companies"}
-          class="inline-flex items-center px-2 py-2 text-sm text-text-secondary transition-colors hover:text-text-primary"
-        >
-          Back to Companies
-        </.app_link>
-      </:actions>
-    </.header>
-
-    <div
-      :if={@flash["info"]}
-      class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
-    >
-      {@flash["info"]}
+  <.band_card id="cs-members-t" title="Members">
+    <:header_end><span class="meta mono">{Enum.count(@memberships)}</span></:header_end>
+    <div :if={@memberships != []} class="tbl-w">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col" class="m-hide">Email</th>
+            <th scope="col">Role</th>
+            <th :if={@can_manage?} scope="col"><span class="sr">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr :for={membership <- @memberships}>
+            <th scope="row">{membership.user.name}</th>
+            <td class="m-hide cs-email">{membership.user.email}</td>
+            <td>
+              {role_label(membership.role)}<span
+                :if={membership.is_board_member}
+                class="tag cs-board"
+              >Board</span>
+            </td>
+            <td :if={@can_manage?} class="cs-act">
+              <button
+                type="button"
+                class="pl warn"
+                phx-click="delete_membership"
+                phx-value-id={membership.id}
+                aria-label={"Remove #{membership.user.email}"}
+                data-confirm={"Remove #{membership.user.email} from #{@company.name}? They will lose access to this company."}
+              >
+                Remove
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
+    <.quiet_empty :if={@memberships == []} title="No members yet">
+      Add users to this company from Settings.
+    </.quiet_empty>
+  </.band_card>
 
-    <div
-      :if={@flash["error"]}
-      class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
-    >
-      {@flash["error"]}
-    </div>
+  <section
+    :if={@can_manage? && @company.status == "active" && !editing?}
+    class="card"
+    aria-label="Pause"
+  >
+    <ul class="rows">
+      <.list_row id="company-pause-row" title={"Pause #{@company.name}"} icon="i-pause">
+        <:meta>Stops agent dispatch and new runs until you resume it.</:meta>
+        <:actions>
+          <button type="button" class="pl warn" phx-click="show_pause_modal">Pause</button>
+        </:actions>
+      </.list_row>
+    </ul>
+  </section>
 
-    <div class="stagger-children grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8 mt-2">
-      <div class="ember-stat card-lift bg-surface border border-border rounded-xl p-6">
-        <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-          Company Slug
-        </div>
-        <div class="font-serif text-2xl font-510 text-text-primary">
-          <code class="bg-black/20 px-2 py-1 rounded">{@company.slug}</code>
-        </div>
-      </div>
+  <.modal
+    :if={@show_pause_modal}
+    id="pause-company-modal"
+    show
+    title={"Pause #{@company.name}"}
+    on_cancel={JS.push("hide_pause_modal")}
+  >
+    <p class="gl-sub">Pause all agents and stop dispatching.</p>
+    <form id="pause-company-reason" phx-change="update_pause_reason">
+      <.input
+        type="textarea"
+        id="pause-company-reason-input"
+        name="pause_reason"
+        value={@pause_reason}
+        label="Reason"
+        placeholder="Why are you pausing it?"
+        rows={3}
+      />
+    </form>
+    <:footer>
+      <button type="button" class="pl" phx-click="hide_pause_modal">Cancel</button>
+      <button
+        type="button"
+        class="pl stop"
+        phx-click="pause_company"
+        data-confirm={"Pause #{@company.name}? This stops agent dispatch and new runtime launches until the company is resumed."}
+      >
+        Pause
+      </button>
+    </:footer>
+  </.modal>
 
-      <div class="ember-stat card-lift bg-surface border border-border rounded-xl p-6">
-        <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-          Status
-        </div>
-        <div class="font-serif text-2xl font-510">
-          <span :if={@company.status == "active"} class="text-green-400">Active</span><span
-            :if={@company.status == "paused"}
-            class="text-yellow-400"
-          >Paused</span>
-        </div>
-        <div :if={@company.paused_reason} class="text-xs text-text-secondary mt-1">
-          {@company.paused_reason}
-        </div>
-      </div>
-
-      <div class="ember-stat card-lift bg-surface border border-border rounded-xl p-6">
-        <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-          Members
-        </div>
-        <div class="font-serif text-2xl font-510 text-text-primary">
-          {Enum.count(@memberships)}
-        </div>
-      </div>
-
-      <div class="ember-stat card-lift bg-surface border border-border rounded-xl p-6">
-        <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-          Created
-        </div>
-        <div class="font-serif text-2xl font-510 text-text-primary">
-          {format_inserted_at(@company)}
-        </div>
-      </div>
-    </div>
-
-    <div class="ember-glass overflow-hidden">
-      <div class="px-6 py-4 border-b border-white/10">
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">Team</p>
-        <h2 class="mt-1 font-serif text-lg font-510 text-text-primary">Company Members</h2>
-      </div>
-
-      <div class="overflow-x-auto">
-        <table class="w-full">
-          <thead class="bg-subtle border-b border-border">
-            <tr>
-              <th class="text-left text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
-                User
-              </th>
-              <th class="text-left text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
-                Email
-              </th>
-              <th class="text-left text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
-                Role
-              </th>
-              <th class="text-right text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-border">
-            <%= for membership <- @memberships do %>
-              <tr class="transition-colors hover:bg-subtle hover:shadow-[inset_2px_0_0_0_var(--color-primary)]">
-                <td class="px-6 py-4 text-text-primary">
-                  {membership.user.name}
-                </td>
-                <td class="px-6 py-4 text-text-secondary text-sm">
-                  {membership.user.email}
-                </td>
-                <td class="px-6 py-4">
-                  <span class="inline-flex items-center px-2 py-1 rounded text-xs font-510 bg-brand/10 text-brand">
-                    {role_label(membership.role)}
-                  </span>
-                </td>
-                <td class="px-6 py-4 text-right">
-                  <button
-                    :if={@can_manage?}
-                    phx-click="delete_membership"
-                    phx-value-id={membership.id}
-                    class="text-red-400 hover:text-red-300 text-sm"
-                    data-confirm={"Remove #{membership.user.email} from #{@company.name}? They will lose access to this company."}
-                  >
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            <% end %>
-          </tbody>
-        </table>
-      </div>
-
-      <div :if={Enum.empty?(@memberships)} class="text-center py-12">
-        <div class="text-text-tertiary text-sm">No members yet. Add users to this company!</div>
-      </div>
-    </div>
-
-    <div :if={@show_pause_modal} class="fixed inset-0 z-50 flex items-center justify-center">
-      <div class="fixed inset-0 bg-black/60" phx-click="hide_pause_modal"></div>
-      <div class="relative bg-surface border border-border rounded-xl p-6 max-w-md w-full mx-4">
-        <h3 class="text-lg font-510 text-text-primary mb-2">Pause Company</h3>
-        <p class="text-sm text-text-secondary mb-4">Pause all agents and stop dispatching.</p>
-        <input
-          type="text"
-          phx-change="update_pause_reason"
-          value={@pause_reason}
-          name="pause_reason"
-          class="w-full bg-black/20 border border-border rounded-lg px-3 py-2 text-sm mb-4"
-          placeholder="Reason"
-        />
-        <div class="flex justify-end gap-3">
-          <button
-            phx-click="hide_pause_modal"
-            class="px-4 py-2 text-sm border border-border rounded-lg"
-          >
-            Cancel
-          </button>
-          <button
-            phx-click="pause_company"
-            data-confirm={"Pause #{@company.name}? This stops agent dispatch and new runtime launches until the company is resumed."}
-            class="px-4 py-2 text-sm font-510 bg-yellow-600 text-white rounded-lg"
-          >
-            Pause
-          </button>
-        </div>
-      </div>
-    </div>
-    <div :if={@show_resume_modal} class="fixed inset-0 z-50 flex items-center justify-center">
-      <div class="fixed inset-0 bg-black/60" phx-click="hide_resume_modal"></div>
-      <div class="relative bg-surface border border-border rounded-xl p-6 max-w-md w-full mx-4">
-        <h3 class="text-lg font-510 text-text-primary mb-2">Resume Company</h3>
-        <p class="text-sm text-text-secondary mb-4">Resume agents and re-enable dispatching.</p>
-        <div class="flex justify-end gap-3">
-          <button
-            phx-click="hide_resume_modal"
-            class="px-4 py-2 text-sm border border-border rounded-lg"
-          >
-            Cancel
-          </button>
-          <button
-            phx-click="resume_company"
-            data-confirm={"Resume #{@company.name}? This re-enables agent dispatch for this company."}
-            class="px-4 py-2 text-sm font-510 bg-green-600 text-white rounded-lg"
-          >
-            Resume
-          </button>
-        </div>
-      </div>
-    </div>
-    <.live_component
-      :if={@can_manage? && @live_action in [:edit]}
-      module={CymphoWeb.CompanyLive.FormComponent}
-      id={@company.id}
-      title={@page_title}
-      action={@live_action}
-      company={@company}
-      current_user={@current_user}
-      patch={true}
-    />
-  </div>
-</div>
+  <.modal
+    :if={@show_resume_modal}
+    id="resume-company-modal"
+    show
+    title={"Resume #{@company.name}"}
+    on_cancel={JS.push("hide_resume_modal")}
+  >
+    <p class="gl-sub">Resume agents and re-enable dispatching.</p>
+    <:footer>
+      <button type="button" class="pl" phx-click="hide_resume_modal">Cancel</button>
+      <button
+        type="button"
+        class="pl"
+        phx-click="resume_company"
+        data-confirm={"Resume #{@company.name}? This re-enables agent dispatch for this company."}
+      >
+        Resume
+      </button>
+    </:footer>
+  </.modal>
+</.page_frame>

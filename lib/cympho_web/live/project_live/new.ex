@@ -10,6 +10,7 @@ defmodule CymphoWeb.ProjectLive.New do
 
     {:ok,
      socket
+     |> assign(:page_title, "New project")
      |> assign(:project_scope, scope)
      |> assign(:form, to_form(changeset))}
   end
@@ -24,28 +25,12 @@ defmodule CymphoWeb.ProjectLive.New do
       {:ok, project} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Project created. Add its first issue when you are ready.")
+         |> put_flash(:info, "Project created. Add its first task when you are ready.")
          |> push_navigate(to: ~p"/projects/#{project.id}")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
     end
-  end
-
-  attr :text, :string, required: true
-
-  @doc "Collapses a form section's help paragraph into a hoverable `?` marker."
-  def field_hint(assigns) do
-    ~H"""
-    <span
-      role="img"
-      aria-label={@text}
-      title={@text}
-      class="inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-[11px] font-590 text-text-quaternary"
-    >
-      ?
-    </span>
-    """
   end
 
   defp project_scope(socket) do

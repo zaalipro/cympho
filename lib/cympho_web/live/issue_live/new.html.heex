@@ -1,267 +1,193 @@
-<.page size="wide" class="ember-aurora" data-ui-complex-page>
-  <div class="relative z-[1] mx-auto max-w-4xl">
-    <.header>
-      <div class="min-w-0">
-        <h1 class="ember-ink mt-3 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-          New issue
-        </h1>
-        <p class="mt-2 text-sm text-text-tertiary">What should the team do?</p>
+<.page_frame
+  page="task-new"
+  kind={:deep}
+  parent={{"/issues", "Tasks"}}
+  current="New task"
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="tn-h">
+      <h1 class="h1 big" id="tn-h">New task</h1>
+      <p class="sub">What should the team do?</p>
+    </section>
+  </:head>
+
+  <.flash_line flash={@flash} />
+
+  <% queue_focus_disabled? =
+    queue_focus_disabled?(@brief_readiness) or swarm_enabled?(@swarm_config) %>
+  <% queue_focus_checked? = queue_focus_checked?(@brief_readiness, @queue_dispatch_focus?) %>
+  <% ceo_missing? = @intake_route && @intake_route[:missing?] %>
+
+  <.form_pair
+    id="issue-form"
+    for={@form}
+    phx-change="validate"
+    phx-submit="save"
+    heading="After you create it"
+    verb="create"
+  >
+    <.band_card id="tn-task-t" title="Task">
+      <div class="flds">
+        <.input
+          field={@form[:title]}
+          label="Title"
+          required
+          placeholder="The outcome, in one sentence"
+          wrapper_class="full"
+        />
+        <.input
+          field={@form[:description]}
+          label="Details"
+          type="textarea"
+          rows={8}
+          placeholder={@description_placeholder}
+          wrapper_class="full"
+        />
+        <p class="ui-advanced-only help full" data-testid="issue-brief-readiness">
+          {@brief_readiness.label}<span aria-hidden="true"> · </span>
+          <span class="mono">
+            {@brief_readiness.passed_count}/{@brief_readiness.total}
+          </span>
+          <span :if={@brief_readiness.status != :ready}>
+            <span aria-hidden="true"> · </span>{@brief_readiness.next_prompt}
+          </span>
+        </p>
+        <span :if={@brief_readiness.status != :ready} class="ui-advanced-only full tn-tpl">
+          <.pill phx-click="use_launch_scaffold">Use a structured template</.pill>
+        </span>
       </div>
-      <:actions>
-        <.icon_action navigate={~p"/issues"} icon="hero-x-mark-mini" label="Close" />
-      </:actions>
-    </.header>
+      <div class="tn-mode" data-testid="issue-work-mode">
+        <.option_rows
+          name={@form[:work_mode].name}
+          legend="How should the team begin?"
+          own={false}
+          checked={to_string(@form[:work_mode].value || :standard)}
+          items={work_mode_items()}
+        />
+        <%!-- The full contract stays with screen readers in Advanced instead of
+             printing legalese under every option. --%>
+        <ul class="ui-advanced-only sr">
+          <li :for={{label, _value, _help, contract} <- work_mode_options()}>
+            {label}: {contract}
+          </li>
+        </ul>
+      </div>
+    </.band_card>
 
-    <section class="ember-glass overflow-clip">
-      <.simple_form
-        for={@form}
-        phx-change="validate"
-        phx-submit="save"
-        class="space-y-5 p-5 sm:p-6"
-      >
-        <% queue_focus_disabled? =
-          queue_focus_disabled?(@brief_readiness) or swarm_enabled?(@swarm_config) %>
-        <% queue_focus_checked? = queue_focus_checked?(@brief_readiness, @queue_dispatch_focus?) %>
-
-        <div class="space-y-5">
+    <details id="issue-new-more" class="card tech" phx-mounted={JS.ignore_attributes("open")}>
+      <summary>
+        <span class="h2">Options</span> <.r3_icon name="i-chev-down" />
+      </summary>
+      <div class="flds">
+        <.input
+          :if={!Enum.empty?(@goals)}
+          field={@form[:goal_id]}
+          type="select"
+          label="Goal"
+          options={goal_options(@goals)}
+        />
+        <.input
+          :if={!Enum.empty?(@projects)}
+          field={@form[:project_id]}
+          type="select"
+          label="Project"
+          required
+          options={project_options(@projects)}
+        />
+        <.input field={@form[:due_on]} type="date" label="Due date" />
+        <div class="ui-advanced-only">
           <.input
-            field={@form[:title]}
-            label="Title"
+            field={@form[:status]}
+            type="select"
+            label="Status"
             required
-            placeholder="Describe the outcome in one sentence"
+            options={status_options()}
           />
-
-          <div>
-            <.input
-              field={@form[:description]}
-              label="Details"
-              type="textarea"
-              rows={8}
-              placeholder={@description_placeholder}
-            />
-            <button
-              :if={@brief_readiness.status != :ready}
-              type="button"
-              phx-click="use_launch_scaffold"
-              class="ui-advanced-only mt-2 inline-flex items-center gap-1.5 text-xs font-590 text-text-tertiary transition-colors hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-            >
-              <.icon name="hero-document-plus-mini" class="h-3.5 w-3.5" />
-              Use a structured template
-            </button>
-          </div>
-
-          <fieldset data-testid="issue-work-mode" class="space-y-2">
-            <legend class="text-sm font-590 text-text-primary">How should the team begin?</legend>
-            <div class="grid gap-2 sm:grid-cols-3">
-              <label
-                :for={{label, value, simple_help, contract} <- work_mode_options()}
-                title={contract}
-                class={[
-                  "cursor-pointer rounded-xl border px-3 py-3 transition-colors",
-                  to_string(@form[:work_mode].value || :standard) == value &&
-                    "border-brand/50 bg-brand/10",
-                  to_string(@form[:work_mode].value || :standard) != value &&
-                    "border-border bg-surface/55 hover:border-border-hover"
-                ]}
-              >
-                <input
-                  type="radio"
-                  name={@form[:work_mode].name}
-                  value={value}
-                  checked={to_string(@form[:work_mode].value || :standard) == value}
-                  class="sr-only"
-                />
-                <span class="block text-sm font-590 text-text-primary">{label}</span>
-                <span class="mt-1 block text-xs leading-5 text-text-tertiary">{simple_help}</span>
-                <%!-- The full contract stays reachable on hover (the label's
-                     title) and to screen readers instead of printing legalese on
-                     every card. Still advanced-only: simple mode deliberately
-                     keeps this out of the a11y tree too, not just off-screen. --%>
-                <span class="ui-advanced-only sr-only">{contract}</span>
-              </label>
-            </div>
-          </fieldset>
-
-          <details
-            id="issue-new-more"
-            class="group rounded-xl border border-border bg-surface/55"
-            phx-mounted={JS.ignore_attributes("open")}
-          >
-            <summary class="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-590 text-text-secondary transition-colors hover:text-text-primary">
-              <.icon name="hero-adjustments-horizontal-mini" class="h-4 w-4 text-text-quaternary" />
-              <span class="flex-1">Options</span>
-              <.icon
-                name="hero-chevron-down-mini"
-                class="h-4 w-4 text-text-quaternary transition-transform group-open:rotate-180"
-              />
-            </summary>
-
-            <div class="space-y-5 border-t border-border px-4 py-4">
-              <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <.input
-                  :if={!Enum.empty?(@goals)}
-                  field={@form[:goal_id]}
-                  type="select"
-                  label="Goal"
-                  options={goal_options(@goals)}
-                />
-                <.input
-                  :if={!Enum.empty?(@projects)}
-                  field={@form[:project_id]}
-                  type="select"
-                  label="Project"
-                  required
-                  options={project_options(@projects)}
-                />
-                <.input field={@form[:due_on]} type="date" label="Due date" />
-                <div class="ui-advanced-only">
-                  <.input
-                    field={@form[:status]}
-                    type="select"
-                    label="Status"
-                    required
-                    options={status_options()}
-                  />
-                </div>
-                <div class="ui-advanced-only">
-                  <.input
-                    field={@form[:priority]}
-                    type="select"
-                    label="Priority"
-                    required
-                    options={priority_options()}
-                  />
-                </div>
-              </div>
-
-              <div
-                :if={@swarm_admin?}
-                data-testid="issue-swarm-controls"
-                class="ui-advanced-only border-t border-border pt-4"
-              >
-                <label for="issue-swarm-enabled" class="flex cursor-pointer items-center gap-3">
-                  <input
-                    id="issue-swarm-enabled"
-                    type="checkbox"
-                    name="swarm[enabled]"
-                    value="true"
-                    checked={swarm_enabled?(@swarm_config)}
-                    class="h-4 w-4 rounded border-border bg-canvas text-brand focus:ring-brand/40"
-                  />
-                  <span class="flex-1 text-sm font-590 text-text-primary">Use swarm</span>
-                  <span class="text-xs text-text-quaternary">
-                    {swarm_count(@swarm_config)} workers
-                  </span>
-                </label>
-
-                <.swarm_configuration
-                  :if={swarm_enabled?(@swarm_config)}
-                  id="issue-swarm-advanced-panel"
-                  title="Swarm setup"
-                  description="Choose the worker mix."
-                  swarm_params={@swarm_params}
-                  swarm_config={@swarm_config}
-                  proxy_profiles={@proxy_profiles}
-                  compact={true}
-                  class="mt-4"
-                />
-              </div>
-            </div>
-          </details>
-
-          <div
-            :if={@intake_route && @intake_route[:missing?]}
-            class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3"
-          >
-            <p class="text-sm text-amber-100">Add a CEO agent before this issue can run.</p>
-            <.app_link
-              navigate={~p"/agents/new"}
-              class="rounded-md border border-amber-500/25 px-2.5 py-1.5 text-xs font-590 text-amber-50 hover:bg-amber-500/15"
-            >
-              Add CEO agent
-            </.app_link>
-          </div>
-
-          <label
-            :if={!(@intake_route && @intake_route[:missing?]) && !swarm_enabled?(@swarm_config)}
-            for="queue-dispatch-focus"
-            class={[
-              "flex items-start gap-3 rounded-lg border border-border bg-surface/55 px-4 py-3",
-              queue_focus_disabled? && "opacity-60"
-            ]}
-          >
-            <input type="hidden" name="queue_dispatch_focus" value="false" />
+        </div>
+        <div class="ui-advanced-only">
+          <.input
+            field={@form[:priority]}
+            type="select"
+            label="Priority"
+            required
+            options={priority_options()}
+          />
+        </div>
+        <div :if={@swarm_admin?} data-testid="issue-swarm-controls" class="ui-advanced-only full">
+          <label class="fld-ck" for="issue-swarm-enabled">
             <input
-              id="queue-dispatch-focus"
+              id="issue-swarm-enabled"
               type="checkbox"
-              name="queue_dispatch_focus"
+              name="swarm[enabled]"
               value="true"
-              checked={queue_focus_checked?}
-              disabled={queue_focus_disabled?}
-              class="mt-0.5 h-4 w-4 rounded border-border bg-canvas text-brand focus:ring-brand/40 disabled:cursor-not-allowed"
+              checked={swarm_enabled?(@swarm_config)}
             />
-            <span class="min-w-0">
-              <span class="ui-advanced-only block text-sm font-590 text-text-primary">
-                Queue after creating
-              </span>
-              <span class="ui-simple-only block text-sm font-590 text-text-primary">
-                Start right away
-              </span>
-              <span :if={queue_focus_disabled?} class="mt-0.5 block text-xs text-text-quaternary">
-                <span class="ui-advanced-only">Add enough detail to make the brief ready.</span>
-                <%!-- Simple mode hides the readiness panel that names the missing
-                     signal, so say it here instead of only "write more". --%>
-                <span class="ui-simple-only">
-                  Write a bit more first.
-                  <span :if={@brief_readiness.status != :ready}>
-                    {@brief_readiness.next_prompt}
-                  </span>
-                </span>
-              </span>
-            </span>
+            <span>Use swarm</span>
+            <span class="help mono">{swarm_count(@swarm_config)} workers</span>
           </label>
 
-          <section class="ui-advanced-only rounded-lg border border-border bg-panel/70 px-4 py-3">
-            <div class="flex items-center gap-3">
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center justify-between gap-3">
-                  <p class="text-sm font-590 text-text-primary">{@brief_readiness.label}</p>
-                  <span class="font-mono text-xs text-text-quaternary">
-                    {@brief_readiness.passed_count}/{@brief_readiness.total}
-                  </span>
-                </div>
-                <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-surface">
-                  <div
-                    class={[
-                      "h-full rounded-full",
-                      @brief_readiness.status == :ready && "bg-success",
-                      @brief_readiness.status != :ready && "bg-amber-400"
-                    ]}
-                    style={"width: #{@brief_readiness.percent}%"}
-                  >
-                  </div>
-                </div>
-                <p :if={@brief_readiness.status != :ready} class="mt-2 text-xs text-text-tertiary">
-                  {@brief_readiness.next_prompt}
-                </p>
-              </div>
-            </div>
-          </section>
+          <.swarm_configuration
+            :if={swarm_enabled?(@swarm_config)}
+            id="issue-swarm-advanced-panel"
+            title="Swarm setup"
+            description="Choose the worker mix."
+            swarm_params={@swarm_params}
+            swarm_config={@swarm_config}
+            proxy_profiles={@proxy_profiles}
+            compact={true}
+            class="mt-4"
+          />
         </div>
+      </div>
+    </details>
 
-        <%!-- The form's own child, not the :actions slot: inside that slot's
-             wrapper (its own height) the bar could never stick. --%>
-        <div class="sticky-above-mobile-nav sticky z-20 -mx-5 flex justify-end border-t border-border bg-panel/95 px-5 py-3 backdrop-blur sm:-mx-6 sm:px-6">
-          <.button type="submit" variant="primary" class="cta-glow min-w-32">
-            {submit_label(
-              @brief_readiness,
-              @queue_dispatch_focus?,
-              @intake_route,
-              @swarm_config
-            )}
-          </.button>
-        </div>
-      </.simple_form>
-    </section>
-  </div>
-</.page>
+    <:effect>
+      <.ink_note :if={ceo_missing?}>Add a CEO agent before this task can run.</.ink_note>
+      <.consequences
+        :if={!ceo_missing?}
+        rows={[
+          {:done,
+           "Cympho gives it to an agent with the right role, or keeps it in Later if nobody is free."}
+        ]}
+      />
+      <%!-- What pressing the primary does depends on this box, so it sits on the
+           resolution card beside it. --%>
+      <div :if={!ceo_missing? && !swarm_enabled?(@swarm_config)} class="fld">
+        <label class="fld-ck" for="queue-dispatch-focus">
+          <input type="hidden" name="queue_dispatch_focus" value="false" />
+          <input
+            id="queue-dispatch-focus"
+            type="checkbox"
+            name="queue_dispatch_focus"
+            value="true"
+            checked={queue_focus_checked?}
+            disabled={queue_focus_disabled?}
+            aria-describedby={queue_focus_disabled? && "queue-dispatch-focus-help"}
+          />
+          <span>
+            <span class="ui-advanced-only">Queue after creating</span><span class="ui-simple-only">Start right away</span>
+          </span>
+        </label>
+        <p :if={queue_focus_disabled?} class="help" id="queue-dispatch-focus-help">
+          <span class="ui-advanced-only">Add enough detail to make the brief ready.</span>
+          <%!-- Simple mode hides the readiness line that names the missing
+               signal, so say it here instead of only "write more". --%>
+          <span class="ui-simple-only">
+            Write a bit more first.
+            <span :if={@brief_readiness.status != :ready}>{@brief_readiness.next_prompt}</span>
+          </span>
+        </p>
+      </div>
+    </:effect>
+    <:secondary>
+      <.ghost_pill :if={ceo_missing?} navigate={~p"/agents/new"}>Add CEO agent</.ghost_pill>
+      <.ghost_pill :if={!ceo_missing?} navigate={~p"/issues"}>Cancel</.ghost_pill>
+    </:secondary>
+    <:primary>
+      <.primary_pill type="submit" phx-disable-with="Creating…">
+        {submit_label(@brief_readiness, @queue_dispatch_focus?, @intake_route, @swarm_config)}
+      </.primary_pill>
+    </:primary>
+  </.form_pair>
+</.page_frame>

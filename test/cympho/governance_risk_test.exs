@@ -42,6 +42,29 @@ defmodule Cympho.GovernanceRiskTest do
       assert Enum.any?(brief.signals, &(&1.label == "Board vote state"))
       assert Enum.any?(brief.signals, &(&1.label == "Audit trail"))
     end
+
+    test "agrees the verb with the number of board members still to vote" do
+      company = create_company(%{"threshold_type" => "count", "threshold_value" => 2})
+      first = create_board_user(company, "first")
+      _second = create_board_user(company, "second")
+
+      {:ok, approval} =
+        BoardApprovals.create_board_approval(%{
+          title: "Hire a QA engineer",
+          description: "Add a QA engineer to the team.",
+          category: "strategic_initiative",
+          company_id: company.id,
+          review_deadline: DateTime.utc_now() |> DateTime.add(3 * 24 * 60 * 60, :second)
+        })
+
+      brief = GovernanceRisk.approval_brief(BoardApprovals.get_board_approval!(approval.id))
+      assert brief.summary == "2 board members still need to vote; 0 approve votes recorded."
+
+      {:ok, _approve} = BoardApprovals.cast_vote(approval.id, first.id, "approve", "Yes")
+
+      brief = GovernanceRisk.approval_brief(BoardApprovals.get_board_approval!(approval.id))
+      assert brief.summary == "1 board member still needs to vote; 1 approve vote recorded."
+    end
   end
 
   describe "company_snapshot/1" do

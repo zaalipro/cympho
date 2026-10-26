@@ -124,8 +124,7 @@ defmodule CymphoWeb.IssueLive.Show.Header do
         description_draft={@description_draft}
         delivery_brief_readiness={@delivery_brief_readiness}
       />
-      <p :if={@flash["info"]} class="flash-msg" role="status">{@flash["info"]}</p>
-      <p :if={@flash["error"]} class="flash-msg err" role="alert">{@flash["error"]}</p>
+      <.flash_line flash={@flash} />
     </section>
     """
   end

@@ -3,8 +3,11 @@ defmodule CymphoWeb.BudgetLive.Index do
 
   import CymphoWeb.Format, only: [money: 1, window: 1]
 
+  alias Cympho.Agents
   alias Cympho.Budgets
   alias Cympho.Finances
+  alias Cympho.Projects
+  alias CymphoWeb.NextStep
   alias CymphoWeb.TeamRail
 
   @impl true
@@ -15,7 +18,7 @@ defmodule CymphoWeb.BudgetLive.Index do
 
     socket =
       socket
-      |> assign(:page_title, "Budgets")
+      |> assign(:page_title, "Spending limit")
       |> assign(:infinite_scroll, %{})
       |> recalc_summary()
       |> init_stream(:budget, &fetch_budgets(socket, &1))
@@ -30,7 +33,7 @@ defmodule CymphoWeb.BudgetLive.Index do
 
   defp apply_action(socket, :index, _params) do
     socket
-    |> assign(:page_title, "Budgets")
+    |> assign(:page_title, "Spending limit")
     |> assign(:budget, nil)
   end
 
@@ -43,7 +46,7 @@ defmodule CymphoWeb.BudgetLive.Index do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     socket
-    |> assign(:page_title, "New Budget")
+    |> assign(:page_title, "New limit")
     |> assign(:budget, %Budgets.Budget{
       company_id: company_id,
       scope_type: "company",
@@ -147,6 +150,13 @@ defmodule CymphoWeb.BudgetLive.Index do
     |> assign(:budget_policies, policies)
     |> assign(:spending, spending)
     |> assign(:budget_command, command)
+    |> assign(:scope_names, scope_names(socket.assigns.current_company.id))
+  end
+
+  # Project and agent names for the rows' scope, from this company only.
+  defp scope_names(company_id) do
+    (Projects.list_projects_by_company(company_id) ++ Agents.list_agents_by_company(company_id))
+    |> Map.new(&{&1.id, &1.name})
   end
 
   # No Budget yet, but the company has a limit no Budget owns (the one set up
@@ -199,22 +209,6 @@ defmodule CymphoWeb.BudgetLive.Index do
     format_percentage(pct)
   end
 
-  def status_badge(budget) do
-    cond do
-      budget.status == "exhausted" ->
-        {"bg-brand/10 text-brand border-brand/20", "Exhausted"}
-
-      budget.status == "cancelled" ->
-        {"bg-gray-500/10 text-gray-400 border-gray-500/20", "Cancelled"}
-
-      Budgets.Budget.at_threshold?(budget) ->
-        {"bg-amber-500/10 text-amber-400 border-amber-500/20", "Threshold"}
-
-      true ->
-        {"bg-green-500/10 text-green-400 border-green-500/20", "Active"}
-    end
-  end
-
   def scope_label(budget) do
     case budget.scope_type do
       "company" -> "Company"
@@ -225,37 +219,36 @@ defmodule CymphoWeb.BudgetLive.Index do
     end
   end
 
-  def progress_color(budget) do
-    pct = Budgets.Budget.utilization_percentage(budget)
-    pct_value = Decimal.to_float(pct)
-
-    cond do
-      pct_value >= 100 -> "bg-brand"
-      pct_value >= budget.threshold_alert_percentage -> "bg-amber-500"
-      true -> "bg-green-500"
+  @doc "The scope with its project or agent name: \"Project Invoicing app\"."
+  def scope_text(%{scope_type: type} = budget, names) when type in ["project", "agent"] do
+    case Map.get(names, budget.scope_id) do
+      name when is_binary(name) -> "#{scope_label(budget)} #{name}"
+      _ -> scope_label(budget)
     end
   end
 
+  def scope_text(budget, _names), do: scope_label(budget)
+
+  @doc "The budget window as one short line: \"25 Oct – 24 Nov\"."
+  def period_label(%{period_start: %DateTime{} = from, period_end: %DateTime{} = to}),
+    do: "#{day(from)} – #{day(to)}"
+
+  def period_label(%{period_start: %DateTime{} = from}), do: "From #{day(from)}"
+  def period_label(%{period_end: %DateTime{} = to}), do: "Until #{day(to)}"
+  def period_label(_budget), do: nil
+
+  defp day(at), do: Calendar.strftime(at, "%-d %b")
+
   @doc """
-  Plain-language health state for a single budget, so a glance reads as
-  "Healthy — 40% used" rather than a bare percentage.
+  The row's status word (v7 §1.5): only the exception is printed. Below the
+  warning share there is none; the share itself sits in the row's trail.
   """
-  def budget_state(budget, policies \\ []) do
-    used = utilization_percentage(budget)
-    enforcement = enforcement_mode(budget, policies)
-
+  def budget_status(budget) do
     cond do
-      budget.status == "exhausted" or over_cap?(budget) ->
-        %{tone: :exhausted, word: "Exhausted", detail: exhausted_detail(enforcement)}
-
-      budget.status == "cancelled" ->
-        %{tone: :cancelled, word: "Cancelled", detail: "no longer enforced"}
-
-      Budgets.Budget.at_threshold?(budget) ->
-        %{tone: :watch, word: "Watch", detail: "#{used} used"}
-
-      true ->
-        %{tone: :ok, word: "Healthy", detail: "#{used} used"}
+      budget.status == "exhausted" or over_cap?(budget) -> {:stopped, "Limit reached"}
+      budget.status == "cancelled" -> nil
+      Budgets.Budget.at_threshold?(budget) -> {:waiting, "Near the limit"}
+      true -> nil
     end
   end
 
@@ -268,10 +261,6 @@ defmodule CymphoWeb.BudgetLive.Index do
         false
     end
   end
-
-  defp exhausted_detail(:block), do: "agents paused"
-  defp exhausted_detail(:warn), do: "over the cap — agents keep spending"
-  defp exhausted_detail(_), do: "over the cap — not runtime-enforced"
 
   @doc """
   One calm sentence describing what happens to autonomous runs when this
@@ -315,20 +304,6 @@ defmodule CymphoWeb.BudgetLive.Index do
         end
     end)
   end
-
-  def budget_dot_class(:exhausted), do: "bg-brand"
-  def budget_dot_class(:watch), do: "bg-amber-400"
-  def budget_dot_class(:cancelled), do: "bg-text-quaternary"
-  def budget_dot_class(_tone), do: "bg-emerald-400"
-
-  def budget_state_text_class(:exhausted), do: "text-brand"
-  def budget_state_text_class(:watch), do: "text-amber-400"
-  def budget_state_text_class(:cancelled), do: "text-text-quaternary"
-  def budget_state_text_class(_tone), do: "text-emerald-400"
-
-  def budget_card_accent(:exhausted), do: "hover:shadow-[inset_3px_0_0_var(--color-primary)]"
-  def budget_card_accent(:watch), do: "hover:shadow-[inset_3px_0_0_rgb(251_191_36)]"
-  def budget_card_accent(_tone), do: "hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
 
   defp build_budget_command(%{total: 0}, _budgets, _policies) do
     %{
@@ -403,29 +378,11 @@ defmodule CymphoWeb.BudgetLive.Index do
     }
   end
 
-  def budget_command_badge_class(:critical), do: "border-brand/25 bg-brand/10 text-brand"
-
-  def budget_command_badge_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  def budget_command_badge_class(:attention),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-
-  def budget_command_badge_class(:ready), do: "border-success/25 bg-success/10 text-success"
-  def budget_command_badge_class(_), do: "border-border bg-subtle text-text-tertiary"
-
-  def budget_command_action_class(:critical),
-    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
-
-  def budget_command_action_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15"
-
-  def budget_command_action_class(:ready),
-    do:
-      "border-border bg-button text-text-secondary hover:bg-button-hover hover:text-text-primary"
-
-  def budget_command_action_class(_),
-    do: "border-brand/25 bg-brand text-on-primary hover:bg-accent-hover"
+  @doc "The overview's tone as a status word (v7 §1.5)."
+  def command_status(:critical), do: :stopped
+  def command_status(tone) when tone in [:warning, :attention], do: :waiting
+  def command_status(:ready), do: :done
+  def command_status(_tone), do: :idle
 
   defp format_percentage(percentage) do
     percentage

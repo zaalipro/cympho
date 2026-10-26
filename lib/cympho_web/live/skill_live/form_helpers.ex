@@ -1,11 +1,111 @@
 defmodule CymphoWeb.SkillLive.FormHelpers do
   @moduledoc false
 
-  import Phoenix.Component, only: [assign: 3]
+  use CymphoWeb, :html
 
   alias Cympho.Projects
 
   @default_entrypoint "Cympho.Skills.CustomSkill"
+
+  attr :form, :any, required: true
+  attr :project_options, :list, required: true
+  attr :heading, :string, required: true, doc: "\"After you create it\" | \"After you save\""
+  attr :submit, :string, required: true, doc: "\"Create skill\" | \"Save skill\""
+  attr :cancel, :string, required: true, doc: "where Cancel goes"
+
+  @doc """
+  The skill form shared by New and Edit (v7 H4/H6): today's controls and names
+  (the manifest is built from Entrypoint and Capabilities, `normalize_skill_params/3`)
+  in three field cards beside the ink card.
+  """
+  def skill_form(assigns) do
+    ~H"""
+    <.form_pair
+      id="skill-form"
+      for={@form}
+      phx-change="validate"
+      phx-submit="save"
+      heading={@heading}
+      verb="save"
+    >
+      <.band_card id="sf-skill-t" title="Skill">
+        <div class="flds">
+          <.input field={@form[:name]} label="Name" required placeholder="Repository Auditor" />
+          <.input
+            field={@form[:identifier]}
+            label="Identifier"
+            required
+            placeholder="repo_auditor"
+            class="mono"
+          />
+          <.input
+            field={@form[:description]}
+            label="Usage brief"
+            type="textarea"
+            rows={5}
+            placeholder="What this skill enables, what input it expects, and what evidence it should return."
+            wrapper_class="full"
+          />
+        </div>
+      </.band_card>
+
+      <.band_card id="sf-call-t" title="How agents call it">
+        <div class="flds">
+          <.input
+            id="skill-entrypoint"
+            name="skill[entrypoint]"
+            label="Entrypoint"
+            value={manifest_entrypoint(@form[:manifest].value)}
+            placeholder="Cympho.Skills.CustomSkill"
+            required
+            class="mono"
+            wrapper_class="full"
+          />
+          <.input
+            id="skill-capabilities"
+            name="skill[capabilities]"
+            label="Capabilities"
+            value={capabilities_value(@form[:manifest].value)}
+            placeholder="repo_audit, test_plan"
+            help="Separate them with commas."
+            wrapper_class="full"
+          />
+        </div>
+      </.band_card>
+
+      <.band_card id="sf-scope-t" title="Scope">
+        <div class="flds">
+          <.input field={@form[:version]} label="Version" placeholder="0.1.0" class="mono" />
+          <.input field={@form[:author]} label="Author" placeholder="Cympho Labs" />
+          <.input
+            type="select"
+            field={@form[:project_id]}
+            label="Project scope"
+            value={@form[:project_id].value || ""}
+            options={@project_options}
+          />
+          <.input
+            type="select"
+            field={@form[:enabled]}
+            label="Availability"
+            value={to_string(if is_nil(@form[:enabled].value), do: true, else: @form[:enabled].value)}
+            options={[{"Enabled", "true"}, {"Disabled", "false"}]}
+          />
+        </div>
+      </.band_card>
+
+      <:effect>
+        <.consequences rows={[{:done, "Agents can use it once it is on."}]} />
+      </:effect>
+      <:secondary>
+        <.ghost_pill navigate={@cancel}>Cancel</.ghost_pill>
+      </:secondary>
+      <:primary>
+        <.primary_pill type="submit" phx-disable-with="Saving…">{@submit}</.primary_pill>
+      </:primary>
+    </.form_pair>
+    """
+  end
 
   def assign_context_options(socket) do
     company_id = current_company_id(socket)

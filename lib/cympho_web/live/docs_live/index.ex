@@ -45,6 +45,9 @@ defmodule CymphoWeb.DocsLive.Index do
     {:noreply, socket}
   end
 
+  # Closing the Topics sheet returns the keyboard to the Topics pill that opened it.
+  defp close_topics, do: JS.push("close_mobile_sidebar") |> JS.focus(to: "#docs-topics-btn")
+
   defp resolve_doc(nil, nil), do: Content.first_doc()
 
   defp resolve_doc(topic_slug, nil) do

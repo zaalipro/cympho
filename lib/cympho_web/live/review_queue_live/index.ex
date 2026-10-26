@@ -12,7 +12,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
 
     {:ok,
      socket
-     |> assign(:page_title, "Review queue")
+     |> assign(:page_title, "Reviews")
      |> assign(:review_changes, nil)
      |> load_lanes()}
   end
@@ -406,32 +406,10 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
     "Fix these #{count} things first — approving stays locked until the evidence is there."
   end
 
-  # Emerald and red are reserved for the approve / return actions themselves.
-  # Gate telemetry uses amber only when something blocks; clear gates read calm.
-  defp review_gate_card_class(%{blocker_count: 0}) do
-    "border-border bg-surface/60"
-  end
-
-  defp review_gate_card_class(_card), do: "border-amber-500/25 bg-amber-500/[0.06]"
-
-  defp review_gate_badge_class(%{blocker_count: 0}) do
-    "border-border bg-surface text-text-tertiary"
-  end
-
-  defp review_gate_badge_class(_card), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-
-  defp review_packet_card_class(%{tone: :ready}) do
-    "border-border bg-surface/60"
-  end
-
-  defp review_packet_card_class(_packet), do: "border-amber-500/20 bg-amber-500/[0.04]"
-
-  defp review_packet_badge_class(%{tone: :ready}) do
-    "border-border bg-surface text-text-secondary"
-  end
-
-  defp review_packet_badge_class(_packet),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+  # A decision card's gates as a word and its shape (v7 §1.5, G3).
+  defp gate_status(%{blocker_count: 0}), do: {:done, "Gates clear"}
+  defp gate_status(%{blocker_count: 1}), do: {:waiting, "1 gap"}
+  defp gate_status(%{blocker_count: count}), do: {:waiting, "#{count} gaps"}
 
   defp assignee_name(%{assignee: %Ecto.Association.NotLoaded{}}), do: nil
   defp assignee_name(%{assignee: %{name: name}}), do: name
@@ -451,24 +429,12 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
   defp oldest_label(%{age: age}) when is_binary(age), do: age
   defp oldest_label(%{issue: issue}), do: format_age(issue.updated_at)
 
-  defp review_command_tone_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-
-  defp review_command_tone_class(tone) when tone in [:ready, :active],
-    do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp review_command_tone_class(_),
-    do: "border-border bg-surface text-text-secondary"
-
-  defp review_command_action_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
-
-  defp review_command_action_class(tone) when tone in [:ready, :active],
-    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
-
-  defp review_command_action_class(_),
-    do:
-      "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+  # The overview's state as a word and its shape (Tier A band header).
+  defp command_status(:attention), do: {:waiting, "Gates blocked"}
+  defp command_status(:ready), do: {:done, "Ready to accept"}
+  defp command_status(:active), do: {:waiting, "Spec decision"}
+  defp command_status(:rework), do: {:idle, "Rework loop"}
+  defp command_status(_tone), do: {:done, "Clear"}
 
   defp latest_reviewer_name(issue) do
     latest_review =
@@ -496,14 +462,6 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
 
   defp normalize_monitor_state(%{} = monitor_state), do: monitor_state
   defp normalize_monitor_state(_), do: %{}
-
-  def status_color(:backlog), do: "bg-gray-400"
-  def status_color(:todo), do: "bg-blue-400"
-  def status_color(:in_progress), do: "bg-yellow-400"
-  def status_color(:in_review), do: "bg-purple-400"
-  def status_color(:done), do: "bg-green-400"
-  def status_color(:blocked), do: "bg-brand"
-  def status_color(_), do: "bg-gray-400"
 
   def format_age(updated_at) do
     diff_sec = DateTime.diff(DateTime.utc_now(), updated_at, :second)

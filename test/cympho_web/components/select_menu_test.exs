@@ -60,6 +60,42 @@ defmodule CymphoWeb.Components.SelectMenuTest do
     assert html =~ ~s(data-select-option-label="y")
   end
 
+  # v7 §3.1 B7: the r3 field look; the popover is .sel-pop (not .menu, whose
+  # display:flex would beat Tailwind's hidden) and starts hidden.
+  test "the trigger is an r3 field, named and described; the popover starts hidden" do
+    doc =
+      render_menu(
+        name: "status",
+        value: "todo",
+        label: "Status",
+        describedby: "status-help",
+        options: [{"Backlog", "backlog"}, {"To Do", "todo"}]
+      )
+      |> Floki.parse_fragment!()
+
+    [trigger] = Floki.find(doc, "button[data-select-trigger]")
+    assert Floki.attribute(trigger, "class") == ["fld-sel"]
+    assert Floki.attribute(trigger, "aria-label") == ["Status"]
+    assert Floki.attribute(trigger, "aria-describedby") == ["status-help"]
+    assert Floki.attribute(trigger, "aria-invalid") == []
+
+    [pop] = Floki.find(doc, "[data-select-popover][role='listbox']")
+
+    assert pop |> Floki.attribute("class") |> hd() |> String.split() |> Enum.sort() == [
+             "hidden",
+             "sel-pop"
+           ]
+  end
+
+  test "an invalid select marks its trigger" do
+    doc =
+      render_menu(name: "p", invalid: true, options: [{"One", "1"}])
+      |> Floki.parse_fragment!()
+
+    assert doc |> Floki.find("button[data-select-trigger]") |> Floki.attribute("aria-invalid") ==
+             ["true"]
+  end
+
   test "labeled select/1 wrapper delegates to the styled menu" do
     html =
       render_component(&CymphoWeb.Components.select/1,
@@ -72,5 +108,6 @@ defmodule CymphoWeb.Components.SelectMenuTest do
     assert html =~ "Role"
     assert html =~ "data-select-menu"
     assert html =~ ~s(name="role")
+    assert [_] = html |> Floki.parse_fragment!() |> Floki.find("div.fld > label")
   end
 end

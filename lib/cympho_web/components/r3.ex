@@ -44,7 +44,9 @@ defmodule CymphoWeb.Components.R3 do
 <symbol id="i-pause" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M8.25 7.6v4.8M11.75 7.6v4.8"/></symbol>
 <symbol id="i-alert" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 6.6v4.1"/><path d="M10 13.4h.01" stroke-width="2"/></symbol>
 <symbol id="i-term" viewBox="0 0 20 20"><rect x="3" y="4.25" width="14" height="11.5" rx="2.5"/><path d="m6.6 8.4 1.9 1.7-1.9 1.7M10.6 11.9h3"/></symbol>
-<symbol id="i-chev-right" viewBox="0 0 20 20"><path d="m8 5 5 5-5 5"/></symbol>|
+<symbol id="i-chev-right" viewBox="0 0 20 20"><path d="m8 5 5 5-5 5"/></symbol>
+<symbol id="i-x" viewBox="0 0 20 20"><path d="m5.75 5.75 8.5 8.5M14.25 5.75l-8.5 8.5"/></symbol>
+<symbol id="i-more" viewBox="0 0 20 20"><path d="M5 10h.01M10 10h.01M15 10h.01" stroke-width="2.5"/></symbol>|
 
   # File glyphs are inlined, not <use>d: their token colours come from .cy-r3 selectors,
   # which cannot reach a <use> shadow tree (build.py F_DOC / F_CODE).
@@ -196,13 +198,14 @@ defmodule CymphoWeb.Components.R3 do
   ## ── The Next step pair ────────────────────────────────────────
 
   attr :id, :string, default: "ns-", doc: "id prefix; the problem card's title id is <id>t"
+  attr :rest, :global, doc: "data-testid, aria-* on the section"
   slot :problem, required: true
   slot :resolution
 
   @doc "The Next step: the problem card and its resolution card. A lone problem spans both columns."
   def next_step(assigns) do
     ~H"""
-    <section class="next" aria-labelledby={@id <> "t"}>
+    <section class="next" aria-labelledby={@id <> "t"} {@rest}>
       {render_slot(@problem)}{render_slot(@resolution)}
     </section>
     """
@@ -646,12 +649,14 @@ defmodule CymphoWeb.Components.R3 do
   attr :title, :string, required: true
   attr :band, :boolean, default: true, doc: "the filled header row"
   attr :class, :any, default: nil
+  attr :section_id, :string, default: nil, doc: "the section's own id (anchors, tests)"
+  attr :rest, :global, doc: "data-testid, aria-* on the section"
   slot :header_end
   slot :inner_block
 
   def band_card(assigns) do
     ~H"""
-    <section class={["card", @class]} aria-labelledby={@id}>
+    <section id={@section_id} class={["card", @class]} aria-labelledby={@id} {@rest}>
       <div class={["card-h", @band && "band"]}>
         <h2 class="h2" id={@id}>{@title}</h2>
         {render_slot(@header_end)}
@@ -775,17 +780,142 @@ defmodule CymphoWeb.Components.R3 do
 
   attr :title, :string, required: true
   attr :heading, :string, default: nil
+  attr :rest, :global, doc: "data-testid, aria-* on the root"
   slot :inner_block, doc: "one line of context"
   slot :action
 
   @doc "Quiet section: small heading, one plain line, one line of context, one action. No illustration."
   def quiet_empty(assigns) do
     ~H"""
-    <div class="gl-sec">
+    <div class="gl-sec" {@rest}>
       <h2 :if={@heading} class="gl-h">{@heading}</h2>
       <p class="gl-big">{@title}</p>
       <p :if={@inner_block != []} class="gl-sub">{render_slot(@inner_block)}</p>
       {render_slot(@action)}
+    </div>
+    """
+  end
+
+  ## ── Forms, rows, filters, flash (v7 §3.1 A1–A4) ──────────────
+
+  attr :for, :any, default: %{}, doc: "the Phoenix form (to_form/1); %{} for name-only fields"
+  attr :id, :string, required: true
+  attr :heading, :string, required: true, doc: "the ink card's heading: \"After you create it\""
+  attr :verb, :string, default: nil, doc: "⌘↵ hint verb (\"create\", \"save\"); nil hides it"
+
+  attr :rest, :global,
+    include: ~w(phx-change phx-submit phx-target action method multipart autocomplete novalidate)
+
+  slot :inner_block, required: true, doc: "the field cards (band_card with .flds)"
+  slot :effect, doc: "consequences/1 or one ink_note/1: what pressing the primary does"
+  slot :secondary, doc: "one ghost_pill (Cancel)"
+  slot :primary, required: true, doc: "one primary_pill type=\"submit\""
+
+  @doc """
+  A create/edit form as a Next step pair: the field cards on paper, and the ink
+  card that says what submitting does and holds the page's one primary. The form
+  carries `next`, so ⌘↵ presses that primary (app.js `nextStepPrimary/0`).
+  """
+  def form_pair(assigns) do
+    ~H"""
+    <.form for={@for} id={@id} class="next fpair" {@rest}>
+      <div class="fp-main">{render_slot(@inner_block)}</div>
+      <.ink_card heading={@heading} heading_id={@id <> "-h"}>
+        {render_slot(@effect)}
+        <.ink_foot verb={@verb}>
+          <:secondary>{render_slot(@secondary)}</:secondary>
+          <:primary>{render_slot(@primary)}</:primary>
+        </.ink_foot>
+      </.ink_card>
+    </.form>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :navigate, :string, default: nil
+  attr :patch, :string, default: nil
+  attr :href, :string, default: nil
+  attr :icon, :string, default: nil, doc: "sprite id for the leading .kt tile"
+
+  attr :kind, :atom,
+    default: :neutral,
+    values: [:neutral, :problem, :question],
+    doc: "tile tone (.kt.p / .kt.q)"
+
+  attr :status, :any, default: nil, doc: "{kind, word} for status_word at the end"
+  attr :tag, :string, default: "li", values: ~w(li div)
+  attr :rest, :global, doc: "data-testid, aria-*; not class"
+  slot :meta, doc: "the meta line: at most 4 parts"
+  slot :trail, doc: "a quiet value at the end (a %, an amount)"
+  slot :actions, doc: "pills or an overflow_menu; they sit above the title's row link"
+
+  slot :below,
+    doc:
+      "a block under the row on its own line: payload/linked-work disclosure, a packet, an inline form"
+
+  @doc """
+  A list row: optional kind tile · title (a link that covers the row) over its
+  meta line · status word · trail · actions, and an optional block below. Only
+  `actions` and `below` take interactive children: they sit above the row link.
+  """
+  def list_row(assigns) do
+    assigns = assign(assigns, :link?, link?(assigns))
+
+    ~H"""
+    <.dynamic_tag tag_name={@tag} id={@id} class="row lrow" {@rest}>
+      <span :if={@icon} class={["kt", row_kind(@kind)]}><.r3_icon name={@icon} /></span>
+      <span class="row-main">
+        <.link :if={@link?} class="rt2" navigate={@navigate} patch={@patch} href={@href}>
+          {@title}
+        </.link>
+        <span :if={!@link?} class="rt">{@title}</span>
+        <span :if={@meta != []} class="rm">{render_slot(@meta)}</span>
+      </span>
+      <span :if={@status} class="lr-st">
+        <.status_word kind={elem(@status, 0)} word={elem(@status, 1)} />
+      </span>
+      <span :if={@trail != []} class="lr-tr">{render_slot(@trail)}</span>
+      <span :if={@actions != []} class="lr-acts">{render_slot(@actions)}</span>
+      <div :if={@below != []} class="lr-below">{render_slot(@below)}</div>
+    </.dynamic_tag>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :active, :integer, default: 0, doc: "how many filters are set"
+  attr :label, :string, default: "Filter"
+  slot :inner_block, required: true, doc: "the filter controls"
+
+  @doc "Tasks' Filter disclosure (`issue_live/tasks.ex`): a chip with the active count over a panel."
+  def filter_menu(assigns) do
+    ~H"""
+    <details id={@id} class="flt-d" phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}>
+      <summary class="chip flt">
+        <.r3_icon name="i-filter" /><span class="fl-t">{@label}</span><span
+          :if={@active > 0}
+          class="mono"
+        >{@active}</span>
+      </summary>
+      <div class="flt-p">{render_slot(@inner_block)}</div>
+    </details>
+    """
+  end
+
+  attr :flash, :map, required: true
+
+  @doc "The page's flash, under its header: the info line and the error line."
+  def flash_line(assigns) do
+    assigns =
+      assign(assigns,
+        info: Phoenix.Flash.get(assigns.flash, :info),
+        error: Phoenix.Flash.get(assigns.flash, :error)
+      )
+
+    ~H"""
+    <div :if={@info || @error} class="flash-line">
+      <p :if={@info} class="flash-msg" role="status">{@info}</p>
+      <p :if={@error} class="flash-msg err" role="alert">{@error}</p>
     </div>
     """
   end

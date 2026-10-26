@@ -1,78 +1,74 @@
-<.page size="content">
-  <.header title={@skill.name} subtitle={@skill.description || @skill.identifier}>
-    <:actions>
-      <.button type="button" phx-click="toggle_skill" variant="secondary">
-        {if @skill.enabled, do: "Disable", else: "Enable"}
-      </.button>
-      <.app_link
-        navigate={~p"/skills/#{@skill.id}/edit"}
-        class="cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-      >
-        Edit
-      </.app_link>
-    </:actions>
-  </.header>
+<.page_frame
+  page="skill"
+  kind={:deep}
+  parent={{"/skills", "Skills"}}
+  current={@skill.name}
+  tray_class="split"
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="sk-h">
+      <h1 class="h1 big" id="sk-h">{@skill.name}</h1>
+      <div class="chips">
+        <span :if={CymphoWeb.SkillLive.Index.skill_manifest_gap?(@skill)} class="chip">
+          <.status_word kind={:stopped} word="Manifest gap" />
+        </span>
+        <span :if={!@skill.enabled} class="tag">Off</span>
+        <.pill phx-click="toggle_skill">
+          {if @skill.enabled, do: "Turn off", else: "Turn on"}
+        </.pill>
+        <.pill navigate={~p"/skills/#{@skill.id}/edit"}><.r3_icon name="i-pencil" />Edit</.pill>
+      </div>
+    </section>
+  </:head>
 
-  <div class="grid gap-4 lg:grid-cols-[1fr_280px]">
-    <.panel class="p-5">
-      <%!-- The pretty-printed manifest was the longest thing on the page and
-           repeated the name, description, identifier, version, author, and
-           capabilities that the panel beside it already shows in plain rows. --%>
-      <details id="skill-manifest" class="group" phx-mounted={JS.ignore_attributes("open")}>
-        <summary class="flex cursor-pointer list-none items-center gap-1.5 text-xs font-510 uppercase tracking-wide text-text-secondary [&::-webkit-details-marker]:hidden">
-          <span class="hero-chevron-right-mini h-3.5 w-3.5 transition-transform group-open:rotate-90">
-          </span>
-          Manifest
-        </summary>
-        <pre class="mt-3 overflow-x-auto rounded-lg border border-border bg-black/20 p-4 text-xs text-text-secondary"><%= Jason.encode!(@skill.manifest || %{}, pretty: true) %></pre>
-      </details>
-    </.panel>
+  <.flash_line flash={@flash} />
 
-    <.panel class="space-y-4 p-5">
-      <div>
-        <p class="text-xs font-510 uppercase tracking-wide text-text-quaternary">Identifier</p>
-        <p class="mt-1 text-sm text-text-primary">{@skill.identifier}</p>
-      </div>
-      <div>
-        <p class="text-xs font-510 uppercase tracking-wide text-text-quaternary">Version</p>
-        <p class="mt-1 text-sm text-text-primary">{@skill.version || "0.0.0"}</p>
-      </div>
-      <div>
-        <p class="text-xs font-510 uppercase tracking-wide text-text-quaternary">Scope</p>
-        <p class="mt-1 text-sm text-text-primary">
-          {(@skill.company && @skill.company.name) || "Global"}
-        </p>
-      </div>
-      <div>
-        <p class="text-xs font-510 uppercase tracking-wide text-text-quaternary">Status</p>
-        <p class={[
-          "mt-1 inline-flex items-center gap-1.5 text-sm font-510",
-          (@skill.enabled && "text-text-primary") || "text-text-tertiary"
-        ]}>
-          <span class={[
-            "h-1.5 w-1.5 rounded-full",
-            (@skill.enabled && "bg-emerald-400/80") || "bg-text-quaternary/60"
-          ]}>
-          </span>
-          {if @skill.enabled, do: "Enabled for agents", else: "Disabled"}
-        </p>
-      </div>
+  <.band_card id="sk-what-t" title="What it does">
+    <div class="gl-sec">
+      <p :if={@skill.description not in [nil, ""]} class="sk-desc">{@skill.description}</p>
+      <p :if={@skill.description in [nil, ""]} class="gl-sub">No usage brief yet.</p>
+      <p :if={capabilities(@skill) != []} class="sk-caps">
+        <span class="gl-h">This skill can</span>
+        <span :for={capability <- capabilities(@skill)} class="tag mono">{capability}</span>
+      </p>
+    </div>
+  </.band_card>
 
-      <% capabilities =
-        List.wrap(@skill.manifest["capabilities"] || @skill.manifest[:capabilities]) %>
-      <div :if={capabilities != []}>
-        <p class="text-xs font-510 uppercase tracking-wide text-text-quaternary">
-          This skill can
-        </p>
-        <div class="mt-2 flex flex-wrap gap-1.5">
-          <span
-            :for={capability <- capabilities}
-            class="rounded-md border border-border bg-subtle px-2 py-0.5 text-xs text-text-secondary"
+  <section class="card ui-advanced-only" aria-label="Manifest">
+    <details id="skill-manifest" class="tech" phx-mounted={JS.ignore_attributes("open")}>
+      <summary>
+        <span class="h2">Manifest</span> <.r3_icon name="i-chev-down" />
+      </summary>
+      <pre class="mono sk-pre"><%= Jason.encode!(@skill.manifest || %{}, pretty: true) %></pre>
+    </details>
+  </section>
+
+  <.band_card id="sk-det-t" title="Details" class="aside">
+    <.kv_list>
+      <:item term="Identifier"><span class="mono hr-wrap">{@skill.identifier}</span></:item>
+      <:item term="Version"><span class="mono">{@skill.version || "0.0.0"}</span></:item>
+      <:item :if={@skill.author} term="Author">{@skill.author}</:item>
+      <:item term="Scope">{(@skill.company && @skill.company.name) || "Global"}</:item>
+      <:item :if={@skill.project} term="Project">{@skill.project.name}</:item>
+    </.kv_list>
+  </.band_card>
+
+  <section class="card" aria-label="Delete this skill">
+    <ul class="rows">
+      <.list_row id="sk-delete" title="Delete this skill">
+        <:meta>Agents can no longer use it.</:meta>
+        <:actions>
+          <button
+            type="button"
+            class="pl warn"
+            phx-click="delete"
+            data-confirm="Delete this skill?"
           >
-            {capability}
-          </span>
-        </div>
-      </div>
-    </.panel>
-  </div>
-</.page>
+            Delete
+          </button>
+        </:actions>
+      </.list_row>
+    </ul>
+  </section>
+</.page_frame>

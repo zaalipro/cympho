@@ -92,8 +92,11 @@ defmodule CymphoWeb.UiCopyAdversarialTest do
         end
       end
     end
+  end
 
-    test "verifies humanized replacement terms exist on target routes" do
+  # One block per route (v7 §3.1 D): a track edits only its own route's block.
+  describe "humanized replacement terms exist on target routes" do
+    setup do
       conn = authenticated_conn(%{is_board_member: true})
       company = current_company()
 
@@ -105,23 +108,68 @@ defmodule CymphoWeb.UiCopyAdversarialTest do
           company_id: company.id
         })
 
-      expectations = [
-        {"/dashboard", "Executive Overview"},
-        {"/reviews", "Review Overview"},
-        {"/reviews", "No issues currently have changes requested."},
-        {"/operations", "Pending Tasks"},
-        {"/routines", "Automated Routines"},
-        {"/goals", "Goals Overview"},
-        {"/workspaces", "Workspaces"},
-        {"/activity", "Activity History"}
-      ]
+      %{conn: conn}
+    end
 
-      for {route, expected_phrase} <- expectations do
-        {:ok, _view, html} = live(conn, route)
+    # /dashboard: Home (redesigned; no track)
+    test "/dashboard keeps its humanized phrase", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/dashboard")
 
-        assert html =~ expected_phrase,
-               "Expected humanized phrase #{inspect(expected_phrase)} missing from route #{route}"
-      end
+      assert html =~ "Executive Overview",
+             "Expected humanized phrase \"Executive Overview\" missing from route /dashboard"
+    end
+
+    # /reviews: governance track
+    test "/reviews keeps its humanized phrase", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/reviews")
+
+      assert html =~ "Review Overview",
+             "Expected humanized phrase \"Review Overview\" missing from route /reviews"
+
+      assert html =~ "No issues currently have changes requested.",
+             "Expected humanized phrase \"No issues currently have changes requested.\" missing from route /reviews"
+    end
+
+    # /operations: ops track
+    test "/operations keeps its humanized phrase", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/operations")
+
+      # v7 O1: band titles are sentence case.
+      assert html =~ "Pending tasks",
+             "Expected humanized phrase \"Pending tasks\" missing from route /operations"
+    end
+
+    # /routines: planning track
+    test "/routines keeps its humanized phrase", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/routines")
+
+      assert html =~ "Repeating tasks overview",
+             "Expected humanized phrase \"Repeating tasks overview\" missing from route /routines"
+    end
+
+    # /goals: planning track
+    test "/goals keeps its humanized phrase", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/goals")
+
+      assert html =~ "Goals overview",
+             "Expected humanized phrase \"Goals overview\" missing from route /goals"
+    end
+
+    # /workspaces: ops track
+    test "/workspaces keeps its humanized phrase", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/workspaces")
+
+      # v7 §1.2: the page is titled with its rail label, "Work files".
+      assert html =~ "Work files",
+             "Expected humanized phrase \"Work files\" missing from route /workspaces"
+    end
+
+    # /activity: governance track
+    test "/activity keeps its humanized phrase", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/activity")
+
+      assert html =~ "Activity History",
+             "Expected humanized phrase \"Activity History\" missing from route /activity"
     end
   end
 end

@@ -1,233 +1,152 @@
+<% pending? = @approval.status == "pending" %>
+<% vote? = pending? && @board_member? && !@voted? %>
+<% requester = (@approval.requested_by && @approval.requested_by.name) || "System" %>
+<% metrics = @governance_risk.metrics %>
+
 <.page_frame
   page="board-vote"
   kind={:deep}
   parent={{"/inbox", "Inbox"}}
   current={@approval.title}
   from={@from}
+  tray_class="split"
   data-ui-complex-page
 >
   <:head>
-    <div class="head">
-      <h1 class="h1 big">{@approval.title}</h1>
+    <section class="head" aria-labelledby="bv-h">
+      <h1 class="h1 big" id="bv-h">{@approval.title}</h1>
       <p class="sub">
-        Board decision · {category_label(@approval.category)} · Filed {format_datetime(
-          @approval.inserted_at
-        )}
+        Board decision <span aria-hidden="true">·</span>
+        {category_label(@approval.category)} <span aria-hidden="true">·</span>
+        <span class="nw">
+          Filed {day(@approval.inserted_at)}
+          <span class="mono">{clock(@approval.inserted_at)}</span>
+        </span>
       </p>
       <div class="chips">
-        <span class={"inline-flex items-center rounded-lg border px-3 py-1.5 text-xs font-590 tracking-wide #{status_badge(@approval.status)}"}>
-          {String.upcase(@approval.status)}
+        <span class={["chip", pending? && "st-wait"]}>
+          <.status_word
+            kind={elem(status(@approval.status), 0)}
+            word={elem(status(@approval.status), 1)}
+          />
         </span>
       </div>
-    </div>
+      <.flash_line flash={@flash} />
+    </section>
   </:head>
 
-  <div class="space-y-6">
-    <section data-testid="governance-risk-brief" class="ember-glass overflow-hidden">
-      <div class="flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Governance Risk Brief
-            </h3>
-            <span class={"rounded-full border px-2.5 py-1 text-[12px] font-510 #{risk_badge(@governance_risk.level)}"}>
-              {@governance_risk.label}
+  <%!-- The vote (the Next step): the request, then the vote with its reason. Approve is the one primary. --%>
+  <.next_step :if={vote?} id="bv-ns-">
+    <:problem>
+      <.problem_card title="Cast your vote" title_id="bv-ns-t">
+        <:eyebrow>Next step<span aria-hidden="true"> · </span>Board vote</:eyebrow>
+        <p class="obj">{@approval.description}</p>
+        <:foot>
+          <span class="who">
+            <span class="tile-ag sm" aria-hidden="true">
+              {CymphoWeb.AgentLive.Parts.initials(requester)}
             </span>
-          </div>
-          <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-secondary">
-            {@governance_risk.summary}
-          </p>
-          <p class="mt-3 inline-flex items-center gap-2 rounded-lg border border-brand/20 bg-brand/[0.06] px-3 py-1.5 text-xs font-510 text-text-primary">
-            <span class="hero-arrow-right-mini h-3.5 w-3.5 text-brand"></span>
-            {@governance_risk.next_action}
-          </p>
-        </div>
-
-        <div class="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-xl border border-hairline bg-hairline sm:min-w-[260px]">
-          <div class="ember-stat bg-panel px-4 py-3 text-center">
-            <p class="font-serif text-[26px] font-590 leading-tight text-emerald-300 tabular-nums">
-              {@governance_risk.metrics.approve_votes}
-            </p>
-            <p class="mt-1.5 text-[12px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Approve
-            </p>
-          </div>
-          <div class="ember-stat bg-panel px-4 py-3 text-center">
-            <p class="font-serif text-[26px] font-590 leading-tight text-red-300 tabular-nums">
-              {@governance_risk.metrics.deny_votes}
-            </p>
-            <p class="mt-1.5 text-[12px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Deny
-            </p>
-          </div>
-          <div class="ember-stat bg-panel px-4 py-3 text-center">
-            <p class="font-serif text-[26px] font-590 leading-tight text-amber-300 tabular-nums">
-              {@governance_risk.metrics.missing_votes}
-            </p>
-            <p class="mt-1.5 text-[12px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Missing
-            </p>
-          </div>
-          <div class="ember-stat bg-panel px-4 py-3 text-center">
-            <p class="font-serif text-[26px] font-590 leading-tight text-blue-300 tabular-nums">
-              {@governance_risk.metrics.audit_events}
-            </p>
-            <p class="mt-1.5 text-[12px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Audit
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div class="ui-advanced-only grid gap-2 border-t border-hairline px-6 py-4 lg:grid-cols-2">
-        <div
-          :for={signal <- @governance_risk.signals}
-          class={"rounded-lg border px-3 py-2.5 #{signal_class(signal.tone)}"}
-        >
-          <p class="text-[12px] font-590 uppercase tracking-[0.1em]">
-            {signal.label}
-          </p>
-          <p class="mt-1 text-xs leading-5 opacity-85">
-            {signal.detail}
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <div class="card-lift rounded-xl border border-border bg-panel p-6 shadow-card">
-      <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-        Description
-      </h3>
-      <p class="mt-3 leading-6 text-text-primary">{@approval.description}</p>
-    </div>
-
-    <div class="card-lift rounded-xl border border-border bg-panel p-6 shadow-card">
-      <h3 class="mb-4 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-        Details
-      </h3>
-      <dl class="divide-y divide-border">
-        <div class="flex justify-between py-2.5">
-          <dt class="text-sm text-text-secondary">Category</dt>
-          <dd class="text-sm font-510 text-text-primary">
-            {category_label(@approval.category)}
-          </dd>
-        </div>
-        <div class="flex items-center justify-between py-2.5">
-          <dt class="text-sm text-text-secondary">Status</dt>
-          <dd class={"rounded border px-2 py-0.5 text-sm font-510 #{status_badge(@approval.status)}"}>
-            {String.upcase(@approval.status)}
-          </dd>
-        </div>
-        <div class="flex justify-between py-2.5">
-          <dt class="text-sm text-text-secondary">Requested By</dt>
-          <dd class="text-sm text-text-primary">
-            <%= if @approval.requested_by do %>
-              {@approval.requested_by.name}
-            <% else %>
-              System
-            <% end %>
-          </dd>
-        </div>
-        <div class="flex justify-between py-2.5">
-          <dt class="text-sm text-text-secondary">Review Deadline</dt>
-          <dd class="font-serif text-sm tabular-nums text-text-primary">
-            {format_datetime(@approval.review_deadline)}
-          </dd>
-        </div>
-      </dl>
-      <%= if @approval.decision_reasoning do %>
-        <div class="mt-4 border-t border-border pt-4">
-          <span class="text-sm text-text-secondary">Decision Reasoning</span>
-          <p class="mt-1 text-sm leading-6 text-text-primary">{@approval.decision_reasoning}</p>
-        </div>
-      <% end %>
-    </div>
-
-    <%= if @approval.status == "pending" && @board_member? && !@voted? do %>
-      <form
-        id="vote"
-        phx-submit="cast_vote"
-        class="card-lift rounded-xl border border-border bg-panel p-6 shadow-card"
-      >
-        <h3 class="mb-4 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Cast your vote
-        </h3>
-        <label for="vote-reason" class="text-sm text-text-secondary">
-          Your reason (optional, saved with your vote)
-        </label>
-        <textarea
+            <span>
+              Requested by
+              <b>{requester}</b><span :if={@approval.review_deadline}><span aria-hidden="true"> · </span>decide by
+                <span class="mono">{day(@approval.review_deadline)} {clock(@approval.review_deadline)}</span></span>
+            </span>
+          </span>
+        </:foot>
+      </.problem_card>
+    </:problem>
+    <:resolution>
+      <.ink_card form="Your vote" id="vote" phx-submit="cast_vote">
+        <h3 class="ink-h">Your vote</h3>
+        <.input
+          type="textarea"
           id="vote-reason"
           name="reason"
-          rows="2"
-          class="mb-4 mt-1.5 w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary"
-        ></textarea>
-        <div class="flex flex-wrap gap-2">
-          <button
-            type="submit"
-            name="vote"
-            value="approve"
-            class="btn-press inline-flex h-11 sm:h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-590 text-on-primary transition-colors hover:bg-emerald-700"
-          >
-            Approve
-          </button>
-          <button
-            type="submit"
-            name="vote"
-            value="deny"
-            class="btn-press inline-flex h-11 sm:h-10 items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 text-sm font-590 text-red-300 transition-colors hover:bg-red-500/20"
-          >
-            Deny
-          </button>
-          <button
-            type="submit"
-            name="vote"
-            value="abstain"
-            class="btn-press inline-flex h-11 sm:h-10 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 text-sm font-590 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-          >
-            Abstain
-          </button>
-        </div>
-      </form>
-    <% end %>
+          value=""
+          rows={2}
+          label="Your reason (optional, saved with your vote)"
+        />
+        <.ink_foot verb="approve">
+          <:secondary>
+            <.ghost_pill type="submit" name="vote" value="deny">Deny</.ghost_pill>
+            <.ghost_pill type="submit" name="vote" value="abstain">Abstain</.ghost_pill>
+          </:secondary>
+          <:primary>
+            <.primary_pill type="submit" name="vote" value="approve">Approve</.primary_pill>
+          </:primary>
+        </.ink_foot>
+      </.ink_card>
+    </:resolution>
+  </.next_step>
 
-    <%= if length(@approval.votes) > 0 do %>
-      <div class="card-lift rounded-xl border border-border bg-panel p-6 shadow-card">
-        <h3 class="mb-4 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Votes
-        </h3>
-        <div class="divide-y divide-border">
-          <%= for vote <- @approval.votes do %>
-            <div
-              id={"board-vote-#{vote.id}"}
-              class="flex items-start justify-between gap-4 py-2.5"
-            >
-              <div class="min-w-0">
-                <span class="text-sm text-text-primary">
-                  {(vote.user && vote.user.name) || "A former member"}
-                </span>
-                <p
-                  :if={vote.reasoning}
-                  data-vote-reason
-                  class="mt-1 break-words text-sm leading-6 text-text-secondary"
-                >
-                  {vote.reasoning}
-                </p>
-              </div>
-              <span class={
-                  "shrink-0 rounded border px-2 py-1 text-xs font-510 " <>
-                    (case vote.vote do
-                      "approve" -> "bg-green-500/10 text-green-500 border-green-500/20"
-                      "deny" -> "bg-brand/10 text-brand border-brand/20"
-                      "abstain" -> "bg-gray-500/10 text-gray-500 border-gray-500/20"
-                      _ -> "bg-gray-500/10 text-gray-500 border-gray-500/20"
-                    end)
-                }>
-                {String.upcase(vote.vote)}
-              </span>
-            </div>
-          <% end %>
-        </div>
+  <.band_card id="bv-risk-t" title="Governance risk" data-testid="governance-risk-brief">
+    <:header_end>
+      <span class="bv-st">
+        <.status_word
+          kind={risk_kind(@governance_risk.level)}
+          word={@governance_risk.label}
+        />
+      </span>
+    </:header_end>
+    <div class="gl-sec">
+      <p class="gl-big">{@governance_risk.summary}</p>
+      <p class="gl-sub">{@governance_risk.next_action}</p>
+    </div>
+    <div class="strip s4">
+      <div class="cell">
+        <span class="v mono">{metrics.approve_votes}</span><span class="l">Approve</span>
       </div>
-    <% end %>
-  </div>
+      <div class="cell">
+        <span class="v mono">{metrics.deny_votes}</span><span class="l">Deny</span>
+      </div>
+      <div class="cell">
+        <span class="v mono">{metrics.missing_votes}</span><span class="l">Missing</span>
+      </div>
+      <div class="cell">
+        <span class="v mono">{metrics.audit_events}</span><span class="l">Audit</span>
+      </div>
+    </div>
+    <ul class="rows ui-advanced-only">
+      <.list_row
+        :for={{signal, n} <- Enum.with_index(@governance_risk.signals)}
+        id={"bv-signal-#{n}"}
+        title={signal.label}
+        status={signal_status(signal.tone)}
+      >
+        <:meta>{signal.detail}</:meta>
+      </.list_row>
+    </ul>
+  </.band_card>
+
+  <.band_card :if={!vote?} id="bv-req-t" title="Request">
+    <p class="bv-desc">{@approval.description}</p>
+  </.band_card>
+
+  <.band_card :if={@approval.votes != []} id="bv-votes-t" title="Votes">
+    <:header_end><span class="meta mono">{length(@approval.votes)}</span></:header_end>
+    <ul class="rows">
+      <.list_row
+        :for={vote <- @approval.votes}
+        id={"board-vote-#{vote.id}"}
+        title={(vote.user && vote.user.name) || "A former member"}
+        status={vote_status(vote.vote)}
+      >
+        <:meta :if={vote.reasoning}><span data-vote-reason>{vote.reasoning}</span></:meta>
+      </.list_row>
+    </ul>
+  </.band_card>
+
+  <.band_card id="bv-det-t" title="Details" class="aside">
+    <.kv_list>
+      <:item term="Category">{category_label(@approval.category)}</:item>
+      <:item term="Requested by">{requester}</:item>
+      <:item :if={@approval.review_deadline} term="Decide by">
+        {day(@approval.review_deadline)}
+        <span class="mono">{clock(@approval.review_deadline)}</span>
+      </:item>
+      <:item :if={@approval.decision_reasoning} term="Decision reason">
+        {@approval.decision_reasoning}
+      </:item>
+    </.kv_list>
+  </.band_card>
 </.page_frame>

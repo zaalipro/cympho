@@ -1,0 +1,175 @@
+/* r3 page CSS: ops. Owned by the ops track (v7 spec §4); no other track edits this file.
+   - Every selector starts with .cy-r3; scope page-only rules with .cy-r3 [data-page="…"]
+     (data-page sits on the page frame rendered by page_frame/1).
+   - No colour literal: use the tokens (app.css :root, themes.css). A new colour token goes into
+     the light block and both identical dark copies, never here.
+   - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
+   - Shared components belong in r3.css, not here. */
+
+/* ================================================================
+   Shared by the ops pages: a status word inline (the glyph carries the colour),
+   long tokens that must wrap, a row of tags or pills
+   ================================================================ */
+.cy-r3 .st-w{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.cy-r3 .card-h .st-w{font-size:12px;line-height:16px;font-weight:500;color:var(--ink-2)}
+.cy-r3 :is(.wf-loc,.iw-path,.st-hash,.op-wrap){overflow-wrap:anywhere}
+.cy-r3 :is(.op-tags,.op-acts,.wf-acts,.st-x){display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.cy-r3 :is(.op-end,.wf-end){display:inline-flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px 12px;min-width:0}
+/* a band header whose end does not fit wraps it under the title, never the title itself */
+.cy-r3 :is([data-page="health"],[data-page="steps"],[data-page="workfiles"],[data-page="workfile"],[data-page="exec"]) .card-h{flex-wrap:wrap}
+.cy-r3 :is([data-page="health"],[data-page="steps"],[data-page="workfiles"],[data-page="workfile"],[data-page="exec"]) .card-h>.h2{flex:none}
+
+/* a quiet empty state's row of pills keeps its own width, as r3.css does for one pill */
+.cy-r3 .gl-sec>.st-x{align-self:flex-start}
+
+/* ================================================================
+   Work files (O3), a folder (O4), a run's folder (O5), a task's work files (O6)
+   ================================================================ */
+.cy-r3 .wf-recs{display:flex;flex-direction:column;gap:6px;padding-top:4px}
+.cy-r3 .wf-recs li{display:flex;align-items:flex-start;gap:8px;font-size:13px;line-height:19px;color:var(--ink-2)}
+.cy-r3 .wf-recs .g{margin-top:3px}
+.cy-r3 .wf-recs b{color:var(--ink)}
+/* no Next step on these pages: beside the bands, the Details aside starts on the first row
+   (one column from 1180 px down, where it follows the bands as r3.css places it) */
+@media (min-width:1181px){
+  .cy-r3 [data-page="workfile"] .split>.aside{grid-row:1 / span 3}
+  .cy-r3 [data-page="exec"] .split>.aside{grid-row:1 / span 4}
+}
+.cy-r3 :is([data-page="workfile"],[data-page="exec"]) .kv dd{overflow-wrap:anywhere}
+.cy-r3 [data-page="exec"] .card>.gh{padding:8px 12px 0}
+.cy-r3 .ex-none{padding:2px 12px 10px}
+.cy-r3 .ex-out{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:18px;color:var(--ink-2);overflow-wrap:anywhere}
+.cy-r3 .ex-copy{padding:0 12px 12px}
+.cy-r3 .iw-form{display:flex;flex-direction:column;gap:10px;padding:8px 12px 12px}
+.cy-r3 .iw-f{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+
+/* ================================================================
+   Step log (O2): the chain band, the table, the details aside
+   ================================================================ */
+.cy-r3 [data-page="steps"] .flt-p{width:min(520px,calc(100vw - 48px))}
+.cy-r3 .st-f{width:100%}
+/* the details sit beside the table once a step is open */
+.cy-r3 .st-split{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;align-items:start}
+.cy-r3 .st-split.st-open{grid-template-columns:minmax(0,1fr) 360px}
+.cy-r3 .st-det{position:sticky;top:76px;min-width:0}
+.cy-r3 .st-row{cursor:pointer}
+.cy-r3 .tbl tbody tr[aria-current]>*{background:var(--hover)}
+.cy-r3 .st-row .ul{display:inline-flex;align-items:center;min-width:24px;min-height:24px;font-size:13px;color:var(--ink)}
+.cy-r3 .st-tool{display:block;font-weight:500;color:var(--ink)}
+.cy-r3 .st-sub{display:block;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 #traces-empty td{height:auto;padding:4px 0}
+.cy-r3 .st-rec{display:flex;flex-direction:column;gap:6px;margin:4px 4px 8px;padding:10px 12px;border-radius:12px;background:var(--band);border:1px solid var(--band-line)}
+.cy-r3 .st-rec-h{display:inline-flex;align-items:center;gap:6px;font-size:13px;line-height:18px;font-weight:500;color:var(--ink)}
+.cy-r3 :is(.st-cmd,.op-cmd){display:flex;flex-direction:column;gap:6px;min-width:0}
+.cy-r3 :is(.st-cmd-h,.op-cmd-h){display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px}
+.cy-r3 .op-cmd-end{justify-content:flex-end}
+.cy-r3 :is(.st-cmd-h,.op-cmd-h) .gh{min-height:0;padding:0}
+.cy-r3 :is(.st-well,.op-code){display:block;padding:8px 10px;border-radius:10px;background:var(--well);border:1px solid var(--band-line);font-size:12px;line-height:18px;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+.cy-r3 .st-blk{display:flex;flex-direction:column;gap:4px;padding:0 12px 12px}
+.cy-r3 .st-blk .gh{min-height:24px;padding:0}
+.cy-r3 .st-tall{max-height:240px;overflow:auto}
+.cy-r3 .st-err{background:var(--stopped-bg);border-color:var(--stopped-line);color:var(--stopped)}
+
+/* ================================================================
+   Health (O1): sections inside a band, wells, commands, strips, the console's lists
+   ================================================================ */
+.cy-r3 .op-sec{display:flex;flex-direction:column;gap:8px;min-width:0;padding:8px 12px 12px}
+.cy-r3 .op-well{display:flex;flex-direction:column;gap:8px;min-width:0;padding:10px 12px;border-radius:12px;background:var(--band);border:1px solid var(--band-line)}
+.cy-r3 .op-well.w{background:var(--waiting-bg);border-color:var(--waiting-line);color:var(--ink)}
+.cy-r3 .op-well.p{background:var(--stopped-bg);border-color:var(--stopped-line)}
+.cy-r3 p.op-well{display:block}
+.cy-r3 .op-well-h{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:13px;line-height:18px;color:var(--ink)}
+.cy-r3 .op-well-h .gh{min-height:0;padding:0}
+.cy-r3 .op-well-h .lnk,.cy-r3 .op-well-h .pl{margin-left:auto}
+.cy-r3 .op-item{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;font-size:13px;line-height:18px}
+.cy-r3 .op-pre{max-height:192px;overflow:auto}
+/* a command is one line of text: the template's own indentation must not show */
+.cy-r3 code:is(.st-well,.op-code){white-space:normal}
+.cy-r3 .op-inline{display:inline-block;align-self:flex-start;max-width:100%;padding:4px 8px}
+.cy-r3 .op-hint{padding:0}
+/* an inline link in a 16 px help line reaches the 24 px target height without moving the line */
+.cy-r3 [data-page="health"] .help .ul{padding:5px 0}
+.cy-r3 .op-foot{padding:6px 12px 8px;font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .op-gh{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 12px}
+.cy-r3 .op-gh .gh{min-height:24px;padding:0}
+.cy-r3 .op-sub-h{padding:8px 12px 0}
+/* a disclosure inside a row or a well: no rule above, the chevron beside its words */
+.cy-r3 .op-more{margin:0;border-top:0}
+.cy-r3 .op-more>summary{display:inline-flex;gap:6px;min-height:32px;padding:0 8px 0 0}
+.cy-r3 .op-more>summary .ico{margin-left:0}
+.cy-r3 .op-more[open]>summary{margin-bottom:4px}
+.cy-r3 .op-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+.cy-r3 .op-steps li{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:10px;background:var(--card);border:1px solid var(--band-line)}
+.cy-r3 .op-steps li.op-cur{border-color:var(--ink-2)}
+.cy-r3 .op-step-l{font-size:12px;line-height:16px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}
+.cy-r3 .op-step-d{font-size:12px;line-height:17px;color:var(--ink)}
+.cy-r3 .op-cell-l{display:inline-flex;align-items:center;gap:6px}
+.cy-r3 .op-cell-d{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .op-v-word{font-size:16px;line-height:34px}
+/* a long list scrolls inside its card, never the page; a shade on its bottom edge says more rows
+   are below (the card-coloured cover scrolls with the rows and hides the shade at the end) */
+.cy-r3 .op-scroll{max-height:760px;overflow-y:auto;background:linear-gradient(transparent,var(--card) 70%) center bottom / 100% 40px no-repeat local,linear-gradient(transparent,var(--line)) center bottom / 100% 12px no-repeat scroll}
+.cy-r3 .op-scroll>*{flex-shrink:0}
+.cy-r3 .op-scroll-s{max-height:520px}
+.cy-r3 .op-checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px}
+.cy-r3 .op-checks li{display:grid;grid-template-columns:12px minmax(0,1fr);align-items:center;column-gap:8px;padding:6px 8px;border-radius:10px;background:var(--card);border:1px solid var(--band-line)}
+.cy-r3 .op-check-l{font-size:12px;line-height:16px;font-weight:500;color:var(--ink)}
+.cy-r3 .op-check-d{grid-column:2;font-size:12px;line-height:16px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cy-r3 .op-swarm{border-top:1px solid var(--hair)}
+.cy-r3 .op-log{display:flex;flex-direction:column;max-height:224px;overflow-y:auto;border-top:1px solid var(--hair)}
+.cy-r3 .op-log li{display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px;padding:8px 0;border-bottom:1px solid var(--hair);font-size:13px;line-height:18px;color:var(--ink)}
+.cy-r3 .op-log-t{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2)}
+.cy-r3 .op-log-m{display:flex;flex-direction:column;gap:4px;min-width:0}
+.cy-r3 .op-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 8px}
+.cy-r3 .op-groups{display:flex;flex-direction:column;gap:6px}
+.cy-r3 .op-groups li{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;padding:8px 10px;border-radius:10px;background:var(--well);border:1px solid var(--band-line);font-size:13px;line-height:18px}
+.cy-r3 .op-groups .help{grid-column:1 / -1}
+.cy-r3 .op-group-n{font-weight:500;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cy-r3 .op-groups .mono{font-size:12px;color:var(--ink)}
+.cy-r3 .op-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:6px;margin:0}
+.cy-r3 .op-metrics>div{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;padding:8px 10px;border-radius:10px;background:var(--well);border:1px solid var(--band-line)}
+.cy-r3 .op-metrics dt{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 .op-metrics dd.mono{font-size:14px;line-height:16px;color:var(--ink-hi)}
+.cy-r3 .op-metrics dd.help{grid-column:1 / -1}
+.cy-r3 #prompt-drift-radar .op-metrics{padding:0 12px 8px}
+.cy-r3 .op-receipts,.cy-r3 .op-preview{display:flex;flex-direction:column;gap:10px}
+.cy-r3 .op-receipts>li{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--hair)}
+.cy-r3 .op-score{margin-left:auto;font-size:12px;color:var(--ink)}
+.cy-r3 .op-bullets{display:flex;flex-direction:column;gap:2px;padding-left:16px;list-style:disc;font-size:12px;line-height:17px;color:var(--ink-2)}
+.cy-r3 .op-repairs{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}
+.cy-r3 .op-repairs>li{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:var(--well);border:1px solid var(--band-line)}
+.cy-r3 .op-repair-t{font-size:13px;line-height:18px;font-weight:500;color:var(--ink);overflow-wrap:anywhere}
+.cy-r3 .op-clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.cy-r3 .op-quote{padding-left:8px;border-left:2px solid var(--band-line)}
+.cy-r3 .op-svc+.op-svc{border-top:1px solid var(--hair);margin-top:4px;padding-top:4px}
+.cy-r3 .op-svc>.op-gh{padding:8px 12px 0}
+.cy-r3 .op-ex{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.cy-r3 .op-agents{display:flex;flex-direction:column;gap:4px;padding-top:4px}
+.cy-r3 .op-agents li{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;font-size:13px;line-height:18px}
+.cy-r3 .op-agents .st-w{margin-left:auto;font-size:12px;color:var(--ink-2)}
+.cy-r3 .op-patch{display:flex;flex-direction:column;gap:4px}
+.cy-r3 .op-pri{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;color:var(--ink-2);white-space:nowrap}
+/* the trail of a dense console row wraps under the title instead of squeezing it */
+.cy-r3 [data-page="health"] .lrow .lr-tr{flex:0 1 auto;max-width:100%}
+.cy-r3 [data-page="health"] .lrow .lr-below{display:flex;flex-direction:column;gap:6px}
+.cy-r3 [data-page="health"] .card>.strip{margin:0 4px 6px}
+.cy-r3 [data-page="health"] .dlg{max-width:760px}
+
+/* ---------- 1024 ---------- */
+@media (max-width:1180px){
+  .cy-r3 .st-split.st-open{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 .st-det{position:static}
+  .cy-r3 .op-grid{grid-template-columns:minmax(0,1fr)}
+}
+
+/* ---------- phone (390) ---------- */
+@media (max-width:640px){
+  .cy-r3 .op-s3 .v{font-size:20px}
+  .cy-r3 .op-log li{grid-template-columns:minmax(0,1fr)}
+  .cy-r3 .op-well-h .lnk,.cy-r3 .op-well-h .pl{margin-left:0}
+  .cy-r3 .st-row .ul{min-height:44px;min-width:44px}
+  .cy-r3 .op-more>summary{min-height:44px}
+  .cy-r3 .op-scroll,.cy-r3 .op-scroll-s{max-height:none}
+  /* an inline link in a help line is a 44 px target, as r3.css does for .gl-sub links */
+  .cy-r3 [data-page="health"] .help .ul{padding:15px 0}
+}

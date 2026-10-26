@@ -1,0 +1,105 @@
+/* r3 page CSS: hire. Owned by the hire track (v7 spec §4); no other track edits this file.
+   - Every selector starts with .cy-r3; scope page-only rules with .cy-r3 [data-page="…"]
+     (data-page sits on the page frame rendered by page_frame/1).
+   - No colour literal: use the tokens (app.css :root, themes.css). A new colour token goes into
+     the light block and both identical dark copies, never here.
+   - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
+   - Shared components belong in r3.css, not here. */
+
+/* ================================================================
+   Shared by the hire pages (v7 §4.4): a band header's end, long tokens
+   ================================================================ */
+/* a band header's end holding a tag and a meta word, or two pills */
+.cy-r3 :is([data-page="hire"],.set-main[data-section="plugins"]) .hr-end{display:inline-flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+/* identifiers, DIDs, module names and URLs wrap instead of widening a row on phones */
+.cy-r3 .hr-wrap{overflow-wrap:anywhere}
+/* a status word inside text (a property value, a row line) */
+.cy-r3 .hr-st{display:inline-flex;align-items:center;gap:6px}
+
+/* ================================================================
+   Hire (H1)
+   ================================================================ */
+/* field grids nested in a band (the runtime part, the adapter panels) get the card padding too */
+.cy-r3 [data-page="hire"] .card .flds{padding:8px 12px 12px}
+.cy-r3 [data-page="hire"] .hr-role{padding:0 12px 12px;font-size:13px;line-height:19px;color:var(--ink-2)}
+.cy-r3 [data-page="hire"] .hr-role b{color:var(--ink)}
+.cy-r3 [data-page="hire"] .hr-rt{display:block;font-size:12px;line-height:16px}
+.cy-r3 [data-page="hire"] .hr-ex{padding-top:4px}
+.cy-r3 [data-page="hire"] .hr-ex .chip{max-width:100%}
+.cy-r3 [data-page="hire"] .hr-ex-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the chosen runtime profile, beside its picker */
+.cy-r3 [data-page="hire"] .hr-pcard{display:flex;flex-direction:column;gap:6px;min-width:0;padding:12px 14px;border-radius:14px;background:var(--well);border:1px solid var(--band-line)}
+.cy-r3 [data-page="hire"] .hr-tags{display:flex;flex-wrap:wrap;gap:6px}
+.cy-r3 [data-page="hire"] .hr-pname{font-size:14px;line-height:20px;font-weight:500;color:var(--ink)}
+.cy-r3 [data-page="hire"] .hr-pfoot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;padding-top:8px;border-top:1px solid var(--hair);font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 [data-page="hire"] .hr-cmd{align-self:end;padding-bottom:12px;font-size:12px;line-height:16px;color:var(--ink-2);overflow-wrap:anywhere}
+
+/* ================================================================
+   Remote agents (H2)
+   ================================================================ */
+.cy-r3 [data-page="remote"] .rm-cap{flex:0 1 240px;min-width:0}
+.cy-r3 [data-page="remote"] .rm-line{padding:10px 12px}
+.cy-r3 [data-page="remote"] .rm-hire{display:flex;flex-direction:column;gap:10px;padding:4px 8px 10px}
+.cy-r3 [data-page="remote"] .rm-hire>.gl-sub{overflow-wrap:anywhere}
+.cy-r3 [data-page="remote"] .rm-go{display:flex;justify-content:flex-end}
+.cy-r3 [data-page="remote"] .lrow .rm{overflow-wrap:anywhere}
+
+/* ================================================================
+   Skills (H3-H6) and the shared health band (Skills, Plugins)
+   ================================================================ */
+.cy-r3 [data-page="skills"] .sk-co{flex:0 1 280px;min-width:0}
+.cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-line{padding:4px 12px 2px}
+.cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-next{margin:4px 4px 0;border-top:1px solid var(--hair)}
+.cy-r3 :is([data-page="skills"],.set-main[data-section="plugins"]) .hb-next .lnk{align-self:flex-start;margin-left:-4px}
+/* the detail pages have no Next step above their aside: beside the content it starts on the first row
+   (at 1180 px and below the split stacks and r3's grid-row:auto keeps Details after the content) */
+@media (min-width:1181px){
+  .cy-r3 :is([data-page="skill"],[data-page="plugin"]) .split>.aside{grid-row:1 / span 3}
+}
+.cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-desc{max-width:62ch;font-size:14px;line-height:21px;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+.cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-caps{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px}
+.cy-r3 :is([data-page="skill"],[data-page="plugin"]) .sk-pre{max-height:520px;overflow:auto;margin:4px 8px 8px;padding:12px 14px;border-radius:12px;background:var(--well);border:1px solid var(--band-line);font-size:12px;line-height:18px;color:var(--ink)}
+
+/* ================================================================
+   Plugins (H7-H12): the Settings section, the forms, the detail page, the catalog
+   ================================================================ */
+/* the list band's header holds Filter, Catalog and New plugin: it wraps instead of overflowing */
+.cy-r3 .set-main[data-section="plugins"] .card-h{flex-wrap:wrap}
+.cy-r3 .set-main[data-section="plugins"] .card-h .hr-end{margin-left:auto}
+.cy-r3 .set-main[data-section="plugins"] .pl-flt{display:flex;flex-direction:column;gap:10px;width:100%}
+.cy-r3 .set-main[data-section="plugins"] .pl-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.cy-r3 .set-main[data-section="plugins"] .pl-can{padding:0 8px 10px}
+/* the plugin page's description is its head line */
+.cy-r3 [data-page="plugin"] .head .sub{max-width:72ch;overflow-wrap:anywhere}
+/* the JSON disclosures inside a form band */
+.cy-r3 [data-page="plugin-form"] .tech{margin:4px 4px 0;border-top:1px solid var(--hair)}
+.cy-r3 [data-page="plugin-form"] .tech .flds{padding:4px 8px 12px}
+/* the catalog: a grid of cards (v7 P1 exception) */
+.cy-r3 [data-page="marketplace"] .mk-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.cy-r3 [data-page="marketplace"] .mk-card{display:flex;flex-direction:column;gap:8px;padding:14px 16px 12px}
+.cy-r3 [data-page="marketplace"] .mk-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.cy-r3 [data-page="marketplace"] .mk-h .tag{flex:none}
+.cy-r3 [data-page="marketplace"] .mk-mod{font-size:12px;line-height:16px;color:var(--ink-2)}
+.cy-r3 [data-page="marketplace"] .mk-act{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;padding-top:10px;border-top:1px solid var(--hair);font-size:13px;color:var(--ink)}
+.cy-r3 [data-page="marketplace"] .sk-caps{display:flex;flex-wrap:wrap;gap:6px}
+
+@media (max-width:1180px){
+  .cy-r3 [data-page="marketplace"] .mk-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+@media (max-width:640px){
+  /* the gated Hire's ghost names the key ("Add DASHSCOPE_API_KEY"): it takes its own line above the primary
+     instead of being pushed off the card's start by r3's no-wrap phone footer */
+  .cy-r3 [data-page="hire"] .ink-f{flex-wrap:wrap}
+  .cy-r3 [data-page="hire"] .ink-f .pd{flex:1 1 100%;justify-content:center}
+  /* the Filter panel opens across the band (its chip may sit anywhere in the wrapped header) */
+  .cy-r3 .set-main[data-section="plugins"] .card-h{position:relative}
+  .cy-r3 .set-main[data-section="plugins"] .card-h .flt-d{position:static}
+  .cy-r3 .set-main[data-section="plugins"] .card-h .flt-p{left:6px;right:6px;min-width:0;max-width:none}
+  .cy-r3 [data-page="marketplace"] .mk-grid{grid-template-columns:minmax(0,1fr)}
+  /* "Add key" in the readiness list is a 44 px target; the line does not move (r3.css .gl-sub .ul) */
+  .cy-r3 [data-page="hire"] .kv dd .ul{padding:15px 0}
+  /* row actions wrap to the row's start on phones, so the menu opens from the kebab's start, not off-screen */
+  .cy-r3 .set-main[data-section="plugins"] .lrow .cympho-menu>.menu{left:0;right:auto}
+  .cy-r3 [data-page="remote"] .rm-cap,.cy-r3 [data-page="skills"] .sk-co{flex:1 1 100%}
+}

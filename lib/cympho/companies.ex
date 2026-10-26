@@ -2820,6 +2820,17 @@ defmodule Cympho.Companies do
     |> Repo.all()
   end
 
+  @doc "Member count per company id, in one query: `%{company_id => count}`."
+  def count_memberships_by_company(company_ids) when is_list(company_ids) do
+    from(m in CompanyMembership,
+      where: m.company_id in ^company_ids,
+      group_by: m.company_id,
+      select: {m.company_id, count(m.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
   @doc """
   Returns a company the user is actually a member of.
 

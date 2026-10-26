@@ -43,4 +43,14 @@ defmodule CymphoWeb.ExecutionPolicyLive.Show do
   def truthy_flag(stage, key) do
     (Map.get(stage, key) || Map.get(stage, String.to_atom(key))) in [true, "true", 1, "1", "on"]
   end
+
+  defp stage_type_label(stage),
+    do: (stage["type"] || stage[:type] || "stage") |> to_string() |> String.capitalize()
+
+  defp participant(stage) do
+    case stage["participant_id"] || stage[:participant_id] do
+      pid when is_binary(pid) and pid != "" -> pid
+      _ -> nil
+    end
+  end
 end

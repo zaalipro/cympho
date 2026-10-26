@@ -4,6 +4,8 @@ defmodule CymphoWeb.RoutineLive.New do
   alias Cympho.Routines.Routine
   alias CymphoWeb.RoutineLive.FormHelpers
 
+  import CymphoWeb.RoutineLive.FormHelpers, only: [routine_form: 1]
+
   @impl true
   def mount(_params, _session, socket) do
     if is_binary(current_company_id(socket)) do
@@ -11,7 +13,11 @@ defmodule CymphoWeb.RoutineLive.New do
 
       socket =
         socket
-        |> assign(changeset: changeset, form: to_form(changeset), page_title: "New Routine")
+        |> assign(
+          changeset: changeset,
+          form: to_form(changeset),
+          page_title: "New repeating task"
+        )
         |> FormHelpers.assign_context_options()
 
       {:ok, socket}

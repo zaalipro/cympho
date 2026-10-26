@@ -1,517 +1,224 @@
 <.settings_layout active={:integrations}>
-  <.header
-    title="Integrations"
-    subtitle="Connect company-level services that extend how Cympho agents work."
+  <.flash_line flash={@flash} />
+
+  <.form_pair
+    id="agrenting-form"
+    for={@agrenting_form}
+    phx-submit="save_agrenting"
+    heading="After you save"
+    verb="save"
   >
-    <:actions>
-      <.app_link
-        navigate={~p"/agents/remote"}
-        class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+    <.band_card id="in-t" title="Integrations">
+      <:header_end>
+        <span class="st">
+          <.status_word
+            kind={if agrenting_connected?(@agrenting_status), do: :done, else: :idle}
+            word={connection_badge_label(@agrenting_status)}
+          />
+        </span>
+        <button
+          :if={agrenting_connected?(@agrenting_status)}
+          type="button"
+          class="pl warn"
+          phx-click="disconnect_agrenting"
+          data-confirm="Disconnect Agrenting for this company?"
+        >
+          Disconnect
+        </button>
+      </:header_end>
+      <p class="sub-h">Agrenting</p>
+      <p class="in-l">
+        Hire marketplace agents and run them from Cympho without exposing the API key to individual users.
+      </p>
+      <div class="flds">
+        <.input
+          field={@agrenting_form[:api_key]}
+          type="password"
+          label="API key"
+          placeholder={
+            if api_key_present?(@agrenting_status),
+              do: "Leave blank to keep current key",
+              else: "ap_..."
+          }
+          autocomplete="off"
+          wrapper_class="full"
+        />
+        <.input
+          field={@agrenting_form[:base_url]}
+          type="url"
+          label="Base URL"
+          placeholder="https://www.agrenting.com"
+          help="Keep the default unless your Agrenting workspace uses a custom endpoint."
+          autocomplete="off"
+          wrapper_class="ui-advanced-only"
+        />
+        <.input
+          field={@agrenting_form[:repo_access_token]}
+          type="password"
+          label="Repo access token"
+          placeholder={
+            if repo_token_present?(@agrenting_status),
+              do: "Leave blank to keep current token",
+              else: "Optional push token"
+          }
+          help="Optional. Use this when remote agents need to push work products back to a repository."
+          autocomplete="off"
+          wrapper_class="ui-advanced-only"
+        />
+      </div>
+      <p :if={test_result_label(@agrenting_test_result)} class="in-r st">
+        <.status_word
+          kind={if match?({:ok, _}, @agrenting_test_result), do: :done, else: :stopped}
+          word={test_result_label(@agrenting_test_result)}
+        />
+      </p>
+    </.band_card>
+    <:effect>
+      <.ink_note>Stored as a company secret; used only for Agrenting requests.</.ink_note>
+    </:effect>
+    <:secondary>
+      <.ghost_pill phx-click="test_agrenting" disabled={!agrenting_connected?(@agrenting_status)}>
+        Test
+      </.ghost_pill>
+    </:secondary>
+    <:primary>
+      <.primary_pill type="submit" phx-disable-with="Saving…">Save connection</.primary_pill>
+    </:primary>
+  </.form_pair>
+
+  <.band_card id="rh-t" title="Remote hiring">
+    <div class="in-b">
+      <p class="in-l">
+        Once connected, marketplace agents appear in Cympho with pricing, capabilities, and a local proxy agent record.
+      </p>
+      <.text_link navigate={~p"/agents/remote"}>Browse agents</.text_link>
+    </div>
+  </.band_card>
+
+  <div class="ui-advanced-only">
+    <.band_card id="mcp-t" title="External AI control (MCP)" data-testid="mcp-command">
+      <:header_end>
+        <span class="st">
+          <.status_word
+            kind={if @mcp_status.status.tone == :ready, do: :done, else: :waiting}
+            word={@mcp_status.status.label}
+          />
+        </span>
+      </:header_end>
+      <p class="in-l">
+        Connect external AI clients through Cympho's MCP server. Calls are authenticated as an agent and scoped to this company.
+      </p>
+      <div class="strip s4">
+        <div class="cell">
+          <p class="v mono">{@mcp_status.tool_count}</p>
+          <p class="l">MCP tools</p>
+        </div>
+        <div class="cell">
+          <p class="v mono">{@mcp_status.agent_count}</p>
+          <p class="l">Agents</p>
+        </div>
+        <div class="cell">
+          <p class="v mono">{@mcp_status.ceo_count}</p>
+          <p class="l">CEOs</p>
+        </div>
+        <div class="cell">
+          <p class="v mono">{@mcp_status.api_key_count}</p>
+          <p class="l">API keys</p>
+        </div>
+      </div>
+
+      <p class="sub-h">Do this next</p>
+      <p class="in-l">{@mcp_status.next_action}</p>
+
+      <p class="sub-h">MCP setup checklist</p>
+      <ol class="steps">
+        <li :for={{step, n} <- Enum.with_index(@mcp_status.setup_steps, 1)} class="step">
+          <span class="chk">
+            <.r3_icon :if={step.tone == :ready} name="i-check" class="ico s14" />
+            <span :if={step.tone != :ready} class="mono">{n}</span>
+          </span>
+          <span class="step-t">{step.label}<span class="rm">{step.detail}</span></span>
+          <span class="step-c">{step.state}</span>
+        </li>
+      </ol>
+
+      <p class="sub-h">MCP routes</p>
+      <p class="in-tags">
+        <span class="tag mono">GET /api/mcp/tools</span>
+        <span class="tag mono">POST /api/mcp/call</span>
+      </p>
+
+      <details id="mcp-intake" class="earlier" phx-mounted={JS.ignore_attributes("open")}>
+        <summary>CEO intake recipe<.r3_icon name="i-chev-down" /></summary>
+        <div class="in-d">
+          <p class="in-l">
+            Route external requests into CEO review instead of leaving them as unowned backlog.
+          </p>
+          <div id="mcp-intake-copy" phx-hook="CopyToClipboard">
+            <button
+              type="button"
+              class="pl"
+              data-copy-text={@mcp_status.intake_example}
+              data-copy-label="Copy recipe"
+            >
+              Copy recipe
+            </button>
+          </div>
+          <pre class="code">{@mcp_status.intake_example}</pre>
+        </div>
+      </details>
+
+      <details
+        id="mcp-tool-catalog"
+        class="earlier"
+        data-testid="mcp-tool-catalog"
+        phx-mounted={JS.ignore_attributes("open")}
       >
-        <.icon name="hero-user-plus" class="h-4 w-4" /> Remote agents
-      </.app_link>
-    </:actions>
-  </.header>
+        <summary>
+          Available tools<span class="mono">{@mcp_status.tool_count}</span>
+          <span class="tag mono">
+            X-API-Key
+          </span>
+          <.r3_icon name="i-chev-down" />
+        </summary>
+        <ul class="in-tools">
+          <li :for={tool <- @mcp_status.tools}>
+            <span class="mono">{tool.name}</span><span class="rm">{tool.description}</span>
+          </li>
+        </ul>
+      </details>
 
-  <.panel class="ember-glass ui-advanced-only mb-4 overflow-hidden" data-testid="mcp-command">
-    <div class={[
-      "h-px bg-gradient-to-r from-transparent to-transparent",
-      if(@mcp_status.status.tone == :ready, do: "via-success/40", else: "via-brand/30")
-    ]}>
-    </div>
-    <div class="grid gap-0 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
-      <div class="p-5">
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div class="flex min-w-0 gap-3">
-            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand/25 bg-brand/10 text-brand">
-              <.icon name="hero-command-line" class="h-5 w-5" />
-            </div>
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <h2 class="text-card-title text-text-primary">External AI control</h2>
-                <span class={"inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-510 #{mcp_tone_class(@mcp_status.status.tone)}"}>
-                  <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
-                  {@mcp_status.status.label}
-                </span>
-              </div>
-              <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
-                Connect external AI clients through Cympho's MCP server. Calls are authenticated as an agent and scoped to this company.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <div class="ember-stat rounded-md border border-border bg-surface px-3 py-2">
-            <div class="font-mono text-lg font-510 leading-none text-text-primary">
-              {@mcp_status.tool_count}
-            </div>
-            <div class="mt-1 text-[10px] font-510 uppercase tracking-wider text-text-tertiary">
-              MCP tools
-            </div>
-          </div>
-          <div class="ember-stat rounded-md border border-border bg-surface px-3 py-2">
-            <div class="font-mono text-lg font-510 leading-none text-text-primary">
-              {@mcp_status.agent_count}
-            </div>
-            <div class="mt-1 text-[10px] font-510 uppercase tracking-wider text-text-tertiary">
-              Agents
-            </div>
-          </div>
-          <div class="ember-stat rounded-md border border-border bg-surface px-3 py-2">
-            <div class="font-mono text-lg font-510 leading-none text-text-primary">
-              {@mcp_status.ceo_count}
-            </div>
-            <div class="mt-1 text-[10px] font-510 uppercase tracking-wider text-text-tertiary">
-              CEOs
-            </div>
-          </div>
-          <div class="ember-stat rounded-md border border-border bg-surface px-3 py-2">
-            <div class="font-mono text-lg font-510 leading-none text-text-primary">
-              {@mcp_status.api_key_count}
-            </div>
-            <div class="mt-1 text-[10px] font-510 uppercase tracking-wider text-text-tertiary">
-              API keys
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-4 rounded-lg border border-border bg-surface p-4">
-          <div class="flex items-start gap-3">
-            <div class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-brand/25 bg-brand/10 text-brand">
-              <.icon name="hero-arrow-turn-down-right" class="h-4 w-4" />
-            </div>
-            <div class="min-w-0">
-              <div class="font-serif text-[13px] font-510 italic tracking-[0.01em] text-brand/90">
-                Do this next
-              </div>
-              <p class="mt-1 text-sm leading-5 text-text-primary">
-                {@mcp_status.next_action}
-              </p>
-              <p class="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">
-                {@mcp_status.status.detail}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-4 rounded-lg border border-border bg-surface p-4">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 class="text-sm font-590 text-text-primary">MCP setup checklist</h3>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                The shortest path from external AI client to CEO-owned work.
-              </p>
-            </div>
-            <span class={"rounded-full border px-2 py-0.5 text-xs font-510 #{mcp_tone_class(@mcp_status.status.tone)}"}>
-              {@mcp_status.status.label}
-            </span>
-          </div>
-
-          <div class="mt-3 space-y-2">
-            <div
-              :for={step <- @mcp_status.setup_steps}
-              class={"rounded-md border px-3 py-2 #{mcp_step_card_class(step.tone)}"}
-            >
-              <div class="flex items-center justify-between gap-3">
-                <div class="flex min-w-0 flex-1 items-start gap-2.5">
-                  <span class={[
-                    "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
-                    if(step.tone == :ready,
-                      do: "border-success/30 bg-success/15 text-success",
-                      else: "border-border bg-surface text-text-quaternary"
-                    )
-                  ]}>
-                    <.icon :if={step.tone == :ready} name="hero-check" class="h-3 w-3" />
-                    <span
-                      :if={step.tone != :ready}
-                      class="h-1.5 w-1.5 rounded-full bg-current"
-                    >
-                    </span>
-                  </span>
-                  <div class="min-w-0">
-                    <p class="text-xs font-590 text-text-primary">{step.label}</p>
-                    <p class="mt-0.5 line-clamp-1 text-xs leading-5 text-text-tertiary">
-                      {step.detail}
-                    </p>
-                  </div>
-                </div>
-                <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-510 #{mcp_tone_class(step.tone)}"}>
-                  {step.state}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-5 rounded-lg border border-border bg-surface p-3">
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="font-serif text-[13px] font-510 italic tracking-[0.01em] text-brand/90">
-              MCP routes
-            </span>
-            <code class="break-all rounded bg-black/20 px-2.5 py-1.5 text-xs text-text-primary">
-              GET /api/mcp/tools
-            </code>
-            <code class="break-all rounded bg-black/20 px-2.5 py-1.5 text-xs text-text-primary">
-              POST /api/mcp/call
-            </code>
-          </div>
-        </div>
-
-        <div class="mt-5 rounded-lg border border-border bg-surface p-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h3 class="text-sm font-590 text-text-primary">CEO intake recipe</h3>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Route external requests into CEO review instead of leaving them as unowned backlog.
-              </p>
-            </div>
-            <div class="flex shrink-0 items-center gap-2">
-              <span class="rounded-full border border-border bg-subtle px-2 py-1 text-xs text-text-tertiary">
-                create_issue
-              </span>
-              <div id="mcp-intake-copy" phx-hook="CopyToClipboard">
-                <button
-                  type="button"
-                  data-copy-text={@mcp_status.intake_example}
-                  data-copy-label="Copy recipe"
-                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-button px-2 py-1 text-xs font-510 text-text-secondary hover:bg-button-hover hover:text-text-primary"
-                >
-                  <.icon name="hero-clipboard-document" class="h-3.5 w-3.5" /> Copy
-                </button>
-              </div>
-            </div>
-          </div>
-          <code class="block max-h-36 overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 px-3 py-2 text-xs leading-5 text-text-primary">
-            {@mcp_status.intake_example}
-          </code>
-        </div>
-
-        <details
-          id="mcp-tool-catalog"
-          class="group mt-5 rounded-lg border border-border bg-surface p-4"
-          data-testid="mcp-tool-catalog"
-          phx-mounted={JS.ignore_attributes("open")}
-        >
-          <summary class="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
-            <div>
-              <h3 class="text-sm font-590 text-text-primary">Available tools</h3>
-              <p class="mt-1 text-xs text-text-tertiary">
-                Expand when you need the full company-scoped tool catalog.
-              </p>
-            </div>
-            <div class="flex shrink-0 items-center gap-2">
-              <span class="rounded-full border border-border bg-subtle px-2 py-1 text-xs text-text-tertiary">
-                {@mcp_status.tool_count} tools
-              </span>
-              <span class="rounded-full border border-border bg-subtle px-2 py-1 text-xs text-text-tertiary">
-                X-API-Key
-              </span>
-              <.icon
-                name="hero-chevron-down"
-                class="h-4 w-4 text-text-quaternary transition-transform group-open:rotate-180"
-              />
-            </div>
-          </summary>
-
-          <div class="mt-3 grid gap-2 sm:grid-cols-2">
-            <div
-              :for={tool <- @mcp_status.tools}
-              class="rounded-md border border-border bg-subtle px-3 py-2"
-            >
-              <div class="font-mono text-xs text-text-primary">{tool.name}</div>
-              <div class="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">
-                {tool.description}
-              </div>
-            </div>
-          </div>
-        </details>
-      </div>
-
-      <div class="border-t border-border bg-subtle/60 p-5 xl:border-l xl:border-t-0">
-        <h3 class="text-sm font-590 text-text-primary">Create MCP API key</h3>
-        <p class="mt-2 text-sm leading-5 text-text-tertiary">
-          Keys are bound to one agent. Use the agent identity that should own imported issues, comments, and tool calls.
-        </p>
-
-        <form phx-submit="create_mcp_key" class="mt-4 space-y-4">
-          <label class="space-y-1.5">
-            <span class="text-xs font-510 text-text-secondary">Agent identity</span>
-            <select
-              name="mcp_key[agent_id]"
-              disabled={@mcp_status.agent_count == 0}
-              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand disabled:cursor-not-allowed disabled:text-text-quaternary"
-            >
-              <option :if={@mcp_status.agent_count == 0} value="">No agents available</option>
-              <option
-                :for={agent <- @mcp_status.agents}
-                value={agent.id}
-                selected={@mcp_key_form[:agent_id].value == agent.id}
-              >
-                {agent.name} ({agent.role})
-              </option>
-            </select>
-          </label>
-
-          <label class="space-y-1.5">
-            <span class="text-xs font-510 text-text-secondary">Key name</span>
-            <input
-              name="mcp_key[name]"
-              value={@mcp_key_form[:name].value}
-              disabled={@mcp_status.agent_count == 0}
-              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand disabled:cursor-not-allowed disabled:text-text-quaternary"
-            />
-          </label>
-
-          <button
-            type="submit"
+      <p class="sub-h">Create MCP API key</p>
+      <p class="in-l">
+        Keys are bound to one agent. Use the agent identity that should own imported tasks, comments, and tool calls.
+      </p>
+      <form phx-submit="create_mcp_key" class="in-k">
+        <div class="flds">
+          <.input
+            field={@mcp_key_form[:agent_id]}
+            type="select"
+            label="Agent identity"
+            options={mcp_agent_options(@mcp_status.agents)}
             disabled={@mcp_status.agent_count == 0}
-            class={[
-              "inline-flex w-full items-center justify-center gap-2 rounded-button px-4 py-2 text-sm font-510 transition-colors",
-              if(@mcp_status.agent_count == 0,
-                do: "cursor-not-allowed bg-surface text-text-quaternary",
-                else: "bg-brand text-on-primary hover:bg-accent-hover"
-              )
-            ]}
-          >
-            <.icon name="hero-key" class="h-4 w-4" /> Create key
-          </button>
-        </form>
-
-        <div
-          :if={@mcp_key_result}
-          data-testid="mcp-key-result"
-          class="mt-5 rounded-lg border border-amber-500/25 bg-amber-500/10 p-4"
-        >
-          <div class="text-sm font-590 text-amber-200">Copy this key now</div>
-          <p class="mt-1 text-xs leading-5 text-amber-100/80">
-            It authenticates as {@mcp_key_result.agent.name} and will not be shown again.
-          </p>
-          <code class="mt-3 block break-all rounded bg-black/30 px-3 py-2 text-xs text-amber-50">
-            {@mcp_key_result.plain_text_key}
-          </code>
-          <code class="mt-3 block whitespace-pre-wrap rounded bg-black/30 px-3 py-2 text-xs text-amber-50">
-            curl -H "X-API-Key: &lt;key&gt;" /api/mcp/tools
-          </code>
+          />
+          <.input
+            field={@mcp_key_form[:name]}
+            label="Key name"
+            disabled={@mcp_status.agent_count == 0}
+            autocomplete="off"
+          />
         </div>
-      </div>
-    </div>
-  </.panel>
-
-  <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-    <.panel class="ember-glass overflow-hidden">
-      <div class={[
-        "h-px bg-gradient-to-r from-transparent to-transparent",
-        if(agrenting_connected?(@agrenting_status), do: "via-success/40", else: "via-border")
-      ]}>
-      </div>
-      <div class="border-b border-border bg-gradient-to-b from-surface-2/40 to-transparent p-5">
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div class="flex min-w-0 gap-3">
-            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand/25 bg-brand/10 text-brand">
-              <.icon name="hero-sparkles" class="h-5 w-5" />
-            </div>
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <h2 class="text-card-title text-text-primary">Agrenting</h2>
-                <span class={"inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-510 #{connection_badge_class(@agrenting_status)}"}>
-                  <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
-                  {connection_badge_label(@agrenting_status)}
-                </span>
-              </div>
-              <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
-                Hire marketplace agents and run them from Cympho without exposing the API key to individual users.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <form phx-submit="save_agrenting" class="p-5">
-        <div class="grid gap-5 lg:grid-cols-2">
-          <label class="space-y-1.5">
-            <span class="text-xs font-510 text-text-secondary">API key</span>
-            <input
-              type="password"
-              name="agrenting[api_key]"
-              value={@agrenting_form[:api_key].value}
-              placeholder={
-                if api_key_present?(@agrenting_status),
-                  do: "Leave blank to keep current key",
-                  else: "ap_..."
-              }
-              autocomplete="off"
-              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-            />
-            <p class="text-xs leading-5 text-text-quaternary">
-              Stored as a company secret and used only for Agrenting marketplace requests.
-            </p>
-          </label>
-
-          <label class="ui-advanced-only space-y-1.5">
-            <span class="text-xs font-510 text-text-secondary">Base URL</span>
-            <input
-              type="url"
-              name="agrenting[base_url]"
-              value={@agrenting_form[:base_url].value}
-              placeholder="https://www.agrenting.com"
-              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-            />
-            <p class="text-xs leading-5 text-text-quaternary">
-              Keep the default unless your Agrenting workspace uses a custom endpoint.
-            </p>
-          </label>
-
-          <label class="ui-advanced-only space-y-1.5 lg:col-span-2">
-            <span class="text-xs font-510 text-text-secondary">Repo access token</span>
-            <input
-              type="password"
-              name="agrenting[repo_access_token]"
-              value={@agrenting_form[:repo_access_token].value}
-              placeholder={
-                if repo_token_present?(@agrenting_status),
-                  do: "Leave blank to keep current token",
-                  else: "Optional token for push delivery"
-              }
-              autocomplete="off"
-              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-            />
-            <p class="text-xs leading-5 text-text-quaternary">
-              Optional. Use this when remote agents need to push work products back to a repository.
-            </p>
-          </label>
-        </div>
-
-        <div class="mt-5 flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
-          <div class="min-h-5 text-sm text-text-tertiary">
-            <span
-              :if={test_result_label(@agrenting_test_result)}
-              class={[
-                "inline-flex items-center gap-2",
-                if(match?({:ok, _}, @agrenting_test_result),
-                  do: "text-success",
-                  else: "text-brand"
-                )
-              ]}
-            >
-              <.icon
-                name={
-                  if match?({:ok, _}, @agrenting_test_result),
-                    do: "hero-check-circle",
-                    else: "hero-exclamation-circle"
-                }
-                class="h-4 w-4"
-              />
-              {test_result_label(@agrenting_test_result)}
-            </span>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-            <button
-              type="button"
-              phx-click="disconnect_agrenting"
-              data-confirm="Disconnect Agrenting for this company?"
-              class={[
-                "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
-                if(agrenting_connected?(@agrenting_status),
-                  do:
-                    "border-red-500/25 bg-red-500/10 text-red-300 hover:bg-red-500/15 hover:text-red-200",
-                  else: "hidden"
-                )
-              ]}
-            >
-              <.icon name="hero-link-slash" class="h-4 w-4" /> Disconnect
-            </button>
-            <button
-              type="button"
-              phx-click="test_agrenting"
-              disabled={!agrenting_connected?(@agrenting_status)}
-              class={[
-                "inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-510 transition-colors",
-                if(agrenting_connected?(@agrenting_status),
-                  do:
-                    "bg-button text-text-secondary hover:bg-button-hover hover:text-text-primary",
-                  else: "cursor-not-allowed bg-surface text-text-quaternary"
-                )
-              ]}
-            >
-              <.icon name="hero-signal" class="h-4 w-4" /> Test
-            </button>
-            <button
-              type="submit"
-              phx-disable-with="Saving..."
-              class="btn-press inline-flex items-center gap-2 cta-glow rounded-button bg-brand bg-gradient-to-b from-white/[0.10] to-transparent px-4 py-2 text-sm font-510 text-on-primary shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] transition-colors hover:bg-accent-hover"
-            >
-              <.icon name="hero-check" class="h-4 w-4" /> Save connection
-            </button>
-          </div>
-        </div>
+        <.pill type="submit" disabled={@mcp_status.agent_count == 0}>Create key</.pill>
       </form>
-    </.panel>
 
-    <div class="space-y-4">
-      <.panel class="ui-advanced-only">
-        <div class="p-5">
-          <h3 class="text-sm font-590 text-text-primary">Connection State</h3>
-          <dl class="mt-4 space-y-3 text-sm">
-            <div class="flex items-center justify-between gap-3 border-b border-border pb-3">
-              <dt class="text-text-tertiary">API key</dt>
-              <dd class="flex items-center gap-1.5 font-510 text-text-primary">
-                <span class={[
-                  "h-1.5 w-1.5 rounded-full",
-                  if(api_key_present?(@agrenting_status),
-                    do: "bg-success",
-                    else: "bg-text-quaternary"
-                  )
-                ]}>
-                </span>
-                {present_label(api_key_present?(@agrenting_status))}
-              </dd>
-            </div>
-            <div class="flex items-center justify-between gap-3 border-b border-border pb-3">
-              <dt class="text-text-tertiary">Marketplace</dt>
-              <dd class="max-w-[190px] truncate font-mono text-xs text-text-primary">
-                {@agrenting_status.base_url}
-              </dd>
-            </div>
-            <div class="flex items-center justify-between gap-3 border-b border-border pb-3">
-              <dt class="text-text-tertiary">URL mode</dt>
-              <dd class="font-510 text-text-primary">
-                {if custom_base_url?(@agrenting_status), do: "Custom", else: "Default"}
-              </dd>
-            </div>
-            <div class="flex items-center justify-between gap-3">
-              <dt class="text-text-tertiary">Repo token</dt>
-              <dd class="flex items-center gap-1.5 font-510 text-text-primary">
-                <span class={[
-                  "h-1.5 w-1.5 rounded-full",
-                  if(repo_token_present?(@agrenting_status),
-                    do: "bg-success",
-                    else: "bg-text-quaternary"
-                  )
-                ]}>
-                </span>
-                {present_label(repo_token_present?(@agrenting_status))}
-              </dd>
-            </div>
-          </dl>
-        </div>
-      </.panel>
-
-      <.panel>
-        <div class="p-5">
-          <h3 class="text-sm font-590 text-text-primary">Remote Hiring</h3>
-          <p class="mt-2 text-sm leading-5 text-text-tertiary">
-            Once connected, marketplace agents appear in Cympho with pricing, capabilities, and a local proxy agent record.
-          </p>
-          <.app_link
-            navigate={~p"/agents/remote"}
-            class="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-button px-3 py-2 text-sm font-510 text-text-secondary hover:bg-button-hover hover:text-text-primary"
-          >
-            <.icon name="hero-arrow-right" class="h-4 w-4" /> Browse agents
-          </.app_link>
-        </div>
-      </.panel>
-    </div>
+      <div :if={@mcp_key_result} data-testid="mcp-key-result" class="in-key">
+        <p class="gl-big">Copy this key now</p>
+        <p class="in-l">
+          It authenticates as {@mcp_key_result.agent.name} and will not be shown again.
+        </p>
+        <code class="mono">{@mcp_key_result.plain_text_key}</code>
+        <code class="mono">curl -H "X-API-Key: &lt;key&gt;" /api/mcp/tools</code>
+      </div>
+    </.band_card>
   </div>
 </.settings_layout>

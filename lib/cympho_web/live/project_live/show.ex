@@ -20,8 +20,14 @@ defmodule CymphoWeb.ProjectLive.Show do
   end
 
   @impl true
-  def handle_params(%{"id" => id}, _url, socket) do
-    {:noreply, apply_action(socket, socket.assigns.live_action, id)}
+  def handle_params(%{"id" => id}, url, socket) do
+    # The router gives /edit no live_action (router.ex), so the path tells them apart.
+    editing? = url |> URI.parse() |> Map.get(:path, "") |> String.ends_with?("/edit")
+
+    {:noreply,
+     socket
+     |> assign(:editing?, editing?)
+     |> apply_action(socket.assigns.live_action, id)}
   end
 
   defp apply_action(socket, nil, id), do: apply_action(socket, :show, id)
@@ -138,26 +144,6 @@ defmodule CymphoWeb.ProjectLive.Show do
     |> Repo.all()
   end
 
-  defp status_counts(%{id: project_id}) do
-    counts =
-      Issue
-      |> where(project_id: ^project_id)
-      |> group_by(:status)
-      |> select([i], {i.status, count(i.id)})
-      |> Repo.all()
-      |> Map.new()
-
-    %{
-      backlog: Map.get(counts, :backlog, 0),
-      todo: Map.get(counts, :todo, 0),
-      in_progress: Map.get(counts, :in_progress, 0),
-      in_review: Map.get(counts, :in_review, 0),
-      done: Map.get(counts, :done, 0),
-      blocked: Map.get(counts, :blocked, 0),
-      total: Enum.sum(Map.values(counts))
-    }
-  end
-
   defp list_project_secrets(%{id: id, company_id: company_id}) when is_binary(company_id) do
     Secrets.list_secrets(company_id, scope: "project", scope_id: id)
   end
@@ -171,57 +157,25 @@ defmodule CymphoWeb.ProjectLive.Show do
 
   defp assign_project(socket, project) do
     issues = list_project_issues(project)
-    status_counts = status_counts(project)
     health = project_health(project)
     goal_progress = Goals.list_goals_with_progress(project.id)
     project_workspaces = Workspaces.list_project_workspaces(project.id)
     secrets = list_project_secrets(project)
-    env_keys = Enum.map(secrets, & &1.key)
 
     socket
-    |> assign(:page_title, project.name)
+    |> assign(:page_title, (socket.assigns[:editing?] && "Edit #{project.name}") || project.name)
     |> assign(:project, project)
     |> assign(:form, to_form(Projects.change_project(project)))
     |> assign(:env_form, to_form(%{"key" => "", "value" => ""}, as: :env))
     |> assign(:issues, issues)
-    |> assign(:status_counts, status_counts)
-    |> assign(:project_health, health)
     |> assign(:goal_progress, goal_progress)
     |> assign(:project_workspaces, project_workspaces)
     |> assign(:secrets, secrets)
-    |> assign(:env_keys, env_keys)
+    |> assign(:project_health, health)
     |> assign(
       :project_command,
-      project_command(project, health, goal_progress, project_workspaces, env_keys)
+      project_command(project, health, goal_progress, project_workspaces)
     )
-  end
-
-  def status_label(:in_progress), do: "In progress"
-  def status_label(:in_review), do: "In review"
-  def status_label(s), do: s |> to_string() |> String.capitalize()
-
-  def status_dot_class(:todo), do: "bg-accent"
-  def status_dot_class(:in_progress), do: "bg-brand"
-  def status_dot_class(:in_review), do: "bg-violet-300"
-  def status_dot_class(:done), do: "bg-emerald-400"
-  def status_dot_class(:blocked), do: "bg-red-400"
-  def status_dot_class(_status), do: "bg-text-quaternary"
-
-  attr :label, :string, required: true
-  attr :value, :any, required: true
-  attr :tone, :atom, default: :neutral
-
-  def project_command_metric(assigns) do
-    ~H"""
-    <div class="border-r border-border px-4 py-3 last:border-r-0">
-      <p class="text-[10px] font-590 uppercase leading-3 tracking-[0.12em] text-text-quaternary">
-        {@label}
-      </p>
-      <p class={"mt-1 font-serif text-2xl font-590 leading-none #{metric_text(@tone)}"}>
-        {@value}
-      </p>
-    </div>
-    """
   end
 
   defp project_health(%{company_id: company_id, id: project_id}) when is_binary(company_id) do
@@ -232,40 +186,15 @@ defmodule CymphoWeb.ProjectLive.Show do
 
   defp project_health(_project), do: Projects.empty_project_work_health()
 
-  defp project_command(project, health, goal_progress, project_workspaces, env_keys) do
+  defp project_command(project, health, goal_progress, project_workspaces) do
     state = project_state(project, health)
-    focus = project_focus(project, health, goal_progress, project_workspaces, env_keys)
 
     %{
-      tone: state,
       heading: project_command_heading(state),
       detail: project_command_detail(project, state, health, goal_progress, project_workspaces),
       action_label: project_command_action_label(state),
-      action_path: project_command_action_path(project, state),
-      focus_label: elem(focus, 0),
-      focus_detail: elem(focus, 1),
-      metrics: project_command_metrics(health, goal_progress, project_workspaces, env_keys)
+      action_path: project_command_action_path(project, state)
     }
-  end
-
-  defp project_command_metrics(health, goal_progress, project_workspaces, env_keys) do
-    [
-      %{label: "Open", value: health.open, tone: count_tone(health.open, :ok)},
-      %{label: "Progress", value: "#{health.progress_percent}%", tone: :neutral},
-      %{label: "Review", value: health.in_review, tone: count_tone(health.in_review, :review)},
-      %{label: "Blocked", value: health.blocked, tone: count_tone(health.blocked, :critical)},
-      %{
-        label: "Goals",
-        value: length(goal_progress),
-        tone: count_tone(length(goal_progress), :ok)
-      },
-      %{
-        label: "Workspaces",
-        value: length(project_workspaces),
-        tone: count_tone(length(project_workspaces), :ok)
-      },
-      %{label: "Env keys", value: length(env_keys), tone: count_tone(length(env_keys), :ok)}
-    ]
   end
 
   defp project_state(%{status: :archived}, _health), do: :archived
@@ -275,38 +204,10 @@ defmodule CymphoWeb.ProjectLive.Show do
   defp project_state(_project, %{active_goals: active_goals}) when active_goals > 0, do: :planned
   defp project_state(_project, _health), do: :idle
 
-  defp project_focus(project, health, goal_progress, project_workspaces, env_keys) do
-    cond do
-      health.blocked > 0 ->
-        {"Blocked work",
-         "#{health.blocked} #{plural(health.blocked, "issue")} #{verb(health.blocked, "needs", "need")} escalation"}
-
-      health.in_review > 0 ->
-        {"Review queue",
-         "#{health.in_review} #{plural(health.in_review, "issue")} #{verb(health.in_review, "needs", "need")} a decision"}
-
-      not repo_configured?(project) ->
-        {"Repository setup", "Add a repo URL before agent work branches cleanly"}
-
-      project_workspaces == [] ->
-        {"Workspace setup", "Attach a project workspace for isolated execution"}
-
-      goal_progress == [] ->
-        {"Strategy link", "Add a mission or goal for this workstream"}
-
-      env_keys == [] ->
-        {"Runtime secrets", "Add project env keys when agents need provider access"}
-
-      true ->
-        {"Execution ready",
-         "#{length(project_workspaces)} #{plural(length(project_workspaces), "workspace")}, #{length(env_keys)} env #{plural(length(env_keys), "key")}"}
-    end
-  end
-
   defp project_command_heading(:blocked), do: "Clear blocked work before adding more scope"
   defp project_command_heading(:review), do: "Review waiting work so agents can continue"
   defp project_command_heading(:active), do: "Project work is moving through execution"
-  defp project_command_heading(:planned), do: "Goals exist; turn them into executable issues"
+  defp project_command_heading(:planned), do: "Goals exist; turn them into tasks"
   defp project_command_heading(:archived), do: "Project is archived"
   defp project_command_heading(:idle), do: "Project is ready for a sharper operating loop"
 
@@ -323,31 +224,31 @@ defmodule CymphoWeb.ProjectLive.Show do
   end
 
   defp project_command_detail(_project, :blocked, health, _goal_progress, _project_workspaces) do
-    "#{health.blocked} blocked #{plural(health.blocked, "issue")} #{verb(health.blocked, "is", "are")} stopping flow. Open the queue, resolve blockers, or hand the decision to a lead."
+    "#{health.blocked} blocked #{plural(health.blocked, "task")} #{verb(health.blocked, "is", "are")} stopping flow. Open the queue, resolve blockers, or hand the decision to a lead."
   end
 
   defp project_command_detail(_project, :review, health, _goal_progress, _project_workspaces) do
-    "#{health.in_review} #{plural(health.in_review, "issue")} #{verb(health.in_review, "is", "are")} waiting for review. Approve, request changes, or reassign review ownership."
+    "#{health.in_review} #{plural(health.in_review, "task")} #{verb(health.in_review, "is", "are")} waiting for review. Approve, request changes, or reassign review ownership."
   end
 
   defp project_command_detail(_project, :active, health, goal_progress, project_workspaces) do
-    "#{health.open} open #{plural(health.open, "issue")}, #{length(goal_progress)} root #{plural(length(goal_progress), "goal")}, and #{length(project_workspaces)} #{plural(length(project_workspaces), "workspace")} connected."
+    "#{health.open} open #{plural(health.open, "task")}, #{length(goal_progress)} root #{plural(length(goal_progress), "goal")}, and #{length(project_workspaces)} #{plural(length(project_workspaces), "work folder")} connected."
   end
 
   defp project_command_detail(_project, :planned, _health, goal_progress, _project_workspaces) do
-    "#{length(goal_progress)} root #{plural(length(goal_progress), "goal")} #{verb(length(goal_progress), "is", "are")} active, but this project needs executable issues to move."
+    "#{length(goal_progress)} root #{plural(length(goal_progress), "goal")} #{verb(length(goal_progress), "is", "are")} active, but this project needs tasks to move."
   end
 
   defp project_command_detail(_project, :idle, _health, _goal_progress, _project_workspaces) do
-    "Connect a goal, workspace, repo, and first issue so agents have enough context to execute independently."
+    "Connect a goal, work folder, repo, and first task so agents have enough context to work on their own."
   end
 
-  defp project_command_action_label(:blocked), do: "Open project issues"
+  defp project_command_action_label(:blocked), do: "Open project tasks"
   defp project_command_action_label(:review), do: "Open reviews"
-  defp project_command_action_label(:active), do: "Open project issues"
-  defp project_command_action_label(:planned), do: "Create issue"
+  defp project_command_action_label(:active), do: "Open project tasks"
+  defp project_command_action_label(:planned), do: "Create task"
   defp project_command_action_label(:archived), do: "Edit settings"
-  defp project_command_action_label(:idle), do: "Create issue"
+  defp project_command_action_label(:idle), do: "Create task"
 
   defp project_command_action_path(_project, :review), do: "/reviews"
 
@@ -356,34 +257,6 @@ defmodule CymphoWeb.ProjectLive.Show do
 
   defp project_command_action_path(project, :archived), do: "/projects/#{project.id}/edit"
   defp project_command_action_path(project, _state), do: "/issues?project_id=#{project.id}"
-
-  defp project_action_class(:blocked),
-    do: "border-red-500/25 bg-red-500/10 text-red-100 hover:bg-red-500/15"
-
-  defp project_action_class(:review),
-    do: "border-cyan-500/25 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/15"
-
-  defp project_action_class(:active),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
-
-  defp project_action_class(:planned),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15"
-
-  defp project_action_class(_state),
-    do:
-      "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-
-  defp metric_text(:critical), do: "text-red-300"
-  defp metric_text(:review), do: "text-cyan-300"
-  defp metric_text(:warning), do: "text-amber-300"
-  defp metric_text(:ok), do: "text-emerald-300"
-  defp metric_text(_), do: "text-text-primary"
-
-  defp count_tone(0, _tone), do: :neutral
-  defp count_tone(_count, tone), do: tone
-
-  defp repo_configured?(project), do: not blank?(project.repo_url)
-  defp blank?(value), do: is_nil(value) or value == ""
 
   defp workspace_location(%{cwd: cwd}) when is_binary(cwd) and cwd != "", do: cwd
 
@@ -397,13 +270,4 @@ defmodule CymphoWeb.ProjectLive.Show do
     |> to_string()
     |> String.capitalize()
   end
-
-  defp goal_status_class("active"), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  defp goal_status_class("completed"), do: "border-border bg-surface text-text-tertiary"
-  defp goal_status_class(_), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp progress_width(percent) when is_integer(percent),
-    do: "width: #{max(min(percent, 100), 0)}%"
-
-  defp progress_width(_percent), do: "width: 0%"
 end

@@ -27,8 +27,9 @@ defmodule CymphoWeb.SimpleModeCopyTest do
       assert html =~ "No spending limit yet"
       assert html =~ "provider spend has a hard stop"
       assert html =~ "Set one so the team can&#39;t overspend."
-      assert html =~ "Spending limits"
-      assert html =~ "Limits"
+      # v7 C1: the paired "Spending limits"/"Limits" eyebrow is gone; the list's
+      # band says "Limits" in both modes, under the H1 "Spending limit".
+      assert html =~ ~s(<h2 class="h2" id="budgets-list-t">Limits</h2>)
       # Empty state DOM stays present for the stream (CSS shows it when empty).
       assert html =~ ~s(id="budget-empty")
       assert html =~ ~s(href="/budgets/new")
@@ -137,9 +138,9 @@ defmodule CymphoWeb.SimpleModeCopyTest do
       assert html =~ "Choose the agent"
       assert html =~ "role and reporting line"
       assert html =~ "Create an autonomous teammate with a role"
-      # Simple drops the orphaned step number when sections 2/3 are hidden.
-      assert html =~ "Identity and reporting"
-      assert html =~ "1 · Identity and reporting"
+      # r3 (v7 H1): the first band is "Who", with no step numbers in either mode.
+      assert has_element?(view, "[data-testid='new-agent-identity-section'] .h2", "Who")
+      refute html =~ "1 · Identity and reporting"
     end
 
     test "demand-backed hire banners both operator and plain wording", %{conn: conn} do
