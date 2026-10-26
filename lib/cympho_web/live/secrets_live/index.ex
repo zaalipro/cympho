@@ -11,62 +11,47 @@ defmodule CymphoWeb.SecretsLive.Index do
     %{
       id: "qwen-dashscope",
       title: "CEO Qwen runtime",
-      summary: "OpenAI-compatible DashScope execution for CEO and executive agents.",
-      profile: "OpenAI Chat Qwen DashScope Flash / Plus / Intl",
       primary_key: "DASHSCOPE_API_KEY",
       keys: ["DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
       model: "qwen3.6-flash for smoke, qwen3.7-plus for planning",
       endpoint: "dashscope.aliyuncs.com or dashscope-intl.aliyuncs.com compatible mode",
-      description: "DashScope compatible-mode runtime credential",
-      icon: "hero-sparkles-mini"
+      description: "DashScope compatible-mode runtime credential"
     },
     %{
       id: "llmotions",
       title: "LLMotions runtime",
-      summary: "OpenAI-compatible LLMotions execution for CEO and CTO smoke runs.",
-      profile: "OpenAI Chat LLMotions Gemma / Gemini Flash",
       primary_key: "LLMOTIONS_API_KEY",
       keys: ["LLMOTIONS_API_KEY", "OPENAI_API_KEY"],
       model: "gemma-4-31b for smoke, gemini-3.5-flash for stronger planning",
       endpoint: "https://cli.llmotions.com/v1",
-      description: "LLMotions OpenAI-compatible runtime credential",
-      icon: "hero-bolt-mini"
+      description: "LLMotions OpenAI-compatible runtime credential"
     },
     %{
       id: "claude-compatible",
       title: "Claude Code runtime",
-      summary: "Anthropic-compatible execution for Claude Code adapters and wrapper commands.",
-      profile: "Claude-compatible",
       primary_key: "ANTHROPIC_API_KEY",
       keys: ["ANTHROPIC_API_KEY"],
       model: "Wrapper or ANTHROPIC_MODEL",
       endpoint: "ANTHROPIC_BASE_URL or wrapper default",
-      description: "Anthropic-compatible runtime credential",
-      icon: "hero-command-line-mini"
+      description: "Anthropic-compatible runtime credential"
     },
     %{
       id: "codex",
       title: "Codex agents",
-      summary: "OpenAI/Codex credentials for coding agents and hosted model execution.",
-      profile: "Codex runtime",
       primary_key: "OPENAI_API_KEY",
       keys: ["OPENAI_API_KEY", "CODEX_API_KEY"],
       model: "Agent profile default",
       endpoint: "OpenAI-compatible API",
-      description: "OpenAI or Codex runtime credential",
-      icon: "hero-cpu-chip-mini"
+      description: "OpenAI or Codex runtime credential"
     },
     %{
       id: "agrenting",
       title: "Remote marketplace agents",
-      summary: "Agrenting marketplace hires and remote execution handoffs.",
-      profile: "Agrenting remote",
       primary_key: "AGRENTING_API_KEY",
       keys: ["AGRENTING_API_KEY"],
       model: "Marketplace agent",
       endpoint: "Agrenting integration base URL",
-      description: "Agrenting remote agent credential",
-      icon: "hero-user-plus-mini"
+      description: "Agrenting remote agent credential"
     }
   ]
 
@@ -80,7 +65,7 @@ defmodule CymphoWeb.SecretsLive.Index do
   defp mount_company(company_id, socket) when is_binary(company_id) do
     socket =
       socket
-      |> assign(:page_title, "Secrets Management")
+      |> assign(:page_title, "Keys and secrets")
       |> assign(:company_id, company_id)
       |> assign(
         :can_manage_secrets,
@@ -104,7 +89,7 @@ defmodule CymphoWeb.SecretsLive.Index do
   defp mount_company(_company_id, socket) do
     {:ok,
      socket
-     |> assign(:page_title, "Secrets Management")
+     |> assign(:page_title, "Keys and secrets")
      |> assign(:company_id, nil)
      |> assign(:can_manage_secrets, false)
      |> assign(:infinite_scroll, %{})
@@ -464,12 +449,6 @@ defmodule CymphoWeb.SecretsLive.Index do
 
   defp safe_prefill_return_to(_prefill), do: nil
 
-  defp scope_badge_class("company"), do: "bg-purple-500/20 text-purple-400"
-  defp scope_badge_class("instance"), do: "bg-blue-500/20 text-blue-400"
-  defp scope_badge_class("agent"), do: "bg-green-500/20 text-green-400"
-  defp scope_badge_class("project"), do: "bg-yellow-500/20 text-yellow-400"
-  defp scope_badge_class(_), do: "bg-gray-500/20 text-gray-400"
-
   defp format_scope("company"), do: "Company"
   defp format_scope("instance"), do: "Instance"
   defp format_scope("agent"), do: "Agent"
@@ -493,7 +472,6 @@ defmodule CymphoWeb.SecretsLive.Index do
     %{
       ready_count: ready_count,
       total_count: length(profiles),
-      status: runtime_credential_status(ready_count, length(profiles)),
       summary: runtime_credential_summary(ready_count, length(profiles)),
       profiles: profiles
     }
@@ -506,7 +484,6 @@ defmodule CymphoWeb.SecretsLive.Index do
     %{
       ready_count: 0,
       total_count: length(profiles),
-      status: :blocked,
       summary: "No company is selected, so runtime credentials cannot be evaluated.",
       profiles: profiles
     }
@@ -519,14 +496,9 @@ defmodule CymphoWeb.SecretsLive.Index do
     profile
     |> Map.put(:ready, ready?)
     |> Map.put(:present_key, present_key)
-    |> Map.put(:status_label, if(ready?, do: "Ready", else: "Missing"))
     |> Map.put(:status_detail, runtime_credential_detail(profile, present_key))
     |> Map.put(:setup_path, runtime_credential_setup_path(profile))
   end
-
-  defp runtime_credential_status(total, total), do: :ready
-  defp runtime_credential_status(0, _total), do: :blocked
-  defp runtime_credential_status(_ready, _total), do: :attention
 
   defp runtime_credential_summary(total, total) do
     "All #{total} providers are ready for agent execution."
@@ -559,49 +531,8 @@ defmodule CymphoWeb.SecretsLive.Index do
     "/settings/secrets?#{query}"
   end
 
-  defp runtime_credential_badge_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp runtime_credential_badge_class(:attention),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-
-  defp runtime_credential_badge_class(:blocked),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  defp credential_profile_class(true),
-    do: "border-emerald-500/20 bg-emerald-500/[0.04]"
-
-  defp credential_profile_class(false),
-    do: "border-border bg-surface"
-
-  defp credential_profile_status_class(true),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp credential_profile_status_class(false),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-
-  defp rotation_badge_class(:fresh),
-    do: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
-
-  defp rotation_badge_class(:due_soon), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-  defp rotation_badge_class(:overdue), do: "border-red-500/25 bg-red-500/10 text-red-300"
-  defp rotation_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
-  defp rotation_status_label(%{status: :fresh, age_days: age_days}) do
-    "Fresh · #{format_age(age_days)}"
-  end
-
-  defp rotation_status_label(%{status: :due_soon, age_days: age_days}) do
-    "Due soon · #{format_age(age_days)}"
-  end
-
-  defp rotation_status_label(%{status: :overdue, age_days: age_days}) do
-    "Overdue · #{format_age(age_days)}"
-  end
-
-  defp rotation_status_label(_rotation), do: "Review age"
-
-  defp format_age(nil), do: "unknown"
-  defp format_age(1), do: "1 day"
-  defp format_age(days), do: "#{days} days"
+  # Rotation as a word plus a shape, printed only when it is due (v7 §1.5).
+  defp rotation_status(%{status: :due_soon}), do: {:waiting, "Rotate soon"}
+  defp rotation_status(%{status: :overdue}), do: {:stopped, "Rotate now"}
+  defp rotation_status(_rotation), do: nil
 end

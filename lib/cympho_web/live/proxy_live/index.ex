@@ -14,7 +14,7 @@ defmodule CymphoWeb.ProxyLive.Index do
 
     {:ok,
      socket
-     |> assign(:page_title, "Proxy Profiles")
+     |> assign(:page_title, "Network proxies")
      |> assign(:company_id, company && company.id)
      |> assign(:can_manage_proxies, can_manage?)
      |> assign(:show_form, false)
@@ -139,38 +139,26 @@ defmodule CymphoWeb.ProxyLive.Index do
     ]
   end
 
-  def status_label("online"), do: "Online"
-  def status_label("offline"), do: "Offline"
-  def status_label(_), do: "Untested"
+  # Health as a word plus a shape (v7 §1.5).
+  def proxy_status("online"), do: {:done, "Online"}
+  def proxy_status("offline"), do: {:stopped, "Offline"}
+  def proxy_status(_), do: {:idle, "Not checked"}
 
-  def status_class("online"),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  def status_class("offline"), do: "border-red-500/25 bg-red-500/10 text-red-300"
-
-  def status_class(_), do: "border-border bg-surface text-text-tertiary"
-
+  # The ping only means something once the proxy answered; the status word says the rest.
   def ping_label(%{last_status: "online", last_ping_ms: ms}) when is_integer(ms), do: "#{ms} ms"
-  def ping_label(%{last_status: "offline"}), do: "Failed"
-  def ping_label(_proxy), do: "Not tested"
+  def ping_label(_proxy), do: nil
 
-  def checked_label(%{last_checked_at: nil}), do: "Never"
+  def checked_label(%{last_checked_at: nil}), do: nil
 
-  def checked_label(%{last_checked_at: checked_at}) do
-    Calendar.strftime(checked_at, "%b %d, %H:%M")
-  end
+  def checked_label(%{last_checked_at: checked_at}),
+    do: CymphoWeb.AgentLive.Parts.stamp(checked_at)
 
   def has_password?(%{encrypted_password: encrypted}), do: is_binary(encrypted)
 
   def profile_stats(profiles) do
     counts = Enum.frequencies_by(profiles, & &1.last_status)
 
-    %{
-      total: length(profiles),
-      online: Map.get(counts, "online", 0),
-      offline: Map.get(counts, "offline", 0),
-      untested: Map.get(counts, "untested", 0)
-    }
+    %{total: length(profiles), online: Map.get(counts, "online", 0)}
   end
 
   defp assign_form(socket, %ProxyProfile{} = proxy) do

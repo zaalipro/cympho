@@ -6,6 +6,7 @@ defmodule CymphoWeb.AdapterLive.Show do
   alias Cympho.CompanyRBAC
   alias Cympho.Repo
   alias Cympho.Secrets
+  alias CymphoWeb.AgentLive.Parts, as: AgentParts
 
   @encrypted_secret_marker "__cympho_encrypted_secret__"
   @management_forbidden_message "Only company owners, admins, and board members can change adapter settings."
@@ -596,6 +597,9 @@ defmodule CymphoWeb.AdapterLive.Show do
   defp simple_field_label(%{key: :temperature}), do: "Temperature"
   defp simple_field_label(field), do: field.description || Atom.to_string(field.key)
 
+  defp no_required_fields?(schema),
+    do: schema |> visible_config_schema() |> Enum.all?(&(&1.required != true))
+
   defp visible_config_schema(schema) do
     keys = MapSet.new(schema, & &1.key)
 
@@ -606,34 +610,27 @@ defmodule CymphoWeb.AdapterLive.Show do
     end
   end
 
-  defp health_status_class(:healthy), do: "bg-success/20 text-success"
-  defp health_status_class(:degraded), do: "bg-amber-500/20 text-amber-400"
-  defp health_status_class(:unhealthy), do: "bg-brand/20 text-brand"
-  defp health_status_class(_), do: "bg-text-quaternary/20 text-text-quaternary"
+  # Health as a word plus a shape (v7 §1.5).
+  defp health_status(:healthy), do: {:done, "Ready"}
+  defp health_status(:degraded), do: {:waiting, "Degraded"}
+  defp health_status(:unhealthy), do: {:stopped, "Unhealthy"}
+  defp health_status(_), do: {:idle, "Not checked"}
 
-  defp health_dot_class(:healthy), do: "bg-success animate-pulse"
-  defp health_dot_class(:degraded), do: "bg-amber-400 animate-pulse"
-  defp health_dot_class(:unhealthy), do: "bg-brand animate-pulse"
-  defp health_dot_class(_), do: "bg-text-quaternary"
-
-  defp health_status_label(:healthy), do: "Healthy"
-  defp health_status_label(:degraded), do: "Degraded"
-  defp health_status_label(:unhealthy), do: "Unhealthy"
-  defp health_status_label(_), do: "Unknown"
+  # The heartbeat skips sleeping agents, so say so; the frozen AgentLive.Parts.status/2
+  # reads every other status (it would print "Idle" here).
+  defp agent_status(%{status: :sleeping}), do: {:idle, "Sleeping"}
+  defp agent_status(agent), do: AgentParts.status(agent, false)
 
   # nil when the role would just repeat the agent name above it ("CEO" / "Ceo").
   defp distinct_role_label(agent) do
     label =
-      agent.role
-      |> Atom.to_string()
-      |> String.replace("_", " ")
-      |> String.capitalize()
+      case agent.role do
+        role when role in [:ceo, :cto] -> role |> Atom.to_string() |> String.upcase()
+        role -> role |> Atom.to_string() |> String.replace("_", " ") |> String.capitalize()
+      end
 
     if String.downcase(label) == String.downcase(agent.name || ""), do: nil, else: label
   end
-
-  defp format_datetime(nil), do: "Never"
-  defp format_datetime(dt), do: CymphoWeb.Format.format_datetime(dt)
 
   defp input_type(field) do
     cond do
@@ -665,7 +662,7 @@ defmodule CymphoWeb.AdapterLive.Show do
 
   defp field_input_value(field, config) do
     cond do
-      field.type == :boolean -> "true"
+      field.type == :boolean -> field_checked?(field, config)
       sensitive_field?(field) -> ""
       true -> input_value(Map.get(config, field.key))
     end
@@ -673,8 +670,6 @@ defmodule CymphoWeb.AdapterLive.Show do
 
   defp field_checked?(%{type: :boolean} = field, config),
     do: Map.get(config, field.key) in [true, "true", "on", "1"]
-
-  defp field_checked?(_field, _config), do: false
 
   defp field_required?(field, config) do
     field.required and

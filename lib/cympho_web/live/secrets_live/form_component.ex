@@ -124,106 +124,43 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
   @impl true
   def render(assigns) do
     ~H"""
-    <section
-      id="secret-form-panel"
-      class="mb-6 overflow-hidden rounded-lg border border-border bg-panel"
-    >
-      <div
-        :if={@mutation_error}
-        data-testid="secret-form-authorization-error"
-        class="border-b border-red-500/25 bg-red-500/10 px-5 py-3 text-sm text-red-200"
+    <div id="secret-form-panel">
+      <.form_pair
+        id="secret-form"
+        for={@form}
+        phx-target={@myself}
+        phx-change="validate"
+        phx-submit="save"
+        heading={if @form_mode == :create, do: "After you add it", else: "After you save"}
+        verb={if @form_mode == :create, do: "add", else: "save"}
       >
-        {@mutation_error}
-      </div>
-      <div
-        :if={@runtime_hint}
-        id="runtime-secret-setup-guide"
-        data-testid="runtime-secret-setup-guide"
-        class="border-b border-brand/20 bg-brand/[0.08] px-5 py-4"
-      >
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div class="min-w-0">
-            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
-              {@runtime_hint.title}
-            </p>
-            <p class="mt-2 max-w-2xl text-sm leading-5 text-text-secondary">
-              {@runtime_hint.summary}
-            </p>
-          </div>
-          <span class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-brand/25 bg-panel/80 px-2.5 py-1 text-xs font-510 text-brand">
-            <.icon name="hero-shield-check" class="h-3.5 w-3.5" />
-            {@runtime_hint.profile}
-          </span>
-        </div>
-
-        <dl class="mt-4 grid gap-2 border-t border-brand/15 pt-3 sm:grid-cols-2">
-          <div
-            :for={item <- @runtime_hint.items}
-            class="min-w-0 rounded-md border border-brand/15 bg-panel/75 px-3 py-2"
-          >
-            <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              {item.label}
-            </dt>
-            <dd class="mt-1 break-words text-xs text-text-secondary">{item.value}</dd>
-          </div>
-        </dl>
-
-        <div class="mt-3 grid gap-2 sm:grid-cols-3">
-          <div class="rounded-md border border-brand/15 bg-panel/70 px-3 py-2">
-            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Save effect
-            </p>
-            <p class="mt-1 text-xs leading-5 text-text-secondary">
-              {@runtime_hint.save_effect}
-            </p>
-          </div>
-          <div class="rounded-md border border-brand/15 bg-panel/70 px-3 py-2">
-            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Security
-            </p>
-            <p class="mt-1 text-xs leading-5 text-text-secondary">
-              Encrypted at rest; the value is never shown after save.
-            </p>
-          </div>
-          <div class="rounded-md border border-brand/15 bg-panel/70 px-3 py-2">
-            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Next
-            </p>
-            <p class="mt-1 text-xs leading-5 text-text-secondary">
-              {@runtime_hint.next_step}
-            </p>
-          </div>
-        </div>
-
         <p
-          :if={@return_to}
-          class="mt-3 inline-flex rounded-md border border-brand/15 bg-panel/60 px-3 py-1.5 text-xs text-text-secondary"
+          :if={@mutation_error}
+          class="err"
+          role="alert"
+          data-testid="secret-form-authorization-error"
         >
-          After saving, Cympho returns to the runtime page that requested this credential.
+          <.r3_icon name="i-alert" />{@mutation_error}
         </p>
-      </div>
-
-      <div class="px-5 py-4">
-        <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p class="font-serif text-base font-510 text-text-primary">{form_title(@form_mode)}</p>
-            <p class="mt-1 text-xs leading-5 text-text-tertiary">
-              Use company scope for provider keys unless a single agent or project needs a separate quota.
-            </p>
+        <.band_card id="sf-t" title={(@runtime_hint && @runtime_hint.title) || form_title(@form_mode)}>
+          <:header_end :if={@runtime_hint}>
+            <span class="ui-advanced-only tag">{@runtime_hint.profile}</span>
+          </:header_end>
+          <p
+            :if={@runtime_hint}
+            id="runtime-secret-setup-guide"
+            data-testid="runtime-secret-setup-guide"
+            class="gl-sub sf-l"
+          >
+            {@runtime_hint.summary}
+          </p>
+          <div :if={@runtime_hint} class="ui-advanced-only">
+            <.kv_list class="wide">
+              <:item :for={item <- @runtime_hint.items} term={item.label}>{item.value}</:item>
+              <:item term="Next">{@runtime_hint.next_step}</:item>
+            </.kv_list>
           </div>
-          <span class="inline-flex w-fit rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] font-510 text-text-tertiary">
-            No provider call on save
-          </span>
-        </div>
-
-        <.form
-          for={@form}
-          phx-target={@myself}
-          phx-change="validate"
-          phx-submit="save"
-          id="secret-form"
-        >
-          <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div class="flds">
             <%!-- Key/Value is a text+password pair, which Chrome reads as a
                  login form: without these it offers to fill the signed-in
                  user's own email and password into a company secret. --%>
@@ -235,7 +172,15 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
               autocomplete="off"
               required
             />
-
+            <.input
+              :if={@form_mode != :edit}
+              field={@form[:value]}
+              label={if @form_mode == :rotate, do: "New value", else: "Value"}
+              type="password"
+              placeholder="Secret value"
+              autocomplete="new-password"
+              required={@form_mode in [:create, :rotate]}
+            />
             <div class="ui-advanced-only" data-testid="secret-scope-field">
               <.select
                 name={@form[:scope].name}
@@ -250,7 +195,6 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
                 required
               />
             </div>
-
             <div
               :if={@form[:scope].value in ["agent", "project"]}
               data-testid="secret-scope-id-field"
@@ -260,48 +204,53 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
                 field={@form[:scope_id]}
                 label="Scope ID"
                 placeholder="Agent or Project ID"
+                autocomplete="off"
               />
             </div>
-
             <.input
-              :if={@form_mode != :edit}
-              field={@form[:value]}
-              label={if @form_mode == :rotate, do: "New Value", else: "Value"}
-              type="password"
-              placeholder="Secret value"
-              autocomplete="new-password"
-              required={@form_mode in [:create, :rotate]}
+              field={@form[:description]}
+              label="Description"
+              placeholder="Optional description of what this secret is for"
+              autocomplete="off"
+              wrapper_class="full"
             />
-
-            <div class="md:col-span-2">
-              <.input
-                field={@form[:description]}
-                label="Description"
-                placeholder="Optional description of what this secret is for"
-              />
-            </div>
           </div>
-
-          <div class="flex items-center justify-end gap-3 mt-4">
-            <button
-              type="button"
-              phx-click={@on_cancel}
-              class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
-            >
-              <.icon name="hero-shield-check-mini" class="h-4 w-4" /> {submit_label(@form_mode)}
-            </button>
-          </div>
-        </.form>
-      </div>
-    </section>
+        </.band_card>
+        <:effect>
+          <.consequences rows={effect_rows(@form_mode, @runtime_hint, @return_to)} />
+        </:effect>
+        <:secondary>
+          <.ghost_pill phx-click={@on_cancel}>Cancel</.ghost_pill>
+        </:secondary>
+        <:primary>
+          <.primary_pill type="submit" phx-disable-with="Saving…">
+            {submit_label(@form_mode)}
+          </.primary_pill>
+        </:primary>
+      </.form_pair>
+    </div>
     """
   end
+
+  # What saving does, true to save_secret/2: create and rotate encrypt a value
+  # (rotate keeps the old version, inactive); edit changes the details only.
+  defp effect_rows(:edit, _hint, return_to) do
+    [{:done, "Updates its details; the stored value is not changed."} | return_row(return_to)]
+  end
+
+  defp effect_rows(_mode, hint, return_to) do
+    hint_rows = if hint, do: [{:done, hint.save_effect}], else: []
+
+    hint_rows ++
+      [{:done, "Encrypted at rest; the value is never shown after save."} | return_row(return_to)]
+  end
+
+  defp return_row(path) when is_binary(path) and path != "",
+    do: [
+      {:done, "After saving, Cympho returns to the runtime page that requested this credential."}
+    ]
+
+  defp return_row(_path), do: []
 
   defp runtime_hint(%{"key" => "ANTHROPIC_API_KEY"}) do
     %{
@@ -401,11 +350,11 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
 
   defp runtime_hint(_prefill), do: nil
 
-  defp form_title(:rotate), do: "Rotate encrypted secret"
-  defp form_title(:edit), do: "Edit secret metadata"
-  defp form_title(_), do: "Store encrypted runtime secret"
+  defp form_title(:rotate), do: "Rotate secret"
+  defp form_title(:edit), do: "Edit details"
+  defp form_title(_), do: "New secret"
 
-  defp submit_label(:create), do: "Create Secret"
-  defp submit_label(:rotate), do: "Rotate Secret"
-  defp submit_label(_), do: "Save Secret"
+  defp submit_label(:create), do: "Add secret"
+  defp submit_label(:rotate), do: "Rotate secret"
+  defp submit_label(_), do: "Save secret"
 end

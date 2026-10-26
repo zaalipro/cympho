@@ -31,7 +31,7 @@ defmodule CymphoWeb.AdapterLive.Index do
 
     socket =
       socket
-      |> assign(:page_title, "Adapters")
+      |> assign(:page_title, "How agents run")
       |> assign(:adapters, adapters)
       |> assign(:health, health)
       |> assign(:agents_by_adapter, agents_by_adapter)
@@ -158,7 +158,6 @@ defmodule CymphoWeb.AdapterLive.Index do
 
     %{
       summary: runtime_summary(counts, attention_adapter),
-      tone: runtime_tone(counts),
       stats: runtime_stats(counts),
       attention_adapter: attention_adapter,
       actions: runtime_actions(counts)
@@ -229,12 +228,6 @@ defmodule CymphoWeb.AdapterLive.Index do
   defp adapter_noun(1), do: "adapter is"
   defp adapter_noun(_n), do: "adapters are"
 
-  defp runtime_tone(%{total: 0}), do: :blocked
-  defp runtime_tone(%{assigned_agents: 0}), do: :attention
-  defp runtime_tone(%{healthy: healthy}) when healthy == 0, do: :blocked
-  defp runtime_tone(%{attention: 0}), do: :ready
-  defp runtime_tone(_counts), do: :attention
-
   defp runtime_stats(counts) do
     [
       %{label: "Healthy", value: counts.healthy, note: "#{counts.total} registered"},
@@ -251,24 +244,20 @@ defmodule CymphoWeb.AdapterLive.Index do
     ]
   end
 
+  # Health (/operations) is an Advanced-only page, so its link is Advanced-only too.
   defp runtime_actions(%{assigned_agents: 0}) do
     [
-      %{label: "Add agent", url: ~p"/agents/new", tone: :primary, icon: "hero-plus-mini"},
-      %{label: "Secrets", url: ~p"/settings/secrets", tone: :neutral, icon: "hero-key-mini"},
-      %{label: "Operations", url: ~p"/operations", tone: :neutral, icon: "hero-command-line-mini"}
+      %{label: "Add agent", url: ~p"/agents/new"},
+      %{label: "Keys and secrets", url: ~p"/settings/secrets"},
+      %{label: "Health", url: ~p"/operations", advanced?: true}
     ]
   end
 
   defp runtime_actions(_counts) do
     [
-      %{
-        label: "Operations",
-        url: ~p"/operations",
-        tone: :primary,
-        icon: "hero-command-line-mini"
-      },
-      %{label: "Add agent", url: ~p"/agents/new", tone: :neutral, icon: "hero-plus-mini"},
-      %{label: "Secrets", url: ~p"/settings/secrets", tone: :neutral, icon: "hero-key-mini"}
+      %{label: "Health", url: ~p"/operations", advanced?: true},
+      %{label: "Add agent", url: ~p"/agents/new"},
+      %{label: "Keys and secrets", url: ~p"/settings/secrets"}
     ]
   end
 
@@ -284,50 +273,19 @@ defmodule CymphoWeb.AdapterLive.Index do
   defp card_health_status(%{available: false}, _health), do: :unavailable
   defp card_health_status(_adapter, health), do: Map.get(health, :status, :unknown)
 
-  defp health_status_class(:healthy), do: "bg-success/20 text-success"
-  defp health_status_class(:degraded), do: "bg-amber-500/20 text-amber-400"
-  defp health_status_class(:unhealthy), do: "bg-brand/20 text-brand"
-  defp health_status_class(:unavailable), do: "bg-brand/20 text-brand"
-  defp health_status_class(_), do: "bg-text-quaternary/20 text-text-quaternary"
+  # Health as a word plus a shape (v7 §1.5).
+  defp health_status(:healthy), do: {:done, "Ready"}
+  defp health_status(:degraded), do: {:waiting, "Degraded"}
+  defp health_status(:unhealthy), do: {:stopped, "Unhealthy"}
+  defp health_status(:unavailable), do: {:stopped, "Unavailable"}
+  defp health_status(_), do: {:idle, "Not checked"}
 
-  defp health_dot_class(:healthy), do: "bg-success animate-pulse"
-  defp health_dot_class(:degraded), do: "bg-amber-400 animate-pulse"
-  defp health_dot_class(:unhealthy), do: "bg-brand animate-pulse"
-  defp health_dot_class(:unavailable), do: "bg-brand"
-  defp health_dot_class(_), do: "bg-text-quaternary"
+  defp health_message(health, key), do: health |> Map.get(key, %{}) |> Map.get(:message)
 
-  defp health_status_label(:healthy), do: "Healthy"
-  defp health_status_label(:degraded), do: "Degraded"
-  defp health_status_label(:unhealthy), do: "Unhealthy"
-  defp health_status_label(:unavailable), do: "Unavailable"
-  defp health_status_label(_), do: "Unknown"
-
-  defp runtime_panel_class(:ready), do: "border-success/25 bg-success/10"
-  defp runtime_panel_class(:attention), do: "border-amber-500/25 bg-amber-500/10"
-  defp runtime_panel_class(:blocked), do: "border-brand/25 bg-brand/10"
-  defp runtime_panel_class(_tone), do: "border-border bg-surface"
-
-  defp runtime_action_class(:primary) do
-    "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent-hover"
-  end
-
-  defp runtime_action_class(_tone) do
-    "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-  end
+  defp agents_label([]), do: "No agents"
+  defp agents_label(agents) when length(agents) <= 3, do: Enum.map_join(agents, ", ", & &1.name)
+  defp agents_label(agents), do: "#{length(agents)} agents"
 
   defp pluralize(1, word), do: word
   defp pluralize(_count, word), do: word <> "s"
-
-  defp adapter_icon(:claude_code), do: "⚡"
-  defp adapter_icon(:codex), do: "🔬"
-  defp adapter_icon(:cursor), do: "🖱"
-  defp adapter_icon(:http), do: "🌐"
-  defp adapter_icon(:openai_chat), do: "💬"
-  defp adapter_icon(:openclaw), do: "🐾"
-  defp adapter_icon(:process), do: "⚙"
-  defp adapter_icon(_), do: "📦"
-
-  defp agent_count(assigns, key) do
-    length(Map.get(assigns.agents_by_adapter, key, []))
-  end
 end

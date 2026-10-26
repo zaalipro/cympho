@@ -49,7 +49,9 @@ defmodule CymphoWeb.Components.SettingsLayout do
   @doc """
   A settings section in the r3 root frame titled "Settings" (v7 §3.1 B12): the
   section nav and the section's own content. `picked` keeps the phone rule
-  (money.css) from hiding `.set-main`; `data-section` scopes section CSS.
+  (money.css) from hiding `.set-main`; `data-section` scopes section CSS. Phones
+  hide the nav here, so `.set-bk` (shown only on phones, settings.css) leads back
+  to Settings' own list.
   """
   attr :active, :atom, required: true
   slot :inner_block, required: true
@@ -59,7 +61,12 @@ defmodule CymphoWeb.Components.SettingsLayout do
     <.page_frame page="settings" title="Settings" tray_class="set-page" data-ui-complex-page>
       <div class="set picked">
         <.settings_nav active={@active} />
-        <div class="set-main" data-section={@active}>{render_slot(@inner_block)}</div>
+        <div class="set-main" data-section={@active}>
+          <.link navigate="/settings/company" class="pl set-bk">
+            <.r3_icon name="i-chev-left" />All settings
+          </.link>
+          {render_slot(@inner_block)}
+        </div>
       </div>
     </.page_frame>
     """

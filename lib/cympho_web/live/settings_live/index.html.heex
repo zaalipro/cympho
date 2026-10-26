@@ -1,8 +1,8 @@
 <.settings_layout active={:notifications}>
-  <.header title="Alerts" subtitle="What Cympho tells you about, and where." />
+  <.flash_line flash={@flash} />
 
-  <div :if={@user != nil} class="flex flex-col gap-4">
-    <.band_card id="ev-t" title="Events">
+  <%= if @user != nil do %>
+    <.band_card id="ev-t" title="Alerts">
       <table class="mx">
         <thead>
           <tr>
@@ -40,7 +40,7 @@
     <.band_card id="ch-t" title="Channels">
       <ul class="srows">
         <li id="channel-email" class="srow">
-          <span class="kt"><.icon name="hero-envelope" class="h-4 w-4" /></span>
+          <span class="kt"><.r3_icon name="i-inbox" /></span>
           <span class="row-main">
             <span class="rt">Email</span>
             <span class="rm">{@user.email}</span>
@@ -50,7 +50,7 @@
           </span>
         </li>
         <li id="channel-telegram" class="srow">
-          <span class="kt"><.icon name="hero-paper-airplane" class="h-4 w-4" /></span>
+          <span class="kt"><.r3_icon name="i-external" /></span>
           <div class="row-main">
             <span class="rt">Telegram</span>
             <span class="rm">
@@ -58,43 +58,29 @@
                 do: "Not linked",
                 else: telegram_chat_id(@prefs, @user)}
             </span>
-            <div
-              :if={telegram_chat_id(@prefs, @user) != ""}
-              class="mt-3 flex flex-wrap items-center gap-2"
-            >
-              <span
-                :if={@telegram_verify_status in [:verified, :linked]}
-                class="rounded-md border border-success/20 bg-success/10 px-2 py-0.5 text-xs font-510 text-success"
-              >
-                {if @telegram_verify_status == :verified, do: "Verified", else: "Linked"}
+            <div :if={telegram_chat_id(@prefs, @user) != ""} class="ch-a">
+              <span :if={@telegram_verify_status in [:verified, :linked]} class="st">
+                <.status_word
+                  kind={:done}
+                  word={if @telegram_verify_status == :verified, do: "Verified", else: "Linked"}
+                />
               </span>
-              <button
-                type="button"
-                class="pl"
-                phx-click="verify_telegram"
-              >
-                Verify
-              </button>
+              <.pill phx-click="verify_telegram">Verify</.pill>
             </div>
             <form
               :if={telegram_chat_id(@prefs, @user) == ""}
               phx-submit="link_telegram"
-              class="mt-3 flex gap-2"
+              class="ch-f"
             >
-              <input
-                type="text"
+              <.input
+                id="telegram-chat-id"
                 name="telegram_chat_id"
-                placeholder="Telegram chat ID"
+                label="Telegram chat ID"
                 value={@telegram_chat_id_input}
+                autocomplete="off"
                 required
-                class="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
               />
-              <button
-                type="submit"
-                class="pl"
-              >
-                Link
-              </button>
+              <.pill type="submit">Link</.pill>
             </form>
           </div>
           <span class="end">
@@ -102,50 +88,29 @@
           </span>
         </li>
         <li id="channel-webhook" class="srow ui-advanced-only">
-          <span class="kt"><.icon name="hero-bolt" class="h-4 w-4" /></span>
+          <span class="kt"><.r3_icon name="i-term" /></span>
           <div class="row-main">
             <span class="rt">Webhook</span>
-            <span class="rm">
-              {if webhook_url(@prefs, @user) == "",
-                do: "No endpoint",
-                else: webhook_url(@prefs, @user)}
-            </span>
             <span class="rm">Cympho POSTs a JSON event to your endpoint for each alert.</span>
-            <form phx-submit="update_webhook_url" class="mt-3 flex gap-2">
-              <input
+            <form phx-submit="update_webhook_url" class="ch-f">
+              <.input
+                id="webhook-url"
                 type="url"
                 name="webhook_url"
+                label="Endpoint URL"
                 placeholder="https://example.com/webhook"
                 value={webhook_url(@prefs, @user)}
-                class="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+                autocomplete="off"
               />
-              <button
-                type="submit"
-                class="pl"
-              >
-                Save
-              </button>
+              <.pill type="submit">Save</.pill>
             </form>
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                :if={webhook_url(@prefs, @user) != ""}
-                type="button"
-                class="pl"
-                phx-click="test_webhook"
-              >
-                Test Ping
-              </button>
-              <span
-                :if={match?({:ok, _}, @webhook_test_result)}
-                class="rounded-md border border-success/20 bg-success/10 px-2 py-0.5 text-xs font-510 text-success"
-              >
-                Test passed
+            <div :if={webhook_url(@prefs, @user) != ""} class="ch-a">
+              <.pill phx-click="test_webhook">Test Ping</.pill>
+              <span :if={match?({:ok, _}, @webhook_test_result)} class="st">
+                <.status_word kind={:done} word="Test passed" />
               </span>
-              <span
-                :if={match?({:error, _}, @webhook_test_result)}
-                class="rounded-md border border-brand/20 bg-brand/10 px-2 py-0.5 text-xs font-510 text-brand"
-              >
-                Test failed
+              <span :if={match?({:error, _}, @webhook_test_result)} class="st">
+                <.status_word kind={:stopped} word="Test failed" />
               </span>
             </div>
           </div>
@@ -155,5 +120,5 @@
         </li>
       </ul>
     </.band_card>
-  </div>
+  <% end %>
 </.settings_layout>

@@ -280,23 +280,11 @@ defmodule CymphoWeb.SettingsLive.Integrations do
 
   defp agrenting_connected?(status), do: Map.get(status, :connected?, false)
   defp api_key_present?(status), do: Map.get(status, :api_key_present?, false)
-  defp custom_base_url?(status), do: Map.get(status, :base_url_custom?, false)
   defp repo_token_present?(status), do: Map.get(status, :repo_token_present?, false)
-
-  defp connection_badge_class(status) do
-    if agrenting_connected?(status) do
-      "border-success/25 bg-success/10 text-success"
-    else
-      "border-border bg-surface text-text-tertiary"
-    end
-  end
 
   defp connection_badge_label(status) do
     if agrenting_connected?(status), do: "Connected", else: "Not connected"
   end
-
-  defp present_label(true), do: "Stored"
-  defp present_label(false), do: "Not stored"
 
   defp test_result_label(nil), do: nil
   defp test_result_label({:ok, %{agent_count: count}}), do: "Test passed. #{count} agents found."
@@ -319,13 +307,9 @@ defmodule CymphoWeb.SettingsLive.Integrations do
 
   defp agrenting_error(_reason), do: "Agrenting did not accept the connection."
 
-  # Done reads as calm emerald; anything still to set up stays neutral gray
-  # (a checklist posture, not an alarm) so setup never feels like an error.
-  defp mcp_tone_class(:ready), do: "border-success/25 bg-success/10 text-success"
-  defp mcp_tone_class(_tone), do: "border-border bg-surface text-text-tertiary"
-
-  defp mcp_step_card_class(:ready), do: "border-success/20 bg-success/[0.06]"
-  defp mcp_step_card_class(_tone), do: "border-border bg-surface"
+  # The key form's agent choices; one placeholder while the company has none.
+  defp mcp_agent_options([]), do: [{"No agents available", ""}]
+  defp mcp_agent_options(agents), do: Enum.map(agents, &{"#{&1.name} (#{&1.role})", &1.id})
 
   defp mcp_error(:missing_company), do: "Select a company before creating MCP keys."
   defp mcp_error(:invalid_agent), do: "Choose an agent from this company."

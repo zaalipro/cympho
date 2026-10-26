@@ -1,40 +1,8 @@
 <.settings_layout active={:secrets}>
-  <.header>
-    <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-      {@page_title}
-    </h1>
-    <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-      Encrypted, company-scoped credentials. Values are sealed on save and never shown again.
-    </p>
-    <:actions>
-      <button
-        :if={@can_manage_secrets}
-        type="button"
-        phx-click="show_create_form"
-        class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
-      >
-        <.icon name="hero-plus-mini" class="h-4 w-4" /> Add Secret
-      </button>
-    </:actions>
-  </.header>
-
-  <hr class="ember-rule mb-4" />
-
-  <div
-    :if={!@can_manage_secrets}
-    data-testid="secrets-read-only"
-    class="mb-4 rounded-lg border border-border bg-surface px-4 py-3 text-sm text-text-secondary"
-  >
-    Secret metadata is read-only. Only company owners, admins, and board members can make changes.
-  </div>
-
-  <div
-    :if={@secret_action_error}
-    data-testid="secret-action-error"
-    class="mb-4 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200"
-  >
-    {@secret_action_error}
-  </div>
+  <.flash_line flash={@flash} />
+  <p :if={@secret_action_error} class="err" role="alert" data-testid="secret-action-error">
+    <.r3_icon name="i-alert" />{@secret_action_error}
+  </p>
 
   <%= if @show_form and @can_manage_secrets do %>
     <.live_component
@@ -50,207 +18,59 @@
     />
   <% end %>
 
-  <section
-    id="runtime-credential-guide"
-    data-testid="runtime-credential-guide"
-    class="ember-glass ui-advanced-only mb-4 overflow-hidden"
-  >
-    <div class="border-b border-hairline px-5 py-4">
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Runtime credentials
-            </p>
-            <span class={[
-              "rounded-full border px-2.5 py-1 text-[11px] font-510",
-              runtime_credential_badge_class(@runtime_credential_guide.status)
-            ]}>
-              {@runtime_credential_guide.ready_count} of {@runtime_credential_guide.total_count} ready
-            </span>
-          </div>
-          <h2 class="mt-2 font-serif text-[19px] font-510 tracking-tight text-text-primary">
-            Provider coverage for autonomous agents
-          </h2>
-          <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
-            {@runtime_credential_guide.summary}
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <div class="grid gap-3 p-4 xl:grid-cols-2">
-      <article
-        :for={profile <- @runtime_credential_guide.profiles}
-        data-testid={"runtime-credential-profile-#{profile.id}"}
-        class={[
-          "card-lift rounded-xl border p-4 transition-colors",
-          credential_profile_class(profile.ready)
-        ]}
+  <.band_card id="se-t" title="Keys and secrets">
+    <:header_end>
+      <%!-- While the list is empty its quiet line carries the one Add control. --%>
+      <.pill
+        :if={@can_manage_secrets and !@show_form and @rotation_summary.total > 0}
+        phx-click="show_create_form"
       >
-        <div class="flex items-start justify-between gap-3">
-          <div class="flex min-w-0 gap-3">
-            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-panel text-text-secondary">
-              <span class={[profile.icon, "h-4 w-4"]}></span>
-            </div>
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <h3 class="font-serif text-sm font-510 text-text-primary">{profile.title}</h3>
-                <span class={[
-                  "rounded-full border px-2 py-0.5 text-[11px] font-510",
-                  credential_profile_status_class(profile.ready)
-                ]}>
-                  {profile.status_label}
-                </span>
-              </div>
-              <p class="mt-1 text-sm leading-5 text-text-tertiary">{profile.summary}</p>
-            </div>
-          </div>
-        </div>
-
-        <dl class="mt-3 space-y-1 rounded-md border border-border bg-canvas/60 px-3 py-2 text-xs text-text-secondary">
-          <dt class="sr-only">Profile</dt>
-          <dd class="break-words" title="Profile">{profile.profile}</dd>
-          <dt class="sr-only">Model</dt>
-          <dd class="break-words" title="Model">{profile.model}</dd>
-          <dt class="sr-only">Endpoint</dt>
-          <dd class="break-words" title="Endpoint">{profile.endpoint}</dd>
-        </dl>
-
-        <div class="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
-          <p class="text-xs leading-5 text-text-tertiary">{profile.status_detail}</p>
-          <.link
-            :if={@can_manage_secrets and !profile.ready}
-            patch={profile.setup_path}
-            class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand transition hover:bg-brand/15"
-          >
-            <.icon name="hero-plus" class="h-3.5 w-3.5" /> Add key
-          </.link>
-        </div>
-      </article>
-    </div>
-  </section>
-
-  <div
-    :if={@rotation_summary.total > 0}
-    class="card-lift ui-advanced-only mb-4 rounded-xl border border-border bg-panel p-4 shadow-card"
-  >
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          Rotation status
-        </p>
-        <p class="mt-1 text-sm text-text-secondary">
-          {@rotation_summary.needs_rotation} of {@rotation_summary.total} active secrets need rotation attention.
-        </p>
-      </div>
-      <div class="grid grid-cols-3 overflow-hidden rounded-lg border border-hairline bg-hairline text-center">
-        <div class="ember-stat bg-surface px-4 py-2.5">
-          <p class="font-serif text-lg font-590 leading-none text-emerald-300 tabular-nums">
-            {@rotation_summary.fresh}
-          </p>
-          <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
-            Fresh
-          </p>
-        </div>
-        <div class="ember-stat bg-surface px-4 py-2.5">
-          <p class="font-serif text-lg font-590 leading-none text-amber-300 tabular-nums">
-            {@rotation_summary.due_soon}
-          </p>
-          <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
-            Due
-          </p>
-        </div>
-        <div class="ember-stat bg-surface px-4 py-2.5">
-          <p class="font-serif text-lg font-590 leading-none text-red-300 tabular-nums">
-            {@rotation_summary.overdue}
-          </p>
-          <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
-            Overdue
-          </p>
-        </div>
-      </div>
-    </div>
-  </div>
-  
-<!-- Secrets List -->
-  <.infinite_scroll
-    id="secrets"
-    has_more={@infinite_scroll[:secrets][:has_more?] || false}
-    container_class="space-y-4"
-  >
-    <:empty>
-      <div class="flex flex-col items-center justify-center py-20 text-center">
-        <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-brand/20 bg-brand/10 text-brand shadow-[0_0_24px_rgba(217,119,87,0.12)]">
-          <.icon name="hero-lock-closed" class="h-6 w-6" />
-        </div>
-        <div class="mb-4 max-w-md">
-          <p class="font-serif text-base font-510 text-text-primary">
-            No runtime secrets stored yet
-          </p>
-          <p class="ui-advanced-only mt-1 text-sm leading-5 text-text-tertiary">
-            Add a company-scoped provider key before assigning autonomous work. Runtime preflight uses these encrypted secrets to inject agent credentials.
-          </p>
-          <p class="ui-simple-only mt-1 text-sm leading-5 text-text-tertiary">
-            Add your AI provider's API key here so your agents can start working.
-          </p>
-        </div>
-        <button
-          :if={@can_manage_secrets}
-          type="button"
-          phx-click="show_create_form"
-          class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-primary-hover"
-        >
-          <.icon name="hero-plus-mini" class="h-4 w-4" /> Add runtime secret
-        </button>
-      </div>
-    </:empty>
-
-    <div
-      :for={{dom_id, secret} <- @streams.secrets}
-      id={dom_id}
-      data-testid={"secret-row-#{secret.id}"}
-      class="rounded-xl border border-border p-4 transition-colors hover:border-border-hover hover:bg-subtle hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
+        <.r3_icon name="i-plus" />Add secret
+      </.pill>
+    </:header_end>
+    <.infinite_scroll
+      id="secrets"
+      has_more={@infinite_scroll[:secrets][:has_more?] || false}
+      container_class="rows"
     >
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div class="min-w-0 flex-1">
-          <% rotation = secret_rotation(secret) %>
-          <div class="mb-2 flex flex-wrap items-center gap-2">
-            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-canvas/60 text-text-tertiary">
-              <.icon name="hero-lock-closed-mini" class="h-3.5 w-3.5" />
-            </span>
-            <h3 class="break-all font-serif text-lg font-semibold text-text-primary">
-              {secret.key}
-            </h3>
-            <span class={[
-              "text-xs px-2 py-0.5 rounded-full font-medium",
-              scope_badge_class(secret.scope)
-            ]}>
-              {format_scope(secret.scope)}
-            </span>
-            <span class="rounded-md border border-border bg-canvas/60 px-1.5 py-0.5 font-mono text-xs text-text-quaternary">
-              v{secret.version}
-            </span>
-            <span class={[
-              "rounded-full border px-2 py-0.5 text-xs font-medium",
-              rotation_badge_class(rotation.status)
-            ]}>
-              {rotation_status_label(rotation)}
-            </span>
-          </div>
+      <:empty>
+        <.quiet_empty title="No keys or secrets yet">
+          <span class="ui-advanced-only">
+            Add a company-scoped provider key before assigning autonomous work. Runtime preflight uses these encrypted secrets to inject agent credentials.
+          </span>
+          <span class="ui-simple-only">
+            Add your AI provider's API key here so your agents can start working.
+          </span>
+          <:action>
+            <.pill :if={@can_manage_secrets and !@show_form} phx-click="show_create_form">
+              <.r3_icon name="i-plus" />Add secret
+            </.pill>
+          </:action>
+        </.quiet_empty>
+      </:empty>
 
-          <p :if={secret.description} class="text-sm text-text-secondary mb-2">
-            {secret.description}
-          </p>
-
-          <div class="ui-advanced-only text-xs leading-5 text-text-quaternary">
-            Created: {Calendar.strftime(secret.inserted_at, "%b %d, %Y %H:%M")}
-            <span class="mx-2">•</span>
-            Updated: {Calendar.strftime(secret.updated_at, "%b %d, %Y %H:%M")}
-          </div>
-        </div>
-
-        <div class="flex shrink-0 justify-end self-end sm:self-auto">
+      <.list_row
+        :for={{dom_id, secret} <- @streams.secrets}
+        tag="div"
+        id={dom_id}
+        data-testid={"secret-row-#{secret.id}"}
+        icon="i-shield"
+        title={secret.key}
+        status={rotation_status(secret_rotation(secret))}
+      >
+        <:meta>
+          <span :if={secret.description}>
+            {secret.description}<span aria-hidden="true"> · </span>
+          </span>
+          <span class="tag">{format_scope(secret.scope)}</span><span aria-hidden="true"> · </span><span class="mono">v{secret.version}</span>
+          <span class="ui-advanced-only">
+            <span aria-hidden="true"> · </span>created
+            <time datetime={DateTime.to_iso8601(secret.inserted_at)}>
+              {Calendar.strftime(secret.inserted_at, "%a %-d %b %Y")}
+            </time>
+          </span>
+        </:meta>
+        <:actions>
           <.overflow_menu
             id={"secret-menu-#{secret.id}"}
             label={"Manage #{secret.key}"}
@@ -280,58 +100,94 @@
               Delete secret
             </.menu_item>
           </.overflow_menu>
+        </:actions>
+      </.list_row>
+    </.infinite_scroll>
+    <p :if={!@can_manage_secrets} class="cfoot" data-testid="secrets-read-only">
+      <span>
+        Secret metadata is read-only. Only company owners, admins, and board members can make changes.
+      </span>
+    </p>
+  </.band_card>
+
+  <div class="ui-advanced-only">
+    <.band_card
+      id="rc-t"
+      title="Runtime credentials"
+      section_id="runtime-credential-guide"
+      data-testid="runtime-credential-guide"
+    >
+      <:header_end>
+        <span class="meta mono">
+          {@runtime_credential_guide.ready_count} of {@runtime_credential_guide.total_count} ready
+        </span>
+      </:header_end>
+      <p class="gl-sub rc-l">{@runtime_credential_guide.summary}</p>
+      <ul class="rows">
+        <.list_row
+          :for={profile <- @runtime_credential_guide.profiles}
+          id={"runtime-credential-#{profile.id}"}
+          data-testid={"runtime-credential-profile-#{profile.id}"}
+          icon="i-term"
+          title={profile.title}
+          status={if profile.ready, do: {:done, "Ready"}, else: {:waiting, "Needs a key"}}
+        >
+          <:meta>
+            {profile.status_detail}<span aria-hidden="true"> · </span>{profile.model}<span aria-hidden="true"> · </span>{profile.endpoint}
+          </:meta>
+          <:actions :if={@can_manage_secrets and !profile.ready}>
+            <.pill patch={profile.setup_path}><.r3_icon name="i-plus" />Add key</.pill>
+          </:actions>
+        </.list_row>
+      </ul>
+    </.band_card>
+  </div>
+
+  <div :if={@rotation_summary.total > 0} class="ui-advanced-only">
+    <.band_card id="ro-t" title="Rotation status">
+      <p class="gl-sub rc-l">
+        {@rotation_summary.needs_rotation} of {@rotation_summary.total} active secrets need rotation attention.
+      </p>
+      <div class="strip s3">
+        <div class="cell">
+          <p class="v mono">{@rotation_summary.fresh}</p>
+          <p class="l">Fresh</p>
+        </div>
+        <div class="cell">
+          <p class="v mono">{@rotation_summary.due_soon}</p>
+          <p class="l">Due</p>
+        </div>
+        <div class="cell">
+          <p class="v mono">{@rotation_summary.overdue}</p>
+          <p class="l">Overdue</p>
         </div>
       </div>
-    </div>
-  </.infinite_scroll>
-  
-<!-- Version History Modal -->
+    </.band_card>
+  </div>
+
   <.modal
     :if={@show_versions}
     id="versions-modal"
     show={@show_versions}
     on_cancel={JS.push("hide_versions")}
-    title="Version History"
+    title="Version history"
   >
-    <div class="space-y-3">
-      <div :if={@versions == []} class="text-center py-8 text-text-tertiary">
-        No version history available.
-      </div>
-
-      <div
+    <.quiet_empty :if={@versions == []} title="No version history available." />
+    <ul :if={@versions != []} class="rows">
+      <.list_row
         :for={version <- @versions}
-        class="flex items-center justify-between p-3 bg-subtle rounded-lg"
+        id={"secret-version-#{version.id}"}
+        title={"#{version.key} v#{version.version}"}
       >
-        <div>
-          <div class="flex items-center gap-2 mb-1">
-            <span class="text-sm font-medium text-text-primary">
-              {version.key}
-            </span>
-            <span class="text-xs text-text-quaternary">
-              v{version.version}
-            </span>
-            <span
-              :if={!version.is_active}
-              class="text-xs px-2 py-0.5 rounded-full bg-gray-500/20 text-gray-400"
-            >
-              Inactive
-            </span>
-          </div>
-          <div class="text-xs text-text-quaternary">
-            Created: {Calendar.strftime(version.inserted_at, "%b %d, %Y %H:%M")}
-          </div>
-        </div>
-      </div>
-    </div>
-
+        <:meta>
+          Created {Calendar.strftime(version.inserted_at, "%a %-d %b %Y")}
+          <span class="mono">{Calendar.strftime(version.inserted_at, "%H:%M")}</span>
+        </:meta>
+        <:trail :if={!version.is_active}><span class="tag">Inactive</span></:trail>
+      </.list_row>
+    </ul>
     <:footer>
-      <button
-        type="button"
-        phx-click="hide_versions"
-        class="px-4 py-2 bg-surface hover:bg-surface-hover text-text-secondary rounded-lg text-sm font-medium transition-colors"
-      >
-        Close
-      </button>
+      <.pill phx-click="hide_versions">Close</.pill>
     </:footer>
   </.modal>
 </.settings_layout>
