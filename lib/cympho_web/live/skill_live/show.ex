@@ -45,6 +45,11 @@ defmodule CymphoWeb.SkillLive.Show do
     |> assign(:page_title, "Edit #{socket.assigns.skill.name}")
   end
 
+  defp capabilities(%{manifest: manifest}) when is_map(manifest),
+    do: List.wrap(manifest["capabilities"] || manifest[:capabilities])
+
+  defp capabilities(_skill), do: []
+
   @impl true
   def handle_event("toggle_skill", _params, socket) do
     case Skills.toggle_skill(socket.assigns.skill) do

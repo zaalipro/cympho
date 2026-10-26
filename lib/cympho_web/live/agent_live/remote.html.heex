@@ -1,252 +1,151 @@
-<.page size="wide" class="ember-aurora">
-  <div class="relative z-[1]">
-    <.header>
-      <div class="min-w-0">
-        <span class="ember-eyebrow">Agrenting marketplace</span>
-        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-          Hire Remote Agent
-        </h1>
-        <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-          Browse Agrenting marketplace agents and connect them as Cympho operators.
-        </p>
+<.page_frame
+  page="remote"
+  kind={:deep}
+  parent={{"/agents", "Team"}}
+  current="Remote agents"
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="rm-h">
+      <h1 class="h1 big" id="rm-h">Remote agents</h1>
+      <p class="sub">Browse Agrenting marketplace agents and connect them as Cympho operators.</p>
+      <div class="chips">
+        <.pill phx-click="refresh">Refresh</.pill>
       </div>
-      <:actions>
-        <.app_link
-          navigate={~p"/agents"}
-          class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        >
-          Agents
-        </.app_link>
-        <button
-          type="button"
-          phx-click="refresh"
-          class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        >
-          Refresh
-        </button>
-      </:actions>
-    </.header>
+    </section>
+  </:head>
 
-    <.panel :if={@integration_status == :not_configured}>
-      <div class="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p class="text-sm font-590 text-text-primary">Agrenting is not connected</p>
-          <p class="mt-1 text-sm text-text-tertiary">
-            Connect Agrenting in company integrations, then marketplace agents will appear here.
-          </p>
-        </div>
-        <.app_link
-          navigate={~p"/settings/integrations"}
-          class="inline-flex items-center justify-center cta-glow rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
-        >
-          Connect Agrenting
-        </.app_link>
-      </div>
-    </.panel>
+  <.flash_line flash={@flash} />
 
-    <div
-      :if={@integration_status == :error}
-      class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300"
+  <section :if={@integration_status == :not_configured} class="card">
+    <.quiet_empty title="Connect Agrenting first">
+      Agrenting is not connected. Connect it in company integrations, then marketplace agents
+      will appear here.
+      <:action>
+        <.pill navigate={~p"/settings/integrations"}>Open Integrations</.pill>
+      </:action>
+    </.quiet_empty>
+  </section>
+
+  <p :if={@integration_status == :error} class="err" role="alert">
+    <.r3_icon name="i-alert" />{@error_message}
+  </p>
+
+  <form
+    :if={@integration_status in [:ready, :checking]}
+    id="remote-search"
+    phx-change="search"
+    class="tbar"
+  >
+    <div class="tbar-f">
+      <.search_capsule
+        label="Search remote agents"
+        name="filters[query]"
+        value={@query}
+        placeholder="Search agents, agent IDs, models, capabilities"
+      />
+    </div>
+    <.select_menu
+      id="remote-capability"
+      name="filters[capability]"
+      value={@capability}
+      options={@capability_options}
+      placeholder="All capabilities"
+      label="Capability"
+      class="rm-cap"
+    />
+  </form>
+
+  <.band_card
+    :if={@integration_status in [:ready, :checking]}
+    id="rm-list-t"
+    title="Marketplace agents"
+  >
+    <:header_end>
+      <span :if={!@loading? and @remote_agents != []} class="meta mono">
+        {length(@remote_agents)}
+      </span>
+    </:header_end>
+    <p :if={@loading?} class="gl-sub rm-line" role="status">Loading…</p>
+
+    <.quiet_empty
+      :if={!@loading? and @remote_agents == []}
+      title="No remote agents match"
     >
-      {@error_message}
-    </div>
+      Nothing is wrong — try a broader search or switch the capability filter.
+    </.quiet_empty>
 
-    <div :if={@integration_status in [:ready, :checking]} class="space-y-4">
-      <.panel>
-        <form phx-change="search" class="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_240px]">
-          <input
-            type="search"
-            name="filters[query]"
-            value={@query}
-            placeholder="Search agents, agent IDs, models, capabilities"
-            class="h-10 rounded-lg border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-          />
-          <select
-            name="filters[capability]"
-            class="h-10 rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-          >
-            <option
-              :for={{label, value} <- @capability_options}
-              value={value}
-              selected={value == @capability}
-            >
-              {label}
-            </option>
-          </select>
-        </form>
-      </.panel>
-
-      <div :if={@loading?} class="grid gap-4 xl:grid-cols-2">
-        <div
-          :for={_placeholder <- 1..4}
-          class="rounded-lg border border-border bg-panel p-4 shadow-card"
-        >
-          <div class="skeleton-shimmer h-5 w-2/5 rounded bg-surface"></div>
-          <div class="skeleton-shimmer mt-3 h-3 w-3/5 rounded bg-surface"></div>
-          <div class="mt-4 flex gap-2">
-            <div class="skeleton-shimmer h-6 w-20 rounded-md bg-surface"></div>
-            <div class="skeleton-shimmer h-6 w-24 rounded-md bg-surface"></div>
-          </div>
-        </div>
-      </div>
-
-      <.panel :if={!@loading? and Enum.empty?(@remote_agents)}>
-        <.empty_state
-          title="No remote agents match"
-          message="Nothing is wrong — try a broader search or switch the capability filter."
-        />
-      </.panel>
-
-      <div
-        :if={!@loading? and @remote_agents != []}
-        class="stagger-children grid gap-4 xl:grid-cols-2"
+    <ul :if={!@loading? and @remote_agents != []} class="rows">
+      <.list_row
+        :for={agent <- @remote_agents}
+        id={"remote-agent-#{agent["did"]}"}
+        title={agent["name"] || agent["did"]}
+        icon="i-team"
+        status={remote_status(@hired_remote_dids, agent)}
       >
-        <div
-          :for={agent <- @remote_agents}
-          class={[
-            "card-lift rounded-lg border bg-panel p-4 shadow-card hover:shadow-raised",
-            if(hired_remote_agent?(@hired_remote_dids, agent),
-              do: "border-brand/30 bg-brand/[0.04]",
-              else: "border-border"
-            )
-          ]}
-        >
-          <div class="flex items-start justify-between gap-4">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <h2 class="truncate text-card-title text-text-primary">
-                  {agent["name"] || agent["did"]}
-                </h2>
-                <span class={"rounded-full border px-2 py-0.5 text-xs font-510 #{status_badge_class(agent["status"])}"}>
-                  {agent["status"] || "unknown"}
-                </span>
-                <span
-                  :if={hired_remote_agent?(@hired_remote_dids, agent)}
-                  class="rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-xs font-510 text-brand"
-                >
-                  Connected
-                </span>
+        <:meta>
+          <%= for {part, n} <- Enum.with_index(remote_meta_parts(agent)) do %>
+            <span :if={n > 0} aria-hidden="true"> · </span>{part}
+          <% end %>
+        </:meta>
+        <:below :if={!hired_remote_agent?(@hired_remote_dids, agent)}>
+          <details
+            id={"remote-hire-#{agent["did"]}"}
+            class="earlier"
+            phx-mounted={JS.ignore_attributes("open")}
+          >
+            <summary>
+              Hire<span class="sr"> {agent["name"] || agent["did"]}</span><.r3_icon name="i-chev-down" />
+            </summary>
+            <form
+              id={"remote-hire-form-#{agent["did"]}"}
+              phx-submit="hire_agent"
+              class="rm-hire"
+            >
+              <input type="hidden" name="agent_did" value={agent["did"]} />
+              <p class="gl-sub">
+                Agent ID <span class="mono hr-wrap">{agent["did"]}</span>. Hiring uses sensible
+                defaults — change these only to override them.
+              </p>
+              <div class="flds">
+                <.input
+                  type="select"
+                  id={"remote-hire-#{agent["did"]}-capability"}
+                  name="capability"
+                  label="Capability"
+                  value={first_value(capability_select_options(agent))}
+                  options={capability_select_options(agent)}
+                />
+                <.input
+                  type="select"
+                  id={"remote-hire-#{agent["did"]}-role"}
+                  name="role"
+                  label="Cympho role"
+                  value={first_value(role_options())}
+                  options={role_options()}
+                />
+                <.input
+                  id={"remote-hire-#{agent["did"]}-max-price"}
+                  name="max_price"
+                  label="Max price"
+                  value={agent["base_price"] || ""}
+                />
+                <.input
+                  type="select"
+                  id={"remote-hire-#{agent["did"]}-delivery"}
+                  name="delivery_mode"
+                  label="Delivery"
+                  value={first_value(delivery_options())}
+                  options={delivery_options()}
+                />
               </div>
-              <p class="mt-1 truncate font-mono text-xs text-text-quaternary">{agent["did"]}</p>
-            </div>
-            <div class="shrink-0 text-right">
-              <p class="font-serif text-card-title tabular-nums text-text-primary">
-                {price_label(agent["base_price"])}
-              </p>
-              <p class="text-caption text-text-quaternary">
-                base price · {rating_label(agent["reputation_score"])}
-              </p>
-            </div>
-          </div>
-
-          <div class="mt-3 flex flex-wrap items-center gap-2">
-            <span
-              :if={agent["ai_provider"] || agent["ai_model"]}
-              class="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-secondary"
-            >
-              {provider_model_label(agent)}
-            </span>
-            <span
-              :for={capability <- Enum.take(agent["capabilities"] || [], 4)}
-              class="rounded-md border border-brand/20 bg-brand/10 px-2 py-1 text-xs text-brand"
-            >
-              {humanize(capability)}
-            </span>
-            <span
-              :if={length(agent["capabilities"] || []) > 4}
-              class="text-xs text-text-quaternary"
-              title={Enum.map_join(agent["capabilities"] || [], ", ", &humanize/1)}
-            >
-              +{length(agent["capabilities"] || []) - 4} more
-            </span>
-          </div>
-
-          <form phx-submit="hire_agent" class="mt-4 border-t border-border pt-4">
-            <input type="hidden" name="agent_did" value={agent["did"]} />
-            <div class="flex items-start justify-between gap-3">
-              <details
-                id={"remote-hire-options-#{agent["did"]}"}
-                class="min-w-0 flex-1"
-                phx-mounted={JS.ignore_attributes("open")}
-              >
-                <summary class="cursor-pointer list-none text-sm font-510 text-text-tertiary hover:text-text-primary">
-                  Adjust role, price, delivery ▾
-                </summary>
-                <p class="mt-1 text-xs text-text-quaternary">
-                  Hiring uses sensible defaults — open this only to override them.
-                </p>
-                <div class="mt-3 grid gap-3 md:grid-cols-2">
-                  <label class="space-y-1.5">
-                    <span class="text-xs font-510 text-text-secondary">Capability</span>
-                    <select
-                      name="capability"
-                      class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                    >
-                      <option
-                        :for={{label, value} <- capability_select_options(agent)}
-                        value={value}
-                      >
-                        {label}
-                      </option>
-                    </select>
-                  </label>
-
-                  <label class="space-y-1.5">
-                    <span class="text-xs font-510 text-text-secondary">Cympho role</span>
-                    <select
-                      name="role"
-                      class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                    >
-                      <option :for={{label, value} <- role_options()} value={value}>
-                        {label}
-                      </option>
-                    </select>
-                  </label>
-
-                  <label class="space-y-1.5">
-                    <span class="text-xs font-510 text-text-secondary">Max price</span>
-                    <input
-                      type="text"
-                      name="max_price"
-                      value={agent["base_price"] || ""}
-                      class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                    />
-                  </label>
-
-                  <label class="space-y-1.5">
-                    <span class="text-xs font-510 text-text-secondary">Delivery</span>
-                    <select
-                      name="delivery_mode"
-                      class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                    >
-                      <option :for={{label, value} <- delivery_options()} value={value}>
-                        {label}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-              </details>
-
-              <button
-                type="submit"
-                disabled={hired_remote_agent?(@hired_remote_dids, agent)}
-                class={[
-                  "btn-press shrink-0 rounded-lg px-4 py-2 text-sm font-510",
-                  if(hired_remote_agent?(@hired_remote_dids, agent),
-                    do: "cursor-not-allowed border border-border bg-surface text-text-quaternary",
-                    else:
-                      "cta-glow bg-brand bg-gradient-to-b from-white/[0.10] to-transparent text-on-primary shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] hover:bg-accent-hover"
-                  )
-                ]}
-              >
-                {if hired_remote_agent?(@hired_remote_dids, agent),
-                  do: "Connected",
-                  else: "Hire in Cympho"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-</.page>
+              <div class="rm-go">
+                <.pill type="submit">Hire in Cympho</.pill>
+              </div>
+            </form>
+          </details>
+        </:below>
+      </.list_row>
+    </ul>
+  </.band_card>
+</.page_frame>

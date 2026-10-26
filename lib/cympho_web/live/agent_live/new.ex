@@ -46,7 +46,7 @@ defmodule CymphoWeb.AgentLive.New do
 
     {:ok,
      socket
-     |> assign(:page_title, "New Agent")
+     |> assign(:page_title, "Hire")
      |> assign(:pending_approval_id, nil)
      |> assign(:env_text, env_text)
      |> assign(:hire_context, hire_context(params, company, role))
@@ -211,15 +211,16 @@ defmodule CymphoWeb.AgentLive.New do
   def runtime_profile_concurrency(profile),
     do: RuntimeProfiles.max_concurrent_jobs_for_profile(profile.id)
 
+  @doc "What a profile can deliver, as a tag word (nil for Custom and the rest)."
   def runtime_profile_capability(profile) do
     if profile.id == RuntimeProfiles.custom_id() do
       nil
     else
-      runtime_profile_capability_badge(profile)
+      runtime_profile_capability_label(profile)
     end
   end
 
-  defp runtime_profile_capability_badge(profile) do
+  defp runtime_profile_capability_label(profile) do
     runtime = %{
       adapter: profile.adapter,
       config: profile.config || %{},
@@ -227,16 +228,14 @@ defmodule CymphoWeb.AgentLive.New do
     }
 
     cond do
-      Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(runtime) ->
-        %{label: "Repo capable", class: "border-success/25 bg-success/10 text-success"}
-
-      profile.adapter == "openai_chat" ->
-        %{label: "Text/action only", class: "border-amber-500/25 bg-amber-500/10 text-amber-200"}
-
-      true ->
-        nil
+      Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(runtime) -> "Repo capable"
+      profile.adapter == "openai_chat" -> "Text/action only"
+      true -> nil
     end
   end
+
+  defp slot_label(1), do: "1 slot"
+  defp slot_label(count), do: "#{count} slots"
 
   defp maybe_put_company_id(params, %{id: company_id}) do
     Map.put(params, "company_id", company_id)
@@ -913,11 +912,38 @@ defmodule CymphoWeb.AgentLive.New do
 
   defp role_label(role), do: Agent.role_label(role)
 
-  def role_avatar_class(role) when is_binary(role) do
-    role |> Agent.normalize_role() |> CymphoWeb.Format.role_avatar_class()
-  end
+  defp role_value(form), do: form[:role].value || @default_role
 
-  def role_avatar_class(role), do: CymphoWeb.Format.role_avatar_class(role)
+  # The primary's title and screen-reader help, and the ink card's sentence when hiring is open.
+  defp hire_help(%{status: :needs_key, primary_key: key}),
+    do: "Add #{key} before hiring. This agent cannot run without a provider key."
+
+  defp hire_help(_readiness),
+    do:
+      "New agents start with this role, company defaults, and reporting line. If work is waiting for this role, it is assigned after hire."
+
+  attr :id, :string, required: true
+  attr :name, :string, required: true
+  attr :label, :string, required: true
+  attr :help, :string, default: nil
+  slot :inner_block, required: true, doc: "the <option>s (they carry data-* the hook reads)"
+
+  # A native <select> in an r3 field: the AdapterConfigFields hook reads its options'
+  # data-adapter / data-provider, which the styled select_menu/1 does not render.
+  defp native_select(assigns) do
+    ~H"""
+    <div class="fld">
+      <label for={@id}>{@label}</label>
+      <span class="hr-sel">
+        <select id={@id} name={@name} class="fld-sel" aria-describedby={@help && @id <> "-help"}>
+          {render_slot(@inner_block)}
+        </select>
+        <.r3_icon name="i-chev-down" />
+      </span>
+      <p :if={@help} class="help" id={@id <> "-help"}>{@help}</p>
+    </div>
+    """
+  end
 
   @doc """
   One line of "what this role actually does" so the hire choice is made
@@ -934,7 +960,7 @@ defmodule CymphoWeb.AgentLive.New do
     do: "Owns technical direction, reviews engineering output, and unblocks delivery."
 
   def role_blurb(:engineer),
-    do: "Picks up coding issues, ships changes as PRs, and reports verified results."
+    do: "Picks up coding tasks, ships changes as PRs, and reports verified results."
 
   def role_blurb(:release_engineer),
     do: "Prepares releases, merges verified work, and keeps deploys healthy."
@@ -943,7 +969,7 @@ defmodule CymphoWeb.AgentLive.New do
     do: "Tests delivered work against acceptance criteria and files regressions."
 
   def role_blurb(:product_manager),
-    do: "Turns goals into scoped issues with clear acceptance criteria."
+    do: "Turns goals into scoped tasks with clear acceptance criteria."
 
   def role_blurb(:designer),
     do: "Produces design specs and reviews UI work for consistency."
@@ -963,7 +989,7 @@ defmodule CymphoWeb.AgentLive.New do
   def role_blurb(:customer_support),
     do: "Answers customer issues and escalates product problems with context."
 
-  def role_blurb(_), do: "Works assigned issues and reports progress owners can read."
+  def role_blurb(_), do: "Works assigned tasks and reports progress owners can read."
 
   @doc "Default reporting line for a role, used as hire-form guidance."
   def role_reports_to_hint(role) when is_binary(role) do
@@ -1285,7 +1311,7 @@ defmodule CymphoWeb.AgentLive.New do
     "#{identifier} · #{title}"
   end
 
-  defp issue_example_label(%{title: title}), do: title || "Untitled issue"
+  defp issue_example_label(%{title: title}), do: title || "Untitled task"
 
   defp plural_noun(1, singular), do: singular
   defp plural_noun(_count, singular), do: singular <> "s"

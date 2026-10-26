@@ -179,82 +179,6 @@ defmodule CymphoWeb.SkillLive.Index do
       else: first_company_id(companies)
   end
 
-  attr :enabled, :boolean, required: true
-
-  def skill_state(assigns) do
-    ~H"""
-    <span class={[
-      "inline-flex items-center gap-1.5 text-xs font-510",
-      (@enabled && "text-text-tertiary") || "text-text-quaternary"
-    ]}>
-      <span class={[
-        "h-1.5 w-1.5 rounded-full",
-        (@enabled && "bg-emerald-400/80") || "bg-text-quaternary/60"
-      ]}>
-      </span>
-      {(@enabled && "Enabled") || "Disabled"}
-    </span>
-    """
-  end
-
-  attr :label, :string, required: true
-  attr :value, :any, required: true
-  attr :tone, :atom, default: :neutral
-  attr :title, :string, default: nil
-
-  def skill_health_metric(assigns) do
-    ~H"""
-    <div class="bg-surface/70 px-3 py-2 text-center" title={@title}>
-      <p class={"font-mono text-[18px] font-590 leading-none #{skill_metric_text(@tone)}"}>
-        {@value}
-      </p>
-      <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
-        {@label}
-      </p>
-    </div>
-    """
-  end
-
-  def skill_health_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
-  def skill_health_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  def skill_health_badge(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  def skill_health_badge(:empty), do: "border-border bg-surface text-text-tertiary"
-  def skill_health_badge(_), do: "border-border bg-surface text-text-tertiary"
-
-  def skill_metric_text(:critical), do: "text-red-300"
-  def skill_metric_text(:warning), do: "text-amber-300"
-  def skill_metric_text(:ok), do: "text-emerald-300"
-  def skill_metric_text(_), do: "text-text-primary"
-
-  def skill_recommendation_class(:critical), do: "border-red-500/20 bg-red-500/10 text-red-100"
-
-  def skill_recommendation_class(:warning),
-    do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
-
-  def skill_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
-
-  def skill_next_action_class(:critical), do: "border-red-500/25 bg-red-500/10 text-red-100"
-  def skill_next_action_class(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-100"
-
-  def skill_next_action_class(:ok),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
-
-  def skill_next_action_class(_), do: "border-border bg-surface text-text-secondary"
-
-  def skill_posture_label(:empty), do: "Setup status"
-  def skill_posture_label(_level), do: "Capability status"
-
-  def skill_posture_text(:empty) do
-    "No reusable skills exist for this company. Add one narrow skill with a valid manifest before broadening agent capability access."
-  end
-
-  def skill_posture_text(_level) do
-    "Skill manifests, capabilities, and hot reload are ready for runtime use."
-  end
-
   def skill_next_action_path(%{key: :create_first_skill}), do: "/skills/new"
 
   def skill_next_action_path(%{key: :start_hot_reloader}),
@@ -272,24 +196,6 @@ defmodule CymphoWeb.SkillLive.Index do
   def skill_empty_detail(_company_id) do
     "Add one skill and assign it to the agents that need it."
   end
-
-  def scope_label(%{company: %{name: name}}) when is_binary(name), do: name
-  def scope_label(_skill), do: "Global"
-
-  def manifest_entrypoint(%{manifest: manifest}) when is_map(manifest) do
-    Map.get(manifest, "entrypoint") || Map.get(manifest, :entrypoint) || "No entrypoint"
-  end
-
-  def manifest_entrypoint(_skill), do: "No entrypoint"
-
-  def capability_count(%{manifest: manifest}) when is_map(manifest) do
-    case Map.get(manifest, "capabilities") || Map.get(manifest, :capabilities) do
-      capabilities when is_list(capabilities) -> length(capabilities)
-      _ -> 0
-    end
-  end
-
-  def capability_count(_skill), do: 0
 
   def skill_manifest_gap?(skill), do: not valid_manifest?(skill)
 

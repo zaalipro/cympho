@@ -343,13 +343,160 @@ defmodule CymphoWeb.AgentLiveTest do
   end
 
   describe "Remote agent marketplace" do
+    import CymphoWeb.R3PageHelpers
+
     test "renders configuration guidance when Agrenting is not connected", %{conn: conn} do
       {:ok, view, html} = live(conn, "/agents/remote")
 
-      assert html =~ "Hire Remote Agent"
+      assert html =~ "Remote agents"
       assert render(view) =~ "Agrenting is not connected"
       assert render(view) =~ "Connect Agrenting"
       assert render(view) =~ "/settings/integrations"
+
+      # r3 (v7 H2): a deep page under Team; the empty state is one quiet section.
+      doc = main_doc(view)
+
+      assert_r3_page(doc,
+        page: "remote",
+        h1: "Remote agents",
+        kind: :deep,
+        parent: "Team",
+        primaries: 0
+      )
+
+      assert text(doc, ".gl-sec .gl-big") == "Connect Agrenting first"
+      assert Floki.attribute(doc, ".gl-sec a.pl", "href") == ["/settings/integrations"]
+      assert Floki.find(doc, ~s(.head .chips button.pl[phx-click="refresh"])) |> length() == 1
+      refute render(view) =~ "ember-"
+    end
+
+    @remote_agents [
+      %{
+        "did" => "did:agr:writer-1",
+        "name" => "Copy Writer",
+        "status" => "online",
+        "base_price" => "12",
+        "reputation_score" => "4.5",
+        "capabilities" => ["copy_writing", "editing"],
+        "ai_provider" => "anthropic",
+        "ai_model" => "claude"
+      },
+      %{
+        "did" => "did:agr:coder-2",
+        "name" => "Hired Coder",
+        "status" => "busy",
+        "base_price" => "30",
+        "capabilities" => ["code_review"]
+      }
+    ]
+
+    @tag membership_role: "admin"
+    test "lists marketplace agents as rows with a closed Hire disclosure", %{
+      conn: conn,
+      current_company: company
+    } do
+      assert {:ok, _status} =
+               Cympho.Agrenting.save_company_config(company.id, %{
+                 "api_key" => "agrenting-test-key",
+                 "base_url" => "https://agrenting.example.test"
+               })
+
+      {:ok, _hired} =
+        create_agent(%{
+          name: "Hired Coder",
+          role: :engineer,
+          adapter: :agrenting,
+          config: %{"agent_did" => "did:agr:coder-2"}
+        })
+
+      with_mock Cympho.Agrenting.Client, [:passthrough],
+        list_agents: fn _config, _filters -> {:ok, @remote_agents} end do
+        {:ok, view, _html} = live(conn, "/agents/remote")
+        doc = main_doc(view)
+
+        assert Floki.find(doc, ~s(form[phx-change="search"] input[name="filters[query]"])) != []
+
+        assert Floki.find(doc, ~s(form[phx-change="search"] select[name="filters[capability]"])) !=
+                 []
+
+        assert texts(doc, ".rows .lrow .rt") == ["Copy Writer", "Hired Coder"]
+        assert text(doc, ~s([id="remote-agent-did:agr:writer-1"] .rm)) =~ "Copy Writing, Editing"
+        assert text(doc, ~s([id="remote-agent-did:agr:writer-1"] .rm)) =~ "$12"
+        assert text(doc, ~s([id="remote-agent-did:agr:writer-1"] .lr-st)) == "Online"
+        assert text(doc, ~s([id="remote-agent-did:agr:coder-2"] .lr-st)) == "Connected"
+
+        [details] = Floki.find(doc, ~s(details.earlier[id="remote-hire-did:agr:writer-1"]))
+        assert Floki.attribute(details, "open") == []
+
+        assert Floki.find(details, ~s(form[phx-submit="hire_agent"] input[name="agent_did"])) !=
+                 []
+
+        for name <- ~w(capability role delivery_mode) do
+          assert Floki.find(details, ~s(select[name="#{name}"])) != []
+        end
+
+        assert Floki.find(details, ~s(input[name="max_price"][value="12"])) != []
+        assert Floki.find(details, "button.pl[type=submit]") |> Floki.text() =~ "Hire in Cympho"
+        # Already connected: no Hire disclosure.
+        assert Floki.find(doc, ~s(details[id="remote-hire-did:agr:coder-2"])) == []
+
+        result =
+          view
+          |> form(~s(form[id="remote-hire-form-did:agr:writer-1"]), %{"role" => "engineer"})
+          |> render_submit()
+
+        assert {:error, {:live_redirect, %{to: "/agents/" <> _}}} = result
+        assert Enum.any?(Agents.list_agents_by_company(company.id), &(&1.name == "Copy Writer"))
+      end
+    end
+
+    @tag membership_role: "admin"
+    test "the Hire disclosure shows the defaults an untouched hire submits", %{
+      conn: conn,
+      current_company: company
+    } do
+      assert {:ok, _status} =
+               Cympho.Agrenting.save_company_config(company.id, %{
+                 "api_key" => "agrenting-test-key",
+                 "base_url" => "https://agrenting.example.test"
+               })
+
+      with_mock Cympho.Agrenting.Client, [:passthrough],
+        list_agents: fn _config, _filters -> {:ok, @remote_agents} end do
+        {:ok, view, _html} = live(conn, "/agents/remote")
+
+        shown =
+          view
+          |> main_doc()
+          |> Floki.find(~s(details[id="remote-hire-did:agr:writer-1"] [data-select-menu]))
+          |> Map.new(fn menu ->
+            [name] = Floki.attribute(menu, "select", "name")
+
+            {name,
+             {Floki.attribute(menu, "option[selected]", "value"),
+              text(menu, "[data-select-display]")}}
+          end)
+
+        # The old native selects showed their first option, which is what posts untouched;
+        # the styled triggers read "Select…" instead.
+        assert shown == %{
+                 "capability" => {["copy_writing"], "Copy Writing"},
+                 "role" => {["ceo"], "CEO"},
+                 "delivery_mode" => {["output"], "Output + artifacts"}
+               }
+
+        result =
+          view
+          |> form(~s(form[id="remote-hire-form-did:agr:writer-1"]))
+          |> render_submit()
+
+        assert {:error, {:live_redirect, %{to: "/agents/" <> _}}} = result
+        agent = Enum.find(Agents.list_agents_by_company(company.id), &(&1.name == "Copy Writer"))
+        assert agent.role == :ceo
+        assert agent.config["capability"] == "copy_writing"
+        assert agent.config["delivery_mode"] == "output"
+        assert agent.config["max_price"] == "12"
+      end
     end
 
     test "does not show an API key echoed in an Agrenting error message", %{
@@ -2162,36 +2309,26 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, view, html} = live(conn, "/agents/new")
 
       assert html =~ "Adapter"
-      # The "Agent launch plan" panel preamble was removed; the numbered first
-      # section is now the form's leading copy.
-      assert html =~ "1 · Identity and reporting"
+      # r3 (v7 H1): the numbered sections are band cards ("Who" first); the
+      # actions live on the form pair's ink card, which stacks below the fields
+      # under 1180 px, so the sticky bar, the aside checklist and role guide went.
+      assert has_element?(view, "[data-testid='new-agent-identity-section'] .h2", "Who")
       assert html =~ ~s(data-testid="new-agent-identity-section")
       assert html =~ ~s(data-testid="new-agent-adapter-section")
       assert html =~ ~s(data-testid="new-agent-guide-section")
-      assert html =~ ~s(data-testid="new-agent-setup-checklist")
-      assert html =~ ~s(data-testid="new-agent-role-guide")
-      assert html =~ ~s(data-testid="new-agent-form-actions")
-      assert html =~ "Hire checklist"
+      assert has_element?(view, "#new-agent-form .ink [data-testid='new-agent-hire-button']")
+      # The role's blurb and reporting hint sit under the role picker.
+      assert has_element?(
+               view,
+               "[data-testid='new-agent-identity-section']",
+               "Usually reports to"
+             )
 
-      # The actions stick on wider screens (no overflow-hidden card between
-      # them and the scroller); on phones they end the form instead, since the
-      # key notice can make the bar a third of the screen tall.
-      doc = Floki.parse_document!(html)
-      [actions] = Floki.find(doc, ~s([data-testid="new-agent-form-actions"]))
-      assert actions |> Floki.attribute("class") |> hd() =~ "max-[640px]:static"
-
-      assert Floki.find(
-               doc,
-               ~s(#main-content .overflow-hidden [data-testid="new-agent-form-actions"])
-             ) == []
-
-      assert html =~ "Selected role"
       assert html =~ ~s(data-testid="new-agent-runtime-profile")
       assert html =~ "Runtime profile"
       assert html =~ "Choose the agent"
       assert html =~ "role and reporting line"
       assert html =~ "Create an autonomous teammate with a role"
-      assert has_element?(view, "form[data-ui-simple-single-column]")
       assert has_element?(view, "[data-testid='new-agent-defaults-summary'].ui-simple-only")
       assert has_element?(view, "[data-testid='new-agent-runtime-section'].ui-advanced-only")
       assert has_element?(view, "[data-testid='new-agent-adapter-section']")
@@ -2593,12 +2730,22 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "target markets"
       assert html =~ ~s(data-testid="hire-demand-context")
       assert html =~ "Demand-backed hire"
-      assert html =~ "1 open issue"
+      assert html =~ "1 open task"
       assert html =~ "Queued work needs a Marketer"
       assert html =~ "Plan SEO launch campaign"
       assert html =~ "/issues/#{issue.id}"
       assert html =~ issue.identifier
       assert html =~ "Reports to CEO"
+
+      # r3: a band titled "Work is waiting" with the waiting tasks as chip links.
+      doc = Floki.parse_document!(html)
+
+      assert Floki.find(doc, ~s([data-testid="hire-demand-context"] .h2)) |> Floki.text() ==
+               "Work is waiting"
+
+      assert Floki.attribute(doc, ~s([data-testid="hire-demand-context"] a.chip), "href") == [
+               "/issues/#{issue.id}"
+             ]
     end
 
     test "demand-backed hire assigns waiting role work and returns to source", %{
@@ -2723,6 +2870,157 @@ defmodule CymphoWeb.AgentLiveTest do
         |> render_change()
 
       assert html =~ "codex --model gpt-5.5"
+    end
+  end
+
+  # ── r3 "Paper & Ink": Hire (v7 H1) ─────────────────────────────────
+  describe "r3 Hire" do
+    @describetag membership_role: "admin"
+
+    import CymphoWeb.R3PageHelpers
+
+    test "is a deep page under Team: the form's cards beside one ink card", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents/new")
+      doc = main_doc(view)
+
+      assert_r3_page(doc, page: "hire", h1: "Hire", kind: :deep, parent: "Team", primaries: 1)
+      assert page_title(view) =~ "Hire"
+
+      assert Floki.find(
+               doc,
+               "form#new-agent-form.next.fpair[phx-submit=save][phx-change=validate]"
+             )
+             |> length() == 1
+
+      assert Floki.find(
+               doc,
+               "#new-agent-config-fields[phx-hook=AdapterConfigFields] #new-agent-form"
+             )
+             |> length() == 1
+
+      assert texts(doc, "#new-agent-form .fp-main .card-h .h2") == [
+               "Who",
+               "Defaults",
+               "How it runs",
+               "Instructions"
+             ]
+
+      assert text(doc, "#new-agent-form .ink .ink-h") == "After you hire"
+      # The aside checklist, role guide and sticky bar are gone; the ink card holds the actions.
+      assert Floki.find(doc, ~s([data-testid="new-agent-setup-checklist"])) == []
+      assert Floki.find(doc, ~s([data-testid="new-agent-role-guide"])) == []
+      assert Floki.find(doc, ~s([data-testid="new-agent-form-actions"])) == []
+      refute render(view) =~ "ember-"
+    end
+
+    test "Role and Reports to show the values the form submits", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents/new")
+
+      shown =
+        view
+        |> main_doc()
+        |> Floki.find(~s([data-testid="new-agent-identity-section"] [data-select-menu]))
+        |> Map.new(fn menu ->
+          [name] = Floki.attribute(menu, "select", "name")
+
+          {name,
+           {Floki.attribute(menu, "option[selected]", "value"),
+            text(menu, "[data-select-display]")}}
+        end)
+
+      # Without a manager picked, the trigger read "Select…" while "" (no manager) posted.
+      assert shown["agent[role]"] == {["engineer"], "Engineer"}
+      assert shown["agent[parent_id]"] == {[""], "— No manager —"}
+    end
+
+    test "without a provider key the primary is disabled and the ink card says how to fix it",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents/new")
+      doc = main_doc(view)
+
+      assert [_] = Floki.find(doc, ~s(.ink .pw[disabled][data-testid="new-agent-hire-button"]))
+      assert text(doc, ".ink .pw") =~ "Hire Engineer"
+
+      assert text(doc, ~s(.ink [data-testid="new-agent-hire-gate"])) =~
+               "Add ANTHROPIC_API_KEY before hiring."
+
+      [add_key] = Floki.attribute(doc, ".ink a.pd", "href")
+      assert add_key =~ "/settings/secrets?"
+      assert add_key =~ "key=ANTHROPIC_API_KEY"
+      assert text(doc, ".ink a.pd") == "Add ANTHROPIC_API_KEY"
+      # Gated: no Cancel beside it (the breadcrumb goes back to Team).
+      assert Floki.attribute(doc, ".ink a.pd", "href") |> length() == 1
+    end
+
+    test "with a provider key it offers Cancel and says what hiring does", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, _} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "ANTHROPIC_API_KEY",
+          value: "test-key",
+          description: "Hire readiness"
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/new")
+      doc = main_doc(view)
+
+      assert [_] = Floki.find(doc, ~s(.ink .pw[data-testid="new-agent-hire-button"]))
+      assert Floki.find(doc, ".ink .pw[disabled]") == []
+      assert Floki.attribute(doc, ".ink a.pd", "href") == ["/agents"]
+      assert text(doc, ".ink .conseq") =~ "New agents start with this role"
+      assert Floki.find(doc, ~s([data-testid="new-agent-hire-gate"])) == []
+    end
+
+    test "a refused hire draws the handler's error flash", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents/new")
+
+      view
+      |> form("#new-agent-form", %{
+        "agent" => %{"name" => "No Key", "role" => "engineer", "parent_id" => ""}
+      })
+      |> render_submit()
+
+      assert text(main_doc(view), ".flash-line .flash-msg.err") ==
+               "Add ANTHROPIC_API_KEY before hiring — this agent cannot run without a provider key."
+    end
+
+    test "a hire the board must approve links the request from the ink card", %{
+      conn: conn,
+      current_company: company
+    } do
+      company
+      |> Ecto.Changeset.change(governance_config: %{"required_approvals" => ["agent_hire"]})
+      |> Repo.update!()
+
+      {:ok, _} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "ANTHROPIC_API_KEY",
+          value: "test-key",
+          description: "Hire readiness"
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/new")
+
+      view
+      |> form("#new-agent-form", %{
+        "agent" => %{"name" => "Voted Hire", "role" => "engineer", "parent_id" => ""}
+      })
+      |> render_submit()
+
+      approval = Repo.get_by!(BoardApproval, company_id: company.id)
+      doc = main_doc(view)
+
+      assert Floki.attribute(doc, ".ink a.pd", "href") == ["/board-approvals/#{approval.id}"]
+      assert text(doc, ".ink a.pd") == "View approval request"
+      assert text(doc, ".ink .ink-note") =~ "Agent hire requires board approval."
+      # Said once, on the ink card: the info flash would repeat it.
+      assert length(Regex.scan(~r/Agent hire requires board approval/, render(view))) == 1
     end
   end
 
