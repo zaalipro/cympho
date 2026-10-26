@@ -1,6 +1,8 @@
 defmodule CymphoWeb.ReviewQueueLiveTest do
   use CymphoWeb.LiveCase, async: true
 
+  import CymphoWeb.R3PageHelpers
+
   alias Cympho.{Agents, Comments, Issues, Projects, Repo, WorkProducts}
   alias Cympho.HeartbeatEngine.Run
 
@@ -59,8 +61,17 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
       )
 
     {:ok, _live, html} = live(conn, "/reviews")
+    doc = main_doc(html)
 
-    assert html =~ "Review queue"
+    # r3 (v7 G3): a root page under Inbox; each lane is a band, each card a row.
+    assert_r3_page(doc, page: "reviews", h1: "Reviews", kind: :root, primaries: 0)
+
+    assert texts(doc, ".card-h .h2") |> Enum.take(3) ==
+             ["Waiting for your decision", "Changes requested", "Specs waiting on the CTO"]
+
+    assert Floki.attribute(doc, ~s(#reviews-decide-t ~ * a.lnk), "href") |> Enum.sort() ==
+             ["/issues?triage=review", "/operations#review-nudges"]
+
     assert html =~ "Review Overview"
     assert html =~ "Resolve review gates"
     assert html =~ "Blocked gates"
@@ -72,15 +83,20 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
     assert html =~ "Approve and close"
     assert html =~ "Request changes"
     assert html =~ "Awaiting CTO review"
-    assert html =~ "Awaiting review"
+
+    card = ~s([data-testid="review-decision-card-#{in_review.id}"])
+    assert Floki.attribute(doc, card <> " a.rt2", "href") == ["/issues/#{in_review.id}"]
+    # The row's status names the gaps; the lane heading already says it awaits review.
+    assert text(doc, card <> " .lr-st") =~ ~r/^\d+ gaps?$/
     assert html =~ ~s(data-testid="review-decision-card-#{in_review.id}")
     assert html =~ ~s(data-testid="review-gate-card-#{in_review.id}")
     assert html =~ ~s(data-testid="review-action-bar-#{in_review.id}")
-    assert html =~ "Decide from what&#39;s above"
     assert html =~ "Evidence gaps block closure"
     assert html =~ "approving stays locked until the evidence is there."
-    assert html =~ "Review decision packet"
-    assert html =~ "Request changes first"
+
+    assert text(doc, ~s(#review-packet-#{in_review.id} > summary)) ==
+             "Review decision packet · Request changes first"
+
     assert html =~ "Evidence present"
     assert html =~ "Risk / asks"
     assert html =~ "No completed runtime run recorded."

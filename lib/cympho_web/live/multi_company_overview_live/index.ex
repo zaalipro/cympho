@@ -5,7 +5,7 @@ defmodule CymphoWeb.MultiCompanyOverviewLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, socket |> assign(:page_title, "Company overview") |> refresh()}
+    {:ok, socket |> assign(:page_title, "Compare companies") |> refresh()}
   end
 
   @impl true
@@ -21,88 +21,104 @@ defmodule CymphoWeb.MultiCompanyOverviewLive.Index do
 
   defp money(amount), do: "$" <> (amount |> Decimal.round(2) |> Decimal.to_string(:normal))
 
+  # A comparable limit's state as a word and its shape (v7 §1.5); below the
+  # warning share it is just the share, in mono (nil here).
+  defp budget_status(%{budget_status: :over_budget}), do: {:stopped, "Limit reached"}
+  defp budget_status(%{budget_status: :watch}), do: {:waiting, "Near the limit"}
+  defp budget_status(_budget), do: nil
+
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="max-w-5xl mx-auto p-6 space-y-6">
-      <header class="flex items-start justify-between gap-4">
-        <div>
-          <h1 class="text-xl font-semibold text-text-primary">Company overview</h1>
-          <p class="mt-2 text-sm text-text-secondary">
-            Read-only snapshot of companies you can access. Your home stays unchanged.
-          </p>
-        </div>
-        <button id="refresh-overview" phx-click="refresh" class="btn-secondary">Refresh</button>
-      </header>
-      <p class="text-xs text-text-tertiary">
-        Running executions exclude queued and pending runs. Refresh to update counts and access.
+    <.page_frame page="overview" title="Compare companies" data-ui-complex-page>
+      <:header_end>
+        <.pill id="refresh-overview" phx-click="refresh">Refresh</.pill>
+      </:header_end>
+
+      <p class="gl-sub ov-note">
+        A read-only snapshot of the companies you can access; running counts leave out queued runs.
       </p>
-      <p :if={@summaries == []} class="text-sm text-text-secondary">No accessible companies.</p>
-      <section
+
+      <.band_card :if={@summaries == []} id="overview-empty-t" title="Companies">
+        <.quiet_empty title="No accessible companies." />
+      </.band_card>
+
+      <.band_card
         :for={summary <- @summaries}
-        id={"overview-company-#{summary.company.id}"}
+        id={"overview-company-#{summary.company.id}-t"}
+        section_id={"overview-company-#{summary.company.id}"}
         aria-label={summary.company.name}
-        class="rounded-xl border border-border bg-panel p-5 space-y-4"
+        title={summary.company.name}
       >
-        <h2 class="text-lg font-semibold text-text-primary">
-          <a href={workflow_path(summary.company.id, "/dashboard")} class="hover:underline">
-            {summary.company.name}
-          </a>
-        </h2>
-        <dl class="grid grid-cols-3 gap-4 text-sm">
-          <div>
-            <dt class="text-text-secondary">Running executions</dt>
-            <dd data-summary="running" class="mt-1 text-xl tabular-nums">{summary.running}</dd>
+        <:header_end>
+          <span :if={budget_status(summary.budget)} class="ov-st">
+            <.status_word
+              kind={elem(budget_status(summary.budget), 0)}
+              word={elem(budget_status(summary.budget), 1)}
+            />
+          </span>
+          <span
+            :if={!budget_status(summary.budget) and summary.budget.budget_comparable}
+            class="meta mono"
+          >
+            {summary.budget.budget_used_percent}% used
+          </span>
+          <span :if={!summary.budget.budget_comparable} class="tag">
+            {summary.budget.budget_status_label}
+          </span>
+        </:header_end>
+        <div class="strip ov-strip">
+          <div class="cell">
+            <span class="v mono" data-summary="running">{summary.running}</span><span class="l">Running now</span>
           </div>
-          <div>
-            <dt class="text-text-secondary">Issues in review</dt>
-            <dd data-summary="review" class="mt-1 text-xl tabular-nums">{summary.review}</dd>
+          <div class="cell">
+            <span class="v mono" data-summary="review">{summary.review}</span><span class="l">Tasks in review</span>
           </div>
-          <div>
-            <dt class="text-text-secondary">Blocked issues</dt>
-            <dd data-summary="blocked" class="mt-1 text-xl tabular-nums">{summary.blocked}</dd>
+          <div class="cell">
+            <span class="v mono" data-summary="blocked">{summary.blocked}</span><span class="l">Blocked tasks</span>
           </div>
-        </dl>
-        <div class="text-sm space-y-1">
-          <p class="font-medium">Budget: {summary.budget.budget_status_label}</p>
-          <p class="text-text-secondary">
-            Tracked {summary.budget.budget_period} spend: {money(summary.budget.budget_spend)}
+        </div>
+        <div class="lim ov-lim">
+          <p class="lim-line">
+            Tracked {summary.budget.budget_period} spend
+            <b class="mono">{money(summary.budget.budget_spend)}</b><span :if={
+              summary.budget.budget_comparable
+            }>
+              of <span class="mono">{money(summary.budget.budget_limit)}</span><span aria-hidden="true"> · </span><span class="mono">{money(summary.budget.budget_remaining)}</span> left
+            </span>
           </p>
-          <p :if={summary.budget.budget_comparable} class="text-text-secondary">
-            Company limit: {money(summary.budget.budget_limit)} · Remaining: {money(
-              summary.budget.budget_remaining
-            )}
-          </p>
-          <p :if={!summary.budget.budget_comparable} class="text-text-secondary">
+          <p :if={!summary.budget.budget_comparable} class="help">
             No company-wide balance.
             <span :if={summary.budget.budget_configured}>
               Scoped controls are not a comparable company limit.
             </span>
             <span :if={!summary.budget.budget_configured}>No budget configured.</span>
           </p>
-          <p :if={summary.has_unpriced_usage?} class="text-text-tertiary">
+          <p :if={summary.has_unpriced_usage?} class="help">
             Some usage is unpriced; tracked spend may be incomplete.
           </p>
         </div>
-        <nav
-          class="flex flex-wrap gap-4 text-sm text-text-secondary"
-          aria-label={"#{summary.company.name} workflows"}
-        >
-          <a href={workflow_path(summary.company.id, "/issues")} class="hover:text-text-primary">
+        <nav class="ov-links" aria-label={"#{summary.company.name} workflows"}>
+          <.text_link href={workflow_path(summary.company.id, "/dashboard")} arrow={false}>
+            Home
+          </.text_link>
+          <.text_link href={workflow_path(summary.company.id, "/issues")} arrow={false}>
             Tasks
-          </a>
-          <a href={workflow_path(summary.company.id, "/reviews")} class="hover:text-text-primary">
-            Reviews
-          </a>
-          <a href={workflow_path(summary.company.id, "/projects")} class="hover:text-text-primary">
+          </.text_link>
+          <span class="ui-advanced-only">
+            <.text_link href={workflow_path(summary.company.id, "/reviews")} arrow={false}>
+              Reviews
+            </.text_link>
+          </span>
+          <.text_link href={workflow_path(summary.company.id, "/projects")} arrow={false}>
             Projects
-          </a>
-          <a href={workflow_path(summary.company.id, "/costs")} class="hover:text-text-primary">
-            Costs
-          </a>
+          </.text_link>
+          <.text_link href={workflow_path(summary.company.id, "/costs")} arrow={false}>
+            Spending
+          </.text_link>
         </nav>
-      </section>
-    </div>
+      </.band_card>
+    </.page_frame>
     """
   end
 end

@@ -1,476 +1,338 @@
-<.page size="wide" data-ui-complex-page class="ember-aurora">
-  <div class="relative z-[1]">
-    <.header>
-      <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-        Search
-      </h1>
-      <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-        Find issues, people, projects, and goals in this company.
-      </p>
-    </.header>
+<.page_frame page="search" title="Search" data-ui-complex-page>
+  <section class="card srch" aria-label="Search this company">
+    <form phx-submit="search" class="srch-f">
+      <.search_capsule
+        label="Find tasks, people, projects and goals in this company"
+        placeholder="Search tasks, agents, projects, goals…"
+        name="search[query]"
+        value={@query}
+      />
+      <.pill type="submit">Search</.pill>
+    </form>
 
-    <.panel class="mb-5 overflow-hidden">
-      <div class="border-b border-border px-5 py-4">
-        <form phx-submit="search" class="flex flex-col gap-3 md:flex-row">
-          <div class="ember-glass relative flex-1 rounded-2xl transition-shadow duration-300 focus-within:shadow-[0_0_0_1px_rgb(var(--color-primary-rgb)/0.45),0_18px_50px_-12px_rgb(var(--color-primary-rgb)/0.5)]">
-            <.icon
-              name="hero-magnifying-glass-mini"
-              class="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-text-quaternary"
+    <div class="srch-tools">
+      <.filter_menu id="search-filter" active={filter_count(@filters)}>
+        <form phx-change="filter" phx-submit="filter" class="srch-ff">
+          <div class="flds" data-testid="search-core-filters">
+            <.input
+              type="select"
+              id="search-filter-status"
+              label="Task status"
+              name="filter[status]"
+              value={@filters["status"] || ""}
+              options={[
+                {"All", ""},
+                {"Later", "backlog"},
+                {"To do", "todo"},
+                {"Working", "in_progress"},
+                {"In review", "in_review"},
+                {"Done", "done"},
+                {"Blocked", "blocked"},
+                {"Cancelled", "cancelled"}
+              ]}
             />
-            <input
-              type="text"
-              name="search[query]"
-              value={@query}
-              placeholder="Search issues, agents, projects, goals..."
-              class="h-12 w-full rounded-2xl border-0 bg-transparent pl-11 pr-16 text-base text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-0"
-              autocomplete="off"
+            <.input
+              type="select"
+              id="search-filter-project"
+              label="Project"
+              name="filter[project_id]"
+              value={@filters["project_id"] || ""}
+              options={[{"All", ""} | Enum.map(@projects, &{&1.name, &1.id})]}
             />
-            <kbd class="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 select-none items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] font-510 text-text-quaternary sm:inline-flex">
-              Enter
-            </kbd>
+            <.input
+              type="select"
+              id="search-filter-assignee"
+              label="Assignee"
+              name="filter[assignee_id]"
+              value={@filters["assignee_id"] || ""}
+              options={[{"All", ""} | Enum.map(@agents, &{&1.name, &1.id})]}
+            />
+            <%!-- Native date fields, not the DatePicker: its root is phx-update="ignore",
+                 so a patch that clears or restores these filters (Clear filters, a recent
+                 search, Back) would leave a stale date to post with the next change. --%>
+            <div class="fld">
+              <label for="search-date-from">From</label>
+              <input
+                id="search-date-from"
+                type="date"
+                name="filter[date_from]"
+                value={@filters["date_from"] || ""}
+              />
+            </div>
+            <div class="fld">
+              <label for="search-date-to">To</label>
+              <input
+                id="search-date-to"
+                type="date"
+                name="filter[date_to]"
+                value={@filters["date_to"] || ""}
+              />
+            </div>
           </div>
-          <button
-            type="submit"
-            class="cta-glow inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-brand px-5 text-sm font-510 text-on-primary transition-colors hover:bg-accent-hover"
+
+          <details
+            id="search-advanced-filters"
+            data-testid="search-advanced-filters"
+            open={advanced_filters_active?(@filters)}
+            data-open={to_string(advanced_filters_active?(@filters))}
+            class="ui-advanced-only earlier"
+            phx-hook="ServerOpen"
+            phx-mounted={JS.ignore_attributes("open")}
           >
-            <.icon name="hero-arrow-right-mini" class="h-4 w-4" /> Search
-          </button>
+            <summary>
+              Advanced filters
+              <span class="mono">
+                <%= if advanced_filter_count(@filters) > 0 do %>
+                  {advanced_filter_count(@filters)} active advanced
+                <% else %>
+                  Optional
+                <% end %>
+              </span>
+              <.r3_icon name="i-chev-down" class="ico s14" />
+            </summary>
+            <div class="flds">
+              <.input
+                type="select"
+                id="search-filter-goal"
+                label="Goal"
+                name="filter[goal_id]"
+                value={@filters["goal_id"] || ""}
+                options={[{"All", ""} | Enum.map(@goals, &{&1.title, &1.id})]}
+              />
+              <.input
+                type="select"
+                id="search-filter-label"
+                label="Label"
+                name="filter[label_id]"
+                value={@filters["label_id"] || ""}
+                options={[{"All", ""} | Enum.map(@labels, &{&1.name, &1.id})]}
+              />
+              <.input
+                type="select"
+                id="search-filter-role"
+                label="Agent role"
+                name="filter[role]"
+                value={@filters["role"] || ""}
+                options={[{"All", ""} | @role_options]}
+              />
+              <.input
+                type="select"
+                id="search-filter-agent-status"
+                label="Agent status"
+                name="filter[agent_status]"
+                value={@filters["agent_status"] || ""}
+                options={[
+                  {"All", ""},
+                  {"Idle", "idle"},
+                  {"Running", "running"},
+                  {"Error", "error"},
+                  {"Sleeping", "sleeping"},
+                  {"Offline", "offline"},
+                  {"Terminated", "terminated"}
+                ]}
+              />
+              <.input
+                type="select"
+                id="search-filter-project-status"
+                label="Project status"
+                name="filter[project_status]"
+                value={@filters["project_status"] || ""}
+                options={[{"All", ""}, {"Active", "active"}, {"Archived", "archived"}]}
+              />
+              <.input
+                type="select"
+                id="search-filter-goal-status"
+                label="Goal status"
+                name="filter[goal_status]"
+                value={@filters["goal_status"] || ""}
+                options={[
+                  {"All", ""},
+                  {"Active", "active"},
+                  {"Completed", "completed"},
+                  {"Cancelled", "cancelled"}
+                ]}
+              />
+              <.input
+                type="select"
+                id="search-filter-goal-priority"
+                label="Goal priority"
+                name="filter[goal_priority]"
+                value={@filters["goal_priority"] || ""}
+                options={[
+                  {"All", ""},
+                  {"Critical", "critical"},
+                  {"High", "high"},
+                  {"Medium", "medium"},
+                  {"Low", "low"}
+                ]}
+              />
+            </div>
+          </details>
         </form>
-      </div>
-
-      <div class="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div>
-          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Filters
-              </p>
-              <p class="mt-1 text-sm text-text-tertiary">
-                {filter_count(@filters)} active / {@total_count} current results
-              </p>
-            </div>
-            <button
-              :if={filters_active?(@filters)}
-              type="button"
-              phx-click="clear_filters"
-              class="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-            >
-              Clear filters
-            </button>
-          </div>
-
-          <form phx-change="filter" phx-submit="filter" class="space-y-3">
-            <div
-              data-testid="search-core-filters"
-              class="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-5"
-            >
-              <div>
-                <label class="mb-1 block text-xs text-text-tertiary">Issue status</label>
-                <.select_menu
-                  label="Issue status"
-                  name="filter[status]"
-                  value={@filters["status"] || ""}
-                  options={[
-                    {"All", ""},
-                    {"Backlog", "backlog"},
-                    {"To do", "todo"},
-                    {"In progress", "in_progress"},
-                    {"In review", "in_review"},
-                    {"Done", "done"},
-                    {"Blocked", "blocked"},
-                    {"Cancelled", "cancelled"}
-                  ]}
-                />
-              </div>
-
-              <div>
-                <label class="mb-1 block text-xs text-text-tertiary">Project</label>
-                <.select_menu
-                  label="Project"
-                  name="filter[project_id]"
-                  value={@filters["project_id"] || ""}
-                  options={[{"All", ""} | Enum.map(@projects, &{&1.name, &1.id})]}
-                />
-              </div>
-
-              <div>
-                <label class="mb-1 block text-xs text-text-tertiary">Assignee</label>
-                <.select_menu
-                  label="Assignee"
-                  name="filter[assignee_id]"
-                  value={@filters["assignee_id"] || ""}
-                  options={[{"All", ""} | Enum.map(@agents, &{&1.name, &1.id})]}
-                />
-              </div>
-
-              <div>
-                <%!-- for/id association: a date input has no placeholder to fall
-                     back on, so without this the field had no accessible name. --%>
-                <label for="search-date-from" class="mb-1 block text-xs text-text-tertiary">
-                  From
-                </label>
-                <input
-                  id="search-date-from"
-                  type="date"
-                  name="filter[date_from]"
-                  value={@filters["date_from"] || ""}
-                  class="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-
-              <div>
-                <label for="search-date-to" class="mb-1 block text-xs text-text-tertiary">
-                  To
-                </label>
-                <input
-                  id="search-date-to"
-                  type="date"
-                  name="filter[date_to]"
-                  value={@filters["date_to"] || ""}
-                  class="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-            </div>
-
-            <details
-              id="search-advanced-filters"
-              data-testid="search-advanced-filters"
-              open={advanced_filters_active?(@filters)}
-              data-open={to_string(advanced_filters_active?(@filters))}
-              class="ui-advanced-only rounded-lg border border-border bg-surface-1/50"
-              phx-hook="ServerOpen"
-              phx-mounted={JS.ignore_attributes("open")}
-            >
-              <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary">
-                <span class="inline-flex min-w-0 items-center gap-2">
-                  <.icon name="hero-adjustments-horizontal-mini" class="h-4 w-4 shrink-0" />
-                  <span class="font-510">Advanced filters</span>
-                </span>
-                <span class="shrink-0 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 text-text-tertiary">
-                  <%= if advanced_filter_count(@filters) > 0 do %>
-                    {advanced_filter_count(@filters)} active advanced
-                  <% else %>
-                    Optional
-                  <% end %>
-                </span>
-              </summary>
-
-              <div class="grid grid-cols-1 gap-3 border-t border-border px-3 py-3 md:grid-cols-3 xl:grid-cols-4">
-                <div>
-                  <label class="mb-1 block text-xs text-text-tertiary">Goal</label>
-                  <.select_menu
-                    label="Goal"
-                    name="filter[goal_id]"
-                    value={@filters["goal_id"] || ""}
-                    options={[{"All", ""} | Enum.map(@goals, &{&1.title, &1.id})]}
-                  />
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-xs text-text-tertiary">Label</label>
-                  <.select_menu
-                    label="Label"
-                    name="filter[label_id]"
-                    value={@filters["label_id"] || ""}
-                    options={[{"All", ""} | Enum.map(@labels, &{&1.name, &1.id})]}
-                  />
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-xs text-text-tertiary">Agent role</label>
-                  <.select_menu
-                    label="Agent role"
-                    name="filter[role]"
-                    value={@filters["role"] || ""}
-                    options={[{"All", ""} | @role_options]}
-                  />
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-xs text-text-tertiary">Agent status</label>
-                  <.select_menu
-                    label="Agent status"
-                    name="filter[agent_status]"
-                    value={@filters["agent_status"] || ""}
-                    options={[
-                      {"All", ""},
-                      {"Idle", "idle"},
-                      {"Running", "running"},
-                      {"Error", "error"},
-                      {"Sleeping", "sleeping"},
-                      {"Offline", "offline"},
-                      {"Terminated", "terminated"}
-                    ]}
-                  />
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-xs text-text-tertiary">Project status</label>
-                  <.select_menu
-                    label="Project status"
-                    name="filter[project_status]"
-                    value={@filters["project_status"] || ""}
-                    options={[{"All", ""}, {"Active", "active"}, {"Archived", "archived"}]}
-                  />
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-xs text-text-tertiary">Goal status</label>
-                  <.select_menu
-                    label="Goal status"
-                    name="filter[goal_status]"
-                    value={@filters["goal_status"] || ""}
-                    options={[
-                      {"All", ""},
-                      {"Active", "active"},
-                      {"Completed", "completed"},
-                      {"Cancelled", "cancelled"}
-                    ]}
-                  />
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-xs text-text-tertiary">Goal priority</label>
-                  <.select_menu
-                    label="Goal priority"
-                    name="filter[goal_priority]"
-                    value={@filters["goal_priority"] || ""}
-                    options={[
-                      {"All", ""},
-                      {"Critical", "critical"},
-                      {"High", "high"},
-                      {"Medium", "medium"},
-                      {"Low", "low"}
-                    ]}
-                  />
-                </div>
-              </div>
-            </details>
-          </form>
-        </div>
-
-        <div>
-          <div class="flex items-center justify-between">
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Recent
-            </p>
-            <button
-              :if={@recent_searches != []}
-              type="button"
-              phx-click="clear_recent_searches"
-              class="text-xs text-text-tertiary transition-colors hover:text-text-primary"
-            >
-              Clear all
-            </button>
-          </div>
-
-          <div
-            :if={@recent_searches == []}
-            class="mt-3 rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-text-tertiary"
-          >
-            No recent searches.
-          </div>
-
-          <div :if={@recent_searches != []} class="mt-3 flex flex-wrap gap-2">
-            <button
-              :for={recent_search <- @recent_searches}
-              type="button"
-              phx-click="recent_search"
-              phx-value-query={recent_search.query}
-              class="card-lift inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-            >
-              <span class="max-w-[180px] truncate">{recent_search.query}</span>
-              <span class="font-mono text-text-quaternary">{recent_search.search_count}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </.panel>
-
-    <.panel
-      id="search-command"
-      data-testid="search-command"
-      class="ui-advanced-only mb-5 overflow-hidden"
-    >
-      <div class="border-b border-border px-5 py-4">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Search Overview
-            </p>
-            <h2 class="mt-1 text-card-title text-text-primary">
-              {@search_command.summary}
-            </h2>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <.app_link
-              :for={action <- @search_command.actions}
-              navigate={action.url}
-              class={search_command_action_class(action.tone)}
-            >
-              <.icon name={action.icon} class="h-4 w-4" />
-              <span>{action.label}</span>
-            </.app_link>
-          </div>
-        </div>
-      </div>
-
-      <div class="grid min-w-0 gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-4">
-          <.link
-            :for={mix <- @search_command.result_mix}
-            patch={mix.url}
-            class={search_mix_card_class(mix.count)}
-          >
-            <span class="text-eyebrow uppercase text-text-quaternary">{mix.label}</span>
-            <span class={search_mix_count_class(mix.count)}>{mix.count}</span>
-          </.link>
-        </div>
-
-        <div class="min-w-0 rounded-lg border border-border bg-surface-1 px-4 py-3">
-          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Top match
-          </p>
-          <.app_link
-            :if={@search_command.top_result}
-            navigate={@search_command.top_result.url}
-            class="mt-2 flex min-w-0 items-start gap-3 rounded-md border border-border/70 bg-surface px-3 py-2 transition-shadow hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
-          >
-            <span class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <.icon name={@search_command.top_result.icon} class="h-4 w-4" />
-            </span>
-            <span class="min-w-0">
-              <span class="block truncate text-sm font-590 text-text-primary">
-                {@search_command.top_result.title}
-              </span>
-              <span class="mt-0.5 block truncate text-xs text-text-tertiary">
-                {@search_command.top_result.kind} / {@search_command.top_result.subtitle}
-              </span>
-            </span>
-          </.app_link>
-          <div
-            :if={!@search_command.top_result}
-            class="mt-2 rounded-md border border-dashed border-border px-3 py-3 text-sm text-text-tertiary"
-          >
-            No top match.
-          </div>
-        </div>
-      </div>
-    </.panel>
-
-    <div class="mb-4 flex flex-wrap gap-2">
-      <button
-        :for={tab <- [:all, :issues, :agents, :projects, :goals]}
-        type="button"
-        phx-click="change_tab"
-        phx-value-tab={tab}
-        class={[
-          "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
-          @active_tab == tab && "border-primary/40 bg-primary/10 text-primary",
-          @active_tab != tab &&
-            "border-border bg-panel text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        ]}
-      >
-        {String.capitalize(to_string(tab))}
-        <span :if={tab == :all and @total_count > 0} class="font-mono text-xs text-text-tertiary">
-          {@total_count}
-        </span>
-        <%= if count = tab_count(@results, tab) do %>
-          <span class="font-mono text-xs text-text-tertiary">{count}</span>
-        <% end %>
-      </button>
-    </div>
-
-    <.panel class="overflow-hidden">
-      <div class="border-b border-border px-5 py-4">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Results
-            </p>
-            <h2 :if={@query != ""} class="mt-1 text-card-title text-text-primary">
-              {result_heading(@results, @total_count, @active_tab, @query)}
-            </h2>
-          </div>
-          <span
-            :if={filters_active?(@filters)}
-            class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-xs font-510 text-amber-300"
-          >
-            Filtered
-          </span>
-        </div>
-      </div>
-
-      <div class="p-5">
-        <% empty_state =
-          result_empty_state(
-            @query,
-            @total_count,
-            @filters,
-            @search_command.actions
-          ) %>
-
-        <div
-          :if={empty_state}
-          data-testid="search-results-empty"
-          class="rounded-lg border border-dashed border-border bg-surface-1/50 px-4 py-10 text-center"
+        <button
+          :if={filters_active?(@filters)}
+          type="button"
+          class="lnk"
+          phx-click="clear_filters"
         >
-          <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface text-text-tertiary">
-            <.icon name={empty_state.icon} class="h-6 w-6" />
-          </div>
-          <p class="text-sm font-590 text-text-primary">{empty_state.title}</p>
-          <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
-            {empty_state.detail}
-          </p>
-          <div class="mt-5 flex flex-wrap justify-center gap-2">
-            <.app_link
-              :for={action <- empty_state.actions}
-              navigate={action.url}
-              class={search_command_action_class(action.tone)}
-            >
-              <.icon name={action.icon} class="h-4 w-4" />
-              <span>{action.label}</span>
-            </.app_link>
-          </div>
+          Clear filters
+        </button>
+      </.filter_menu>
+
+      <div :if={@recent_searches != []} class="srch-recent">
+        <span class="meta">Recent</span>
+        <.chip
+          :for={recent_search <- @recent_searches}
+          phx-click="recent_search"
+          phx-value-query={recent_search.query}
+        >
+          <span class="srch-q">{recent_search.query}</span>
+          <span class="mono">{recent_search.search_count}</span>
+        </.chip>
+        <button type="button" class="lnk" phx-click="clear_recent_searches">Clear</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="seg srch-tabs" role="group" aria-label="Result kind">
+    <button
+      :for={tab <- [:all, :issues, :agents, :projects, :goals]}
+      type="button"
+      phx-click="change_tab"
+      phx-value-tab={tab}
+      aria-pressed={to_string(@active_tab == tab)}
+    >
+      {tab_label(tab)}<span :if={tab_count(@results, tab, @total_count) > 0} class="mono">{tab_count(@results, tab, @total_count)}</span>
+    </button>
+  </div>
+
+  <.band_card id="search-results-t" title="Results" section_id="search-results">
+    <:header_end>
+      <span class="srch-end">
+        <span :if={@query != ""} class="meta">
+          {result_heading(@results, @total_count, @active_tab, @query)}
+        </span>
+        <span :if={filters_active?(@filters)} class="tag">Filtered</span>
+      </span>
+    </:header_end>
+
+    <% empty_state = result_empty_state(@query, @total_count, @filters, @search_command.actions) %>
+    <.quiet_empty
+      :if={empty_state}
+      title={empty_state.title}
+      data-testid="search-results-empty"
+    >
+      {empty_state.detail}
+      <:action>
+        <div class="srch-acts">
+          <%= for action <- empty_state.actions do %>
+            <span :if={action.advanced} class="ui-advanced-only">
+              <.text_link navigate={action.url}>{action.label}</.text_link>
+            </span>
+            <.text_link :if={!action.advanced} navigate={action.url}>{action.label}</.text_link>
+          <% end %>
         </div>
+      </:action>
+    </.quiet_empty>
 
-        <div :if={@query != "" and @total_count > 0}>
-          <div :if={@active_tab == :all} class="space-y-6">
-            {render_issues(assigns, @results.issues, "Issues")}
-            {render_agents(assigns, @results.agents, "Agents")}
-            {render_projects(assigns, @results.projects, "Projects")}
-            {render_goals(assigns, @results.goals, "Goals")}
-          </div>
+    <ul :if={@query != "" and @total_count > 0} class="rows">
+      <.list_row
+        :for={issue <- tab_items(@results, @active_tab, :issues)}
+        id={"search-issue-#{issue.id}"}
+        title={issue.title}
+        navigate={~p"/issues/#{issue.id}"}
+      >
+        <:meta>
+          <span :if={issue.identifier} class="mono">{issue.identifier}</span><span
+            :if={issue.identifier}
+            aria-hidden="true"
+          > · </span>{task_state(issue.status)}<span :if={issue.assignee}><span aria-hidden="true"> · </span>{issue.assignee.name}</span>
+          <span :if={issue.project}><span aria-hidden="true"> · </span>{issue.project.name}</span>
+          <span :if={snippet(issue.description)} class="srch-snip">
+            {snippet(issue.description)}
+          </span>
+          <span :if={task_context(issue)} class="srch-snip ui-advanced-only">
+            {task_context(issue)}
+          </span>
+        </:meta>
+        <:trail>
+          <CymphoWeb.IssueLive.Tasks.priority priority={issue.priority} />
+          <span class="tag">Task</span>
+        </:trail>
+      </.list_row>
+      <.list_row
+        :for={agent <- tab_items(@results, @active_tab, :agents)}
+        id={"search-agent-#{agent.id}"}
+        title={agent.name}
+        navigate={~p"/agents/#{agent.id}"}
+        status={agent_status(agent)}
+      >
+        <:meta>{agent_line(agent)}</:meta>
+        <:trail><span class="tag">Agent</span></:trail>
+      </.list_row>
+      <.list_row
+        :for={project <- tab_items(@results, @active_tab, :projects)}
+        id={"search-project-#{project.id}"}
+        title={project.name}
+        navigate={~p"/projects/#{project.id}"}
+      >
+        <:meta>
+          <span class="mono">{project.prefix}</span><span :if={project.status == :archived}><span aria-hidden="true"> · </span>Archived</span><span :if={
+            snippet(project.description)
+          }><span aria-hidden="true"> · </span>{snippet(project.description)}</span>
+        </:meta>
+        <:trail><span class="tag">Project</span></:trail>
+      </.list_row>
+      <.list_row
+        :for={goal <- tab_items(@results, @active_tab, :goals)}
+        id={"search-goal-#{goal.id}"}
+        title={goal.title}
+        navigate={~p"/goals/#{goal.id}"}
+      >
+        <:meta>
+          {format_search_value(goal.goal_type)}<span aria-hidden="true"> · </span>{format_search_value(
+            goal.status
+          )}<span :if={goal.project}><span aria-hidden="true"> · </span>{goal.project.name}</span>
+          <span :if={snippet(goal.description)} class="srch-snip">
+            {snippet(goal.description)}
+          </span>
+        </:meta>
+        <:trail>
+          <CymphoWeb.IssueLive.Tasks.priority priority={goal_priority(goal.priority)} />
+          <span class="tag">Goal</span>
+        </:trail>
+      </.list_row>
+    </ul>
 
-          <div :if={@active_tab == :issues}>
-            {render_issues(assigns, @results.issues, nil)}
-            <p :if={@results.issues == []} class="py-8 text-center text-sm text-text-tertiary">
-              No issues found.
-            </p>
-          </div>
+    <.quiet_empty
+      :if={@query != "" and @total_count > 0 and tab_empty?(@results, @active_tab)}
+      title={"No #{String.downcase(tab_label(@active_tab))} found."}
+    />
+  </.band_card>
 
-          <div :if={@active_tab == :agents}>
-            {render_agents(assigns, @results.agents, nil)}
-            <p :if={@results.agents == []} class="py-8 text-center text-sm text-text-tertiary">
-              No agents found.
-            </p>
-          </div>
-
-          <div :if={@active_tab == :projects}>
-            {render_projects(assigns, @results.projects, nil)}
-            <p :if={@results.projects == []} class="py-8 text-center text-sm text-text-tertiary">
-              No projects found.
-            </p>
-          </div>
-
-          <div :if={@active_tab == :goals}>
-            {render_goals(assigns, @results.goals, nil)}
-            <p :if={@results.goals == []} class="py-8 text-center text-sm text-text-tertiary">
-              No goals found.
-            </p>
-          </div>
+  <div class="ui-advanced-only">
+    <.band_card
+      id="search-command-t"
+      title="Search Overview"
+      section_id="search-command"
+      data-testid="search-command"
+    >
+      <div class="gl-sec">
+        <p class="gl-big">{@search_command.summary}</p>
+        <div class="srch-acts">
+          <.text_link :for={action <- @search_command.actions} navigate={action.url}>
+            {action.label}
+          </.text_link>
         </div>
       </div>
-    </.panel>
+      <div class="gl-sec">
+        <h3 class="gl-h">Top match</h3>
+        <p :if={@search_command.top_result} class="gl-sub">
+          <.top_link result={@search_command.top_result} />
+          <span aria-hidden="true"> · </span>{@search_command.top_result.kind}<span aria-hidden="true"> · </span>{@search_command.top_result.subtitle}
+        </p>
+        <p :if={!@search_command.top_result} class="gl-sub">No top match.</p>
+      </div>
+    </.band_card>
   </div>
-</.page>
+</.page_frame>

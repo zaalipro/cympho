@@ -5,3 +5,173 @@
      the light block and both identical dark copies, never here.
    - 1024 rules under @media (max-width:1180px), phone rules under @media (max-width:640px).
    - Shared components belong in r3.css, not here. */
+
+/* ================================================================
+   Shared by the governance pages: action rows, tags, band header ends, status lines
+   ================================================================ */
+/* a row of text links (empty states, the Advanced overview bands) */
+.cy-r3 :is(.ap-acts,.srch-acts){display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;margin-left:-4px}
+.cy-r3 :is(.rv-tags,.act-tags){display:flex;flex-wrap:wrap;gap:6px}
+/* a band header's end with a count and a link or two */
+.cy-r3 :is(.rv-end,.org-end,.srch-end){display:inline-flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px 12px;min-width:0}
+/* a status word in a band header (the glyph carries the colour) */
+.cy-r3 :is(.rv-tone,.org-lvl,.ov-st){display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;font-weight:500;color:var(--ink-2);white-space:nowrap}
+/* a disclosure on its own line under a row: no rule of its own, the row's hairline separates */
+.cy-r3 :is([data-page="approvals"],[data-page="reviews"]) .lr-below>.earlier{margin:0;border-top:0}
+.cy-r3 :is([data-page="approvals"],[data-page="reviews"]) .lr-below>.earlier>summary{display:inline-flex;gap:6px;min-height:32px;padding:0 8px 0 0}
+.cy-r3 :is([data-page="approvals"],[data-page="reviews"]) .lr-below>.earlier>summary .ico{margin-left:0}
+/* counts inside segments (mono, quiet; the lifted one in ink) */
+.cy-r3 :is([data-page="approvals"],[data-page="search"]) .seg .mono{font-size:12px;color:var(--ink-2)}
+.cy-r3 :is([data-page="approvals"],[data-page="search"]) .seg :is([aria-current],[aria-pressed="true"]) .mono{color:var(--ink)}
+.cy-r3 :is([data-page="reviews"],[data-page="org-chart"],[data-page="search"],[data-page="overview"]) .card-h{flex-wrap:wrap}
+
+/* ================================================================
+   Approval history (G1) and an approval (G2)
+   ================================================================ */
+.cy-r3 [data-page="approvals"] .tbar .seg{max-width:100%}
+.cy-r3 .ap-tasks{display:flex;flex-direction:column;gap:6px;padding:2px 0 10px}
+.cy-r3 .ap-tasks li{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;font-size:13px;line-height:18px;min-width:0}
+.cy-r3 .ap-tasks .ul{overflow-wrap:anywhere}
+.cy-r3 .ap-tasks .mono{font-size:12px;color:var(--ink-2)}
+/* resolved, the page has no Next step: the Details aside starts on the first row */
+.cy-r3 [data-page="approval"] .split:not(:has(>.next))>.aside{grid-row:1 / span 3}
+.cy-r3 [data-page="approval"] .kv dd{overflow-wrap:anywhere}
+.cy-r3 [data-page="approval"] .earlier{margin:4px 8px 4px}
+.cy-r3 .ap-raw{max-height:288px;overflow:auto;margin:0 0 10px;padding:10px 12px;border-radius:10px;background:var(--band);font:12px/18px var(--mono);color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* ================================================================
+   Reviews (G3): the evidence under each decision row
+   ================================================================ */
+.cy-r3 .rv-acts{display:inline-flex;flex-wrap:wrap;gap:6px}
+.cy-r3 .rv-gate{display:flex;flex-direction:column;gap:4px;margin:2px 0 2px;padding:10px 12px;border-radius:12px;background:var(--band);border:1px solid var(--band-line)}
+.cy-r3 .rv-gate-h{font-size:13px;line-height:18px;font-weight:500;color:var(--ink)}
+.cy-r3 .rv-gate .rv-tags{padding-top:4px}
+.cy-r3 .rv-gate .tag{background:var(--card)}
+.cy-r3 .rv-packet{display:flex;flex-direction:column;gap:10px;padding:0 0 10px}
+.cy-r3 .rv-lists{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.cy-r3 .rv-lists ul{display:flex;flex-direction:column;gap:4px;margin-top:4px;padding-left:16px;list-style:disc;font-size:12px;line-height:18px;color:var(--ink-2)}
+.cy-r3 :is(.rv-strip,.org-strip,.org-mstrip){grid-template-columns:repeat(4,minmax(0,1fr))}
+.cy-r3 .rv-oldest{padding:2px 12px 8px}
+
+/* ================================================================
+   Activity (G4)
+   ================================================================ */
+.cy-r3 [data-page="activity"] .flt-p{min-width:300px}
+.cy-r3 .act-f{width:100%}
+.cy-r3 [data-page="activity"] .rm .ul{overflow-wrap:anywhere}
+.cy-r3 [data-page="activity"] .rm .nw{white-space:nowrap}
+
+/* ================================================================
+   Org chart (G5): health, staffing gaps, the reporting tree (a board of tiles)
+   ================================================================ */
+.cy-r3 .org-sum{padding:8px 12px 0}
+.cy-r3 .org-ex{display:flex;flex-wrap:wrap;gap:2px 14px;padding-bottom:6px;font-size:12px;line-height:18px}
+.cy-r3 .org-ex .ul{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the tree scrolls inside its card, never the page */
+.cy-r3 .org-scroll{overflow-x:auto;padding:16px 8px 12px}
+.cy-r3 .org-tree,.cy-r3 .org-tree ul{display:flex;justify-content:center}
+.cy-r3 .org-tree{width:max-content;min-width:100%}
+.cy-r3 .org-tree ul{position:relative;padding-top:20px}
+.cy-r3 .org-tree li{position:relative;display:flex;flex-direction:column;align-items:center;padding:20px 6px 0}
+/* connectors: half a rule each side of a tile, and a stem down from its manager */
+.cy-r3 .org-tree li::before,.cy-r3 .org-tree li::after{content:"";position:absolute;top:0;right:50%;width:50%;height:20px;border-top:1px solid var(--tick)}
+.cy-r3 .org-tree li::after{right:auto;left:50%;border-left:1px solid var(--tick)}
+.cy-r3 .org-tree li:only-child{padding-top:0}
+.cy-r3 .org-tree li:only-child::before,.cy-r3 .org-tree li:only-child::after{display:none}
+.cy-r3 .org-tree li:first-child::before,.cy-r3 .org-tree li:last-child::after{border:0}
+.cy-r3 .org-tree li:last-child::before{border-right:1px solid var(--tick);border-radius:0 8px 0 0}
+.cy-r3 .org-tree li:first-child::after{border-radius:8px 0 0 0}
+.cy-r3 .org-tree ul::before{content:"";position:absolute;top:0;left:50%;height:20px;border-left:1px solid var(--tick)}
+.cy-r3 .org-tree>li{padding-top:0}
+.cy-r3 .org-tree>li::before,.cy-r3 .org-tree>li::after{display:none}
+/* an agent tile (the Team page's card): who, what they do, how they are */
+.cy-r3 .org-t{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);align-items:start;gap:10px;width:216px;padding:12px 12px 11px;border-radius:14px;background:var(--lift);border:1px solid var(--lift-line);box-shadow:var(--sh-raise);text-align:left;transition:border-color .18s var(--ease)}
+.cy-r3 .org-t:hover{border-color:var(--btn-line-hover)}
+.cy-r3 .org-m{display:flex;flex-direction:column;gap:1px;min-width:0}
+.cy-r3 .org-n{font-size:14px;line-height:18px;font-weight:500;color:var(--ink)}
+.cy-r3 .org-r{font-size:12px;line-height:16px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cy-r3 .org-s{display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;line-height:16px;color:var(--ink-nav)}
+.cy-r3 .org-c{font-size:12px;line-height:16px;color:var(--ink-2)}
+/* the two statistics dialogs */
+.cy-r3 [data-page="org-chart"] .dlg :is(.strip,.kv){margin:0}
+.cy-r3 [data-page="org-chart"] .dlg .gl-h{padding:0 12px}
+.cy-r3 [data-page="org-chart"] .dlg .lim-line{padding:0 12px;font-size:13px;line-height:19px}
+
+/* ================================================================
+   Search (G6)
+   ================================================================ */
+.cy-r3 .srch{display:flex;flex-direction:column;gap:10px;padding:12px}
+.cy-r3 .srch-f{display:flex;align-items:center;gap:8px}
+.cy-r3 .srch-f .search{flex:1;min-width:0;height:40px}
+.cy-r3 .srch-f .search input{font-size:14px}
+.cy-r3 .srch-f .pl{height:40px;padding:0 18px}
+.cy-r3 .srch-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cy-r3 .srch-recent{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.cy-r3 .srch-recent .chip .mono{font-size:12px;color:var(--ink-2)}
+.cy-r3 .srch-q{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cy-r3 [data-page="search"] .flt-p{width:min(560px,calc(100vw - 48px))}
+.cy-r3 .srch-ff{display:flex;flex-direction:column;gap:10px;width:100%}
+.cy-r3 [data-page="search"] .flt-p .earlier{margin:0}
+.cy-r3 [data-page="search"] .flt-p .earlier>summary{padding:0}
+.cy-r3 [data-page="search"] .flt-p .earlier>summary .mono{font-size:12px}
+.cy-r3 [data-page="search"] .flt-p .earlier .flds{padding:4px 0 8px}
+.cy-r3 .srch-tabs{align-self:flex-start;max-width:100%}
+/* a task or goal result's description, and a task's Advanced goal and labels: one quiet line each */
+.cy-r3 .srch-snip{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cy-r3 [data-page="search"] .lr-tr{display:inline-flex;align-items:center;gap:10px}
+
+/* ================================================================
+   Compare companies (G7)
+   ================================================================ */
+.cy-r3 .ov-note{padding:0 6px}
+.cy-r3 .ov-strip{grid-template-columns:repeat(3,minmax(0,1fr))}
+.cy-r3 .ov-strip .v.mono{font-size:22px;line-height:28px}
+.cy-r3 .ov-links{display:flex;flex-wrap:wrap;gap:2px 14px;margin:4px 8px 2px;padding-top:6px;border-top:1px solid var(--hair)}
+
+/* ================================================================
+   1024
+   ================================================================ */
+@media (max-width:1180px){
+  .cy-r3 .rv-lists{grid-template-columns:minmax(0,1fr)}
+}
+
+/* ================================================================
+   Phone (390)
+   ================================================================ */
+@media (max-width:640px){
+  /* segments that do not fit scroll sideways, fading at the right edge (Inbox's) */
+  .cy-r3 :is([data-page="approvals"] .tbar .seg,.srch-tabs){width:auto;overflow-x:auto;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,var(--mask) calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,var(--mask) calc(100% - 28px),transparent)}
+  .cy-r3 :is([data-page="approvals"] .tbar .seg,.srch-tabs)::-webkit-scrollbar{display:none}
+  .cy-r3 [data-page="approvals"] .tbar .seg a,.cy-r3 .srch-tabs button{flex:none;padding:0 14px}
+  .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip){grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip) .cell:nth-child(odd){border-left:0}
+  .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip) .cell:nth-child(n+3){border-top:1px solid var(--hair)}
+  .cy-r3 :is([data-page="approvals"],[data-page="reviews"]) .lr-below>.earlier>summary{min-height:44px}
+  /* a task waiting on an approval is a 44 px target (18 px line + 13 px each side), one per line */
+  .cy-r3 .ap-tasks{gap:0}
+  .cy-r3 .ap-tasks .ul{padding:13px 0}
+  /* a status word that wraps under a tiled row lines up with the title, as the actions do */
+  .cy-r3 :is([data-page="approvals"],[data-page="reviews"],[data-page="org-chart"]) .lrow:has(>.kt)>.lr-st{margin-left:46px}
+  .cy-r3 .srch{padding:8px}
+  .cy-r3 .srch-f .search,.cy-r3 .srch-f .pl{height:44px}
+  .cy-r3 .srch-f .search input{font-size:16px}
+  /* a result's priority and kind stay beside its title: the bars alone, the word for screen readers (Tasks' phone rule) */
+  .cy-r3 [data-page="search"] .lrow>.row-main{flex-basis:200px}
+  .cy-r3 [data-page="search"] .lr-tr .prio .pt{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .cy-r3 [data-page="activity"] .flt-p{min-width:0;width:min(320px,calc(100vw - 48px))}
+  /* the row is not a link, so its task link is the target: 44 px tall, the line does not move (r3.css .gl-sub .ul) */
+  .cy-r3 [data-page="activity"] .rm .ul{padding:15px 0}
+  /* the tree becomes an indented list: 16 px per level, no connectors */
+  .cy-r3 .org-scroll{padding:6px 4px 8px}
+  .cy-r3 .org-tree,.cy-r3 .org-tree ul{flex-direction:column;align-items:stretch;padding:0}
+  .cy-r3 .org-tree{width:auto;min-width:0}
+  .cy-r3 .org-tree ul{padding-left:16px}
+  .cy-r3 .org-tree li,.cy-r3 .org-tree li:only-child{align-items:stretch;padding:6px 0 0}
+  .cy-r3 .org-tree>li:first-child{padding-top:0}
+  .cy-r3 .org-tree li::before,.cy-r3 .org-tree li::after,.cy-r3 .org-tree ul::before{display:none}
+  .cy-r3 .org-t{width:100%;min-height:44px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .cy-r3 .org-t{transition:none}
+}
