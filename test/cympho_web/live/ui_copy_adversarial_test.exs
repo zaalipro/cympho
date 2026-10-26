@@ -134,8 +134,9 @@ defmodule CymphoWeb.UiCopyAdversarialTest do
     test "/operations keeps its humanized phrase", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/operations")
 
-      assert html =~ "Pending Tasks",
-             "Expected humanized phrase \"Pending Tasks\" missing from route /operations"
+      # v7 O1: band titles are sentence case.
+      assert html =~ "Pending tasks",
+             "Expected humanized phrase \"Pending tasks\" missing from route /operations"
     end
 
     # /routines: planning track
@@ -158,8 +159,9 @@ defmodule CymphoWeb.UiCopyAdversarialTest do
     test "/workspaces keeps its humanized phrase", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/workspaces")
 
-      assert html =~ "Workspaces",
-             "Expected humanized phrase \"Workspaces\" missing from route /workspaces"
+      # v7 §1.2: the page is titled with its rail label, "Work files".
+      assert html =~ "Work files",
+             "Expected humanized phrase \"Work files\" missing from route /workspaces"
     end
 
     # /activity: governance track
