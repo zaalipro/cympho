@@ -50,6 +50,36 @@ defmodule CymphoWeb.AdapterShowLiveTest do
       assert Floki.find(doc, ".set-main") == []
     end
 
+    # The heartbeat skips sleeping agents (agent_heartbeat.ex), so the row must not read "Idle".
+    test "assigned agents keep a sleeping agent's own word", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, sleeper} =
+        Agents.create_agent(%{
+          name: "Sleepy Builder",
+          role: :engineer,
+          status: :sleeping,
+          adapter: :claude_code,
+          company_id: company.id
+        })
+
+      {:ok, idler} =
+        Agents.create_agent(%{
+          name: "Idle Builder",
+          role: :engineer,
+          status: :idle,
+          adapter: :claude_code,
+          company_id: company.id
+        })
+
+      {:ok, view, _html} = live(conn, "/settings/adapters/claude_code")
+      doc = main_doc(view)
+
+      assert text(doc, "#adapter-agent-#{sleeper.id} .lr-st") == "Sleeping"
+      assert text(doc, "#adapter-agent-#{idler.id} .lr-st") == "Idle"
+    end
+
     test "associates adapter labels and explains encrypted API-key storage", %{conn: conn} do
       {:ok, view, html} = live(conn, "/settings/adapters/openai_chat")
 

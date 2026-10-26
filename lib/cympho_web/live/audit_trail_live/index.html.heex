@@ -133,8 +133,10 @@
           <span
             :if={event.resource_id}
             class="ui-advanced-only"
-          ><span aria-hidden="true"> · </span>{resource_words(event.resource_type)}
-            <span class="mono">{String.slice(event.resource_id, 0..7)}</span></span>
+          >
+            <span aria-hidden="true"> · </span>{resource_words(event.resource_type)}
+            <span class="mono">{String.slice(event.resource_id, 0..7)}</span>
+          </span>
         </:meta>
         <:below :if={event.payload not in [nil, %{}]}>
           <details

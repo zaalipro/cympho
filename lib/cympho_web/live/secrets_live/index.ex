@@ -11,8 +11,6 @@ defmodule CymphoWeb.SecretsLive.Index do
     %{
       id: "qwen-dashscope",
       title: "CEO Qwen runtime",
-      summary: "OpenAI-compatible DashScope execution for CEO and executive agents.",
-      profile: "OpenAI Chat Qwen DashScope Flash / Plus / Intl",
       primary_key: "DASHSCOPE_API_KEY",
       keys: ["DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
       model: "qwen3.6-flash for smoke, qwen3.7-plus for planning",
@@ -22,8 +20,6 @@ defmodule CymphoWeb.SecretsLive.Index do
     %{
       id: "llmotions",
       title: "LLMotions runtime",
-      summary: "OpenAI-compatible LLMotions execution for CEO and CTO smoke runs.",
-      profile: "OpenAI Chat LLMotions Gemma / Gemini Flash",
       primary_key: "LLMOTIONS_API_KEY",
       keys: ["LLMOTIONS_API_KEY", "OPENAI_API_KEY"],
       model: "gemma-4-31b for smoke, gemini-3.5-flash for stronger planning",
@@ -33,8 +29,6 @@ defmodule CymphoWeb.SecretsLive.Index do
     %{
       id: "claude-compatible",
       title: "Claude Code runtime",
-      summary: "Anthropic-compatible execution for Claude Code adapters and wrapper commands.",
-      profile: "Claude-compatible",
       primary_key: "ANTHROPIC_API_KEY",
       keys: ["ANTHROPIC_API_KEY"],
       model: "Wrapper or ANTHROPIC_MODEL",
@@ -44,8 +38,6 @@ defmodule CymphoWeb.SecretsLive.Index do
     %{
       id: "codex",
       title: "Codex agents",
-      summary: "OpenAI/Codex credentials for coding agents and hosted model execution.",
-      profile: "Codex runtime",
       primary_key: "OPENAI_API_KEY",
       keys: ["OPENAI_API_KEY", "CODEX_API_KEY"],
       model: "Agent profile default",
@@ -55,8 +47,6 @@ defmodule CymphoWeb.SecretsLive.Index do
     %{
       id: "agrenting",
       title: "Remote marketplace agents",
-      summary: "Agrenting marketplace hires and remote execution handoffs.",
-      profile: "Agrenting remote",
       primary_key: "AGRENTING_API_KEY",
       keys: ["AGRENTING_API_KEY"],
       model: "Marketplace agent",

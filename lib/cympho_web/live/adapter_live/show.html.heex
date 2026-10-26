@@ -114,7 +114,7 @@
         id={"adapter-agent-#{agent.id}"}
         title={agent.name}
         navigate={~p"/agents/#{agent.id}"}
-        status={AgentParts.status(agent, false)}
+        status={agent_status(agent)}
       >
         <:meta :if={distinct_role_label(agent)}>{distinct_role_label(agent)}</:meta>
       </.list_row>

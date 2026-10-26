@@ -41,10 +41,6 @@
 /* disabled pills (r3.css styles only the disabled primary): the same dashed, quiet edge */
 .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .ink .pd:disabled{background:transparent;border-style:dashed;border-color:var(--inv-dash);color:var(--inv-ink-2);cursor:not-allowed}
 .cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .pl:disabled{background:transparent;border-style:dashed;box-shadow:none;color:var(--ink-2);cursor:not-allowed}
-/* a form pair whose fields are shorter than its ink card: the field card grows to the ink card's height (as a
-   Next step pair does), instead of leaving a gap above the next band; the ink card keeps its sticky top */
-.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .fpair>.fp-main{align-self:stretch}
-.cy-r3 :is([data-page="settings"] .set-main:is([data-section="profile"],[data-section="notifications"],[data-section="appearance"],[data-section="integrations"],[data-section="adapters"],[data-section="secrets"],[data-section="proxies"],[data-section="policies"],[data-section="audit"]),[data-page="adapter"]) .fpair>.fp-main>.card:last-child{flex:1 1 auto}
 /* checkbox rows: a 32 px hit area on desktop (r3.css gives 24, and 44 on phones) */
 .cy-r3 :is([data-page="adapter"],[data-page="policy-form"]) .fld-ck{min-height:32px}
 
