@@ -70,6 +70,10 @@
   <div class={["set", @picked? && "picked"]}>
     <.settings_nav active={@section} />
     <div class="set-main">
+      <%!-- Phones show only the opened section; this leads back to the list (settings.css), as on every section --%>
+      <.link :if={@picked?} navigate="/settings/company" class="pl set-bk">
+        <.r3_icon name="i-chev-left" />All settings
+      </.link>
       <%= case @section do %>
         <% :details -> %>
           <.band_card id="cd-t" title="Company details">

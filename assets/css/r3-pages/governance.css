@@ -15,7 +15,7 @@
 /* a band header's end with a count and a link or two */
 .cy-r3 :is(.rv-end,.org-end,.srch-end){display:inline-flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px 12px;min-width:0}
 /* a status word in a band header (the glyph carries the colour) */
-.cy-r3 :is(.rv-tone,.org-lvl,.ov-st){display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;font-weight:500;color:var(--ink-2);white-space:nowrap}
+.cy-r3 :is(.rv-tone,.org-lvl,.ov-st,.bv-st){display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;font-weight:500;color:var(--ink-2);white-space:nowrap}
 /* a disclosure on its own line under a row: no rule of its own, the row's hairline separates */
 .cy-r3 :is([data-page="approvals"],[data-page="reviews"]) .lr-below>.earlier{margin:0;border-top:0}
 .cy-r3 :is([data-page="approvals"],[data-page="reviews"]) .lr-below>.earlier>summary{display:inline-flex;gap:6px;min-height:32px;padding:0 8px 0 0}
@@ -33,11 +33,18 @@
 .cy-r3 .ap-tasks li{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;font-size:13px;line-height:18px;min-width:0}
 .cy-r3 .ap-tasks .ul{overflow-wrap:anywhere}
 .cy-r3 .ap-tasks .mono{font-size:12px;color:var(--ink-2)}
-/* resolved, the page has no Next step: the Details aside starts on the first row */
-.cy-r3 [data-page="approval"] .split:not(:has(>.next))>.aside{grid-row:1 / span 3}
+/* resolved (or nothing for the viewer to decide), the page has no Next step: beside the content the Details
+   aside starts on the first row (at 1180 px and below r3.css stacks it after the content) */
+@media (min-width:1181px){
+  .cy-r3 :is([data-page="approval"],[data-page="board-vote"]) .split:not(:has(>.next))>.aside{grid-row:1 / span 3}
+}
 .cy-r3 [data-page="approval"] .kv dd{overflow-wrap:anywhere}
 .cy-r3 [data-page="approval"] .earlier{margin:4px 8px 4px}
 .cy-r3 .ap-raw{max-height:288px;overflow:auto;margin:0 0 10px;padding:10px 12px;border-radius:10px;background:var(--band);font:12px/18px var(--mono);color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* the Board vote (a redesigned page, restyled with the governance pages): the request in full */
+.cy-r3 [data-page="board-vote"] .bv-desc{padding:8px 12px 12px;max-width:72ch;font-size:14px;line-height:21px;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+.cy-r3 [data-page="board-vote"] .kv dd{overflow-wrap:anywhere}
 
 /* ================================================================
    Reviews (G3): the evidence under each decision row
@@ -50,7 +57,6 @@
 .cy-r3 .rv-packet{display:flex;flex-direction:column;gap:10px;padding:0 0 10px}
 .cy-r3 .rv-lists{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .cy-r3 .rv-lists ul{display:flex;flex-direction:column;gap:4px;margin-top:4px;padding-left:16px;list-style:disc;font-size:12px;line-height:18px;color:var(--ink-2)}
-.cy-r3 :is(.rv-strip,.org-strip,.org-mstrip){grid-template-columns:repeat(4,minmax(0,1fr))}
 .cy-r3 .rv-oldest{padding:2px 12px 8px}
 
 /* ================================================================
@@ -124,7 +130,6 @@
    Compare companies (G7)
    ================================================================ */
 .cy-r3 .ov-note{padding:0 6px}
-.cy-r3 .ov-strip{grid-template-columns:repeat(3,minmax(0,1fr))}
 .cy-r3 .ov-strip .v.mono{font-size:22px;line-height:28px}
 .cy-r3 .ov-links{display:flex;flex-wrap:wrap;gap:2px 14px;margin:4px 8px 2px;padding-top:6px;border-top:1px solid var(--hair)}
 
@@ -143,15 +148,10 @@
   .cy-r3 :is([data-page="approvals"] .tbar .seg,.srch-tabs){width:auto;overflow-x:auto;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,var(--mask) calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,var(--mask) calc(100% - 28px),transparent)}
   .cy-r3 :is([data-page="approvals"] .tbar .seg,.srch-tabs)::-webkit-scrollbar{display:none}
   .cy-r3 [data-page="approvals"] .tbar .seg a,.cy-r3 .srch-tabs button{flex:none;padding:0 14px}
-  .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip){grid-template-columns:repeat(2,minmax(0,1fr))}
-  .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip) .cell:nth-child(odd){border-left:0}
-  .cy-r3 :is(.rv-strip,.org-strip,.org-mstrip) .cell:nth-child(n+3){border-top:1px solid var(--hair)}
   .cy-r3 :is([data-page="approvals"],[data-page="reviews"]) .lr-below>.earlier>summary{min-height:44px}
   /* a task waiting on an approval is a 44 px target (18 px line + 13 px each side), one per line */
   .cy-r3 .ap-tasks{gap:0}
   .cy-r3 .ap-tasks .ul{padding:13px 0}
-  /* a status word that wraps under a tiled row lines up with the title, as the actions do */
-  .cy-r3 :is([data-page="approvals"],[data-page="reviews"],[data-page="org-chart"]) .lrow:has(>.kt)>.lr-st{margin-left:46px}
   .cy-r3 .srch{padding:8px}
   .cy-r3 .srch-f .search,.cy-r3 .srch-f .pl{height:44px}
   .cy-r3 .srch-f .search input{font-size:16px}

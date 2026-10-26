@@ -380,7 +380,7 @@
         </.pill>
       </p>
     </div>
-    <div class="strip op-s4">
+    <div class="strip s4">
       <div :for={step <- @ceo_flow.steps} class="cell">
         <span class="v mono">{step.value}</span>
         <span class="l op-cell-l">
@@ -1027,7 +1027,7 @@
         Evidence, review, and owner-update requests waiting across the company.
       </p>
     </div>
-    <div :if={@review_nudges.counts.total > 0} class="strip op-s4">
+    <div :if={@review_nudges.counts.total > 0} class="strip s4">
       <div class="cell">
         <span class="v mono">{@review_nudges.counts.active}</span><span class="l">Active</span>
       </div>
@@ -1201,7 +1201,7 @@
     <:header_end><span class="meta mono">{@ceo_outcomes.counts.recent} recent</span></:header_end>
     <div data-testid="ceo-outcome-header" class="op-sec">
       <p class="gl-sub">{@ceo_outcomes.summary}</p>
-      <div data-testid="ceo-outcome-health-strip" class="strip op-s3">
+      <div data-testid="ceo-outcome-health-strip" class="strip s3 op-s3">
         <div class="cell">
           <span class="v mono">{ceo_outcome_signal_count(@ceo_outcomes.counts)}</span><span class="l">Signal</span>
         </div>
@@ -1331,7 +1331,7 @@
         </p>
       </details>
     </div>
-    <div class="strip op-s3">
+    <div class="strip s3 op-s3">
       <div class="cell">
         <span class="v mono">{@doctor.counts.critical}</span>
         <span class="l op-cell-l">
@@ -1628,7 +1628,7 @@
         and issue-memory fields shown on issue pages.
       </p>
     </div>
-    <div class="strip op-s4">
+    <div class="strip s4">
       <div class="cell">
         <span class="v mono">{@contract_failures.counts.issues}</span><span class="l">Issues</span>
       </div>
@@ -1833,7 +1833,7 @@
       <p class="gl-big">{@capacity.summary}</p>
       <p class="gl-sub">{@capacity.hint}</p>
     </div>
-    <div class="strip op-s4">
+    <div class="strip s4">
       <div class="cell">
         <span class="v mono">{@capacity.total_agents}</span><span class="l">Agents</span>
       </div>

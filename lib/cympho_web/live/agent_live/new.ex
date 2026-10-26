@@ -934,7 +934,7 @@ defmodule CymphoWeb.AgentLive.New do
     ~H"""
     <div class="fld">
       <label for={@id}>{@label}</label>
-      <span class="hr-sel">
+      <span class="nsel">
         <select id={@id} name={@name} class="fld-sel" aria-describedby={@help && @id <> "-help"}>
           {render_slot(@inner_block)}
         </select>

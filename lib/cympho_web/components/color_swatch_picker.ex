@@ -22,6 +22,11 @@ defmodule CymphoWeb.Components.ColorSwatchPicker do
 
   def presets, do: @presets
 
+  defp chosen?(hex, value) when is_binary(value),
+    do: String.downcase(hex) == value |> String.trim() |> String.downcase()
+
+  defp chosen?(_hex, _value), do: false
+
   attr :field, Phoenix.HTML.FormField, required: true
   attr :label, :string, default: "Colour"
 
@@ -44,6 +49,7 @@ defmodule CymphoWeb.Components.ColorSwatchPicker do
           data-hex={hex}
           title={name}
           aria-label={"Set colour to #{name}"}
+          aria-pressed={to_string(chosen?(hex, @value))}
           style={"background-color:#{hex}"}
         >
         </button>

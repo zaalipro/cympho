@@ -530,6 +530,20 @@ defmodule CymphoWeb.AgentLiveTest do
   end
 
   describe "Show - Agent Details" do
+    # v7 §1.7: a handler's flash is the existing message; the page shows it under its header.
+    test "an Agent page handler's error flash is shown", %{conn: conn} do
+      {:ok, agent} = create_agent(%{name: "Flash Agent", role: :engineer, status: :idle})
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}")
+
+      render_click(view, "apply_instruction_patch", %{"patch" => "no-such-patch"})
+
+      assert has_element?(
+               view,
+               ".agent-h .flash-line .flash-msg.err[role=alert]",
+               "Instruction patch not found."
+             )
+    end
+
     test "renders agent details page", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{

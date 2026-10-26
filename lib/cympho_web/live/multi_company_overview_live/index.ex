@@ -67,7 +67,7 @@ defmodule CymphoWeb.MultiCompanyOverviewLive.Index do
             {summary.budget.budget_status_label}
           </span>
         </:header_end>
-        <div class="strip ov-strip">
+        <div class="strip s3 ov-strip">
           <div class="cell">
             <span class="v mono" data-summary="running">{summary.running}</span><span class="l">Running now</span>
           </div>

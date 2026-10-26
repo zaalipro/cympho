@@ -429,7 +429,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
             {@trace_command.action_label}
           </.text_link>
         </div>
-        <div class="strip st-strip">
+        <div class="strip s4">
           <div :for={metric <- @trace_command.metrics} class="cell">
             <span class="v mono">{metric.value}</span><span class="l">{metric.label}</span>
           </div>

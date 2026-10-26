@@ -102,7 +102,8 @@ defmodule CymphoWeb.TeamRail do
   defp status(:paused), do: {:stopped, "Paused"}
   defp status(:pending_approval), do: {:waiting, "Waiting for your approval"}
   defp status(:offline), do: {:idle, "Offline"}
-  defp status(_idle_or_sleeping), do: {:idle, "Idle"}
+  defp status(:sleeping), do: {:idle, "Sleeping"}
+  defp status(_idle), do: {:idle, "Idle"}
 
   defp rank(%{kind: :stopped}), do: 0
   defp rank(%{for_you: n}) when n > 0, do: 1

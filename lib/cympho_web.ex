@@ -72,7 +72,6 @@ defmodule CymphoWeb do
       import CymphoWeb.CoreComponents
       import CymphoWeb.Components
       import CymphoWeb.Components.Badge
-      import CymphoWeb.Components.Card
       import CymphoWeb.Components.Combobox
       import CymphoWeb.Components.ColorSwatchPicker
       import CymphoWeb.Components.DatePicker

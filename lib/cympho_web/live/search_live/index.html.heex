@@ -265,7 +265,7 @@
         id={"search-agent-#{agent.id}"}
         title={agent.name}
         navigate={~p"/agents/#{agent.id}"}
-        status={agent_status(agent)}
+        status={CymphoWeb.AgentLive.Parts.status(agent, false)}
       >
         <:meta>{agent_line(agent)}</:meta>
         <:trail><span class="tag">Agent</span></:trail>
@@ -298,7 +298,9 @@
           </span>
         </:meta>
         <:trail>
-          <CymphoWeb.IssueLive.Tasks.priority priority={goal_priority(goal.priority)} />
+          <CymphoWeb.IssueLive.Tasks.priority priority={
+            CymphoWeb.GoalLive.Show.priority_atom(goal.priority)
+          } />
           <span class="tag">Goal</span>
         </:trail>
       </.list_row>

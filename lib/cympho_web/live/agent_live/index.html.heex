@@ -19,10 +19,7 @@
     </.pill>
   </:header_end>
 
-  <div :if={@flash[:info] || @flash[:error]} class="flash-line" role="status">
-    <p :if={@flash[:info]} class="text-sm text-success">{@flash[:info]}</p>
-    <p :if={@flash[:error]} class="text-sm text-error">{@flash[:error]}</p>
-  </div>
+  <.flash_line flash={@flash} />
 
   <%!-- The Next step: the company stopped at its limit, else a stopped agent;
        with none, agents-off or all clear (plan §11 D1). A hire is its own card below. --%>

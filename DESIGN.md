@@ -16,7 +16,7 @@ One theme, three modes. Light is paper for reading and ink for deciding. Dark is
 | `assets/css/app.css` `:root` | The light mode: the r3 token set (`--page`, `--frame`, `--tray`, `--card`, `--ink`, `--ink-2`, `--accent`, the status hues, `--inv-*` …), radii, fonts, motion, phone geometry, then the legacy names (`--color-*`) mapped onto r3 tokens |
 | `assets/css/themes.css` | The dark mode, written twice and kept identical: under `prefers-color-scheme: dark` unless `data-mode="light"`, and under `data-mode="dark"` |
 | `assets/css/r3.css` | The shell and the shared components; every selector under `.cy-r3` (the body) |
-| `assets/css/r3-pages/*.css` | Page rules, one file per page group, scoped by `[data-page="…"]` on the page frame |
+| `assets/css/r3-pages/*.css` | Page rules, one file per page group, scoped by `[data-page="…"]` on the page frame (or `.set-main[data-section="…"]` for a Settings section): `home`, `task`, `work` (Tasks, Board), `agents` (Team, Agent), `money` (Spending, Settings), `onboarding`, `auth` (signed-out), `settings`, `planning` (new task, projects, goals, labels, launch checklist, repeating tasks), `governance` (approvals, board vote, reviews, activity, org chart, search, compare companies), `hire` (hire, remote agents, skills, plugins), `company` (spending limits, companies, export, import, docs), `ops` (Health, step log, work files) |
 
 Rules:
 - No colour literal outside the two token blocks. Components and pages use `var(--token)`; templates use Tailwind classes that resolve to tokens.
@@ -49,32 +49,39 @@ The root layout (`controllers/layouts/root.html.heex`) draws one shell for every
 
 ## Page frame
 
-`page_frame/1` (`CymphoWeb.Components.R3`) wraps every redesigned page: a sticky context header and the tray.
-- **Root pages** (Home, Inbox, Tasks, Team, Spending, Settings): the H1, an optional two-tone aside, and controls at the header's end (a segmented filter or view switch, a secondary pill).
-- **Deep pages** (Task, Agent, Board vote): a breadcrumb to the parent destination, and "Back to …" when the page was opened from somewhere other than its parent. The origin comes from `?from=`, accepted only through the allow-list in `UserAuth.safe_from/1`.
-- Pages that are not redesigned keep their markup inside the same frame (`<.page>` / `<.header>`, or a top-level `.ember-aurora`) and inherit the tokens.
+`page_frame/1` (`CymphoWeb.Components.R3`) wraps every page, with `data-ui-complex-page`: a sticky context header and the tray. Settings sections use `settings_layout/1`, which renders the frame titled "Settings" with the section list; the section's first card carries the section's name. (The dev-only Prompt inspector is the one page outside it.)
+- **Root pages** (the six destinations, the pages listed under them in the rail, Search, Documentation): the H1 is the rail label; controls at the header's end (a segmented filter or view switch, at most one secondary pill on phones, usually "New …").
+- **Deep pages** (every detail, create and edit page): a breadcrumb to the list one level up ("‹ Goals › Edit goal"), and "Back to …" when the page was opened from somewhere other than its parent. The origin comes from `?from=`, accepted only through the allow-list in `UserAuth.safe_from/1`. The deep head is `section.head`: the H1, one `.sub` line, then `.chips` with the status and the page's secondary actions. On phones the crumb keeps only the Back pill (the H1 under it names the page; Task and Agent keep their own crumbs).
+- **Page kinds.** A list page: an optional toolbar (`search_capsule`, `filter_menu`, a segmented status), then a `band_card` of `list_row`s or a `quiet_empty`, problems first; at most one `.strip` of 3–4 cells (`.strip.s3` / `.s4`), never a row of stat tiles. A detail page: content bands, then an aside `band_card` "Details" with `kv_list class="wide"` (ids, dates, owners live only there), and a destructive action last as `.pl.warn`. A form page: `form_pair/1`. A log: `list_row`s with a kind tile and the payload in a closed disclosure; a real table is `.tbl-w > table.tbl`, whose `m-hide` columns drop on phones.
+- The page's flash is `flash_line/1`, right under the header (inside a deep head).
 
 ## The Next step
 
-Every redesigned page opens with one Next step: a pair of cards.
+A page that asks the owner to decide opens with one Next step: a pair of cards. Home, Inbox, Tasks, Task, Team, Agent, Spending and Settings always do; the decision pages (an approval, a board vote, a spending limit that was hit, a repeating task that failed or has no schedule, a paused company, export, import, Health's next fix) do while there is something to decide. Other list pages have none: their "New …" pill is secondary.
 - **Problem card** (paper): an eyebrow, a verb-first title, the object in the agent's own words, at most one instrument (run bars, a tick meter), and a footer link to the object.
 - **Resolution card** (ink): what pressing does — consequence rows or the decision form itself — the effect sentence, then the footer with the ⌘↵ hint, one secondary and **the page's only primary** (`primary_pill/1`). Everything else on a page is a secondary pill or a text link.
 - **Order**: the company stopped at its spending limit, then problems, questions, reviews, approvals. Home and Inbox take the first item of `OwnerAttention.owner_order/1`; Tasks opens the first decision of its first group (Blocked, then Waiting on you); Task and Agent lead with their own object's decision in the same order (OwnerAttention keeps one row per task, the problem before the question); Team, Spending and Settings lead with their own subject (a stopped agent, the limit, alerts) after a company stop.
 - **List pages** (Inbox, Tasks) open the first item in place as the pair; every other item is a closed row with one secondary verb.
 - **All clear**: the eyebrow "All clear", the page's own title and, when there is an action, its one primary. With no action the problem card stands alone.
+- **Forms** are pairs too (`form_pair/1`): the field cards on paper, and the ink card saying what saving does, with Cancel as its secondary and the submit as the page's only primary.
 - When agents are switched off on the server and nothing needs the owner, the pair says so ("Turn agents on").
 - A question keeps its task Blocked and offers 2–4 numbered answers plus "write your own".
 - Copy comes from one place: `CymphoWeb.NextStep` holds the effect sentences for every owner item, so one decision reads the same on every page.
 
 ## Components
 
-- `CymphoWeb.Components.R3`: `page_frame`, `next_step`, `problem_card`, `ink_card`, `consequences`, `ink_note`, `ink_foot`, `primary_pill`, `pill`, `ghost_pill`, `text_link`, `chip`, `quote_mark`, `option_rows`, `status_glyph`, `status_word`, `run_bars`, `tick_meter`, `now_capsule`, `object_tile`, `kv_list`, `segmented`, `band_card`, `needs_row`, `team_row`, `search_capsule`, `composer`, `quiet_empty`, and the icon sprite (`r3_sprite`, `r3_icon`).
+- `CymphoWeb.Components.R3`: `page_frame`, `next_step`, `problem_card`, `ink_card`, `consequences`, `ink_note`, `ink_foot`, `primary_pill`, `pill`, `ghost_pill`, `text_link`, `chip`, `quote_mark`, `option_rows`, `status_glyph`, `status_word`, `run_bars`, `tick_meter`, `now_capsule`, `object_tile`, `kv_list`, `segmented`, `band_card`, `needs_row`, `team_row`, `search_capsule`, `composer`, `quiet_empty`, `form_pair`, `list_row` (a row whose title link covers it; only its `actions` and `below` slots take controls), `filter_menu`, `flash_line`, and the icon sprite (`r3_sprite`, `r3_icon`).
+- In the same look, from `CymphoWeb.Components` / `CoreComponents`: `input/1` (`.fld`: label, one help line, the error with `aria-invalid` + `aria-describedby`; 16 px and 44 px tall on phones), `select_menu/1` and the date pickers (`.fld-sel` trigger, `.sel-pop` popover), `modal/1` (a paper dialog, a bottom sheet on phones), `overflow_menu/1` + `menu_item/1`, `density_switch/1`.
+- Status is `status_word` (glyph + word) for live, health and outcome states and `.tag` for neutral attributes; lifecycle defaults ("Active", "Enabled") are not printed. An agent's word comes from `AgentLive.Parts.status/2` everywhere it is shown.
 - `CymphoWeb.NextStep`: `pair/1` for an owner item, `row/1` for a closed Needs-you row, `paused_step/1`, `server_off_step/1`, `all_clear/1`, and `answer_from_params/1` for answer forms.
 - A page-only variant is built from these components in the page's own module; it does not copy their markup.
-- Simple is the default view. Advanced-only blocks carry `ui-advanced-only` and sit below the redesigned blocks.
+- Simple is the default view. Advanced-only blocks carry `ui-advanced-only` and sit below the Simple blocks; Advanced-only pages keep their rail entries Advanced-only, and no Simple-visible link points at them.
+- Every `<details>` a LiveView renders has a stable id and `phx-mounted={JS.ignore_attributes("open")}` (a server-decided `open` uses `data-open` with the `ServerOpen` hook).
 
 ## Checks
 
-- `test/cympho_web/r3_css_contract_test.exs`: the two dark copies are identical, every colour token has a dark value, every `var()` names a declared token, and `r3.css` and `r3-pages/*.css` contain no colour literal.
+- `test/cympho_web/r3_css_contract_test.exs`: the two dark copies are identical, every colour token has a dark value, every `var()` names a declared token, and `r3.css` and `r3-pages/*.css` contain no colour literal. Templates write no colour either, except a user's own data colour (a label, a project) as a 10 px `.sw` swatch beside its text.
+- `test/cympho_web/details_open_state_test.exs`: the `<details>` rule above.
+- `CymphoWeb.R3PageHelpers.assert_r3_page/2` in page tests: the frame, one H1, the crumb on deep pages, and every `.pw` on an ink card.
 - Contrast: every token pair the pages use passes WCAG AA in both modes: 4.5:1 for text, 3:1 for marks, field borders and focus rings.
 - Every page: one H1, one current destination, one primary, no horizontal overflow at 1440, 1024 and 390 px.

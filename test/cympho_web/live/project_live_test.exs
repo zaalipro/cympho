@@ -477,6 +477,23 @@ defmodule CymphoWeb.ProjectLiveTest do
     end
   end
 
+  test "the chosen colour swatch is pressed, ringed with tokens rather than an inline colour" do
+    field = Phoenix.Component.to_form(%{"color" => "#5DB8A6"}, as: :project)[:color]
+
+    doc =
+      (&CymphoWeb.Components.ColorSwatchPicker.color_swatch_picker/1)
+      |> Phoenix.LiveViewTest.render_component(field: field)
+      |> Floki.parse_fragment!()
+
+    assert Floki.attribute(doc, ~s(.swp-b[aria-pressed="true"]), "title") == ["Teal"]
+    assert length(Floki.find(doc, ~s(.swp-b[aria-pressed="false"]))) == 7
+
+    css = File.read!("assets/css/r3-pages/planning.css")
+
+    assert css =~
+             ~s|.swp-b[aria-pressed="true"]{border-color:var(--card);box-shadow:0 0 0 2px var(--ink)}|
+  end
+
   test "keyboard focus on a colour swatch draws the focus ring" do
     css = File.read!("assets/css/r3-pages/planning.css")
 

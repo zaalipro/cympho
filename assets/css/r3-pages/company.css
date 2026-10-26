@@ -7,15 +7,12 @@
    - Shared components belong in r3.css, not here. */
 
 /* ================================================================
-   1. Shared by the company pages: 3/4-cell strips (2×2 on phones), a quiet line in a card,
-      a status word in a band header, the form pair's effect stack
+   1. Shared by the company pages: a quiet line in a card, a status word in a band header,
+      the form pair's effect stack
    ================================================================ */
-.cy-r3 :is([data-page="budgets"],[data-page="companies"]) .strip.s4{grid-template-columns:repeat(4,minmax(0,1fr))}
-.cy-r3 [data-page="import"] .strip.s3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .cy-r3 [data-page="import"] .paper .strip{margin:4px -8px 0;padding-top:8px;border-top:1px solid var(--hair)}
 .cy-r3 :is([data-page="export"],[data-page="import"]) :is(.ex-line,.im-line){padding:4px 12px 2px}
 .cy-r3 :is([data-page="budgets"],[data-page="companies"]) :is(.bg-st,.co-st){display:inline-flex;align-items:center;gap:6px}
-.cy-r3 :is([data-page="budgets"],[data-page="companies"]) .gl-sec>.lnk{align-self:flex-start;margin-left:-4px}
 
 /* ================================================================
    2. Spending limit (/budgets, /budgets/:id, the limit form)
@@ -126,8 +123,6 @@
 
 /* the search dialog (CoreComponents.modal) */
 .cy-r3 [data-page="docs"] .dc-search{display:flex;flex-direction:column;gap:12px;min-width:0}
-/* the capsule draws the focus ring (:focus-within); the field inside must not draw a second one */
-.cy-r3 [data-page="docs"] .dc-search .search input:focus-visible{box-shadow:none}
 .cy-r3 [data-page="docs"] .dc-try{display:flex;flex-direction:column;gap:10px;padding:4px 2px}
 .cy-r3 [data-page="docs"] .dc-hits{display:flex;flex-direction:column;gap:2px;max-height:min(50dvh,420px);overflow-y:auto}
 .cy-r3 [data-page="docs"] .dc-hit{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:var(--r-row);border:1px solid transparent;transition:background .18s var(--ease)}
@@ -165,18 +160,11 @@
 
 /* ---------- phone (390) ---------- */
 @media (max-width:640px){
-  .cy-r3 :is([data-page="budgets"],[data-page="companies"]) .strip.s4{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .cy-r3 :is([data-page="budgets"],[data-page="companies"]) .strip.s4 .cell:nth-child(3){border-left:0}
-  .cy-r3 :is([data-page="budgets"],[data-page="companies"]) .strip.s4 .cell:nth-child(n+3){border-top:1px solid var(--hair)}
   .cy-r3 [data-page="budgets"] .lrow .lr-tr{white-space:normal}
   .cy-r3 [data-page="budgets"] .lrow>.lr-tr{flex-basis:100%}
   /* a company row's only action is its menu: the tag and the kebab stay beside the name, not on lines of their own */
   .cy-r3 [data-page="companies"] .lrow>.row-main{flex-basis:0}
   .cy-r3 [data-page="companies"] .lrow .lr-acts{flex-basis:auto}
-  /* a record's phone crumb has ~60-80 px beside its Back pill, so its name would show as "Northwin…";
-     it keeps only the Back pill, and the H1 right under it names the page in full ("Invoicing app", "Edit …", "Export") */
-  .cy-r3 :is([data-page="budget"],[data-page="company"],[data-page="export"]) .crumb li+li,
-  .cy-r3 :is([data-page="budget"],[data-page="company"],[data-page="export"]) .crumb .sep{display:none}
   .cy-r3 [data-page="import"] .strip.s3 .v{font-size:20px}
   .cy-r3 [data-page="import"] .im-drop input[type=file]{font-size:16px}
   .cy-r3 [data-page="import"] .im-drop input[type=file]::file-selector-button{height:44px;font-size:16px}

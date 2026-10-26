@@ -156,7 +156,7 @@ defmodule CymphoWeb.LaunchItemLive.Index do
               <div class="li-ctl">
                 <form id={"launch-item-owner-#{item.id}"} phx-change="update_owner" class="li-own">
                   <input type="hidden" name="_id" value={item.id} />
-                  <span class="li-sel">
+                  <span class="nsel li-sel">
                     <select
                       name="owner_user_id"
                       class="fld-sel"

@@ -478,16 +478,6 @@ defmodule CymphoWeb.SearchLive.Index do
     end
   end
 
-  # A goal's priority is a string; Tasks.priority/1 draws the High and Critical atoms only.
-  defp goal_priority("critical"), do: :critical
-  defp goal_priority("high"), do: :high
-  defp goal_priority(_priority), do: nil
-
-  # Parts.status/2 (frozen, shared with Team) reads :sleeping as Idle; the heartbeat
-  # skips a sleeping agent (agent_heartbeat.ex), so it is named, in Parts' shape for Offline.
-  defp agent_status(%{status: :sleeping}), do: {:idle, "Sleeping"}
-  defp agent_status(agent), do: CymphoWeb.AgentLive.Parts.status(agent, false)
-
   defp agent_line(%{title: title}) when is_binary(title) and title != "", do: title
   defp agent_line(agent), do: Agent.role_label(agent.role)
 

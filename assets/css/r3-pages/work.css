@@ -74,8 +74,6 @@
 .cy-r3 .colp:hover{color:var(--ink);border-color:var(--field)}
 .cy-r3 .colp .mono{color:var(--ink)}
 .cy-r3 .colp[aria-expanded="true"]{border-style:solid;border-color:var(--btn-line-hover);background:var(--btn-bg);color:var(--ink)}
-.cy-r3 .bflash{padding:10px 14px;border-radius:12px;background:var(--card);border:1px solid var(--edge);font-size:13px;line-height:18px;color:var(--ink)}
-.cy-r3 .bflash.st{background:var(--stopped-bg);border-color:var(--stopped-line);color:var(--stopped)}
 .cy-r3 .bcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:start}
 .cy-r3 .bcol{display:flex;flex-direction:column;gap:6px;min-width:0}
 .cy-r3 .bcs{display:flex;flex-direction:column;gap:8px;min-height:56px}

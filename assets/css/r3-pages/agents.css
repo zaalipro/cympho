@@ -61,6 +61,8 @@
 .cy-r3 [data-page="agent"] .sp.k-wait{background:var(--waiting-bg);border-color:var(--waiting-line);color:var(--waiting)}
 .cy-r3 [data-page="agent"] .sp.k-idle{background:var(--band);border-color:var(--band-line);color:var(--ink-nav)}
 .cy-r3 [data-page="agent"] .adv-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+/* the page's flash takes its own line under the status and the tabs */
+.cy-r3 [data-page="agent"] .row2>.flash-line{flex-basis:100%}
 .cy-r3 [data-page="agent"] .adv-tools .pl[aria-current]{background:var(--count-bg);border-color:var(--count-bg);color:var(--count-ink)}
 .cy-r3 [data-page="agent"] .tray>.gl-sub[role="status"]{padding:0 6px}
 /* the task named under Working on is a link: give it the desktop target floor */

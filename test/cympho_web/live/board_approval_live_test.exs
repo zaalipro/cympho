@@ -25,7 +25,9 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
 
     {:ok, _view, html} = live(conn, "/board-approvals/#{approval.id}")
 
-    assert html =~ "Governance Risk Brief"
+    # r3 (integrator restyle): the brief is a band titled "Governance risk", the level a status word.
+    assert html =~ "Governance risk"
+    assert html =~ ~s(data-testid="governance-risk-brief")
     assert html =~ "High risk"
     assert html =~ "Split vote detected"
     assert html =~ "Resolve board disagreement"
@@ -34,7 +36,7 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
     assert html =~ "1 missing"
     assert html =~ "Decision threshold"
     assert html =~ "Audit trail"
-    assert html =~ "PENDING"
+    assert html =~ "Waiting for votes"
     refute html =~ "String.upcase"
     # r3: the vote is a form with a reason; a member who is not on the board gets none.
     refute html =~ "cast_vote"
@@ -90,6 +92,14 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
     assert crumb_parent(html) == "/inbox"
     refute html =~ "Back to Inbox"
     assert has_element?(view, "form#vote button[name='vote'][value='approve']")
+
+    # r3: the vote is the page's Next step; Approve is its one primary, on the ink card.
+    doc = Floki.parse_document!(html)
+    assert [_] = Floki.find(doc, "#main-content .pw")
+    assert [_] = Floki.find(doc, ".next form.ink#vote button.pw[name='vote'][value='approve']")
+    assert [_] = Floki.find(doc, ".next form.ink#vote button.pd[name='vote'][value='deny']")
+    assert [_] = Floki.find(doc, ".next form.ink#vote button.pd[name='vote'][value='abstain']")
+    assert [_] = Floki.find(doc, ".next form.ink#vote textarea#vote-reason[name='reason']")
 
     # r3: the vote is a form, so the reason travels with it (cast_vote/4).
     view
@@ -162,7 +172,7 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
     html = render(view)
 
     assert Process.alive?(pid)
-    assert html =~ "APPROVED"
+    assert html =~ "Approved"
     assert html =~ "1 approve"
     refute has_element?(view, "form#vote")
 
@@ -195,13 +205,13 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
     {:ok, _third} = BoardApprovals.cast_vote(approval.id, third.id, "approve")
 
     {:ok, view, html} = live(conn, "/board-approvals/#{approval.id}")
-    assert html =~ "APPROVED"
+    assert html =~ "Approved"
     assert html =~ "Release checks keep slipping."
 
     row = view |> element("#board-vote-#{with_reason.id}") |> render()
     assert row =~ voter.name
     assert row =~ "Release checks keep slipping."
-    assert row =~ "APPROVE"
+    assert row =~ "Approved"
 
     # A vote cast without a reason shows its voter and vote, and no empty reason line.
     assert has_element?(view, "#board-vote-#{without_reason.id}", silent.name)
@@ -237,7 +247,7 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
 
     # render/1 is queued behind the :board_vote_cast broadcast the view sent itself.
     html = render(view)
-    assert html =~ "PENDING"
+    assert html =~ "Waiting for votes"
 
     {:ok, updated} = BoardApprovals.get_board_approval(approval.id)
     assert updated.status == "pending"
@@ -245,7 +255,7 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
 
     voter = Users.get_user!(user_id)
     assert has_element?(view, "#board-vote-#{vote.id}", voter.name)
-    assert has_element?(view, "#board-vote-#{vote.id}", "APPROVE")
+    assert has_element?(view, "#board-vote-#{vote.id}", "Approved")
 
     assert has_element?(
              view,
@@ -279,11 +289,11 @@ defmodule CymphoWeb.BoardApprovalLiveTest do
 
     view |> form("#vote") |> render_submit(%{"vote" => "abstain"})
 
-    assert render(view) =~ "PENDING"
+    assert render(view) =~ "Waiting for votes"
     refute has_element?(view, "form#vote")
 
     {:ok, _view, html} = live(conn, "/board-approvals/#{approval.id}")
-    assert html =~ "PENDING"
+    assert html =~ "Waiting for votes"
     refute html =~ ~s(id="vote")
   end
 

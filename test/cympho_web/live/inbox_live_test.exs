@@ -1044,6 +1044,13 @@ defmodule CymphoWeb.InboxLiveTest do
       assert Phoenix.Flash.get(flash, :error) ==
                "Only company owners, admins, and board members can resolve approvals."
 
+      # The page draws it with the shared flash line (v7 §1.7).
+      assert has_element?(
+               view,
+               ".flash-line .flash-msg.err[role=alert]",
+               "Only company owners, admins, and board members can resolve approvals."
+             )
+
       assert {:ok, pending} = Approvals.get_company_approval(company.id, approval.id)
       assert pending.status == :pending
     end

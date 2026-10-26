@@ -93,7 +93,7 @@ defmodule CymphoWeb.OrgChartLive do
           </span>
         </:header_end>
         <p class="gl-sub org-sum">{@org_health.summary}</p>
-        <div class="strip org-strip">
+        <div class="strip s4">
           <div class="cell">
             <span class="v mono">{@org_health.metrics.missing_roles}</span><span class="l">Role gaps</span>
           </div>
@@ -186,7 +186,7 @@ defmodule CymphoWeb.OrgChartLive do
         on_cancel={JS.push("close_agent_panel")}
         show={true}
       >
-        <div class="strip org-mstrip">
+        <div class="strip s4">
           <div class="cell">
             <span class="v mono">
               {@selected_agent_stats && @selected_agent_stats.direct_reports}
@@ -305,7 +305,7 @@ defmodule CymphoWeb.OrgChartLive do
   attr :node, :map, required: true
 
   def agent_card(assigns) do
-    assigns = assign(assigns, :status, agent_status(assigns.node))
+    assigns = assign(assigns, :status, Parts.status(assigns.node, false))
 
     ~H"""
     <span class="tile-ag" aria-hidden="true">{Parts.initials(@node.name)}</span>
@@ -319,11 +319,6 @@ defmodule CymphoWeb.OrgChartLive do
     </span>
     """
   end
-
-  # Parts.status/2 (frozen, shared with Team) reads :sleeping as Idle; the heartbeat
-  # skips a sleeping agent (agent_heartbeat.ex), so it is named, in Parts' shape for Offline.
-  defp agent_status(%{status: :sleeping}), do: {:idle, "Sleeping"}
-  defp agent_status(agent), do: Parts.status(agent, false)
 
   defp tree_count(nodes) when is_list(nodes) do
     Enum.reduce(nodes, 0, fn node, acc -> acc + 1 + tree_count(node.children) end)

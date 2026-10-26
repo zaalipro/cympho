@@ -447,61 +447,11 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
   color: var(--color-primary);
 }
 
-.ui-simple-icon {
-  display: inline-flex;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-hairline);
-  border-radius: 8px;
-  background: var(--color-surface-3);
-  color: var(--color-ink);
-}
-
-.ui-simple-card {
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
-    var(--color-panel);
-  box-shadow:
-    inset 0 1px 0 0 var(--shadow-inset-highlight),
-    0 1px 2px rgb(var(--shadow-rgb) / calc(0.18 * var(--shadow-strength)));
-  transition:
-    transform 400ms var(--ease-spring),
-    border-color 200ms ease,
-    box-shadow 400ms var(--ease-spring);
-}
-
-.ui-simple-card:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
-  box-shadow:
-    inset 0 1px 0 0 var(--shadow-inset-highlight),
-    0 4px 12px rgb(var(--shadow-rgb) / calc(0.22 * var(--shadow-strength))),
-    0 12px 32px rgb(var(--shadow-rgb) / calc(0.18 * var(--shadow-strength)));
-}
-
-.cympho-panel {
-  background: var(--color-panel);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  box-shadow:
-    inset 0 1px 0 0 var(--shadow-inset-highlight),
-    0 1px 2px rgb(var(--shadow-rgb) / calc(0.18 * var(--shadow-strength)));
-}
-
 /* Text on a primary fill reads the fill's own ink. Legacy links pass it next to
    app_link/1's default text colours, which come later in the utilities and
    would otherwise win (and turn to ink on hover). */
 .text-on-primary {
   color: var(--color-on-primary) !important;
-}
-
-#kanban-board[data-drag-unavailable="true"] .kanban-card-actions {
-  opacity: 1;
 }
 
 /* Universal focus-visible ring per DESIGN.md: every interactive
@@ -539,18 +489,6 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
   outline: 1px solid var(--color-primary);
   outline-offset: -1px;
   transition: outline-color 200ms ease-out;
-}
-
-.kanban-card-shake {
-  animation: kanban-shake 0.32s ease-in-out;
-}
-
-@keyframes kanban-shake {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(-4px); }
-  40% { transform: translateX(4px); }
-  60% { transform: translateX(-3px); }
-  80% { transform: translateX(2px); }
 }
 
 .cympho-menu > summary::-webkit-details-marker {
@@ -645,24 +583,6 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-@keyframes slide-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.animate-slide-up {
-  animation: slide-up 0.15s ease-out;
-}
-
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.animate-fade-in {
-  animation: fade-in 0.15s ease-out;
-}
-
 /* Mission-control status pulse — used on the dashboard hero status dot
    and on the running-agent avatar ring. Halo grows + fades. */
 @keyframes cympho-pulse {
@@ -684,286 +604,6 @@ html[data-ui-mode="simple"] [data-ui-complex-page] [data-ui-simple-full-span] {
 
 .cympho-activity-flash {
   animation: cympho-activity-flash 0.8s ease-out;
-}
-
-/* Faint film-grain overlay applied once on the dashboard page wrapper.
-   SVG fractal noise → no extra asset, no network cost. */
-.cympho-noise::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  opacity: var(--noise-opacity);
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/></svg>");
-}
-
-/* Soft vignette on the dashboard page so the canvas edges fall off. */
-.cympho-vignette::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background: radial-gradient(ellipse at center, transparent 55%, var(--vignette-color) 100%);
-}
-
-/* ============================================
-   Search Bar
-   ============================================ */
-
-.search-bar {
-  display: inline-flex;
-  align-items: center;
-  position: relative;
-}
-
-.search-bar input[type="text"] {
-  padding: 8px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font-size: 0.9em;
-  width: 220px;
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-}
-
-.search-bar input[type="text"]::placeholder {
-  color: var(--color-text-quaternary);
-}
-
-.search-clear {
-  position: absolute;
-  right: 6px;
-  background: none;
-  border: none;
-  font-size: 1.2em;
-  cursor: pointer;
-  color: var(--color-text-tertiary);
-  padding: 0 4px;
-}
-
-/* ============================================
-   Issue Filters
-   ============================================ */
-
-.issue-filters {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  margin-bottom: 20px;
-  padding: 12px 15px;
-  background: var(--color-subtle);
-  border-radius: 12px;
-  border: 1px solid var(--color-border-subtle);
-}
-
-.filter-group select {
-  padding: 8px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font-size: 0.9em;
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
-}
-
-.issue-count-label {
-  color: var(--color-text-tertiary);
-  font-size: 0.9em;
-  margin-left: auto;
-}
-
-/* ============================================
-   Pagination
-   ============================================ */
-
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 15px;
-  margin-top: 20px;
-  padding: 15px;
-}
-
-.pagination-btn {
-  background: var(--color-button-bg);
-  color: var(--color-text-secondary);
-  border: 1px solid var(--color-border);
-  padding: 8px 16px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.pagination-btn:hover {
-  background: var(--color-button-hover);
-  color: var(--color-text-primary);
-}
-
-.pagination-info {
-  color: var(--color-text-tertiary);
-  font-size: 0.9em;
-}
-
-/* ============================================
-   Settings
-   ============================================ */
-
-.settings-container { max-width: 800px; }
-
-.settings-section {
-  background: var(--color-panel);
-  padding: 24px;
-  border-radius: 12px;
-  border: 1px solid var(--color-border);
-  margin-bottom: 20px;
-}
-
-.settings-section h2 { margin: 0 0 8px 0; color: var(--color-text-primary); }
-.settings-description { color: var(--color-text-tertiary); margin: 0 0 20px 0; font-size: 0.95em; }
-
-.channel-cards { display: flex; flex-direction: column; gap: 12px; }
-
-.channel-card {
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 16px;
-  background: var(--color-surface);
-}
-
-.channel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.channel-info h3 { margin: 0 0 4px 0; font-size: 1.1em; color: var(--color-text-primary); }
-
-.channel-status {
-  font-size: 0.85em;
-  color: var(--color-text-tertiary);
-}
-
-.channel-detail {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--color-border-subtle);
-  font-size: 0.9em;
-  color: var(--color-text-tertiary);
-}
-
-.channel-detail code {
-  background: var(--color-subtle);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 0.9em;
-  color: var(--color-text-secondary);
-}
-
-.toggle-btn {
-  width: 52px;
-  height: 28px;
-  border-radius: 14px;
-  border: none;
-  cursor: pointer;
-  font-size: 0.75em;
-  font-weight: bold;
-  color: white;
-  transition: background 0.2s;
-}
-
-.toggle-on { background: var(--color-success); }
-.toggle-off { background: var(--color-text-quaternary); }
-
-.inline-form {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.inline-form input {
-  padding: 8px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font-size: 0.9em;
-  flex: 1;
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-}
-
-.inline-form input::placeholder {
-  color: var(--color-text-quaternary);
-}
-
-.badge-success { background: rgba(61,139,79,0.15); color: var(--color-success); }
-html[data-theme="dark"] .badge-success { background: rgba(74,222,128,0.15); }
-.badge-info { background: rgba(201,100,66,0.15); color: var(--color-brand); }
-.badge-error { background: rgba(181,51,51,0.15); color: var(--color-error); }
-html[data-theme="dark"] .badge-error { background: rgba(239,68,68,0.15); color: #f87171; }
-
-.test-result { margin-top: 8px; }
-
-.event-grid { display: flex; flex-direction: column; gap: 12px; }
-
-.event-channel-group {
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 16px;
-  background: var(--color-surface);
-}
-
-.event-channel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.event-channel-header h3 { margin: 0; color: var(--color-text-primary); }
-
-.event-toggles { display: flex; gap: 16px; flex-wrap: wrap; }
-
-.event-toggle { display: flex; align-items: center; gap: 6px; }
-
-.event-toggle-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  font-size: 0.85em;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.event-on { background: var(--color-success); }
-.event-off { background: var(--color-text-quaternary); }
-
-.event-label { font-size: 0.9em; color: var(--color-text-tertiary); }
-
-.settings-empty {
-  text-align: center;
-  padding: 40px;
-  color: var(--color-text-tertiary);
-}
-
-/* ============================================
-   Responsive Overrides
-   ============================================ */
-
-@media (max-width: 640px) {
-  .issue-filters {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .filter-group select {
-    width: 100%;
-  }
 }
 
 /* ============================================
@@ -992,12 +632,6 @@ html[data-theme="dark"] .badge-error { background: rgba(239,68,68,0.15); color: 
 }
 .toast-visible { opacity: 1; transform: translateX(0) scale(1); }
 .toast-exit { opacity: 0; transform: translateX(24px) scale(0.97); }
-.toast-info    { background: rgba(201, 100, 66, 0.15); color: var(--color-brand); border: 1px solid rgba(201, 100, 66, 0.2); }
-.toast-success { background: rgba(61, 139, 79, 0.15); color: var(--color-success); border: 1px solid rgba(61, 139, 79, 0.2); }
-.toast-warning { background: rgba(180, 140, 60, 0.15); color: #b48c3c; border: 1px solid rgba(180, 140, 60, 0.2); }
-html[data-theme="dark"] .toast-warning { color: #facc15; background: rgba(234, 179, 8, 0.15); border-color: rgba(234, 179, 8, 0.2); }
-.toast-error   { background: rgba(181, 51, 51, 0.15); color: var(--color-error); border: 1px solid rgba(181, 51, 51, 0.2); }
-html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); color: #f87171; border-color: rgba(239, 68, 68, 0.2); }
 
 /* ============================================
    Markdown body — used for rendered agent instructions etc.
@@ -1282,7 +916,6 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
     animation: none !important;
   }
   .card-lift:hover,
-  .ui-simple-card:hover,
   .cta-glow:hover {
     transform: none !important;
   }

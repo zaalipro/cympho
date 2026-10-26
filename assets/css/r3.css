@@ -509,12 +509,10 @@
 .cy-r3 .spend-go{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:500;color:var(--ink)}
 .cy-r3 .spend:hover .spend-go{text-decoration:underline;text-underline-offset:3px}
 
-/* ---------- legacy pages in the r3 frame (CymphoWeb.Components.page/1 and top-level .ember-aurora roots) ---------- */
+/* ---------- a page outside the r3 frame (CymphoWeb.Components.page/1: only the dev Prompt inspector) ---------- */
 .cy-r3 .lframe{background:var(--frame);border-radius:var(--r-frame);box-shadow:var(--sh-frame);padding:14px 24px 24px}
-.cy-r3 [data-phx-main]>.ember-aurora{background:var(--frame);border-radius:var(--r-frame);box-shadow:var(--sh-frame)}
 @media (max-width:640px){
   .cy-r3 .lframe{border-radius:24px;padding:10px 12px 16px}
-  .cy-r3 [data-phx-main]>.ember-aurora{border-radius:24px}
 }
 
 /* ---------- states the shared components draw (CymphoWeb.Components.R3) beyond the mockups' frames ---------- */
@@ -883,4 +881,62 @@
   .cy-r3 :where([data-page]:not([data-page="onboarding"])) .kv.wide dd{margin-bottom:10px}
   /* on paper the legend is the section heading (r3.css hides it on the resolution card) */
   .cy-r3 :is(.card,.paper) .opts legend:not(.sr){position:static;width:auto;height:auto;margin:0 0 4px;overflow:visible;clip:auto;white-space:normal}
+}
+
+
+/* ================================================================
+   Shared parts promoted after the finish-redesign merge (v7 integrator): rules that two or more
+   page files wrote for themselves, now written once
+   ================================================================ */
+
+/* strips of three or four cells: a band's summary numbers (two by two on phones) */
+.cy-r3 .strip.s3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.cy-r3 .strip.s4{grid-template-columns:repeat(4,minmax(0,1fr))}
+
+/* an open row menu rises above the next rows' lifted actions (each .lr-acts is z-index 1 and a .row is no
+   stacking context), so their buttons cannot paint over the panel and take its clicks */
+.cy-r3 .lrow .lr-acts:has(.cympho-menu[open]){z-index:3}
+/* a row title inside an Advanced block keeps its own line box (app.css's legacy 28/44 px floor reaches it):
+   the row-covering ::after is the target */
+.cy-r3 .lrow .rt2{min-height:0}
+
+/* a native <select> drawn as an r3 field (select.fld-sel in a .nsel wrapper with a chevron), where a hook reads
+   its options (Hire's runtime fields) or a row changes it in place (Launch checklist owners) */
+.cy-r3 .nsel{position:relative;display:flex}
+.cy-r3 .nsel select{-webkit-appearance:none;appearance:none;padding-right:36px;cursor:pointer}
+.cy-r3 .nsel>.ico{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--ink-2);pointer-events:none}
+
+/* a quiet section's one pill or text link keeps its own width (the section is a flex column) */
+.cy-r3 .gl-sec>.pl{align-self:flex-start;margin-top:6px}
+.cy-r3 .gl-sec>.lnk{align-self:flex-start;margin-left:-4px}
+
+/* a disabled pill reads as unavailable: dashed and quiet, as the disabled primary and fields do */
+.cy-r3 .pl:disabled{background:transparent;border-style:dashed;box-shadow:none;color:var(--ink-2);cursor:not-allowed;opacity:.55}
+.cy-r3 .ink .pd:disabled{background:transparent;border-style:dashed;border-color:var(--inv-dash);color:var(--inv-ink-2);cursor:not-allowed}
+/* a text link on the resolution card reads the inverse ink */
+.cy-r3 .ink .lnk{color:var(--inv-ink-hi)}
+
+/* the search capsule draws the ring (:focus-within); its field does not draw a second one */
+.cy-r3 .search input:focus-visible{box-shadow:none}
+/* the focus ring wins over a control's resting shadow (both 0,2,0; the control's rule came later). A needs-row
+   verb (.go) keeps its ring on the whole row */
+.cy-r3 :is(.pl,.pw,.pd,.chip,.seg a,.seg button,.d,.ib,.btn-new):not(.go):focus-visible{box-shadow:0 0 0 2px var(--focus-gap),0 0 0 4px var(--focus-ring)}
+
+/* toasts (the Toast hook, app.js): a paper pop with ink text; a problem in the Stopped tone, a warning in Waiting */
+.cy-r3 .toast{background:var(--pop);border:1px solid var(--line);color:var(--ink);box-shadow:var(--sh-pop)}
+.cy-r3 .toast-warning{background:var(--waiting-bg);border-color:var(--waiting-line);color:var(--waiting)}
+.cy-r3 .toast-error{background:var(--stopped-bg);border-color:var(--stopped-line);color:var(--stopped)}
+
+@media (max-width:640px){
+  .cy-r3 .strip.s4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cy-r3 .strip.s4>.cell:nth-child(3){border-left:0}
+  .cy-r3 .strip.s4>.cell:nth-child(n+3){border-top:1px solid var(--hair)}
+  /* a status, or a trail without one, that wraps under a tiled row lines up with the title (as the actions do) */
+  .cy-r3 .lrow:has(>.kt)>.lr-st,.cy-r3 .lrow:has(>.kt):not(:has(>.lr-st))>.lr-tr{margin-left:46px}
+  /* a deep page's crumb keeps only the way back, the H1 right under it names the page; a long parent name
+     ellipsizes inside the Back pill. Task and Agent keep their approved phone crumbs */
+  .cy-r3 [data-page]:not([data-page="task"],[data-page="agent"]) .crumb :is(li+li,.sep){display:none}
+  .cy-r3 [data-page]:not([data-page="task"],[data-page="agent"]) .crumb li:first-child{flex:0 1 auto;min-width:0}
+  .cy-r3 [data-page]:not([data-page="task"],[data-page="agent"]) .crumb .back{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;line-height:44px}
+  .cy-r3 [data-page]:not([data-page="task"],[data-page="agent"]) .crumb .back .ico{margin-right:4px;vertical-align:-3px}
 }

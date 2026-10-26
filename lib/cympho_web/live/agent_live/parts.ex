@@ -21,6 +21,8 @@ defmodule CymphoWeb.AgentLive.Parts do
   def status(%{status: status}, _) when status in [:running, :active], do: {:working, "Working"}
   def status(%{status: :pending_approval}, _), do: {:waiting, "Waiting for your approval"}
   def status(%{status: :offline}, _), do: {:idle, "Offline"}
+  # The heartbeat skips a sleeping agent, so it is named rather than called Idle.
+  def status(%{status: :sleeping}, _), do: {:idle, "Sleeping"}
   def status(%{status: :terminated}, _), do: {:idle, "Terminated"}
   def status(_agent, _running?), do: {:idle, "Idle"}
 

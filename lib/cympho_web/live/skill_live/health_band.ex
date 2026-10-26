@@ -34,7 +34,7 @@ defmodule CymphoWeb.SkillLive.HealthBand do
         </span>
       </:header_end>
       <p class="gl-sub hb-line">{@health.summary}</p>
-      <div class="strip hb-strip">
+      <div class="strip s4">
         <div :for={{label, value} <- @cells} class="cell">
           <span class="v mono">{value}</span><span class="l">{label}</span>
         </div>

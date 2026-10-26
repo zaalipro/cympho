@@ -126,7 +126,6 @@ module.exports = {
         fuchsia: semantic("cat-2"),
         slate: semantic("idle"),
         gray: semantic("idle"),
-        zinc: { 100: "#E8E3DA", 200: "#D6D0C6", 500: "#807A6F" },
       },
       fontFamily: {
         // Theme-driven — the real stacks live in CSS vars (app.css :root +
@@ -254,32 +253,6 @@ module.exports = {
     }),
 
     plugin(({addUtilities}) => addUtilities({
-      ".text-display-xl": {
-        fontFamily: "var(--font-display)",
-        fontSize: "80px", lineHeight: "1.05", letterSpacing: "-1.5px", fontWeight: "600"
-      },
-      ".text-display-lg": {
-        fontFamily: "var(--font-display)",
-        fontSize: "56px", lineHeight: "1.10", letterSpacing: "-1.0px", fontWeight: "600"
-      },
-      ".text-display-md": {
-        fontFamily: "var(--font-display)",
-        fontSize: "40px", lineHeight: "1.15", letterSpacing: "-0.5px", fontWeight: "600"
-      },
-      ".text-headline": {
-        fontFamily: "var(--font-display)",
-        fontSize: "28px", lineHeight: "1.20", letterSpacing: "-0.3px", fontWeight: "600"
-      },
-      ".text-card-title": {
-        fontFamily: "var(--font-display)",
-        fontSize: "22px", lineHeight: "1.25", letterSpacing: "-0.2px", fontWeight: "500"
-      },
-      ".text-subhead": {
-        fontSize: "20px", lineHeight: "1.40", letterSpacing: "-0.2px", fontWeight: "400"
-      },
-      ".text-body-lg": {
-        fontSize: "18px", lineHeight: "1.50", letterSpacing: "-0.1px", fontWeight: "400"
-      },
       ".text-body": {
         fontSize: "16px", lineHeight: "1.50", letterSpacing: "-0.05px", fontWeight: "400"
       },
@@ -289,15 +262,8 @@ module.exports = {
       ".text-caption": {
         fontSize: "12px", lineHeight: "1.40", letterSpacing: "0", fontWeight: "400"
       },
-      ".text-button": {
-        fontSize: "14px", lineHeight: "1.20", letterSpacing: "0", fontWeight: "500"
-      },
       ".text-eyebrow": {
         fontSize: "13px", lineHeight: "1.30", letterSpacing: "0.4px", fontWeight: "500"
-      },
-      ".text-mono": {
-        fontFamily: "var(--font-mono)",
-        fontSize: "13px", lineHeight: "1.50", letterSpacing: "0", fontWeight: "400"
       },
     })),
   ]

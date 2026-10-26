@@ -616,11 +616,6 @@ defmodule CymphoWeb.AdapterLive.Show do
   defp health_status(:unhealthy), do: {:stopped, "Unhealthy"}
   defp health_status(_), do: {:idle, "Not checked"}
 
-  # The heartbeat skips sleeping agents, so say so; the frozen AgentLive.Parts.status/2
-  # reads every other status (it would print "Idle" here).
-  defp agent_status(%{status: :sleeping}), do: {:idle, "Sleeping"}
-  defp agent_status(agent), do: AgentParts.status(agent, false)
-
   # nil when the role would just repeat the agent name above it ("CEO" / "Ceo").
   defp distinct_role_label(agent) do
     label =

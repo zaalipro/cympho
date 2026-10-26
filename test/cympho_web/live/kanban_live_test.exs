@@ -996,6 +996,7 @@ defmodule CymphoWeb.KanbanLiveTest do
         })
 
       assert html =~ "Issue not found or unauthorized"
+      assert has_element?(view, ".flash-line .flash-msg.err", "Issue not found or unauthorized")
       assert Comments.list_comments(foreign.id) == []
     end
   end
