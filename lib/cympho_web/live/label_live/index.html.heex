@@ -1,142 +1,89 @@
-<.page size="content" class="ember-aurora">
-  <div class="relative z-[1]">
-    <.header>
-      <div class="min-w-0">
-        <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-          {@page_title}
-        </h1>
-        <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-          Color-code work so the board reads at a glance.
-        </p>
+<.settings_layout active={:labels}>
+  <.flash_line flash={@flash} />
+
+  <.form_pair
+    id="label-form"
+    for={@form}
+    phx-submit={(@editing_label && "update_label") || "create_label"}
+    heading={(@editing_label && "After you save") || "After you add it"}
+    verb={(@editing_label && "save") || "add"}
+  >
+    <.band_card id="lf-card-t" title={(@editing_label && "Edit label") || "New label"}>
+      <div class="flds">
+        <.input field={@form[:name]} label="Name" placeholder="Label name" />
+        <.input field={@form[:color]} label="Colour" placeholder="#FF0000" />
+        <.input
+          field={@form[:description]}
+          label="Description"
+          placeholder="Optional"
+          wrapper_class="full"
+        />
       </div>
-    </.header>
+    </.band_card>
+    <:effect>
+      <.consequences
+        :if={!@editing_label}
+        rows={[{:done, "It can be added to any task right away."}]}
+      />
+      <.consequences
+        :if={@editing_label}
+        rows={[{:done, "Tasks that carry it show the new name and colour."}]}
+      />
+    </:effect>
+    <:secondary :if={@editing_label}>
+      <.ghost_pill phx-click="cancel_edit">Cancel</.ghost_pill>
+    </:secondary>
+    <:primary>
+      <.primary_pill type="submit">
+        {(@editing_label && "Save label") || "Add label"}
+      </.primary_pill>
+    </:primary>
+  </.form_pair>
 
-    <div
-      :if={@flash["info"]}
-      class="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
+  <.band_card id="labels-list-t" title="Labels">
+    <.infinite_scroll
+      id="labels"
+      has_more={@infinite_scroll[:labels][:has_more?] || false}
+      container_class="rows"
     >
-      {@flash["info"]}
-    </div>
+      <:empty>
+        <.quiet_empty title="No labels yet">
+          Add one above to color-code tasks on the board.
+        </.quiet_empty>
+      </:empty>
 
-    <div
-      :if={@flash["error"]}
-      class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
-    >
-      {@flash["error"]}
-    </div>
-
-    <div class="grid gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] lg:items-start">
-      <section class="ember-glass overflow-hidden">
-        <div class="border-b border-white/10 px-5 py-4">
-          <h2 :if={@editing_label} class="text-lg font-590 text-text-primary">
-            Editing: {@editing_label.name}
-          </h2>
-          <h2 :if={!@editing_label} class="text-lg font-590 text-text-primary">
-            Create a label
-          </h2>
-        </div>
-
-        <.simple_form
-          for={@form}
-          phx-submit={(@editing_label && "update_label") || "create_label"}
-          class="space-y-4 p-5"
-        >
-          <.input field={@form[:name]} label="Name" placeholder="Label name" />
-          <.input field={@form[:color]} label="Color" placeholder="#FF0000" />
-          <.input
-            field={@form[:description]}
-            label="Description"
-            placeholder="Description (optional)"
-          />
-          <:actions>
-            <div class="flex items-center gap-2 border-t border-white/10 pt-4">
-              <.button type="submit" variant="primary" class="cta-glow">
-                {(@editing_label && "Update") || "Create"} Label
-              </.button>
-              <button
-                :if={@editing_label}
-                type="button"
-                phx-click="cancel_edit"
-                class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary"
-              >
-                Cancel
-              </button>
-            </div>
-          </:actions>
-        </.simple_form>
-      </section>
-
-      <section class="min-w-0">
-        <p class="mb-3 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-          All labels
-        </p>
-
-        <.infinite_scroll
-          id="labels"
-          has_more={@infinite_scroll[:labels][:has_more?] || false}
-          container_class="space-y-2"
-        >
-          <:empty>
-            <div class="rounded-xl border border-dashed border-border bg-surface/50 px-6 py-12 text-center text-sm text-text-tertiary">
-              No labels yet. Create your first label to start color-coding work.
-            </div>
-          </:empty>
-
-          <div
-            :for={{dom_id, label} <- @streams.labels}
-            id={dom_id}
-            class="group flex items-center justify-between gap-4 rounded-xl border border-border bg-surface px-4 py-3 transition-colors hover:border-border-hover hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
+      <.list_row
+        :for={{dom_id, label} <- @streams.labels}
+        tag="div"
+        id={dom_id}
+        title={label.name}
+      >
+        <:meta>
+          <span
+            :if={label.color not in [nil, ""]}
+            class="sw"
+            style={"background:#{label.color}"}
+            aria-hidden="true"
           >
-            <div class="flex min-w-0 items-center gap-3">
-              <span
-                class="h-9 w-9 shrink-0 rounded-lg ring-1 ring-inset ring-white/10"
-                style={"background-color: #{label.color}"}
-              >
-              </span>
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span
-                    class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-590"
-                    style={"background-color: #{label.color}; color: #{text_color(label.color)}"}
-                  >
-                    {label.name}
-                  </span>
-                  <code class="text-[11px] uppercase tracking-wide text-text-quaternary">
-                    {label.color}
-                  </code>
-                </div>
-                <p :if={label.description} class="mt-1 truncate text-xs text-text-tertiary">
-                  {label.description}
-                </p>
-              </div>
-            </div>
-
-            <div class="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                phx-click="edit_label"
-                phx-value-id={label.id}
-                aria-label={"Edit #{label.name}"}
-                title={"Edit #{label.name}"}
-                class="inline-flex items-center justify-center rounded-lg border border-transparent p-1.5 text-text-quaternary transition-colors hover:border-border hover:bg-surface hover:text-text-secondary"
-              >
-                <.icon name="hero-pencil-square-mini" class="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                phx-click="delete_label"
-                phx-value-id={label.id}
-                data-confirm="Delete this label?"
-                aria-label={"Delete #{label.name}"}
-                title={"Delete #{label.name}"}
-                class="inline-flex items-center justify-center rounded-lg border border-transparent p-1.5 text-text-quaternary transition-colors hover:border-red-500/25 hover:bg-red-500/10 hover:text-red-300"
-              >
-                <.icon name="hero-trash-mini" class="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        </.infinite_scroll>
-      </section>
-    </div>
-  </div>
-</.page>
+          </span>
+          <span class="mono">{label.color}</span><span :if={label.description not in [nil, ""]}><span aria-hidden="true"> · </span>{label.description}</span>
+        </:meta>
+        <:actions>
+          <.pill phx-click="edit_label" phx-value-id={label.id} aria-label={"Edit #{label.name}"}>
+            Edit
+          </.pill>
+          <button
+            type="button"
+            class="pl warn"
+            phx-click="delete_label"
+            phx-value-id={label.id}
+            data-confirm="Delete this label?"
+            aria-label={"Delete #{label.name}"}
+          >
+            Delete
+          </button>
+        </:actions>
+      </.list_row>
+    </.infinite_scroll>
+  </.band_card>
+</.settings_layout>

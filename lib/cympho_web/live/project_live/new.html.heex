@@ -1,172 +1,91 @@
-<.page size="wide" class="ember-aurora" data-ui-complex-page>
-  <div class="relative z-[1]">
-    <.header>
-      <h1 class="ember-ink font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-        New project
-      </h1>
-      <p class="ui-simple-only mt-2 max-w-2xl text-body-sm text-text-tertiary">
-        Name the project and tell the team what it owns.
-      </p>
-      <p class="ui-advanced-only mt-2 max-w-2xl text-body-sm text-text-tertiary">
-        Group related issues, link to a repo, and configure environment variables for agents.
-      </p>
-      <:actions>
-        <.app_link
-          navigate={~p"/projects"}
-          class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-        >
-          Cancel
-        </.app_link>
-      </:actions>
-    </.header>
+<.page_frame
+  page="project-form"
+  kind={:deep}
+  parent={{"/projects", "Projects"}}
+  current="New project"
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="pf-h">
+      <h1 class="h1 big" id="pf-h">New project</h1>
+      <p class="sub">Name the project and tell the team what it owns.</p>
+    </section>
+  </:head>
 
-    <.form
-      for={@form}
-      phx-submit="save"
-      data-ui-simple-single-column
-      class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
-    >
-      <section class="ember-glass overflow-hidden">
-        <div class="border-b border-border px-5 py-4">
-          <h2 class="text-lg font-590 text-text-primary">
-            Create the workstream overview
-          </h2>
-        </div>
+  <.flash_line flash={@flash} />
 
-        <div class="space-y-6 p-5">
-          <%!-- The section eyebrows restated the fields under them ("Operating
-               boundary" over Name/Description) and each carried a paragraph of
-               help. The help now rides a ? next to the fields it explains. --%>
-          <section class="space-y-4">
-            <div class="flex justify-end">
-              <.field_hint text="Describe what belongs in this project so intake and handoffs do not blur together." />
-            </div>
-
-            <.input field={@form[:name]} label="Name" required placeholder="Acme Backend" />
-            <.input
-              field={@form[:description]}
-              label="Description"
-              type="textarea"
-              rows={5}
-              placeholder="What this project owns, what agents should optimize for, and what evidence proves progress."
-            />
-          </section>
-
-          <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
-            <div class="flex justify-end">
-              <.field_hint text="Prefixes become issue IDs. Repo URLs give runtime workspaces a concrete code target." />
-            </div>
-
-            <div
-              data-testid="project-identifier-fields"
-              data-ui-simple-single-column
-              class="grid gap-4 md:grid-cols-[minmax(0,160px)_minmax(0,1fr)]"
-            >
-              <.input field={@form[:prefix]} label="Prefix" required placeholder="ACME" />
-              <div class="ui-advanced-only" data-testid="project-repository-field">
-                <.input
-                  field={@form[:repo_url]}
-                  label="Repository URL"
-                  placeholder="https://github.com/owner/repo"
-                />
-              </div>
-            </div>
-          </section>
-
-          <section
-            class="ui-advanced-only space-y-4"
-            data-testid="project-workspace-posture"
-          >
-            <div class="flex justify-end">
-              <.field_hint text="Keep active work visible and give the sidebar a stable visual marker." />
-            </div>
-
-            <div class="grid gap-5 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
-              <.input
-                type="select"
-                field={@form[:status]}
-                label="Status"
-                value={@form[:status].value || :active}
-                options={[{"Active", "active"}, {"Archived", "archived"}]}
-              />
-              <.color_swatch_picker field={@form[:color]} label="Sidebar color" />
-            </div>
-          </section>
-        </div>
-      </section>
-
-      <aside class="ui-advanced-only space-y-4" data-testid="project-setup-rail">
-        <%!-- Steps 1 and 2 restated the form sections they sit next to. Worth
-             keeping for a first project, not worth a column of prose every visit. --%>
-        <details
-          id="project-setup-checklist"
-          data-testid="project-setup-checklist"
-          class="rounded-xl border border-border bg-panel p-4 shadow-card"
-          phx-mounted={JS.ignore_attributes("open")}
-        >
-          <summary class="cursor-pointer list-none text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary [&::-webkit-details-marker]:hidden">
-            Setup checklist
-          </summary>
-          <div class="mt-4 space-y-3">
-            <div class="flex gap-3">
-              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
-                1
-              </span>
-              <div>
-                <p class="text-sm font-590 text-text-primary">Define ownership</p>
-                <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                  The project brief should tell agents what work belongs here.
-                </p>
-              </div>
-            </div>
-            <div class="flex gap-3">
-              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
-                2
-              </span>
-              <div>
-                <p class="text-sm font-590 text-text-primary">Connect the codebase</p>
-                <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                  Add the repo now or attach it later from the project overview.
-                </p>
-              </div>
-            </div>
-            <div class="flex gap-3">
-              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
-                3
-              </span>
-              <div>
-                <p class="text-sm font-590 text-text-primary">Add goals and secrets after save</p>
-                <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                  Goals align work; project secrets make runtime execution reproducible.
-                </p>
-              </div>
-            </div>
-          </div>
-        </details>
-      </aside>
-
-      <div
-        data-testid="project-create-actions"
-        data-ui-simple-full-span
-        class="border-t border-border pt-4 lg:col-span-2"
-      >
-        <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-          <.app_link
-            navigate={~p"/projects"}
-            class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Cancel
-          </.app_link>
-          <.button type="submit" variant="primary" class="cta-glow min-h-[40px] w-full sm:w-auto">
-            Create project
-          </.button>
-        </div>
-        <%!-- Was a "Create behavior" prose panel beside the form. One sentence
-             under the button that triggers it is where people actually read it. --%>
-        <p class="mt-2 text-xs leading-5 text-text-tertiary sm:text-right">
-          Creates an active workstream. Attach environments, secrets, goals, and issues after save.
-        </p>
+  <.form_pair
+    id="project-form"
+    for={@form}
+    phx-submit="save"
+    heading="After you create it"
+    verb="create"
+  >
+    <.band_card id="pf-project-t" title="Project">
+      <div class="flds">
+        <.input
+          field={@form[:name]}
+          label="Name"
+          required
+          placeholder="Acme Backend"
+          wrapper_class="full"
+        />
+        <.input
+          field={@form[:description]}
+          label="Description"
+          type="textarea"
+          rows={5}
+          placeholder="What this project owns and what evidence proves progress."
+          wrapper_class="full"
+        />
       </div>
-    </.form>
-  </div>
-</.page>
+    </.band_card>
+
+    <.band_card id="pf-identity-t" title="Identity" data-testid="project-identifier-fields">
+      <div class="flds">
+        <.input
+          field={@form[:prefix]}
+          label="Prefix"
+          required
+          placeholder="ACME"
+          help="Becomes the task ID prefix, like ACME-12."
+        />
+        <div class="ui-advanced-only" data-testid="project-repository-field">
+          <.input
+            field={@form[:repo_url]}
+            label="Repository URL"
+            placeholder="https://github.com/owner/repo"
+          />
+        </div>
+      </div>
+    </.band_card>
+
+    <.band_card
+      id="pf-look-t"
+      title="Status and colour"
+      class="ui-advanced-only"
+      data-testid="project-workspace-posture"
+    >
+      <div class="flds">
+        <.input
+          type="select"
+          field={@form[:status]}
+          label="Status"
+          value={@form[:status].value || :active}
+          options={[{"Active", "active"}, {"Archived", "archived"}]}
+        />
+        <.color_swatch_picker field={@form[:color]} />
+      </div>
+    </.band_card>
+
+    <:effect>
+      <.consequences rows={[{:done, "Tasks can be filed under it right away."}]} />
+    </:effect>
+    <:secondary>
+      <.ghost_pill navigate={~p"/projects"}>Cancel</.ghost_pill>
+    </:secondary>
+    <:primary>
+      <.primary_pill type="submit" phx-disable-with="Creating…">Create project</.primary_pill>
+    </:primary>
+  </.form_pair>
+</.page_frame>

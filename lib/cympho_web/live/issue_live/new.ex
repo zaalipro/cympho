@@ -27,7 +27,7 @@ defmodule CymphoWeb.IssueLive.New do
 
     {:ok,
      socket
-     |> assign(:page_title, "New Issue")
+     |> assign(:page_title, "New task")
      |> assign(:projects, projects)
      |> assign(:goals, goals)
      |> assign(:description_placeholder, description_placeholder())
@@ -160,6 +160,12 @@ defmodule CymphoWeb.IssueLive.New do
       {"Ask me first", "ask", "Ask the questions needed to get this right.",
        "The agent must create a structured question request and cannot take other side effects until you respond."}
     ]
+  end
+
+  # The work modes as answer rows on paper (option_rows/1): the label and its plain help.
+  def work_mode_items do
+    for {label, value, simple_help, _contract} <- work_mode_options(),
+        do: %{value: value, label: label, sub: simple_help}
   end
 
   defp description_placeholder do
@@ -352,13 +358,13 @@ defmodule CymphoWeb.IssueLive.New do
   defp queue_focus_disabled?(%{status: :ready}), do: false
   defp queue_focus_disabled?(_readiness), do: true
 
-  defp submit_label(_readiness, _queue_focus?, %{missing?: true}), do: "Create issue"
+  defp submit_label(_readiness, _queue_focus?, %{missing?: true}), do: "Create task"
 
   defp submit_label(%{status: :ready}, true, _intake_route), do: "Create & queue"
 
-  defp submit_label(%{status: :ready}, _queue_focus?, _intake_route), do: "Create issue"
+  defp submit_label(%{status: :ready}, _queue_focus?, _intake_route), do: "Create task"
 
-  defp submit_label(_readiness, _queue_focus?, _intake_route), do: "Create issue"
+  defp submit_label(_readiness, _queue_focus?, _intake_route), do: "Create task"
 
   defp submit_label(_readiness, _queue_focus?, _intake_route, %{enabled: true}),
     do: "Create swarm"

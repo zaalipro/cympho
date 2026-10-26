@@ -1,6 +1,7 @@
 defmodule CymphoWeb.RoutineLive.Index do
   use CymphoWeb, :live_view
   import CymphoWeb.RoutineLive.FormHelpers, only: [schedule_summary: 1, next_run: 1, raw_cron: 1]
+  alias Cympho.Agents
   alias Cympho.Routines
   alias Cympho.Routines.Routine
 
@@ -28,7 +29,7 @@ defmodule CymphoWeb.RoutineLive.Index do
 
   defp apply_action(socket, :index, params) do
     socket
-    |> assign(:page_title, "Routines")
+    |> assign(:page_title, "Repeating tasks")
     |> assign(:routine, nil)
     |> assign(:digest_density, normalize_digest_density(params["density"]))
   end
@@ -118,6 +119,16 @@ defmodule CymphoWeb.RoutineLive.Index do
     socket
     |> assign(:routine_health, health)
     |> assign(:routine_command, build_routine_command(health, command_routines))
+    |> assign(:agent_names, agent_names(company_id))
+  end
+
+  # The row's meta line names each repeating task's default owner.
+  defp agent_names(nil), do: %{}
+
+  defp agent_names(company_id) do
+    company_id
+    |> Agents.list_agents_by_company()
+    |> Map.new(&{&1.id, &1.name})
   end
 
   defp put_next_action_routine_id(
@@ -169,11 +180,11 @@ defmodule CymphoWeb.RoutineLive.Index do
       cond do
         metrics.total_routines == 0 ->
           %{
-            tone: :empty,
             badge: "None yet",
-            heading: "Create the first routine",
-            detail: "Routines create work on a schedule, so you don't have to remember to.",
-            action_label: "New routine",
+            heading: "Set up the first repeating task",
+            detail:
+              "A repeating task files work on a schedule, so you don't have to remember to.",
+            action_label: "New repeating task",
             action_path: "/routines/new",
             focus_label: nil,
             focus_detail: nil
@@ -181,12 +192,11 @@ defmodule CymphoWeb.RoutineLive.Index do
 
         triggerless ->
           %{
-            tone: :critical,
             badge: "No trigger",
-            heading: "Add trigger to routine",
+            heading: "Give a repeating task a schedule",
             detail:
-              "#{triggerless.name} is active, but nothing can set it off — add a schedule or webhook.",
-            action_label: "Open routine",
+              "#{triggerless.name} is on, but nothing can set it off — add a schedule or webhook.",
+            action_label: "Open it",
             action_path: "/routines/#{triggerless.id}",
             focus_label: triggerless.name,
             focus_detail: "Active without enabled trigger"
@@ -194,9 +204,8 @@ defmodule CymphoWeb.RoutineLive.Index do
 
         stale ->
           %{
-            tone: :critical,
             badge: "Stuck run",
-            heading: "A routine run looks stuck",
+            heading: "A run looks stuck",
             detail: "#{stale.name} has a run that's been going for over two hours.",
             action_label: "Open run history",
             action_path: "/routines/#{stale.id}",
@@ -206,11 +215,10 @@ defmodule CymphoWeb.RoutineLive.Index do
 
         failed ->
           %{
-            tone: :warning,
             badge: "Recent failure",
-            heading: "Review failed routine",
+            heading: "Look at the failed run",
             detail: "#{failed.name} failed recently. Worth a look before it runs again.",
-            action_label: "Open failed routine",
+            action_label: "Open it",
             action_path: "/routines/#{failed.id}",
             focus_label: failed.name,
             focus_detail: latest_run_label(failed)
@@ -218,11 +226,10 @@ defmodule CymphoWeb.RoutineLive.Index do
 
         paused ->
           %{
-            tone: :paused,
             badge: "Paused",
-            heading: "A routine is paused",
-            detail: "#{paused.name} won't create work until you resume or archive it.",
-            action_label: "Open paused routine",
+            heading: "A repeating task is paused",
+            detail: "#{paused.name} won't file work until you resume or archive it.",
+            action_label: "Open it",
             action_path: "/routines/#{paused.id}",
             focus_label: paused.name,
             focus_detail: "Paused"
@@ -230,12 +237,11 @@ defmodule CymphoWeb.RoutineLive.Index do
 
         runnable ->
           %{
-            tone: :healthy,
             badge: "Running",
-            heading: "Routines are running",
+            heading: "Repeating tasks are running",
             detail:
-              "#{metrics.active_routines} active routine#{plural_suffix(metrics.active_routines)} creating work on schedule.",
-            action_label: "Open routine",
+              "#{metrics.active_routines} active repeating task#{plural_suffix(metrics.active_routines)} filing work on schedule.",
+            action_label: "Open it",
             action_path: "/routines/#{runnable.id}",
             focus_label: runnable.name,
             focus_detail: latest_run_label(runnable)
@@ -243,11 +249,11 @@ defmodule CymphoWeb.RoutineLive.Index do
 
         true ->
           %{
-            tone: :empty,
             badge: "None active",
-            heading: "No routines are running",
-            detail: "You have routines, but none are active. Resume one or create a new one.",
-            action_label: "New routine",
+            heading: "None are running",
+            detail:
+              "You have repeating tasks, but none are active. Resume one or create a new one.",
+            action_label: "New repeating task",
             action_path: "/routines/new",
             focus_label: nil,
             focus_detail: nil
@@ -285,220 +291,99 @@ defmodule CymphoWeb.RoutineLive.Index do
     |> String.capitalize()
   end
 
-  # ── Smart routine card ─────────────────────────────────────────────────────
-  # Each card answers "is it healthy and when does it run next?". Only a routine
-  # that needs a person right now (failed / stuck / missing trigger) is loud.
+  # ── Row ────────────────────────────────────────────────────────────────────
+  # Each row answers "is it healthy and when does it run next?". Only a repeating
+  # task that needs a person (failed / stuck / no trigger) carries a status.
 
   attr :id, :string, required: true
   attr :routine, :map, required: true
+  attr :agent_names, :map, required: true
   attr :density, :string, required: true
 
-  def routine_card(assigns) do
-    routine = assigns.routine
-    signal = routine_card_signal(routine)
+  def routine_row(assigns) do
+    triggers = assigns.routine.triggers
 
     assigns =
       assigns
-      |> assign(:signal, signal)
-      |> assign(:pill, routine_signal_pill(signal))
-      |> assign(:outcome, routine_last_outcome(routine))
-      |> assign(:next, next_run(routine.triggers))
-      |> assign(:schedule, schedule_summary(routine.triggers))
-      |> assign(:cron, raw_cron(routine.triggers))
+      |> assign(:status, routine_status(assigns.routine))
+      |> assign(:schedule, schedule_summary(triggers))
+      |> assign(:next, next_run(triggers))
+      |> assign(:cron, raw_cron(triggers))
+      |> assign(:agent, assigns.agent_names[assigns.routine.agent_id])
 
     ~H"""
-    <article
+    <.list_row
+      tag="div"
       id={@id}
-      class={[
-        "group card-lift rounded-xl border transition-colors",
-        routine_signal_card_class(@signal),
-        if(@density == "compact", do: "p-3", else: "p-4")
-      ]}
+      title={@routine.name}
+      navigate={~p"/routines/#{@routine.id}"}
+      status={@status}
     >
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0 flex-1">
-          <div class="flex min-w-0 items-center gap-2">
-            <span
-              class={["h-2 w-2 shrink-0 rounded-full", routine_status_dot(@routine.status)]}
-              title={"Status: #{routine_label(@routine.status)}"}
-            >
-            </span>
-            <.app_link
-              navigate={~p"/routines/#{@routine.id}"}
-              class="truncate text-sm font-590 text-text-primary hover:text-brand"
-            >
-              {@routine.name}
-            </.app_link>
-            <span
-              :if={@pill}
-              class={["shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-590", elem(@pill, 1)]}
-            >
-              {elem(@pill, 0)}
-            </span>
-          </div>
-
-          <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-tertiary">
-            <span class="inline-flex items-center gap-1.5" title={@cron && "cron: #{@cron}"}>
-              <.icon name="hero-clock-mini" class="h-3.5 w-3.5 text-text-quaternary" />
-              {@schedule}
-            </span>
-            <span :if={@next} class="text-text-quaternary">Next run {@next}</span>
-            <span :if={@outcome} class="inline-flex items-center gap-1.5">
-              <span class={["h-1.5 w-1.5 rounded-full", @outcome.dot]}></span> Last {@outcome.label}
-            </span>
-            <span class="uppercase tracking-[0.1em] text-[10px] text-text-quaternary">
-              {routine_label(@routine.status)}
-            </span>
-          </div>
-
-          <p
-            :if={@density == "detailed"}
-            class="mt-2 max-w-3xl text-sm leading-5 text-text-tertiary"
+      <:meta>
+        <span title={@cron && "cron: #{@cron}"}>{@schedule}</span><span :if={@agent}><span aria-hidden="true"> · </span>{@agent}</span><span :if={
+          @next
+        }><span aria-hidden="true"> · </span>Next run {@next}</span>
+      </:meta>
+      <:trail :if={@routine.status in [:paused, :archived]}>
+        <span class="tag">{routine_label(@routine.status)}</span>
+      </:trail>
+      <:actions>
+        <.pill
+          :if={@routine.status == :active}
+          phx-click="pause_routine"
+          phx-value-id={@routine.id}
+          data-confirm="Pause this routine? It stops creating work until resumed."
+        >
+          Pause
+        </.pill>
+        <.pill
+          :if={@routine.status == :paused}
+          phx-click="resume_routine"
+          phx-value-id={@routine.id}
+          data-confirm="Resume this routine? It will create work on its next trigger."
+        >
+          Resume
+        </.pill>
+        <.overflow_menu id={"routine-menu-#{@routine.id}"} label={"Actions for #{@routine.name}"}>
+          <.menu_item navigate={~p"/routines/#{@routine.id}/edit"}>Edit</.menu_item>
+          <.menu_item
+            :if={@routine.status != :archived}
+            danger
+            phx-click="delete_routine"
+            phx-value-id={@routine.id}
+            data-confirm="Archive this routine? It stops running and moves out of the active list."
           >
-            {@routine.description || "No description provided."}
-          </p>
-          <div
-            :if={@density == "detailed"}
-            class="ui-advanced-only mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-text-quaternary"
-          >
-            <span>{routine_label(@routine.priority)} priority</span>
-            <span>{routine_label(@routine.concurrency_policy)}</span>
-            <span>Missed runs: {routine_label(@routine.catch_up_policy)}</span>
-            <span>Max {@routine.catch_up_cap}</span>
-          </div>
-        </div>
-
-        <div class="flex shrink-0 items-center gap-1.5">
-          <.app_link
-            navigate={~p"/routines/#{@routine.id}"}
-            class="inline-flex min-h-[32px] items-center rounded-lg border border-brand/25 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition-colors hover:bg-brand/15"
-          >
-            Open
-          </.app_link>
-          <div class="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-            <.app_link
-              navigate={~p"/routines/#{@routine.id}/edit"}
-              class="rounded-lg border border-border bg-button px-2.5 py-1.5 text-xs font-510 text-text-tertiary transition-colors hover:bg-button-hover hover:text-text-primary"
-            >
-              Edit
-            </.app_link>
-            <button
-              :if={@routine.status == :active}
-              type="button"
-              class="rounded-lg border border-border bg-button px-2.5 py-1.5 text-xs font-510 text-text-tertiary transition-colors hover:bg-button-hover hover:text-text-primary"
-              phx-click="pause_routine"
-              phx-value-id={@routine.id}
-              data-confirm="Pause this routine? It stops creating work until resumed."
-            >
-              Pause
-            </button>
-            <button
-              :if={@routine.status == :paused}
-              type="button"
-              class="rounded-lg border border-success/20 bg-success/10 px-2.5 py-1.5 text-xs font-510 text-success transition-colors hover:bg-success/15"
-              phx-click="resume_routine"
-              phx-value-id={@routine.id}
-              data-confirm="Resume this routine? It will create work on its next trigger."
-            >
-              Resume
-            </button>
-            <button
-              :if={@routine.status != :archived}
-              type="button"
-              class="rounded-lg border border-border bg-button px-2.5 py-1.5 text-xs font-510 text-text-tertiary transition-colors hover:bg-button-hover hover:text-rose-300"
-              phx-click="delete_routine"
-              phx-value-id={@routine.id}
-              data-confirm="Archive this routine? It stops running and moves out of the active list."
-            >
-              Archive
-            </button>
-          </div>
-        </div>
-      </div>
-    </article>
+            Archive
+          </.menu_item>
+        </.overflow_menu>
+      </:actions>
+      <:below :if={@density == "detailed"}>
+        <p class="gl-sub">{@routine.description || "No description provided."}</p>
+        <p class="ui-advanced-only help">
+          {routine_label(@routine.priority)} priority<span aria-hidden="true"> · </span>{routine_label(
+            @routine.concurrency_policy
+          )}<span aria-hidden="true"> · </span>Missed runs: {routine_label(@routine.catch_up_policy)}<span aria-hidden="true"> · </span>Max {@routine.catch_up_cap}
+        </p>
+      </:below>
+    </.list_row>
     """
   end
 
-  # Highest-urgency signal wins; only failed/stale/trigger_gap are "act now".
-  def routine_card_signal(routine) do
-    cond do
-      routine.status == :archived -> :archived
-      routine.has_recent_failure -> :failed
-      routine.has_stale_run -> :stale
-      routine.status == :active and without_enabled_trigger?(routine) -> :trigger_gap
-      routine.status == :paused -> :paused
-      true -> :ok
-    end
+  @doc "Only a repeating task that needs a person carries a status word."
+  def routine_status(%{status: :archived}), do: nil
+  # has_recent_failure is any failed run in the last day, not the latest run's outcome.
+  def routine_status(%{has_recent_failure: true}), do: {:stopped, "Failed recently"}
+  def routine_status(%{has_stale_run: true}), do: {:waiting, "Run stuck"}
+
+  def routine_status(%{status: :active} = routine) do
+    if without_enabled_trigger?(routine), do: {:waiting, "Needs a trigger"}
   end
 
-  def routine_signal_card_class(:failed),
-    do: "border-rose-500/35 bg-rose-500/[0.05] hover:border-rose-500/50"
+  def routine_status(_routine), do: nil
 
-  def routine_signal_card_class(:stale),
-    do: "border-rose-500/30 bg-rose-500/[0.04] hover:border-rose-500/45"
-
-  def routine_signal_card_class(:trigger_gap),
-    do: "border-amber-500/30 bg-amber-500/[0.04] hover:border-amber-500/45"
-
-  def routine_signal_card_class(_),
-    do: "border-border bg-surface hover:border-border-hover hover:bg-surface-hover"
-
-  def routine_signal_pill(:failed),
-    do: {"Failed recently", "border-rose-500/30 bg-rose-500/10 text-rose-300"}
-
-  def routine_signal_pill(:stale),
-    do: {"Run stuck", "border-rose-500/30 bg-rose-500/10 text-rose-300"}
-
-  def routine_signal_pill(:trigger_gap),
-    do: {"Needs a trigger", "border-amber-500/30 bg-amber-500/10 text-amber-300"}
-
-  def routine_signal_pill(_), do: nil
-
-  def routine_status_dot(:active), do: "bg-emerald-400/70"
-  def routine_status_dot(:paused), do: "bg-amber-400/70"
-  def routine_status_dot(_), do: "bg-text-quaternary/40"
-
-  def routine_last_outcome(%{runs: []}), do: nil
-
-  def routine_last_outcome(%{runs: runs}) when is_list(runs) do
-    run = Enum.max_by(runs, &(&1.triggered_at || ~U[1970-01-01 00:00:00Z]), DateTime)
-
-    %{
-      dot: CymphoWeb.RoutineLive.FormHelpers.routine_run_dot(run.status),
-      label: routine_label(run.status)
-    }
-  end
-
-  def routine_last_outcome(_), do: nil
-
-  attr :label, :string, required: true
-  attr :value, :integer, required: true
-  attr :tone, :atom, default: :neutral
-
-  def routine_health_metric(assigns) do
-    ~H"""
-    <div class="bg-surface/70 px-3 py-2 text-center">
-      <p class={"font-mono text-[18px] font-590 leading-none #{routine_metric_text(@tone)}"}>
-        {@value}
-      </p>
-      <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
-        {@label}
-      </p>
-    </div>
-    """
-  end
-
-  def routine_health_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
-  def routine_health_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  def routine_health_badge(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  def routine_health_badge(:empty), do: "border-border bg-surface text-text-tertiary"
-  def routine_health_badge(_), do: "border-border bg-surface text-text-tertiary"
-
-  def routine_posture_label(:empty), do: "Setup status"
-  def routine_posture_label(_level), do: "Automation status"
+  def recommendation_kind(:critical), do: :problem
+  def recommendation_kind(:warning), do: :question
+  def recommendation_kind(_severity), do: :neutral
 
   def routine_posture_text(:empty) do
     "No recurring automation is configured. Create one routine, attach a trigger, then watch run history here."
@@ -508,55 +393,8 @@ defmodule CymphoWeb.RoutineLive.Index do
     "Triggers, run freshness, recent failures, and paused recurring work are quiet."
   end
 
-  def routine_metric_text(:critical), do: "text-red-300"
-  def routine_metric_text(:warning), do: "text-amber-300"
-  def routine_metric_text(:ok), do: "text-emerald-300"
-  def routine_metric_text(_), do: "text-text-primary"
-
   defp plural_suffix(1), do: ""
   defp plural_suffix(_), do: "s"
-
-  def routine_command_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
-  def routine_command_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def routine_command_badge(:paused), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-
-  def routine_command_badge(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  def routine_command_badge(_), do: "border-border bg-surface text-text-tertiary"
-
-  def routine_command_action(:critical),
-    do: "border-red-500/25 bg-red-500/10 text-red-300 hover:bg-red-500/15"
-
-  def routine_command_action(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15"
-
-  def routine_command_action(:paused),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-300 hover:bg-blue-500/15"
-
-  def routine_command_action(:healthy),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15"
-
-  def routine_command_action(_),
-    do:
-      "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-
-  def routine_recommendation_class(:critical), do: "border-red-500/20 bg-red-500/10 text-red-100"
-
-  def routine_recommendation_class(:warning),
-    do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
-
-  def routine_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
-
-  def routine_next_action_class(:critical), do: "border-red-500/25 bg-red-500/10 text-red-100"
-
-  def routine_next_action_class(:warning),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-100"
-
-  def routine_next_action_class(:ok),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
-
-  def routine_next_action_class(_), do: "border-border bg-surface text-text-secondary"
 
   def routine_next_action_path(%{key: :add_triggers, routine_id: id}), do: "/routines/" <> id
   def routine_next_action_path(%{key: :create_first_routine}), do: "/routines/new"

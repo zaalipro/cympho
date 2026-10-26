@@ -1,168 +1,24 @@
-<.page size="wide" data-ui-complex-page>
-  <.header title={@goal.title} subtitle="Goal settings.">
-    <:actions>
-      <.app_link
-        navigate={~p"/goals/#{@goal.id}"}
-        class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-      >
-        Cancel
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <.form
-    for={@form}
-    phx-submit="save"
-    class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
-  >
-    <section class="ember-glass overflow-hidden">
-      <div class="border-b border-border px-5 py-4">
-        <div class="flex items-center gap-1.5">
-          <h2 class="text-lg font-590 text-text-primary">Maintain the strategic target</h2>
-          <.field_hint text="Keep the outcome, hierarchy, and project context accurate so linked work stays aimed at the right result." />
-        </div>
-        <hr class="ember-rule mt-4" />
-      </div>
-
-      <div class="space-y-6 p-5">
-        <%!-- The section eyebrows ("Outcome brief" over Title/Success criteria)
-             restated the fields below them; their help now rides a ? marker. --%>
-        <section class="space-y-4">
-          <div class="flex justify-end">
-            <.field_hint text="Keep this focused on the owner-visible result agents should optimize for." />
-          </div>
-
-          <.input field={@form[:title]} label="Title" required />
-          <.input field={@form[:description]} label="Success criteria" type="textarea" rows={5} />
-        </section>
-
-        <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
-          <div class="flex justify-end">
-            <.field_hint text="Move this goal carefully. Linked work will continue to point here after save." />
-          </div>
-
-          <div class="grid gap-4 md:grid-cols-3">
-            <.input
-              type="select"
-              field={@form[:goal_type]}
-              label="Goal type"
-              value={@form[:goal_type].value || @goal.goal_type}
-              options={@goal_type_options}
-            />
-            <.input
-              type="select"
-              field={@form[:parent_id]}
-              label="Parent goal"
-              value={@form[:parent_id].value || ""}
-              options={@parent_goal_options}
-            />
-            <.input
-              type="select"
-              field={@form[:project_id]}
-              label="Project context"
-              value={@form[:project_id].value || ""}
-              options={@project_options}
-            />
-          </div>
-        </section>
-
-        <section class="space-y-4">
-          <div class="flex justify-end">
-            <.field_hint text="Keep priority and target timing aligned with current company focus." />
-          </div>
-
-          <div class="grid gap-4 sm:grid-cols-3">
-            <.input
-              type="select"
-              field={@form[:status]}
-              label="Status"
-              value={@form[:status].value || @goal.status}
-              options={[
-                {"Active", "active"},
-                {"Completed", "completed"},
-                {"Cancelled", "cancelled"}
-              ]}
-            />
-            <.input
-              type="select"
-              field={@form[:priority]}
-              label="Priority"
-              value={@form[:priority].value || @goal.priority}
-              options={[
-                {"Critical", "critical"},
-                {"High", "high"},
-                {"Medium", "medium"},
-                {"Low", "low"}
-              ]}
-            />
-            <.input field={@form[:target_date]} type="date" label="Target date" />
-          </div>
-        </section>
-      </div>
+<.page_frame
+  page="goal-form"
+  kind={:deep}
+  parent={{"/goals", "Goals"}}
+  current="Edit goal"
+  data-ui-complex-page
+>
+  <:head>
+    <section class="head" aria-labelledby="gf-h">
+      <h1 class="h1 big" id="gf-h">Edit {@goal.title}</h1>
     </section>
+  </:head>
 
-    <aside class="ui-advanced-only space-y-4">
-      <section
-        data-testid="goal-setup-checklist"
-        class="rounded-xl border border-border bg-panel p-4 shadow-card"
-      >
-        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Maintenance checklist
-        </p>
-        <div class="mt-4 space-y-3">
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
-              1
-            </span>
-            <div>
-              <p class="text-sm font-590 text-text-primary">Outcome still describes success</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Update stale success criteria before linking more work.
-              </p>
-            </div>
-          </div>
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
-              2
-            </span>
-            <div>
-              <p class="text-sm font-590 text-text-primary">Hierarchy is intentional</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Parent changes should match how the owner reviews progress.
-              </p>
-            </div>
-          </div>
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
-              3
-            </span>
-            <div>
-              <p class="text-sm font-590 text-text-primary">Linked issues remain valid</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Review linked work after changing project context.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-    </aside>
+  <.flash_line flash={@flash} />
 
-    <div data-ui-simple-full-span class="border-t border-border pt-4 lg:col-span-2">
-      <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-        <.app_link
-          navigate={~p"/goals/#{@goal.id}"}
-          class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-        >
-          Cancel
-        </.app_link>
-        <.button type="submit" variant="primary" class="cta-glow min-h-[40px] w-full sm:w-auto">
-          Save changes
-        </.button>
-      </div>
-      <%!-- Was an "Edit behavior" prose panel beside the form. --%>
-      <p class="mt-2 text-xs leading-5 text-text-tertiary sm:text-right">
-        A child goal with no project context inherits its parent's when saved.
-      </p>
-    </div>
-  </.form>
-</.page>
+  <.goal_form
+    form={@form}
+    goal_type_options={@goal_type_options}
+    parent_goal_options={@parent_goal_options}
+    project_options={@project_options}
+    submit="Save goal"
+    cancel={~p"/goals/#{@goal.id}"}
+  />
+</.page_frame>

@@ -142,16 +142,16 @@ defmodule CymphoWeb.UiCopyAdversarialTest do
     test "/routines keeps its humanized phrase", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/routines")
 
-      assert html =~ "Automated Routines",
-             "Expected humanized phrase \"Automated Routines\" missing from route /routines"
+      assert html =~ "Repeating tasks overview",
+             "Expected humanized phrase \"Repeating tasks overview\" missing from route /routines"
     end
 
     # /goals: planning track
     test "/goals keeps its humanized phrase", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/goals")
 
-      assert html =~ "Goals Overview",
-             "Expected humanized phrase \"Goals Overview\" missing from route /goals"
+      assert html =~ "Goals overview",
+             "Expected humanized phrase \"Goals overview\" missing from route /goals"
     end
 
     # /workspaces: ops track
